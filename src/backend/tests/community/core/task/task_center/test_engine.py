@@ -349,6 +349,50 @@ class TestOnReportPass:
         assert graph.status == Status.DONE
 
 
+
+
+# 3 级图 root->结构中父 m->叶执行 lm:owner bot plan 逐条验收 + 结构父 gap 闭翻 DONE 补全 run_info
+class _VerdictPlanner:
+    def __init__(self, verdicts):
+        self.verdicts = verdicts
+        self.plan_calls = 0
+    async def plan(self, graph, target_node_id=None) -> PlanResult:
+        self.plan_calls += 1
+        return PlanResult(children=[], has_gap=False, acceptance_verdicts=list(self.verdicts))
+
+
+class TestStructuralParentGapClosedRollup:
+    # lm DONE -> 父 m1 gap 闭翻 DONE:补全 run_info(验收执行者=owner 落 run_mode/assignee +
+    # 父自身 acceptance_result 逐条结论 + output 滚子交付物); root 一跳 done_children 看到非空
+    # m1.output -> plan(t1) gap 闭 -> 图 DONE(不再 gap_no_progress 死循环)
+    def test_mid_rollup_and_root_finish(self, svc, graph):
+        # 结构父 m1(子 t1, run_mode 留 None); 叶执行 lm(子 m1), single_bot 跑
+        svc.add_task_nodes([_child("m1")], parent_node_id="t1")
+        svc.add_task_nodes([_child("lm")], parent_node_id="m1")
+        svc.update_task_node_info(_patch("t1", "lm", status=Status.RUNNING, run_mode="single_bot", assignee="worker_bot"))
+        planner = _VerdictPlanner([{"ac_id": "ac1", "passed": True, "reason": "名册3位齐全"}])
+        eng = _engine(svc, planner=planner)
+        _run(eng.on_report(_patch("t1", "lm",
+            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE),
+            output_patch={"output": "# 架构师名册\n章文嵩/毕玄/唐洪"})))
+        # 结构父 m1: gap 闭翻 DONE, 补全 run_info(验收执行者=owner=b1)
+        m = svc._get_node(graph, "m1")
+        assert m.status == Status.DONE
+        assert m.run_info.run_mode == "single_bot"
+        assert m.run_info.assignee == "b1"
+        assert m.run_info.output == {"output": "# 架构师名册\n章文嵩/毕玄/唐洪"}
+        assert m.run_info.acceptance_result is not None
+        assert m.run_info.acceptance_result.verdict == AcceptanceVerdict.DONE
+        assert m.run_info.acceptance_result.acceptances_metric == [{"ac1": "名册3位齐全"}]
+        # root: 一跳 done_children 看到非空 m1.output -> plan(t1) gap 闭 -> 图 DONE
+        root = svc._get_node(graph, "t1")
+        assert root.status == Status.DONE
+        assert graph.status == Status.DONE
+        assert root.run_info.run_mode == "single_bot"
+        assert root.run_info.assignee == "b1"
+        assert root.run_info.output  # 滚子交付物非空
+        assert planner.plan_calls == 2
+
 # ===== on_report FAIL =====
 class TestOnReportFail:
     def test_fail_to_failed_no_immediate_remedy(self, svc, graph):

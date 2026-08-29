@@ -42,6 +42,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     NodeAction,
     NodeOpResult,
+    PlanResult,
     Status,
     TaskCallbackData,
     TaskGraphPatch,
@@ -393,6 +394,56 @@ class ExecutionEngine:
             return  # 已 PLANNING / 已终态 → 幂等不翻
         self._graph.update_task_node_info(
             TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.PLANNING)
+        )
+
+    def _rollup_done_children_output(
+        self, task_id: str, parent_node_id: str
+    ) -> dict | None:
+        """结构父(非执行)gap 闭翻 DONE 时,把直接已 DONE 子交付物滚入父 ``run_info.output``,
+        使祖父一跳 ``done_children`` 看到交付物(否则空 output → gap_no_progress 死循环)。
+
+        存储 output 恒为 dict;单子透传子存储 output(保 ``{"output":<c>}`` 单键形,dashboard 仍展平);
+        多子按 node_id 聚合(``{<node_id>: <child.output>}``)。"""
+        children = self._graph.get_child_tasks(task_id, parent_node_id)
+        done = [
+            c for c in children
+            if c.status == Status.DONE and c.run_info.output
+        ]
+        if not done:
+            return None
+        if len(done) == 1:
+            return dict(done[0].run_info.output)
+        return {c.node_id: dict(c.run_info.output) for c in done}
+
+    def _build_parent_acceptance_result(
+        self, parent: TaskNode, pr: PlanResult | None
+    ) -> AcceptanceResult:
+        """结构父/根 gap 闭(自身验收通过)翻 DONE 时的父自身验收结果(验收执行者=owner)。
+
+        调用上下文已 ``not pr.has_gap`` → verdict 恒 DONE。``pr.acceptance_verdicts`` 非空 →
+        用 owner bot plan 逐条结论填 ``acceptances_metric``(每条 ac 的 reason);否则回退合成"验收通过"。"""
+        ac_ids = [a.id for a in parent.task_spec.goal.acceptances]
+        verdicts: list[dict] = []
+        if pr is not None:
+            verdicts = getattr(pr, "acceptance_verdicts", None) or []
+        if verdicts:
+            vmap: dict[str, dict] = {}
+            for v in verdicts:
+                if isinstance(v, dict):
+                    vmap[str(v.get("ac_id", ""))] = v
+            metrics: list[Any] = []
+            for ac_id in ac_ids:
+                v = vmap.get(ac_id)
+                reason = str(v.get("reason") or "") if v else ""
+                metrics.append({ac_id: reason or "验收通过(子节点交付达成)"})
+            return AcceptanceResult(
+                verdict=AcceptanceVerdict.DONE, acceptances_metric=metrics, gaps=[]
+            )
+        metrics = [{ac_id: "验收通过(子节点交付达成)"} for ac_id in ac_ids]
+        if not metrics:
+            metrics = [{"all": "验收通过"}]
+        return AcceptanceResult(
+            verdict=AcceptanceVerdict.DONE, acceptances_metric=metrics, gaps=[]
         )
 
     def _log_action(
@@ -1096,7 +1147,7 @@ class ExecutionEngine:
                 self._graph.add_task_nodes(pr.children, root.node_id)
                 await self._prepare_into(task_id, side)
             elif not pr.has_gap:
-                self._maybe_finish_graph(task_id)  # 根 gap 初始即闭(罕见)
+                self._maybe_finish_graph(task_id, pr)  # 根 gap 初始即闭(罕见)
             else:
                 self._hung_and_escalate(
                     task_id, root.node_id, "root_gap_no_decompose"
@@ -1476,13 +1527,29 @@ class ExecutionEngine:
             await self._prepare_into(task_id, side)
         elif not pr.has_gap:
             if is_root_parent:
-                self._maybe_finish_graph(task_id)
+                self._maybe_finish_graph(task_id, pr)
                 return
-            self._graph.update_task_node_info(
-                TaskNodePatch(
-                    task_id=task_id, node_id=parent.node_id, status=Status.DONE
+            # 结构父(非执行态)gap 闭翻 DONE 时补全 run_info:验收执行者=owner 落 run_mode/assignee,
+            # 父自身 acceptance_result(owner 逐条验收结论)补全,output 滚直接已 DONE 子交付物
+            # (否则结构父 output 恒空 → 祖父一跳 done_children 看不到 → gap_no_progress 死循环)。
+            if not parent.run_info.run_mode:
+                _done_out = self._rollup_done_children_output(task_id, parent.node_id)
+                _parent_acc = self._build_parent_acceptance_result(parent, pr)
+                _owner = graph.extend_props.get("owner_bot_id") or ""
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id, node_id=parent.node_id,
+                        acceptance_result=_parent_acc, output_patch=_done_out,
+                        run_mode="single_bot" if _owner else None,
+                        assignee=_owner or None,
+                    )
                 )
-            )
+            else:
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id, node_id=parent.node_id, status=Status.DONE
+                    )
+                )
             # 动作历史:TRANSITION(非根 gap 闭传播 DONE)
             self._log_action(
                 task_id,
@@ -2227,8 +2294,10 @@ class ExecutionEngine:
         for m in miss_tasks:
             await self.on_miss(m)
 
-    def _maybe_finish_graph(self, task_id: str) -> None:
-        """根 gap 闭(终验通过)→ 全图 DONE。图级写收口 + 根节点翻 DONE。两写均经 SSOT 网关(锁内同步)。"""
+    def _maybe_finish_graph(self, task_id: str, pr: PlanResult | None = None) -> None:
+        """根 gap 闭(终验通过)→ 全图 DONE。图级写收口 + 根节点翻 DONE(并补全 run_info:
+        验收执行者=owner 落 run_mode/assignee,根自身 acceptance_result(owner 逐条验收结论),
+        output 滚直接已 DONE 子交付物)。两写均经 SSOT 网关(锁内同步)。"""
         self._graph.update_task_graph_info(
             task_id,
             TaskGraphPatch(status=Status.DONE, output_patch={"result": "all_done"}),
@@ -2236,8 +2305,17 @@ class ExecutionEngine:
         root = self._root(task_id)
         if root is not None and root.status != Status.DONE:
             _rprev = root.status
+            graph = self._graph.query_task_dashboard(task_id)
+            _owner = graph.extend_props.get("owner_bot_id") or ""
+            _root_out = self._rollup_done_children_output(task_id, root.node_id)
+            _root_acc = self._build_parent_acceptance_result(root, pr)
             self._graph.update_task_node_info(
-                TaskNodePatch(task_id=task_id, node_id=root.node_id, status=Status.DONE)
+                TaskNodePatch(
+                    task_id=task_id, node_id=root.node_id,
+                    acceptance_result=_root_acc, output_patch=_root_out,
+                    run_mode="single_bot" if _owner else None,
+                    assignee=_owner or None,
+                )
             )
             # 动作历史:TRANSITION(根 gap 闭终验通过 → root DONE)
             self._log_action(

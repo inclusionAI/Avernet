@@ -346,3 +346,4 @@ class PlanResult:
     children: list["TaskNode"] = field(default_factory=list)
     has_gap: bool = False
     gap_detail: str = ""                # gap 描述(空+has_gap=True 时说明为何拆不出;has_gap=False 时可为 "done")
+    acceptance_verdicts: list[dict[str, Any]] = field(default_factory=list)  # 逐条验收结论:[{ac_id,passed,reason}];owner bot plan 一并吐出,供结构父 gap 闭翻 DONE 时构造父自身 acceptance_result
