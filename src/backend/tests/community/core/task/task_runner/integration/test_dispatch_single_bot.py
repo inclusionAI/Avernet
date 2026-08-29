@@ -190,8 +190,9 @@ def test_prompt_formatter_uses_context_and_node_spec():
     s = fmt.format_execute({"mode": "execute", "node_instruction": "分析行业"}, n)
     assert "分析行业" in s
     assert "验收标准" in s
-    assert '"success"' in s
-    assert '"gaps"' in s
+    assert '"status": "SUCCESS"' in s
+    assert '"task_id"' in s
+    assert '"acceptance_result"' in s
 
 
 def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():

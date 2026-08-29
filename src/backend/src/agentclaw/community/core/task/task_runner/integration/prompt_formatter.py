@@ -15,6 +15,36 @@ from agentclaw.community.core.task.task_runner.integration.ports import (
 )
 
 
+def _acceptance_instruction(context: dict[str, Any], *, task_id: str, node_id: str) -> str:
+    """Build a non-skippable execution → acceptance → report protocol block."""
+    backend = str(context.get("backend") or "{backend}")
+    reporter = context.get("reporter_bot_id")
+    reporter_line = (
+        f"唯一上报者: reporter_bot_id={reporter}; reporter_role={context.get('reporter_role') or 'worker'}。"
+        if reporter
+        else "当前执行 Bot 是唯一上报者。"
+    )
+    return "\n".join([
+        "【强制执行闭环，不得跳过】",
+        "阶段1 执行：先完成上面的任务指令，形成完整执行产出。",
+        "阶段2 校验：执行完成后，必须逐条对照当前 goal.acceptances，明确判断每条是否满足；不能只凭‘看起来完成’结束。",
+        "阶段3 验收：整理完整 output，并生成 SUCCESS（全部满足）或 FAIL（存在未满足项）；FAIL 必须在 acceptance_result.gaps 中写明差距。",
+        "阶段4 上报：必须真正发起 HTTP POST，不能只在对话中输出‘完成’或只返回 JSON。",
+        reporter_line,
+        f"回调地址: POST {backend}/api/v1/collaboration/tasks/callback/report",
+        "请求体只能包含以下节点级字段；callback 内部会根据 task_id/node_id 组装回投关联字段：",
+        json.dumps({
+            "task_id": task_id,
+            "node_id": node_id,
+            "status": "SUCCESS",
+            "output": "完整执行输出",
+            "acceptance_result": {},
+            "extend_props": {},
+        }, ensure_ascii=False),
+        "上报前自检：task_id/node_id 与当前节点一致；status 只能是 SUCCESS/FAIL；acceptance_result 和 extend_props 必须是对象；收到 HTTP 200 前不得认为上报完成。",
+    ])
+
+
 class PromptFormatterImpl(PromptFormatter):
     def format_execute(self, context: dict[str, Any], node: TaskNode) -> str:
         instr = context.get("node_instruction") or node.task_spec.metadata.instruction
@@ -26,18 +56,20 @@ class PromptFormatterImpl(PromptFormatter):
         ]
         parts = [
             "[task-execute]",
-            "请执行任务。执行完成后，必须调用 task-loop 中的任务验收(acceptance)逻辑，逐条检查验收标准并上报结果。",
+            "请严格按以下阶段执行，执行、校验、验收、上报均不可跳过。",
             f"目标:{goal}",
             f"指令:{instr}",
             f"验收标准:{json.dumps(acceptances, ensure_ascii=False)}",
+            _acceptance_instruction(
+                context,
+                task_id=str(context.get("task_id") or node.task_id),
+                node_id=str(context.get("node_id") or node.node_id),
+            ),
         ]
         if siblings:
             parts.append(f"上游产出:{json.dumps(siblings, ensure_ascii=False, default=str)}")
         parts.append(
-            "验收完成后，最终只能输出一个 JSON 对象，不要输出 Markdown 代码块或额外解释。"
-            "通过示例:{\"success\":true,\"data\":{\"result\":\"任务实际产出\"},\"gaps\":[]};"
-            "未通过示例:{\"success\":false,\"data\":{\"result\":\"当前已有产出\"},"
-            "\"gaps\":[\"尚未满足的验收差距\"]}。"
+            "HTTP 上报完成后，回复中只需确认上报结果；不要用回复文本替代 HTTP POST。"
         )
         parts.append(NO_WEB_SEARCH_CONSTRAINT)
         return "\n".join(parts)
