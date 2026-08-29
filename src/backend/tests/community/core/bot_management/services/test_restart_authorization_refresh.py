@@ -98,7 +98,7 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_details = AsyncMock(return_value={"success": True})
+    mcp_sync.sync_mcp_desired_state = AsyncMock(return_value={"success": True})
     factory = MagicMock()
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
@@ -121,7 +121,7 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     assert scope_kwargs["entity_type"] == "staff"
     assert scope_kwargs["engine_type"] == "aicoding"
     assert "extra_cli_items" not in scope_kwargs
-    mcp_sync.sync_mcp_details.assert_awaited_once_with(
+    mcp_sync.sync_mcp_desired_state.assert_awaited_once_with(
         user_id="ent-9",
         entity_id="ent-9",
         bot_id="bot-1",
@@ -166,7 +166,7 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
     mcp_sync.refresh_mcp_scope = AsyncMock(
         return_value={"success": False, "error": "scope denied"}
     )
-    mcp_sync.sync_mcp_details = AsyncMock()
+    mcp_sync.sync_mcp_desired_state = AsyncMock()
     factory = MagicMock()
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
@@ -181,7 +181,7 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
             skill_set_factory=factory,
         ) is True
 
-    mcp_sync.sync_mcp_details.assert_not_called()
+    mcp_sync.sync_mcp_desired_state.assert_not_called()
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
@@ -189,7 +189,7 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_details = AsyncMock(
+    mcp_sync.sync_mcp_desired_state = AsyncMock(
         return_value={"success": False, "error": "detail down"}
     )
     factory = MagicMock()
@@ -206,7 +206,7 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
             skill_set_factory=factory,
         ) is True
 
-    mcp_sync.sync_mcp_details.assert_awaited_once()
+    mcp_sync.sync_mcp_desired_state.assert_awaited_once()
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
@@ -214,7 +214,7 @@ def test_aicoding_refresh_does_not_retry_mcp_detail_when_runtime_not_ready() -> 
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_details = AsyncMock(
+    mcp_sync.sync_mcp_desired_state = AsyncMock(
         side_effect=[
             {"success": False, "error": "NO_ACTIVE_DEVICES"},
             {"success": True},
@@ -234,7 +234,7 @@ def test_aicoding_refresh_does_not_retry_mcp_detail_when_runtime_not_ready() -> 
             skill_set_factory=factory,
         ) is True
 
-    mcp_sync.sync_mcp_details.assert_awaited_once()
+    mcp_sync.sync_mcp_desired_state.assert_awaited_once()
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
@@ -242,7 +242,7 @@ def test_aicoding_refresh_does_not_retry_mcp_detail_exception() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_details = AsyncMock(
+    mcp_sync.sync_mcp_desired_state = AsyncMock(
         side_effect=[
             RuntimeError("BaaS API error: NO_ACTIVE_DEVICES"),
             {"success": True},
@@ -258,7 +258,7 @@ def test_aicoding_refresh_does_not_retry_mcp_detail_exception() -> None:
             skill_set_factory=None,
         ) is True
 
-    mcp_sync.sync_mcp_details.assert_awaited_once()
+    mcp_sync.sync_mcp_desired_state.assert_awaited_once()
 
 
 def test_aicoding_refresh_does_not_retry_skill_symlink_when_false() -> None:
@@ -305,7 +305,7 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_details = AsyncMock(side_effect=RuntimeError("detail down"))
+    mcp_sync.sync_mcp_desired_state = AsyncMock(side_effect=RuntimeError("detail down"))
     factory = MagicMock()
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(side_effect=RuntimeError("skill down"))
@@ -320,7 +320,7 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
             skill_set_factory=factory,
         ) is True
 
-    mcp_sync.sync_mcp_details.assert_awaited_once()
+    mcp_sync.sync_mcp_desired_state.assert_awaited_once()
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
@@ -364,7 +364,7 @@ def test_aicoding_refresh_clears_persisted_marker_after_confirmed_extra_success(
     }
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_details = AsyncMock(return_value={"success": True})
+    mcp_sync.sync_mcp_desired_state = AsyncMock(return_value={"success": True})
     template_service = MagicMock()
     template_service.get_template_config.return_value = stored_template_config
 
@@ -403,7 +403,7 @@ def test_aicoding_refresh_uses_persisted_template_marker_and_clears_after_succes
     )
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_details = AsyncMock(return_value={"success": True})
+    mcp_sync.sync_mcp_desired_state = AsyncMock(return_value={"success": True})
     template_service = MagicMock()
     template_service.get_template_config.return_value = template_config
 

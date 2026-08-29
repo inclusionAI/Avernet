@@ -696,7 +696,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         if not scope_result.get("success"):
                             return scope_result, None
 
-                        detail_result = await mcp_sync.sync_mcp_details(
+                        detail_result = await mcp_sync.sync_mcp_desired_state(
                             user_id=effective_entity_id,
                             entity_id=effective_entity_id,
                             bot_id=ctx.bot_id,
