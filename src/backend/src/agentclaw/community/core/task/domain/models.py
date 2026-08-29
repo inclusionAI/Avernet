@@ -135,7 +135,7 @@ class AcceptanceResult:
     """验收/审计结果(无 verifier 字段)。"""
 
     verdict: AcceptanceVerdict
-    acceptances_metric: list[str] = field(default_factory=list)  # 已满足的验收指标明细
+    acceptances_metric: list[Any] = field(default_factory=list)  # 已满足的验收指标明细(新协议为指标对象数组,放宽为 Any)
     gaps: list[str] = field(default_factory=list)                # 与期望目标的差距(驱动 plan 自算,非 plan 入参)
 
 
