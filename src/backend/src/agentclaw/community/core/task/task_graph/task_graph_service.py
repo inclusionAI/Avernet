@@ -372,7 +372,7 @@ class TaskGraphService:
             for n in graph.tasks
         )
 
-        cond_e = graph and graph.tasks and len(graph.tasks) == 1 and graph.tasks[0].status == Status.HUNG
+        cond_e = graph and graph.tasks and len(graph.tasks) >= 1 and graph.tasks[0].status == Status.HUNG
 
         if not (cond_a or cond_b or cond_c or cond_d or cond_e):
             raise GraphIntegrityError("add_task_nodes: 触发条件 a/b/c/d/e 均不满足")
