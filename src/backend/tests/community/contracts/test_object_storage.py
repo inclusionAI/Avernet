@@ -12,8 +12,22 @@ the call. A consumer bypassing the plugin would never trigger them.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterStoreConfig,
+    CanonicalCenterVersion,
+    CanonicalCenterVersionIdentity,
+)
+from agentclaw.community.core.skill_center.services.canonical_center_store import (
+    OssCanonicalCenterVersionStore,
+)
 from agentclaw.community.core.skill_center.services.skill_publish_service import SkillPublishService
-from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+from agentclaw.community.plugin_api.object_storage import (
+    ImmutableObjectStorageCapability,
+    ObjectCreateResult,
+    ObjectReadResult,
+    ObjectReadStatus,
+    ObjectStoragePlugin,
+)
 
 
 def test_upload_zip_routes_through_oss_storage_plugin(world, tmp_path) -> None:
@@ -46,3 +60,38 @@ def test_community_column_binds_contract_shaped_object_storage(community_world) 
 
     oss = community_world.get(ObjectStoragePlugin)
     assert isinstance(oss, CommunityFsObjectStorage)
+    assert isinstance(oss, ImmutableObjectStorageCapability)
+
+
+def test_canonical_store_consumer_hits_immutable_object_capability(world) -> None:
+    version = CanonicalCenterVersion.from_files(
+        CanonicalCenterVersionIdentity(
+            skill_uuid="11111111-1111-4111-8111-111111111111",
+            sc_version_number="7",
+        ),
+        {"SKILL.md": b"---\nname: demo\ndescription: Demo\n---\n"},
+    )
+    objects = world.get(ObjectStoragePlugin)
+    objects.create_object_if_absent.return_value = ObjectCreateResult.CREATED
+
+    def read_written(key: str) -> ObjectReadResult:
+        if key.endswith("/.teamclaw-ready.json"):
+            return ObjectReadResult(ObjectReadStatus.FOUND, version.manifest)
+        if key.endswith("/SKILL.md"):
+            return ObjectReadResult(
+                ObjectReadStatus.FOUND,
+                version.skill_md,
+            )
+        return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+
+    objects.read_object.side_effect = read_written
+    store = OssCanonicalCenterVersionStore(
+        object_storage=objects,
+        config=CanonicalCenterStoreConfig(),
+    )
+
+    ref = store.write_version(version)
+
+    assert ref.identity == version.identity
+    assert objects.create_object_if_absent.call_count == 3
+    assert objects.read_object.call_count == 2

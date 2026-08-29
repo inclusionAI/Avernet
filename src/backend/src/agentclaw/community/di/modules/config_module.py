@@ -26,6 +26,9 @@ from typing import Any
 from injector import Module, inject, provider, singleton
 
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterStoreConfig,
+)
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
@@ -249,6 +252,36 @@ class ConfigModule(Module):
     """Bind every typed config dataclass."""
 
     # ── Workspace ───────────────────────────────────────────────────
+
+    @singleton
+    @provider
+    def canonical_center_store(self) -> CanonicalCenterStoreConfig:
+        raw = _user_config().get("canonical_center_store")
+        if raw is None:
+            block: dict[str, Any] = {}
+        elif isinstance(raw, dict):
+            block = dict(raw)
+        else:
+            raise ValueError("canonical_center_store must be a mapping")
+        unknown = set(block) - {"base_prefix_template"}
+        if unknown:
+            raise ValueError(
+                "canonical_center_store has unknown keys: "
+                + ", ".join(sorted(unknown))
+            )
+        defaults = CanonicalCenterStoreConfig(env=get_current_env())
+        prefix = block.get(
+            "base_prefix_template",
+            defaults.base_prefix_template,
+        )
+        if not isinstance(prefix, str):
+            raise ValueError(
+                "canonical_center_store.base_prefix_template must be a string"
+            )
+        return CanonicalCenterStoreConfig(
+            env=get_current_env(),
+            base_prefix_template=prefix,
+        )
 
     @singleton
     @provider

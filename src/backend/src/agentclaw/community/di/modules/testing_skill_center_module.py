@@ -19,9 +19,15 @@ from __future__ import annotations
 from injector import Binder, Module, provider, singleton
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionStore,
+)
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.plugins.local.oss_storage import MockObjectStoragePlugin
+from agentclaw.community.testing.canonical_center_store import (
+    LocalCanonicalCenterVersionStore,
+)
 
 logger = get_logger()
 
@@ -50,6 +56,11 @@ class TestingSkillCenterModule(Module):
             to=MockObjectStoragePlugin,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    def canonical_center_version_store(self) -> CanonicalCenterVersionStore:
+        return LocalCanonicalCenterVersionStore()
 
     # SkillRepository / SkillSetRepository are no longer overridden:
     # the unified repositories (bound in SkillCenterModule) are a

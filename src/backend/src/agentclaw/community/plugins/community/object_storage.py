@@ -13,12 +13,20 @@ rather than raised.
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+from agentclaw.community.plugin_api.object_storage import (
+    ObjectCreateResult,
+    ObjectReadResult,
+    ObjectReadStatus,
+    ImmutableObjectStorageCapability,
+    ObjectStoragePlugin,
+)
 
 
 if TYPE_CHECKING:
@@ -28,7 +36,9 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
-class CommunityFsObjectStorage(ObjectStoragePlugin):
+class CommunityFsObjectStorage(
+    ObjectStoragePlugin, ImmutableObjectStorageCapability
+):
     """Object storage backed by the local filesystem under a root directory."""
 
     def __init__(self, root: str) -> None:
@@ -63,6 +73,51 @@ class CommunityFsObjectStorage(ObjectStoragePlugin):
             logger.error("ObjectStorage put_object failed: key=%s, error=%s", key, e)
             return False
 
+    def create_object_if_absent(
+        self, key: str, content: bytes | str
+    ) -> ObjectCreateResult:
+        path = self._safe_path(key)
+        if path is None:
+            return ObjectCreateResult.FAILED
+        temp_path: Path | None = None
+        try:
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, raw_temp_path = tempfile.mkstemp(
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+            )
+            temp_path = Path(raw_temp_path)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temp_path.chmod(0o644)
+            # A same-filesystem hard link is an atomic create-if-absent publish:
+            # readers either see no final key or the complete staged payload.
+            os.link(temp_path, path)
+            return ObjectCreateResult.CREATED
+        except FileExistsError:
+            return ObjectCreateResult.ALREADY_EXISTS
+        except OSError as e:
+            logger.error(
+                "ObjectStorage create_object_if_absent failed: key=%s, error=%s",
+                key,
+                e,
+            )
+            return ObjectCreateResult.FAILED
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning(
+                        "ObjectStorage temporary file cleanup failed: path=%s",
+                        temp_path,
+                    )
+
     def put_file(self, key: str, local_path: str) -> bool:
         path = self._safe_path(key)
         if path is None:
@@ -87,6 +142,17 @@ class CommunityFsObjectStorage(ObjectStoragePlugin):
             logger.error("ObjectStorage get_object failed: key=%s, error=%s", key, e)
             return None
 
+    def read_object(self, key: str) -> ObjectReadResult:
+        path = self._safe_path(key)
+        if path is None:
+            return ObjectReadResult(ObjectReadStatus.FAILED)
+        try:
+            if not path.is_file():
+                return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+            return ObjectReadResult(ObjectReadStatus.FOUND, path.read_bytes())
+        except OSError as e:
+            logger.error("ObjectStorage read_object failed: key=%s, error=%s", key, e)
+            return ObjectReadResult(ObjectReadStatus.FAILED)
     def delete_object(self, key: str) -> bool:
         path = self._safe_path(key)
         if path is None:
@@ -157,7 +223,9 @@ class CommunityFsObjectStorage(ObjectStoragePlugin):
             return False
 
 
-class CommunityS3ObjectStorage(ObjectStoragePlugin):
+class CommunityS3ObjectStorage(
+    ObjectStoragePlugin, ImmutableObjectStorageCapability
+):
     """Object storage over an S3-compatible service (MinIO / S3 / R2 / OSS).
 
     boto3 is imported lazily so a pure-filesystem community deploy that never
@@ -186,6 +254,7 @@ class CommunityS3ObjectStorage(ObjectStoragePlugin):
             BotoCoreError,
             S3UploadFailedError,
         )
+        self._client_error = ClientError
         self._bucket = cfg.bucket
         self._s3 = boto3.client(
             "s3",
@@ -204,6 +273,27 @@ class CommunityS3ObjectStorage(ObjectStoragePlugin):
             logger.error("S3 put_object failed: key=%s, error=%s", key, e)
             return False
 
+    def create_object_if_absent(
+        self, key: str, content: bytes | str
+    ) -> ObjectCreateResult:
+        try:
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            self._s3.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=content,
+                IfNoneMatch="*",
+            )
+            return ObjectCreateResult.CREATED
+        except self._errors as e:
+            if self._is_precondition_conflict(e):
+                return ObjectCreateResult.ALREADY_EXISTS
+            logger.error(
+                "S3 create_object_if_absent failed: key=%s, error=%s", key, e
+            )
+            return ObjectCreateResult.FAILED
+
     def put_file(self, key: str, local_path: str) -> bool:
         try:
             self._s3.upload_file(local_path, self._bucket, key)
@@ -220,6 +310,34 @@ class CommunityS3ObjectStorage(ObjectStoragePlugin):
             # Includes a missing key (ClientError NoSuchKey) — swallowed to None.
             logger.error("S3 get_object failed: key=%s, error=%s", key, e)
             return None
+
+    def read_object(self, key: str) -> ObjectReadResult:
+        try:
+            resp = self._s3.get_object(Bucket=self._bucket, Key=key)
+            return ObjectReadResult(ObjectReadStatus.FOUND, resp["Body"].read())
+        except self._errors as e:
+            if self._is_not_found(e):
+                return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+            logger.error("S3 read_object failed: key=%s, error=%s", key, e)
+            return ObjectReadResult(ObjectReadStatus.FAILED)
+
+    def _is_not_found(self, error: Exception) -> bool:
+        if not isinstance(error, self._client_error):
+            return False
+        response = error.response
+        code = str(response.get("Error", {}).get("Code", ""))
+        return code in {"NoSuchKey", "NoSuchObject", "NotFound", "404"}
+
+    def _is_precondition_conflict(self, error: Exception) -> bool:
+        if not isinstance(error, self._client_error):
+            return False
+        response = error.response
+        code = str(response.get("Error", {}).get("Code", ""))
+        status = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        return code in {
+            "PreconditionFailed",
+            "ConditionalRequestConflict",
+        } or status in {409, 412}
 
     def delete_object(self, key: str) -> bool:
         try:

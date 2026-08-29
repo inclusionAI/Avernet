@@ -16,8 +16,54 @@ proactively mirror a full object-storage SDK.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 from typing import Protocol, runtime_checkable
 from agentclaw.community.plugin_api.base import Plugin
+
+
+class ObjectCreateResult(str, Enum):
+    """Outcome of an atomic create-if-absent operation."""
+
+    CREATED = "CREATED"
+    ALREADY_EXISTS = "ALREADY_EXISTS"
+    FAILED = "FAILED"
+
+
+class ObjectReadStatus(str, Enum):
+    """Distinguish a missing object from an unavailable object store."""
+
+    FOUND = "FOUND"
+    NOT_FOUND = "NOT_FOUND"
+    FAILED = "FAILED"
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectReadResult:
+    status: ObjectReadStatus
+    content: bytes | None = None
+
+
+@runtime_checkable
+class ImmutableObjectStorageCapability(Protocol):
+    """Optional write-once object capability for immutable consumers.
+
+    This is deliberately separate from :class:`ObjectStoragePlugin`: corp
+    overlays that implement only the long-standing mutable surface keep
+    satisfying that contract, while immutable consumers can fail closed at
+    composition time until their concrete store supports conditional create
+    and three-state reads.
+    """
+
+    def create_object_if_absent(
+        self, key: str, content: bytes | str
+    ) -> ObjectCreateResult:
+        """Atomically publish the complete ``content`` without replacement."""
+        ...
+
+    def read_object(self, key: str) -> ObjectReadResult:
+        """Read with distinct FOUND, NOT_FOUND, and FAILED outcomes."""
+        ...
 
 
 @runtime_checkable

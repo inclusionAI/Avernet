@@ -698,8 +698,19 @@ Latest 是发布成功后的 Best-Effort 异步刷新，不参与发布成功门
   `skills-pool/skill-center/<skill_uuid>/<sc_version_number>/`。Center 对 Local/Repo
   layout 切流中立：无论 Bot 当前 Local/Repo 是 Legacy 还是 Pool，Center 都使用这一
   canonical root，不创建 `legacy_center`，但进入 mapping publish/verify/inventory 生命周期。
-- 共享 OSS 物理根由服务端环境配置提供，不写入 Spec、业务代码或公开合同；文件型
-  Engine Adapter 将其暴露为容器内 `skills-pool/skill-center/` 视图。
+- Backend 的 `CanonicalCenterVersionStore` 只接受显式 `skill_uuid + sc_version_number`
+  exact identity，Interface 只暴露 `write_version/read_version/verify_version`；禁止
+  `latest/current`、覆盖和按名称寻址。默认 OSS 物理 key 根为
+  `aidesktop/aidesktop_<env>/bolt_shared/skills-center/<skill_uuid>/`
+  `<sc_version_number>/`，其下保存经过上游 Materializer 规范化的安全文件树，且必须有
+  根级 `SKILL.md`。Store 用 write-once intent 占住 exact identity，逐文件原子
+  create-if-absent，完整校验后最后发布 Ready manifest；部分写失败只补偿本次写入拥有的
+  对象。Ready 缺失、文件缺失、hash/manifest 冲突或对象存储不可用时均不可读、不可向
+  Runtime/Artifact 暴露。重复写入同一 exact identity 仅允许同内容幂等验证，任何内容冲突
+  fail closed。该 Store 不负责 SC 下载、Scanner、MCP dependency、Version 状态、Runtime
+  mapping、Teclaw StoreRef 或 Artifact。
+- 真实 bucket 与可选 base override 由服务端环境配置提供；上面的默认 key 合同不包含
+  bucket。文件型 Engine Adapter 将它暴露为容器内 `skills-pool/skill-center/` 视图。
 - Teclaw 沿用 Artifact v4，新增 `skill-center` OSS Store，SkillRef path 为
   `<skill_uuid>/<sc_version_number>`；Bucket/Base 来自服务端配置。
 - **TeamClaw Canonical Store Ready** 是发布成功门槛：该 Version 面向本期支持消费者

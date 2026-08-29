@@ -4,6 +4,10 @@ FS impl runs against a temp root; S3 impl runs under moto's in-process AWS mock.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import os
+from threading import Barrier
+
 import boto3
 import pytest
 from moto import mock_aws
@@ -12,6 +16,10 @@ from agentclaw.community.di.config_community import CommunityS3Config
 from agentclaw.community.plugins.community.object_storage import (
     CommunityFsObjectStorage,
     CommunityS3ObjectStorage,
+)
+from agentclaw.community.plugin_api.object_storage import (
+    ObjectCreateResult,
+    ObjectReadStatus,
 )
 
 _BUCKET = "b3-test-bucket"
@@ -42,6 +50,81 @@ def test_fs_get_object_roundtrip_and_missing(tmp_path):
     # Absent key and a path-traversal key both return None, never raise.
     assert store.get_object("nope.txt") is None
     assert store.get_object("../escape.txt") is None
+
+
+def test_fs_conditional_create_and_three_state_read(tmp_path):
+    store = _fs(tmp_path)
+
+    assert (
+        store.create_object_if_absent("immutable", b"first")
+        is ObjectCreateResult.CREATED
+    )
+    assert (
+        store.create_object_if_absent("immutable", b"second")
+        is ObjectCreateResult.ALREADY_EXISTS
+    )
+    assert store.read_object("immutable").content == b"first"
+    assert store.read_object("missing").status is ObjectReadStatus.NOT_FOUND
+    assert store.read_object("../escape").status is ObjectReadStatus.FAILED
+
+
+def test_fs_conditional_create_is_atomic_under_concurrency(tmp_path):
+    store = _fs(tmp_path)
+    barrier = Barrier(2)
+
+    def create(content: bytes) -> ObjectCreateResult:
+        barrier.wait()
+        return store.create_object_if_absent("same-key", content)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(create, (b"first", b"second")))
+
+    assert sorted(results, key=lambda result: result.value) == [
+        ObjectCreateResult.ALREADY_EXISTS,
+        ObjectCreateResult.CREATED,
+    ]
+    assert store.read_object("same-key").content in {b"first", b"second"}
+
+
+def test_fs_conditional_create_publishes_only_complete_content(
+    tmp_path, monkeypatch
+):
+    store = _fs(tmp_path)
+    target = tmp_path / "store" / "immutable"
+    original_link = os.link
+
+    def assert_complete_then_publish(source, destination):
+        assert destination == target
+        assert not target.exists()
+        assert source.read_bytes() == b"complete-payload"
+        original_link(source, destination)
+
+    monkeypatch.setattr(os, "link", assert_complete_then_publish)
+
+    assert (
+        store.create_object_if_absent("immutable", b"complete-payload")
+        is ObjectCreateResult.CREATED
+    )
+    assert target.read_bytes() == b"complete-payload"
+
+
+def test_fs_conditional_create_cleans_staging_file_when_publish_fails(
+    tmp_path, monkeypatch
+):
+    store = _fs(tmp_path)
+
+    def fail_link(source, destination):
+        raise OSError("publish failed")
+
+    monkeypatch.setattr(os, "link", fail_link)
+
+    assert (
+        store.create_object_if_absent("immutable", b"payload")
+        is ObjectCreateResult.FAILED
+    )
+    root = tmp_path / "store"
+    assert not (root / "immutable").exists()
+    assert list(root.glob(".immutable.*.tmp")) == []
 
 
 def test_fs_nested_key_creates_dirs(tmp_path):
@@ -154,10 +237,12 @@ def test_s3_errors_on_missing_bucket_swallow_to_falsy(monkeypatch):
             CommunityS3Config(bucket="never-created", region="us-east-1")
         )
         assert store.put_object("k", "x") is False
+        assert store.create_object_if_absent("k", "x") is ObjectCreateResult.FAILED
         assert store.put_file("k", __file__) is False
         assert store.delete_object("k") is False
         assert store.list_objects("") == []
         assert store.get_etag("k") is None
+        assert store.read_object("k").status is ObjectReadStatus.FAILED
         assert store.set_object_acl("k", "private") is False
 
 
@@ -193,6 +278,19 @@ def test_s3_get_object_roundtrip_and_missing(s3_store):
     assert s3_store.get_object("g") == b"payload"
     # Missing key is a swallowed NoSuchKey ClientError → None, not a raise.
     assert s3_store.get_object("missing") is None
+
+
+def test_s3_conditional_create_and_three_state_read(s3_store):
+    assert (
+        s3_store.create_object_if_absent("immutable", b"first")
+        is ObjectCreateResult.CREATED
+    )
+    assert (
+        s3_store.create_object_if_absent("immutable", b"second")
+        is ObjectCreateResult.ALREADY_EXISTS
+    )
+    assert s3_store.read_object("immutable").content == b"first"
+    assert s3_store.read_object("missing").status is ObjectReadStatus.NOT_FOUND
 
 
 def test_s3_list_prefix_and_max_keys(s3_store):
