@@ -16,7 +16,7 @@ import logging
 import uuid
 from typing import Any
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceResult, AcceptanceVerdict, Goal, RuntimeInfo, Status, TaskNode, TaskNodePatch, TaskSpec,
+    AcceptanceResult, AcceptanceVerdict, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskNodePatch, TaskSpec,
 )
 
 logger = logging.getLogger(__name__)
@@ -98,17 +98,17 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         logger.info("[task][bbs_mode] send_and_wait, task_id=%s, result_msg=%s", task_id, task_result)
 
         bbs_task_node = TaskNode(
-            node_id = f"bbs-{uuid.uuid4().hex[:8]}",
+            node_id=f"bbs-{uuid.uuid4().hex[:8]}",
             task_id=task_id,
             status=Status.DONE,
-            task_spec=TaskSpec(),
-            run_info=RuntimeInfo(),
-            node_run_graph=None
+            task_spec=TaskSpec(
+                metadata=Metadata(task_id=task_id, title="BBS 接力", instruction=""),
+                context=Context(background=""),
+                goal=Goal(objective=msg, acceptances=[]),
+            ),
+            run_info=RuntimeInfo(run_mode="bbs"),
+            node_run_graph=None,
         )
-        bbs_task_node.task_spec = TaskSpec()
-        bbs_task_node.task_spec.goal = Goal()
-        bbs_task_node.task_spec.goal.objective = msg
-        bbs_task_node.run_info.run_mode = "bbs"
 
         graph.add_task_nodes([bbs_task_node], task_id)
         logger.info("[task][bbs_mode] send_and_wait, task_id=%s, add_bbs_new_node=%s", task_id, bbs_task_node)
@@ -126,17 +126,17 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
 
         bbs_task_node = TaskNode(
-            node_id = f"bbs-{uuid.uuid4().hex[:8]}",
+            node_id=f"bbs-{uuid.uuid4().hex[:8]}",
             task_id=task_id,
             status=Status.FAILED,
-            task_spec=TaskSpec(),
-            run_info=RuntimeInfo(),
-            node_run_graph=None
+            task_spec=TaskSpec(
+                metadata=Metadata(task_id=task_id, title="BBS 接力", instruction=""),
+                context=Context(background=""),
+                goal=Goal(objective=msg, acceptances=[]),
+            ),
+            run_info=RuntimeInfo(run_mode="bbs"),
+            node_run_graph=None,
         )
-        bbs_task_node.task_spec = TaskSpec()
-        bbs_task_node.task_spec.goal = Goal()
-        bbs_task_node.task_spec.goal.objective = msg
-        bbs_task_node.run_info.run_mode = "bbs"
 
         graph.add_task_nodes([bbs_task_node], task_id)
         logger.warning("[task][bbs_mode] send_and_wait, task_id=%s, add_bbs_new_failed_node=%s", task_id, bbs_task_node)
