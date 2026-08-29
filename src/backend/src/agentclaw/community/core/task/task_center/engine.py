@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import random
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -36,6 +38,7 @@ from agentclaw.community.core.task.domain.errors import (
     TaskStateError,
 )
 from agentclaw.community.core.task.domain.models import (
+    AcceptanceResult,
     AcceptanceVerdict,
     NodeAction,
     NodeOpResult,
@@ -499,6 +502,12 @@ class ExecutionEngine:
         )
         await self._drain(task_id, side)
 
+    def _static_auto_report_on(self) -> bool:
+        """演示自驱开关:开启后静态 plan 节点不做真实派发/拉群,转为后台自回投 mock 结果,
+        复用同一 on_report 通路推进图态,便于上报/skill 未就绪时也能跑通全链路。
+        env: OCB_TASK_STATIC_AUTO_REPORT in {1,true,yes,on}"""
+        return os.environ.get("OCB_TASK_STATIC_AUTO_REPORT", "").lower() in {"1", "true", "yes", "on"}
+
     async def _prepare_static(self, task_id: str, runtime, side: list[tuple]) -> None:
         graph = self._graph.query_task_dashboard(task_id)
         readiness = runtime.ready(graph)
@@ -545,7 +554,9 @@ class ExecutionEngine:
         不进 dispatcher.dispatch / 不查 catalog / 不做 claim_join,故未 ready 的依赖节点
         (strategy_approval/implementation)不会被提前搜推成 MISS/claim_mode_off,且 YAML 绑定
         的 bot_id 永远被尊重(不会被 catalog 命中的其他 bot 替换)。依赖顺序由 runtime.ready 保证。"""
+        auto = self._static_auto_report_on()
         to_run: list[TaskNode] = []
+        auto_nodes: list[TaskNode] = []
         for node in ready_nodes:
             definition = runtime.by_id.get(node.node_id)
             if definition is None:
@@ -554,6 +565,25 @@ class ExecutionEngine:
                     task_id,
                     node.node_id,
                 )
+                continue
+            if auto:
+                node_type = getattr(definition, "node_type", "bot")
+                run_mode = "coop_group" if node_type == "collaboration" else "single_bot"
+                bot_id = getattr(definition, "bot_id", None) or ""
+                logger.info(
+                    "[task][static-plan] task=%s node=%s -> auto-mock skip dispatch type=%s run_mode=%s",
+                    task_id, node.node_id, node_type, run_mode,
+                )
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        run_mode=run_mode,
+                        assignee=bot_id,
+                        extend_props_patch={"dispatching": True},
+                    )
+                )
+                auto_nodes.append(node)
                 continue
             gf = node.run_info.extend_props.get("pending_group_formation")
             if gf is not None:
@@ -615,6 +645,46 @@ class ExecutionEngine:
                 )
         if to_run:
             side.append(("run", to_run))
+        if auto_nodes:
+            side.append(("auto", auto_nodes))
+
+    async def _static_auto_report(self, task_id: str, node_id: str) -> None:
+        """演示自驱:延迟后用 mock 结果走 on_report,复用静态推进通路。"""
+        runtime = self._static_runtime(task_id)
+        if runtime is None:
+            return
+        delay = random.uniform(0.8, 2.0)
+        logger.info(
+            "[task][static-plan] auto-report scheduled task=%s node=%s in %.2fs",
+            task_id, node_id, delay,
+        )
+        await asyncio.sleep(delay)
+        definition = runtime.by_id.get(node_id)
+        mock_result: Any = {
+            "summary": f"[auto-mock] node={node_id}",
+            "random": f"{random.randrange(10 ** 6):06d}",
+        }
+        if definition is not None and any(
+            isinstance(v, str) and v.startswith("$.result.approved")
+            for v in definition.output.values()
+        ):
+            mock_result["approved"] = True
+        logger.info(
+            "[task][static-plan] auto-report fire task=%s node=%s mock=%s -> on_report",
+            task_id, node_id, mock_result,
+        )
+        await self.on_report(
+            TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                acceptance_result=AcceptanceResult(
+                    verdict=AcceptanceVerdict.PASS,
+                    acceptances_metric=["auto_mock"],
+                ),
+                output_patch={"result": mock_result},
+                extend_props_patch={"dispatching": None},
+            )
+        )
 
     async def _on_static_report(self, task_id: str, node_id: str) -> None:
         runtime = self._static_runtime(task_id)
@@ -1633,6 +1703,7 @@ class ExecutionEngine:
         run_nodes: list[TaskNode] = []
         miss_tasks: list[TaskNodePatch] = []
         dispatch_fail_patches: list[TaskNodePatch] = []
+        auto_nodes: list[TaskNode] = []
         for kind, *payload in side:
             if kind == "run":
                 run_nodes.extend(payload[0])
@@ -1713,6 +1784,8 @@ class ExecutionEngine:
                     status_to=Status.RUNNING,
                 )
                 run_nodes.append(node)
+            elif kind == "auto":
+                auto_nodes.extend(payload[0])
             elif kind == "miss":
                 miss_tasks.append(payload[0])
             elif kind == "dispatch_fail":
@@ -1789,6 +1862,15 @@ class ExecutionEngine:
                             status_from=Status.PENDING,
                             status_to=Status.RUNNING,
                         )
+        # ④ auto(静态自驱 mock,OCB_TASK_STATIC_AUTO_REPORT):dispatching 守门防重派;后台 on_report
+        #    自回投 PASS+mock 翻 DONE 推进图态,不占真实 bot/群。
+        if auto_nodes:
+            logger.info(
+                "[task][drain] task=%s auto-mock scheduled %d nodes: %s",
+                task_id, len(auto_nodes), [n.node_id for n in auto_nodes],
+            )
+            for n in auto_nodes:
+                asyncio.create_task(self._static_auto_report(task_id, n.node_id))
         # ② dispatch_fail:落 dispatch_error(留 PENDING,harness 按超时重试搜推)
         for patch in dispatch_fail_patches:
             self._graph.update_task_node_info(patch)
