@@ -56,8 +56,11 @@ api/
 
 ## Enforcement
 
-Four gates under `tests/community/architecture/`:
+Five gates under `tests/community/architecture/`:
 
+- `test_protocol_base_ordering.py` — a Protocol base never precedes a
+  non-Protocol base that defines the same members, so a service's `...`
+  stubs cannot silently shadow a real mixin implementation.
 - `test_api_layer_is_protocols_only.py` — every file under `api/` either
   defines a Protocol or re-exports one from a core contract module via
   `__all__`; no subdirectories, no router code.
