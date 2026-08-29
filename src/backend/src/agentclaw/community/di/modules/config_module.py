@@ -69,6 +69,7 @@ def _block(name: str) -> dict[str, Any]:
 
 
 def _object_prefix_setting(name: str, default: str) -> Any:
+    """Read one strict object-store prefix block without duplicating parsing."""
     raw = _user_config().get(name)
     if raw is None:
         return default
@@ -472,21 +473,10 @@ class ConfigModule(Module):
     @provider
     def draft_content_store(self) -> DraftContentStoreConfig:
         """Immutable Draft revision object-key prefix."""
-        raw = _user_config().get("draft_content_store")
-        if raw is None:
-            block: dict[str, Any] = {}
-        elif isinstance(raw, dict):
-            block = dict(raw)
-        else:
-            raise ValueError("draft_content_store must be a mapping")
-        unknown = sorted(set(block) - {"base_prefix_template"})
-        if unknown:
-            raise ValueError(
-                "draft_content_store contains unknown keys: "
-                + ", ".join(unknown)
-            )
         defaults = DraftContentStoreConfig()
-        value = block.get("base_prefix_template", defaults.base_prefix_template)
+        value = _object_prefix_setting(
+            "draft_content_store", defaults.base_prefix_template
+        )
         return DraftContentStoreConfig(base_prefix_template=value)
 
     # NOTE: codefuse_token provider moved to ``CorpConfigModule`` (B8).

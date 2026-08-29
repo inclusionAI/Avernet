@@ -17,9 +17,6 @@ from agentclaw.community.api.bot_runtime_projector import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_upload_service import (
-    LocalSkillUploadServiceProtocol,
-)
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
 )
@@ -143,9 +140,6 @@ from agentclaw.community.core.skill_center.services.git_sync import (
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
-from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
-    LocalSkillUploadService,
-)
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
 from agentclaw.community.core.skill_center.services.repository_catalog_service import (
     RepositoryCatalogService,
@@ -169,8 +163,6 @@ from agentclaw.community.core.skill_center.services.skill_member_service import 
 from agentclaw.community.core.skill_center.services.skill_propagation_service import (
     SkillPropagationService,
 )
-from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
-from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.skill_center.services.skill_publish_service import (
     SkillPublishService,
 )
@@ -209,6 +201,9 @@ from agentclaw.community.di.modules.canonical_center_store_module import (
 )
 from agentclaw.community.di.modules.draft_content_store_module import (
     DraftContentStoreBindings,
+)
+from agentclaw.community.di.modules.local_skill_upload_module import (
+    LocalSkillUploadBindings,
 )
 from agentclaw.community.di.modules.skill_center_protocols import (
     SkillCenterProtocolBindings,
@@ -259,6 +254,7 @@ logger = get_logger()
 class SkillCenterModule(
     CanonicalCenterStoreBindings,
     DraftContentStoreBindings,
+    LocalSkillUploadBindings,
     SkillCenterProtocolBindings,
     Module,
 ):
@@ -512,32 +508,6 @@ class SkillCenterModule(
             mcp_center,
             mcp_auth,
             ext_info_provider=_build__ext_info_provider(injector),
-        )
-
-    @singleton
-    @provider
-    @inject
-    def local_skill_upload_service(
-        self,
-        skill_repo: SkillRepository,
-        bot_repo: BotRepository,
-        collaborator_service: CollaboratorServiceProtocol,
-        skill_service_factory: SkillServiceFactory,
-        audit_log_repo: BotCollabLogRepositoryProtocol,
-        edit_guard: SkillsPoolEditGuard,
-        injector: Injector,
-        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
-    ) -> LocalSkillUploadServiceProtocol:
-        return LocalSkillUploadService(
-            skill_repo,
-            bot_repo,
-            collaborator_service,
-            skill_service_factory,
-            audit_log_repo,
-            edit_guard,
-            lambda: injector.get(DeviceContextResolver),
-            runtime_reconciler,
-            SkillPackageValidator(SkillParser()),
         )
 
     @singleton
