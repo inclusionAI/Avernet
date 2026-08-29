@@ -21,7 +21,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use bcs_cache_api::{CachePlugin, CacheSetMode};
+use bcs_cache_api::{CacheError, CachePlugin, CacheSetMode};
 use bcs_db_api::{db_get_column, db_get_column_opt, DbPlugin, DbSqlFlavor, DbStatement, DbValue};
 use bcs_service_api::port::repo::{
     CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
@@ -148,7 +148,19 @@ impl SqlChatRunRepo {
         }
     }
 
-    async fn write_overlay(&self, run_id: &str, overlay: &StreamingOverlay, expires_at_ms: u64) {
+    /// Write the streaming overlay. Returns `Ok(())` only when the store
+    /// confirmed the write (`set_value` → `Ok(true)`). A rejection, or the
+    /// no-write `Ok(false)` for an upsert (which means the delta was NOT
+    /// stored), is surfaced as `Err` so the caller that relies on the overlay
+    /// as the sole delta record (`append_streaming_content`) can fail over to
+    /// the DB. Best-effort callers (`create`, state CAS) ignore the result
+    /// since the DB row is authoritative there.
+    async fn write_overlay(
+        &self,
+        run_id: &str,
+        overlay: &StreamingOverlay,
+        expires_at_ms: u64,
+    ) -> Result<(), CacheError> {
         let now = now_ms();
         // Overlay must survive the run deadline by the retention grace so the
         // timeout sweep (which runs only once `expires_at_ms < now`) can still
@@ -157,17 +169,55 @@ impl SqlChatRunRepo {
             .saturating_add(self.overlay_retention_ms)
             .saturating_sub(now)
             .max(1000);
-        if let Ok(bytes) = serde_json::to_vec(overlay) {
-            let _ = self
-                .cache
-                .set_value(
-                    &self.cache_key(run_id),
-                    bytes,
-                    Some(Duration::from_millis(ttl_ms)),
-                    CacheSetMode::Upsert,
-                )
-                .await;
+        let bytes = serde_json::to_vec(overlay)
+            .map_err(|err| CacheError::InvalidInput(err.to_string()))?;
+        match self
+            .cache
+            .set_value(
+                &self.cache_key(run_id),
+                bytes,
+                Some(Duration::from_millis(ttl_ms)),
+                CacheSetMode::Upsert,
+            )
+            .await
+        {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(CacheError::Backend(
+                "streaming overlay upsert reported no write".to_string(),
+            )),
+            Err(err) => Err(err),
         }
+    }
+
+    /// Fail a streaming delta over to the authoritative DB row when the Redis
+    /// overlay write is unavailable (C4, #1546: never convert a backend write
+    /// failure into a lost delta). Writes `accumulated_content` directly with
+    /// `version = version + 1` under the non-terminal guard: applied →
+    /// `Ok(true)`, already-terminal (0 rows, delta not applied) → `Ok(false)`,
+    /// DB error → propagated `Backend`.
+    async fn fall_back_to_db_append(
+        &self,
+        run_id: &str,
+        accumulated: &str,
+        truncated: bool,
+    ) -> Result<bool, ChatRunRepoError> {
+        let now = now_ms();
+        let stmt = DbStatement::with_params(
+            &format!(
+                "UPDATE bcs_chat_runs SET accumulated_content = ?, content_truncated = ?, \
+                 version = version + 1, updated_at_ms = ? \
+                 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?"
+            ),
+            vec![
+                DbValue::from(accumulated.to_string()),
+                DbValue::from(truncated),
+                DbValue::from(now as i64),
+                DbValue::from(run_id.to_string()),
+                DbValue::from(self.env.as_str()),
+            ],
+        );
+        let result = self.db.execute(stmt).await.map_err(backend)?;
+        Ok(result.affected_rows > 0)
     }
 
     async fn delete_overlay(&self, run_id: &str) {
@@ -393,17 +443,20 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         );
         match self.db.execute(stmt).await {
             Ok(_) => {
-                self.write_overlay(
-                    &record.run_id,
-                    &StreamingOverlay {
-                        version: record.version,
-                        state: state_str(record.state).to_string(),
-                        accumulated_content: record.accumulated_content.clone(),
-                        content_truncated: record.content_truncated,
-                    },
-                    record.expires_at_ms,
-                )
-                .await;
+                // Overlay here is only a read cache of the just-inserted DB row;
+                // a write blip is benign (a later read falls back to the DB).
+                let _ = self
+                    .write_overlay(
+                        &record.run_id,
+                        &StreamingOverlay {
+                            version: record.version,
+                            state: state_str(record.state).to_string(),
+                            accumulated_content: record.accumulated_content.clone(),
+                            content_truncated: record.content_truncated,
+                        },
+                        record.expires_at_ms,
+                    )
+                    .await;
                 Ok(())
             }
             Err(err) if err.is_duplicate_key() => {
@@ -445,17 +498,20 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         let result = self.db.execute(stmt).await.map_err(backend)?;
         if result.affected_rows > 0 {
             let updated = read_full(self.db.as_ref(), run_id, &self.env).await?.unwrap_or(new.clone());
-            self.write_overlay(
-                run_id,
-                &StreamingOverlay {
-                    version: updated.version,
-                    state: state_str(updated.state).to_string(),
-                    accumulated_content: updated.accumulated_content.clone(),
-                    content_truncated: updated.content_truncated,
-                },
-                updated.expires_at_ms,
-            )
-            .await;
+            // Refresh the read-cache overlay of the just-applied DB state; best
+            // effort, since the DB row is authoritative on a read miss.
+            let _ = self
+                .write_overlay(
+                    run_id,
+                    &StreamingOverlay {
+                        version: updated.version,
+                        state: state_str(updated.state).to_string(),
+                        accumulated_content: updated.accumulated_content.clone(),
+                        content_truncated: updated.content_truncated,
+                    },
+                    updated.expires_at_ms,
+                )
+                .await;
             Ok(CasOutcome::Applied(updated))
         } else {
             classify_cas_failure(self.db.as_ref(), run_id, &self.env).await
@@ -537,8 +593,14 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         }
         overlay.accumulated_content = accumulated;
         overlay.content_truncated = truncated;
-        self.write_overlay(run_id, &overlay, expires_at_ms).await;
-        Ok(true)
+        match self.write_overlay(run_id, &overlay, expires_at_ms).await {
+            // Overlay (the sole delta record) confirmed the write.
+            Ok(()) => Ok(true),
+            // C4: the overlay write was rejected (Redis outage / upsert no-write).
+            // Fail the delta over to the authoritative DB row instead of
+            // silently dropping it (#1546 forbids a swallowed backend write).
+            Err(_) => self.fall_back_to_db_append(run_id, &overlay.accumulated_content, truncated).await,
+        }
     }
 
     async fn list_active(&self, now_ms: u64) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {

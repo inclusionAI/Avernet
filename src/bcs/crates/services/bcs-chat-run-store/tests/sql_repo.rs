@@ -1,5 +1,9 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
+use async_trait::async_trait;
+use bcs_cache_api::{CacheError, CachePlugin, CacheResult, CacheSetMode, CacheTtl};
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_chat_run_store::{
     CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
@@ -13,6 +17,85 @@ fn repo() -> SqlChatRunRepo {
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     let cache = Arc::new(InMemoryCachePlugin::new());
     SqlChatRunRepo::new(db, DbSqlFlavor::Sqlite, cache, "bcs:".to_string(), 120_000, "test".to_string())
+}
+
+/// Cache double whose `set_value` always rejects, simulating a Redis overlay
+/// write outage. Reads/deletes delegate to an in-memory store so `read_overlay`
+/// sees the nothing that was written — exactly the C4 fail-over scenario.
+struct FailingWritesCache {
+    inner: InMemoryCachePlugin,
+}
+
+impl FailingWritesCache {
+    fn new() -> Self {
+        Self {
+            inner: InMemoryCachePlugin::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl CachePlugin for FailingWritesCache {
+    async fn get_value(&self, key: &str) -> CacheResult<Option<Vec<u8>>> {
+        self.inner.get_value(key).await
+    }
+
+    async fn set_value(
+        &self,
+        _key: &str,
+        _value: Vec<u8>,
+        _ttl: Option<Duration>,
+        _mode: CacheSetMode,
+    ) -> CacheResult<bool> {
+        Err(CacheError::Backend(
+            "injected overlay write failure".to_string(),
+        ))
+    }
+
+    async fn delete(&self, key: &str) -> CacheResult<bool> {
+        self.inner.delete(key).await
+    }
+
+    async fn expire(&self, key: &str, ttl: Duration) -> CacheResult<bool> {
+        self.inner.expire(key, ttl).await
+    }
+
+    async fn ttl(&self, key: &str) -> CacheResult<CacheTtl> {
+        self.inner.ttl(key).await
+    }
+
+    async fn hash_get(&self, key: &str, field: &str) -> CacheResult<Option<Vec<u8>>> {
+        self.inner.hash_get(key, field).await
+    }
+
+    async fn hash_get_all(&self, key: &str) -> CacheResult<BTreeMap<String, Vec<u8>>> {
+        self.inner.hash_get_all(key).await
+    }
+
+    async fn hash_set(&self, key: &str, field: &str, value: Vec<u8>) -> CacheResult<()> {
+        self.inner.hash_set(key, field, value).await
+    }
+
+    async fn hash_set_many(&self, key: &str, fields: BTreeMap<String, Vec<u8>>) -> CacheResult<()> {
+        self.inner.hash_set_many(key, fields).await
+    }
+
+    async fn hash_delete(&self, key: &str, field: &str) -> CacheResult<bool> {
+        self.inner.hash_delete(key, field).await
+    }
+}
+
+fn repo_failing_cache() -> SqlChatRunRepo {
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    let cache: Arc<dyn CachePlugin> = Arc::new(FailingWritesCache::new());
+    SqlChatRunRepo::new(
+        db,
+        DbSqlFlavor::Sqlite,
+        cache,
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    )
 }
 
 fn record(run_id: &str, version: u64) -> ChatRunRecord {
@@ -104,6 +187,77 @@ async fn streaming_append_advances_cache_ahead_of_db() {
             .await
             .unwrap()
     );
+}
+
+#[tokio::test]
+async fn streaming_append_falls_back_to_db_when_overlay_write_fails() {
+    // C4: when Redis rejects the overlay write, `append_streaming_content` must
+    // fail the delta over to the authoritative DB row instead of silently
+    // returning Ok(true) and dropping it. #1546 forbids a swallowed backend
+    // write masquerading as success.
+    let repo = repo_failing_cache();
+    repo.create(record("a", 1)).await.unwrap();
+
+    // Overlay write is rejected (injected Redis outage), yet the append still
+    // reports Ok(true) and lands the content in the DB.
+    assert!(
+        repo.append_streaming_content("a", 1, "hello".to_string(), false)
+            .await
+            .unwrap()
+    );
+    // The overlay held nothing (its write was rejected), so the merged read now
+    // falls back to the DB row — which must carry the delta and the bumped
+    // version, proving the fail-over wrote through.
+    let stored = repo.get("a").await.unwrap().unwrap();
+    assert_eq!(stored.accumulated_content, "hello");
+    assert_eq!(stored.version, 2);
+    assert!(!stored.content_truncated);
+
+    // A second delta keeps accumulating in the DB while the overlay keeps
+    // rejecting — recovery picks up the DB advance as the base.
+    assert!(
+        repo.append_streaming_content("a", 2, "hello world".to_string(), true)
+            .await
+            .unwrap()
+    );
+    let stored = repo.get("a").await.unwrap().unwrap();
+    assert_eq!(stored.accumulated_content, "hello world");
+    assert_eq!(stored.version, 3);
+    assert!(stored.content_truncated);
+}
+
+#[tokio::test]
+async fn streaming_append_fallover_noop_when_run_already_terminal() {
+    // C4 fail-over UPDATE is gated on the non-terminal state guard. If the run
+    // became terminal concurrently the UPDATE affects 0 rows and the append
+    // reports Ok(false) (delta not applied) instead of rewriting the audited
+    // terminal row.
+    let repo = repo_failing_cache();
+    repo.create(record("t", 1)).await.unwrap();
+
+    let mut failed = record("t", 1);
+    failed.state = ChatRunState::Failed;
+    failed.completed_at_ms = Some(0);
+    failed.accumulated_content = "final".to_string();
+    repo.compare_and_set_terminal("t", 1, failed)
+        .await
+        .unwrap();
+
+    // The terminal CAS left the DB row at version 2; passing expected version 2
+    // gets past the overlay/version check and reaches the fail-over UPDATE,
+    // which the terminal guard rejects (0 rows affected).
+    assert!(
+        !repo
+            .append_streaming_content("t", 2, "late".to_string(), false)
+            .await
+            .unwrap()
+    );
+
+    // The audited terminal content is untouched.
+    let stored = repo.get("t").await.unwrap().unwrap();
+    assert_eq!(stored.state, ChatRunState::Failed);
+    assert_eq!(stored.accumulated_content, "final");
+    assert_eq!(stored.version, 2);
 }
 
 #[tokio::test]
