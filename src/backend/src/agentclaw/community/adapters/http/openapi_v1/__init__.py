@@ -545,7 +545,7 @@ def build_public_router() -> APIRouter:
         responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
-    # Task public surface (execute/dashboard/list) — served at the external
+    # Task public surface (run-template/execute/dashboard/list) — served at the external
     # contract path the gateway's `collaboration-tasks` domain routes to the
     # backend (pulled out of the broad collaboration→bcs namespace). Not
     # bot-scoped, no grant gate; caller identity via _PUBLIC_AUTH/UserIdDep,

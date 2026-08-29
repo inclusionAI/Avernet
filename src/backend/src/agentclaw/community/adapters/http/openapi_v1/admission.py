@@ -591,12 +591,13 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
     # Served at the external contract path the gateway verbatim-forwards here.
     ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): AdmissionMode.OPEN,
-    # Task public surface (execute/dashboard/list) — mounted together with the
+    # Task public surface (run-template/execute/dashboard/list) — mounted together with the
     # gateway `collaboration-tasks` domain → backend. Tasks are not bot-scoped
     # (no grant), and the public face is open to any authenticated app caller
     # (a human principal is admitted regardless); `list` still scopes its answer
     # by the `user_id` it receives. OPEN is the contract label — at the
     # require_principal gate it behaves the same as USER_GATED.
+    ("POST", "/openapi/v1/collaboration/tasks/run-template"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/execute"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,

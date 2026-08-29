@@ -118,7 +118,7 @@ from agentclaw.community.adapters.http.skills_pool import router as skills_pool_
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
-# The task surface is internal: execute/dashboard/list, the report and bbs
+# The task surface is internal: run-template/execute/dashboard/list, the report and bbs
 # operations, the discovery phase and the engine's push callbacks all answer
 # under ``/api/v1/collaboration/tasks`` in ``adapters/http/task``. The
 # ``/openapi/v1`` namespace is reserved for the domains the gateway's shipped

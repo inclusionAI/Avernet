@@ -1,12 +1,13 @@
 """Task 内部 HTTP adapter routes —— 不经 gateway spanner(内部 API)。
 
 任务模块内部前缀 ``/api/v1/collaboration/tasks``。本 router 承载:
-- 公开面镜像(execute/dashboard/list 副本):供内部调用方(bot / 服务间)免 gateway spanner 直调;
+- 公开面镜像(run-template/execute/dashboard/list 副本):供内部调用方(bot / 服务间)免 gateway spanner 直调;
   与 ``adapters/http/openapi_v1/task/`` 公开面同一 ``TaskServiceProtocol`` 委托,逻辑保持一致(改其一须同步)。
 - 回投 / BBS 接力 / 任务发现阶段:前端不直面的内部写口/阶段接口。
 前端公开面(经 gateway spanner)见 ``adapters/http/openapi_v1/task/``。本 router 只转协议,不持领域策略(Rule 22)。
 
 端点(同一任务模块,不同阶段):
+  POST /api/v1/collaboration/tasks/run-template     — 运行预置静态模板(delegate TaskServiceProtocol.run_template)
   POST /api/v1/collaboration/tasks/execute          — 提交任务(公开面镜像;delegate TaskServiceProtocol.execute)
   GET  /api/v1/collaboration/tasks/dashboard         — 查任务图(公开面镜像;delegate get_task_dashboard)
   GET  /api/v1/collaboration/tasks/list              — 列持久化任务记录(公开面镜像;delegate list_tasks)
@@ -50,6 +51,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskExecutionGraphDTO,
     TaskInfoRecordDTO,
     TaskInfoRequestDTO,
+    TemplateRunRequestDTO,
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
     acceptance_result_from_dto,
@@ -119,9 +121,30 @@ logger = get_logger()
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
 
 
-# ===== 公开面镜像(execute/dashboard/list;内部 /api/v1 副本,不经 spanner)=====
+# ===== 公开面镜像(run-template/execute/dashboard/list;内部 /api/v1 副本,不经 spanner)=====
 # 与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol`` 委托,
 # 逻辑保持一致 —— 内部调用方(bot / 服务间)走此副本免 gateway spanner。改其一须同步。
+
+
+@router.post("/run-template", response_model=Envelope[TaskOpResultDTO])
+@envelope_errors
+async def run_template_internal(
+    body: TemplateRunRequestDTO,
+    request: Request,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[TaskOpResultDTO]:
+    """运行预置静态模板(内部接口)。
+
+    与动态任务 ``/execute`` 同属内部 Task API；调用方只提交模板标识和模板输入，
+    模板节点、Bot 绑定及 DAG 由后端配置提供。
+    """
+    result = await service.run_template(
+        body.template_id,
+        body.input,
+        owner_user_id="",
+        owner_bot_id="",
+    )
+    return envelope(op_result_to_dto(result), request)
 
 
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])

@@ -154,6 +154,17 @@ def _execute_and_get_id(c) -> str:
 
 
 class TestTaskExecute:
+    def test_internal_router_exposes_static_template_run_endpoint(self):
+        routes = {
+            (route.path, method)
+            for route in task_internal_router.routes
+            for method in getattr(route, "methods", set())
+        }
+        assert (
+            "/api/v1/collaboration/tasks/run-template",
+            "POST",
+        ) in routes
+
     def test_execute_returns_op_result(self, client):
         c, _ = client
         r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
