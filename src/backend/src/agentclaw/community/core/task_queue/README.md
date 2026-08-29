@@ -15,12 +15,33 @@ a handler that reschedules itself until done, bounded by a wall-clock deadline.
 ## Pieces
 
 - `repository/models.py` — `ac_task_queue` ORM table.
+- `repository/pending_row_writer.py` — session-bound PENDING-row writer. It
+  owns model construction, JSON serialization, DB-clock timestamps, and
+  active-only idempotency, but never commits or rolls back the caller's outer
+  transaction.
 - `repository/protocol.py` — `TaskQueueRepositoryProtocol` (claim CAS + holder-guarded transitions). Impl: `plugins/task_queue_repository.py` (unified, runs on SQLite + OceanBase). **The DB owns all timing** — callers pass durations; the repo computes `run_at`/`lease`/`deadline` and every comparison with the DB clock (`now()`), so pod clock skew can't affect coordination.
 - `types.py` — `TaskRecord`, the `TaskStatus` enum (`PENDING`/`RUNNING`/`SUCCEEDED`/`FAILED`/`TIMED_OUT`), and the handler outcomes `Complete` / `Reschedule` / `Retry` / `Fail`.
 - `services/registry.py` — `TaskHandler` Protocol + `HandlerRegistry`.
 - `services/task_queue_service.py` — `TaskQueueService.enqueue(...)`, the entry point adopters call.
 - `services/worker.py` — `TaskWorker`, the Lifecycle that polls, claims, runs handlers, and applies outcomes.
 - `examples.py` — `NoopTaskHandler` + `PollUntilTerminalExampleHandler` (not wired in prod).
+
+## Transaction-bound enqueue seam
+
+`TaskQueuePendingRowWriter.write_pending(session, ...)` is the internal seam
+for a domain Unit of Work that must commit its business facts and
+`ac_task_queue` together. The caller supplies the ORM session it already owns;
+the writer hides `TaskQueueModel`, payload encoding, DB-clock expressions, and
+the active-key queries. A keyed duplicate is isolated with a nested SAVEPOINT,
+so resolving the live holder never rolls back unrelated business changes in
+the outer transaction.
+
+The ordinary `TaskQueueRepository.enqueue(...)` now opens a real
+`transactional_orm_session`, delegates to this same writer, and returns only
+after that context commits. `TaskQueueService.enqueue(...)` keeps its public
+signature and existing post-repository wake policy: a due, newly-created,
+opted-in task wakes the worker only after the row is committed. The low-level
+writer itself never commits, rolls back, or signals the worker.
 
 ## App scoping
 

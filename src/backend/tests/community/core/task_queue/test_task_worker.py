@@ -5,6 +5,7 @@ Timing is DB-owned, so deadline behavior is exercised via ``deadline_seconds``
 and backoff config rather than injected clocks.
 """
 import asyncio
+import threading
 import time
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -42,18 +43,26 @@ APP = DEFAULT_APP
 class InMemorySqliteDB:
     def __init__(self, engine):
         self._session_factory = sessionmaker(bind=engine, autoflush=False)
+        # StaticPool exposes one sqlite3 connection to both the worker thread
+        # and the test thread. Mirror LocalDatabasePlugin's serialization so
+        # the harness never drives that single connection concurrently.
+        self._session_lock = threading.RLock()
 
     @contextmanager
     def orm_session(self):
-        db = self._session_factory()
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        with self._session_lock:
+            db = self._session_factory()
+            try:
+                yield db
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+
+    def transactional_orm_session(self):
+        return self.orm_session()
 
 
 class _World:

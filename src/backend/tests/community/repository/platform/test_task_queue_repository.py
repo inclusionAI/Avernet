@@ -54,6 +54,9 @@ class InMemorySqliteDB:
         finally:
             db.close()
 
+    def transactional_orm_session(self):
+        return self.orm_session()
+
 
 @pytest.fixture
 def repo():
@@ -595,12 +598,12 @@ def test_is_active_idem_conflict_recognises_both_engine_message_forms():
 def test_unrelated_integrity_error_propagates(repo, monkeypatch):
     """A blanket except would turn someone else's constraint violation into a
     bogus duplicate and hand back the wrong row."""
-    def boom(**_kwargs):
+    def boom(_session, **_kwargs):
         raise IntegrityError(
             "INSERT ...", {}, Exception("UNIQUE constraint failed: ac_task_queue.other")
         )
 
-    monkeypatch.setattr(repo, "_insert", boom)
+    monkeypatch.setattr(repo._pending_writer, "_insert", boom)
     with pytest.raises(IntegrityError):
         _enqueue_result(repo, idempotency_key="k1")
 
@@ -621,16 +624,24 @@ def test_holder_going_terminal_between_insert_and_lookup_is_retried(repo):
     """The insert/re-SELECT race: the conflicting row can reach a terminal state
     in that window, releasing the key. The retry then inserts cleanly."""
     first = _enqueue_result(repo, idempotency_key="k1")
-    real_find = repo._find_active_by_key
+    writer = repo._pending_writer
+    real_find = writer._find_active_by_key
 
-    def free_the_key_then_look(**kwargs):
+    def free_the_key_then_look(session, **kwargs):
         # Simulate the holder finishing the instant after our INSERT lost.
-        _claim(repo, "W")
-        repo.complete(task_id=first.record.id, worker_id="W")
-        repo._find_active_by_key = real_find
-        return real_find(**kwargs)
+        session.query(TaskQueueModel).filter(
+            TaskQueueModel.id == first.record.id
+        ).update(
+            {
+                TaskQueueModel.status: TaskStatus.SUCCEEDED.value,
+                TaskQueueModel.active_idempotency_key: None,
+            },
+            synchronize_session=False,
+        )
+        writer._find_active_by_key = real_find
+        return real_find(session, **kwargs)
 
-    repo._find_active_by_key = free_the_key_then_look
+    writer._find_active_by_key = free_the_key_then_look
 
     second = _enqueue_result(repo, idempotency_key="k1")
     assert second.created is True  # second attempt inserted
@@ -644,7 +655,7 @@ def test_enqueue_raises_when_it_can_neither_insert_nor_resolve_a_holder(repo):
     one — the key looks free on every retry and another caller keeps winning."""
     _enqueue_result(repo, idempotency_key="k1")
     # A holder that is never found: every attempt conflicts, every lookup misses.
-    repo._find_active_by_key = lambda **_kwargs: None
+    repo._pending_writer._find_active_by_key = lambda _session, **_kwargs: None
 
     with pytest.raises(RuntimeError, match="taken and released by other callers"):
         _enqueue_result(repo, idempotency_key="k1")
@@ -663,10 +674,11 @@ def test_three_consecutive_benign_races_still_enqueue(repo):
     _claim(repo, "W")
     repo.complete(task_id=first.record.id, worker_id="W")  # key genuinely free
 
-    real_insert = repo._insert
+    writer = repo._pending_writer
+    real_insert = writer._insert
     losses = {"n": 0}
 
-    def lose_three_times_then_succeed(**kwargs):
+    def lose_three_times_then_succeed(session, **kwargs):
         if losses["n"] < 3:
             losses["n"] += 1
             raise IntegrityError(
@@ -674,9 +686,9 @@ def test_three_consecutive_benign_races_still_enqueue(repo):
                 {},
                 Exception(f"Duplicate entry 'x' for key '{_ACTIVE_IDEM_INDEXES[0]}'"),
             )
-        return real_insert(**kwargs)
+        return real_insert(session, **kwargs)
 
-    repo._insert = lose_three_times_then_succeed
+    writer._insert = lose_three_times_then_succeed
     result = _enqueue_result(repo, idempotency_key="k1")
 
     assert losses["n"] == 3  # it really did lose three times

@@ -648,6 +648,14 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
 - RESULT_UNKNOWN：Draft 保持 FROZEN，普通用户不能处理。
 - 不建设长期 Snapshot URI/Hash，不提供 Attempt cancel。
 - Runtime reconcile 不使用 `ac_task_queue`；SC 发布与物化继续使用持久任务。
+- Task Queue Implementation 提供内部 `TaskQueuePendingRowWriter`：接收 Unit of Work
+  已拥有的 `transactional_orm_session`，隐藏 `TaskQueueModel`、payload JSON、DB clock、
+  env/app 字段和 active-only idempotency SQL，并且绝不 commit/rollback 外层事务。keyed
+  冲突只回滚自己的 nested SAVEPOINT，不能回滚已写入的 Draft/Attempt/Version 事实。
+  普通 `TaskQueueRepository.enqueue()` 同样复用该 writer 并自行打开真实事务；公共
+  `TaskQueueService.enqueue()` 不增加 `session` 参数，仍只在 Repository 已提交、任务新建且
+  due-now/type opt-in 后 best-effort wake Worker。本条只冻结事务 seam，不提前注册
+  Publication task type 或 Handler。
 - Bot Binding、Service Artifact 或进行中操作存在时阻断整体退役。
 
 前端阶段投影固定为：`PREPARING/SC_SUBMITTING/WAITING_SC` 显示“发布中”；SC 已形成
