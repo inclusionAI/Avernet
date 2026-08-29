@@ -175,3 +175,37 @@ def test_acceptance_result_dto_accepts_object_arrays():
     assert dto.verdict == "DONE"
     assert dto.acceptances_metric == [{"ac_1": "exec_ok"}]
     assert dto.gaps == [{"sddss": "xxsdd"}]
+
+
+def test_unwrap_node_output_collapses_single_output_key():
+    """adapter 路径(pull/poller 与 push/callback-report)统一把产出挂在 output key,
+    DTO 出口需把 ``{"output": <content>}`` 展平为标量,消除 dashboard 两层 output 嵌套。"""
+    from agentclaw.community.adapters.http.task.schemas import _unwrap_node_output
+
+    # 字符串内容 -> 标量(不再 {output:{output:...}})
+    assert _unwrap_node_output({"output": "完整分析内容..."}) == "完整分析内容..."
+    # dict 内容 -> 解出真实 dict 内容
+    assert _unwrap_node_output({"output": {"answer": 42}}) == {"answer": 42}
+    # 空 dict -> 空 dict
+    assert _unwrap_node_output({}) == {}
+    # 非 output 的单键/多键分支(static/bbs/notify)原样保留 dict
+    assert _unwrap_node_output({"architects": [1, 2]}) == {"architects": [1, 2]}
+    assert _unwrap_node_output({"result": "x", "extra": "y"}) == {"result": "x", "extra": "y"}
+    assert _unwrap_node_output({"skipped": True}) == {"skipped": True}
+    # None 直通
+    assert _unwrap_node_output(None) is None
+
+
+def test_runtime_info_dto_output_accepts_scalar_string():
+    """RuntimeInfoDTO.output 放宽为 Any 后,adapter 展平的标量产出可直接落字段,
+    与历史 dict 形态共存,不再因 ``output: dict[str, Any]`` 把字符串判为非法。"""
+    from agentclaw.community.adapters.http.task.schemas import RuntimeInfoDTO
+
+    scalar_dto = RuntimeInfoDTO(output="完整分析内容...")
+    assert scalar_dto.output == "完整分析内容..."
+
+    dict_dto = RuntimeInfoDTO(output={"architects": [1, 2]})
+    assert dict_dto.output == {"architects": [1, 2]}
+
+    empty_dto = RuntimeInfoDTO()
+    assert empty_dto.output == {}

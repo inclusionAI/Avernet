@@ -486,5 +486,5 @@ class TestDashboardTerminal:
         from agentclaw.community.core.task.task_runner.runner import TaskRunner
         r = TaskRunner(svc)
         detail = r.query_detail(_node("N_overview", "t_case"))
-        assert detail.run_info.output.get("data") == "行业全貌"
-        assert r.query_result(_node("N_overview", "t_case")).run_info.output.get("data") == "行业全貌"
+        assert detail.run_info.output.get("output") == "行业全貌"
+        assert r.query_result(_node("N_overview", "t_case")).run_info.output.get("output") == "行业全貌"

@@ -458,7 +458,7 @@ class TestBCNManagerWorker:
         assert (patch.task_id, patch.node_id) == ("task-99", "root")
         assert patch.acceptance_result is not None
         assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
-        assert patch.output_patch == {"data": "all done"}
+        assert patch.output_patch == {"output": "all done"}
         assert engine.starts == []
 
     def test_session_completed_converges_to_failed_when_reason_failed(self):
@@ -585,7 +585,7 @@ class TestBCNStateMachine:
         patch = engine.reports[0]
         assert (patch.task_id, patch.node_id) == ("task-99", "root")
         assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE  # → DONE
-        assert patch.output_patch == {"data": {"final": "ok"}}
+        assert patch.output_patch == {"output": {"final": "ok"}}
 
     def test_run_failed_converges_to_failed(self, monkeypatch):
         run_detail = {"run": {"status": "failed", "output": {"err": "x"}}, "nodes": []}
@@ -618,7 +618,7 @@ class TestBCNStateMachine:
         patch = engine.reports[0]
         assert (patch.task_id, patch.node_id) == ("task-99", "root")
         assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE  # → DONE
-        assert patch.output_patch == {"data": {"final": "ok"}}
+        assert patch.output_patch == {"output": {"final": "ok"}}
 
     def test_fetch_failure_falls_back_to_raw_cloudevent_but_still_converges(self, monkeypatch):
         """fetch 失败时:审计行仍 fallback 落原始 CloudEvent(_raw_callback_body 未覆盖),
@@ -803,7 +803,7 @@ class TestFrameworkCallback:
         patch = engine.reports[0]
         assert (patch.task_id, patch.node_id) == ("t1", "c1")  # node_id 直拼
         assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
-        assert patch.output_patch == {"data": {"r": 1}}
+        assert patch.output_patch == {"output": {"r": 1}}
         # 同时落 task_callback 审计(invoker 来自 workflow_source)
         assert repo.calls[0].invoker == "bcn"
         assert repo.calls[0].run_id == "t1" and repo.calls[0].node_id == "c1"

@@ -35,6 +35,20 @@ def _split_loop_task_id(loop_task_id: Any) -> tuple[str, str]:
     return parts[0], (parts[1] if len(parts) == 2 else "")
 
 
+def _unwrap_poller_content(data_field: Any) -> Any:
+    """pull(poller)终态 ``{success, data, gaps}`` 的 ``data`` 归一为最终文本内容。
+
+    bot 终态内容两种形态:
+      1) 裸字符串(如 ``"行业全貌"``)——直接采用;
+      2) 二次包裹 ``{"result": <str>}``(bot 把结论挂在 result key)——展平为 result 字符串,
+         使 pull 与 push(callback/report ``output`` 裸字符串)在 run_info.output 中形态一致,
+         dashboard 不再出现 ``{output: {result: ...}}`` 二次 json 嵌套。
+    其它多键 dict(bcs/notify 检查点等)原样保留,避免误展平。"""
+    if isinstance(data_field, dict) and isinstance(data_field.get("result"), str):
+        return data_field["result"]
+    return data_field
+
+
 # Pending callback audit shared with the graph service so it can persist the
 # inbound callback audit row in the SAME database transaction as the graph
 # mutation it drives (spec §12). The callback boundary sets it; the graph
@@ -140,7 +154,8 @@ class CallbackAdapter:
         A) poller 形态(single_bot/BCN 翻译器产出的 ``result`` 是 dict 且含 ``success``):
            result.success/data/gaps/_ext_info/exec_error 组装;三段互斥(对齐 on_report 分流):
            ① exec_error 非空 → 执行报错(bot 没跑通)→ patch.exec_error(无 acceptance,→ on_harness 重投);
-           ② success=True → 验收 DONE → acceptance_result=DONE + output_patch={"data": ...};
+           ② success=True → 验收 DONE → content=_unwrap_poller_content(data)(展平 {"result":<str>})
+           + output_patch={"output": content};
            ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAILED(→ harness 重派);
            ④ success 非布尔/失败无 gaps → exec_error=terminal_result_invalid。
 
@@ -173,6 +188,7 @@ class CallbackAdapter:
             )
         success = result.get("success")
         data_field = result.get("data")
+        content = _unwrap_poller_content(data_field)  # 归一裸文本(展平 {result:<str>})
         # ④ success 非 boolean → 非法终态,无 acceptance。
         if success is None or not isinstance(success, bool):
             return TaskNodePatch(
@@ -188,7 +204,7 @@ class CallbackAdapter:
                 task_id=task_id,
                 node_id=node_id,
                 status=Status.DONE,
-                output_patch={"data": data_field} if data_field is not None else None,
+                output_patch={"output": content} if content is not None else None,
                 acceptance_result=AcceptanceResult(
                     verdict=AcceptanceVerdict.DONE,
                     acceptances_metric=[],
@@ -218,7 +234,7 @@ class CallbackAdapter:
             task_id=task_id,
             node_id=node_id,
             status=Status.FAILED,
-            output_patch={"data": data_field} if data_field is not None else None,
+            output_patch={"output": content} if content is not None else None,
             acceptance_result=AcceptanceResult(
                 verdict=AcceptanceVerdict.FAILED,
                 acceptances_metric=[],
@@ -233,6 +249,8 @@ class CallbackAdapter:
         body = body if isinstance(body, dict) else {}
         accept = body.get("acceptance_result")
         accept = accept if isinstance(accept, dict) else {}
+        # push(skill HTTP 上报)按协作群既定协议产 ``body["output"]``;保持该协议不变,
+        # 产状按 ``"output"`` key 落 run_info.output(pull/poller 归一映射到同 key,见 _adapt_poller)。
         return TaskNodePatch(
             task_id=body.get("task_id"),
             node_id=d.get("node_id") or body.get("node_id"),

@@ -246,8 +246,9 @@ class RuntimeInfoDTO(BaseModel):
     assignee: str | None = Field(None, description="当前承接节点执行的 bot id")
     start_time: int | None = Field(None, description="执行开始时间戳(毫秒)")
     end_time: int | None = Field(None, description="执行结束时间戳(毫秒)")
-    output: dict[str, Any] = Field(
-        default_factory=dict, description="节点输出(checkpoint fold)"
+    output: Any = Field(
+        default_factory=dict,
+        description="节点输出(checkpoint fold);adapter 路径以 output key 落 run_info.output,DTO 层展平为标量(去除两层 output 嵌套)",
     )
     acceptance_result: AcceptanceResultDTO | None = Field(None, description="验收结论")
     extend_props: dict[str, Any] = Field(
@@ -506,6 +507,18 @@ def _normalize_execution_config(graph) -> dict[str, Any]:
     return ec
 
 
+def _unwrap_node_output(d: Any) -> Any:
+    """展平 adapter 落库的 ``{"output": <content>}`` 单键 dict 为标量内容。
+
+    pull(poller)与 push(callback/report)两条链路统一按 callback/report 协议把产出挂在
+    ``run_info.output["output"]``,与字典字段名 ``output`` 同名会形成 dashboard
+    ``{output: {output: <content>}}`` 两层嵌套;此处仅在 DTO 出口展平为 ``output: <content>``,
+    内部 sibling/child output、static/bbs/notify 等多键分支原样保留 dict。"""
+    if isinstance(d, dict) and len(d) == 1 and "output" in d:
+        return d["output"]
+    return dict(d) if isinstance(d, dict) else d
+
+
 def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGraphDTO:
     nodes: list[TaskNodeDTO] = []
     for n in graph.tasks:
@@ -547,7 +560,7 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                     assignee=n.run_info.assignee,
                     start_time=n.run_info.start_time,
                     end_time=n.run_info.end_time,
-                    output=dict(n.run_info.output),
+                    output=_unwrap_node_output(n.run_info.output),
                     acceptance_result=ar_dto,
                     extend_props=dict(n.run_info.extend_props),
                     action_log=(

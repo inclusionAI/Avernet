@@ -9,6 +9,7 @@ import asyncio
 
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
+    Status,
     TaskCallbackData,
     TaskNodePatch,
 )
@@ -63,8 +64,22 @@ class TestAdapt:
         assert patch.node_id == "c1"
         assert patch.acceptance_result is not None
         assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
-        assert patch.output_patch == {"data": "行业全貌"}
+        assert patch.output_patch == {"output": "行业全貌"}
         assert patch.extend_props_patch is None
+
+    def test_pass_flattens_result_wrapper_to_bare_string(self):
+        """pull 拉取的原始 response ``data`` 可能为 ``{"result": <str>}`` 二次包裹
+        (bot 把结论挂在 result key);统一展平为裸字符串,与 push(callback/report output 裸字符串)
+        一致,消除 dashboard ``{output: {result: ...}}`` 二次 json 嵌套。"""
+        adapter = CallbackAdapter()
+        patch = adapter.adapt(_data(success=True, data={"result": "技术栈概览文档已完整产出..."}))
+        assert patch.output_patch == {"output": "技术栈概览文档已完整产出..."}  # 裸字符串,不带 result
+
+    def test_pass_keeps_non_result_dict_unchanged(self):
+        """非 ``result`` 包裹的多键 dict(bcs/notify 检查点等)原样保留,不被误展平。"""
+        adapter = CallbackAdapter()
+        patch = adapter.adapt(_data(success=True, data={"r": 1}))
+        assert patch.output_patch == {"output": {"r": 1}}
 
     def test_fail_with_detail_mapping(self):
         adapter = CallbackAdapter()
@@ -314,4 +329,25 @@ class TestZeroCase:
         res = adapter.adapt(task_callback_data)
 
         print("===" + str(res))
+
+    def test_common_task_output_unified_to_output_key_no_double_output(self):
+        """push(skill HTTP /callback/report 上报)与 pull(poller)两条链路统一按上报协议把产出
+        挂在 ``output`` key;两条链路写入 run_info.output 的字段一致,DTO 层再展平成标量。
+        不得让 push 存成 ``{"data": ...}`` 与 pull 不一致。"""
+        adapter = CallbackAdapter()
+        patch = adapter.adapt(TaskCallbackData(data={
+            "loop_task_id": "t9::N1", "node_id": "N1", "workflow_type": "task_loop",
+            "status": "DONE",
+            "_raw_callback_body": {
+                "task_id": "t9", "node_id": "N1", "status": "DONE",
+                "output": "完整分析内容...",
+                "acceptance_result": {"verdict": "DONE", "acceptances_metric": [], "gaps": []},
+                "extend_props": {},
+            },
+            "result": "完整分析内容...",
+        }))
+        assert patch.status == Status.DONE
+        assert patch.output_patch == {"output": "完整分析内容..."}  # 统一 output key,对齐 callback/report 协议
+        assert patch.acceptance_result is not None
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
 
