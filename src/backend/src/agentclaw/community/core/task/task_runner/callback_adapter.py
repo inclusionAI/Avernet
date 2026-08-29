@@ -94,6 +94,11 @@ def _to_callback_record(payload: dict[str, Any], *, event_id: str | None = None,
     按同事务落库语义传入(callback 驱动路径=``PROCESSED``,``ingest`` 审计路径=``None``)。
     """
     run_id, node_id = _split_loop_task_id(payload.get("loop_task_id"))
+    tmp_node_id = payload.get("node_id")
+    if tmp_node_id:
+        node_id = tmp_node_id
+    logger.info("[task][task-callback] to_callback_record, payload=%s, node_id=%s", payload, node_id)
+
     result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     success = result.get("success")
     ext_info = result.get("_ext_info")
