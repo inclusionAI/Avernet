@@ -7,6 +7,7 @@ from enum import Enum
 import hashlib
 import json
 from pathlib import PurePosixPath
+from string import Formatter
 from types import MappingProxyType
 from typing import Mapping, Protocol, runtime_checkable
 from uuid import UUID
@@ -264,14 +265,31 @@ class CanonicalCenterStoreConfig:
                 str(error),
             ) from error
         template = self.base_prefix_template
-        if not isinstance(template, str) or template.count("{env}") != 1:
+        if not isinstance(template, str):
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.INVALID_CONFIGURATION,
+                "base_prefix_template must contain exactly one {env} placeholder",
+            )
+        try:
+            parsed = list(Formatter().parse(template))
+        except ValueError as error:
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.INVALID_CONFIGURATION,
+                "base_prefix_template is malformed",
+            ) from error
+        fields = [
+            (field_name, format_spec, conversion)
+            for _literal, field_name, format_spec, conversion in parsed
+            if field_name is not None
+        ]
+        if fields != [("env", "", None)]:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.INVALID_CONFIGURATION,
                 "base_prefix_template must contain exactly one {env} placeholder",
             )
         try:
             rendered = template.format(env=env)
-        except (KeyError, ValueError) as error:
+        except ValueError as error:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.INVALID_CONFIGURATION,
                 "base_prefix_template contains unsupported placeholders",

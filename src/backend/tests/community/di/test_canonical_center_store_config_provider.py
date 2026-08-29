@@ -101,6 +101,23 @@ def test_invalid_config_fails_application_boot(monkeypatch) -> None:
         build_injector(profile=DeployProfile.TEST)
 
 
+@pytest.mark.parametrize(
+    "template",
+    [
+        "sandbox/{{env}}/skills-center",
+        "sandbox/{env!r}/skills-center",
+        "sandbox/{env:>10}/skills-center",
+        "sandbox/{env}/{env}/skills-center",
+        "sandbox/{tenant}/skills-center",
+    ],
+)
+def test_config_rejects_escaped_or_non_exact_env_placeholder(template: str) -> None:
+    with pytest.raises(CanonicalCenterStoreError) as error:
+        CanonicalCenterStoreConfig(env="pre", base_prefix_template=template)
+
+    assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_CONFIGURATION
+
+
 def test_provider_builds_oss_adapter_and_rejects_legacy_storage() -> None:
     injector = Injector([ConfigModule(), SkillCenterModule(), _ObjectModule()])
     assert isinstance(
