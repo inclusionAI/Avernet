@@ -1220,6 +1220,24 @@ class ExecutionEngine:
             return self._graph.update_task_node_info(patch)
 
     # ===== on_report:三路分流(exec_error→harness / PASS→on_pass / FAIL→on_fail)=====
+    def _root_children_terminal_mixed_done_hung(self, task_id: str) -> bool:
+        """HARDCODED(BBS 测试用):根的直接子节点全部 ∈ {DONE, HUNG} 且至少一个 HUNG(无可运行的)。
+
+        无子节点 / 根已终态 / 存在非 {DONE, HUNG} 的子节点(仍可运行或有 FAILED 等)→ False。
+        仅判定根的**直接**子节点;中间父节点的子终态收敛不在本写死规则范围。
+        """
+        root = self._root(task_id)
+        if root is None:
+            return False
+        if root.status in {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}:
+            return False
+        children = self._graph.get_child_tasks(task_id, root.node_id)
+        if not children:
+            return False
+        if not all(c.status in {Status.DONE, Status.HUNG} for c in children):
+            return False
+        return any(c.status == Status.HUNG for c in children)
+
     async def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
         """回投事件:patch 内含 (task_id,node_id)+终态翻转依据。
         三路分流(互斥):
@@ -1237,6 +1255,42 @@ class ExecutionEngine:
         with self._lock_for(patch.task_id):
             logger.info("[task_callback][on_report] begin update task node info, task=%s,", patch.task_id)
             result = self._graph.update_task_node_info(patch)
+            # ⚠️ HARDCODED(BBS 测试用):根的直接子节点全部终态 ∈ {DONE, HUNG} 且含 HUNG(无可运行的)
+            # → 根节点 + 图直接 HUNG。绕过 BBS 可恢复态拦截 / verdict 驱动,任何节点更新都触发(含
+            # 手动 status 直驱)。仅用于排查"子全终态(部分DONE部分HUNG)根不收敛"并验证 BBS 恢复,后续
+            # 按正式收敛逻辑替换。
+            if self._root_children_terminal_mixed_done_hung(patch.task_id):
+                root = self._root(patch.task_id)
+                if (
+                    root is not None
+                    and root.status
+                    not in {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}
+                ):
+                    logger.info(
+                        "[task][on_report][hardcoded-bbs-test] task=%s "
+                        "根直接子节点全终态(部分DONE部分HUNG,无可运行)→ 根 HUNG + 图 HUNG",
+                        patch.task_id,
+                    )
+                    self._graph.update_task_node_info(
+                        TaskNodePatch(
+                            task_id=patch.task_id,
+                            node_id=root.node_id,
+                            status=Status.HUNG,
+                            extend_props_patch={"hung_reason": "root_children_mixed_terminal"},
+                        )
+                    )
+                    self._graph.update_task_graph_info(
+                        patch.task_id,
+                        TaskGraphPatch(
+                            status=Status.HUNG,
+                            # bbs_mode=true 使 HUNG 图可被 /bbs/claim 恢复(BBS 接力测试)。
+                            extend_props_patch={
+                                "hung_reason": "root_children_mixed_terminal",
+                                "bbs_mode": True,
+                            },
+                        ),
+                    )
+                    return result
             if self._static_runtime(patch.task_id) is not None:
                 # Static plans use the same harness contract as dynamic tasks.
                 if patch.exec_error is not None:
