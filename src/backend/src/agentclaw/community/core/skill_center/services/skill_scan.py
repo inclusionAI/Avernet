@@ -45,7 +45,7 @@ DEFAULT_CONFIG = {
 # skipped at startup (see ``startup``).
 
 
-class SkillScanService(SkillScanServiceProtocol, LifecycleBase):
+class SkillScanService(LifecycleBase, SkillScanServiceProtocol):
     """Skill Scan Service - 提供技能扫描和定时任务管理能力."""
 
     async def startup(self) -> None:

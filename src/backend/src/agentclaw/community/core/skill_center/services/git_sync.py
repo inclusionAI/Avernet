@@ -163,7 +163,7 @@ class GitSyncConfig:
         self.remote_name = "origin"
 
 
-class GitSyncService(GitSyncServiceProtocol, LifecycleBase):
+class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
     """Unified Git synchronization service.
 
     Handles:

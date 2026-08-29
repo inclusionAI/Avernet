@@ -72,7 +72,7 @@ __all__ = [
 # ============================================================================
 # 服务实现
 # ============================================================================
-class CollaboratorService(CollaboratorServiceProtocol, CollaboratorQueryMixin):
+class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
     """Bot 协作者管理服务。
 
     提供协作者的 CRUD 操作和权限检查功能。

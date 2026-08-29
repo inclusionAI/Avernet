@@ -54,7 +54,7 @@ logger = get_logger()
 _CRON_UNSUPPORTED_ENGINES = frozenset({"hermes"})
 
 
-class CronRelayService(CronRelayServiceProtocol, CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
+class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronRelayServiceProtocol):
     """Cron 中继服务 — 转发请求到各 Bot 的 Adapter"""
 
     @inject

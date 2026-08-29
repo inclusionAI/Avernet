@@ -84,7 +84,7 @@ def download_and_extract_zip(url: str, dst_dir: Path, timeout: int = 60) -> bool
         return False
 
 
-class SkillCenterSyncService(SkillCenterSyncServiceProtocol, LifecycleBase):
+class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
     """把 SC 上的 skill 产物同步到本地 NAS。"""
 
     async def startup(self) -> None:

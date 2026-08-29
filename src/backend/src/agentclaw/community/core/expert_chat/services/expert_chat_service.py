@@ -108,7 +108,7 @@ class BotInfoProvider(Protocol):
 # ============ Service Implementation ============
 
 
-class ExpertChatService(ExpertChatServiceProtocol, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin):
+class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatServiceProtocol):
     """用户与专家Bot对话业务逻辑"""
 
     @inject

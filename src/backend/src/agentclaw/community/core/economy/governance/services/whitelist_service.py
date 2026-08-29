@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-class GovernanceWhitelistService(GovernanceWhitelistServiceProtocol, GovernanceWhitelistProtocol):
+class GovernanceWhitelistService(GovernanceWhitelistProtocol, GovernanceWhitelistServiceProtocol):
     """Whitelist management — add, remove, bulk orchestration (independent domain)."""
 
     @inject
