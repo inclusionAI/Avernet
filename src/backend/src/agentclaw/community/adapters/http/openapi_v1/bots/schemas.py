@@ -80,6 +80,9 @@ class Bot(BaseModel):
                 "bot_type": "personal",
                 "status": "ACTIVE",
                 "owner_entity_id": "u_165137",
+                "template_type": None,
+                "template_config": None,
+                "space": None,
             }
         }
     )
@@ -104,6 +107,21 @@ class Bot(BaseModel):
     status: str = Field(description=_BOT_STATUS_DESC)
     owner_entity_id: str = Field(
         description="The user who owns the bot — echoes the user_id the request named."
+    )
+    template_type: str | None = Field(
+        default=None,
+        description="Template type of the bot, e.g. 'applicationCoding'; null for "
+        "bots created without a template.",
+    )
+    template_config: dict | None = Field(
+        default=None,
+        description="Server-projected template snapshot (display-safe subset; "
+        "secrets never returned). Null without a template.",
+    )
+    space: BusinessSpace | None = Field(
+        default=None,
+        description="Business space the bot's record is assigned to (owner view). "
+        "Populated on the listing endpoints.",
     )
 
 
@@ -694,6 +712,16 @@ class BotInventoryItem(BaseModel):
     owner_entity_id: str = Field(description="User who owns the bot.")
     space: BusinessSpace | None = Field(
         default=None, description="Business space containing the bot, when resolved."
+    )
+    template_type: str | None = Field(
+        default=None,
+        description="Template type of the bot, e.g. 'applicationCoding'; null for "
+        "bots created without a template.",
+    )
+    template_config: dict | None = Field(
+        default=None,
+        description="Server-projected template snapshot (display-safe subset; "
+        "secrets never returned). Null without a template.",
     )
     avatar_url: str | None = Field(
         default=None, description="Avatar URL for the bot, when configured."

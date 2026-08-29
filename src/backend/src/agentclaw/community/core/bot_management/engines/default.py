@@ -116,12 +116,11 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
         bot: dict[str, object],
         extra_configs: dict[str, object] | None,
         *,
-        passport_plugin: object,
-        skill_set_factory: object,
-        template_service: object,
-        caller_identity_repo: object,
-    ) -> None:
-        return None
+        mcp_sync: object = None,
+        skill_set_factory: object = None,
+        template_service: object = None,
+    ) -> bool:
+        return False
 
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         return None

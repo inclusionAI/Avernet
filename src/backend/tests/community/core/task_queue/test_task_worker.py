@@ -29,13 +29,14 @@ from agentclaw.community.core.task_queue.services.registry import HandlerRegistr
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.services.worker import TaskWorker
-from agentclaw.community.core.task_queue.types import Complete, TaskStatus
-from agentclaw.community.di.config import TaskQueueWorkerConfig
+from agentclaw.community.core.task_queue.types import DEFAULT_APP, Complete, TaskStatus
+from agentclaw.community.di.config import TaskQueueConfig, TaskQueueWorkerConfig
 from agentclaw.community.core.repository.implementations.platform.task_queue import TaskQueueRepository
 
 pytestmark = pytest.mark.integration
 
 ENV = "dev"
+APP = DEFAULT_APP
 
 
 class InMemorySqliteDB:
@@ -68,11 +69,19 @@ class _World:
         self.repo = TaskQueueRepository(InMemorySqliteDB(engine))
         self.registry = HandlerRegistry()
         self.config = config
+        # The owning app, shared by both sides exactly as DI shares it: the
+        # enqueue path stamps it and the worker claims with it, so a mismatch
+        # here would show up as a worker that claims nothing.
+        self.queue_config = TaskQueueConfig(app=APP)
         # One latch, shared by the enqueue path and the worker — same wiring
         # the DI module provides in production.
         self.wakeup = WorkerWakeup()
-        self.service = TaskQueueService(self.repo, self.registry, self.wakeup)
-        self.worker = TaskWorker(self.repo, self.registry, config, self.wakeup)
+        self.service = TaskQueueService(
+            self.repo, self.registry, self.wakeup, self.queue_config
+        )
+        self.worker = TaskWorker(
+            self.repo, self.registry, config, self.wakeup, self.queue_config
+        )
 
     def enqueue(
         self,
@@ -129,6 +138,28 @@ def test_missing_handler_marks_failed():
     stored = w.repo.get_by_id(rec.id)
     assert stored.status == TaskStatus.FAILED
     assert "no handler registered" in stored.last_error
+
+
+def test_worker_leaves_another_apps_task_alone():
+    """End to end over the seam that matters once the table is shared: a second
+    backend's row is enqueued with its own app, and this worker must not touch
+    it — the two tests above show what would otherwise happen to it, since its
+    ``task_type`` is not in this process's registry and the worker would fail it
+    terminally."""
+    w = _world()
+    w.registry.register(NoopTaskHandler())
+    theirs = w.repo.enqueue(
+        task_type="noop",
+        payload={},
+        delay_seconds=0,
+        deadline_seconds=3600,
+        env=ENV,
+        app="teclaw",
+        idempotency_key=None,
+    ).record
+
+    assert asyncio.run(w.worker.run_once()) == 0
+    assert w.status_of(theirs.id) == TaskStatus.PENDING
 
 
 # ── poll-until-terminal (the motivating shape) ──────────────────────────────
@@ -244,7 +275,7 @@ def test_full_batch_returns_batch_size_so_loop_repolls():
 
     counts = asyncio.run(drive())
     assert counts == [3, 3, 1]
-    assert len(w.repo.list_by_status(status=TaskStatus.SUCCEEDED, env=ENV)) == 7
+    assert len(w.repo.list_by_status(status=TaskStatus.SUCCEEDED, env=ENV, app=APP)) == 7
 
 
 def test_disabled_worker_startup_is_noop():
@@ -257,7 +288,7 @@ def test_disabled_worker_startup_is_noop():
         await w.worker.shutdown()
 
     asyncio.run(boot())
-    assert len(w.repo.list_by_status(status=TaskStatus.SUCCEEDED, env=ENV)) == 0
+    assert len(w.repo.list_by_status(status=TaskStatus.SUCCEEDED, env=ENV, app=APP)) == 0
 
 
 # ── lease-renewal heartbeat ─────────────────────────────────────────────────
@@ -329,12 +360,15 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
     abandoned = w.repo.claim_batch(
         worker_id="dead-worker",
         env=ENV,
+        app=APP,
         limit=1,
         lease_seconds=0,
     )
     assert [task.id for task in abandoned] == [record.id]
 
-    restarted_worker = TaskWorker(w.repo, w.registry, w.config, w.wakeup)
+    restarted_worker = TaskWorker(
+        w.repo, w.registry, w.config, w.wakeup, w.queue_config
+    )
     asyncio.run(restarted_worker.run_once())
 
     assert w.status_of(record.id) == TaskStatus.SUCCEEDED
@@ -365,7 +399,7 @@ class _RecordingWakeup:
 
 def _service_with(world, wakeup):
     """A service over ``world``'s repo/registry but a countable latch."""
-    return TaskQueueService(world.repo, world.registry, wakeup)
+    return TaskQueueService(world.repo, world.registry, wakeup, world.queue_config)
 
 
 def test_registry_defaults_to_not_waking_on_enqueue():

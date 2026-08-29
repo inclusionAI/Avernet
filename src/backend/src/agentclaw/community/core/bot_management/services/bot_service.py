@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.core.common_config.service import CommonConfigService
+    from agentclaw.community.core.devices.protocols import McpSyncProtocol
     from agentclaw.community.core.bot_app_grant.protocols import (
         BotAppGrantSweepProtocol,
     )
@@ -328,10 +329,6 @@ class BotService:
         device_status_client: "DeviceStatusClient",
         cron_auto_setup_service_provider: "Callable[[], CronAutoSetupService]",
         drm_reader: DRMReaderPlugin,
-        # Required, not defaulted: the restart authorization refresh
-        # republishes an overwrite-style Passport MCP scope, and a missing
-        # identity source there is a silent privilege change rather than a
-        # degraded mode. The DI provider always supplies it.
         caller_identity_repo: "CallerIdentityRepositoryProtocol",
         workspace_hosting_config: "cfg.WorkspaceHostingConfig | None" = None,
         policy_service: "PolicyServiceProtocol | None" = None,
@@ -339,6 +336,7 @@ class BotService:
         baas_service_provider: "Callable[[], BaasService] | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
         common_config_service: "CommonConfigService | None" = None,
+        mcp_sync: "McpSyncProtocol | None" = None,
     ) -> None:
         self._repository = repository
         self._allocation_config = allocation_config
@@ -401,6 +399,7 @@ class BotService:
         self._baas_template_resolver = baas_template_resolver
         self._task_queue_service = task_queue_service
         self._common_config_service = common_config_service
+        self._mcp_sync = mcp_sync
 
     def _service_bot_image_policy_enabled(self) -> bool:
         """Whether draft create/restart should opt into image policy."""
@@ -1744,6 +1743,7 @@ class BotService:
         device_provider: Optional[str] = None,
         restart_lock_key: Optional[Tuple[str, str, str, str]] = None,
         bot_ext_override: Optional[Dict[str, Any]] = None,
+        extra_configs: Optional[Dict[str, Any]] = None,
     ):
         """
         Allocate device asynchronously in background thread.
@@ -1921,6 +1921,37 @@ class BotService:
 
                 logger.info(f"[bot_service._allocate_device_async] Device allocated for bot {bot_id}: "
                            f"binding_id={binding_id}, device_id={device_id}, provider={allocated_device_provider}, status={device_status}")
+
+                if restart_lock_key is not None:
+                    try:
+                        from agentclaw.community.core.bot_management.engines import (
+                            resolve_provisioning,
+                        )
+
+                        refresh_ctx, refresh_strategy = resolve_provisioning(
+                            bot_id=str(bot_id),
+                            owner_id=str((bot_record or {}).get("owner_id") or owner_id or user_id),
+                            bot_type=str((bot_record or {}).get("bot_type") or resolved_bot_type or ""),
+                            active_engine=(bot_record or {}).get("active_engine") or active_engine,
+                            template_type=(bot_record or {}).get("template_type") or bot_template_type,
+                            template_config=None,
+                        )
+                        refresh_strategy.refresh_restart_authorization(
+                            refresh_ctx,
+                            bot_record or {},
+                            extra_configs,
+                            mcp_sync=self._mcp_sync,
+                            skill_set_factory=self._skill_set_factory,
+                            template_service=self._template_service,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[bot_service._allocate_device_async] restart authorization refresh failed; "
+                            "continue allocation: bot_id=%s error=%s",
+                            bot_id,
+                            exc,
+                            exc_info=True,
+                        )
 
                 # Map device status to bot status
                 # Device status can be: PENDING, ACTIVE, RELEASED
@@ -4083,6 +4114,7 @@ class BotService:
         device_provider: Optional[str] = None,
         restart_lock_key: Optional[Tuple[str, str, str, str]] = None,
         bot_ext_override: Optional[Dict[str, Any]] = None,
+        extra_configs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Start a bot by triggering async device allocation.
 
@@ -4192,6 +4224,7 @@ class BotService:
             device_provider=device_provider,
             restart_lock_key=restart_lock_key,
             bot_ext_override=bot_ext_override,
+            extra_configs=extra_configs,
         )
 
         # The allocation thread is now spawned and (for the restart flow) owns
@@ -4310,18 +4343,9 @@ class BotService:
                 extra_configs,
                 template_service=self._template_service,
             )
-            # Re-sync the engine's external authorization scope (e.g. the
-            # aicoding Passport MCP/CLI grants) to match what was provisioned
-            # at create time, so a restart does not silently drop grants.
-            strategy.refresh_restart_authorization(
-                ctx,
-                bot,
-                extra_configs,
-                passport_plugin=self._passport_plugin,
-                skill_set_factory=self._skill_set_factory,
-                template_service=self._template_service,
-                caller_identity_repo=self._caller_identity_repo,
-            )
+            # confirmed_template_update 的 MCP/软链刷新由 engine 自己在
+            # refresh_restart_authorization 里判断并执行；replacement restart
+            # 等新设备 apply 成功后再 resolve 并调用，避免写到旧设备上。
         except Exception as exc:
             # Optional engine extensions must never block the existing restart path.
             logger.warning(
@@ -4520,6 +4544,7 @@ class BotService:
                     and (bot.get("ext") or {}).get("sbot_use_default_image") is True
                     else None
                 ),
+                extra_configs=extra_configs,
             )
             handed_off = True
 

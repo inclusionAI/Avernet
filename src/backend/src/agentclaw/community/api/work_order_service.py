@@ -6,6 +6,9 @@ from abc import abstractmethod
 from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.work_orders.callbacks import (
+        WorkOrderCallbackCredential,
+    )
     from agentclaw.community.core.work_orders.models import (
         WorkOrderDetail,
         WorkOrderItemType,
@@ -63,6 +66,7 @@ class WorkOrderServiceProtocol(Protocol):
         actor_id: str,
         decision: WorkOrderDecision,
         review_remark: str | None,
+        callback_credential: WorkOrderCallbackCredential,
     ) -> WorkOrderReviewResult: ...
     @abstractmethod
     def create_space_join_request(

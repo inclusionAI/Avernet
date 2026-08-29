@@ -43,6 +43,17 @@ class TestEventBus:
         # Should not raise
         bus.publish(_DummyEvent(value=1))
 
+
+    def test_is_subscribed_reports_registered_handler(self):
+        bus = EventBus()
+        handler = MagicMock()
+
+        assert not bus.is_subscribed(_DummyEvent, handler)
+
+        bus.subscribe(_DummyEvent, handler)
+
+        assert bus.is_subscribed(_DummyEvent, handler)
+
     def test_multiple_handlers_called_in_registration_order(self):
         bus = EventBus()
         calls: list[str] = []

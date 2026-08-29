@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_collaborator.models import (
@@ -211,8 +212,8 @@ class _BotEditorWorkOrderRepository:
         notification: WorkOrderNotificationDraft,
         env: str,
     ):
-        reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         with self._db.transactional_orm_session() as db:
+            reviewed_at = db.execute(select(func.now())).scalar_one()
             work_order = (
                 db.query(self._WorkOrder)
                 .filter(

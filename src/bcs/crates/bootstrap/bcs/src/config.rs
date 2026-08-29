@@ -750,8 +750,27 @@ pub struct BcsConfig {
 
     /// Async chat run — hard cap on stored records. New submissions are
     /// rejected with 503 when full. Default 100_000.
+    ///
+    /// Memory-mode only: bounds the in-process HashMap. In `persistent` mode
+    /// this cap is **not** enforced as a total-rows limit (that would reject
+    /// new runs once long-retained audit rows crossed the cap); persistent
+    /// growth is bounded by `expires_at_ms` (active runs, timeout sweep) and
+    /// the MySQL platform's audit-retention pruning (terminal rows, spec §11.2).
     #[serde(default = "default_async_chat_run_max_entries")]
     pub async_chat_run_max_entries: usize,
+
+    /// Direct Chat async run store backend: `"memory"` (in-process,
+    /// pre-#1546 behavior; not restart/replica-safe) or `"persistent"`
+    /// (MySQL-authoritative + Redis hot cache). Default `"memory"` — opt-in
+    /// for the governed store. See #1546.
+    #[serde(default = "default_async_chat_run_store")]
+    pub async_chat_run_store: String,
+
+    /// Provider downlink run context backend: `"memory"` or `"redis"`.
+    /// Default `"memory"`. The `"redis"` option requires a configured
+    /// `[cache.redis]` and a Redis-backed `BotRunContextPort` implementation.
+    #[serde(default = "default_bot_run_context_store")]
+    pub bot_run_context_store: String,
 
     /// AI安全网关配置。
     /// 用于Bot间消息的安全检查和拦截。
@@ -872,6 +891,14 @@ fn default_async_chat_poll_wait_max_ms() -> u64 {
 
 fn default_async_chat_run_max_entries() -> usize {
     100_000
+}
+
+fn default_async_chat_run_store() -> String {
+    "memory".to_string()
+}
+
+fn default_bot_run_context_store() -> String {
+    "memory".to_string()
 }
 
 fn default_metrics_endpoint_path() -> String {
@@ -1103,6 +1130,8 @@ impl Default for BcsConfig {
             async_chat_run_retention_ms: default_async_chat_run_retention_ms(),
             async_chat_poll_wait_max_ms: default_async_chat_poll_wait_max_ms(),
             async_chat_run_max_entries: default_async_chat_run_max_entries(),
+            async_chat_run_store: default_async_chat_run_store(),
+            bot_run_context_store: default_bot_run_context_store(),
             security_gateway: SecurityGatewayConfig::default(),
             security: SecurityConfig::default(),
             eventing: EventingConfig::default(),
@@ -1226,6 +1255,29 @@ impl BcsConfig {
         Ok(())
     }
 
+    /// Validate the run-store backend selectors. Unknown values (e.g. a typo
+    /// like `"persisent"`) must fail startup rather than silently fall back to
+    /// `memory`, since these control the advertised governance guarantee.
+    pub fn validate_run_store_selectors(&self) -> Result<(), String> {
+        match self.async_chat_run_store.as_str() {
+            "memory" | "persistent" => {}
+            other => {
+                return Err(format!(
+                    "async_chat_run_store must be 'memory' or 'persistent', got '{other}'"
+                ))
+            }
+        }
+        match self.bot_run_context_store.as_str() {
+            "memory" | "redis" => {}
+            other => {
+                return Err(format!(
+                    "bot_run_context_store must be 'memory' or 'redis', got '{other}'"
+                ))
+            }
+        }
+        Ok(())
+    }
+
     /// Load configuration with multi-environment support.
     ///
     /// This is the recommended way to load config for multi-environment deployment.
@@ -1273,6 +1325,7 @@ impl BcsConfig {
         normalize_local_paths(&mut config, &local_path_base_dir);
         validate_loaded_config_for_environment(&config, result.environment)
             .map_err(|err| err.to_string())?;
+        config.validate_run_store_selectors()?;
         Ok(config)
     }
 
@@ -1599,6 +1652,24 @@ fn validate_eventing_environment_policy(
 mod tests {
     use super::*;
     use secrecy::ExposeSecret;
+
+    #[test]
+    fn validate_run_store_selectors_accepts_known_and_rejects_unknown() {
+        let mut config = BcsConfig::default();
+        // Defaults (memory / memory) are valid.
+        assert!(config.validate_run_store_selectors().is_ok());
+        // Explicit known values are valid.
+        config.async_chat_run_store = "persistent".to_string();
+        config.bot_run_context_store = "redis".to_string();
+        assert!(config.validate_run_store_selectors().is_ok());
+        // Unknown chat-run selector (e.g. a typo) must fail startup.
+        config.async_chat_run_store = "persisent".to_string();
+        assert!(config.validate_run_store_selectors().is_err());
+        config.async_chat_run_store = "persistent".to_string();
+        // Unknown run-context selector must fail startup.
+        config.bot_run_context_store = "reds".to_string();
+        assert!(config.validate_run_store_selectors().is_err());
+    }
 
     #[allow(unsafe_code)]
     fn safe_set_var(key: &str, value: impl AsRef<std::ffi::OsStr>) {

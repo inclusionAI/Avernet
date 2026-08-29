@@ -30,13 +30,20 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.adapters.http.task.schemas import (
     TaskExecutionGraphDTO,
+    TaskGrantRequestDTO,
+    TaskGrantResultDTO,
     TaskInfoRecordDTO,
     TaskInfoRequestDTO,
     TaskOpResultDTO,
+    TaskRevokeRequestDTO,
+    TaskRevokeResultDTO,
     graph_to_dto,
     op_result_to_dto,
     task_info_record_to_dto,
     task_info_request_from_dto,
+)
+from agentclaw.community.api.task.task_grant_service import (
+    TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import Status
@@ -148,5 +155,59 @@ async def list_tasks(
     return page_envelope(
         total,
         [task_info_record_to_dto(item) for item in items],
+        request,
+    )
+
+
+
+@router.post("/grant", response_model=Envelope[TaskGrantResultDTO])
+@envelope_errors
+async def grant_task_claim(
+    body: TaskGrantRequestDTO,
+    request: Request,
+    principal: PrincipalDep,
+    service: TaskClaimGrantServiceProtocol = Injected(TaskClaimGrantServiceProtocol),  # noqa: B008
+) -> Envelope[TaskGrantResultDTO]:
+    """grant 公共 api-key 给某 Bot(前端 public openapi → task 无状态中继 → secbaas admin)。
+
+    透传浏览器 Cookie/Referer;api-key 由服务端持有,不暴露前端。bcs_bot_id=real:entity(/mine bot.id)。
+    secbaas 401/403(未登录/非 Bot owner/非管理员)→ envelope_errors 映射;4xx/5xx 可重试;幂等。"""
+    result = await service.grant(
+        bcs_bot_id=body.bcs_bot_id,
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        operator=principal.user_id,
+    )
+    return envelope(
+        TaskGrantResultDTO(
+            bcs_bot_id=result.bcs_bot_id,
+            api_key_prefix=result.api_key_prefix,
+            grant_status=result.grant_status,
+            operator=result.operator,
+        ),
+        request,
+    )
+
+
+@router.post("/revoke", response_model=Envelope[TaskRevokeResultDTO])
+@envelope_errors
+async def revoke_task_claim(
+    body: TaskRevokeRequestDTO,
+    request: Request,
+    principal: PrincipalDep,
+    service: TaskClaimGrantServiceProtocol = Injected(TaskClaimGrantServiceProtocol),  # noqa: B008
+) -> Envelope[TaskRevokeResultDTO]:
+    """撤销授权(透传 Cookie/Referer → secbaas revoke)。幂等(无记录/已 revoked 也返回 revoked)。"""
+    result = await service.revoke(
+        bcs_bot_id=body.bcs_bot_id,
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        operator=principal.user_id,
+    )
+    return envelope(
+        TaskRevokeResultDTO(
+            bcs_bot_id=result.bcs_bot_id,
+            grant_status=result.grant_status,
+        ),
         request,
     )

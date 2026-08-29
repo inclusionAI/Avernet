@@ -106,6 +106,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_center_types # Space Skill query projection
   - agentclaw.community.core.market_favorites.models # Favorite records and target enum — typed in market_favorite_service.py
   - agentclaw.community.core.work_orders.models       # Work-order, notification, query, status, and event contracts
+  - agentclaw.community.core.work_orders.callbacks    # Work-order callback credential typed in work_order_service.py
   - agentclaw.community.core.service_bot.services.baas_service  # BotWsConnectionInfoResponse / HttpConnectionInfo — typed in baas_service.py (BaasService is a plain core service)
   - agentclaw.community.core.service_bot.types       # PublishStage enum — typed in baas_service.py
   - agentclaw.community.core.skills_pool             # Skills Pool rollout/query/recovery domain DTOs used by operator Service API Protocols
@@ -119,6 +120,9 @@ internal_dependencies:
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
+  - agentclaw.community.plugin_api.skill_center_gateway # Public catalogue request/result DTOs typed in skill_center_gateway_service.py
+  - agentclaw.community.core.task.task_runner.integration.ports  # OpenApiBotPort — typed in task_grant_service.py (stateless secbaas grant/revoke relay)
+  - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
 ```
 
 ### Change impact

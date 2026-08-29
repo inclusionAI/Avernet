@@ -123,6 +123,10 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
     ProjectionScope,
 )
+from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
+    EngineRuntimeProjectionRegistry,
+)
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
 )
@@ -566,6 +570,42 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         )
 
         return UnifiedSkillCategoryRepository(db)
+
+    @singleton
+    @provider
+    @inject
+    def engine_runtime_projection_registry(
+        self,
+        pool_runtime: SkillsPoolRuntimeProtocol,
+        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
+    ) -> EngineRuntimeProjectionRegistry:
+        """Which runtime contract each engine's projection obeys.
+
+        Routing only — the same shape as ``CommunityDeviceSyncModule``: adding
+        an engine whose runtime differs means a new implementation and an entry
+        here, with no edit to the others. Per-domain is the *default* rather
+        than an enumerated key, so an ordinary new engine needs no entry at all
+        and mis-routing one takes a wrong entry rather than a forgotten right
+        one.
+
+        Only ``PerDomainRuntimeProjection`` takes collaborators: the Skills
+        Pool runtime and layout repository, which no other implementation and
+        no longer the projector itself needs.
+        """
+        from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+            PerDomainRuntimeProjection,
+        )
+        from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
+            WholeArtifactRuntimeProjection,
+        )
+
+        return EngineRuntimeProjectionRegistry(
+            default=PerDomainRuntimeProjection(
+                pool_runtime=pool_runtime,
+                pool_layouts=pool_layouts,
+            ),
+            by_engine={"teclaw": WholeArtifactRuntimeProjection()},
+        )
 
     @singleton
     @provider

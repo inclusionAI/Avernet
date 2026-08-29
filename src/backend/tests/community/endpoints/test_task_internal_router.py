@@ -5,6 +5,16 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.api.task.task_grant_service import (
+    GRANTED,
+    REVOKED,
+    GrantResult,
+    RevokeResult,
+    TaskClaimGrantServiceProtocol,
+)
+from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+    TaskClaimJoinGateProtocol,
+)
 from agentclaw.community.core.task.domain.models import (
     NodeOpResult,
     Status,
@@ -434,4 +444,123 @@ def scheduled_trigger_happy():
     expect=ExpectError(status=200, json_contains={"success": False, "total_discovered": 0, "results": []}),
 )
 def scheduled_trigger_error():
+    pass
+
+
+# ── 任务认领 grant/revoke + claim_on JOIN 灰度开关(internal /api/v1 face)─────────
+_GRANT_BODY = {"bcs_bot_id": "bot-endpoint-1:ent"}
+_STAFF_COOKIE = {"cookie": "staff_id=user-endpoint-1"}
+
+
+def _seed_grant_service(world) -> None:
+    async def grant(_self, *, bcs_bot_id, cookie, referer, operator):
+        return GrantResult(bcs_bot_id=bcs_bot_id, api_key_prefix="ep", grant_status=GRANTED, operator=operator)
+
+    async def revoke(_self, *, bcs_bot_id, cookie, referer, operator):
+        return RevokeResult(bcs_bot_id=bcs_bot_id, grant_status=REVOKED)
+
+    bind_overrides(world, TaskClaimGrantServiceProtocol, {"grant": grant, "revoke": revoke})
+
+
+def _seed_claim_join_gate(world) -> None:
+    bind_overrides(
+        world,
+        TaskClaimJoinGateProtocol,
+        {
+            "is_enabled": lambda _self: False,
+            "get_enabled": lambda _self, *, env: False,
+            "set_enabled": lambda _self, *, enabled, env, operator=None: bool(enabled),
+        },
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/grant",
+    scenario="happy_ok",
+    seed=_seed_grant_service,
+    input=CaseInput(headers=_STAFF_COOKIE, json_body=_GRANT_BODY),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"grant_status": "granted"}}),
+)
+def internal_grant_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/grant",
+    scenario="err_unauthenticated",
+    input=CaseInput(json_body=_GRANT_BODY),
+    expect=ExpectError(status=401),
+)
+def internal_grant_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/revoke",
+    scenario="happy_ok",
+    seed=_seed_grant_service,
+    input=CaseInput(headers=_STAFF_COOKIE, json_body=_GRANT_BODY),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"grant_status": "revoked"}}),
+)
+def internal_revoke_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/revoke",
+    scenario="err_unauthenticated",
+    input=CaseInput(json_body=_GRANT_BODY),
+    expect=ExpectError(status=401),
+)
+def internal_revoke_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/claim-join-filter",
+    scenario="happy_ok",
+    seed=_seed_claim_join_gate,
+    input=CaseInput(headers=_STAFF_COOKIE),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"enabled": False}}),
+)
+def internal_claim_join_filter_get_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/claim-join-filter",
+    scenario="err_unauthenticated",
+    input=CaseInput(),
+    expect=ExpectError(status=401),
+)
+def internal_claim_join_filter_get_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/claim-join-filter",
+    scenario="happy_ok",
+    seed=_seed_claim_join_gate,
+    input=CaseInput(headers=_STAFF_COOKIE, json_body={"enabled": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"enabled": True}}),
+)
+def internal_claim_join_filter_post_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/claim-join-filter",
+    scenario="err_unauthenticated",
+    input=CaseInput(json_body={"enabled": True}),
+    expect=ExpectError(status=401),
+)
+def internal_claim_join_filter_post_unauthenticated():
     pass

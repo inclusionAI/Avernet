@@ -219,7 +219,11 @@ from .resources import router as resources_router
 from .render_screens import router as render_screens_router
 from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
-from .skills import publish_status_router as skill_publish_status_router
+from .routines.owner_router import router as routines_owner_router
+from .skills import (
+    publish_status_router as skill_publish_status_router,
+    readme_router as skill_readme_router,
+)
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .service_publications import (
@@ -283,6 +287,14 @@ _OPEN_SUBGROUPS = [
     skill_publish_status_router,
 ]
 
+# Skill README is user-scoped: public Repo Skills are globally addressable, but
+# Local Skills must be authorized against the Bot resolved from the Skill row.
+# Keep it on the user-scoped response surface so the published contract carries
+# the standard 403 response as well as the principal requirement.
+_USER_SCOPED_SUBGROUPS = [
+    skill_readme_router,
+]
+
 _SUBGROUPS = [
     token_router,
     # Both authorization groups precede `bots` below. `authorized_apps_router`
@@ -309,6 +321,11 @@ _SUBGROUPS = [
     # check via `HarnessBotAccessDep`, so it joins the plain subgroups with
     # only `_PUBLIC_AUTH` + the user-scoped error table.
     harness_router,
+    # The owner-level routine aggregate is a literal under `bots/routines` —
+    # it must mount before the *legacy* routines shim's `/{routine_id}`
+    # wildcard (which the legacy groups, mounted later, contribute) or that
+    # route captures a literal "all" as a routine id.
+    routines_owner_router,
 ]
 
 # These groups may address a shared Bot. ``OwnerIdDep`` performs the same grant
@@ -473,7 +490,7 @@ def build_public_router() -> APIRouter:
         public.include_router(
             router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
-    for router in _SUBGROUPS:
+    for router in _SUBGROUPS + _USER_SCOPED_SUBGROUPS:
         public.include_router(
             router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )

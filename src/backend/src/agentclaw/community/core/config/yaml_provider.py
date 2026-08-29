@@ -128,18 +128,28 @@ def _load_yaml_configs(
     # deploy the assembled runtime `configs/` (cwd) holds them; in the monorepo they
     # resolve from the subtree. Community never searches corp/configs — the test
     # suite reads only community overlays, and corp prod reads config via sofapy.
+    community_root = Path(__file__).resolve().parents[2]  # agentclaw/community
     config_dirs = [
         Path.cwd() / "configs",
-        Path(__file__).resolve().parents[2] / "configs",  # agentclaw/community/configs
+        community_root / "configs",  # agentclaw/community/configs
     ]
 
-    # Corp overlay search dirs (local monorepo + deployed configs/).
+    # Corp overlay search dirs (deployed configs/ + the corp subtree that sits
+    # beside community in the same package).
     # Filename: application-singlebox-corp.yaml (derived from overlay name).
+    #
+    # Anchored on the package layout rather than a fixed count of parent hops:
+    # the corp tree is always ``agentclaw/corp/configs``, whatever absolute path
+    # the package is installed at. A hardcoded ascent has to guess that depth, and
+    # guessing too high raises ``IndexError`` — unconditionally, since this list is
+    # built before any overlay is read, so a shallow install root would break every
+    # config load rather than merely skipping the optional corp layer. ``.parent``
+    # cannot walk off the top of a path, so this cannot raise.
     stem = overlay_name.removesuffix(".yaml")
     corp_overlay_name = f"{stem}-corp.yaml"
     corp_config_dirs = [
         Path.cwd() / "configs",
-        Path(__file__).resolve().parents[8] / "src" / "backend" / "src" / "agentclaw" / "corp" / "configs",
+        community_root.parent / "corp" / "configs",  # agentclaw/corp/configs
     ]
 
     for config_dir in config_dirs:

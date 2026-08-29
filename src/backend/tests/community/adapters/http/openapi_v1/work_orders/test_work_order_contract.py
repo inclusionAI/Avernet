@@ -19,10 +19,15 @@ from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
     WorkOrderServiceProtocol,
 )
-from agentclaw.community.core.work_orders.errors import WorkOrderNotFoundError
+from agentclaw.community.core.work_orders.callbacks import WorkOrderCallbackCredential
+from agentclaw.community.core.work_orders.errors import (
+    WorkOrderCallbackError,
+    WorkOrderNotFoundError,
+)
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
     WorkOrderBizType,
+    WorkOrderDecision,
     WorkOrderDetail,
     WorkOrderEventCreatedResult,
     WorkOrderEventStatus,
@@ -111,6 +116,63 @@ def client(work_order_service, notification_service):
     attach_injector(app, Injector([_Bindings()]))
     mount_public_error_handlers(app)
     return user_scoped_client(app, "owner-1")
+
+
+def test_process_approval_forwards_only_callback_identity_headers(
+    client, work_order_service
+):
+    work_order_service.process_approval.return_value = WorkOrderReviewResult(
+        work_order_id=11,
+        status=WorkOrderStatus.APPROVED,
+        decision=WorkOrderDecision.APPROVED,
+        reviewer_user_id="owner-1",
+        review_remark=None,
+        reviewed_at=MODIFIED,
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/work-orders/11/approval",
+        json={"decision": "APPROVED"},
+        headers={
+            "Authorization": "Bearer token",
+            "Cookie": "backend_session=must-not-forward",
+            "X-Request-Id": "request-1",
+            "X-Trace-Id": "trace-1",
+            "X-Avernet-Principal": "must-not-forward",
+        },
+    )
+
+    assert response.status_code == 200
+    kwargs = work_order_service.process_approval.call_args.kwargs
+    assert kwargs["work_order_id"] == 11
+    assert kwargs["actor_id"] == "owner-1"
+    assert kwargs["decision"] is WorkOrderDecision.APPROVED
+    assert kwargs["review_remark"] is None
+    credential = kwargs["callback_credential"]
+    assert isinstance(credential, WorkOrderCallbackCredential)
+    lowered = {key.lower(): value for key, value in credential.headers.items()}
+    assert lowered == {
+        "authorization": "Bearer token",
+        "x-request-id": "request-1",
+        "x-trace-id": "trace-1",
+    }
+
+
+def test_process_approval_exposes_callback_failure_without_local_success(
+    client, work_order_service
+):
+    work_order_service.process_approval.side_effect = WorkOrderCallbackError(
+        "private upstream details"
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/work-orders/11/approval",
+        json={"decision": "APPROVED"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502201
+    assert response.json()["message"] == "Upstream work-order callback failed"
 
 
 def test_create_join_request_uses_principal_and_returns_created(
@@ -284,6 +346,28 @@ def test_create_work_order_event_rejects_non_object_json(
     work_order_service.create_work_order_event.assert_not_called()
 
 
+def test_list_work_orders_allows_notice_without_work_order(client, work_order_service):
+    work_order_service.list_items.return_value = (
+        1,
+        [
+            WorkOrderListItem(
+                work_order=None,
+                notification=_notification().model_copy(update={"work_order_id": None}),
+                can_approve=False,
+            )
+        ],
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders")
+
+    assert response.status_code == 200
+    item = response.json()["data"]["items"][0]
+    assert item["item_type"] == "NOTICE"
+    assert item["work_order_id"] is None
+    assert item["work_order_no"] is None
+    assert item["notification_id"] == 21
+
+
 def test_list_work_orders_maps_plain_and_notification_items(client, work_order_service):
     work_order_service.list_items.return_value = (
         2,
@@ -318,15 +402,15 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
     assert items[0]["notification_id"] is None
     assert items[0]["title"] == "空间加入申请待审批"
     assert items[0]["content"] is None
-    assert items[0]["gmt_created"] == "2026-08-18T01:02:03Z"
-    assert items[0]["gmt_modified"] == "2026-08-18T02:03:04Z"
+    assert items[0]["gmt_created"] == "2026-08-18T01:02:03"
+    assert items[0]["gmt_modified"] == "2026-08-18T02:03:04"
     assert items[1]["item_id"] == "NOTIFICATION_21"
     assert items[1]["item_type"] == "NOTICE"
     assert items[1]["notification_id"] == 21
     assert items[1]["title"] == "空间加入申请已通过"
     assert items[1]["content"] == {"message": "approved"}
-    assert items[1]["gmt_created"] == "2026-08-18T01:02:03Z"
-    assert items[1]["gmt_modified"] == "2026-08-18T03:04:05Z"
+    assert items[1]["gmt_created"] == "2026-08-18T01:02:03"
+    assert items[1]["gmt_modified"] == "2026-08-18T03:04:05"
     work_order_service.list_items.assert_called_once()
     assert work_order_service.list_items.call_args.kwargs == {
         "actor_id": "owner-1",
@@ -498,7 +582,7 @@ def test_review_endpoints_return_explicit_result(
         "status": status.value,
         "reviewer_user_id": "owner-1",
         "review_remark": "done",
-        "reviewed_at": "2026-08-18T02:03:04Z",
+        "reviewed_at": "2026-08-18T02:03:04",
     }
     getattr(work_order_service, operation).assert_called_once_with(
         work_order_id=11, actor_id="owner-1", review_remark="done"
@@ -585,7 +669,7 @@ def test_notification_detail_and_mark_read(client, notification_service):
     assert marked.json()["data"] == {
         "notification_id": 21,
         "is_read": True,
-        "read_at": "2026-08-18T02:03:04Z",
+        "read_at": "2026-08-18T02:03:04",
     }
     notification_service.get_detail.assert_called_once_with(
         notification_id=21, actor_id="owner-1"

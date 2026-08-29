@@ -63,3 +63,9 @@ class WorkOrderNoReviewerError(WorkOrderError):
 
 class WorkOrderInvalidEventError(WorkOrderError):
     pass
+
+
+class WorkOrderCallbackError(WorkOrderError):
+    """A required upstream business callback failed or reported failure."""
+
+    pass

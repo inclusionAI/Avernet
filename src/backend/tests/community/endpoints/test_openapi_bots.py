@@ -306,13 +306,41 @@ _HAPPY_CASES = (
 #: ``bot_id``: the surface mints one, so the id is not knowable here.
 _HAPPY_BODIES = {
     ("GET", _BASE_PATH): {
-        "data": {"total": 1, "items": [{"bot_id": _BOT_ID, "owner_entity_id": _OWNER}]}
+        # Seeded bot has no template row and a NULL space_id, which resolves
+        # to the owner's synthetic personal space, so the row carries the
+        # template fields as nulls and the owner-view space summary.
+        "data": {
+            "total": 1,
+            "items": [
+                {
+                    "bot_id": _BOT_ID,
+                    "owner_entity_id": _OWNER,
+                    "template_type": None,
+                    "template_config": None,
+                    "space": {
+                        "space_id": f"personal:{_OWNER}",
+                        "name": "Personal",
+                        "kind": "personal",
+                    },
+                }
+            ],
+        }
     },
     ("POST", _BASE_PATH): {
         "data": {"bot_name": "created-bot", "owner_entity_id": _OWNER}
     },
     ("GET", f"{_BASE_PATH}/all"): {
-        "data": {"total": 1, "items": [{"bot_id": _BOT_ID, "owner_entity_id": _OWNER}]}
+        "data": {
+            "total": 1,
+            "items": [
+                {
+                    "bot_id": _BOT_ID,
+                    "owner_entity_id": _OWNER,
+                    "template_type": None,
+                    "template_config": None,
+                }
+            ],
+        }
     },
     ("GET", f"{_BASE_PATH}/ceiling"): {"data": {"ceiling": 5}},
     ("GET", f"{_BASE_PATH}/{{bot_id}}"): {

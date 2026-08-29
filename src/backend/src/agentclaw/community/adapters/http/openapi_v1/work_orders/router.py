@@ -29,7 +29,6 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     CreateSpaceJoinRequest,
     CreateWorkOrderEventRequest,
     WorkOrderEventCreated,
-    WorkOrderEventStatus,
     CreateBotEditorRequest,
     BotEditorRequestCreated,
     NotificationDetailResponse,
@@ -43,7 +42,6 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderQueryType,
     WorkOrderReviewRequest,
     WorkOrderApprovalRequest,
-    WorkOrderDecision,
     WorkOrderReviewResponse,
     WorkOrderLegacyReviewResponse,
 )
@@ -51,15 +49,21 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.converter import (
     display_title,
     json_object,
 )
+from agentclaw.community.adapters.http.work_orders.converter import (
+    create_work_order_event_data,
+)
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
     WorkOrderServiceProtocol,
 )
+from agentclaw.community.core.work_orders.callbacks import (
+    WorkOrderCallbackCredential,
+)
 from agentclaw.community.core.work_orders.models import (
+    WorkOrderDecision as DomainWorkOrderDecision,
     WorkOrderItemType as DomainWorkOrderItemType,
     WorkOrderListItem as DomainListItem,
     WorkOrderQueryType as DomainWorkOrderQueryType,
-    NotificationCategory as DomainNotificationCategory,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -76,6 +80,22 @@ PageSizeQuery = Annotated[
 ]
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
+
+_CALLBACK_HEADER_NAMES = {
+    "authorization",
+    "x-request-id",
+    "x-trace-id",
+}
+
+
+def _callback_credential(request: Request) -> WorkOrderCallbackCredential:
+    return WorkOrderCallbackCredential(
+        headers={
+            key: value
+            for key, value in request.headers.items()
+            if key.lower() in _CALLBACK_HEADER_NAMES
+        }
+    )
 
 
 def _require_user_delegation(caller: ActingCaller) -> str:
@@ -254,30 +274,12 @@ async def create_work_order_event(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderEventCreated]:
     actor_id = _require_user_delegation(caller)
-    result = service.create_work_order_event(
-        event_category=DomainNotificationCategory(body.event_category),
-        biz_type=body.biz_type,
-        biz_id=body.biz_id,
-        event_type=body.event_type,
-        applicant_user_id=body.applicant_user_id,
-        approver_user_ids=body.approver_user_ids,
-        recipient_user_ids=body.recipient_user_ids,
-        title=body.title,
-        content=body.content,
-        apply_reason=body.apply_reason,
-        biz_data=body.biz_data,
+    data = create_work_order_event_data(
+        body=body,
         actor_id=actor_id,
+        service=service,
     )
-    return created(
-        WorkOrderEventCreated(
-            event_category=result.event_category,
-            work_order_id=result.work_order_id,
-            work_order_no=result.work_order_no,
-            notification_ids=result.notification_ids,
-            status=WorkOrderEventStatus(result.status),
-        ),
-        request,
-    )
+    return created(data, request)
 
 
 @router.get(
@@ -400,8 +402,9 @@ async def process_work_order_approval(
     result = service.process_approval(
         work_order_id=work_order_id,
         actor_id=actor_id,
-        decision=WorkOrderDecision(body.decision),
+        decision=DomainWorkOrderDecision(body.decision.value),
         review_remark=body.review_remark,
+        callback_credential=_callback_credential(request),
     )
     return envelope(_review_response(result), request)
 

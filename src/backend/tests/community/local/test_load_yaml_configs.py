@@ -143,6 +143,70 @@ class TestLoadYamlConfigsOverlaySelection:
         assert result["user_config"]["overlay"] == "corp-override"
         assert result["user_config"]["corp_secret"] == "real-secret"
 
+    def test_corp_overlay_resolves_beside_community_subtree(self, monkeypatch, tmp_path):
+        """The corp overlay resolves as ``agentclaw/corp/configs``.
+
+        The case above finds the corp file via ``cwd/configs``, so it passes even
+        if the package-relative dir is computed wrongly. This one puts the corp
+        overlay *only* in the subtree beside community and leaves cwd without a
+        configs/ dir, pinning that second search dir.
+
+        It also pins that the derivation is layout-relative, not a fixed count of
+        parent hops: ``tmp_path`` is shallow, and a hardcoded ascent deep enough to
+        clear a real monorepo checkout raises ``IndexError`` here.
+        """
+        overlay_name = "application-test.yaml"
+        agentclaw_root = tmp_path / "agentclaw"
+        community_configs = agentclaw_root / "community" / "configs"
+        community_configs.mkdir(parents=True)
+        (community_configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (community_configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+
+        corp_configs = agentclaw_root / "corp" / "configs"
+        corp_configs.mkdir(parents=True)
+        (corp_configs / "application-test-corp.yaml").write_text(
+            "user_config:\n  overlay: corp-override\n  corp_secret: real-secret\n"
+        )
+
+        # cwd holds no configs/, so the community subtree is the only source.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            yaml_provider,
+            "__file__",
+            str(agentclaw_root / "community" / "core" / "config" / "yaml_provider.py"),
+        )
+
+        result = _load_yaml_configs(overlay_name)
+        assert result["user_config"]["base"] == "base-val"
+        assert result["user_config"]["overlay"] == "corp-override"
+        assert result["user_config"]["corp_secret"] == "real-secret"
+
+    def test_loads_without_corp_subtree_present(self, monkeypatch, tmp_path):
+        """A community-only build has no corp/ dir at all — that is not an error.
+
+        The corp search dirs are built before any overlay is read, so a failure to
+        resolve them breaks *every* config load rather than skipping the optional
+        corp layer.
+        """
+        overlay_name = "application-test.yaml"
+        agentclaw_root = tmp_path / "agentclaw"
+        community_configs = agentclaw_root / "community" / "configs"
+        community_configs.mkdir(parents=True)
+        (community_configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (community_configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            yaml_provider,
+            "__file__",
+            str(agentclaw_root / "community" / "core" / "config" / "yaml_provider.py"),
+        )
+
+        result = _load_yaml_configs(overlay_name)
+        assert result["user_config"]["base"] == "base-val"
+        assert result["user_config"]["overlay"] == "overlay-val"
+        assert "corp_secret" not in result["user_config"]
+
 
 @pytest.fixture(autouse=True)
 def _community_database_url(monkeypatch):

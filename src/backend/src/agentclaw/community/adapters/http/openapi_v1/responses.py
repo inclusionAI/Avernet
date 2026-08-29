@@ -66,10 +66,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.space_skill_error_mappings import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
-from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
-    WorkOrderErrorCode,
-    WorkOrderPublicErrorMessage,
-)
+from agentclaw.community.adapters.http.openapi_v1.errors_work_order import WorkOrderErrorCode, WorkOrderPublicErrorMessage
 from agentclaw.community.core.bot_app_grant.errors import (
     GrantBotNotLiveError,
     GrantIdentityTooLongError,
@@ -179,6 +176,7 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
     WorkOrderAlreadyPendingError,
     WorkOrderAlreadyProcessedError,
+    WorkOrderCallbackError,
     WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderBotEditorRequestNotAllowedError,
@@ -275,8 +273,11 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterPublishStatusError,
     SkillCenterTeamCreateError,
 )
-
 T = TypeVar("T")
+
+
+class SkillCenterMarketplaceUnavailableError(RuntimeError):
+    """A public Skill Center marketplace read could not be served."""
 
 
 def _trace_id(request: Request) -> str:
@@ -370,6 +371,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
     ),
     SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
+    SkillCenterMarketplaceUnavailableError: (
+        502,
+        "Skill Center marketplace unavailable",
+    ),
     SkillCenterPublishStatusError: (502, "Skill Center publish status unavailable"),
     # Staff directory infra failure (master-data service unreachable/errored).
     # 502, not 200-null: "directory down" must stay distinct from "no dept" so an
@@ -400,6 +405,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         WorkOrderPublicErrorMessage.ALREADY_PROCESSED,
     ),
+    WorkOrderCallbackError: (502, WorkOrderPublicErrorMessage.CALLBACK_FAILED),
     WorkOrderApplicantAlreadyMemberError: (
         409,
         WorkOrderPublicErrorMessage.APPLICANT_ALREADY_MEMBER,
@@ -769,6 +775,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     WorkOrderNotificationNotFoundError: WorkOrderErrorCode.NOTIFICATION_NOT_FOUND,
     WorkOrderAlreadyPendingError: WorkOrderErrorCode.ALREADY_PENDING,
     WorkOrderAlreadyProcessedError: WorkOrderErrorCode.ALREADY_PROCESSED,
+    WorkOrderCallbackError: WorkOrderErrorCode.CALLBACK_FAILED,
     WorkOrderApplicantAlreadyMemberError: WorkOrderErrorCode.APPLICANT_ALREADY_MEMBER,
     WorkOrderApplicantAlreadyEditorError: WorkOrderErrorCode.APPLICANT_ALREADY_EDITOR,
     WorkOrderNoReviewerError: WorkOrderErrorCode.NO_REVIEWER,

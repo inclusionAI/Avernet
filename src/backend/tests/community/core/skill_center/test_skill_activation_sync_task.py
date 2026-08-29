@@ -41,7 +41,8 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
-from agentclaw.community.core.task_queue.types import Fail, TaskStatus
+from agentclaw.community.core.task_queue.types import DEFAULT_APP, Fail, TaskStatus
+from agentclaw.community.di.config import TaskQueueConfig
 
 ENV = "dev"
 ACTION = SkillActivationSyncAction.PLACEHOLDER
@@ -336,6 +337,7 @@ def queue(monkeypatch):
         TaskQueueRepository(_InMemorySqliteDB(engine)),
         HandlerRegistry(),
         WorkerWakeup(),
+        TaskQueueConfig(),
     )
 
 
@@ -375,7 +377,9 @@ def test_a_different_bot_is_not_deduped(queue):
 def test_a_terminal_task_releases_the_bot_for_the_next_operation(queue, monkeypatch):
     first, _ = enqueue_skill_activation_sync(queue, scope=_scope(), action=ACTION)
     repo = queue._repo
-    claimed = repo.claim_batch(worker_id="w-1", env=ENV, limit=1, lease_seconds=60)
+    claimed = repo.claim_batch(
+        worker_id="w-1", env=ENV, app=DEFAULT_APP, limit=1, lease_seconds=60
+    )
     assert [task.id for task in claimed] == [first.id]
     assert repo.complete(task_id=first.id, worker_id="w-1") is True
 

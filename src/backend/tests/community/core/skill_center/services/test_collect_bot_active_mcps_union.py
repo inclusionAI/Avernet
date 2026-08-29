@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.models.mcp import BotMCPInstallation, SkillSetMCPServer
-from agentclaw.community.core.models.skill import SkillSet
+from agentclaw.community.core.models.skill import BotSkillInstallation, Skill, SkillSet
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     CapabilityDesiredStateRepository,
 )
@@ -209,6 +209,39 @@ def test_a_direct_installation_appears_with_minimal_metadata(tmp_path):
             "is_default": False,
         }
     ]
+
+
+def test_an_installed_skills_mcp_dependency_is_effective_without_mcp_installation(
+    tmp_path,
+):
+    """Skill Installation supplies its declared MCP dependency without turning
+    that derived supply into an explicit MCP Installation fact."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        skill = Skill(
+            name="weather-skill",
+            git_path="git://team/weather-skill",
+            mcp_dependencies='["mcp.weather"]',
+            env="dev",
+        )
+        session.add(skill)
+        session.flush()
+        session.add(
+            BotSkillInstallation(
+                bot_id="bot",
+                owner_id="owner",
+                skill_id=skill.id,
+                env="dev",
+            )
+        )
+
+    result = _service(db, tmp_path).collect_bot_active_mcps(
+        entity_id="owner", bot_id="bot", user_id="owner"
+    )
+
+    assert [entry["server_code"] for entry in result] == ["mcp.weather"]
+    with db.orm_session() as session:
+        assert session.query(BotMCPInstallation).all() == []
 
 
 def test_strict_runtime_policy_context_propagates_provider_failure(tmp_path):

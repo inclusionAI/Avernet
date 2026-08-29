@@ -285,6 +285,11 @@ pub use port::interaction::{
     InteractionResolveClaim, InteractionResolveCommit, InteractionStorePort,
 };
 
+pub use port::repo::chat_run::{
+    CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
+    ChatRunState, MAX_CONTENT_BYTES as CHAT_RUN_MAX_CONTENT_BYTES,
+};
+
 pub use bcs_domain::{
     GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,
     InviteTargetType, InviteTokenPayload, InviteTokenError,

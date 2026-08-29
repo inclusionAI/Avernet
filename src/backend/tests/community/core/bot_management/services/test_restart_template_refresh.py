@@ -116,3 +116,28 @@ def test_non_template_engine_does_not_refresh():
 
     service.get_template_config.assert_not_called()
     service.update_template.assert_not_called()
+
+
+def test_restart_persists_resync_marker_for_confirmed_template_update():
+    latest = {
+        "template_key": "architect",
+        "template_uid": "aicoding_bot_template",
+        "template_version_id": 101,
+    }
+    template_service = _service({"template_version_id": 100})
+
+    AicodingProvisioningStrategy("claude_code").apply_restart_extra_configs(
+        _ctx("claude_code"),
+        {"template_config": latest, "confirmed_template_update": True},
+        template_service=template_service,
+    )
+
+    persisted = template_service.update_template.call_args.kwargs["template_config"]
+    assert persisted is not latest
+    assert persisted["template_version_id"] == 101
+    assert persisted["_aicoding_restart"] == {
+        "resync_authorization": True,
+        "template_version_id": 101,
+        "source": "restart_template_update",
+    }
+    assert "_aicoding_restart" not in latest
