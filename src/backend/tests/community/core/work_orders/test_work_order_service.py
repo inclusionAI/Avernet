@@ -170,6 +170,7 @@ def _service(
     collaborator_repository = MagicMock()
     collaborators = MagicMock()
     member_management = MagicMock()
+    skill_handler = MagicMock()
     if staff_dept is None:
         staff_dept = MagicMock(spec=StaffDeptPlugin)
         staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
@@ -190,6 +191,7 @@ def _service(
             collaborators,
             member_management,
             staff_dept,
+            skill_handler,
             decision_callbacks,
         ),
         repository,
@@ -209,6 +211,7 @@ def _bot_editor_service():
     collaborators = MagicMock()
     member_management = MagicMock()
     staff_dept = MagicMock(spec=StaffDeptPlugin)
+    skill_handler = MagicMock()
     decision_callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
     decision_callbacks.requires_callback.return_value = False
     service = WorkOrderService(
@@ -221,6 +224,7 @@ def _bot_editor_service():
         collaborators,
         member_management,
         staff_dept,
+        skill_handler,
         decision_callbacks,
     )
     return (
@@ -485,7 +489,7 @@ def test_generic_approval_without_handler_preserves_existing_path() -> None:
     context = _friend_context().model_copy(
         update={
             "work_order": _work_order().model_copy(
-                update={"biz_type": "SKILL_COLLABORATOR", "biz_id": "skill-1"}
+                    update={"biz_type": "GENERIC_APPROVAL", "biz_id": "generic-1"}
             ),
             "source_event_type": WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
         }
@@ -1062,6 +1066,13 @@ def test_create_work_order_event_normalizes_and_delegates(
         ),
         ({"applicant_user_id": "other-user"}, "applicant must be"),
         ({"apply_reason": "x" * 513}, "no more than 512"),
+        (
+            {
+                "biz_type": "SKILL_COLLABORATOR",
+                "event_type": "SKILL_COLLABORATOR_APPLIED",
+            },
+            "must use the Skill endpoint",
+        ),
     ],
 )
 def test_create_work_order_event_rejects_invalid_input(

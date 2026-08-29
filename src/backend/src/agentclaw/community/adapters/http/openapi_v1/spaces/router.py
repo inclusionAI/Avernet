@@ -45,6 +45,12 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     SpaceMemberItem,
     SpaceMemberMutationResult,
     SpaceSkillItem,
+    SkillGrantItem,
+    SpaceSkillGrants,
+    TransferSkillOwnerRequest,
+    CreateSkillEditorRequest,
+    SkillEditorRequestCreated,
+    DraftEditLeaseResource,
     UpdateSpaceMemberRoleRequest,
 )
 from agentclaw.community.api.market_favorite_service import (
@@ -56,6 +62,15 @@ from agentclaw.community.api.space_service import (
 )
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
+from agentclaw.community.api.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestServiceProtocol,
+)
+from agentclaw.community.api.draft_edit_lease_service import (
+    DraftEditLeaseServiceProtocol,
 )
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType as DomainFavoriteTargetType,
@@ -80,9 +95,20 @@ router = APIRouter(
     prefix="/openapi/v1/bots/spaces", tags=["spaces"], route_class=PublicAPIRoute
 )
 SpaceIdPath = Annotated[int, Path(ge=1, description="Space primary identifier.")]
+SkillIdPath = Annotated[int, Path(ge=1, description="Space Skill primary identifier.")]
+GrantUserIdPath = Annotated[
+    str, Path(min_length=1, max_length=128, description="Grant target user identifier.")
+]
 PageNoQuery = Annotated[int, Query(ge=1, description="One-based page number.")]
 PageSizeQuery = Annotated[
     int, Query(ge=1, le=100, description="Maximum items returned per page.")
+]
+LeaseFencingTokenQuery = Annotated[
+    int,
+    Query(
+        ge=1,
+        description="Exact fencing token returned when this actor acquired the Lease.",
+    ),
 ]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
@@ -157,10 +183,8 @@ def _space_skill_item(record: SpaceSkillSummaryRecord) -> SpaceSkillItem:
         status=record["status"],
         draft_status=record["draft_status"],
         space_type=record["space_type"],
-        current_user_skill_role=record["current_user_skill_role"],
-        can_edit=record["can_edit"],
-        can_grant=record["can_grant"],
-        can_apply_edit=record["can_apply_edit"],
+        actor=record["actor"],
+        lease_summary=record["lease_summary"],
         gmt_created=record["gmt_created"],
         gmt_modified=record["gmt_modified"],
     )
@@ -289,6 +313,205 @@ async def list_space_skills(
         page_size=page_size,
     )
     return page(total, [_space_skill_item(record) for record in records], request)
+
+
+@router.get(
+    "/{space_id}/skills/{skill_id}/grants",
+    response_model=Envelope[SpaceSkillGrants],
+)
+@envelope_errors
+async def list_space_skill_grants(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    caller: ActingCallerDep,
+    service: SpaceSkillGrantServiceProtocol = Injected(SpaceSkillGrantServiceProtocol),
+) -> Envelope[SpaceSkillGrants]:
+    actor_id = _require_user_delegation(caller)
+    return envelope(
+        SpaceSkillGrants.model_validate(
+            service.list_grants(space_id=space_id, skill_id=skill_id, actor_id=actor_id)
+        ),
+        request,
+    )
+
+
+@router.put(
+    "/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    response_model=Envelope[SkillGrantItem],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def add_space_skill_manager(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    manager_user_id: GrantUserIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillGrantServiceProtocol = Injected(SpaceSkillGrantServiceProtocol),
+) -> Envelope[SkillGrantItem]:
+    result = service.add_manager(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        manager_user_id=manager_user_id,
+    )
+    return envelope(SkillGrantItem.model_validate(result), request)
+
+
+@router.delete(
+    "/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    response_model=Envelope[SkillGrantItem],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def remove_space_skill_manager(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    manager_user_id: GrantUserIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillGrantServiceProtocol = Injected(SpaceSkillGrantServiceProtocol),
+) -> Envelope[SkillGrantItem]:
+    result = service.remove_manager(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        manager_user_id=manager_user_id,
+    )
+    return envelope(SkillGrantItem.model_validate(result), request)
+
+
+@router.post(
+    "/{space_id}/skills/{skill_id}/owner-transfer",
+    response_model=Envelope[SpaceSkillGrants],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def transfer_space_skill_owner(
+    body: TransferSkillOwnerRequest,
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillGrantServiceProtocol = Injected(SpaceSkillGrantServiceProtocol),
+) -> Envelope[SpaceSkillGrants]:
+    result = service.transfer_owner(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        new_owner_user_id=body.new_owner_user_id,
+        reason=body.reason,
+        retain_previous_owner_as_manager=body.retain_previous_owner_as_manager,
+    )
+    return envelope(SpaceSkillGrants.model_validate(result), request)
+
+
+@router.get(
+    "/{space_id}/skills/{skill_id}/draft/lease",
+    response_model=Envelope[DraftEditLeaseResource],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def get_draft_edit_lease(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: DraftEditLeaseServiceProtocol = Injected(DraftEditLeaseServiceProtocol),
+) -> Envelope[DraftEditLeaseResource]:
+    result = service.get_lease(space_id=space_id, skill_id=skill_id, actor_id=user_id)
+    return envelope(DraftEditLeaseResource.model_validate(result), request)
+
+
+@router.put(
+    "/{space_id}/skills/{skill_id}/draft/lease",
+    response_model=Envelope[DraftEditLeaseResource],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def acquire_draft_edit_lease(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: DraftEditLeaseServiceProtocol = Injected(DraftEditLeaseServiceProtocol),
+) -> Envelope[DraftEditLeaseResource]:
+    result = service.acquire(space_id=space_id, skill_id=skill_id, actor_id=user_id)
+    return envelope(DraftEditLeaseResource.model_validate(result), request)
+
+
+@router.delete(
+    "/{space_id}/skills/{skill_id}/draft/lease",
+    response_model=Envelope[DraftEditLeaseResource],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def release_draft_edit_lease(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    fencing_token: LeaseFencingTokenQuery,
+    request: Request,
+    user_id: UserIdDep,
+    service: DraftEditLeaseServiceProtocol = Injected(DraftEditLeaseServiceProtocol),
+) -> Envelope[DraftEditLeaseResource]:
+    result = service.release(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        fencing_token=fencing_token,
+    )
+    return envelope(DraftEditLeaseResource.model_validate(result), request)
+
+
+@router.post(
+    "/{space_id}/skills/{skill_id}/draft/lease/takeover",
+    response_model=Envelope[DraftEditLeaseResource],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def takeover_draft_edit_lease(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: DraftEditLeaseServiceProtocol = Injected(DraftEditLeaseServiceProtocol),
+) -> Envelope[DraftEditLeaseResource]:
+    result = service.takeover(space_id=space_id, skill_id=skill_id, actor_id=user_id)
+    return envelope(DraftEditLeaseResource.model_validate(result), request)
+
+
+@router.post(
+    "/{space_id}/skills/{skill_id}/editor-requests",
+    status_code=201,
+    response_model=Envelope[SkillEditorRequestCreated],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def create_space_skill_editor_request(
+    body: CreateSkillEditorRequest,
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillEditorRequestServiceProtocol = Injected(
+        SpaceSkillEditorRequestServiceProtocol
+    ),
+) -> Envelope[SkillEditorRequestCreated]:
+    result = service.create_request(
+        space_id=space_id,
+        skill_id=skill_id,
+        applicant_user_id=user_id,
+        reason=body.reason,
+    )
+    return created(
+        SkillEditorRequestCreated(
+            work_order_id=result.id,
+            work_order_no=result.work_order_no,
+            status=result.status,
+        ),
+        request,
+    )
 
 
 @router.post(

@@ -413,7 +413,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The task grant/revoke operations also carry the target in ``bcs_bot_id``
 #: request-body fields rather than a ``bot_id`` parameter, adding two more
 #: operations without changing the path/query counts.
-_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 66}
+_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 75}
 
 
 def _schema() -> dict:
@@ -536,9 +536,11 @@ def test_the_pinned_number_of_operations_take_it():
     # count: 182 → 181. execute/dashboard take no user_id at all — see
     # _NO_USER_DIMENSION.
     # Caller identity context and call-type update add two operations.
+    # Space Skill Grant management adds four Space-addressed operations,
+    # editor-request command adds one, and permanent Draft Edit Lease adds four.
     # The owner-level routines aggregate (GET /bots/routines/all) adds one
-    # account-level operation: 183 → 184.
-    assert len(taking) == 184
+    # account-level operation; the merged surface contains 193 operations.
+    assert len(taking) == 193
 
 
 def test_the_exempt_operations_take_none():

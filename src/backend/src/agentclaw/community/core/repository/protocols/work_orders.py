@@ -101,6 +101,18 @@ class WorkOrderRepositoryProtocol(Protocol):
     ) -> WorkOrderRecord: ...
 
     @abstractmethod
+    def create_skill_editor_request(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        applicant_user_id: str,
+        applicant_name: str,
+        apply_reason: str,
+        env: str,
+    ) -> WorkOrderRecord: ...
+
+    @abstractmethod
     def list_items(
         self,
         *,
@@ -134,6 +146,18 @@ class WorkOrderRepositoryProtocol(Protocol):
 
     @abstractmethod
     def review_bot_editor_request(
+        self,
+        *,
+        work_order_id: int,
+        reviewer_user_id: str,
+        review_remark: str | None,
+        target_status: WorkOrderStatus,
+        notification: WorkOrderNotificationDraft,
+        env: str,
+    ) -> WorkOrderReviewResult: ...
+
+    @abstractmethod
+    def review_skill_editor_request(
         self,
         *,
         work_order_id: int,

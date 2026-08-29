@@ -60,6 +60,9 @@ from agentclaw.community.api.space_service import (
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
     WorkOrderServiceProtocol,
@@ -228,6 +231,7 @@ def make_client(bots):
                 binder.bind(SpaceServiceProtocol, to=unexpected)
                 binder.bind(SpaceMemberServiceProtocol, to=unexpected)
                 binder.bind(SpaceSkillQueryServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillGrantServiceProtocol, to=unexpected)
                 binder.bind(MarketFavoriteServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderNotificationServiceProtocol, to=unexpected)
@@ -741,6 +745,12 @@ _UNGRANTED_APP_CASES = {
     },
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): {
         "request": lambda client: client.get("/openapi/v1/bots/spaces/1/skills"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/grants"
+        ),
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites"): {

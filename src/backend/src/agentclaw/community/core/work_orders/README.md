@@ -7,7 +7,7 @@ and the atomic Space-join approval unit of work.
 ## Context Boundary
 
 ```yaml
-purpose: "Own approval work orders, recipient notifications, required decision callbacks, and transactional Space-join decisions."
+purpose: "Own approval work orders, notifications, dispatch to business-owned approval handlers, required decision callbacks, and transactional Space-join decisions."
 provides:
   - WorkOrderService
   - WorkOrderNotificationService
@@ -26,11 +26,13 @@ provides:
   - WorkOrderMessageContent
   - WorkOrderNotificationDetail
   - WorkOrderNotificationBadgeSummary
+  - SkillCollaboratorApprovalHandlerProtocol
   - WorkOrderDecisionCallbackDispatcher
   - WorkOrderCallbackCredential
 consumes:
   - "WorkOrderRepositoryProtocol (core.repository) — persistence and transactional state changes"
   - "SpaceRepositoryProtocol and SpaceAccessService — Space existence, membership, and OWNER authorization"
+  - "SkillCollaboratorApprovalHandlerProtocol — Skill-owned approval policy and atomic Grant transition"
   - "Qualified BCN HttpClient Plugin API — required friend-request approval callbacks"
 consumed_by:
   - "adapters/http/openapi_v1/work_orders — public work-order and notification operations"
@@ -68,7 +70,7 @@ and client compatibility plan.
 | Persisted notification category | `APPROVAL`, `NOTICE` |
 | List category filter | `ALL`, `APPROVAL`, `NOTICE` |
 | List query type | `PENDING_FOR_ME`, `INITIATED_BY_ME`, `PROCESSED_BY_ME` |
-| Supported business type | `SPACE_JOIN`, `BOT_COLLABORATOR`, and `BOT_FRIEND`; the unified Service API also accepts registered business-module-defined `biz_type` values. |
+| Supported business type | `SPACE_JOIN`, `BOT_COLLABORATOR`, `SKILL_COLLABORATOR`, and `BOT_FRIEND`; Skill policy uses its business-owned handler, while callback-backed types use decision callbacks. |
 
 `ALL` is a query-only filter and must never be persisted as a notification
 category. `WorkOrderEventType` is also a persisted whitelist. Approval events are
@@ -143,6 +145,8 @@ from an absent notification.
 | `409203` | 409 | `WorkOrderApplicantAlreadyMemberError` | `Applicant is already a space member` |
 | `409204` | 409 | `WorkOrderNoReviewerError` | `The space has no available approver` |
 | `409205` | 409 | `WorkOrderJoinNotAllowedError` | `The space does not accept join requests` |
+| `409208` | 409 | `WorkOrderSkillEditorRequestNotAllowedError` | `The Skill does not accept editor requests` |
+| `409209` | 409 | `WorkOrderSkillApplicantAlreadyEditorError` | `Applicant already has Skill editor access` |
 | `502201` | 502 | `WorkOrderCallbackError` | `Upstream work-order callback failed` |
 
 The numeric codes and fixed messages are enums in

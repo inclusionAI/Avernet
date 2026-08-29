@@ -65,6 +65,9 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision,
     WorkOrderEventCreatedResult,
 )
+from agentclaw.community.core.work_orders.protocols import (
+    SkillCollaboratorApprovalHandlerProtocol,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.staff_dept import (
     StaffDeptPlugin,
@@ -90,6 +93,7 @@ class WorkOrderService:
         collaborators: CollaboratorServiceProtocol,
         member_management: MemberManagementCapabilityService,
         staff_dept: StaffDeptPlugin,
+        skill_collaborator_approval_handler: SkillCollaboratorApprovalHandlerProtocol,
         decision_callbacks: WorkOrderDecisionCallbackDispatcher,
     ) -> None:
         self._repository = repository
@@ -101,6 +105,7 @@ class WorkOrderService:
         self._collaborators = collaborators
         self._member_management = member_management
         self._staff_dept = staff_dept
+        self._skill_collaborator_approval_handler = skill_collaborator_approval_handler
         self._decision_callbacks = decision_callbacks
 
     @staticmethod
@@ -155,6 +160,13 @@ class WorkOrderService:
         if registered_category is not event_category:
             raise WorkOrderInvalidEventError(
                 "event_type category does not match event_category"
+            )
+        if (
+            biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value
+            or event_type == WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
+        ):
+            raise WorkOrderInvalidEventError(
+                "Skill editor requests must use the Skill endpoint"
             )
         if event_category is NotificationCategory.APPROVAL:
             if not approvers or recipients:
@@ -274,6 +286,13 @@ class WorkOrderService:
             )
         if detail.work_order.biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
             return self._review_bot_editor_request(
+                detail=detail,
+                actor_id=actor_id,
+                review_remark=normalized,
+                target_status=WorkOrderStatus(decision.value),
+            )
+        if detail.work_order.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
+            return self._skill_collaborator_approval_handler.process(
                 detail=detail,
                 actor_id=actor_id,
                 review_remark=normalized,

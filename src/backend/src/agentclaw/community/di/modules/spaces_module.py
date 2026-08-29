@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from injector import Binder, Module, singleton
+from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
@@ -14,6 +14,15 @@ from agentclaw.community.api.space_service import (
 )
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
+from agentclaw.community.api.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestServiceProtocol,
+)
+from agentclaw.community.api.draft_edit_lease_service import (
+    DraftEditLeaseServiceProtocol,
 )
 from agentclaw.community.core.bot_management.bot_space import (
     BotSpaceAccessProtocol,
@@ -27,6 +36,13 @@ from agentclaw.community.core.repository.protocols.market_favorites import (
     MarketFavoriteRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SpaceSkillRepository,
+    DraftEditLeaseRepository,
+)
+from agentclaw.community.core.repository.protocols.work_orders import (
+    WorkOrderRepositoryProtocol,
+)
 from agentclaw.community.core.spaces.services import (
     SpaceAccessService,
     SpaceMemberService,
@@ -35,9 +51,19 @@ from agentclaw.community.core.spaces.services import (
 from agentclaw.community.core.skill_center.services.space_skill_query_service import (
     SpaceSkillQueryService,
 )
+from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
+    SpaceSkillGrantService,
+)
+from agentclaw.community.core.skill_center.services.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestService,
+)
+from agentclaw.community.core.skill_center.services.draft_edit_lease_service import (
+    DraftEditLeaseService,
+)
 from agentclaw.community.core.spaces.protocols import (
     SpaceAccessServiceProtocol as CoreSpaceAccessServiceProtocol,
 )
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 class SpacesModule(Module):
@@ -76,3 +102,35 @@ class SpacesModule(Module):
             to=MarketFavoriteService,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    @inject
+    def space_skill_grant_service(
+        self,
+        access: CoreSpaceAccessServiceProtocol,
+        repository: SpaceSkillRepository,
+    ) -> SpaceSkillGrantServiceProtocol:
+        """Assemble Grant policy with environment resolution at the DI boundary."""
+        return SpaceSkillGrantService(access, repository, get_current_env)
+
+    @singleton
+    @provider
+    @inject
+    def space_skill_editor_request_service(
+        self, repository: WorkOrderRepositoryProtocol
+    ) -> SpaceSkillEditorRequestServiceProtocol:
+        """Assemble editor-request policy with environment at the boundary."""
+        return SpaceSkillEditorRequestService(repository, get_current_env)
+
+    @singleton
+    @provider
+    @inject
+    def draft_edit_lease_service(
+        self,
+        access: CoreSpaceAccessServiceProtocol,
+        grants: SpaceSkillGrantServiceProtocol,
+        repository: DraftEditLeaseRepository,
+    ) -> DraftEditLeaseServiceProtocol:
+        """Assemble permanent Draft Lease policy at the composition root."""
+        return DraftEditLeaseService(access, grants, repository, get_current_env)

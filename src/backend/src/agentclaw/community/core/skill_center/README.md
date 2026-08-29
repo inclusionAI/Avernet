@@ -20,6 +20,10 @@ provides:
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
+  - "SpaceSkillGrantService"
+  - "SpaceSkillEditorRequestService"
+  - "SkillCollaboratorApprovalHandler"
+  - "DraftEditLeaseService"
   - "RuntimeProjectionResolver"
   - "resolve_effective_mcp_server_codes"
   - "BotCapabilityStateReader"
@@ -60,6 +64,10 @@ consumes:
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
   - "BotRuntimeProjectorProtocol"
+  - "SpaceAccessServiceProtocol"
+  - "SpaceSkillRepository"
+  - "WorkOrderRepositoryProtocol"
+  - "DraftEditLeaseRepository"
 internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
@@ -69,6 +77,8 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
+  - agentclaw.community.core.repository.protocols.work_orders
+  - agentclaw.community.core.work_orders
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.capability_desired_state
@@ -86,6 +96,9 @@ internal_dependencies:
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
   - agentclaw.community.core.spaces.services
+  - agentclaw.community.core.spaces.errors
+  - agentclaw.community.core.spaces.models
+  - agentclaw.community.core.spaces.protocols
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.task_queue    # durable enqueue for Bot-level activation sync
   - agentclaw.community.core.workspace
