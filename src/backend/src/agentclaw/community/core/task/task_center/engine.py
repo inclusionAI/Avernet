@@ -1783,8 +1783,8 @@ class ExecutionEngine:
         dispatch 给 dream-mode bot。不持锁、不阻塞 ``on_*``/``_maybe_propagate_hung`` 汇报路径:``asyncio.create_task``
         调度后台协程,异常经 ``_on_bg_done`` 记 log。端口不全(无 runner/bot/bcs,如单测 stub)→ 静默跳过。"""
         logger.info("[task][bbs_mode], begin schedule bbs notify, task_id=%s", task_id)
-        if self._runner:
-            logger.info("[task][bbs_mode], _runner is none, task_id=%s", task_id)
+        if not self._runner:
+            logger.info("[task][bbs_mode], _runner is none, skip, task_id=%s", task_id)
             return
         bg = asyncio.create_task(self._runner.run_bbs(execution_graph))
         self._bg_tasks.add(bg)
@@ -1799,13 +1799,14 @@ class ExecutionEngine:
         """自 node 往上:若父的子全终态且含 HUNG → 父 HUNG(不计额外 loop_round,纯冒泡)→ 继续上行。
         到根 → 图终态收口(HUNG)。若图已 HUNG(loop_exhausted 等已收口)→ 不覆盖 hung_reason。
 
-        **BBS 可恢复态(spec §10.5)**:仅当根冒泡的来源 ``hung_reason``=``miss_depth_exhausted``
-        (LAN 未匹配执行者,BBS 中继可接)且图 ``bbs_mode`` 已置、根未被 claim 时,拒不置图 HUNG,
-        维持根原态(PLANNING 待接力)。其它 reason(``root_gap_no_decompose``/``gap_no_progress``/
-        ``plan_round_exhausted``/``exec_stuck`` 等)是**硬死锁**(无规划端口 / 拆不出 / 重规划无进展 /
-        执行卡死),即使 bbs_mode 也按硬 HUNG 收口(无规划端口可继 / 无进展可恢复;为避免"图一直 RUNNING 假活着"
-        统一收口 HUNG)。"""
-        # 仅 MISS 深度闸门升 BBS 视为可恢复;其它 reason 即便 bbs_mode 也走硬 HUNG 冒泡
+        **BBS 可恢复态(spec §10.5,调度优化)**:只要根节点进入 HUNG(任一 ``hung_reason``:
+        ``miss_depth_exhausted``/``root_gap_no_decompose``/``gap_no_progress``/
+        ``plan_round_exhausted``/``exec_stuck``/``child_hung`` 等)且图 ``bbs_mode`` 已置、根未被
+        claim 时,即升 BBS 可恢复态(派发 ``run_bbs``);``loop_exhausted`` 由 ``_bump_loop_round``
+        提前置图 HUNG,被上方 ``g.status==HUNG`` 短路拦截、不再调度,保留反失控兜底。在途 BBS
+        (``bbs_owner`` 非空)亦跳过,不重复派发。"""
+        # recoverable 仅用于下方"子 HUNG 冒泡到根(分支2)"路径:miss_depth_exhausted 时根保持
+        # PLANNING 待 BBS 接力(不翻 HUNG);其它 reason 走正常冒泡→根置 HUNG→分支1 升 BBS。
         recoverable = hung_reason == "miss_depth_exhausted"
         cur = node_id
         while True:
@@ -1824,17 +1825,20 @@ class ExecutionEngine:
                     if g.status == Status.HUNG:
                         return
                     if (
-                        recoverable
-                        and g.extend_props.get("bbs_mode")
+                        g.extend_props.get("bbs_mode")
                         and not g.extend_props.get("bbs_owner")
                     ):
+                        # 优化:只要根进入 HUNG 即升 BBS 可恢复态(不限 miss_depth_exhausted)。
+                        # loop_exhausted(MAX_LOOP)已由上方 g.status==HUNG 短路 return 拦截,不会走到这里,
+                        # 故反失控兜底仍保留;在途 BBS(根已被 claim,bbs_owner 非空)也在此跳过,不重复派发。
                         logger.info(
-                            "[task][hung-propagate] task=%s 根冒泡被 BBS 可恢复态拦截(reason=%s),保持根原态",
+                            "[task][hung-propagate] task=%s 根 HUNG(reason=%s)→升 BBS 可恢复态",
                             task_id,
                             hung_reason,
                         )
                         self._schedule_bbs_notify(task_id, g)
                         return
+                    # 无 bbs_mode 或已被 BBS claim → 硬 HUNG 收口(不再调度,等在途 BBS 回投)
                     self._graph.update_task_graph_info(
                         task_id,
                         TaskGraphPatch(
