@@ -265,6 +265,13 @@ class TaskModule(Module):
             bot_token_provider = injector.get(BcsBotTokenProvider)
         except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
             bot_token_provider = NullBcsBotTokenProvider()
+        from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
+            NotifyMessagesProvider, NullNotifyMessagesProvider,
+        )
+        try:
+            notify_messages_provider = injector.get(NotifyMessagesProvider)
+        except Exception:  # noqa: BLE101 未绑定时降级 noop(不阻断)
+            notify_messages_provider = NullNotifyMessagesProvider()
         return TaskService(
             graph,
             harness=harness,
@@ -282,6 +289,7 @@ class TaskModule(Module):
             task_auth_gate=task_auth_gate,
             api_base_url=self._resolve_api_base_url(bcs_callback_url),
             bot_token_provider=bot_token_provider,
+            notify_messages_provider=notify_messages_provider,
             task_search_skill_enabled=task_dispatch.task_search_skill_enabled,
             task_settings=task_settings,
         )

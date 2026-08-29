@@ -111,6 +111,9 @@ class StaticPlanDefinition:
     def validate_bindings(self) -> None:
         missing = ["<entry>"] if not self.entry_bot_id else []
         for node in self.nodes:
+            if node.node_type == "notify":
+                # notify 终端通知节点无 bot 绑定(直走钉钉通道),不参与 bot binding 校验。
+                continue
             if node.node_type == "collaboration":
                 unbound = not node.bot_ids or any(not bot_id for bot_id in node.bot_ids)
             else:

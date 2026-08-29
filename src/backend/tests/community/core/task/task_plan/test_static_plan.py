@@ -11,12 +11,23 @@ TEMPLATE_DIR = Path(__file__).parents[7] / "src" / "backend" / "src" / "agentcla
 
 def test_okr_template_declares_parallel_branches_and_join():
     plan = StaticPlanDefinition.from_file("okr-implementation", TEMPLATE_DIR)
+    by_id = {n.node_id: n for n in plan.nodes}
 
     assert plan.template_id == "okr-implementation"
-    assert plan.nodes[0].depends_on == ()
-    assert plan.nodes[1].depends_on == ()
-    assert plan.nodes[2].depends_on == ("risk_assessment", "marketing_strategy")
-    assert plan.nodes[3].depends_on == ("strategy_approval",)
+    # 两条根并行支:风险评估群 / 大促营销策略 均无前置
+    assert by_id["risk_assessment"].depends_on == ()
+    assert by_id["marketing_strategy"].depends_on == ()
+    # 营销策略扇出→(圈人、选品),后与风险结果四路在 strategy_approval 汇合(join)
+    assert set(by_id["crowd_selection"].depends_on) == {"marketing_strategy"}
+    assert set(by_id["product_selection"].depends_on) == {"marketing_strategy"}
+    assert by_id["strategy_approval"].depends_on == (
+        "risk_assessment", "marketing_strategy", "crowd_selection", "product_selection",
+    )
+    # 实施依赖审核;notify 终端节点依赖实施并发钉钉通知(无 bot 绑定,validate_bindings 豁免)
+    assert by_id["implementation"].depends_on == ("strategy_approval",)
+    assert by_id["notify_done"].depends_on == ("implementation",)
+    assert by_id["notify_done"].node_type == "notify"
+    plan.validate_bindings()  # notify 无 bot_id 不应触发 missing
 
 
 def test_static_plan_rejects_missing_required_input():

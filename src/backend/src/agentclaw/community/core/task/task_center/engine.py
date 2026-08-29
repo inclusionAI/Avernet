@@ -89,6 +89,7 @@ class ExecutionEngine:
         task_settings=None,
         api_base_url: str = "",
         bot_token_provider=None,
+        notify_messages_provider=None,
     ) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
@@ -109,6 +110,7 @@ class ExecutionEngine:
         self._task_settings = task_settings
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
+        self._notify_provider = notify_messages_provider
         self._bg_tasks: set[asyncio.Task] = set()
         self._locks: dict[str, threading.RLock] = {}
         self._locks_guard = threading.RLock()
@@ -616,6 +618,65 @@ class ExecutionEngine:
                     "[task][static-plan] task=%s node=%s 无定义,跳过",
                     task_id,
                     node.node_id,
+                )
+                continue
+            # notify 终端节点:任务实施完成通知触发用户(DingTalk account_id),不派发 bot;
+            # 受信方=execution_config.owner_account_id(缺省 guoke.gk),凭证未配/投递失败→provider.send
+            # 返 None,节点仍置 DONE 不阻塞 graph 终态(与 NullProvider 降级语义一致);不走 on_report 避免
+            # acceptance PENDING+PASS 非法翻态,PENDING→DONE 经 status 直驱表允许。
+            if getattr(definition, "node_type", "bot") == "notify":
+                cfg = self._graph._execution_config(task_id)
+                owner_acct = cfg.get("owner_account_id") if isinstance(cfg, dict) else None
+                recipient = owner_acct or "guoke.gk"
+                logger.info(
+                    "[task][static-plan] notify task=%s node=%s recipient=%s template=%s",
+                    task_id, node.node_id, recipient, runtime.definition.template_id,
+                )
+                ext_id = None
+                send_err: str | None = None
+                provider = self._notify_provider
+                if provider is not None:
+                    try:
+                        from agentclaw.community.plugin_api.notify_sender import NotifyMessage
+                        title = f"OKR 实施完成：{runtime.definition.template_id}"
+                        body = (
+                            f"OKR 任务已实施完成。\n模板: {runtime.definition.template_id}\n"
+                            f"通过 OKR实现Bot 完成风险评估 / 营销策略 / 审核 / 投放实施流程。"
+                        )
+                        ext_id = provider.send(
+                            NotifyMessage(title=title, body=body, recipient=recipient),
+                            channel="tc_card",
+                        )
+                    except Exception as ex:  # noqa: BLE101 provider never raise,防实现越界
+                        send_err = f"{type(ex).__name__}: {ex}"
+                        logger.warning(
+                            "[task][static-plan] notify send 异常 task=%s node=%s: %s",
+                            task_id, node.node_id, send_err,
+                        )
+                else:
+                    logger.info(
+                        "[task][static-plan] notify provider 未注入(NullProvider noop) task=%s node=%s",
+                        task_id, node.node_id,
+                    )
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id, node_id=node.node_id,
+                        status=Status.DONE, run_mode="notify",
+                        assignee=f"dingtalk:{recipient}",
+                        output_patch={
+                            "notify_result": {
+                                "recipient": recipient,
+                                "sent": ext_id is not None,
+                                "external_id": ext_id,
+                                "error": send_err,
+                                "channel": "tc_card",
+                            }
+                        },
+                    )
+                )
+                logger.info(
+                    "[task][static-plan] notify dispatched task=%s node=%s sent=%s ext_id=%s",
+                    task_id, node.node_id, ext_id is not None, ext_id,
                 )
                 continue
             # bbs_handoff 旁路:不可实现任务转 BBS 广场(与 approval 并行,不阻塞主实施线)。

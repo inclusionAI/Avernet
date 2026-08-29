@@ -72,6 +72,12 @@ nodes:
       approval_result: $.strategy_approval.output.approval_result
     output:
       implementation_result: $.result
+  - id: notify_done
+    name: 通知钉钉
+    type: notify
+    depends_on: [implementation]
+    input:
+      implementation_result: $.implementation.output.implementation_result
   - id: risk_unhandled_to_bbs
     name: 不可实现任务转BBS广场
     type: bbs_handoff

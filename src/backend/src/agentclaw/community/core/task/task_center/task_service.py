@@ -105,6 +105,7 @@ class TaskService:
         task_settings=None,
         api_base_url: str | None = None,
         bot_token_provider=None,
+        notify_messages_provider=None,
     ) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
@@ -132,6 +133,7 @@ class TaskService:
         self._task_search_skill_enabled = task_search_skill_enabled
         self._task_settings = task_settings
         self._bot_token_provider = bot_token_provider
+        self._notify_provider = notify_messages_provider
         # _build_engine(seam)签名保持不变(测试子类按旧签名覆写);claim_on JOIN 经 self._task_auth_gate
         # 传入 ExecutionEngine→dispatcher,不进签名避免破坏覆写 seam。
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
@@ -171,6 +173,7 @@ class TaskService:
             task_settings=self._task_settings,
             api_base_url=self._api_base_url,
             bot_token_provider=self._bot_token_provider,
+            notify_messages_provider=self._notify_provider,
         )
 
     async def run_template(self, template_id: str, inputs: dict[str, Any], *,
