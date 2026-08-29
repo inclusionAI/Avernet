@@ -212,7 +212,6 @@ def _bot_editor_service():
     member_management = MagicMock()
     staff_dept = MagicMock(spec=StaffDeptPlugin)
     skill_handler = MagicMock()
-    skill_handler = MagicMock()
     decision_callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
     decision_callbacks.requires_callback.return_value = False
     service = WorkOrderService(
