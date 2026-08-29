@@ -152,6 +152,39 @@ def test_compose_scopes_by_entity_id_while_binding_lookup_uses_owner_id():
     )
 
 
+def test_an_already_resolved_mcp_set_rides_on_the_compose_request():
+    """The caller's effective MCP set reaches the composer instead of a re-read.
+
+    Capability projection resolves this set before it decides anything — the
+    projected codes and the Passport scope come out of it — and the compose
+    here would otherwise put the same ``collect_bot_active_mcps`` query to the
+    same database again. Threading it is what removes the second read; the
+    collector still enriches and merges each entry.
+    """
+    service, m = _make_service()
+
+    service.sync_symlinks([], effective_mcps=[{"server_code": "a"}])
+
+    req = m["composer"].compose.call_args.args[0]
+    assert req.effective_mcps == ({"server_code": "a"},)
+    assert req.bot_id == "bot7"
+
+
+def test_a_caller_with_no_resolved_mcp_set_leaves_the_collector_to_read_it():
+    """``None``, not ``()``: the collector must still do its own read.
+
+    Every non-projection entry point (a channel edit, an MCP edit, the
+    device-activated listener) composes without having collected anything.
+    Handing those an empty set would compose an artifact with no MCP servers
+    at all.
+    """
+    service, m = _make_service()
+
+    service.sync_symlinks([])
+
+    assert m["composer"].compose.call_args.args[0].effective_mcps is None
+
+
 def test_entity_id_defaults_to_owner_id_when_omitted():
     """Back-compat for a call site that predates the entity_id/owner_id split."""
     service, m = _make_service(owner_id="org_7", entity_id=None)

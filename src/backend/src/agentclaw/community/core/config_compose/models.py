@@ -6,8 +6,9 @@ composer services pass around while turning DB state into a ``BotConfigArtifact`
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     "CollectedSkill",
     "CollectedFile",
 ]
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -37,7 +40,15 @@ class StdioLaunch:
 
 @dataclass(frozen=True)
 class ComposeRequest:
-    """Identifies the bot + engine context a single compose runs for."""
+    """Identifies the bot + engine context a single compose runs for.
+
+    One request object serves exactly one ``ConfigComposer.compose`` pass, and
+    that is what makes the two non-identity fields at the end safe: they are
+    per-compose carry-alongs, scoped by the request's own lifetime. Both are
+    excluded from equality — they are *derived from* the identity above, never
+    part of it, so two requests naming the same bot are the same request
+    whether or not one of them arrived with its MCP set already resolved.
+    """
 
     entity_id: str
     bot_id: str
@@ -45,6 +56,42 @@ class ComposeRequest:
     engine_type: str
     entity_type: str = "staff"
     version: int | None = None  # set for a published snapshot; None for live/draft
+    effective_mcps: tuple[dict[str, Any], ...] | None = field(
+        default=None, compare=False
+    )
+    """The bot's effective MCP set, when the caller already resolved it.
+
+    A whole-artifact delivery resolves this set during plan resolution
+    (``BotRuntimeProjector._build_plan``) and the composer would otherwise
+    re-read the identical set from the same database microseconds later — both
+    reads go through ``collect_bot_active_mcps`` with
+    ``strict_policy_context=True``, so they are contractually the same answer.
+    Handing the resolved value down is what makes the second read unnecessary;
+    ``None`` means nobody resolved it yet and the collector reads it itself.
+
+    Empty is *not* ``None``: a bot with no MCPs threads an empty tuple, and the
+    collector must not fall back to a second read for it.
+    """
+
+    _memo: dict[str, Any] = field(
+        default_factory=dict, compare=False, repr=False
+    )
+    """Backing store for :meth:`memoized`. Never read or written directly."""
+
+    def memoized(self, key: str, build: Callable[[], _T]) -> _T:
+        """``build()``'s result, computed at most once for this request.
+
+        Scoped to the request object rather than to the caller, deliberately.
+        The collector that uses this is a process-wide singleton, and compose
+        runs inside ``asyncio.to_thread`` — so a memo kept on the collector
+        would let one bot's per-bot service be handed to another bot's compose,
+        concurrently and silently. A request is created for one compose and
+        passed to every collector method within it, which is exactly the
+        lifetime a per-compose memo wants.
+        """
+        if key not in self._memo:
+            self._memo[key] = build()
+        return self._memo[key]
 
 
 @dataclass(frozen=True)

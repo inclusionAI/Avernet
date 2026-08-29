@@ -30,7 +30,10 @@ class CapabilityRuntimeBoundary(Protocol):
     """
 
     async def project_skills(
-        self, *, desired_skills: list[dict] | None = None
+        self,
+        *,
+        desired_skills: list[dict] | None = None,
+        effective_mcps: list[dict] | None = None,
     ) -> bool:
         """Apply one complete resolver-owned Skill snapshot to the runtime.
 
@@ -38,6 +41,12 @@ class CapabilityRuntimeBoundary(Protocol):
         whole-artifact engine an artifact compose and the outbound apply
         request — but keeping off the event loop is the implementation's
         responsibility, not the caller's. Await it like ``project_mcps``.
+
+        ``effective_mcps`` is for the whole-artifact case only, and for the
+        same reason ``desired_skills`` is passed: the compose behind this call
+        re-reads desired state that plan resolution already read, and handing
+        the resolved value over is what avoids the second pass. A runtime with
+        a separate MCP endpoint composes nothing here and leaves it ``None``.
         """
         ...
 
@@ -83,6 +92,13 @@ class ResolvedCapabilityPlan:
     projection: RuntimeProjection
     #: Effective Default CLI facts, as the authorization service holds them.
     effective_cli_items: list[dict]
+    #: The Bot's effective MCP set — default policy ∪ installed ∪ Skill
+    #: dependencies — as ``collect_bot_active_mcps`` resolved it for the
+    #: projected MCP codes. Carried rather than recomputed because a
+    #: whole-artifact engine composes its document from the same set: without
+    #: this the delivery would re-read it from the database it was just read
+    #: from. Bare association entries, no MCP Center detail merged in.
+    effective_mcp_entries: list[dict]
     #: Per-MCP execution identity, resolved during plan resolution because it
     #: can fail — see ``BotRuntimeProjector._resolve_mcp_identity_modes``.
     identity_modes: Mapping[str, object]

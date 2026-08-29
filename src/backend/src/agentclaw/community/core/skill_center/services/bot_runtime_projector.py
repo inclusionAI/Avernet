@@ -309,6 +309,7 @@ class BotRuntimeProjector:
             engine=engine,
             projection=projection,
             effective_cli_items=effective_cli_items,
+            effective_mcp_entries=effective_mcp_entries,
             identity_modes=identity_modes,
         )
 

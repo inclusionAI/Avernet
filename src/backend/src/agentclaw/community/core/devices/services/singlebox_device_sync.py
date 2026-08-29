@@ -23,7 +23,15 @@ class SingleboxDeviceSyncService(DeviceSync):
     def __init__(self, delegate: DeviceSync) -> None:
         self._delegate = delegate
 
-    def sync_symlinks(self, symlinks: list[dict[str, Any]]) -> dict[str, Any]:
+    def sync_symlinks(
+        self,
+        symlinks: list[dict[str, Any]],
+        *,
+        effective_mcps: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        # ``effective_mcps`` is a whole-artifact hint; the BaaS transport
+        # behind this wrapper consumes the symlinks directly, so it is
+        # accepted (the contract declares it) and dropped here.
         return self._delegate.sync_symlinks(symlinks)
 
     def sync_bot_config(

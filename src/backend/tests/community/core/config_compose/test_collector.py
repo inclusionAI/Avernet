@@ -191,6 +191,136 @@ def test_mcps_require_strict_policy_context_for_a_complete_artifact():
     )
 
 
+@pytest.mark.unit
+def test_one_compose_builds_one_skill_set_service():
+    """``skills`` and ``mcps`` of one compose share a single service.
+
+    Building it is not free — the factory re-resolves the bot's workspace
+    paths, re-reads the bot row, and mints a ``SkillService`` whose
+    construction mkdirs against the shared ``/aidesktop`` mount. The request's
+    identifiers fully determine the result, so a compose that built it twice
+    paid for the same object twice.
+    """
+    svc = MagicMock()
+    svc.get_active_skills.return_value = []
+    svc.collect_bot_active_mcps.return_value = []
+    factory = _factory_returning(svc)
+    collector = ConfigComposerInputCollector(
+        skill_set_service_factory=factory,
+        mcp_config_service=MagicMock(),
+        resource_repository=MagicMock(),
+        bot_repo=MagicMock(),
+        path_factory=MagicMock(),
+        identity_service=MagicMock(),
+        overrides_reader=_reader_over(None),
+        local_mcp_registry=_registry_over({}),
+    )
+
+    req = _req()
+    collector.skills(req)
+    collector.mcps(req)
+
+    assert factory.create.call_count == 1
+
+
+@pytest.mark.unit
+def test_a_memoized_service_never_crosses_from_one_bot_to_another():
+    """The memo is per-request, so bot B's compose cannot observe bot A's service.
+
+    The collector is a process-wide singleton and compose runs on a thread
+    pool, so a memo held on the collector would eventually hand one bot's
+    per-bot service — its workspace paths, its bot row — to another bot's
+    compose. Two requests, two services, however many calls each makes.
+    """
+    factory = MagicMock()
+    services = [MagicMock(), MagicMock()]
+    for svc in services:
+        svc.get_active_skills.return_value = []
+        svc.collect_bot_active_mcps.return_value = []
+    factory.create.side_effect = services
+    collector = ConfigComposerInputCollector(
+        skill_set_service_factory=factory,
+        mcp_config_service=MagicMock(),
+        resource_repository=MagicMock(),
+        bot_repo=MagicMock(),
+        path_factory=MagicMock(),
+        identity_service=MagicMock(),
+        overrides_reader=_reader_over(None),
+        local_mcp_registry=_registry_over({}),
+    )
+
+    bot_a = ComposeRequest(
+        entity_id="staff_u1", bot_id="botA", user_id="u1", engine_type="openclaw"
+    )
+    bot_b = ComposeRequest(
+        entity_id="staff_u2", bot_id="botB", user_id="u2", engine_type="openclaw"
+    )
+    collector.skills(bot_a)
+    collector.skills(bot_b)
+    collector.mcps(bot_b)
+
+    assert factory.create.call_count == 2
+    assert [
+        call.kwargs["bot_id"] for call in factory.create.call_args_list
+    ] == ["botA", "botB"]
+    # Bot B's second call reused bot B's service, not bot A's.
+    services[0].collect_bot_active_mcps.assert_not_called()
+    services[1].collect_bot_active_mcps.assert_called_once()
+
+
+@pytest.mark.unit
+def test_mcps_reuse_the_set_the_request_already_carries():
+    """A resolved set on the request replaces the collector's own read.
+
+    Whole-artifact delivery resolves the effective MCP set during plan
+    resolution and threads it here; re-collecting would put the identical
+    query against the identical database microseconds later. The threaded
+    entries are the bare associations ``collect_bot_active_mcps`` returns, so
+    everything downstream — Center enrichment, the per-server merge — still
+    runs over them.
+    """
+    svc = MagicMock()
+    svc.mcp_center.get_mcp_detail.return_value = {
+        "runMode": "REMOTE", "endpoints": []
+    }
+    mcp_cfg = MagicMock()
+    mcp_cfg.build_mcp_sync_payload.return_value = ("kee", {}, "PROD", "http")
+
+    inputs = _collector(skill_set_service=svc, mcp_config_service=mcp_cfg).mcps(
+        ComposeRequest(
+            entity_id="staff_u1", bot_id="bot1", user_id="u1",
+            engine_type="teclaw",
+            effective_mcps=({"server_code": "a"}, {"server_code": "b"}),
+        )
+    )
+
+    svc.collect_bot_active_mcps.assert_not_called()
+    assert [i.mcp_data["server_code"] for i in inputs] == ["a", "b"]
+    assert mcp_cfg.build_mcp_sync_payload.call_count == 2
+
+
+@pytest.mark.unit
+def test_an_empty_carried_set_is_not_a_missing_one():
+    """``()`` means "this bot has no MCPs", not "nobody resolved them".
+
+    A falsy check here would re-read the database for exactly the bots the
+    reuse is cheapest for, and — worse — could compose a set the projection
+    that called it never declared.
+    """
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = [{"server_code": "ghost"}]
+
+    inputs = _collector(skill_set_service=svc).mcps(
+        ComposeRequest(
+            entity_id="staff_u1", bot_id="bot1", user_id="u1",
+            engine_type="teclaw", effective_mcps=(),
+        )
+    )
+
+    assert inputs == []
+    svc.collect_bot_active_mcps.assert_not_called()
+
+
 _HITL_CATALOG = {
     "hitl": {
         "command": "python3",
