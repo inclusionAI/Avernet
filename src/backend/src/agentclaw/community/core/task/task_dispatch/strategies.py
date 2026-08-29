@@ -29,13 +29,14 @@ logger = logging.getLogger("task.dispatcher")
 # discovered candidates as assignees, because discovered Bots may not have the
 # task-claim switch enabled in the target environment.
 _RULE_TEST_BOT_POOL: tuple[str, ...] = (
+    # 仅取已在 BCN 开启 task_claim_mode 的 owner 内 pool bot,使 claim-join 不误 drop、
+    # 随机抽样命中数 == 派发数稳定覆盖协作群链路(全 claim_on,8 条)。
+    # 已剔除 claim_mode_off:`20260824_nwlj25w6:35983`、`20260825_aeqp3xky:440718` 需 owner 开 claim 才可回填。
     "20260825_bohtfhe6:35983",
     "default:35983",
-    "20260824_nwlj25w6:35983",
     "default:146836",
     "20260825_p8e63hms:35983",
     "20260823_1c4am0ei:146836",
-    "20260825_aeqp3xky:440718",
     "20260826_q3tbj2da:146836",
     "20260826_fmszf5aq:146836",
     "20260826_20rphqo0:146836",
@@ -412,15 +413,21 @@ def _dropped_unauthorized(candidates: list[dict], dropped_ids: list[str | None])
     """JOIN 丢掉的候选 → ``unauthorized_bots`` 条目列表(供 dispatcher 写 run_info.extend_props)。
 
     与 dashboard 现有 ``unauthorized_bots`` 契约对齐:``{bot_id(无冒号 product), owner_user_id, reason}``。
-    owner 经 ``_find_candidate`` 回查(无候选时空串);reason=``claim_mode_off``(claim_on 未开启)。
-    """
+    owner 优先取 ``_find_candidate`` 回查候选的 ``owner_id``(BCSFuse/search item 自带 owner_id);
+    无候选回查时(规则派发 ``_RULE_TEST_BOT_POOL`` 的 ``product:owner`` bot 不在 prefetch 候选内),
+    退而从 bot_id 的 ``:owner`` 后缀解析,避免 ``owner_user_id`` 落空串。
+    reason=``claim_mode_off``(claim_on 未开启)。"""
     out: list[dict] = []
     for bid in dropped_ids:
         c = _find_candidate(candidates, bid)
+        owner = (c.get("owner_id") if c else "") or ""
+        if not owner:
+            _, sep, suffix = (bid or "").partition(":")
+            owner = suffix if sep else ""
         out.append(
             {
                 "bot_id": _claim_product(bid),
-                "owner_user_id": (c.get("owner_id") if c else "") or "",
+                "owner_user_id": owner or "",
                 "reason": "claim_mode_off",
             }
         )
