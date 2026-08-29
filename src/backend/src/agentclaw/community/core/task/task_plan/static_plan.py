@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
+
+
+logger = logging.getLogger("task.static_plan")
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,12 @@ class StaticPlanDefinition:
             missing = set(node.depends_on) - known
             if missing:
                 raise ValueError(f"static plan node {node.node_id} depends on unknown nodes: {sorted(missing)}")
+        logger.info(
+            "[task][static-plan] parsed template=%s nodes=%s entry_bot_id=%s",
+            raw["template_id"],
+            [node.node_id for node in nodes],
+            raw.get("entry_bot_id"),
+        )
         # Kahn cycle check: static plans are DAGs, not planner input.
         remaining = {n.node_id: set(n.depends_on) for n in nodes}
         while remaining:
@@ -87,6 +97,11 @@ class StaticPlanDefinition:
         return plan
 
     def validate_input(self, value: dict[str, Any]) -> None:
+        logger.info(
+            "[task][static-plan] validate input template=%s keys=%s",
+            self.template_id,
+            sorted(value),
+        )
         for name, schema in self.input_schema.items():
             if schema.get("required") and (name not in value or value[name] in (None, "")):
                 raise ValueError(f"missing static plan input: {name}")
@@ -103,4 +118,13 @@ class StaticPlanDefinition:
             if unbound:
                 missing.append(node.node_id)
         if missing:
+            logger.error(
+                "[task][static-plan] bot binding validation failed template=%s missing=%s",
+                self.template_id,
+                missing,
+            )
             raise TaskStateError(f"template bot binding missing: node={','.join(missing)}")
+        logger.info(
+            "[task][static-plan] bot binding validation passed template=%s",
+            self.template_id,
+        )

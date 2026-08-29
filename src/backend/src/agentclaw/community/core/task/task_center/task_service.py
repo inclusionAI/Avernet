@@ -177,11 +177,31 @@ class TaskService:
                            owner_user_id: str, owner_bot_id: str) -> TaskOpResult:
         """Load and validate a static template, then enter the existing execute path."""
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
+        logger.info(
+            "[task][template-run] start template=%s owner_bot_id=%s input_keys=%s",
+            template_id,
+            owner_bot_id,
+            sorted(inputs),
+        )
         template_dir = Path(__file__).resolve().parents[3] / "configs" / "task-plans"
         template_path = template_dir / f"{template_id}.yaml"
-        definition = StaticPlanDefinition.from_file(template_id, template_dir)
-        definition.validate_input(inputs)
-        definition.validate_bindings()
+        try:
+            definition = StaticPlanDefinition.from_file(template_id, template_dir)
+            definition.validate_input(inputs)
+            definition.validate_bindings()
+        except Exception as exc:
+            logger.exception(
+                "[task][template-run] validation failed template=%s exc_type=%s",
+                template_id,
+                type(exc).__name__,
+            )
+            raise
+        logger.info(
+            "[task][template-run] validated template=%s nodes=%s entry_bot_id=%s",
+            template_id,
+            [node.node_id for node in definition.nodes],
+            definition.entry_bot_id,
+        )
         plan_yaml = template_path.read_text(encoding="utf-8")
         request = TaskInfoRequest(
             task_spec=RequestTaskSpec(
@@ -205,7 +225,16 @@ class TaskService:
                 "template_input": dict(inputs),
             },
         )
-        return await self.execute(request)
+        result = await self.execute(request)
+        logger.info(
+            "[task][template-run] submitted template=%s task=%s success=%s run_id=%s error=%s",
+            template_id,
+            result.task_id,
+            result.success,
+            result.run_id,
+            result.error,
+        )
+        return result
 
     @property
     def callback(self) -> TaskLoopCallback:

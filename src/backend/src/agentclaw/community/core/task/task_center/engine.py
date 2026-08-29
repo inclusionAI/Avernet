@@ -443,8 +443,23 @@ class ExecutionEngine:
         cfg = self._graph._execution_config(task_id)
         if cfg.get("task_type") != "static_plan":
             return None
-        definition = StaticPlanDefinition.from_yaml(str(cfg["static_plan_yaml"]))
-        return StaticPlanRuntime(definition, dict(cfg.get("template_input") or {}))
+        template_id = cfg.get("static_plan_id")
+        try:
+            definition = StaticPlanDefinition.from_yaml(str(cfg["static_plan_yaml"]))
+            runtime = StaticPlanRuntime(definition, dict(cfg.get("template_input") or {}))
+        except Exception:
+            logger.exception(
+                "[task][static-plan] runtime init failed task=%s template=%s",
+                task_id,
+                template_id,
+            )
+            raise
+        logger.debug(
+            "[task][static-plan] runtime loaded task=%s template=%s",
+            task_id,
+            template_id or definition.template_id,
+        )
+        return runtime
 
     async def _on_static_execute(self, task_id: str) -> None:
         runtime = self._static_runtime(task_id)
@@ -452,18 +467,53 @@ class ExecutionEngine:
             return
         graph = self._graph.query_task_dashboard(task_id)
         root = self._root(task_id)
+        logger.info(
+            "[task][static-plan] execute task=%s template=%s graph_status=%s root=%s relation_count=%s",
+            task_id,
+            runtime.definition.template_id,
+            graph.status.value,
+            root.node_id if root else None,
+            len(graph.relations),
+        )
         if root is None or graph.relations:
+            logger.info(
+                "[task][static-plan] execute task=%s skip materialize root_exists=%s already_materialized=%s",
+                task_id,
+                root is not None,
+                bool(graph.relations),
+            )
             return
         nodes = runtime.nodes(task_id, root.task_spec)
         self._graph.add_task_nodes(nodes, root.node_id)
+        logger.info(
+            "[task][static-plan] materialized task=%s node_count=%s",
+            task_id,
+            len(nodes),
+        )
         side: list[tuple] = []
         await self._prepare_static(task_id, runtime, side)
+        logger.info(
+            "[task][static-plan] execute task=%s prepared side_effects=%s",
+            task_id,
+            [item[0] for item in side],
+        )
         await self._drain(task_id, side)
 
     async def _prepare_static(self, task_id: str, runtime, side: list[tuple]) -> None:
         graph = self._graph.query_task_dashboard(task_id)
         readiness = runtime.ready(graph)
+        logger.info(
+            "[task][static-plan] prepare task=%s ready=%s skipped=%s",
+            task_id,
+            [node.node_id for node in readiness.ready],
+            [node.node_id for node in readiness.skipped],
+        )
         for node in readiness.skipped:
+            logger.info(
+                "[task][static-plan] skip node task=%s node=%s reason=enabled_when",
+                task_id,
+                node.node_id,
+            )
             self._graph.update_task_node_info(
                 TaskNodePatch(
                     task_id=task_id,
@@ -474,6 +524,11 @@ class ExecutionEngine:
                 )
             )
         if readiness.ready:
+            logger.info(
+                "[task][static-plan] dispatch ready nodes task=%s nodes=%s",
+                task_id,
+                [node.node_id for node in readiness.ready],
+            )
             # Reuse the normal dispatcher so static nodes retain the same
             # single-bot and runtime-created group delivery semantics.
             await self._prepare_into(task_id, side)
@@ -485,6 +540,15 @@ class ExecutionEngine:
         graph = self._graph.query_task_dashboard(task_id)
         reported = next((n for n in graph.tasks if n.node_id == node_id), None)
         definition = runtime.by_id.get(node_id)
+        logger.info(
+            "[task][static-plan] report task=%s node=%s node_found=%s definition_found=%s status=%s output_keys=%s",
+            task_id,
+            node_id,
+            reported is not None,
+            definition is not None,
+            reported.status.value if reported is not None else None,
+            sorted(reported.run_info.output) if reported is not None else [],
+        )
         if reported is not None and definition is not None:
             raw = dict(reported.run_info.output)
             mapped: dict[str, Any] = {}
@@ -502,8 +566,23 @@ class ExecutionEngine:
                 )
         side: list[tuple] = []
         await self._prepare_static(task_id, runtime, side)
-        if all(n.status in {Status.DONE, Status.FAILED, Status.HUNG} for n in self._graph.query_task_dashboard(task_id).tasks if n.node_id in runtime.by_id):
+        current = self._graph.query_task_dashboard(task_id)
+        terminal = all(
+            n.status in {Status.DONE, Status.FAILED, Status.HUNG}
+            for n in current.tasks
+            if n.node_id in runtime.by_id
+        )
+        logger.info(
+            "[task][static-plan] report processed task=%s node=%s next_side_effects=%s terminal=%s node_states=%s",
+            task_id,
+            node_id,
+            [item[0] for item in side],
+            terminal,
+            {n.node_id: n.status.value for n in current.tasks if n.node_id in runtime.by_id},
+        )
+        if terminal:
             self._graph.update_task_graph_info(task_id, TaskGraphPatch(status=Status.DONE))
+            logger.info("[task][static-plan] completed task=%s template=%s", task_id, runtime.definition.template_id)
             return
         await self._drain(task_id, side)
 

@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Any
 
 from agentclaw.community.core.task.domain.models import RuntimeInfo, Status, TaskNode, TaskSpec, Metadata, Context, Goal
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from .static_plan import StaticPlanDefinition, StaticPlanNodeDefinition
+
+
+logger = logging.getLogger("task.static_plan_runtime")
 
 
 @dataclass(frozen=True)
@@ -20,6 +24,12 @@ class StaticPlanRuntime:
         self.definition = definition
         self.inputs = inputs
         self.by_id = {n.node_id: n for n in definition.nodes}
+        logger.info(
+            "[task][static-plan-runtime] initialized template=%s input_keys=%s nodes=%s",
+            definition.template_id,
+            sorted(inputs),
+            list(self.by_id),
+        )
 
     def nodes(self, task_id: str, root_spec: TaskSpec) -> list[TaskNode]:
         result = []
@@ -34,6 +44,11 @@ class StaticPlanRuntime:
                 node_id=item.node_id, task_id=task_id, status=Status.PENDING,
                 task_spec=spec, run_info=RuntimeInfo(), node_run_graph=None,  # type: ignore[arg-type]
             ))
+        logger.info(
+            "[task][static-plan-runtime] materialized task=%s nodes=%s",
+            task_id,
+            [node.node_id for node in result],
+        )
         return result
 
     def ready(self, graph) -> StaticPlanReadiness:
@@ -44,6 +59,12 @@ class StaticPlanRuntime:
         returned to the engine and persisted through ``update_task_node_info``.
         """
         done = {n.node_id for n in graph.tasks if n.status == Status.DONE}
+        logger.info(
+            "[task][static-plan-runtime] readiness task=%s done=%s states=%s",
+            graph.task_id,
+            sorted(done),
+            {n.node_id: n.status.value for n in graph.tasks if n.node_id in self.by_id},
+        )
         ready: list[TaskNode] = []
         skipped: list[TaskNode] = []
         for node_id, definition in self.by_id.items():
@@ -59,6 +80,13 @@ class StaticPlanRuntime:
             self._decorate(node, definition, graph)
             node.run_info.extend_props["static_blocked"] = None
             ready.append(node)
+        logger.info(
+            "[task][static-plan-runtime] readiness result task=%s ready=%s skipped=%s waiting=%s",
+            graph.task_id,
+            [node.node_id for node in ready],
+            [node.node_id for node in skipped],
+            [node_id for node_id in self.by_id if node_id not in {n.node_id for n in ready} and node_id not in {n.node_id for n in skipped}],
+        )
         return StaticPlanReadiness(tuple(ready), tuple(skipped))
 
     def _decorate(self, node: TaskNode, definition: StaticPlanNodeDefinition, graph) -> None:
@@ -66,6 +94,11 @@ class StaticPlanRuntime:
         node.task_spec.context.extend_props["static_input"] = resolved
         node.task_spec.metadata.instruction = f"{node.task_spec.metadata.instruction}\n输入: {resolved}"
         node.run_info.extend_props["static_bot_id"] = definition.bot_id
+        logger.info(
+            "[task][static-plan-runtime] node ready task=%s node=%s type=%s depends_on=%s bot_id=%s bot_ids=%s input_keys=%s",
+            graph.task_id, node.node_id, definition.node_type, list(definition.depends_on),
+            definition.bot_id, list(definition.bot_ids), sorted(resolved),
+        )
         if definition.node_type == "collaboration":
             node.run_info.extend_props["pending_group_formation"] = GroupFormation(
                 bot_ids=[str(x) for x in definition.bot_ids if x], collab_mode="chat",
