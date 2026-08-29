@@ -1314,7 +1314,7 @@ async fn search_bots_route_defaults_to_public_and_protected_without_bearer() {
 }
 
 #[tokio::test]
-async fn search_bots_route_omits_is_friend_without_explicit_viewer() {
+async fn search_bots_route_infers_human_viewer_from_caller() {
     let query = Arc::new(RecordingBotQueryService {
         search_result: Ok(BotSearchResult {
             items: vec![query_entry("bot-alpha")],
@@ -1328,8 +1328,12 @@ async fn search_bots_route_omits_is_friend_without_explicit_viewer() {
         ChainUserIdentityPort::new(chain),
     )));
 
-    // No visibility param means the route uses the default public + protected scope,
-    // while friendship is only calculated when explicit viewer params are present.
+    // A human caller without explicit viewer params: the viewer is inferred from
+    // the caller (`human_alice`) so the returned `is_friend` marker is computed
+    // against the human's friend edges; discoverability is judged by
+    // `user_visibility` (default public + protected) and `visibility` is
+    // neutralized (all three values ⇒ unfiltered). The friendship FILTER still
+    // requires explicit viewer params (see ..._rejects_friendship_filter_without_explicit_viewer).
     let response = app
         .oneshot(
             Request::builder()
@@ -1345,15 +1349,28 @@ async fn search_bots_route_omits_is_friend_without_explicit_viewer() {
     let json: Value = serde_json::from_slice(&body).unwrap();
     let items = json["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
+    // The recording stub does not compute is_friend; real computation against
+    // the inferred viewer's friend edges is exercised by integration tests.
     assert!(items[0].get("is_friend").is_none());
 
     let commands = query.search_commands.lock().await;
     assert_eq!(commands.len(), 1);
+    // `visibility` is neutralized for a human viewer (all three ⇒ unfiltered).
     assert_eq!(
         commands[0].visibility.as_ref().unwrap(),
+        &vec![
+            "public".to_string(),
+            "protected".to_string(),
+            "private".to_string()
+        ]
+    );
+    // ...and discoverability is gated by `user_visibility` (default public + protected).
+    assert_eq!(
+        commands[0].user_visibility.as_ref().unwrap(),
         &vec!["public".to_string(), "protected".to_string()]
     );
-    assert!(commands[0].viewer_actor_id.is_none());
+    // The human caller is inferred as the viewer so `is_friend` is computed.
+    assert_eq!(commands[0].viewer_actor_id.as_deref(), Some("human_alice"));
     assert_eq!(commands[0].requester_actor_id.as_deref(), Some("human_alice"));
 }
 
@@ -1397,6 +1414,13 @@ async fn search_bots_route_uses_explicit_viewer_for_is_friend_filter() {
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].viewer_actor_id.as_deref(), Some("viewer-bot"));
     assert_eq!(commands[0].friendship, Some(bcs_service_api::BotSearchFriendshipFilter::Friends));
+    // bot viewer → discoverability judged by `visibility` (public + protected default);
+    // `user_visibility` stays None unless explicitly requested.
+    assert_eq!(
+        commands[0].visibility.as_ref().unwrap(),
+        &vec!["public".to_string(), "protected".to_string()]
+    );
+    assert!(commands[0].user_visibility.is_none());
 }
 
 #[tokio::test]
