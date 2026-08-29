@@ -871,6 +871,7 @@ class ExecutionEngine:
             patch.acceptance_result.verdict if patch.acceptance_result else "fold-only",
         )
         with self._lock_for(patch.task_id):
+            logger.info("[task_callback][on_report] begin update task node info, task=%s,", patch.task_id)
             result = self._graph.update_task_node_info(patch)
             if self._static_runtime(patch.task_id) is not None:
                 # Static plans use the same harness contract as dynamic tasks.
@@ -956,8 +957,10 @@ class ExecutionEngine:
             side = []
             verdict = patch.acceptance_result.verdict
             if verdict == AcceptanceVerdict.PASS:
+                logger.info("[task_callback][on_report] accept_pass,task=%s", patch.task_id)
                 await self._on_pass_collect(patch.task_id, patch.node_id, side)
             else:  # FAIL
+                logger.info("[task_callback][on_report] accept_fail,task=%s", patch.task_id)
                 await self._on_fail_collect(patch.task_id, patch.node_id, side)
             await self._drain(patch.task_id, side)
             return result
