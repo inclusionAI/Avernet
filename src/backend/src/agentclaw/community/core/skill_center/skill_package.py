@@ -8,7 +8,6 @@ import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_metadata import (
     SkillManifestError,
     SkillManifestErrorCode,
@@ -68,12 +67,12 @@ class SkillPackageValidator:
         total = 0
         with archive:
             for info in archive.infolist():
+                normalized_path = self._normalize_path(info.filename)
                 file_kind = (info.external_attr >> 16) & 0o170000
                 if info.is_dir():
                     if file_kind not in (0, 0o040000):
                         raise SkillPackageInvalidError("unsafe_file_path")
                     continue
-                normalized_path = self._normalize_path(info.filename)
                 if file_kind not in (0, 0o100000):
                     raise SkillPackageInvalidError("unsafe_file_path")
                 if self._is_ignored_path(normalized_path):
@@ -109,7 +108,7 @@ class SkillPackageValidator:
         inside that lifecycle. Keeping this narrow encoder here preserves that
         ordering without returning an unvalidated package value object.
         """
-        if not files or len(files) > MAX_FILES:
+        if not files:
             raise SkillPackageInvalidError()
         entries: list[tuple[str, bytes]] = []
         seen: set[str] = set()
@@ -118,13 +117,15 @@ class SkillPackageValidator:
             if not isinstance(path, str) or not isinstance(content, bytes):
                 raise SkillPackageInvalidError()
             normalized_path = self._normalize_path(path, reject_empty_parts=True)
+            if self._is_ignored_path(normalized_path):
+                continue
             if normalized_path in seen:
                 raise SkillPackageInvalidError("duplicate_file_path")
             if len(content) > MAX_FILE_BYTES:
                 raise SkillPackageTooLargeError()
             seen.add(normalized_path)
             total += len(content)
-            if total > MAX_EXPANDED_BYTES:
+            if len(seen) > MAX_FILES or total > MAX_EXPANDED_BYTES:
                 raise SkillPackageTooLargeError()
             entries.append((normalized_path, content))
         canonical_zip = self._build_canonical_zip(
@@ -156,12 +157,14 @@ class SkillPackageValidator:
                 metadata = self._metadata_parser.parse_skill_markdown(
                     markdown, path=skill_path
                 ).to_dict()
-                SkillParser.parse_config(SkillParser.decode_content(markdown))
+                self._metadata_parser.parse_config(
+                    self._metadata_parser.decode_content(markdown)
+                )
             except SkillManifestError as exc:
                 if exc.code is not SkillManifestErrorCode.MISSING_FRONTMATTER:
                     raise
-                text = SkillParser.decode_content(markdown)
-                metadata = SkillParser.parse_legacy_upload_content(text) or {}
+                text = self._metadata_parser.decode_content(markdown)
+                metadata = self._metadata_parser.parse_legacy_upload_content(text) or {}
         except SkillManifestError as exc:
             raise SkillPackageInvalidError("invalid_metadata") from exc
 

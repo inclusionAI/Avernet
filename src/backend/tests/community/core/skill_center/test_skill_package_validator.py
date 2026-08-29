@@ -77,6 +77,30 @@ def test_directory_and_wrapped_zip_produce_the_same_canonical_package() -> None:
     assert _canonical_entries(from_zip) == list(from_zip.files)
 
 
+def test_directory_and_zip_ignore_metadata_before_applying_file_limits(
+    monkeypatch,
+) -> None:
+    validator = SkillPackageValidator(SkillParser())
+    manifest = _skill_md()
+    monkeypatch.setattr(package_module, "MAX_FILES", 2)
+    entries = [
+        ("weather/SKILL.md", manifest),
+        ("weather/script.py", b"pass"),
+        ("weather/.DS_Store", b"metadata"),
+        ("__MACOSX/._SKILL.md", b"metadata"),
+        ("weather/__pycache__/script.pyc", b"metadata"),
+    ]
+
+    from_directory = validator.validate_directory(entries)
+    from_zip = validator.validate_zip(_zip(entries))
+
+    assert from_directory == from_zip
+    assert [path for path, _content in from_directory.files] == [
+        "SKILL.md",
+        "script.py",
+    ]
+
+
 def test_canonical_zip_is_stable_across_input_order_and_archive_metadata() -> None:
     validator = SkillPackageValidator(SkillParser())
     manifest = _skill_md()
@@ -113,6 +137,20 @@ def test_zip_rejects_unsafe_relative_paths(path: str) -> None:
 
     with pytest.raises(SkillPackageInvalidError) as error:
         validator.validate_zip(_zip([(path, _skill_md())]))
+
+    assert error.value.reason == "unsafe_file_path"
+
+
+def test_zip_rejects_traversal_in_directory_entries() -> None:
+    validator = SkillPackageValidator(SkillParser())
+
+    with pytest.raises(SkillPackageInvalidError) as error:
+        validator.validate_zip(
+            _zip(
+                [("../", b""), ("SKILL.md", _skill_md())],
+                attrs={"../": 0o040000 << 16},
+            )
+        )
 
     assert error.value.reason == "unsafe_file_path"
 

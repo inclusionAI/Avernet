@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 class SkillManifestErrorCode(str, Enum):
@@ -86,3 +86,12 @@ class SkillMetadataParserProtocol(Protocol):
     def validate_skill_markdown(
         content: str | bytes, *, path: str = "SKILL.md"
     ) -> SkillManifestValidationResult: ...
+
+    @staticmethod
+    def decode_content(content: bytes) -> str: ...
+
+    @staticmethod
+    def parse_config(content: str) -> list[dict[str, Any]]: ...
+
+    @staticmethod
+    def parse_legacy_upload_content(content: str) -> dict[str, Any] | None: ...

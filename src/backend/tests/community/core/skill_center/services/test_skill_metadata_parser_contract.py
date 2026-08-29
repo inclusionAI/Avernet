@@ -126,6 +126,22 @@ def test_shared_valid_fixture_uses_only_frontmatter_metadata() -> None:
     }
 
 
+def test_protocol_exposes_package_config_and_legacy_compatibility_parsing() -> None:
+    parser: SkillMetadataParserProtocol = SkillParser()
+
+    assert parser.parse_config(
+        "---\nname: release-notes\ndescription: Notes.\n"
+        "config: [{name: region, required: true}]\n---\n"
+    ) == [{"name": "region", "required": True}]
+    assert (
+        parser.parse_legacy_upload_content(
+            "name: legacy-skill\ndescription: Legacy upload\n"
+        )["name"]
+        == "legacy-skill"
+    )
+    assert parser.decode_content("中文".encode()) == "中文"
+
+
 def test_shared_encoding_and_path_fixtures_pin_stable_errors() -> None:
     parser: SkillMetadataParserProtocol = SkillParser()
     invalid_bytes = bytes.fromhex((_FIXTURES / "invalid-encoding.hex").read_text())
