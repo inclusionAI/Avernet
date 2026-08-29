@@ -404,7 +404,7 @@ class TestFailRemedyCure:
         n_market = svc._get_node(g, "N_market")
         assert n_market.status == Status.FAILED
         assert n_market.run_info.acceptance_result is not None
-        assert n_market.run_info.acceptance_result.verdict == AcceptanceVerdict.FAIL
+        assert n_market.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED
         # v4:harness 重新派发执行(不拆):FAILED→PENDING→dispatch→RUNNING
         _run(facade._engine.on_harness(_patch("t_case", "N_market", exec_error="acceptance_fail_retry")))
         g = svc.query_task_dashboard("t_case")
@@ -467,7 +467,7 @@ class TestMissEscalateBbs:
         assert scoped.run_info.run_mode == "bbs"
         _run(facade.report_bbs_result(
             task_id="t_case", node_id=scoped.node_id, bot_id=bbs_bot_id,
-            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS, gaps=[]),
+            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, gaps=[]),
             output_patch={"result": "bbs 一手实践"},
         ))
         g = svc.query_task_dashboard("t_case")

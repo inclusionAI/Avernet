@@ -124,7 +124,7 @@ class TaskHarness:
                         self._graph.update_task_node_info(TaskNodePatch(
                             task_id=task_id, node_id=n.node_id,
                             acceptance_result=AcceptanceResult(
-                                verdict=AcceptanceVerdict.FAIL, gaps=["bbs_lease_expired"])))
+                                verdict=AcceptanceVerdict.FAILED, gaps=["bbs_lease_expired"])))
                         self._graph.update_task_node_info(TaskNodePatch(
                             task_id=task_id, node_id=task_id,
                             extend_props_patch={"bbs_owner": None}))

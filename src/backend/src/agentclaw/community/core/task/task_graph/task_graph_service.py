@@ -388,7 +388,7 @@ class TaskGraphService:
             if patch.acceptance_result is not None:
                 # 模式① acceptance 驱动
                 verdict = patch.acceptance_result.verdict
-                if verdict == AcceptanceVerdict.PASS:
+                if verdict == AcceptanceVerdict.DONE:
                     new_status = Status.DONE
                 else:  # FAIL
                     if not patch.acceptance_result.gaps:
@@ -605,7 +605,7 @@ class TaskGraphService:
     def delete_task_node(self, task_id: str, node_id: str) -> None:
         """删除单个节点(及其 DEPENDENCY 后代子树 + 相关边)。根(``task_id``)永不可删。
 
-        用于 ``on_bbs_report`` 收到 verdict=FAIL:丢弃本次接力尝试(不翻 FAILED、不 fold output_patch),
+        用于 ``on_bbs_report`` 收到 verdict=FAILED:丢弃本次接力尝试(不翻 FAILED、不 fold output_patch),
         图回到 root PLANNING + bbs_mode 可恢复态等下段重新 claim/attach。bbs scoped 节点是叶子,但实现按
         子树删(节点 + DEPENDENCY 后代)以通用。锁:再取同 task 的 RLock(re-entrant 安全,调用方通常已持)。
         """

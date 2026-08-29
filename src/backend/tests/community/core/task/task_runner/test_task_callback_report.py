@@ -457,7 +457,7 @@ class TestBCNManagerWorker:
         patch = engine.reports[0]
         assert (patch.task_id, patch.node_id) == ("task-99", "root")
         assert patch.acceptance_result is not None
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.PASS
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
         assert patch.output_patch == {"data": "all done"}
         assert engine.starts == []
 
@@ -473,7 +473,7 @@ class TestBCNManagerWorker:
         assert len(engine.reports) == 1
         patch = engine.reports[0]
         assert patch.acceptance_result is not None
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAIL
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
 
     def test_manager_worker_events_accumulate_in_single_session_row(self):
         sid = "s-1"
@@ -584,7 +584,7 @@ class TestBCNStateMachine:
         assert len(engine.reports) == 1
         patch = engine.reports[0]
         assert (patch.task_id, patch.node_id) == ("task-99", "root")
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.PASS  # → DONE
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE  # → DONE
         assert patch.output_patch == {"data": {"final": "ok"}}
 
     def test_run_failed_converges_to_failed(self, monkeypatch):
@@ -601,7 +601,7 @@ class TestBCNStateMachine:
         assert len(engine.reports) == 1
         patch = engine.reports[0]
         assert patch.acceptance_result is not None
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAIL
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
 
     def test_run_completed_converges_even_when_bcs_fetch_fails(self, monkeypatch):
         # BCS run 明细 fetch 失败时,事件本身 state_machine.run.completed 已表明 run 成功完成
@@ -617,7 +617,7 @@ class TestBCNStateMachine:
         _ok_envelope(result)
         patch = engine.reports[0]
         assert (patch.task_id, patch.node_id) == ("task-99", "root")
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.PASS  # → DONE
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE  # → DONE
         assert patch.output_patch == {"data": {"final": "ok"}}
 
     def test_fetch_failure_falls_back_to_raw_cloudevent_but_still_converges(self, monkeypatch):
@@ -634,7 +634,7 @@ class TestBCNStateMachine:
         _ok_envelope(result)
         # 收敛已触发(事件兜底)
         assert len(engine.reports) == 1
-        assert engine.reports[0].acceptance_result.verdict == AcceptanceVerdict.PASS
+        assert engine.reports[0].acceptance_result.verdict == AcceptanceVerdict.DONE
         # ingest 审计行(run-1,"")仍 fallback 落原始 CloudEvent;converge 另落一行(task-99,"root")
         ingest = repo.get("run-1", "")
         assert ingest is not None
@@ -802,7 +802,7 @@ class TestFrameworkCallback:
         assert len(engine.reports) == 1
         patch = engine.reports[0]
         assert (patch.task_id, patch.node_id) == ("t1", "c1")  # node_id 直拼
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.PASS
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
         assert patch.output_patch == {"data": {"r": 1}}
         # 同时落 task_callback 审计(invoker 来自 workflow_source)
         assert repo.calls[0].invoker == "bcn"
@@ -814,7 +814,7 @@ class TestFrameworkCallback:
         _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
         patch = engine.reports[0]
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAIL
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
         assert patch.acceptance_result.gaps == ["证据不足"]  # failed_info → 单 gap
 
     def test_task_level_uses_echo_loop_task_id(self):
@@ -848,7 +848,7 @@ class TestFallbackAndInvalid:
         assert len(engine.reports) == 1
         patch = engine.reports[0]
         assert (patch.task_id, patch.node_id) == ("t1", "c1")
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.PASS
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
         # ``callback_from_dto`` 不写 workflow_source,故 invoker 落空串(auth 用 workflow_type
         # 校验但未记录到 invoker 列 —— 轻微审计缺口);DTO 无 instance → main_session_id 空。
         assert repo.calls[0].invoker == ""

@@ -211,9 +211,9 @@ class TaskOpResultDTO(BaseModel):
 
 
 class AcceptanceResultDTO(BaseModel):
-    """验收结论(PASS/FAIL + 通过项与缺口)。"""
+    """验收结论(DONE/FAILED + 通过项与缺口)。"""
 
-    verdict: str = Field(..., description="PASS / FAIL")
+    verdict: str = Field(..., description="DONE / FAILED")
     acceptances_metric: list[str] = Field(
         default_factory=list, description="通过的验收项标识列表"
     )

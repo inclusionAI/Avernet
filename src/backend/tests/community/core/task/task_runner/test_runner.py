@@ -59,7 +59,7 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
 
 
 def _pass() -> AcceptanceResult:
-    return AcceptanceResult(verdict=AcceptanceVerdict.PASS)
+    return AcceptanceResult(verdict=AcceptanceVerdict.DONE)
 
 
 @pytest.fixture

@@ -28,8 +28,8 @@ class Status(StrEnum):
 class AcceptanceVerdict(StrEnum):
     """验收结论。"""
 
-    PASS = "PASS"
-    FAIL = "FAIL"
+    DONE = "DONE"
+    FAILED = "FAILED"
 
 
 class RelationType(StrEnum):

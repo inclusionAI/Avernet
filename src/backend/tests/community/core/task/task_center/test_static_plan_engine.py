@@ -89,7 +89,7 @@ def _report(engine, node_id, result):
     return _run(engine.on_report(TaskNodePatch(
         task_id="t1", node_id=node_id,
         output_patch={"result": result},
-        acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS),
+        acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE),
     )))
 
 

@@ -117,7 +117,7 @@ class TestAddTaskNodes:
         svc.add_task_nodes([_node("leaf")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "leaf", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(
-            _patch("t1", "leaf", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺深度"]))
+            _patch("t1", "leaf", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺深度"]))
         )
         assert svc._get_node(graph, "leaf").status == Status.FAILED
         # 条件 b 成立:补救子挂 FAILED 叶子下(v4 父→PLANNING)
@@ -155,7 +155,7 @@ class TestAddTaskNodes:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(_patch("t1", "c2", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["x"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))
         )
         # c1 FAILED+gaps → 条件 b 成立;parent=c2 RUNNING 不可委托
         with pytest.raises(GraphIntegrityError, match="不可委托"):
@@ -176,7 +176,7 @@ class TestUpdateTaskNodeInfo:
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         r = svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS, acceptances_metric=["ac1"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, acceptances_metric=["ac1"]))
         )
         assert r.prev_status == Status.RUNNING
         assert r.new_status == Status.DONE
@@ -187,14 +187,14 @@ class TestUpdateTaskNodeInfo:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         with pytest.raises(TaskStateError, match="gaps"):
             svc.update_task_node_info(
-                _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=[]))
+                _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=[]))
             )
 
     def test_acceptance_fail_with_gaps(self, svc: TaskGraphService, graph):
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))
         )
         assert svc._get_node(graph, "c1").status == Status.FAILED
 
@@ -224,7 +224,7 @@ class TestUpdateTaskNodeInfo:
         # DONE 不可再翻(PASS 后)
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
-        svc.update_task_node_info(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))
+        svc.update_task_node_info(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE)))
         with pytest.raises(TaskStateError):
             svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING))
 
@@ -270,7 +270,7 @@ class TestUpdateTaskNodeInfo:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         t0 = svc._get_node(graph, "c1").run_info.start_time
         svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS, acceptances_metric=["ac1"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, acceptances_metric=["ac1"]))
         )
         node = svc._get_node(graph, "c1")
         assert node.status == Status.DONE
@@ -281,7 +281,7 @@ class TestUpdateTaskNodeInfo:
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(
-            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["x"]))
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))
         )
         assert svc._get_node(graph, "c1").run_info.end_time is not None
 

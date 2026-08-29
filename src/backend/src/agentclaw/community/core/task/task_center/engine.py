@@ -830,7 +830,7 @@ class ExecutionEngine:
                 task_id=task_id,
                 node_id=node_id,
                 acceptance_result=AcceptanceResult(
-                    verdict=AcceptanceVerdict.PASS,
+                    verdict=AcceptanceVerdict.DONE,
                     acceptances_metric=["auto_mock"],
                 ),
                 output_patch={"result": mock_result},
@@ -958,7 +958,7 @@ class ExecutionEngine:
                 TaskNodePatch(
                     task_id=task_id, node_id=node_id,
                     acceptance_result=AcceptanceResult(
-                        verdict=AcceptanceVerdict.PASS,
+                        verdict=AcceptanceVerdict.DONE,
                         acceptances_metric=["bbs_handoff_mock"],
                     ),
                     output_patch={
@@ -1206,7 +1206,7 @@ class ExecutionEngine:
                     patch.task_id,
                     patch.node_id,
                     NodeAction.EXECUTE,
-                    {"success": _ar.verdict == AcceptanceVerdict.PASS, "output": _out},
+                    {"success": _ar.verdict == AcceptanceVerdict.DONE, "output": _out},
                     status_from=result.prev_status,
                     status_to=result.new_status,
                 )
@@ -1261,7 +1261,7 @@ class ExecutionEngine:
                 return result
             side = []
             verdict = patch.acceptance_result.verdict
-            if verdict == AcceptanceVerdict.PASS:
+            if verdict == AcceptanceVerdict.DONE:
                 logger.info("[task_callback][on_report] accept_pass,task=%s", patch.task_id)
                 await self._on_pass_collect(patch.task_id, patch.node_id, side)
             else:  # FAIL
@@ -1309,7 +1309,7 @@ class ExecutionEngine:
             # PASS / fold-only(无 acceptance):scoped 终态翻转(PASS→DONE)或 fold(output_patch/exec_error)走原路径。
             is_fail = (
                 patch.acceptance_result is not None
-                and patch.acceptance_result.verdict == AcceptanceVerdict.FAIL
+                and patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
             )
             try:
                 if is_fail:

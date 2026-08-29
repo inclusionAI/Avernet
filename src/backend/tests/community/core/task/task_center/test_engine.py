@@ -253,7 +253,7 @@ class TestExternalManagedIsolation:
                     "t1",
                     "t1",
                     output_patch={"content": "third-party result"},
-                    acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS),
+                    acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE),
                 )
             )
         )
@@ -279,7 +279,7 @@ class TestExternalManagedIsolation:
                     "t1",
                     "t1",
                     acceptance_result=AcceptanceResult(
-                        verdict=AcceptanceVerdict.FAIL, gaps=["third-party failure"]
+                        verdict=AcceptanceVerdict.FAILED, gaps=["third-party failure"]
                     ),
                 )
             )
@@ -313,7 +313,7 @@ class TestOnReportPass:
     def test_pass_partial_siblings_wait(self, svc, graph):
         self._setup_running_children(svc, graph, 2)
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c_proceed")]))
-        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
         assert svc._get_node(graph, "c0").status == Status.DONE
         assert eng._planner.plan_calls == 0
 
@@ -321,8 +321,8 @@ class TestOnReportPass:
         self._setup_running_children(svc, graph, 2)
         runner = StubRunner()
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c_proceed")]), runner=runner)
-        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
         assert svc._get_node(graph, "c_proceed").status == Status.RUNNING
         assert len(runner.run_calls) == 1
 
@@ -330,8 +330,8 @@ class TestOnReportPass:
         # 语义A:plan 返 []=gap 闭=终验通过 → 翻根 DONE + 图 DONE(无需 owner bot 单独回投)
         self._setup_running_children(svc, graph, 2)
         eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))
-        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
         assert svc._get_node(graph, "t1").status == Status.DONE  # gap 闭=终验通过→翻根 DONE
         assert graph.status == Status.DONE
 
@@ -339,7 +339,7 @@ class TestOnReportPass:
         # 语义A:c0 PASS → plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(一步到位,不再等回投)
         self._setup_running_children(svc, graph, 1)
         eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))
-        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
         assert svc._get_node(graph, "t1").status == Status.DONE  # 不再等回投
         assert graph.status == Status.DONE
 
@@ -352,7 +352,7 @@ class TestOnReportFail:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
         assert svc._get_node(graph, "c1").status == Status.FAILED  # 落 FAILED,不补救
         assert planner.plan_calls == 0  # 不调用 plan 补救
 
@@ -362,7 +362,7 @@ class TestOnReportFail:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         runner = StubRunner()
         eng = _engine(svc, dispatcher=StubDispatcher(), runner=runner)
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"]))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
         assert svc._get_node(graph, "c1").status == Status.FAILED
         _run(eng.on_harness(_patch("t1", "c1", exec_error="acceptance_fail_retry")))  # harness 重新派发
         assert svc._get_node(graph, "c1").status == Status.RUNNING  # 重新派发执行
@@ -432,7 +432,7 @@ class TestLoopRound:
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         before = graph.loop_round
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]))
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["x"]))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))))
         assert graph.loop_round == before
 
 
@@ -450,13 +450,13 @@ class TestMaxPlanRound:
         _run(eng.on_execute("t1"))  # t1 PENDING→PLANNING,产 c1 RUNNING
         # 回投 c1 PASS → c1 DONE → 兄弟全 DONE → 根重 plan(产 c_r1) → plan_round=1 < 2 → 不 HUNG
         planner._factory = lambda g: [_child("c_r1")]
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
         assert svc._get_node(graph, "t1").status != Status.HUNG
         assert svc._get_node(graph, "c_r1").status == Status.RUNNING
         assert svc._get_node(graph, "t1").run_info.extend_props.get("plan_round") == 1
         # 回投 c_r1 PASS → 根重 plan → plan_round=2 >= MAX → 根 HUNG,不产子
         planner._factory = lambda g: [_child("c_r2")]
-        _run(eng.on_report(_patch("t1", "c_r1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        _run(eng.on_report(_patch("t1", "c_r1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
         root = svc._get_node(graph, "t1")
         assert root.status == Status.HUNG
         assert root.run_info.extend_props.get("hung_reason") == "plan_round_exhausted"
@@ -470,7 +470,7 @@ class TestMaxPlanRound:
         eng = _engine(svc, planner=planner, runner=StubRunner())
         _run(eng.on_execute("t1"))
         planner._factory = lambda g: [_child("c_r1")]
-        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))))
+        _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
         assert svc._get_node(graph, "t1").status == Status.PLANNING
         assert svc._get_node(graph, "c_r1").status == Status.RUNNING
 

@@ -249,7 +249,7 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
         self.assertIn(ri.get("assignee"), dream_ids,
                       f"scoped assignee 非两 dream bot 之一(bid 未选到 dream bot?):{ri.get('assignee')}")
         ar = ri.get("acceptance_result") or {}
-        self.assertEqual(ar.get("verdict"), "PASS", f"scoped 中继段验收未 PASS:{ar}")
+        self.assertEqual(ar.get("verdict"), "DONE", f"scoped 中继段验收未 PASS:{ar}")
         self.assertTrue(ri.get("output"), "scoped 中继段无最终输出(architects 产出为空)")
         # claim 已释放(收口后根 bbs_owner 清空)
         self.assertIsNone((root.get("run_info") or {}).get("extend_props", {}).get("bbs_owner"),

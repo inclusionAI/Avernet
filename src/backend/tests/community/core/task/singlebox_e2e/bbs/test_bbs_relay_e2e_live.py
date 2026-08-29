@@ -302,7 +302,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                         "node_id": node_id,
                         "bot_id": jy_id,
                         "acceptance_result": {
-                            "verdict": "PASS",
+                            "verdict": "DONE",
                             "acceptances_metric": [],
                             "gaps": [],
                         },

@@ -299,7 +299,7 @@ class TestWritingQcStateMachineE2E(unittest.TestCase):
         self.assertTrue(str(ri.get("assignee") or "").startswith(("grp_", "bcs_grp_")),
                         f"根 assignee 非群 id:{ri.get('assignee')!r}")
         acceptance = ri.get("acceptance_result") or {}
-        self.assertEqual(acceptance.get("verdict"), "PASS",
+        self.assertEqual(acceptance.get("verdict"), "DONE",
                          f"根验收未 PASS:{acceptance} (BCS 回投 success=false?)")
         output = ri.get("output")
         self.assertTrue(output, "根无最终输出(output 为空)")

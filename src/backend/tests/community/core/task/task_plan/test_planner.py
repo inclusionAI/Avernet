@@ -108,7 +108,7 @@ class TestPlanTrigger:
     def test_failed_gaps_leaf_target(self, svc, graph):
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
-        svc.update_task_node_info(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["缺x"])))
+        svc.update_task_node_info(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"])))
         planner = _planner(svc, lambda g: [_child("c1_remedy")])
         result = _run(planner.plan(svc.query_task_dashboard("t1"), target_node_id="c1"))
         assert [n.node_id for n in result.children] == ["c1_remedy"]

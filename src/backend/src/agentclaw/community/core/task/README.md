@@ -66,8 +66,8 @@ stateDiagram-v2
     PLANNING --> HUNG : on_miss(depth>=MAX 拆不出子) / gap_no_progress(有 gap 拆不出)
     PLANNING --> PLANNING : 新子 add_task_nodes(父维持委托态)
 
-    RUNNING --> DONE : 回投 verdict=PASS(_on_pass_collect)
-    RUNNING --> FAILED : 回投 verdict=FAIL+gaps(_on_fail_collect)
+    RUNNING --> DONE : 回投 verdict=DONE(_on_pass_collect)
+    RUNNING --> FAILED : 回投 verdict=FAILED+gaps(_on_fail_collect)
     RUNNING --> PENDING : Harness 复位(超时/崩溃/exec_error _on_harness_collect)
     RUNNING --> HUNG : Harness 重试达 MAX_HARNESS
 

@@ -305,7 +305,7 @@ class TestR3LockModel:
                 loop = asyncio.new_event_loop()
                 patch = TaskNodePatch(task_id="t_lock", node_id=node_id,
                                       output_patch={"data": "ok"},
-                                      acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS))
+                                      acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))
                 loop.run_until_complete(eng.on_report(patch))
                 loop.close()
             except Exception as e:  # noqa: BLE001

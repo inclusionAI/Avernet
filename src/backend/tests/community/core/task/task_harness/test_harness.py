@@ -147,7 +147,7 @@ class TestPollOnce:
         clock.advance(5.0)
         h._poll_once()  # 复位 c1
         # 模拟节点已 DONE(不再 RUNNING):c1 被 reset 后由编排核重投,这里手动标 DONE
-        svc.update_task_node_info(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))
+        svc.update_task_node_info(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE)))
         h._poll_once()  # 无 RUNNING → 淘汰记时项
         assert ("t1", "c1") not in h._dispatched_at
 

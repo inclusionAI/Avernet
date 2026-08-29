@@ -648,7 +648,7 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 async def test_report_pass_finishes_graph_when_root_verified(task_service_with_bbs_node):
     svc, task_id, node_id, bot = task_service_with_bbs_node
     r = await svc.report_bbs_result(task_id, node_id, bot,
-                                    acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS), root_verified=True)
+                                    acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE), root_verified=True)
     assert r.success is True
     assert svc.get_task_dashboard(task_id).status == Status.DONE
     # claim 已释放
@@ -658,7 +658,7 @@ async def test_report_pass_finishes_graph_when_root_verified(task_service_with_b
 async def test_report_fail_partial_releases_claim(task_service_with_bbs_node):
     svc, task_id, node_id, bot = task_service_with_bbs_node
     await svc.report_bbs_result(task_id, node_id, bot,
-                                acceptance_result=AcceptanceResult(AcceptanceVerdict.FAIL, gaps=["partial"]),
+                                acceptance_result=AcceptanceResult(AcceptanceVerdict.FAILED, gaps=["partial"]),
                                 output_patch={"progress": 30})
     root = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == task_id)
     assert root.run_info.extend_props.get("bbs_owner") is None  # 释放
@@ -670,7 +670,7 @@ async def test_report_rejects_non_owner(task_service_with_bbs_node):
     svc, task_id, node_id, bot = task_service_with_bbs_node
     with pytest.raises(TaskStateError):
         await svc.report_bbs_result(task_id, node_id, "botOTHER",
-                                    acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS))
+                                    acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE))
 ```
 > fixture `task_service_with_bbs_node`:构造 bbs_mode + 根 PLANNING + claim botA + attach 一个 scoped 节点,返回 `(TaskService, task_id, node_id, botA)`。按 Task 3/5 的构造模式。
 
@@ -697,7 +697,7 @@ Expected: FAIL(`AttributeError: ... 'report_bbs_result'`)
             if root_verified:
                 self._graph.update_task_node_info(TaskNodePatch(
                     task_id=patch.task_id, node_id=patch.task_id,
-                    acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS)))  # 根 PLANNING→DONE
+                    acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE)))  # 根 PLANNING→DONE
                 self._graph.update_task_graph_info(patch.task_id, TaskGraphPatch(status=Status.DONE))
             # 清根 bbs_owner 释放
             self._graph.update_task_node_info(TaskNodePatch(
@@ -949,7 +949,7 @@ Expected: FAIL(bbs 节点被当普通 RUNNING 重派为 PENDING,owner 未清)
                     # BBS lease 到期(FR-EXT-06):清根 bbs_owner + scoped 节点标终态(FAIL),不重派
                     patches.append(TaskNodePatch(
                         task_id=tid, node_id=nid,
-                        acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAIL, gaps=["bbs_lease_expired"])))
+                        acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["bbs_lease_expired"])))
                     patches.append(TaskNodePatch(
                         task_id=tid, node_id=tid,  # 根:清 bbs_owner
                         extend_props_patch={"bbs_owner": None}))

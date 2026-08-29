@@ -209,7 +209,7 @@ class TestWritingQcStateMachinePreE2E(unittest.TestCase):
         )
         acceptance = ri.get("acceptance_result") or {}
         self.assertEqual(
-            acceptance.get("verdict"), "PASS",
+            acceptance.get("verdict"), "DONE",
             f"根验收未 PASS:{acceptance} (BCS 回投 success=false?)",
         )
         output = ri.get("output")
