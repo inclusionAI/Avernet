@@ -618,6 +618,34 @@ class ExecutionEngine:
                     node.node_id,
                 )
                 continue
+            # bbs_handoff 旁路:不可实现任务转 BBS 广场(与 approval 并行,不阻塞主实施线)。
+            # 阶段① 入广场:未派发,assignee 空(不展示研发 bot),写 bbs_status=posted_in_square;
+            # 30s 后由 _bbs_handoff_claim 被接:真 start_run 发研发 bot + 翻 claimed(展示研发 bot)。
+            if getattr(definition, "node_type", "bot") == "bbs_handoff":
+                bot_id = getattr(definition, "bot_id", None) or ""
+                static_input = node.task_spec.context.extend_props.get("static_input") or {}
+                items = static_input.get("unhandled_tasks") or []
+                logger.info(
+                    "[task][static-plan] task=%s node=%s -> bbs_handoff posted items=%s rnd_bot=%s",
+                    task_id, node.node_id,
+                    items if isinstance(items, list) else type(items).__name__, bot_id,
+                )
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        run_mode="single_bot",
+                        extend_props_patch={
+                            "dispatching": True,
+                            "bbs_status": "posted_in_square",
+                            "bbs_owner": "",
+                            "bbs_handed_to": "",
+                            "bbs_task_items": items,
+                        },
+                    )
+                )
+                side.append(("bbs_handoff", node, bot_id, items))
+                continue
             # auto 模式仍走真实派发(group/run),不跳过;仅额外调度延迟 mock 上报(见 _static_auto_report)
             gf = node.run_info.extend_props.get("pending_group_formation")
             if gf is not None:
@@ -720,6 +748,15 @@ class ExecutionEngine:
             for v in definition.output.values()
         ):
             mock_result["approved"] = True
+        # 造不可实现任务列表(仅当节点 output 含 $.result.unhandled_tasks,如 risk_assessment 群)
+        if definition is not None and any(
+            isinstance(v, str) and v.startswith("$.result.unhandled_tasks")
+            for v in definition.output.values()
+        ):
+            mock_result["unhandled_tasks"] = [
+                {"id": "uht-auto-1", "title": "[mock] 自动研发任务-1", "reason": "评估认为暂不可实现(mock)"},
+                {"id": "uht-auto-2", "title": "[mock] 自动研发任务-2", "reason": "依赖外部能力暂缺(mock)"},
+            ]
         logger.info(
             "[task][static-plan] auto-report fire task=%s node=%s mock=%s -> on_report",
             task_id, node_id, mock_result,
@@ -749,6 +786,127 @@ class ExecutionEngine:
             return float(v) if v is not None else 10.0
         except (TypeError, ValueError):
             return 10.0
+
+    def _bbs_handoff_delay(self, task_id: str) -> float:
+        """BBS 交接"被接"延迟秒数(①入广场→②被接):execution_config.bbs_handoff_claim_delay →
+        env OCB_BBS_HANDOFF_CLAIM_DELAY → 30.0。"""
+        cfg = self._graph._execution_config(task_id)
+        v = cfg.get("bbs_handoff_claim_delay")
+        if v in (None, ""):
+            raw = os.environ.get("OCB_BBS_HANDOFF_CLAIM_DELAY")
+            v = raw if raw not in (None, "") else None
+        try:
+            return float(v) if v is not None else 30.0
+        except (TypeError, ValueError):
+            return 30.0
+
+    def _on_bbs_handoff_done(self, t: "asyncio.Task") -> None:
+        """BBS 交接后台任务完成:脱离跟踪集 + 异常可见。"""
+        self._bg_tasks.discard(t)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.error("[task][static-plan] bbs_handoff bg task 异常: %s", exc, exc_info=exc)
+
+    async def _bbs_handoff_claim(
+        self, task_id: str, node_id: str, rnd_bot_id: str, items: Any
+    ) -> None:
+        """BBS 交接"被接":延迟后真实 start_run 发自动研发 bot,成功翻 claimed + 展示研发 bot;
+        auto 模式随即 mock 上报 PASS→DONE(派发完成即交接完成),真实模式留给 poller。
+        失败留 PENDING(post_failed),不掩盖真实派发失败。"""
+        delay = self._bbs_handoff_delay(task_id)
+        logger.info(
+            "[task][static-plan] bbs_handoff claim scheduled task=%s node=%s in %.1fs rnd_bot=%s",
+            task_id, node_id, delay, rnd_bot_id,
+        )
+        await asyncio.sleep(delay)
+        graph = self._graph.query_task_dashboard(task_id)
+        node = next((n for n in graph.tasks if n.node_id == node_id), None)
+        if node is None or node.status != Status.PENDING:
+            logger.info(
+                "[task][static-plan] bbs_handoff skip task=%s node=%s status=%s (非 PENDING)",
+                task_id, node_id, node.status.value if node is not None else None,
+            )
+            return
+        # ① assignee 先置研发 bot(供 start_run 定位)+ 记录 bbs_owner(暂不翻 claimed,先真派发)
+        node.run_info.assignee = rnd_bot_id
+        node.run_info.run_mode = "single_bot"
+        with self._lock_for(task_id):
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id, node_id=node_id,
+                    run_mode="single_bot", assignee=rnd_bot_id,
+                    extend_props_patch={"bbs_owner": rnd_bot_id, "bbs_handed_to": rnd_bot_id},
+                )
+            )
+        # ② 锁外真实派发:真发消息给研发 bot
+        ok = False
+        try:
+            results = await self._runner.start_run([node])
+            ok = bool(results[0]) if results else False
+        except Exception as ex:  # noqa: BLE001
+            logger.warning(
+                "[task][static-plan] bbs_handoff start_run 异常 task=%s node=%s rnd_bot=%s: %s",
+                task_id, node_id, rnd_bot_id, ex,
+            )
+            ok = False
+        if not ok:
+            with self._lock_for(task_id):
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id, node_id=node_id,
+                        run_mode="", assignee="",
+                        extend_props_patch={
+                            "dispatching": None,
+                            "dispatch_error": "bbs_handoff_start_run_failed",
+                            "bbs_status": "post_failed",
+                        },
+                    )
+                )
+            return
+        # ② 被接成功:翻 RUNNING + bbs_status=claimed(此时 dashboard 展示研发 bot)
+        with self._lock_for(task_id):
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id, node_id=node_id,
+                    status=Status.RUNNING, run_mode="single_bot", assignee=rnd_bot_id,
+                    extend_props_patch={"dispatching": None, "bbs_status": "claimed_by_rnd"},
+                )
+            )
+        logger.info(
+            "[task][static-plan] bbs_handoff claimed task=%s node=%s rnd_bot=%s items=%s",
+            task_id, node_id, rnd_bot_id,
+            items if isinstance(items, list) else type(items).__name__,
+        )
+        # 交接完成:auto 模式 mock 上报 PASS→DONE(真实模式等 poller 闭环)
+        if self._static_auto_report_on(task_id):
+            g2 = self._graph.query_task_dashboard(task_id)
+            n2 = next((x for x in g2.tasks if x.node_id == node_id), None)
+            if n2 is None or n2.status != Status.RUNNING:
+                logger.info(
+                    "[task][static-plan] bbs_handoff mock-skip task=%s node=%s status=%s",
+                    task_id, node_id, n2.status.value if n2 is not None else None,
+                )
+                return
+            await self.on_report(
+                TaskNodePatch(
+                    task_id=task_id, node_id=node_id,
+                    acceptance_result=AcceptanceResult(
+                        verdict=AcceptanceVerdict.PASS,
+                        acceptances_metric=["bbs_handoff_mock"],
+                    ),
+                    output_patch={
+                        "result": {
+                            "summary": f"[bbs-handoff] node={node_id}",
+                            "handed_to": rnd_bot_id,
+                            "items": items,
+                            "random": f"{random.randrange(10 ** 6):06d}",
+                        }
+                    },
+                    extend_props_patch={"dispatching": None},
+                )
+            )
 
     async def _on_static_report(self, task_id: str, node_id: str) -> None:
         runtime = self._static_runtime(task_id)
@@ -1873,6 +2031,18 @@ class ExecutionEngine:
                 run_nodes.append(node)
             elif kind == "auto":
                 auto_nodes.extend(payload[0])
+            elif kind == "bbs_handoff":
+                node, bot_id, items = payload
+                t = asyncio.create_task(
+                    self._bbs_handoff_claim(task_id, node.node_id, bot_id, items)
+                )
+                # 强引用保活(同 auto-report),避免 sleep 期间被 GC 回收
+                self._bg_tasks.add(t)
+                t.add_done_callback(self._on_bbs_handoff_done)
+                logger.info(
+                    "[task][static-plan] bbs_handoff claim scheduled task=%s node=%s rnd_bot=%s in %.1fs",
+                    task_id, node.node_id, bot_id, self._bbs_handoff_delay(task_id),
+                )
             elif kind == "miss":
                 miss_tasks.append(payload[0])
             elif kind == "dispatch_fail":
