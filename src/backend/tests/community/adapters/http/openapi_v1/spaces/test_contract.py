@@ -200,19 +200,19 @@ def test_draft_edit_lease_endpoints_publish_fenced_resource_contract(
     }
     draft_edit_lease_service.acquire.return_value = {
         "required": True,
-        "state": "HELD_BY_SELF",
+        "state": "HELD_BY_ME",
         "holder_user_id": "owner-1",
         "fencing_token": 41,
     }
     draft_edit_lease_service.release.return_value = {
         "required": True,
-        "state": "AVAILABLE",
+        "state": "FREE",
         "holder_user_id": None,
         "fencing_token": None,
     }
     draft_edit_lease_service.takeover.return_value = {
         "required": True,
-        "state": "HELD_BY_SELF",
+        "state": "HELD_BY_ME",
         "holder_user_id": "owner-1",
         "fencing_token": 42,
     }
@@ -226,7 +226,7 @@ def test_draft_edit_lease_endpoints_publish_fenced_resource_contract(
 
     assert read.json()["data"]["fencing_token"] is None
     assert acquired.json()["data"]["fencing_token"] == 41
-    assert released.json()["data"]["state"] == "AVAILABLE"
+    assert released.json()["data"]["state"] == "FREE"
     assert taken.json()["data"]["fencing_token"] == 42
     draft_edit_lease_service.release.assert_called_once_with(
         space_id=7, skill_id=9, actor_id="owner-1", fencing_token=41
@@ -546,14 +546,25 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                 "status": "DEVELOPING",
                 "draft_status": "EDITING",
                 "space_type": "TEAM",
-                "current_user_skill_role": None,
-                "can_edit": False,
-                "can_grant": False,
-                "can_apply_edit": True,
+                "actor": {
+                    "skill_role": None,
+                    "permissions": {
+                        "edit_draft": False,
+                        "publish_draft": False,
+                        "delete_draft": False,
+                        "create_upgrade_draft": False,
+                        "retire_skill": False,
+                        "manage_grants": False,
+                        "transfer_owner": False,
+                        "request_edit_access": True,
+                        "takeover_lease": False,
+                    },
+                },
                 "lease_summary": {
                     "required": True,
-                    "state": "AVAILABLE",
+                    "state": "FREE",
                     "holder_user_id": None,
+                    "holder_display_name": None,
                 },
                 "gmt_created": timestamp,
                 "gmt_modified": timestamp,
@@ -578,14 +589,25 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                 "status": "DEVELOPING",
                 "draft_status": "EDITING",
                 "space_type": "TEAM",
-                "current_user_skill_role": None,
-                "can_edit": False,
-                "can_grant": False,
-                "can_apply_edit": True,
+                "actor": {
+                    "skill_role": None,
+                    "permissions": {
+                        "edit_draft": False,
+                        "publish_draft": False,
+                        "delete_draft": False,
+                        "create_upgrade_draft": False,
+                        "retire_skill": False,
+                        "manage_grants": False,
+                        "transfer_owner": False,
+                        "request_edit_access": True,
+                        "takeover_lease": False,
+                    },
+                },
                 "lease_summary": {
                     "required": True,
-                    "state": "AVAILABLE",
+                    "state": "FREE",
                     "holder_user_id": None,
+                    "holder_display_name": None,
                 },
                 "gmt_created": "2026-08-20T03:40:00Z",
                 "gmt_modified": "2026-08-20T03:40:00Z",

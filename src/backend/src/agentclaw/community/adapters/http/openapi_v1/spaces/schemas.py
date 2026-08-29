@@ -117,14 +117,14 @@ class DraftEditLeaseState(_DocumentedEnum):
     """Actor-relative state of a Space Skill Draft's permanent edit Lease."""
 
     NOT_REQUIRED = "NOT_REQUIRED"
-    AVAILABLE = "AVAILABLE"
-    HELD_BY_SELF = "HELD_BY_SELF"
+    FREE = "FREE"
+    HELD_BY_ME = "HELD_BY_ME"
     HELD_BY_OTHER = "HELD_BY_OTHER"
 
     __descriptions__ = {
         "NOT_REQUIRED": "Personal Space Drafts do not use an edit Lease.",
-        "AVAILABLE": "No editor currently holds the Team Draft Lease.",
-        "HELD_BY_SELF": "The current actor holds the Team Draft Lease.",
+        "FREE": "No editor currently holds the Team Draft Lease.",
+        "HELD_BY_ME": "The current actor holds the Team Draft Lease.",
         "HELD_BY_OTHER": "Another OWNER or MANAGER holds the Team Draft Lease.",
     }
 
@@ -340,6 +340,9 @@ class DraftEditLeaseSummary(BaseModel):
     holder_user_id: str | None = Field(
         default=None, description="Current holder identifier, or null when unheld."
     )
+    holder_display_name: str | None = Field(
+        default=None, description="Current holder display name, when available."
+    )
 
 
 class SpaceSkillItem(_UtcResponseModel):
@@ -360,19 +363,8 @@ class SpaceSkillItem(_UtcResponseModel):
     space_type: SpaceType = Field(
         description="Whether the Skill belongs to a personal or team Space."
     )
-    current_user_skill_role: SkillRole | None = Field(
-        default=None,
-        description="Current user's active Skill grant, or null when ungranted.",
-    )
-    can_edit: bool = Field(description="Whether the current user may edit this Skill.")
-    can_grant: bool = Field(
-        description="Whether the current user may grant team Skill edit access."
-    )
-    can_apply_edit: bool = Field(
-        description=(
-            "Whether the current user is eligible to apply for team Skill edit "
-            "access; this does not represent a pending application state."
-        )
+    actor: SkillGrantActor = Field(
+        description="Current caller's Grant role and ACL/Grant qualifications."
     )
     lease_summary: DraftEditLeaseSummary | None = Field(
         default=None,

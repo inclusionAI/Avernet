@@ -136,12 +136,13 @@ class SpaceSkillQueryRecord(TypedDict):
     space_type: Literal["PERSONAL", "TEAM"]
     current_user_skill_role: Literal["OWNER", "MANAGER"] | None
     lease_holder_user_id: str | None
+    lease_holder_display_name: str | None
     gmt_created: datetime
     gmt_modified: datetime
 
 
 class SpaceSkillSummaryRecord(TypedDict):
-    """Service projection containing explicit UI authorization decisions."""
+    """Service projection containing actor qualifications and Lease state."""
 
     id: int
     skill_uuid: str
@@ -150,12 +151,9 @@ class SpaceSkillSummaryRecord(TypedDict):
     status: str | None
     draft_status: str | None
     space_type: Literal["PERSONAL", "TEAM"]
-    current_user_skill_role: Literal["OWNER", "MANAGER"] | None
+    actor: SpaceSkillGrantActorRecord
     gmt_created: datetime
     gmt_modified: datetime
-    can_edit: bool
-    can_grant: bool
-    can_apply_edit: bool
     lease_summary: DraftEditLeaseSummaryRecord | None
 
 
@@ -170,7 +168,7 @@ class DraftEditLeaseViewRecord(TypedDict):
     """Actor-relative Lease resource returned by the Service API."""
 
     required: bool
-    state: Literal["NOT_REQUIRED", "AVAILABLE", "HELD_BY_SELF", "HELD_BY_OTHER"]
+    state: Literal["NOT_REQUIRED", "FREE", "HELD_BY_ME", "HELD_BY_OTHER"]
     holder_user_id: str | None
     fencing_token: int | None
 
@@ -179,5 +177,6 @@ class DraftEditLeaseSummaryRecord(TypedDict):
     """List-card Lease projection that deliberately excludes fencing tokens."""
 
     required: bool
-    state: Literal["NOT_REQUIRED", "AVAILABLE", "HELD_BY_SELF", "HELD_BY_OTHER"]
+    state: Literal["NOT_REQUIRED", "FREE", "HELD_BY_ME", "HELD_BY_OTHER"]
     holder_user_id: str | None
+    holder_display_name: str | None

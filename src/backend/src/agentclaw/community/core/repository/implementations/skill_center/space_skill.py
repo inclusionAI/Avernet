@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from injector import inject
 from sqlalchemy import and_, func, or_
+from sqlalchemy.orm import aliased
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import (
@@ -172,12 +173,14 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         limit: int,
     ) -> tuple[int, list[SpaceSkillQueryRecord]]:
         with self._db.orm_session() as session:
+            lease_holder_member = aliased(SpaceMemberModel)
             query = (
                 session.query(
                     Skill,
                     SpaceModel.space_type,
                     SkillGrant.role,
                     SkillDraftEditLease.holder_user_id,
+                    lease_holder_member.user_name,
                 )
                 .join(
                     SkillSpaceBinding,
@@ -207,6 +210,15 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                     and_(
                         SkillDraftEditLease.skill_id == Skill.id,
                         SkillDraftEditLease.env == env,
+                    ),
+                )
+                .outerjoin(
+                    lease_holder_member,
+                    and_(
+                        lease_holder_member.space_id == SkillSpaceBinding.space_id,
+                        lease_holder_member.user_id
+                        == SkillDraftEditLease.holder_user_id,
+                        lease_holder_member.env == env,
                     ),
                 )
                 .filter(
@@ -807,6 +819,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         space_type: str,
         current_user_skill_role: str | None,
         lease_holder_user_id: str | None,
+        lease_holder_display_name: str | None,
     ) -> SpaceSkillQueryRecord:
         return {
             "id": skill.id,
@@ -818,6 +831,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             "space_type": space_type,
             "current_user_skill_role": current_user_skill_role,
             "lease_holder_user_id": lease_holder_user_id,
+            "lease_holder_display_name": lease_holder_display_name,
             "gmt_created": skill.gmt_created,
             "gmt_modified": skill.gmt_modified,
         }

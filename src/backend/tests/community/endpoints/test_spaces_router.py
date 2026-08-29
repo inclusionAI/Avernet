@@ -144,14 +144,25 @@ def _seed_space_skills(world) -> None:
                 "status": "DEVELOPING",
                 "draft_status": "EDITING",
                 "space_type": "TEAM",
-                "current_user_skill_role": "OWNER",
-                "can_edit": True,
-                "can_grant": True,
-                "can_apply_edit": False,
+                "actor": {
+                    "skill_role": "OWNER",
+                    "permissions": {
+                        "edit_draft": True,
+                        "publish_draft": True,
+                        "delete_draft": True,
+                        "create_upgrade_draft": True,
+                        "retire_skill": True,
+                        "manage_grants": True,
+                        "transfer_owner": True,
+                        "request_edit_access": False,
+                        "takeover_lease": True,
+                    },
+                },
                 "lease_summary": {
                     "required": True,
-                    "state": "AVAILABLE",
+                    "state": "FREE",
                     "holder_user_id": None,
+                    "holder_display_name": None,
                 },
                 "gmt_created": datetime(2026, 8, 20, 3, 30),
                 "gmt_modified": datetime(2026, 8, 20, 3, 40),
@@ -252,7 +263,7 @@ def _seed_draft_edit_lease(world) -> None:
     def _held(token: int):
         return {
             "required": True,
-            "state": "HELD_BY_SELF",
+            "state": "HELD_BY_ME",
             "holder_user_id": _USER_ID,
             "fencing_token": token,
         }
@@ -265,7 +276,7 @@ def _seed_draft_edit_lease(world) -> None:
             "acquire": lambda _self, **_kwargs: _held(8),
             "release": lambda _self, **_kwargs: {
                 "required": True,
-                "state": "AVAILABLE",
+                "state": "FREE",
                 "holder_user_id": None,
                 "fencing_token": None,
             },
@@ -302,7 +313,7 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
     ),
     expect=ExpectSuccess(
         status=200,
-        json_contains={"data": {"state": "HELD_BY_SELF", "fencing_token": 7}},
+        json_contains={"data": {"state": "HELD_BY_ME", "fencing_token": 7}},
     ),
 )
 def get_draft_edit_lease_happy():
@@ -333,7 +344,7 @@ def get_draft_edit_lease_wrong_user():
     ),
     expect=ExpectSuccess(
         status=200,
-        json_contains={"data": {"state": "HELD_BY_SELF", "fencing_token": 8}},
+        json_contains={"data": {"state": "HELD_BY_ME", "fencing_token": 8}},
     ),
 )
 def acquire_draft_edit_lease_happy():
@@ -363,7 +374,7 @@ def acquire_draft_edit_lease_wrong_user():
         headers=_principal_headers(),
     ),
     expect=ExpectSuccess(
-        status=200, json_contains={"data": {"state": "AVAILABLE"}}
+        status=200, json_contains={"data": {"state": "FREE"}}
     ),
 )
 def release_draft_edit_lease_happy():
@@ -398,7 +409,7 @@ def release_draft_edit_lease_wrong_user():
     ),
     expect=ExpectSuccess(
         status=200,
-        json_contains={"data": {"state": "HELD_BY_SELF", "fencing_token": 9}},
+        json_contains={"data": {"state": "HELD_BY_ME", "fencing_token": 9}},
     ),
 )
 def takeover_draft_edit_lease_happy():

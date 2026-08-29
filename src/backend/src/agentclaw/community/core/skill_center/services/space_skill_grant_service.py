@@ -22,6 +22,31 @@ from agentclaw.community.core.spaces.models import SpaceRole, SpaceType
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 
 
+def space_skill_actor_permissions(
+    *, space_type, space_role, skill_role: str | None
+) -> dict[str, bool]:
+    """Project stable ACL/Grant qualifications independently of command state."""
+    can_edit = skill_role in {"OWNER", "MANAGER"}
+    is_owner = skill_role == "OWNER"
+    is_admin = space_role in {
+        SpaceRole.ADMIN,
+        SpaceRole.OWNER,
+        SpaceRole.ADMINISTRATOR,
+    }
+    can_request = space_type == SpaceType.TEAM and skill_role is None
+    return {
+        "edit_draft": can_edit,
+        "publish_draft": can_edit,
+        "delete_draft": can_edit,
+        "create_upgrade_draft": can_edit,
+        "retire_skill": can_edit,
+        "manage_grants": is_owner,
+        "transfer_owner": is_owner or is_admin,
+        "request_edit_access": can_request,
+        "takeover_lease": can_edit,
+    }
+
+
 class SpaceSkillGrantService:
     """Authorize Grant commands and delegate atomic facts to the repository."""
 
@@ -157,30 +182,6 @@ class SpaceSkillGrantService:
         if role != "OWNER":
             raise SpaceSkillGrantForbiddenError("skill owner required")
 
-    @staticmethod
-    def _permissions(
-        *, space_type, space_role, skill_role: str | None
-    ) -> dict[str, bool]:
-        can_edit = skill_role in {"OWNER", "MANAGER"}
-        is_owner = skill_role == "OWNER"
-        is_admin = space_role in {
-            SpaceRole.ADMIN,
-            SpaceRole.OWNER,
-            SpaceRole.ADMINISTRATOR,
-        }
-        can_request = space_type == SpaceType.TEAM and skill_role is None
-        return {
-            "edit_draft": can_edit,
-            "publish_draft": can_edit,
-            "delete_draft": can_edit,
-            "create_upgrade_draft": can_edit,
-            "retire_skill": can_edit,
-            "manage_grants": is_owner,
-            "transfer_owner": is_owner or is_admin,
-            "request_edit_access": can_request,
-            "takeover_lease": can_edit,
-        }
-
     @classmethod
     def _present(
         cls,
@@ -194,7 +195,7 @@ class SpaceSkillGrantService:
             "managers": record["managers"],
             "actor": {
                 "skill_role": record["actor_role"],
-                "permissions": cls._permissions(
+                "permissions": space_skill_actor_permissions(
                     space_type=space_type,
                     space_role=space_role,
                     skill_role=record["actor_role"],

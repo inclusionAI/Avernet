@@ -60,7 +60,7 @@ def test_team_read_requires_an_editable_draft_and_returns_available():
 
     result = service.get_lease(space_id=7, skill_id=9, actor_id="manager-1")
 
-    assert result["state"] == "AVAILABLE"
+    assert result["state"] == "FREE"
     leases.get_lease.assert_called_once_with(space_id=7, skill_id=9, env="test")
 
 
@@ -83,7 +83,7 @@ def test_team_manager_acquires_a_new_fencing_token_through_the_grant_seam():
 
     assert result == {
         "required": True,
-        "state": "HELD_BY_SELF",
+        "state": "HELD_BY_ME",
         "holder_user_id": "manager-1",
         "fencing_token": 41,
     }
@@ -127,7 +127,7 @@ def test_holder_release_requires_the_current_fencing_token():
         fencing_token=41,
     )
 
-    assert result["state"] == "AVAILABLE"
+    assert result["state"] == "FREE"
     assert result["fencing_token"] is None
     leases.release.assert_called_once_with(
         space_id=7,
@@ -147,7 +147,7 @@ def test_owner_or_manager_can_take_over_and_receive_the_new_token():
 
     result = service.takeover(space_id=7, skill_id=9, actor_id="owner-1")
 
-    assert result["state"] == "HELD_BY_SELF"
+    assert result["state"] == "HELD_BY_ME"
     assert result["fencing_token"] == 99
 
 

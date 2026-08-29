@@ -144,14 +144,14 @@ class DraftEditLeaseService:
         if record is None or record["holder_user_id"] is None:
             return {
                 "required": True,
-                "state": "AVAILABLE",
+                "state": "FREE",
                 "holder_user_id": None,
                 "fencing_token": None,
             }
         held_by_self = record["holder_user_id"] == actor_id
         return {
             "required": True,
-            "state": "HELD_BY_SELF" if held_by_self else "HELD_BY_OTHER",
+            "state": "HELD_BY_ME" if held_by_self else "HELD_BY_OTHER",
             "holder_user_id": record["holder_user_id"],
             "fencing_token": record["fencing_token"] if held_by_self else None,
         }

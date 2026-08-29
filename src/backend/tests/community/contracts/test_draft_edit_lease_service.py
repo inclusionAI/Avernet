@@ -38,7 +38,7 @@ def test_consumer_acquires_a_team_lease_through_the_protocol():
 
     result = service.acquire(space_id=3, skill_id=5, actor_id="manager-1")
 
-    assert result["state"] == "HELD_BY_SELF"
+    assert result["state"] == "HELD_BY_ME"
     assert result["fencing_token"] == 7
     grants.require_editor.assert_called_once_with(
         space_id=3, skill_id=5, actor_id="manager-1"
