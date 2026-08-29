@@ -67,6 +67,19 @@ def _block(name: str) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _object_prefix_setting(name: str, default: str) -> Any:
+    """Read one strict object-store prefix block without duplicating parsing."""
+    raw = _user_config().get(name)
+    if raw is None:
+        return default
+    if not isinstance(raw, dict):
+        raise ValueError(f"{name} must be a mapping")
+    unknown = sorted(set(raw) - {"base_prefix_template"})
+    if unknown:
+        raise ValueError(f"{name} contains unknown keys: " + ", ".join(unknown))
+    return raw.get("base_prefix_template", default)
+
+
 def _app_name() -> str | None:
     """The **top-level** ``app_name``, or ``None`` when there is no config.
 
@@ -256,23 +269,9 @@ class ConfigModule(Module):
     @singleton
     @provider
     def canonical_center_store(self) -> CanonicalCenterStoreConfig:
-        raw = _user_config().get("canonical_center_store")
-        if raw is None:
-            block: dict[str, Any] = {}
-        elif isinstance(raw, dict):
-            block = dict(raw)
-        else:
-            raise ValueError("canonical_center_store must be a mapping")
-        unknown = set(block) - {"base_prefix_template"}
-        if unknown:
-            raise ValueError(
-                "canonical_center_store has unknown keys: "
-                + ", ".join(sorted(unknown))
-            )
         defaults = CanonicalCenterStoreConfig(env=get_current_env())
-        prefix = block.get(
-            "base_prefix_template",
-            defaults.base_prefix_template,
+        prefix = _object_prefix_setting(
+            "canonical_center_store", defaults.base_prefix_template
         )
         if not isinstance(prefix, str):
             raise ValueError(
