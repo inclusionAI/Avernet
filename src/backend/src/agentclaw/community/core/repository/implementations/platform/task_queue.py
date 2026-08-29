@@ -80,6 +80,7 @@ from agentclaw.community.core.task_queue.repository.pending_row_writer import (
     _is_active_idem_conflict,
 )
 from agentclaw.community.core.task_queue.types import (
+    TERMINAL_STATUSES,
     EnqueueResult,
     TaskRecord,
     TaskStatus,
@@ -191,13 +192,16 @@ class TaskQueueRepository(
         names the row to clear.
         """
         with self._db.orm_session() as session:
-            return self._pending_writer._find_stranded_key_holder(
+            holder = self._pending_writer._find_key_holder_current(
                 session,
                 env=env,
                 app=app,
                 task_type=task_type,
                 idempotency_key=idempotency_key,
             )
+            if holder is None or holder.status not in TERMINAL_STATUSES:
+                return None
+            return holder.id
 
     def enqueue(
         self,

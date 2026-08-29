@@ -625,7 +625,7 @@ def test_holder_going_terminal_between_insert_and_lookup_is_retried(repo):
     in that window, releasing the key. The retry then inserts cleanly."""
     first = _enqueue_result(repo, idempotency_key="k1")
     writer = repo._pending_writer
-    real_find = writer._find_active_by_key
+    real_find = writer._find_key_holder_current
 
     def free_the_key_then_look(session, **kwargs):
         # Simulate the holder finishing the instant after our INSERT lost.
@@ -638,10 +638,10 @@ def test_holder_going_terminal_between_insert_and_lookup_is_retried(repo):
             },
             synchronize_session=False,
         )
-        writer._find_active_by_key = real_find
+        writer._find_key_holder_current = real_find
         return real_find(session, **kwargs)
 
-    writer._find_active_by_key = free_the_key_then_look
+    writer._find_key_holder_current = free_the_key_then_look
 
     second = _enqueue_result(repo, idempotency_key="k1")
     assert second.created is True  # second attempt inserted
@@ -655,7 +655,9 @@ def test_enqueue_raises_when_it_can_neither_insert_nor_resolve_a_holder(repo):
     one — the key looks free on every retry and another caller keeps winning."""
     _enqueue_result(repo, idempotency_key="k1")
     # A holder that is never found: every attempt conflicts, every lookup misses.
-    repo._pending_writer._find_active_by_key = lambda _session, **_kwargs: None
+    repo._pending_writer._find_key_holder_current = (
+        lambda _session, **_kwargs: None
+    )
 
     with pytest.raises(RuntimeError, match="taken and released by other callers"):
         _enqueue_result(repo, idempotency_key="k1")

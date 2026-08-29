@@ -16,6 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.dialects import mysql
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.repository.implementations.platform.task_queue import (
@@ -91,6 +92,19 @@ def _write(writer, session, **overrides):
 
 def test_public_service_enqueue_does_not_expose_a_session_parameter() -> None:
     assert "session" not in inspect.signature(TaskQueueService.enqueue).parameters
+
+
+def test_key_conflict_resolution_is_a_mysql_current_locking_read() -> None:
+    statement = TaskQueuePendingRowWriter()._key_holder_statement(
+        env="prod",
+        app=DEFAULT_APP,
+        task_type="publication",
+        idempotency_key="publication:42",
+    )
+
+    sql = str(statement.compile(dialect=mysql.dialect()))
+    assert "FOR UPDATE" in sql
+    assert statement.get_execution_options()["populate_existing"] is True
 
 
 def test_business_fact_and_pending_task_commit_atomically(database) -> None:

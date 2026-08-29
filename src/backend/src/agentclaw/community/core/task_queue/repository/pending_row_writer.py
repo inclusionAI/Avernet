@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import func, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -132,39 +132,32 @@ class TaskQueuePendingRowWriter:
             except IntegrityError as error:
                 if not _is_active_idem_conflict(error):
                     raise
-                existing = self._find_active_by_key(
+                holder = self._find_key_holder_current(
                     session,
                     env=env,
                     app=app,
                     task_type=task_type,
                     idempotency_key=idempotency_key,
                 )
-                if existing is not None:
-                    logger.info(
-                        "[task_queue.enqueue] type=%s joined existing id=%s key=%s",
-                        task_type,
-                        existing.id,
-                        idempotency_key,
-                    )
-                    return EnqueueResult(existing, False)
-                stranded_id = self._find_stranded_key_holder(
-                    session,
-                    env=env,
-                    app=app,
-                    task_type=task_type,
-                    idempotency_key=idempotency_key,
-                )
-                if stranded_id is not None:
+                if holder is not None and holder.status in TERMINAL_STATUSES:
                     raise RuntimeError(
                         f"[task_queue.enqueue] key={idempotency_key!r} "
                         f"type={task_type} env={env} app={app} is held by task "
-                        f"id={stranded_id}, which is terminal but never released "
+                        f"id={holder.id}, which is terminal but never released "
                         "it. Retrying cannot help — the key is occupied "
                         "forever. Most likely a worker running code from "
                         "before enqueue idempotency wrote the terminal status "
                         "without clearing active_idempotency_key; clear that "
                         "column on the row to free the key"
                     )
+                if holder is not None:
+                    logger.info(
+                        "[task_queue.enqueue] type=%s joined existing id=%s key=%s",
+                        task_type,
+                        holder.id,
+                        idempotency_key,
+                    )
+                    return EnqueueResult(holder, False)
                 continue
             return EnqueueResult(record, True)
 
@@ -206,7 +199,35 @@ class TaskQueuePendingRowWriter:
         session.flush()
         return row.to_record()
 
-    def _find_active_by_key(
+    def _key_holder_statement(
+        self,
+        *,
+        env: str,
+        app: str,
+        task_type: str,
+        idempotency_key: str,
+    ):
+        """Current/locking read for the unique-key holder.
+
+        A Publication UoW may already have a REPEATABLE READ snapshot from
+        locking Draft/Attempt rows. The unique index sees a concurrent holder
+        even when that snapshot does not; FOR UPDATE is therefore required to
+        resolve the conflict against current committed state. populate_existing
+        prevents an older identity-map instance from winning over that read.
+        """
+        return (
+            select(self.Model)
+            .where(
+                self.Model.env == env,
+                self.Model.app == app,
+                self.Model.task_type == task_type,
+                self.Model.active_idempotency_key == idempotency_key,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+    def _find_key_holder_current(
         self,
         session: Any,
         *,
@@ -215,37 +236,12 @@ class TaskQueuePendingRowWriter:
         task_type: str,
         idempotency_key: str,
     ) -> TaskRecord | None:
-        row = (
-            session.query(self.Model)
-            .filter(
-                self.Model.env == env,
-                self.Model.app == app,
-                self.Model.task_type == task_type,
-                self.Model.active_idempotency_key == idempotency_key,
-                self.Model.status.notin_([item.value for item in TERMINAL_STATUSES]),
+        row = session.execute(
+            self._key_holder_statement(
+                env=env,
+                app=app,
+                task_type=task_type,
+                idempotency_key=idempotency_key,
             )
-            .first()
-        )
-        return row.to_record() if row else None
-
-    def _find_stranded_key_holder(
-        self,
-        session: Any,
-        *,
-        env: str,
-        app: str,
-        task_type: str,
-        idempotency_key: str,
-    ) -> int | None:
-        row = (
-            session.query(self.Model.id)
-            .filter(
-                self.Model.env == env,
-                self.Model.app == app,
-                self.Model.task_type == task_type,
-                self.Model.active_idempotency_key == idempotency_key,
-                self.Model.status.in_([item.value for item in TERMINAL_STATUSES]),
-            )
-            .first()
-        )
-        return row[0] if row else None
+        ).scalar_one_or_none()
+        return row.to_record() if row is not None else None
