@@ -170,7 +170,14 @@ def _reexported_protocol_names(tree: ast.AST) -> set[str]:
     vouched = {n for n in exported if n.endswith("Protocol")} | (
         exported & from_contract_module
     )
-    return vouched if vouched else set()
+    # Every exported name must be vouched, not merely one of them. Accepting a
+    # nonempty subset would let a module re-export ``FooProtocol`` from a
+    # contract module and a concrete ``FooService`` from an implementation
+    # module in the same ``__all__`` — exactly the leak that put a concrete
+    # TaskClaimGrantService in api/ under the old gate.
+    if vouched != exported:
+        return set()
+    return vouched
 
 
 @pytest.mark.unit
@@ -233,3 +240,34 @@ def test_reexport_escape_hatch_rejects_unimported_and_non_protocol_names() -> No
         '__all__ = ["router"]\n'
     )
     assert _reexported_protocol_names(router) == set()
+
+
+@pytest.mark.unit
+def test_reexport_hatch_rejects_a_concrete_service_smuggled_alongside_a_protocol() -> None:
+    """One vouched name does not vouch for the rest of ``__all__``.
+
+    Accepting a nonempty subset would let a module republish its Protocol
+    from a contract module and a concrete service from an implementation
+    module in the same ``__all__`` — the leak that kept a concrete
+    ``TaskClaimGrantService`` in api/ unnoticed under the previous gate.
+    """
+    smuggled = ast.parse(
+        "from agentclaw.community.core.task.task_grant_service_protocol import (\n"
+        "    TaskClaimGrantServiceProtocol,\n"
+        ")\n"
+        "from agentclaw.community.core.task.services.task_grant_service import (\n"
+        "    TaskClaimGrantService,\n"
+        ")\n\n"
+        '__all__ = ["TaskClaimGrantServiceProtocol", "TaskClaimGrantService"]\n'
+    )
+    assert _reexported_protocol_names(smuggled) == set()
+
+    # The same module without the concrete class is still a valid re-export.
+    clean = ast.parse(
+        "from agentclaw.community.core.task.task_grant_service_protocol import (\n"
+        "    GRANTED,\n"
+        "    TaskClaimGrantServiceProtocol,\n"
+        ")\n\n"
+        '__all__ = ["GRANTED", "TaskClaimGrantServiceProtocol"]\n'
+    )
+    assert _reexported_protocol_names(clean) == {"GRANTED", "TaskClaimGrantServiceProtocol"}
