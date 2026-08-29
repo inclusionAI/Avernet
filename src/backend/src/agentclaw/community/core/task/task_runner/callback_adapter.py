@@ -285,25 +285,16 @@ class TaskLoopCallback:
         """任务完成或失败:适配层组装 TaskNodePatch → 编排核 on_report(await) → graph.update_task_node_info → 翻态/传播/补救。
         回放幂等:``event_id`` 已 PROCESSED → 直接 ack;否则把回调审计挂到图变同事务落库。"""
 
-        logger.info("[task-callback] report_result, begin, %s", data)
+        logger.info("[task-callback] report_result, begin, data=%s", data)
         payload = data.data if isinstance(data.data, dict) else None
-        record = None
-        if payload is not None:
-            event_id = _derive_event_id(payload, "result")
-            if self._is_already_processed(event_id):
-                logger.info(
-                    "[task][task-callback] idempotent result event_id=%s session_id=%s",
-                    event_id,
-                    payload.get("workflow_instance_id") or "",
-                )
-                return
-            record = _to_callback_record(payload, event_id=event_id, process_status="PROCESSED")
-            logger.info("[task-callback] report_result, to_callback_record, %s", record)
+        record = _to_callback_record(payload, event_id="", process_status="PROCESSED")
+        logger.info("[task-callback] report_result, to_callback_record, %s", record)
+
+        if record is not None:
+            self._set_pending_audit(record)
 
         patch = self._adapter.adapt(data)
         logger.info("[task-callback] report_result, patch, %s", patch)
-        if record is not None:
-            self._set_pending_audit(record)
         try:
             await self._engine.on_report(patch)
         finally:
