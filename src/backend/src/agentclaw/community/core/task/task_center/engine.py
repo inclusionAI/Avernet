@@ -1703,7 +1703,9 @@ class ExecutionEngine:
         命中根 BBS 可恢复态(miss_depth_exhausted + bbs_mode + 未 claim)时调用——主动 bid→select→claim→
         dispatch 给 dream-mode bot。不持锁、不阻塞 ``on_*``/``_maybe_propagate_hung`` 汇报路径:``asyncio.create_task``
         调度后台协程,异常经 ``_on_bg_done`` 记 log。端口不全(无 runner/bot/bcs,如单测 stub)→ 静默跳过。"""
-        if self._runner is None or self._bot is None or self._bcs is None:
+        logger.info("[task][bbs_mode], begin schedule bbs notify, task_id=%s", task_id)
+        if self._runner:
+            logger.info("[task][bbs_mode], _runner is none, task_id=%s", task_id)
             return
         bg = asyncio.create_task(self._runner.run_bbs(execution_graph))
         self._bg_tasks.add(bg)

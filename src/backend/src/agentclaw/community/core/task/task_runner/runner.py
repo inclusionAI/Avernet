@@ -146,9 +146,11 @@ class TaskRunner:
         """升 BBS 可恢复态后主动通知 dream-mode bot 抢单(委托 execution_backend)。
         注入 execution_backend 时委托其 run_bbs(→ TaskExecutor.run_bbs → bbs_runner.notify);
         否则 stub 记日志(Avernet 无后端兜底,不抛)。"""
+        logger.info("[task][bbs_mode] run_bbs, begin, task=%s", execution_graph.task_id)
         if self._execution_backend is not None:
             return await self._execution_backend.run_bbs(execution_graph)
-        logger.info("[task][runner] run_bbs stub (no execution_backend) task=%s", execution_graph.task_id)
+        logger.info("[task][bbs_mode] run_bbs, finish, task=%s", execution_graph.task_id)
+        return None
 
     def _build_context(self, task_id: str, node_id: str) -> dict[str, Any]:
         """上下文组装(Runner 内聚;内部自动判定,无 NODE/SUBTREE/TASK scope 入参)。
