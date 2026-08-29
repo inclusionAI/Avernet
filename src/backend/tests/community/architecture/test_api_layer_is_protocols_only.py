@@ -120,6 +120,45 @@ def test_api_layer_has_no_subdirectories() -> None:
     )
 
 
+def _module_path(module: str) -> pathlib.Path | None:
+    """``agentclaw.community.core.a.b`` -> the file that defines it."""
+    if not module.startswith("agentclaw."):
+        return None
+    candidate = _BACKEND_ROOT / "src" / pathlib.Path(*module.split("."))
+    for path in (candidate.with_suffix(".py"), candidate / "__init__.py"):
+        if path.is_file():
+            return path
+    return None
+
+
+def _defines_protocol(module: str, name: str, _seen: frozenset[str] = frozenset()) -> bool:
+    """Is ``name`` a Protocol class as defined by ``module`` (following re-exports)?
+
+    Resolved from the source rather than the name, because Service API
+    contracts that predate the suffix convention (``CallerTokenProvider``,
+    ``CallerRuntimeUpdater``) are real Protocols under a plain name, while a
+    constant re-exported from a ``_protocol`` module is not one at all.
+    """
+    if module in _seen or len(_seen) > 8:
+        return False
+    path = _module_path(module)
+    if path is None:
+        return False
+    try:
+        tree = ast.parse(path.read_text(), filename=str(path))
+    except (SyntaxError, OSError):  # pragma: no cover — a separate failure
+        return False
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return _bases_include_protocol(node)
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if any((alias.asname or alias.name) == name for alias in node.names):
+                origin = next(a.name for a in node.names if (a.asname or a.name) == name)
+                return _defines_protocol(node.module, origin, _seen | {module})
+    return False
+
+
 def _reexported_protocol_names(tree: ast.AST) -> set[str]:
     """Names a re-export-only module republishes via ``__all__``.
 
@@ -176,6 +215,20 @@ def _reexported_protocol_names(tree: ast.AST) -> set[str]:
     # module in the same ``__all__`` — exactly the leak that put a concrete
     # TaskClaimGrantService in api/ under the old gate.
     if vouched != exported:
+        return set()
+    # ...and at least one of them must be an actual Protocol. Provenance alone
+    # vouches for constants too, so a module re-exporting only ``GRANTED`` from
+    # a ``_protocol`` module would otherwise pass while declaring no contract.
+    sources = {
+        (alias.asname or alias.name): (node.module, alias.name)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module
+        for alias in node.names
+    }
+    if not any(
+        name in sources and _defines_protocol(*sources[name])
+        for name in exported
+    ):
         return set()
     return vouched
 
@@ -271,3 +324,45 @@ def test_reexport_hatch_rejects_a_concrete_service_smuggled_alongside_a_protocol
         '__all__ = ["GRANTED", "TaskClaimGrantServiceProtocol"]\n'
     )
     assert _reexported_protocol_names(clean) == {"GRANTED", "TaskClaimGrantServiceProtocol"}
+
+
+@pytest.mark.unit
+def test_reexport_hatch_requires_an_actual_protocol_not_just_contract_provenance() -> None:
+    """Coming from a contract module is not the same as being a contract.
+
+    ``vouched == exported`` holds for a module re-exporting only ``GRANTED``
+    from ``task_grant_service_protocol`` — provenance vouches for constants
+    too — so without this check an api/ file could declare no Protocol at all.
+    """
+    constants_only = ast.parse(
+        "from agentclaw.community.core.task.task_grant_service_protocol import (\n"
+        "    GRANTED,\n    REVOKED,\n)\n\n"
+        '__all__ = ["GRANTED", "REVOKED"]\n'
+    )
+    assert _reexported_protocol_names(constants_only) == set()
+
+    # The same constants alongside the Protocol they belong to are fine.
+    with_protocol = ast.parse(
+        "from agentclaw.community.core.task.task_grant_service_protocol import (\n"
+        "    GRANTED,\n    REVOKED,\n    TaskClaimGrantServiceProtocol,\n)\n\n"
+        '__all__ = ["GRANTED", "REVOKED", "TaskClaimGrantServiceProtocol"]\n'
+    )
+    assert _reexported_protocol_names(with_protocol) == {
+        "GRANTED", "REVOKED", "TaskClaimGrantServiceProtocol",
+    }
+
+
+@pytest.mark.unit
+def test_protocol_detection_follows_the_source_not_the_name() -> None:
+    """A Protocol without the suffix still counts; a non-Protocol never does.
+
+    ``CallerTokenProvider`` predates the naming convention and is a real
+    Protocol in core/caller_identity/caller_credential_protocol.py, while
+    ``UnavailableCallerTokenProvider`` sits in that same module and is a
+    concrete class.
+    """
+    mod = "agentclaw.community.core.caller_identity.caller_credential_protocol"
+    assert _defines_protocol(mod, "CallerTokenProvider")
+    assert _defines_protocol(mod, "CallerRuntimeUpdater")
+    assert not _defines_protocol(mod, "UnavailableCallerTokenProvider")
+    assert not _defines_protocol(mod, "CALLER_CHAT_TASK")
