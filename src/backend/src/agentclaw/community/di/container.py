@@ -49,16 +49,15 @@ from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
 from agentclaw.community.di.modules.session_resources_module import SessionResourcesModule
 from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
+from agentclaw.community.di.modules.skill_version_module import SkillVersionModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
 from agentclaw.community.di.modules.spaces_module import SpacesModule
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
-from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
-from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.log import get_logger
@@ -105,6 +104,7 @@ def build_injector(
     modules: list[Module] = [
         ConfigModule(),
         SkillCenterModule(),
+        SkillVersionModule(),
         ServiceBotModule(),
         DesktopBotModule(),
         SystemConfigModule(),
