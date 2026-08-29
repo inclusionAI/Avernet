@@ -248,16 +248,17 @@ def translate_common_task_callback(raw: dict) -> TranslatedCallback | None:
     return TranslatedCallback(
         disposition=disposition,
         data=TaskCallbackData(data={
-            "loop_task_id": dict.get("task_id"),
+            "loop_task_id": raw.get("task_id"),
+            "node_id": raw.get("node_id"),
             "workflow_type": "task_loop",
             "workflow_id": 0,
             "instance_id": 0,
             "workflow_source": "task_loop",
             "workflow_instance_id": "",
             "event_id": "",
-            "status": dict.get("status"),
+            "status": raw.get("status"),
             "_raw_callback_body": raw,
-            "result": dict.get("output")
+            "result": raw.get("output")
         }),
     )
 
