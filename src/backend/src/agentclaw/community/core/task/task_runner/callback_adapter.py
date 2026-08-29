@@ -97,7 +97,7 @@ def _to_callback_record(payload: dict[str, Any], *, event_id: str | None = None,
     tmp_node_id = payload.get("node_id")
     if tmp_node_id:
         node_id = tmp_node_id
-    logger.info("[task][task-callback] to_callback_record, payload=%s, node_id=%s", payload, node_id)
+    logger.info("[task][task_callback] to_callback_record, payload=%s, node_id=%s", payload, node_id)
 
     result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     success = result.get("success")
@@ -140,60 +140,19 @@ class CallbackAdapter:
         ② success=True → 验收 PASS → acceptance_result=PASS;
         ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAIL(→ harness 重派)。
         非法/空终态 → exec_error=terminal_result_invalid。"""
-        d = data.data if isinstance(data.data, dict) else {}
-        task_id, node_id = _split_loop_task_id(d.get("loop_task_id"))
-        result = d.get("result") if isinstance(d.get("result"), dict) else {}
-        out = result.get("data")
-        fail_detail = result.get("fail_detail")
-        raw_gaps = result.get("gaps")
-        gaps = [str(g).strip() for g in raw_gaps if str(g).strip()] \
-            if isinstance(raw_gaps, list) else []
-        if fail_detail and not gaps:
-            gaps = [str(fail_detail)]
-        exec_error = result.get("exec_error")
-        ext = result.get("_ext_info") or {}
-        ep_patch: dict[str, Any] = dict(ext)
-        if fail_detail:
-            ep_patch["fail_detail"] = fail_detail
-        if exec_error:
-            # 执行报错:不设 acceptance(与验收不过区分);on_report 据 exec_error 走 harness
-            return TaskNodePatch(
-                task_id=task_id,
-                node_id=node_id,
-                exec_error=str(exec_error),
-                output_patch={"data": out} if out is not None else None,
-                extend_props_patch=ep_patch if ep_patch else None,
-            )
-        success = result.get("success")
-        if type(success) is not bool:
-            return TaskNodePatch(
-                task_id=task_id,
-                node_id=node_id,
-                exec_error="terminal_result_invalid: success must be bool",
-                output_patch={"data": out} if out is not None else None,
-                extend_props_patch=ep_patch if ep_patch else None,
-            )
-        if success:
-            acceptance = AcceptanceResult(verdict=AcceptanceVerdict.PASS, acceptances_metric=["exec_ok"])
-        else:
-            if not gaps:
-                return TaskNodePatch(
-                    task_id=task_id,
-                    node_id=node_id,
-                    exec_error="terminal_result_invalid: failed result requires gaps",
-                    output_patch={"data": out} if out is not None else None,
-                    extend_props_patch=ep_patch if ep_patch else None,
-                )
-            acceptance = AcceptanceResult(
-                verdict=AcceptanceVerdict.FAIL,
-                gaps=gaps,
-            )
+        d = data.data
+        accept = d.get("acceptance_result")
         return TaskNodePatch(
-            task_id=task_id,
-            node_id=node_id,
-            output_patch={"data": out} if out is not None else None,
-            acceptance_result=acceptance,
-            extend_props_patch=ep_patch if ep_patch else None,
+            task_id=d.get("task_id"),
+            node_id=d.get("node_id"),
+            status=Status(d.get("status")),
+            output_patch={"output" : d.get("output")},
+            acceptance_result=AcceptanceResult(
+                verdict = AcceptanceVerdict(accept.get("verdict")),
+                acceptances_metric=accept.get("acceptances_metric"),
+                gaps=accept.get("gap")
+            ),
+            extend_props_patch = d.get("extend_props")
         )
 
     def adapt_start(self, data: TaskCallbackData) -> TaskNodePatch:
@@ -242,7 +201,7 @@ class TaskLoopCallback:
         try:
             prior = finder(event_id)
         except Exception as exc:  # noqa: BLE001 查幂等键失败不阻断回投(落库/推进仍进行)
-            logger.warning("[task][task-callback] idempotency check failed event_id=%s: %s", event_id, exc)
+            logger.warning("[task][task_callback] idempotency check failed event_id=%s: %s", event_id, exc)
             return False
         return prior is not None and prior.process_status == "PROCESSED"
 
@@ -264,7 +223,7 @@ class TaskLoopCallback:
             event_id = _derive_event_id(payload, "start")
             if self._is_already_processed(event_id):
                 logger.info(
-                    "[task][task-callback] idempotent start event_id=%s session_id=%s",
+                    "[task][task_callback] idempotent start event_id=%s session_id=%s",
                     event_id,
                     payload.get("workflow_instance_id") or "",
                 )
@@ -285,16 +244,17 @@ class TaskLoopCallback:
         """任务完成或失败:适配层组装 TaskNodePatch → 编排核 on_report(await) → graph.update_task_node_info → 翻态/传播/补救。
         回放幂等:``event_id`` 已 PROCESSED → 直接 ack;否则把回调审计挂到图变同事务落库。"""
 
-        logger.info("[task-callback] report_result, begin, data=%s", data)
+        logger.info("[task_callback] report_result, begin, data=%s", data)
         payload = data.data if isinstance(data.data, dict) else None
         record = _to_callback_record(payload, event_id="", process_status="PROCESSED")
-        logger.info("[task-callback] report_result, to_callback_record, %s", record)
+        logger.info("[task_callback] report_result, to_callback_record, %s", record)
 
         if record is not None:
             self._set_pending_audit(record)
 
         patch = self._adapter.adapt(data)
-        logger.info("[task-callback] report_result, patch, %s", patch)
+        logger.info("[task_callback] report_result, adapt patch, %s", patch)
+
         try:
             await self._engine.on_report(patch)
         finally:
@@ -302,7 +262,7 @@ class TaskLoopCallback:
                 self._fallback_persist_audit()
             else:
                 self._set_pending_audit(None)
-        logger.info("[task-callback] report_result, finish")
+        logger.info("[task_callback] report_result, finish")
 
     async def ingest(self, data: TaskCallbackData) -> None:
         """仅落回投审计(``task_callback``),不推进编排核。供 ClawMind/BCN 等事件/工作流级回投用:
@@ -322,7 +282,7 @@ class TaskLoopCallback:
             self._callback_repo.upsert(record)
         except Exception as exc:  # noqa: BLE001 审计落库失败不阻断回投推进
             logger.warning(
-                "[task][task-callback] fallback persist task_callback failed session_id=%s: %s",
+                "[task][task_callback] fallback persist task_callback failed session_id=%s: %s",
                 record.main_session_id or "",
                 exc,
             )
@@ -343,7 +303,7 @@ class TaskLoopCallback:
             self._callback_repo.upsert(_to_callback_record(payload, event_id=event_id))
         except Exception as exc:  # noqa: BLE001 落库失败不影响编排核推进
             logger.warning(
-                "[task][task-callback] persist task_callback failed session_id=%s: %s",
+                "[task][task_callback] persist task_callback failed session_id=%s: %s",
                 payload.get("workflow_instance_id") or "",
                 exc,
             )
