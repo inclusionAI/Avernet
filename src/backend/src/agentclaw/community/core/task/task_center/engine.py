@@ -529,9 +529,92 @@ class ExecutionEngine:
                 task_id,
                 [node.node_id for node in readiness.ready],
             )
-            # Reuse the normal dispatcher so static nodes retain the same
-            # single-bot and runtime-created group delivery semantics.
-            await self._prepare_into(task_id, side)
+            # Static nodes use the YAML-bound bot directly; skip catalog search
+            # and claim-join so dependencies are never dispatched ahead of time
+            # and the bound bot_id (e.g. strategy_approval/implementation) is
+            # honored instead of being replaced by whatever catalog returns.
+            await self._prepare_static_into(task_id, runtime, readiness.ready, side)
+
+    async def _prepare_static_into(
+        self, task_id: str, runtime, ready_nodes, side: list[tuple]
+    ) -> None:
+        """Static DAG 节点跳过搜推,直接用 YAML 绑定的 bot 指派。
+
+        type=bot → single_bot + assignee=definition.bot_id → start_run;
+        type=collaboration → pending_group_formation → form_coop_group。
+        不进 dispatcher.dispatch / 不查 catalog / 不做 claim_join,故未 ready 的依赖节点
+        (strategy_approval/implementation)不会被提前搜推成 MISS/claim_mode_off,且 YAML 绑定
+        的 bot_id 永远被尊重(不会被 catalog 命中的其他 bot 替换)。依赖顺序由 runtime.ready 保证。"""
+        to_run: list[TaskNode] = []
+        for node in ready_nodes:
+            definition = runtime.by_id.get(node.node_id)
+            if definition is None:
+                logger.warning(
+                    "[task][static-plan] task=%s node=%s 无定义,跳过",
+                    task_id,
+                    node.node_id,
+                )
+                continue
+            gf = node.run_info.extend_props.get("pending_group_formation")
+            if gf is not None:
+                gf.extend_props.setdefault(
+                    "task_objective", node.task_spec.goal.objective
+                )
+                gf.extend_props.setdefault(
+                    "task_instruction", node.task_spec.metadata.instruction
+                )
+                gf.extend_props.setdefault(
+                    "acceptances",
+                    [
+                        {"id": a.id, "description": a.description}
+                        for a in node.task_spec.goal.acceptances
+                    ],
+                )
+                logger.info(
+                    "[task][static-plan] task=%s node=%s → group(collab=%s bot_ids=%s) 跳过搜推",
+                    task_id,
+                    node.node_id,
+                    gf.collab_mode,
+                    list(gf.bot_ids),
+                )
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        run_mode="coop_group",
+                        extend_props_patch={"dispatching": True},
+                    )
+                )
+                side.append(("group", node, gf))
+                continue
+            bot_id = getattr(definition, "bot_id", None)
+            if bot_id:
+                node.run_info.run_mode = "single_bot"
+                node.run_info.assignee = bot_id
+                logger.info(
+                    "[task][static-plan] task=%s node=%s → run(assignee=%s) 跳过搜推",
+                    task_id,
+                    node.node_id,
+                    bot_id,
+                )
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        run_mode="single_bot",
+                        assignee=bot_id,
+                        extend_props_patch={"dispatching": True},
+                    )
+                )
+                to_run.append(node)
+            else:
+                logger.warning(
+                    "[task][static-plan] task=%s node=%s 无 bot 绑定也无 group,跳过",
+                    task_id,
+                    node.node_id,
+                )
+        if to_run:
+            side.append(("run", to_run))
 
     async def _on_static_report(self, task_id: str, node_id: str) -> None:
         runtime = self._static_runtime(task_id)
