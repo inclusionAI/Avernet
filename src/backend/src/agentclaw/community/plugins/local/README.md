@@ -8,7 +8,6 @@ Local-mode plugin implementations — in-memory / fixture-backed / noop variants
 purpose: "Local-mode plugin implementations — in-memory / fixture-backed / noop variants for offline dev and tests."
 provides:
   - "Local* and Noop* implementations, including LocalSkillCenterGateway"
-  - "LocalDraftContentStore"
   - "Shared SQLite ORM models for local persistence"
 consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"

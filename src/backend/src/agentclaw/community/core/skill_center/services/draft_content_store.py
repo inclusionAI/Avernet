@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from string import Formatter
-
 from agentclaw.community.core.skill_center.draft_content import (
     DraftContentStoreConfig,
     DraftContentStoreError,
@@ -18,10 +15,11 @@ from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageValidator,
     ValidatedSkillPackage,
 )
-from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
-
-
-_SAFE_PREFIX_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+from agentclaw.community.plugin_api.object_storage import (
+    ObjectCreateResult,
+    ObjectReadStatus,
+    ObjectStoragePlugin,
+)
 
 
 class OssDraftContentStore:
@@ -36,9 +34,7 @@ class OssDraftContentStore:
     ) -> None:
         self._objects = object_storage
         self._validator = package_validator
-        self._base_prefix_template = self._validate_base_prefix_template(
-            config.base_prefix_template
-        )
+        self._base_prefix_template = config.base_prefix_template
 
     def write_revision(
         self,
@@ -47,38 +43,53 @@ class OssDraftContentStore:
     ) -> DraftRevisionRef:
         ref = DraftRevisionRef.from_identity(identity)
         key = self._object_key(ref)
-        existing = self._objects.get_object(key)
-        if existing is not None:
-            if existing == validated_package.canonical_zip:
-                return ref
-            raise DraftContentStoreError(
-                DraftContentStoreErrorCode.CONTENT_CONFLICT,
-                "Draft revision identity already contains different bytes",
-            )
-        if not self._objects.put_object(key, validated_package.canonical_zip):
+        created = self._objects.create_object_if_absent(
+            key, validated_package.canonical_zip
+        )
+        if created is ObjectCreateResult.FAILED:
             raise DraftContentStoreError(
                 DraftContentStoreErrorCode.WRITE_FAILED,
                 "Draft revision write failed",
             )
-        verified = self._objects.get_object(key)
-        if verified is None:
+        verified = self._objects.read_object(key)
+        if verified.status is ObjectReadStatus.FAILED:
+            raise DraftContentStoreError(
+                (
+                    DraftContentStoreErrorCode.WRITE_FAILED
+                    if created is ObjectCreateResult.CREATED
+                    else DraftContentStoreErrorCode.READ_FAILED
+                ),
+                "Draft revision could not be read after conditional create",
+            )
+        if verified.status is ObjectReadStatus.NOT_FOUND:
             raise DraftContentStoreError(
                 DraftContentStoreErrorCode.WRITE_FAILED,
-                "Draft revision could not be verified after write",
+                "Draft revision disappeared after conditional create",
             )
-        if verified != validated_package.canonical_zip:
+        if verified.content != validated_package.canonical_zip:
             raise DraftContentStoreError(
                 DraftContentStoreErrorCode.CONTENT_CONFLICT,
-                "Draft revision changed while verifying the write",
+                "Draft revision identity already contains different bytes",
             )
         return ref
 
     def read_revision(self, ref: DraftRevisionRef) -> ValidatedSkillPackage:
-        stored = self._objects.get_object(self._object_key(ref))
-        if stored is None:
+        result = self._objects.read_object(self._object_key(ref))
+        if result.status is ObjectReadStatus.NOT_FOUND:
             raise DraftContentStoreError(
                 DraftContentStoreErrorCode.NOT_FOUND,
                 "Draft revision was not found",
+            )
+        if result.status is ObjectReadStatus.FAILED:
+            raise DraftContentStoreError(
+                DraftContentStoreErrorCode.READ_FAILED,
+                "Draft revision read failed",
+            )
+        stored = result.content
+        if stored is None:
+            raise DraftContentStoreError(
+                DraftContentStoreErrorCode.CORRUPT_CONTENT,
+                "Object storage returned FOUND without content",
             )
         try:
             package = self._validator.validate_zip(stored)
@@ -107,43 +118,3 @@ class OssDraftContentStore:
             f"{base}/{ref.tenant}/{ref.env}/{ref.skill_uuid}/"
             f"v{ref.target_version}/revisions/{ref.revision_id}.zip"
         )
-
-    @staticmethod
-    def _validate_base_prefix_template(template: str) -> str:
-        if not isinstance(template, str):
-            raise DraftContentStoreError(
-                DraftContentStoreErrorCode.INVALID_CONFIGURATION,
-                "Draft content base prefix template must be a string",
-            )
-        try:
-            parsed = list(Formatter().parse(template))
-        except ValueError as exc:
-            raise DraftContentStoreError(
-                DraftContentStoreErrorCode.INVALID_CONFIGURATION,
-                "Draft content base prefix template is malformed",
-            ) from exc
-        fields = [
-            (field_name, format_spec, conversion)
-            for _literal, field_name, format_spec, conversion in parsed
-            if field_name is not None
-        ]
-        if fields != [("env", "", None)]:
-            raise DraftContentStoreError(
-                DraftContentStoreErrorCode.INVALID_CONFIGURATION,
-                "Draft content base prefix template must contain one {env}",
-            )
-        rendered = template.format(env="validation")
-        if (
-            not rendered
-            or rendered.startswith(("/", "\\"))
-            or "\\" in rendered
-            or any(
-                part in {"", ".", ".."} or _SAFE_PREFIX_SEGMENT.fullmatch(part) is None
-                for part in rendered.split("/")
-            )
-        ):
-            raise DraftContentStoreError(
-                DraftContentStoreErrorCode.INVALID_CONFIGURATION,
-                "Draft content base prefix must be a safe relative path",
-            )
-        return template

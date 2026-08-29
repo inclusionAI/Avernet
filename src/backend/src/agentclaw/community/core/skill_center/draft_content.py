@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from string import Formatter
 from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol, runtime_checkable
@@ -27,6 +28,7 @@ class DraftContentStoreErrorCode(str, Enum):
     INVALID_LOCATOR = "INVALID_LOCATOR"
     INVALID_CONFIGURATION = "INVALID_CONFIGURATION"
     WRITE_FAILED = "WRITE_FAILED"
+    READ_FAILED = "READ_FAILED"
     NOT_FOUND = "NOT_FOUND"
     DELETE_FAILED = "DELETE_FAILED"
     CONTENT_CONFLICT = "CONTENT_CONFLICT"
@@ -48,6 +50,45 @@ class DraftContentStoreConfig:
     base_prefix_template: str = (
         "aidesktop/aidesktop_{env}/bolt_shared/skills-upload/space-drafts"
     )
+
+    def __post_init__(self) -> None:
+        template = self.base_prefix_template
+        if not isinstance(template, str):
+            raise DraftContentStoreError(
+                DraftContentStoreErrorCode.INVALID_CONFIGURATION,
+                "Draft content base prefix template must be a string",
+            )
+        try:
+            parsed = list(Formatter().parse(template))
+        except ValueError as exc:
+            raise DraftContentStoreError(
+                DraftContentStoreErrorCode.INVALID_CONFIGURATION,
+                "Draft content base prefix template is malformed",
+            ) from exc
+        fields = [
+            (field_name, format_spec, conversion)
+            for _literal, field_name, format_spec, conversion in parsed
+            if field_name is not None
+        ]
+        if fields != [("env", "", None)]:
+            raise DraftContentStoreError(
+                DraftContentStoreErrorCode.INVALID_CONFIGURATION,
+                "Draft content base prefix template must contain one {env}",
+            )
+        rendered = template.format(env="validation")
+        if (
+            not rendered
+            or rendered.startswith(("/", "\\"))
+            or "\\" in rendered
+            or any(
+                part in {"", ".", ".."} or _SAFE_SEGMENT.fullmatch(part) is None
+                for part in rendered.split("/")
+            )
+        ):
+            raise DraftContentStoreError(
+                DraftContentStoreErrorCode.INVALID_CONFIGURATION,
+                "Draft content base prefix must be a safe relative path",
+            )
 
 
 def _canonical_uuid(value: str, *, field: str) -> str:

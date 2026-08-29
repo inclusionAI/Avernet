@@ -10,6 +10,7 @@ returned URL is the one the mock produced.
 Plugin-hit assertion: ``put_object`` and ``sign_url`` mocks must record
 the call. A consumer bypassing the plugin would never trigger them.
 """
+
 from __future__ import annotations
 
 from agentclaw.community.core.skill_center.canonical_center_store import (
@@ -20,7 +21,18 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
 from agentclaw.community.core.skill_center.services.canonical_center_store import (
     OssCanonicalCenterVersionStore,
 )
-from agentclaw.community.core.skill_center.services.skill_publish_service import SkillPublishService
+from agentclaw.community.core.skill_center.draft_content import (
+    DraftContentStoreConfig,
+    DraftRevisionIdentity,
+)
+from agentclaw.community.core.skill_center.services.draft_content_store import (
+    OssDraftContentStore,
+)
+from agentclaw.community.core.skill_center.services.skill_publish_service import (
+    SkillPublishService,
+)
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.plugin_api.object_storage import (
     ImmutableObjectStorageCapability,
     ObjectCreateResult,
@@ -99,3 +111,39 @@ def test_canonical_store_consumer_hits_immutable_object_capability(world) -> Non
     assert ref.identity == version.identity
     assert objects.create_object_if_absent.call_count == 3
     assert objects.read_object.call_count == 2
+
+
+def test_immutable_draft_consumer_uses_atomic_object_contract(world) -> None:
+    validator = SkillPackageValidator(SkillParser())
+    package = validator.validate_directory(
+        [
+            (
+                "draft/SKILL.md",
+                b"---\nname: draft\ndescription: Draft\n---\n",
+            )
+        ]
+    )
+    objects = world.get(ObjectStoragePlugin)
+    objects.create_object_if_absent.return_value = ObjectCreateResult.CREATED
+    objects.read_object.return_value = ObjectReadResult(
+        ObjectReadStatus.FOUND, package.canonical_zip
+    )
+    store = OssDraftContentStore(
+        object_storage=objects,
+        package_validator=validator,
+        config=DraftContentStoreConfig(),
+    )
+
+    store.write_revision(
+        DraftRevisionIdentity(
+            tenant="tenant",
+            env="pre",
+            skill_uuid="11111111-1111-4111-8111-111111111111",
+            target_version=1,
+            revision_id="22222222-2222-4222-8222-222222222222",
+        ),
+        package,
+    )
+
+    objects.create_object_if_absent.assert_called_once()
+    objects.read_object.assert_called_once()

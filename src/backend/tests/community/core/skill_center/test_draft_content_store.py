@@ -21,8 +21,13 @@ from agentclaw.community.core.skill_center.services.draft_content_store import (
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
-from agentclaw.community.plugins.local.draft_content_store import (
+from agentclaw.community.testing.draft_content_store import (
     LocalDraftContentStore,
+)
+from agentclaw.community.plugin_api.object_storage import (
+    ObjectCreateResult,
+    ObjectReadResult,
+    ObjectReadStatus,
 )
 
 
@@ -130,7 +135,7 @@ class _Objects:
         self.data: dict[str, bytes] = {}
         self.put_ok = True
         self.delete_ok = True
-        self.read_override: bytes | None | object = _UNSET
+        self.read_override: ObjectReadResult | object = _UNSET
         self.puts: list[tuple[str, bytes]] = []
         self.deletes: list[str] = []
 
@@ -140,10 +145,24 @@ class _Objects:
             self.data[key] = content
         return self.put_ok
 
+    def create_object_if_absent(self, key: str, content: bytes) -> ObjectCreateResult:
+        if not self.put_ok:
+            return ObjectCreateResult.FAILED
+        if key in self.data:
+            return ObjectCreateResult.ALREADY_EXISTS
+        self.puts.append((key, content))
+        self.data[key] = content
+        return ObjectCreateResult.CREATED
+
     def get_object(self, key: str) -> bytes | None:
+        return self.data.get(key)
+
+    def read_object(self, key: str) -> ObjectReadResult:
         if self.read_override is not _UNSET:
             return self.read_override  # type: ignore[return-value]
-        return self.data.get(key)
+        if key not in self.data:
+            return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+        return ObjectReadResult(ObjectReadStatus.FOUND, self.data[key])
 
     def delete_object(self, key: str) -> bool:
         self.deletes.append(key)
@@ -212,7 +231,7 @@ def test_oss_adapter_maps_storage_failures_to_stable_errors(
     if failure == "put":
         objects.put_ok = False
     elif failure == "verify":
-        objects.read_override = None
+        objects.read_override = ObjectReadResult(ObjectReadStatus.FAILED)
     else:
         objects.delete_ok = False
 
@@ -233,6 +252,12 @@ def test_oss_adapter_fails_closed_on_missing_or_noncanonical_content() -> None:
     with pytest.raises(DraftContentStoreError) as missing:
         store.read_revision(ref)
     assert missing.value.code is DraftContentStoreErrorCode.NOT_FOUND
+
+    objects.read_override = ObjectReadResult(ObjectReadStatus.FAILED)
+    with pytest.raises(DraftContentStoreError) as unavailable:
+        store.read_revision(ref)
+    assert unavailable.value.code is DraftContentStoreErrorCode.READ_FAILED
+    objects.read_override = _UNSET
 
     store.write_revision(_identity(), _package())
     key = objects.puts[0][0]

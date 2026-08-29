@@ -237,7 +237,9 @@ Phase 2 复用一条 `ac_skill` 作为跨版本稳定 Identity：
   解析物理路径。默认 OSS object key 为
   `aidesktop/aidesktop_<env>/bolt_shared/skills-upload/space-drafts/<tenant>/<env>/`
   `<skill_uuid>/v<target_version>/revisions/<revision_id>.zip`。Draft 数据库命令与 CAS/补偿
-  仍由后续 P2-01/P2-03 application service 实现，不属于 Store。
+  仍由后续 P2-01/P2-03 application service 实现，不属于 Store。同一 exact revision key
+  必须使用 object-store create-if-absent 原子创建；已存在同字节为幂等，不同字节冲突失败。
+  Object read 必须区分 FOUND/NOT_FOUND/FAILED，禁止把存储故障误判为不存在后覆盖。
 - `SkillPackageValidator` 是 Local、Draft 和精确版本物化共用的纯 package 边界：负责
   安全相对路径、压缩/展开大小与文件数、唯一 `SKILL.md`、frontmatter 的
   name/description/config、wrapper、平台 metadata 忽略和 deterministic canonical ZIP，
