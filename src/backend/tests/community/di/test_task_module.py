@@ -55,9 +55,9 @@ def test_resolve_ports_outside_singlebox_returns_the_two_port_contract(monkeypat
     assert TaskModule._resolve_ports() == (None, None)
 
 
-def test_resolve_api_base_url_reuses_iframe_callback_origin(monkeypatch):
-    # 回投 origin 取自 economy_governance.iframe_callback_url[_pre](已在 ocb 按环境配好)。真实值经 yaml/overlay
-    # 注入,社区测试只用中立域名,不在 community 内联企业域名。
+def test_resolve_api_base_url_uses_bcs_task_callback_origin(monkeypatch):
+    # 回投 origin 取自 bcs_client.task_callback_url[_pre]。BCS client 已按环境选择，
+    # TaskModule 只负责取 origin，社区测试使用中立域名。
 
     # singlebox → SINGLEBOX_BACKEND_URL(本地直连),不走 iframe 解析
     monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
@@ -66,11 +66,11 @@ def test_resolve_api_base_url_reuses_iframe_callback_origin(monkeypatch):
     monkeypatch.setenv("SINGLEBOX_BACKEND_URL", "http://sb.local:8888")
     assert TaskModule._resolve_api_base_url("ignored") == "http://sb.local:8888"
 
-    # non-singlebox → 取 iframe_callback_url 的 origin(去路径)
+    # non-singlebox → 取 bcs_client.task_callback_url 的 origin(去路径)
     monkeypatch.setenv("DEPLOY_PROFILE", "community")
     assert TaskModule._resolve_api_base_url("") == "http://localhost:8888"          # 空 → 兜底
     assert TaskModule._resolve_api_base_url("not a url") == "http://localhost:8888"  # 非法 → 兜底
-    # 真实形态:预发 iframe_callback_url_pre 形如 https://<backend-host>/api/economy/governance/card-callback
+    # 真实形态:task_callback_url_pre 可以带 callback 路径，解析时只保留 origin
     assert (
         TaskModule._resolve_api_base_url(
             "https://agentclaw-pre.example.test/api/economy/governance/card-callback"

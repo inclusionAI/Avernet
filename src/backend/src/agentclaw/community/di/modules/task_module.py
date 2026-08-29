@@ -66,7 +66,7 @@ from agentclaw.community.core.task.task_runner.integration.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
-from agentclaw.community.di.config import EconomyGovernanceConfig, TaskDispatchConfig
+from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.di.profile import DeployProfile
 
 logger = logging.getLogger("task.module")
@@ -250,16 +250,14 @@ class TaskModule(Module):
                 exc,
             )
             task_auth_gate = None
-        # 回投 origin 复用 economy_governance.iframe_callback_url[_pre]:已在 ocb 按环境配成卡片回投
-        # 完整 URL(形如 <backend-host>/api/economy/governance/card-callback),由 EconomyGovernanceConfig
-        # 构造期按 env 选好 _pre/base(_is_pre)。取其 scheme://netloc 作 backend 自身访问 URL——既不内联
-        # 企业域名(满足架构门 test_shipped_config_no_corp_identifiers),又复用现成 env-aware 注入通道,
-        # 无需新增 config/yaml block。EconomyGovernanceModule 未装(纯内核/轻量测试列)→ 取不到 → 传空 → 兜底
-        # localhost。agent 回投结果往此 origin POST(自行拼 /api/v1/... 内部路径,不走 gateway 鉴权)。
-        try:
-            gov = injector.get(EconomyGovernanceConfig)
-        except Exception:  # noqa: BLE101 EconomyGovernanceModule 未装(纯内核/轻量测试列) → 取不到
-            gov = None
+        # 任务回投 origin 使用 bcs_client.task_callback_url[_pre]，由 BCS client
+        # 按当前环境选出对应地址。它是 BCS → Avernet 的真实回投通道，不能复用
+        # economy_governance 的卡片回调地址。
+        bcs_callback_url = ""
+        if bcs is not None:
+            _callback_fn = getattr(bcs, "task_callback_url", None)
+            if callable(_callback_fn):
+                bcs_callback_url = str(_callback_fn() or "").strip()
         from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
             BcsBotTokenProvider, NullBcsBotTokenProvider,
         )
@@ -282,9 +280,7 @@ class TaskModule(Module):
             bot_service=bot_service,
             staff_dept=staff_dept,
             task_auth_gate=task_auth_gate,
-            api_base_url=self._resolve_api_base_url(
-                gov.iframe_callback_url if gov else ""
-            ),
+            api_base_url=self._resolve_api_base_url(bcs_callback_url),
             bot_token_provider=bot_token_provider,
             task_search_skill_enabled=task_dispatch.task_search_skill_enabled,
             task_settings=task_settings,
@@ -389,26 +385,24 @@ class TaskModule(Module):
         return auth
 
     @staticmethod
-    def _resolve_api_base_url(iframe_callback_url: str = "") -> str:
+    def _resolve_api_base_url(task_callback_url: str = "") -> str:
         """返回本 backend 自身访问 URL(agent 回投结果往此 origin POST,自行拼 /api/v1/... 内部路径)。
 
-        复用 economy_governance 提供的环境感知 ``iframe_callback_url[_pre]``:已在 ocb 按环境配成卡片
-        回投完整 URL(形如 ``<backend-host>/api/economy/governance/card-callback``),并由
-        ``EconomyGovernanceConfig`` 构造期按 env 选好 _pre/base。去掉其路径取 ``scheme://netloc`` 即为
-        backend 自身访问 URL——既不内联企业域名(满足架构门 test_shipped_config_no_corp_identifiers),
-        又复用现成 env-aware 注入通道,无需新增 config/yaml block。
+        解析 ``bcs_client.task_callback_url[_pre]`` 提供的任务回投 origin。BCS client
+        已按当前环境选择 ``task_callback_url_pre`` 或 ``task_callback_url``；这里仅取
+        ``scheme://netloc``，避免把路径误拼到任务 callback endpoint。
 
         - singlebox(``DEPLOY_PROFILE``) → ``SINGLEBOX_BACKEND_URL``/localhost(本地直连);
-        - 其余 → 解析 ``iframe_callback_url`` 的 origin;
-        - 空值/非法(社区/dev/未配 economy_governance 或 EconomyGovernanceModule 未装)→ 回退 localhost:8888。"""
+        - 其余 → 解析 ``bcs_client.task_callback_url[_pre]`` 的 origin;
+        - 空值/非法(社区/dev/未配置 BCS 回投地址)→ 回退 localhost:8888。"""
         if (
             os.environ.get("DEPLOY_PROFILE", "").strip().lower()
             == DeployProfile.SINGLEBOX.value
         ):
             return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-        if not iframe_callback_url:
+        if not task_callback_url:
             return "http://localhost:8888"
-        parsed = urlparse(iframe_callback_url)
+        parsed = urlparse(task_callback_url)
         if not parsed.scheme or not parsed.netloc:
             return "http://localhost:8888"
         return f"{parsed.scheme}://{parsed.netloc}"
