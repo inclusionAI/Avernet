@@ -231,9 +231,13 @@ Phase 2 复用一条 `ac_skill` 作为跨版本稳定 Identity：
 - `ac_skill_grant` 表达恰好一个 Owner 和多个 Manager，不读取 Legacy 权限表。
 - `ac_skill_draft_edit_lease` 是永久协作锁事实，保存 holder 与单调递增 fencing
   token；本期没有 TTL、expires、renewal 或自动释放语义。
-- Draft 内容存储的 `DraftContentStore` Protocol、物理 OSS 根、临时区布局以及 OSS/DB
-  失败补偿仍标记为 **TBD**，必须在 P2-01/P2-03 实现前另行冻结。本轮 Grant、Editor
-  Request 与 Lease 只建立可被 Draft 命令复用的领域 seam，不实现或猜测 Draft 文件存储。
+- Draft 内容使用单 immutable ZIP Revision Store，不建设多对象 folder 或 READY marker。
+  `DraftContentStore` 只暴露 `write_revision/read_revision/delete_revision`；Active Draft
+  无 TTL。持久 locator 为 `draft://<skill_uuid>/v<target_version>/<revision_id>`，业务层不
+  解析物理路径。默认 OSS object key 为
+  `aidesktop/aidesktop_<env>/bolt_shared/skills-upload/space-drafts/<tenant>/<env>/`
+  `<skill_uuid>/v<target_version>/revisions/<revision_id>.zip`。Draft 数据库命令与 CAS/补偿
+  仍由后续 P2-01/P2-03 application service 实现，不属于 Store。
 - `SkillPackageValidator` 是 Local、Draft 和精确版本物化共用的纯 package 边界：负责
   安全相对路径、压缩/展开大小与文件数、唯一 `SKILL.md`、frontmatter 的
   name/description/config、wrapper、平台 metadata 忽略和 deterministic canonical ZIP，

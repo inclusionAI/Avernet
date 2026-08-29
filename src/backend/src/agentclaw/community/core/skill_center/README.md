@@ -19,6 +19,11 @@ provides:
   - "SkillPackageValidator"
   - "SkillPackageManifestParserProtocol"
   - "ValidatedSkillPackage"
+  - "DraftContentStore"
+  - "DraftContentStoreConfig"
+  - "DraftRevisionIdentity"
+  - "DraftRevisionRef"
+  - "OssDraftContentStore"
   - "DirectActivationService"
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
@@ -75,6 +80,7 @@ consumes:
   - "SpaceSkillRepository"
   - "WorkOrderRepositoryProtocol"
   - "DraftEditLeaseRepository"
+  - "ObjectStoragePlugin"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
@@ -147,6 +153,12 @@ write intent and integrity manifest live under the derived sibling
 Those objects protect immutable writes and validate completeness; they are not
 a publication state. Only `ac_skill_version.status=PUBLISHED`, owned by the
 later Materializer workflow, expresses domain readiness.
+
+`DraftContentStore` persists one canonical ZIP per immutable Draft revision.
+Its business reference is `draft://<skill_uuid>/v<target>/<revision_id>`; only
+the OSS adapter knows the configured physical object prefix. The Store owns no
+Draft status, TTL, READY marker, database command, Publication behavior, or
+Runtime projection.
 
 Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols. Changes to `SkillMetadataParserProtocol`, `SkillMetadata`, or stable manifest error codes affect Local folder upload immediately and the shared fixtures consumed by Git import, Draft validation and publication validation; coordinate those consumers before changing fields, limits or codes. List/detail/market readers must continue consuming parser-derived projections rather than inventing a second name or description source.
 

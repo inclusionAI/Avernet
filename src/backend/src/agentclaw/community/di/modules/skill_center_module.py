@@ -207,6 +207,9 @@ from agentclaw.community.di import config as cfg
 from agentclaw.community.di.modules.canonical_center_store_module import (
     CanonicalCenterStoreBindings,
 )
+from agentclaw.community.di.modules.draft_content_store_module import (
+    DraftContentStoreBindings,
+)
 from agentclaw.community.di.modules.skill_center_protocols import (
     SkillCenterProtocolBindings,
 )
@@ -253,7 +256,12 @@ logger = get_logger()
 # ── Module ─────────────────────────────────────────────────────────────────
 
 
-class SkillCenterModule(CanonicalCenterStoreBindings, SkillCenterProtocolBindings, Module):
+class SkillCenterModule(
+    CanonicalCenterStoreBindings,
+    DraftContentStoreBindings,
+    SkillCenterProtocolBindings,
+    Module,
+):
     """Production singletons + factories for skill_center."""
 
     def configure(self, binder: Binder) -> None:
