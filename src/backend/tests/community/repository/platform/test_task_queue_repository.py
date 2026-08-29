@@ -17,16 +17,21 @@ from sqlalchemy.pool import StaticPool
 # Side-effect import: registers TaskQueueModel on Base.metadata so
 # create_all() builds the ac_task_queue table.
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel  # noqa: F401
-from agentclaw.community.core.task_queue.types import TaskStatus
+from agentclaw.community.core.task_queue.types import DEFAULT_APP, MAX_APP_LEN, TaskStatus
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
-from agentclaw.community.core.repository.implementations.platform.task_queue import _ACTIVE_IDEM_INDEX, _KEYED_INSERT_ATTEMPTS, _MAX_IDEMPOTENCY_KEY_LEN, _MAX_TASK_TYPE_LEN
+from agentclaw.community.di.config import TaskQueueConfig
+from agentclaw.community.core.repository.implementations.platform.task_queue import _ACTIVE_IDEM_INDEXES, _KEYED_INSERT_ATTEMPTS, _MAX_IDEMPOTENCY_KEY_LEN, _MAX_TASK_TYPE_LEN
 from agentclaw.community.core.repository.implementations.platform.task_queue import TaskQueueRepository, _is_active_idem_conflict
 
 pytestmark = pytest.mark.integration
 
 ENV = "dev"
+#: This deployment's app. A second, independently deployed backend shares the
+#: table under its own name; ``OTHER_APP`` stands in for it.
+APP = DEFAULT_APP
+OTHER_APP = "teclaw"
 
 
 class InMemorySqliteDB:
@@ -70,6 +75,7 @@ def _enqueue_result(
     delay_seconds=0,
     deadline_seconds=3600,
     env=ENV,
+    app=APP,
     task_type="demo",
     idempotency_key=None,
 ):
@@ -80,6 +86,7 @@ def _enqueue_result(
         delay_seconds=delay_seconds,
         deadline_seconds=deadline_seconds,
         env=env,
+        app=app,
         idempotency_key=idempotency_key,
     )
 
@@ -91,8 +98,10 @@ def _enqueue(repo, **kwargs):
     return _enqueue_result(repo, **kwargs).record
 
 
-def _claim(repo, worker, *, limit=10, lease=60, env=ENV):
-    return repo.claim_batch(worker_id=worker, env=env, limit=limit, lease_seconds=lease)
+def _claim(repo, worker, *, limit=10, lease=60, env=ENV, app=APP):
+    return repo.claim_batch(
+        worker_id=worker, env=env, app=app, limit=limit, lease_seconds=lease
+    )
 
 
 # ── enqueue ─────────────────────────────────────────────────────────────────
@@ -124,6 +133,71 @@ def test_claim_respects_env_scoping(repo):
     _enqueue(repo, env="pre")
     won = _claim(repo, "W", env="dev")
     assert len(won) == 1 and won[0].env == "dev"
+
+
+def test_claim_respects_app_scoping(repo):
+    """The reason the column exists: two backends share this table, and a worker
+    must never claim the other's row — it would run a ``task_type`` its registry
+    never saw and fail it."""
+    mine = _enqueue(repo, app=APP)
+    _enqueue(repo, app=OTHER_APP)
+
+    won = _claim(repo, "W", app=APP)
+
+    assert [t.id for t in won] == [mine.id]
+    assert won[0].app == APP
+
+
+def test_claim_leaves_another_apps_expired_lease_alone(repo):
+    """Reclaim is scoped too. An abandoned row of another app looks exactly like
+    work waiting to be rescued — it is not ours to rescue, and taking it would
+    double-run it the moment that app's own worker comes back."""
+    theirs = _enqueue(repo, app=OTHER_APP)
+    assert _claim(repo, "T", app=OTHER_APP)  # their worker holds it
+    with repo._db.orm_session() as db:
+        db.query(TaskQueueModel).filter(TaskQueueModel.id == theirs.id).update(
+            {TaskQueueModel.lease_expires_at: func.datetime("now", "-1 minute")},
+            synchronize_session=False,
+        )
+
+    assert _claim(repo, "W", app=APP) == []
+    stored = repo.get_by_id(theirs.id)
+    assert stored.claimed_by == "T" and stored.status == TaskStatus.RUNNING
+
+
+def test_claim_does_not_time_out_another_apps_past_deadline_task(repo):
+    """The claim scan's other write. Retiring a past-deadline row is a terminal
+    transition, so doing it to another app's row would end work this deployment
+    has no business ending — and release a dedup key it does not own."""
+    theirs = _enqueue(repo, app=OTHER_APP, deadline_seconds=0)
+
+    assert _claim(repo, "W", app=APP) == []
+
+    assert repo.get_by_id(theirs.id).status == TaskStatus.PENDING
+
+
+def test_enqueue_stamps_the_owning_app(repo):
+    """Written explicitly, not left to the column default — a deployment whose
+    app is not the default would otherwise enqueue rows it can never claim."""
+    rec = _enqueue(repo, app=OTHER_APP)
+    assert rec.app == OTHER_APP
+    assert repo.get_by_id(rec.id).app == OTHER_APP
+
+
+def test_list_by_status_is_app_scoped(repo):
+    mine = _enqueue(repo, app=APP)
+    _enqueue(repo, app=OTHER_APP)
+
+    listed = repo.list_by_status(status=TaskStatus.PENDING, env=ENV, app=APP)
+
+    assert [t.id for t in listed] == [mine.id]
+
+
+def test_get_by_id_is_deliberately_not_app_scoped(repo):
+    """It is a primary-key read used for diagnosis and for reading back an
+    insert; the owner is on the record for a caller that needs to check it."""
+    theirs = _enqueue(repo, app=OTHER_APP)
+    assert repo.get_by_id(theirs.id).app == OTHER_APP
 
 
 def test_claim_honors_limit(repo):
@@ -289,8 +363,8 @@ def test_list_by_status_filters(repo):
     a = _enqueue(repo)
     b = _enqueue(repo)
     _claim(repo, "W", limit=1)
-    pending = repo.list_by_status(status=TaskStatus.PENDING, env=ENV)
-    running = repo.list_by_status(status=TaskStatus.RUNNING, env=ENV)
+    pending = repo.list_by_status(status=TaskStatus.PENDING, env=ENV, app=APP)
+    running = repo.list_by_status(status=TaskStatus.RUNNING, env=ENV, app=APP)
     assert {t.id for t in pending} | {t.id for t in running} == {a.id, b.id}
     assert len(running) == 1
 
@@ -361,6 +435,55 @@ def test_same_key_under_different_env_does_not_collide(repo):
 
     assert (a.created, b.created) == (True, True)
     assert a.record.id != b.record.id
+
+
+def test_same_key_under_different_app_is_rejected_while_the_legacy_index_lives(repo):
+    """Not the end state, and asserted as the intermediate one on purpose.
+
+    Dedup is scoped ``(env, app, task_type, key)`` in the code and in the new
+    unique index, so two apps using one key ought to be two rows. The deployed
+    table still carries the pre-``app`` index, which is unique on ``(env,
+    task_type, key)`` and ignores app, so the second app's INSERT is rejected
+    even though the key is free in its own scope.
+
+    What matters is that it fails rather than silently doing the wrong thing:
+    the other app's live task is never handed back (see the test below), and no
+    row is inserted. Dropping that index is the last step of the migration and
+    makes this case disappear."""
+    first = _enqueue_result(repo, app=APP, idempotency_key="k1")
+
+    with pytest.raises(RuntimeError):
+        _enqueue_result(repo, app=OTHER_APP, idempotency_key="k1")
+
+    assert len(_all_rows(repo)) == 1  # nothing inserted for the second app
+    assert repo.get_by_id(first.record.id).app == APP
+
+
+def test_a_foreign_app_key_is_free_again_once_its_holder_goes_terminal(repo):
+    """The contrast case: the rejection above is about a *live* holder, not
+    about the other app having ever used the key. A terminal row releases it,
+    and the second app then enqueues normally."""
+    first = _enqueue_result(repo, app=APP, idempotency_key="k1")
+    _claim(repo, "W", app=APP)
+    assert repo.complete(task_id=first.record.id, worker_id="W") is True
+
+    second = _enqueue_result(repo, app=OTHER_APP, idempotency_key="k1")
+
+    assert second.created is True
+    assert second.record.app == OTHER_APP
+
+
+def test_a_live_key_is_never_joined_across_apps(repo):
+    """The silent failure the app-scoped lookup rules out. Returning the other
+    app's live task with ``created=False`` would tell this deployment its work
+    was already in flight, while the row can only ever be claimed by the app
+    that owns it — so the work would simply never run."""
+    first = _enqueue_result(repo, app=APP, idempotency_key="k1")
+
+    with pytest.raises(RuntimeError):
+        _enqueue_result(repo, app=OTHER_APP, idempotency_key="k1")
+
+    assert repo.get_by_id(first.record.id).app == APP
 
 
 # ── enqueue idempotency: key release across terminal transitions ────────────
@@ -489,7 +612,7 @@ def test_repo_is_usable_after_a_caught_integrity_error(repo):
     assert _enqueue_result(repo, idempotency_key="k1").created is False  # conflict
 
     # Reads and writes both still work afterwards.
-    assert len(repo.list_by_status(status=TaskStatus.PENDING, env=ENV)) == 1
+    assert len(repo.list_by_status(status=TaskStatus.PENDING, env=ENV, app=APP)) == 1
     assert _enqueue_result(repo, idempotency_key="k2").created is True
     assert _enqueue(repo).id is not None
 
@@ -549,7 +672,7 @@ def test_three_consecutive_benign_races_still_enqueue(repo):
             raise IntegrityError(
                 "INSERT ...",
                 {},
-                Exception(f"Duplicate entry 'x' for key '{_ACTIVE_IDEM_INDEX}'"),
+                Exception(f"Duplicate entry 'x' for key '{_ACTIVE_IDEM_INDEXES[0]}'"),
             )
         return real_insert(**kwargs)
 
@@ -635,7 +758,9 @@ def test_key_is_stored_verbatim_without_stripping(repo):
 def test_validation_also_applies_through_the_service_facade(repo):
     """Adopters call TaskQueueService, so the guard must hold on that path too;
     it delegates to the repository, which is where the check lives."""
-    service = TaskQueueService(repo, HandlerRegistry(), WorkerWakeup())
+    service = TaskQueueService(
+        repo, HandlerRegistry(), WorkerWakeup(), TaskQueueConfig(app=APP)
+    )
     with pytest.raises(ValueError, match="exceeds"):
         service.enqueue(
             "demo", {}, 3600, idempotency_key="k" * (_MAX_IDEMPOTENCY_KEY_LEN + 1)
@@ -668,6 +793,54 @@ def test_key_columns_pin_binary_collation_on_mysql():
     for column in ("idempotency_key", "active_idempotency_key", "task_type"):
         line = next(ln for ln in ddl.splitlines() if ln.strip().startswith(column))
         assert "COLLATE utf8mb4_bin" in line, f"{column} lost its binary collation: {line}"
+
+
+def test_app_column_mirrors_the_deployed_ddl():
+    """The two literals that have to agree with the shipped table, and with each
+    other: the column default is what an INSERT naming no app lands on, and
+    ``TaskQueueConfig``'s default is what an un-configured deployment enqueues
+    *and* claims with. Were they to drift, that deployment would stamp one name
+    and look for another, and none of its own work would ever run."""
+    column = TaskQueueModel.__table__.c.app
+    # The literals are spelled out rather than taken from the constants: the
+    # deployed table says `app varchar(32) NOT NULL DEFAULT 'agentclaw'`, and a
+    # test that echoed the constants back would pass after either had been
+    # changed away from it.
+    assert column.type.length == 32 == MAX_APP_LEN
+    assert column.nullable is False
+    assert column.server_default.arg == "agentclaw" == DEFAULT_APP
+    assert TaskQueueConfig().app == DEFAULT_APP
+
+
+def test_app_scoped_indexes_lead_with_the_columns_every_query_filters_on():
+    """The claim scan and the reclaim scan both gained an ``app`` term, so the
+    indexes have to lead with it — otherwise the busiest statement the component
+    runs degrades to a scan. Asserted as column order, which is the part that
+    matters and the part an edit can silently break."""
+    by_name = {index.name: [c.name for c in index.columns] for index in TaskQueueModel.__table__.indexes}
+    assert by_name["idx_env_app_status_run_at"] == ["env", "app", "status", "run_at"]
+    assert by_name["idx_env_app_lease_expires_at"] == ["env", "app", "lease_expires_at"]
+    assert by_name["uk_env_app_task_type_active_idempotency_key"] == [
+        "env",
+        "app",
+        "task_type",
+        "active_idempotency_key",
+    ]
+
+
+def test_app_deliberately_keeps_the_default_collation():
+    """Same decision as ``env``, recorded for the same reason. ``app`` is a scope
+    column of the new unique index, but it comes from deployment config rather
+    than per-call input and the deployed DDL declares no collation for it — so
+    the ORM must not pin one either, or the two definitions diverge. The cost is
+    that app names differing only by case are one app on MySQL/OceanBase; give
+    deployments names that differ by more than that."""
+    from sqlalchemy.dialects import mysql
+    from sqlalchemy.schema import CreateTable
+
+    ddl = str(CreateTable(TaskQueueModel.__table__).compile(dialect=mysql.dialect()))
+    line = next(ln for ln in ddl.splitlines() if ln.strip().startswith("app "))
+    assert "COLLATE" not in line, f"app collation changed deliberately? {line}"
 
 
 def test_env_deliberately_keeps_the_default_collation():
@@ -806,7 +979,9 @@ def test_unkeyed_enqueue_still_accepts_any_task_type(repo, task_type):
 
 def test_padded_task_type_is_rejected_through_the_service_facade(repo):
     """Adopters call the service, so the guard has to hold on that path too."""
-    service = TaskQueueService(repo, HandlerRegistry(), WorkerWakeup())
+    service = TaskQueueService(
+        repo, HandlerRegistry(), WorkerWakeup(), TaskQueueConfig(app=APP)
+    )
     with pytest.raises(ValueError, match="leading or trailing whitespace"):
         service.enqueue("job ", {}, 3600, idempotency_key="k1")
     assert _all_rows(repo) == []

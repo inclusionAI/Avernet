@@ -1,4 +1,12 @@
 # 基础配置
+# app_name also names this deployment's rows in the shared ac_task_queue table:
+# another, independently deployed backend runs against the same table, every row
+# carries its owner, and each fleet claims only its own — so neither runs the
+# other's tasks and fails them for a task_type its registry never saw. Two
+# deployments must therefore not share an app_name, and a deployment needs its
+# own name before it starts enqueueing, since that name is what its own claims
+# will look for. Empty, padded, or over 32 characters fails the boot rather than
+# falling back (see ConfigModule.task_queue).
 app_name: "agentclaw"
 enable_sidecar: true
 workers: 6

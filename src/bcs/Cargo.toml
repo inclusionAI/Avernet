@@ -32,6 +32,7 @@ members = [
     "crates/services/bcs-organization-store",
     "crates/services/bcs-bot",
     "crates/services/bcs-bot-store",
+    "crates/services/bcs-chat-run-store",
     "crates/services/bcs-channel-store",
     "crates/services/bcs-channel",
     "crates/services/bcs-callback",
@@ -237,6 +238,7 @@ bcs-cli        = { path = "crates/tools/bcs-cli" }
 bcs-rule-bot   = { path = "crates/tools/bcs-rule-bot" }
 bcs-bot   = { path = "crates/services/bcs-bot" }
 bcs-bot-store = { path = "crates/services/bcs-bot-store" }
+bcs-chat-run-store = { path = "crates/services/bcs-chat-run-store" }
 bcs-channel-store = { path = "crates/services/bcs-channel-store" }
 bcs-channel = { path = "crates/services/bcs-channel" }
 bcs-callback   = { path = "crates/services/bcs-callback" }

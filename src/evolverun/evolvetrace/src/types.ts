@@ -136,6 +136,64 @@ export interface WorkflowNodeStats {
   nodes: unknown[]
 }
 
+
+// ── Workflow Spec ──
+
+export interface WorkflowNode {
+  id: string
+  title: string
+  phase?: string
+  businessStatus?: string
+  executor: {
+    type: string
+    [key: string]: unknown
+  }
+  dependsOn?: string[]
+  branchId?: string
+  join?: 'all' | 'any'
+  triggerRule?: 'all_success' | 'one_success' | 'all_done'
+  retry?: RetryConfig | unknown
+  outputContract?: OutputContract | unknown
+  outputSchema?: unknown
+  mock?: MockConfig | unknown
+  knowledge?: KnowledgeItem[] | boolean | unknown
+  knowledgeBaseId?: string
+  knowledgeQuery?: string
+  validationTemplateId?: string
+  validationMinScore?: number
+  onSuccess?: PostAction[] | unknown
+  onFailure?: PostAction[] | unknown
+  onFeedback?: OnFeedbackConfig | unknown
+  onResult?: OnResultBranch[] | Array<{ value: string; target: string }>
+  alerting?: NodeAlerting | unknown
+  progressMessage?: string
+  [key: string]: unknown
+}
+
+export interface WorkflowSpec {
+  id: string
+  version: string
+  title: string
+  nodes: WorkflowNode[]
+  config?: Record<string, unknown>
+  params?: Record<string, unknown>
+  tests?: unknown[]
+  requiredParams?: string[]
+  input?: unknown
+  identity?: unknown
+  outputs?: unknown
+  debug?: unknown
+  defaults?: unknown
+  collaboration?: unknown
+  workflow?: unknown
+  messages?: unknown
+  allowedBots?: string[]
+  facade?: {
+    command?: string
+    remark?: string
+  }
+  [key: string]: unknown
+}
 // ── TCLog 迁移类型 ──
 
 export type TraceDataSource = 'auto' | 'tc' | 'langfuse'
@@ -347,4 +405,82 @@ export interface TCLogTaskSearchResponse {
   sessions: TCLogSession[]
   workflowRuns: TCLogWorkflowRun[]
   timeline: TCLogTimelineItem[]
+}
+
+// ── Extended editor types (from clawweb) ──
+
+export interface RetryConfig {
+  maxAttempts?: number
+  initialDelayMs?: number
+  backoffMultiplier?: number
+  retryableStatuses?: string[]
+}
+
+export interface OutputContract {
+  schema?: Record<string, unknown>
+  required?: string[]
+}
+
+export interface MockConfig {
+  output?: unknown
+  [key: string]: unknown
+}
+
+export interface KnowledgeItem {
+  type: string
+  content: string
+  [key: string]: unknown
+}
+
+export interface PostAction {
+  id?: string
+  action?: string
+  required?: boolean
+  args?: Record<string, unknown>
+  saveAs?: Record<string, string>
+}
+
+export interface OnFeedbackConfig {
+  target?: string
+  feedbackPath?: string
+  feedbackMode?: string
+  feedbackTemplate?: string
+}
+
+export interface NodeAlerting {
+  dingtalk?: boolean
+  severity?: string
+  keywords?: string[]
+}
+
+export interface OnResultBranch {
+  value: string
+  target: string
+}
+
+export type ExecutorType =
+  | 'embedded-agent'
+  | 'action'
+  | 'human'
+  | 'loop-group'
+  | 'collaboration'
+  | 'done'
+  | 'subagent'
+  | 'bcs-route'
+  | 'baas-call'
+  | 'mcp-call'
+  | 'cli-script'
+  | 'subworkflow'
+  | 'approval'
+
+export interface WorkflowValidationIssue {
+  path: string
+  message: string
+  severity: 'error' | 'warning'
+}
+
+export interface WorkflowValidationResult {
+  valid: boolean
+  issues: WorkflowValidationIssue[]
+  normalizedSpec: WorkflowSpec | null
 }

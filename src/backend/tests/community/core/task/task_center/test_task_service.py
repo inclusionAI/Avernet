@@ -174,7 +174,7 @@ class _CaseTaskService(TaskService):
 def _build_facade(svc=None, *, decomposer=None, discover=None, runner=None,
                   harness=None, verify=None, bbs=None, task_id_provider=None) -> tuple:
     """兼容旧调用签名(verify/bbs 参数已废弃,忽略);返回 (facade, svc, planner, dispatcher, discover, runner)。"""
-    from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+    from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
     svc = svc or TaskGraphService()
     factory = None
     if decomposer is not None:
@@ -272,7 +272,7 @@ class TestCallback:
 class TestHarnessWiring:
     def test_execute_registers_with_harness(self):
         from agentclaw.community.core.task.task_harness.harness import TaskHarness
-        from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
         svc = TaskGraphService()
         harness = TaskHarness(svc)
         facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")], harness=harness,
@@ -286,7 +286,7 @@ class TestHarnessWiring:
 class TestAcceptanceViaReport:
     def test_root_terminal_pass_via_gap_closed(self):
         # 语义A:全子 DONE + plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(无需 owner bot 回投)
-        from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
         svc = TaskGraphService()
         # decomposer 首批产 c1,c1 DONE 后 plan[]→ gap 闭=终验通过 → 翻根 DONE
         facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1")],
@@ -305,7 +305,7 @@ class TestAcceptanceViaReport:
 class TestBbsEscalationNoMarket:
     def test_bbs_escalation_marks_bbs_mode_no_market_publish(self):
         # V2:升 BBS 只标 bbs_mode,无 bbs market publish
-        from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
         svc = TaskGraphService()
         facade = _CaseTaskService(svc, planner_factory=lambda g: [_child("c1", "t3")],
                                   task_id_provider=lambda: "t3")

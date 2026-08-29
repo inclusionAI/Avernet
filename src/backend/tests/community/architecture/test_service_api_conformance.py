@@ -79,6 +79,9 @@ from agentclaw.community.api.skill_query_service import (
 from agentclaw.community.api.skill_metadata_parser import (
     SkillMetadataParserProtocol,
 )
+from agentclaw.community.api.skill_center_gateway_service import (
+    SkillCenterGatewayServiceProtocol,
+)
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
@@ -104,6 +107,15 @@ from agentclaw.community.api.space_service import (
     SpaceAccessServiceProtocol,
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
+)
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
+from agentclaw.community.api.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestServiceProtocol,
+)
+from agentclaw.community.api.draft_edit_lease_service import (
+    DraftEditLeaseServiceProtocol,
 )
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
@@ -139,6 +151,9 @@ from agentclaw.community.core.skill_center.services.skill_query_service import (
     SkillQueryService,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.services.skill_center_gateway_service import (
+    SkillCenterGatewayService,
+)
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
@@ -157,6 +172,15 @@ from agentclaw.community.core.skill_center.services.repository_catalog_service i
 )
 from agentclaw.community.core.skill_center.services.skill_set_management_service import (
     SkillSetManagementService,
+)
+from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
+    SpaceSkillGrantService,
+)
+from agentclaw.community.core.skill_center.services.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestService,
+)
+from agentclaw.community.core.skill_center.services.draft_edit_lease_service import (
+    DraftEditLeaseService,
 )
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
@@ -187,6 +211,10 @@ _PAIRS = [
     (BotRuntimeProjectorProtocol, BotRuntimeProjector),
     (SkillQueryServiceProtocol, SkillQueryService),
     (SkillMetadataParserProtocol, SkillParser),
+    (SpaceSkillGrantServiceProtocol, SpaceSkillGrantService),
+    (SpaceSkillEditorRequestServiceProtocol, SpaceSkillEditorRequestService),
+    (DraftEditLeaseServiceProtocol, DraftEditLeaseService),
+    (SkillCenterGatewayServiceProtocol, SkillCenterGatewayService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
     (DirectActivationServiceProtocol, DirectActivationService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),

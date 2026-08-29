@@ -994,33 +994,47 @@ pub async fn remove_session_participant(
 
     // Authorization: self, owner, session creator/caller_principal, or coordinator.
     let is_self = caller_id == bot_uuid;
-    // A Human caller may remove a bot they own (mirrors delete_session authz).
-    let is_bot_owner = match &caller {
+    // COSEC: Human authority includes only Bots owned by the authenticated
+    // staff identity. This lets a Human act as a Bot-valued Session manager
+    // without trusting any caller-supplied actor id.
+    let owned_bot_ids = match &caller {
         GroupChatCaller::Human(h) => state
             .services
             .registry
             .list_bots_by_creator(&h.staff_no)
             .await
-            .iter()
-            .any(|b| b.bot_uuid == bot_uuid),
-        GroupChatCaller::Bot { .. } => false,
+            .into_iter()
+            .map(|b| b.bot_uuid)
+            .collect::<Vec<_>>(),
+        GroupChatCaller::Bot { .. } => Vec::new(),
     };
+    let human_owns_actor = |actor_id: &str| owned_bot_ids.iter().any(|id| id == actor_id);
+    // A Human caller may remove a bot they own (mirrors delete_session authz).
+    let is_bot_owner = human_owns_actor(&bot_uuid);
     let is_session_creator = session_created_by
         .as_deref()
-        .map(|c| caller_id == format!("human_{}", c) || caller_id == c)
+        .map(|c| {
+            caller_id == format!("human_{}", c) || caller_id == c || human_owns_actor(c)
+        })
         .unwrap_or(false);
     let is_session_principal = session_caller_principal
         .as_deref()
-        .map(|p| caller_id == p)
+        .map(|p| caller_id == p || human_owns_actor(p))
         .unwrap_or(false);
-    let is_coordinator = if let Some(ref gid) = group_id {
+    let (is_direct_coordinator, is_coordinator) = if let Some(ref gid) = group_id {
         if let Some(group) = state.services.group.get(gid).await {
-            caller_id == group.driver_bot || caller_id == group.originator()
+            let direct = caller_id == group.driver_bot || caller_id == group.originator();
+            (
+                direct,
+                direct
+                    || human_owns_actor(&group.driver_bot)
+                    || human_owns_actor(group.originator()),
+            )
         } else {
-            false
+            (false, false)
         }
     } else {
-        false
+        (false, false)
     };
     if !is_self && !is_bot_owner && !is_session_creator && !is_session_principal && !is_coordinator {
         return (
@@ -1033,7 +1047,10 @@ pub async fn remove_session_participant(
     }
 
     // Session creator/principal/owner cannot remove the driver bot.
-    if (is_session_creator || is_session_principal || is_bot_owner) && !is_self && !is_coordinator {
+    if (is_session_creator || is_session_principal || is_bot_owner)
+        && !is_self
+        && !is_direct_coordinator
+    {
         if let Some(ref gid) = group_id {
             if let Some(group) = state.services.group.get(gid).await {
                 if bot_uuid == group.driver_bot {

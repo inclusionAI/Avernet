@@ -40,7 +40,7 @@ def test_dispatch_returns_one_bool_per_node():
 
 
 def test_runner_falls_back_to_stub_without_backend():
-    from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+    from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
     from agentclaw.community.core.task.task_runner.runner import TaskRunner
     g = TaskGraphService()
     r = TaskRunner(g)  # 无 execution_backend

@@ -7,7 +7,8 @@ use async_trait::async_trait;
 pub use crate::types::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
-    BotControlPlanePatch, BotControlPlaneRecord, BotTaskModesQuery, TaskModeMatch,
+    BotControlPlanePatch, BotControlPlaneRecord, BotSearchCandidateQuery, BotTaskModesQuery,
+    TaskModeMatch,
 };
 use crate::ServiceResult;
 
@@ -39,6 +40,11 @@ pub trait BotControlPlaneRepoPort: Send + Sync {
     async fn list_control_plane_candidates(
         &self,
         query: BotCandidateReadQuery,
+    ) -> ServiceResult<(Vec<BotCandidateReadRecord>, u64)>;
+
+    async fn search_control_plane_candidates(
+        &self,
+        query: BotSearchCandidateQuery,
     ) -> ServiceResult<(Vec<BotCandidateReadRecord>, u64)>;
 
     async fn list_control_plane_by_creator(

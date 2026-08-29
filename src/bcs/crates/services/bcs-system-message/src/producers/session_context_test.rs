@@ -309,12 +309,15 @@ async fn manager_worker_manager_reminder_lists_only_manager_tools() {
 #[tokio::test]
 async fn manager_worker_context_uses_recipient_coordination_surface() {
     let manager_id = "manager-bot";
+    let mcporter_worker_id = "mcporter-worker";
     let native_mcp_worker_id = "native-mcp-worker";
     let native_tool_worker_id = "native-tool-worker";
     let legacy_worker_id = "legacy-worker";
 
     let mut manager = Participant::bot(manager_id, ParticipantRole::Manager);
     manager.bot_name = Some("Manager".to_string());
+    let mut mcporter_worker = Participant::bot(mcporter_worker_id, ParticipantRole::Worker);
+    mcporter_worker.bot_name = Some("Mcporter Worker".to_string());
     let mut native_mcp_worker = Participant::bot(native_mcp_worker_id, ParticipantRole::Worker);
     native_mcp_worker.bot_name = Some("Native MCP Worker".to_string());
     let mut native_tool_worker = Participant::bot(native_tool_worker_id, ParticipantRole::Worker);
@@ -327,6 +330,7 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
         manager_id,
         vec![
             manager.clone(),
+            mcporter_worker.clone(),
             native_mcp_worker.clone(),
             native_tool_worker.clone(),
             legacy_worker.clone(),
@@ -336,12 +340,22 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
     let participants = group.participants.clone();
     let registry = NamedRegistry::new(&[
         (manager_id, "Manager", Some("manager")),
+        (mcporter_worker_id, "Mcporter Worker", None),
         (native_mcp_worker_id, "Native MCP Worker", None),
         (native_tool_worker_id, "Native Tool Worker", None),
         (legacy_worker_id, "Legacy Worker", None),
     ])
     .with_surface(
         manager_id,
+        CoordinationSurface {
+            mode: CoordinationMode::McporterMcp,
+            mcp_server: Some("bcs".to_string()),
+            mcporter_command: Some("mcporter".to_string()),
+            tool_name_mapping: Default::default(),
+        },
+    )
+    .with_surface(
+        mcporter_worker_id,
         CoordinationSurface {
             mode: CoordinationMode::McporterMcp,
             mcp_server: Some("bcs".to_string()),
@@ -381,12 +395,23 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
             .as_str()
     };
     assert!(message_for(manager_id).contains("mcporter call bcs.bcs_assign_task"));
+    assert!(message_for(manager_id).contains("mcporter call bcs.bcs_task_complete"));
+    assert!(message_for(mcporter_worker_id).contains("mcporter call bcs.bcs_send_task_message"));
+    for bot_id in [manager_id, mcporter_worker_id] {
+        assert!(message_for(bot_id).contains("必须保留并回传完整原始输出"));
+        assert!(message_for(bot_id).contains(
+            "禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理"
+        ));
+    }
     assert!(message_for(native_mcp_worker_id).contains("MCP server `bcs`"));
     assert!(message_for(native_mcp_worker_id).contains("`bcs_send_task_message`"));
     assert!(message_for(native_tool_worker_id).contains("原生工具 `bcs_send_task_message`"));
     assert!(!message_for(native_tool_worker_id).contains("MCP server `bcs`"));
     assert!(!message_for(legacy_worker_id).contains("mcporter call"));
     assert!(!message_for(legacy_worker_id).contains("MCP server `bcs`"));
+    for bot_id in [native_mcp_worker_id, native_tool_worker_id, legacy_worker_id] {
+        assert!(!message_for(bot_id).contains("必须保留并回传完整原始输出"));
+    }
 }
 
 #[tokio::test]

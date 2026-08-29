@@ -19,7 +19,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, bind_overrides, endpoint_test
 from agentclaw.community.api.task.task_grant_service import (

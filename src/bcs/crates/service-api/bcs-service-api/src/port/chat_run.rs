@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BotRunContext {
     pub run_id: String,
     pub bot_id: String,

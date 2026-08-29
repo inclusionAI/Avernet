@@ -10,11 +10,17 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     AddSkillsRequest,
     DeactivateSkillSetRequest,
     SearchRequest,
+    UpdateSkillSetRequest,
 )
 from agentclaw.community.adapters.http.skill_center.skillsets import (
     add_skills_to_set,
+    delete_skill_set,
     get_default_skill_set,
+    get_skill_set,
     get_skill_set_mcps,
+    get_skill_set_skills,
+    remove_skill_from_set,
+    update_skill_set,
 )
 from agentclaw.community.adapters.http.skill_center.skills import (
     deactivate_skill_set,
@@ -28,6 +34,9 @@ from agentclaw.community.adapters.http.dependencies import get_request_context
 from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
+)
+from agentclaw.community.core.skill_center.skill_set_batch import (
+    SkillSetSkillOutcome,
 )
 
 
@@ -145,7 +154,7 @@ async def test_legacy_mcp_read_recovers_non_default_bot_from_exact_set_id() -> N
         {
             "set_id": "set-1",
             "actor_id": "owner",
-            "owner_id_hint": None,
+            "owner_id_hint": "owner",
         },
     )
 
@@ -301,10 +310,15 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
         def resolve_legacy_skill_id(self, **kwargs):
             return kwargs["identifier"]
 
-        async def add_skill(self, **_kwargs):
-            raise SkillSetControlPlaneConflictError(
-                "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
-            )
+        async def add_skills(self, **_kwargs):
+            return [
+                SkillSetSkillOutcome(
+                    skill_id="7",
+                    error=SkillSetControlPlaneConflictError(
+                        "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
+                    ),
+                )
+            ]
 
     response = await add_skills_to_set(
         "set-1",
@@ -321,6 +335,166 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
     assert response.success is True
     assert response.data["success"] == []
     assert response.data["failed"][0]["skill_id"] == "7"
+
+
+@pytest.mark.asyncio
+async def test_legacy_skill_set_batch_uses_body_owner_for_collaborator() -> None:
+    class _ControlPlane:
+        def get_set(self, **kwargs):
+            assert kwargs == {
+                "bot_id": "bot",
+                "owner_id": "owner",
+                "user_id": "collaborator",
+                "set_id": "set-1",
+            }
+            return {"id": "set-1", "is_default": False}
+
+        def resolve_legacy_skill_id(self, **kwargs):
+            assert kwargs["bot_id"] == "bot"
+            assert kwargs["owner_id"] == "owner"
+            assert kwargs["actor_id"] == "collaborator"
+            return kwargs["identifier"]
+
+        async def add_skills(self, **kwargs):
+            assert kwargs == {
+                "bot_id": "bot",
+                "owner_id": "owner",
+                "user_id": "collaborator",
+                "set_id": "set-1",
+                "skill_ids": ["7", "8"],
+            }
+            return [
+                SkillSetSkillOutcome(skill_id="7", changed=True),
+                SkillSetSkillOutcome(skill_id="8", changed=True),
+            ]
+
+    response = await add_skills_to_set(
+        "set-1",
+        AddSkillsRequest(skill_ids=["7", "8"], user_id="owner", bot_id="bot"),
+        entity_id=None,
+        entity_type=None,
+        bot_id=None,
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="collaborator", bot_id="default"),
+        bot_repo=_Bots(),
+        control_plane=_ControlPlane(),
+    )
+
+    assert response.success is True
+    assert response.data["success"] == [
+        {"skill_id": "7", "name": "7"},
+        {"skill_id": "8", "name": "8"},
+    ]
+    assert response.data["failed"] == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_exact_set_routes_keep_the_target_owner_for_collaborators() -> None:
+    class _ControlPlane:
+        def __init__(self) -> None:
+            self.operations: list[tuple[str, dict]] = []
+
+        def resolve_legacy_set_scope(self, **_kwargs):
+            raise AssertionError("an explicit bot_id must stay strictly scoped")
+
+        def get_set(self, **kwargs):
+            self.operations.append(("get_set", kwargs))
+            return {
+                "id": "set-1",
+                "name": "tools",
+                "description": None,
+                "is_default": False,
+                "is_builtin": False,
+                "user_id": "owner",
+                "gmt_created": "",
+                "gmt_modified": "",
+            }
+
+        def update_set(self, **kwargs):
+            self.operations.append(("update_set", kwargs))
+            return {
+                "id": "set-1",
+                "name": "tools",
+                "description": kwargs["description"],
+                "is_default": False,
+                "is_builtin": False,
+                "user_id": "owner",
+                "gmt_created": "",
+                "gmt_modified": "",
+            }
+
+        def delete_set(self, **kwargs):
+            self.operations.append(("delete_set", kwargs))
+
+        def list_skills(self, **kwargs):
+            self.operations.append(("list_skills", kwargs))
+            return []
+
+        async def remove_skills(self, **kwargs):
+            self.operations.append(("remove_skills", kwargs))
+            return [SkillSetSkillOutcome(skill_id="7", changed=True)]
+
+        def list_mcps(self, **kwargs):
+            self.operations.append(("list_mcps", kwargs))
+            return []
+
+    control_plane = _ControlPlane()
+    common = {
+        "entity_type": None,
+        "engine_type": None,
+        "ctx": SimpleNamespace(user_id="collaborator", bot_id="default"),
+        "bot_repo": _Bots(),
+        "control_plane": control_plane,
+    }
+
+    await get_skill_set(
+        "set-1", user_id="owner", entity_id=None, bot_id="bot", **common
+    )
+    await update_skill_set(
+        "set-1",
+        UpdateSkillSetRequest(
+            description="updated", user_id="owner", bot_id="bot"
+        ),
+        entity_id=None,
+        bot_id=None,
+        **common,
+    )
+    await inspect.unwrap(delete_skill_set)(
+        "set-1", user_id="owner", entity_id=None, bot_id="bot", **common
+    )
+    await get_skill_set_skills(
+        "set-1", user_id="owner", entity_id=None, bot_id="bot", **common
+    )
+    await inspect.unwrap(remove_skill_from_set)(
+        "set-1",
+        "7",
+        user_id="owner",
+        entity_id=None,
+        bot_id="bot",
+        **common,
+    )
+    await get_skill_set_mcps(
+        "set-1",
+        user_id="owner",
+        entity_id=None,
+        bot_id="bot",
+        skill_set_service_factory=object(),
+        **common,
+    )
+
+    assert [operation for operation, _kwargs in control_plane.operations] == [
+        "get_set",
+        "update_set",
+        "delete_set",
+        "list_skills",
+        "remove_skills",
+        "get_set",
+        "list_mcps",
+    ]
+    for _operation, kwargs in control_plane.operations:
+        assert kwargs["bot_id"] == "bot"
+        assert kwargs["owner_id"] == "owner"
+        assert kwargs["user_id"] == "collaborator"
 
 
 @pytest.mark.asyncio
@@ -365,7 +539,7 @@ async def test_legacy_skill_set_batch_propagates_infrastructure_failure() -> Non
         def resolve_legacy_skill_id(self, **kwargs):
             return kwargs["identifier"]
 
-        async def add_skill(self, **_kwargs):
+        async def add_skills(self, **_kwargs):
             raise RuntimeError("database unavailable")
 
     # The route used to catch this and return a 500 reading "Skill set
@@ -396,7 +570,7 @@ async def test_legacy_skill_set_batch_does_not_hide_mutation_busy() -> None:
         def resolve_legacy_skill_id(self, **kwargs):
             return kwargs["identifier"]
 
-        async def add_skill(self, **_kwargs):
+        async def add_skills(self, **_kwargs):
             raise SkillSetControlPlaneConflictError("BOT_MUTATION_BUSY")
 
     # A busy fence is not one of the two per-skill conflicts the batch records
@@ -465,9 +639,9 @@ async def test_legacy_remove_reaches_the_default_set_exclusion_wire() -> None:
             self.calls.append(("get_set", kwargs))
             return {"id": "set-1", "is_default": True}
 
-        async def remove_skill(self, **kwargs):
-            self.calls.append(("remove_skill", kwargs))
-            return {"id": "set-1", "is_default": True, "changed": True}
+        async def remove_skills(self, **kwargs):
+            self.calls.append(("remove_skills", kwargs))
+            return [SkillSetSkillOutcome(skill_id="7", changed=True)]
 
     control_plane = _ControlPlane()
     response = await remove_skill_from_set(
@@ -487,13 +661,41 @@ async def test_legacy_remove_reaches_the_default_set_exclusion_wire() -> None:
         "success": True,
         "message": "Skill removed from skill set",
     }
-    assert ("remove_skill", {
-        "bot_id": "persisted-bot",
-        "owner_id": "owner",
-        "user_id": "owner",
-        "set_id": "set-1",
-        "skill_id": "7",
-    }) in control_plane.calls
+    assert (
+        "remove_skills",
+        {
+            "bot_id": "persisted-bot",
+            "owner_id": "owner",
+            "user_id": "owner",
+            "set_id": "set-1",
+                "skill_ids": ["7"],
+        },
+    ) in control_plane.calls
+
+
+@pytest.mark.asyncio
+async def test_legacy_remove_keeps_the_historical_missing_member_404() -> None:
+    from agentclaw.community.adapters.http.skill_center.skillsets import (
+        remove_skill_from_set,
+    )
+
+    class _ControlPlane(_LegacySetScopeControlPlane):
+        async def remove_skills(self, **_kwargs):
+            return [SkillSetSkillOutcome(skill_id="7", changed=False)]
+
+    with pytest.raises(SkillSetControlPlaneNotFoundError, match="Skill not found"):
+        await remove_skill_from_set(
+            "set-1",
+            "7",
+            user_id="owner",
+            entity_id=None,
+            entity_type=None,
+            bot_id=None,
+            engine_type=None,
+            ctx=SimpleNamespace(user_id="owner", bot_id="default"),
+            bot_repo=_AddressedBots(),
+            control_plane=_ControlPlane(),
+        )
 
 
 @pytest.mark.asyncio

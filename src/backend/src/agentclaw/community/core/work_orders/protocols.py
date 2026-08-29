@@ -9,6 +9,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.work_orders.models import (
         NotificationCategory,
         WorkOrderEventCreatedResult,
+        WorkOrderDetail,
+        WorkOrderReviewResult,
+        WorkOrderStatus,
     )
 
 
@@ -33,3 +36,18 @@ class WorkOrderEventServiceProtocol(Protocol):
         biz_data: dict[str, object] | None,
         actor_id: str,
     ) -> WorkOrderEventCreatedResult: ...
+
+
+@runtime_checkable
+class SkillCollaboratorApprovalHandlerProtocol(Protocol):
+    """Skill-owned policy seam invoked by the generic approval pipeline."""
+
+    @abstractmethod
+    def process(
+        self,
+        *,
+        detail: WorkOrderDetail,
+        actor_id: str,
+        review_remark: str | None,
+        target_status: WorkOrderStatus,
+    ) -> WorkOrderReviewResult: ...

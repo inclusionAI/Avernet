@@ -1,5 +1,5 @@
 from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 def test_build_engine_passes_api_base_url():

@@ -109,6 +109,22 @@ Core downstream body fields:
 | `message` | `chat.send` / `chat.inject` | Current downstream message. |
 | `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | Downstream operation timeout. For direct A2A `chat.send` submitted by `bcs-cli chat`, BCS sends a fixed 2-hour execution budget (`7200000` ms), independent of the CLI polling timeout. |
 
+For an ordinary Human message received through a Channel whose Bot binding has
+`forward_sender_identity: true`, BCS prepends the following JSON line to the
+Provider request copy of the textual `message`, followed by one blank line:
+
+```text
+{"sender":{"id":"410025","name":"张三"}}
+
+original message
+```
+
+The `from` and Provider request field contracts do not change. The prefix is
+not emitted for Group bindings, Channel commands such as `/new`, HumanInput
+replies, or non-Channel entry points. It is model attribution and observability
+data only, never authentication or authorization input. Sender values are JSON
+serialized, and retries rebuild the request from the unchanged BCS frame.
+
 ## Protocol 2.0 `chat.send` transport negotiation
 
 For every Provider registered with `protocol_version = "2.0"`, BCS sends every

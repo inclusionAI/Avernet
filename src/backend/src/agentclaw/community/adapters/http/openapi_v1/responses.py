@@ -45,12 +45,9 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    ApplicationCodingUnavailableError,
     BotAccessRefusedError,
     BotEditLockCheckError,
     BotEditLockRequiredError,
-    BotCombinationUnsupportedError,
-    BotTemplateInvalidError,
     CallerIdentityConflictError,
     CallerIdentityForbiddenError,
     CallerIdentityInvalidError,
@@ -64,14 +61,10 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UnsupportedEngineError,
     UserIdMismatchError,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors_space import (
-    SpaceErrorCode,
-    SpacePublicErrorMessage,
-)
-from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
-    WorkOrderErrorCode,
-    WorkOrderPublicErrorMessage,
-)
+from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
+from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_work_order import WorkOrderErrorCode, WorkOrderPublicErrorMessage
 from agentclaw.community.core.bot_app_grant.errors import (
     GrantBotNotLiveError,
     GrantIdentityTooLongError,
@@ -123,11 +116,6 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryOperationNotAllowedError,
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
-)
-from agentclaw.community.core.bot_management.errors import (
-    ApplicationCodingUnavailableError,
-    BotCombinationUnsupportedError,
-    BotTemplateInvalidError,
 )
 from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
@@ -190,6 +178,8 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderBotEditorRequestNotAllowedError,
+    WorkOrderSkillEditorRequestNotAllowedError,
+    WorkOrderSkillApplicantAlreadyEditorError,
     WorkOrderInvalidReasonError,
     WorkOrderInvalidEventError,
     WorkOrderInvalidRemarkError,
@@ -281,8 +271,11 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterPublishStatusError,
     SkillCenterTeamCreateError,
 )
-
 T = TypeVar("T")
+
+
+class SkillCenterMarketplaceUnavailableError(RuntimeError):
+    """A public Skill Center marketplace read could not be served."""
 
 
 def _trace_id(request: Request) -> str:
@@ -368,6 +361,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     FavoriteNotFoundError: (404, "Not found"),
     SpaceAlreadyExistsError: (409, "Space already exists"),
     SpaceMemberAlreadyExistsError: (409, "Space member already exists"),
+    **SPACE_SKILL_HTTP_ERRORS,
     SpaceCreatorInvariantError: (409, "Space creator cannot be removed or demoted"),
     PersonalSpaceInvariantError: (409, "Personal space membership is immutable"),
     SkillCenterTeamCreateError: (
@@ -375,6 +369,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
     ),
     SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
+    SkillCenterMarketplaceUnavailableError: (
+        502,
+        "Skill Center marketplace unavailable",
+    ),
     SkillCenterPublishStatusError: (502, "Skill Center publish status unavailable"),
     # Staff directory infra failure (master-data service unreachable/errored).
     # 502, not 200-null: "directory down" must stay distinct from "no dept" so an
@@ -421,6 +419,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     WorkOrderBotEditorRequestNotAllowedError: (
         409,
         WorkOrderPublicErrorMessage.BOT_EDITOR_REQUEST_NOT_ALLOWED,
+    ),
+    WorkOrderSkillEditorRequestNotAllowedError: (
+        409,
+        WorkOrderPublicErrorMessage.SKILL_EDITOR_REQUEST_NOT_ALLOWED,
+    ),
+    WorkOrderSkillApplicantAlreadyEditorError: (
+        409,
+        WorkOrderPublicErrorMessage.SKILL_APPLICANT_ALREADY_EDITOR,
     ),
     WorkOrderNoReviewerError: (
         409,
@@ -532,12 +538,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ChannelEditLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
-    BotTemplateInvalidError: (422, "Invalid coding template"),
-    BotCombinationUnsupportedError: (409, "Coding template combination not supported"),
-    ApplicationCodingUnavailableError: (
-        503,
-        "Application coding is unavailable in this deployment",
-    ),
+    **BOT_CREATE_HTTP_ERRORS,
     PassportError: (502, "Authorization service error"),
     AuthRelationshipError: (502, "Authorization relationship service error"),
     # Engine-config failures. None of these is a BotServiceError, so the base
@@ -758,6 +759,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
+    **SPACE_SKILL_ERROR_CODES,
     WorkOrderInvalidEventError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidReasonError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidRemarkError: WorkOrderErrorCode.INVALID_REMARK,
@@ -772,6 +774,8 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     WorkOrderNoReviewerError: WorkOrderErrorCode.NO_REVIEWER,
     WorkOrderJoinNotAllowedError: WorkOrderErrorCode.JOIN_NOT_ALLOWED,
     WorkOrderBotEditorRequestNotAllowedError: WorkOrderErrorCode.BOT_EDITOR_REQUEST_NOT_ALLOWED,
+    WorkOrderSkillEditorRequestNotAllowedError: WorkOrderErrorCode.SKILL_EDITOR_REQUEST_NOT_ALLOWED,
+    WorkOrderSkillApplicantAlreadyEditorError: WorkOrderErrorCode.SKILL_APPLICANT_ALREADY_EDITOR,
     LocalSkillOwnerAmbiguousError: 409104,
     LocalSkillInvalidPackageError: 400101,
     LocalSkillNotReadyError: 409101,

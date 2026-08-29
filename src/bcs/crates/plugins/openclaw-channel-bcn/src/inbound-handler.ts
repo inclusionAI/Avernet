@@ -176,7 +176,9 @@ export function resolveInboundSender(
     strippedText: string;
   } {
   const { senderName: prefixedSenderName, text: strippedText } = extractFromPrefix(rawText);
-  const fromDisplayName = prefixedSenderName
+  const identityForwarding = channel?.identity_forwarding === true;
+  const fromDisplayName = (identityForwarding ? nonEmptyString(channel?.actor_name) : undefined)
+    || prefixedSenderName
     || channel?.user_id
     || sessionContext?.from
     || 'bcs-bot';
@@ -185,7 +187,8 @@ export function resolveInboundSender(
     || nonEmptyString(channel?.user_id)
     || nonEmptyString(sessionContext?.from)
     || 'bcs-bot';
-  const senderId = nonEmptyString(channel?.actor_id)
+  const senderId = (identityForwarding ? nonEmptyString(channel?.user_id) : undefined)
+    || nonEmptyString(channel?.actor_id)
     || nonEmptyString(sessionContext?.from_bot_id);
   return { fromDisplayName, senderName, senderId, strippedText };
 }

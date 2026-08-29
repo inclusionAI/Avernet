@@ -64,7 +64,7 @@ RUN mkdir -p /app/tmp /home/admin/logs \
 
 USER admin
 
-EXPOSE 8888
+EXPOSE 8080
 
 # BAAS_PORT only steers the healthcheck; the real listen port comes from
 # module_config.web.port in the mounted config. Keep them in sync.

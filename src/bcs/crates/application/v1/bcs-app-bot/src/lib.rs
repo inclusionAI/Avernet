@@ -5,11 +5,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    ApplicationError, Bot, BotCandidate, BotCandidatePurpose, BotCandidateSearchItem,
-    BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor, BotKind, BotProvider,
-    BotReachability, BotService, BotSkill, BotStatus, BotVisibility, GetBot, HumanBot,
-    InternalBotAttributesService, ListBotCandidates, ListMyBots, Page, PatchBotInternalAttributes,
-    PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot, require_authenticated_user,
+    ApplicationError, AuthenticatedUserIdentity, Bot, BotCandidate, BotCandidatePurpose,
+    BotCandidateSearchItem, BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor,
+    BotKind, BotProvider, BotReachability, BotService, BotSkill, BotStatus, BotVisibility, GetBot,
+    HumanBot, InternalBotAttributesService, ListBotCandidates, ListMyBots, Page,
+    PatchBotInternalAttributes, PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot,
+    require_authenticated_user,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
@@ -152,6 +153,27 @@ impl BotServiceImpl {
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
     ) -> Result<String, ApplicationError> {
         Ok(require_authenticated_user(caller)?.id.clone())
+    }
+
+    fn human_display_name(human: &AuthenticatedUserIdentity) -> String {
+        human
+            .display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .or_else(|| {
+                human
+                    .full_name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+            })
+            .or_else(|| {
+                let username = human.username.trim();
+                (!username.is_empty()).then_some(username)
+            })
+            .unwrap_or(human.id.as_str())
+            .to_string()
     }
 
     fn validate_pagination(offset: u64, limit: u64) -> Result<(), ApplicationError> {
@@ -589,8 +611,14 @@ impl BotService for BotServiceImpl {
     }
 
     async fn list_mine(&self, command: ListMyBots) -> Result<Page<Bot>, ApplicationError> {
-        let staff_no = Self::human_staff_no(&command.caller)?;
+        let human = require_authenticated_user(&command.caller)?;
         Self::validate_pagination(command.offset, command.limit)?;
+        let staff_no = human.id.clone();
+        let display_name = Self::human_display_name(human);
+        self.registry
+            .ensure_human_actor(&staff_no, &display_name)
+            .await
+            .map_err(map_service_error)?;
         let records = self
             .control_plane
             .list_by_creator(BotControlPlaneOwnedQuery {

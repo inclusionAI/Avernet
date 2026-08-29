@@ -16,7 +16,7 @@ from collections.abc import Iterable
 
 from injector import Injector, Module
 
-from agentclaw.community.di.config import HttpClientPoolConfig
+from agentclaw.community.di.config import HttpClientPoolConfig, TaskQueueConfig
 
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
@@ -167,6 +167,13 @@ def build_injector(
     # column. It is a pure dict read with no I/O, so it costs nothing when the
     # config is valid, which is the only case that reaches production.
     _app_injector.get(HttpClientPoolConfig)
+
+    # Same reasoning for the task-queue owner: `task_queue` rejects an `app_name`
+    # the column cannot hold faithfully by raising, and a raise that only
+    # surfaced inside `discover_lifecycle_participants` would silently drop the
+    # TaskWorker binding — an app that boots clean and never runs a queued task.
+    # Resolving it here makes a bad owner name fail the boot on every profile.
+    _app_injector.get(TaskQueueConfig)
 
     return _app_injector
 

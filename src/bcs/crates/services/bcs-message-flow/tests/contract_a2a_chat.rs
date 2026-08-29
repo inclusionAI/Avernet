@@ -224,9 +224,33 @@ async fn direct_chat_run_snapshot_port_contract() {
 
 #[tokio::test]
 async fn direct_chat_run_snapshot_maps_http_client_kinds() {
-    let (service, run_port, _run_store) =
-        build_run_service(vec![chat_event("final", "pong")], false).await;
+    // The snapshot gauge counts active (non-terminal) runs only — terminal
+    // totals come from the lifecycle counter. Use two active async runs (no
+    // `final` event, so they stay Running) with different HTTP client kinds.
+    let (service, _run_port, _run_store) = build_run_service(vec![], false).await;
 
+    service
+        .start_async_chat(AsyncA2aChatCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-source".to_string(),
+            }),
+            target_bot_id: "bot-target".to_string(),
+            message: "hello".to_string(),
+            from_actor_id: Some("api-user".to_string()),
+            run_channel_from: Some("api-user".to_string()),
+            authenticated_staff_id: Some("owner-1".to_string()),
+            tags: Vec::new(),
+            run_id: "http-client-kind-run".to_string(),
+            session_key: "http-client-kind-session".to_string(),
+            timeout_ms: 30_000,
+            client: Some("http-chat".to_string()),
+            response_mode: ChatResponseMode::Full,
+            caller_wait_mode: None,
+            organization_code: None,
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap();
     service
         .start_async_chat(AsyncA2aChatCommand {
             caller: CallerContext::Bot(BotActor {
@@ -240,7 +264,7 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
             tags: Vec::new(),
             run_id: "http-async-client-kind-run".to_string(),
             session_key: "http-async-client-kind-session".to_string(),
-            timeout_ms: 1_000,
+            timeout_ms: 30_000,
             client: None,
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
@@ -249,13 +273,13 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
         })
         .await
         .unwrap();
-    run_port
-        .wait_for_event_unregister("http-async-client-kind-run")
-        .await;
 
     let counts = DirectChatRunSnapshotPort::direct_chat_run_counts(service.as_ref())
         .await
         .unwrap();
+    assert!(counts.iter().any(|count| {
+        count.client_kind == DirectChatClientKind::HttpChat && count.count > 0
+    }));
     assert!(counts.iter().any(|count| {
         count.client_kind == DirectChatClientKind::HttpChatAsync && count.count > 0
     }));

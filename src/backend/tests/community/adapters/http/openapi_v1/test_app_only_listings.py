@@ -60,6 +60,9 @@ from agentclaw.community.api.space_service import (
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
     WorkOrderServiceProtocol,
@@ -76,6 +79,7 @@ from agentclaw.community.core.bot_inventory.types import (
     BotInventoryKind,
     DeployMode,
     DisplayState,
+    ServiceEditLockState,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -227,6 +231,7 @@ def make_client(bots):
                 binder.bind(SpaceServiceProtocol, to=unexpected)
                 binder.bind(SpaceMemberServiceProtocol, to=unexpected)
                 binder.bind(SpaceSkillQueryServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillGrantServiceProtocol, to=unexpected)
                 binder.bind(MarketFavoriteServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderNotificationServiceProtocol, to=unexpected)
@@ -274,7 +279,10 @@ def _data(response):
 
 def test_the_listing_is_narrowed_to_the_delegated_bots(make_client):
     """Two bots owned, one delegated: one returned."""
-    client = make_client(GRANTED)
+    # The bots listing now resolves each row's owner-view space (Noop models
+    # the personal space with zero service calls), so it needs a serving
+    # space context rather than the unexpected-service guard.
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     listed = _data(client.get("/openapi/v1/bots"))
 
@@ -287,7 +295,7 @@ def test_the_count_describes_the_narrowed_set(make_client):
     A caller could subtract and learn exactly how many of the user's bots it was
     not granted — a number nobody agreed to share.
     """
-    client = make_client(GRANTED)
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     assert _data(client.get("/openapi/v1/bots"))["total"] == 1
 
@@ -299,7 +307,7 @@ def test_the_narrowing_happens_before_pagination(make_client, bots):
     — a page of 20 that returns 3 — is the kind of thing that looks like an
     off-by-one rather than a scoping failure.
     """
-    client = make_client(GRANTED)
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     client.get("/openapi/v1/bots")
 
@@ -318,7 +326,9 @@ def test_an_application_granted_nothing_gets_an_empty_page(make_client, bots):
 
 def test_a_human_caller_sees_everything_they_own(make_client, bots):
     """The narrowing applies to applications, not to people."""
-    client = make_client(GRANTED, with_user=True)
+    client = make_client(
+        GRANTED, with_user=True, space_context=NoopBusinessSpaceContext()
+    )
 
     listed = _data(client.get("/openapi/v1/bots"))
 
@@ -380,6 +390,54 @@ def test_workshop_inventory_does_not_widen_from_a_shared_bot_grant(make_client):
 
     assert listed["items"] == [] and listed["total"] == 0
     inventory.list_items.assert_not_called()
+
+
+def test_workshop_inventory_serializes_batched_edit_lock(make_client):
+    inventory = MagicMock()
+    inventory.list_items.return_value = (
+        [
+            BotInventoryItem(
+                bot_id=GRANTED,
+                bot_name="service",
+                bot_desc="",
+                engine="openclaw",
+                bot_type="service",
+                kind=BotInventoryKind.SERVICE,
+                deploy_mode=DeployMode.CLOUD,
+                display_state=DisplayState.SERVICE_DRAFT,
+                status="draft",
+                owner_entity_id=USER,
+                space=None,
+                card_id=f"service:{GRANTED}:1",
+                edit_lock=ServiceEditLockState(
+                    locked=True,
+                    holder_user_id="editor-1",
+                    holder_name="Editor One",
+                    has_collaborators=True,
+                    is_owner_holder=False,
+                    need_lock=True,
+                ),
+            )
+        ],
+        1,
+    )
+    client = make_client(
+        GRANTED,
+        inventory_service=inventory,
+        space_context=NoopBusinessSpaceContext(),
+    )
+
+    item = _data(client.get("/openapi/v1/bots/all"))["items"][0]
+
+    assert item["edit_lock"] == {
+        "locked": True,
+        "acquired": None,
+        "holder_user_id": "editor-1",
+        "holder_name": "Editor One",
+        "has_collaborators": True,
+        "is_owner_holder": False,
+        "need_lock": True,
+    }
 
 
 def test_local_listing_passes_owned_grants_before_pagination(make_client):
@@ -478,6 +536,10 @@ def cross_owner_client(bots):
             def configure(self, binder):
                 binder.bind(BotServiceProtocol, to=bots)
                 binder.bind(BotAppGrantServiceProtocol, to=_CrossOwnerGrants())
+                binder.bind(
+                    BusinessSpaceContextProtocol,
+                    to=NoopBusinessSpaceContext(),
+                )
 
         app = FastAPI()
         app.include_router(app_view_router)
@@ -683,6 +745,12 @@ _UNGRANTED_APP_CASES = {
     },
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): {
         "request": lambda client: client.get("/openapi/v1/bots/spaces/1/skills"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/grants"
+        ),
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites"): {

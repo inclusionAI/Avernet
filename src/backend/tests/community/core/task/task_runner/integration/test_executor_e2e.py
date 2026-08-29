@@ -18,7 +18,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import _DoubleBcsClient
 from agentclaw.community.core.task.task_runner.integration.double.double_open_api_bot import _DoubleOpenApiBot
 from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (

@@ -20,7 +20,12 @@ provides:
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
+  - "SpaceSkillGrantService"
+  - "SpaceSkillEditorRequestService"
+  - "SkillCollaboratorApprovalHandler"
+  - "DraftEditLeaseService"
   - "RuntimeProjectionResolver"
+  - "resolve_effective_mcp_server_codes"
   - "BotCapabilityStateReader"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
@@ -35,6 +40,7 @@ provides:
   - "SkillManifestErrorCode"
   - "SkillManifestValidationIssue"
   - "SkillManifestValidationResult"
+  - "SkillCenterGatewayService"
   - "enqueue_skill_activation_sync"
   - "build_skill_activation_sync_payload"
   - "parse_skill_activation_sync_payload"
@@ -53,10 +59,15 @@ consumes:
   - "ObjectStoragePlugin"
   - "SecretResolver"
   - "SkillCenterClient"
+  - "SkillCenterGateway"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
   - "BotRuntimeProjectorProtocol"
+  - "SpaceAccessServiceProtocol"
+  - "SpaceSkillRepository"
+  - "WorkOrderRepositoryProtocol"
+  - "DraftEditLeaseRepository"
 internal_dependencies:
   - agentclaw.community.api.skill_parameter_service_factory
   - agentclaw.community.api.skill_market_service
@@ -66,6 +77,8 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
+  - agentclaw.community.core.repository.protocols.work_orders
+  - agentclaw.community.core.work_orders
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.capability_desired_state
@@ -83,6 +96,9 @@ internal_dependencies:
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
   - agentclaw.community.core.spaces.services
+  - agentclaw.community.core.spaces.errors
+  - agentclaw.community.core.spaces.models
+  - agentclaw.community.core.spaces.protocols
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.task_queue    # durable enqueue for Bot-level activation sync
   - agentclaw.community.core.workspace
@@ -102,6 +118,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.object_storage
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
+  - agentclaw.community.plugin_api.skill_center_gateway
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
   - agentclaw.community.utils
@@ -112,6 +129,31 @@ internal_dependencies:
 ### Change impact
 
 Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols. Changes to `SkillMetadataParserProtocol`, `SkillMetadata`, or stable manifest error codes affect Local folder upload immediately and the shared fixtures consumed by Git import, Draft validation and publication validation; coordinate those consumers before changing fields, limits or codes. List/detail/market readers must continue consuming parser-derived projections rather than inventing a second name or description source.
+
+`SkillCenterGatewayService` is a typed consumer of the independent SC adapter
+boundary. It accepts already-resolved Team requests and does not modify
+`ac_skill`, create Versions, select an Attempt result, retry publication, or
+materialize runtime content. It also preserves catalogue metadata, tag trees,
+SC publish diagnostics (including lossless raw standard/security reports),
+non-paged versions, and exact download facts without turning any of them into
+HTTP presentation DTOs. A status lookup uses the globally unique `skill_code`
+and returns SC's current version; the future Publication application service
+compares that response to its persisted Attempt rather than making the Gateway
+caller supply a Team or expected version.
+It rejects response identity drift across Team, Skill, page, and exact version;
+retry, Attempt, persistence, and materialization decisions remain above it.
+Public version/download reads use an explicit scope and verify public visibility
+before crossing the exact-version boundary.
+
+This change is the staged outbound seam only. A follow-up OCB change provides
+the Corp HTTP adapter, authentication/configuration binding, and wire mapping.
+A separate Avernet change migrates the `openapi_v1` public catalogue and
+publication consumers onto domain services backed by this seam. Until both are
+present, existing routers keep using the legacy client; this module is not a
+claim that production traffic has migrated.
+No Catalog, Publication, Public Reference, or Track Latest application module
+is introduced speculatively by this change; those modules remain owned by their
+later workflow PRs.
 
 ### One writer, one flush, one reader, one rule book
 

@@ -190,6 +190,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         bot_repo=repository.bot_repository,
         bot_device_rel_repo=repository.bot_device_rel_repository,
         arca_ttl_schedule_repository=repository.arca_ttl_schedule_repository,
+        system_config_service=services.system_config_service,
     )
 
     cron_lifecycle = providers.Singleton(

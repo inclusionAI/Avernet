@@ -394,6 +394,26 @@ pub struct ChannelInfo {
     pub actor_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
+    /// True only when the originating Channel binding opted into exposing the
+    /// external Human identity to downstream agents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_forwarding: Option<bool>,
+}
+
+/// Replace the request frame's Channel projection with an explicitly resolved
+/// per-message identity. Non-request or malformed frames are left unchanged.
+pub fn apply_channel_info(frame: &mut BcsFrame, channel: ChannelInfo) {
+    let BcsFrame::Request(request) = frame else {
+        return;
+    };
+    let Some(params) = request.params.as_mut().and_then(Value::as_object_mut) else {
+        return;
+    };
+    let channel = serde_json::to_value(channel).unwrap_or_else(|error| {
+        tracing::warn!(%error, "failed to serialize channel info");
+        Value::Null
+    });
+    params.insert("channel".to_string(), channel);
 }
 
 /// Group context injected by BCS when routing messages to bots.
@@ -964,6 +984,7 @@ pub fn build_chat_inject_frame(
             actor_id: Some(from_bot_id.to_string()),
             actor_name: Some(from_bot_name.to_string()),
             thread_id: Some(session_id.to_string()),
+            identity_forwarding: None,
         },
         session_context: group_context,
         bcs_session_id: if supports_session_field {
@@ -1046,6 +1067,7 @@ pub fn build_chat_send_frame(
             actor_id: Some(from_bot_id.to_string()),
             actor_name: Some(from_bot_name.to_string()),
             thread_id: Some(session_id.to_string()),
+            identity_forwarding: None,
         },
         session_context: group_context,
         timeout_ms: None,
@@ -1119,6 +1141,7 @@ pub fn build_direct_chat_send_frame(
             actor_id: Some(from_actor_id.to_string()),
             actor_name: Some(from_actor_name.to_string()),
             thread_id: Some(session_id.to_string()),
+            identity_forwarding: None,
         },
         session_context: group_context,
         timeout_ms: None,
@@ -1188,6 +1211,7 @@ pub fn build_direct_chat_inject_frame(
             actor_id: Some(from_actor_id.to_string()),
             actor_name: Some(from_actor_name.to_string()),
             thread_id: Some(session_id.to_string()),
+            identity_forwarding: None,
         },
         session_context: group_context,
         bcs_session_id: if supports_session_field {

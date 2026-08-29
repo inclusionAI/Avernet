@@ -174,6 +174,23 @@ def test_mcps_run_collect_then_per_server_merge():
     assert mcp_cfg.build_mcp_sync_payload.call_count == 2
 
 
+@pytest.mark.unit
+def test_mcps_require_strict_policy_context_for_a_complete_artifact():
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = []
+
+    assert _collector(skill_set_service=svc).mcps(_req()) == []
+
+    svc.collect_bot_active_mcps.assert_called_once_with(
+        entity_id="staff_u1",
+        bot_id="bot1",
+        user_id="u1",
+        entity_type="staff",
+        engine_type="openclaw",
+        strict_policy_context=True,
+    )
+
+
 _HITL_CATALOG = {
     "hitl": {
         "command": "python3",

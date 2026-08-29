@@ -180,6 +180,7 @@ export function resolveServerConfig(): { port: number } {
 
 async function initMysql(cfg: DbConfig["mysql"]): Promise<IDatabase> {
   const pool = mysql.createPool({
+    multipleStatements: true,
     host: cfg.host,
     port: cfg.port,
     user: cfg.user,

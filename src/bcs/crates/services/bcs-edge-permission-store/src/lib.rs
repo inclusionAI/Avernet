@@ -995,7 +995,7 @@ impl DbBotActorConfigStore {
     /// SELECT the decision columns for `(bot_uuid, env)`. Excludes soft-deleted
     /// rows, mirroring the bot store read (`COALESCE(is_deleted, 0) = 0`).
     const SELECT_BOT_CONFIG_SQL: &'static str =
-        "SELECT bot_uuid, env, visibility, bot_info, status, created_by \
+        "SELECT bot_uuid, env, visibility, user_visibility, bot_info, status, created_by \
          FROM bcs_bots \
          WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1";
 }
@@ -1150,17 +1150,17 @@ fn row_to_edge_grant(row: &DbRow) -> ServiceResult<EdgeGrant> {
 
 /// Map a `bcs_bots` row to a [`BotActorConfig`].
 ///
-/// `created_by` is `NULL` for legacy bots. `bot_info` carries the existing
-/// internal attributes payload and is reused for friend gating defaults.
+/// `created_by` is `NULL` for legacy bots. `user_visibility` is read from its
+/// own `bcs_bots.user_visibility` column — the same column the internal-
+/// attributes PATCH writes — so friend-gating sees the value the operator
+/// actually set (rather than a `bot_info` default that no write path populates).
+/// `bot_info` still carries `friend_check_in_strategy` / `friend_ext`.
 fn row_to_bot_actor_config(row: &DbRow) -> ServiceResult<BotActorConfig> {
     let bot_info = optional_string(row, "bot_info")?
         .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
         .unwrap_or_default();
-    let user_visibility = bot_info
-        .get("user_visibility")
-        .and_then(|value| value.as_str())
-        .unwrap_or("protected")
-        .to_string();
+    let user_visibility = optional_string(row, "user_visibility")?
+        .unwrap_or_else(|| "protected".to_string());
     let friend_check_in_strategy = bot_info
         .get("friend_check_in_strategy")
         .and_then(|value| value.as_str())
@@ -1797,6 +1797,7 @@ mod tests {
                 bot_uuid TEXT NOT NULL, \
                 env TEXT NOT NULL, \
                 visibility TEXT NOT NULL DEFAULT 'public', \
+                user_visibility TEXT NOT NULL DEFAULT 'protected', \
                 bot_info TEXT DEFAULT NULL, \
                 status TEXT NOT NULL DEFAULT 'online', \
                 created_by TEXT, \
@@ -1845,7 +1846,6 @@ mod tests {
         friend_ext: serde_json::Map<String, serde_json::Value>,
     ) {
         let bot_info = serde_json::json!({
-            "user_visibility": user_visibility,
             "friend_check_in_strategy": friend_check_in_strategy,
             "friend_ext": friend_ext,
         });
@@ -1854,12 +1854,13 @@ mod tests {
                 "seed_bot",
                 DbStatement::with_params(
                     "INSERT INTO bcs_bots \
-                     (bot_uuid, env, visibility, bot_info, status, created_by) \
-                     VALUES (?, ?, ?, ?, ?, ?)",
+                     (bot_uuid, env, visibility, user_visibility, bot_info, status, created_by) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?)",
                     vec![
                         DbValue::from(bot_uuid),
                         DbValue::from(env),
                         DbValue::from(visibility),
+                        DbValue::from(user_visibility),
                         DbValue::from(serde_json::to_string(&bot_info).expect("bot_info json")),
                         DbValue::from(status),
                         match created_by {
@@ -1910,7 +1911,8 @@ mod tests {
         // Different env -> None (PK is bot_uuid + env).
         seed_bot(&store, "bot_b", "prod", "protected", "private", "DEPT_FREE", "hidden", None).await;
         assert!(store.get("bot_b", "dev").await.is_none());
-        // Same env row reads back; internal attributes come from bot_info.
+        // Same env row reads back; user_visibility comes from its column,
+        // friend_* still come from bot_info.
         let cfg = store.get("bot_b", "prod").await.expect("bot exists in prod");
         assert_eq!(cfg.user_visibility, "private");
         assert_eq!(cfg.friend_check_in_strategy, "DEPT_FREE");
