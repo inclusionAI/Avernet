@@ -486,12 +486,24 @@ class ExecutionEngine:
                 bool(graph.relations),
             )
             return
-        nodes = runtime.nodes(task_id, root.task_spec)
+        # 分波揭示:首波仅入图 depends_on 为空的节点(root 结构父);
+        # 后续波由 _on_static_report -> _static_next_wave 按依赖完成度增量补入,
+        # 避免 dashboard 一开始就暴露完整定制计划。
+        all_nodes = runtime.nodes(task_id, root.task_spec)
+        wave0_ids = {d.node_id for d in runtime.definition.nodes if not d.depends_on}
+        nodes = [n for n in all_nodes if n.node_id in wave0_ids]
+        if not nodes:
+            logger.info(
+                "[task][static-plan] execute task=%s no wave0 nodes, skip materialize",
+                task_id,
+            )
+            return
         self._graph.add_task_nodes(nodes, root.node_id)
         logger.info(
-            "[task][static-plan] materialized task=%s node_count=%s",
+            "[task][static-plan] materialized wave0 task=%s node_count=%s nodes=%s",
             task_id,
             len(nodes),
+            [n.node_id for n in nodes],
         )
         side: list[tuple] = []
         await self._prepare_static(task_id, runtime, side)
@@ -501,6 +513,40 @@ class ExecutionEngine:
             [item[0] for item in side],
         )
         await self._drain(task_id, side)
+
+    def _static_next_wave(self, task_id: str, runtime) -> int:
+        """分波揭示:补加可入图的下一波(defs 全 DONE 且未在图中)。
+
+        结构父统一用 root(全程 PLANNING,可委托,复用 add_task_nodes 触发 cond_c);
+        实体 DAG 依赖边(deps -> node)由 task_graph_service.add_relations 补写,
+        使多入合并点(如 strategy_approval 依赖 risk/marketing/crowd/product 四路)
+        在 dashboard 上可渲染为 DAG。返回本次新入图节点数。"""
+        graph = self._graph.query_task_dashboard(task_id)
+        done = {n.node_id for n in graph.tasks if n.status == Status.DONE}
+        in_graph = {n.node_id for n in graph.tasks}
+        wave_defs = [
+            d for d in runtime.definition.nodes
+            if d.node_id not in in_graph and set(d.depends_on).issubset(done)
+        ]
+        if not wave_defs:
+            return 0
+        root = self._root(task_id)
+        if root is None:
+            return 0
+        wave_ids = {d.node_id for d in wave_defs}
+        all_nodes = runtime.nodes(task_id, root.task_spec)
+        wave_nodes = [n for n in all_nodes if n.node_id in wave_ids]
+        self._graph.add_task_nodes(wave_nodes, root.node_id)
+        edges: list[tuple[str, str]] = []
+        for d in wave_defs:
+            edges.extend((dep, d.node_id) for dep in d.depends_on)
+        if edges:
+            self._graph.add_relations(task_id, edges)
+        logger.info(
+            "[task][static-plan] wave added task=%s count=%s nodes=%s edges=%s",
+            task_id, len(wave_defs), [d.node_id for d in wave_defs], len(edges),
+        )
+        return len(wave_defs)
 
     def _static_auto_report_on(self, task_id: str) -> bool:
         """演示自驱开关:开启后静态 plan 节点不做真实派发/拉群,转为后台自回投 mock 结果,
@@ -723,21 +769,32 @@ class ExecutionEngine:
                 self._graph.update_task_node_info(
                     TaskNodePatch(task_id=task_id, node_id=node_id, output_patch=mapped)
                 )
+        # 分波揭示:上报后先补加可入图的新波节点(结构父=root,DAG 依赖边经 add_relations 补),
+        # 再 prepare,使新波节点在本轮即可被 readiness 选中派发。
+        wave_added = self._static_next_wave(task_id, runtime)
         side: list[tuple] = []
         await self._prepare_static(task_id, runtime, side)
         current = self._graph.query_task_dashboard(task_id)
-        terminal = all(
+        # terminal 必须要求"全部定义节点均已入图" + 已入图节点全部终态,
+        # 否则分波会导致未入图节点被遗漏而误判提前 DONE。
+        all_def_ids = set(runtime.by_id)
+        materialized_ids = {n.node_id for n in current.tasks} & all_def_ids
+        all_in_graph = materialized_ids == all_def_ids
+        terminal = all_in_graph and all(
             n.status in {Status.DONE, Status.FAILED, Status.HUNG}
             for n in current.tasks
-            if n.node_id in runtime.by_id
+            if n.node_id in all_def_ids
         )
         logger.info(
-            "[task][static-plan] report processed task=%s node=%s next_side_effects=%s terminal=%s node_states=%s",
+            "[task][static-plan] report processed task=%s node=%s wave_added=%s next_side_effects=%s terminal=%s materialized=%s/%s node_states=%s",
             task_id,
             node_id,
+            wave_added,
             [item[0] for item in side],
             terminal,
-            {n.node_id: n.status.value for n in current.tasks if n.node_id in runtime.by_id},
+            len(materialized_ids),
+            len(all_def_ids),
+            {n.node_id: n.status.value for n in current.tasks if n.node_id in all_def_ids},
         )
         if terminal:
             self._graph.update_task_graph_info(task_id, TaskGraphPatch(status=Status.DONE))

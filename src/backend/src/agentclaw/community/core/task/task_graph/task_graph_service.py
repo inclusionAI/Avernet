@@ -300,6 +300,51 @@ class TaskGraphService:
             self._persist_locked(graph)
             return graph
 
+    def add_relations(self, task_id: str, edges: list[tuple[str, str]]) -> TaskExecutionGraph:
+        """追写 DEPENDENCY 结构边(仅作用于已存在节点)。
+
+        静态 plan DAG 多入合并点用:``add_task_nodes`` 只能写单条 ``parent->child`` 结构边,
+        四路合并(如 strategy_approval 依赖 risk/marketing/crowd/product)的其余入边由本方法补齐,
+        使 relations 分解树之外的多入依赖在 dashboard 上可渲染为 DAG 合并点。
+
+        约束:
+        - 端点必须已入图(节点已存在);自环/空边拒绝;
+        - 仅静态 plan 调用,不走动态规划触发校验(a/b/c/d),不改任何节点状态;
+        - 同向边去重,幂等。"""
+        graph = self._require_graph(task_id)
+        if not edges:
+            return graph
+        with self._lock_for(task_id):
+            graph = self._require_graph(task_id)
+            existing_ids = {n.node_id for n in graph.tasks}
+            existing_edges = {
+                (r.src_id, r.dst_id)
+                for r in graph.relations
+                if r.type == RelationType.DEPENDENCY
+            }
+            added = 0
+            for src, dst in edges:
+                if src == dst:
+                    raise GraphIntegrityError(f"add_relations: 自环禁止 {src}")
+                if src not in existing_ids or dst not in existing_ids:
+                    raise GraphIntegrityError(
+                        f"add_relations: 端点未入图 {src}->{dst}"
+                    )
+                if (src, dst) in existing_edges:
+                    continue
+                graph.relations.append(
+                    Relation(src_id=src, dst_id=dst, type=RelationType.DEPENDENCY)
+                )
+                existing_edges.add((src, dst))
+                added += 1
+            if added:
+                self._persist_locked(graph)
+            _LOG.info(
+                "[task][graph] add_relations task=%s requested=%s added=%s",
+                task_id, len(edges), added,
+            )
+            return graph
+
     def _assert_add_trigger(self, graph: TaskExecutionGraph) -> None:
         cond_a = (
             len(graph.tasks) == 1

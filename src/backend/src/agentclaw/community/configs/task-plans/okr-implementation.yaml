@@ -27,16 +27,36 @@ nodes:
       okr: $.input.okr
     output:
       strategy_result: $.result
+  - id: crowd_selection
+    name: 圈人策略咨询
+    type: bot
+    bot_id: 20260828_6snfeiq0
+    depends_on: [marketing_strategy]
+    input:
+      strategy_result: $.marketing_strategy.output.strategy_result
+    output:
+      crowd_result: $.result
+  - id: product_selection
+    name: 选品策略咨询
+    type: bot
+    bot_id: 20260828_roqtqqkx
+    depends_on: [marketing_strategy]
+    input:
+      strategy_result: $.marketing_strategy.output.strategy_result
+    output:
+      product_result: $.result
   - id: strategy_approval
     name: 策略审核
     type: bot
     bot_id: 20260828_9rgd70li
-    depends_on: [risk_assessment, marketing_strategy]
+    depends_on: [risk_assessment, marketing_strategy, crowd_selection, product_selection]
     join:
       type: all_predecessors_done
     input:
       risk_result: $.risk_assessment.output.risk_result
       strategy_result: $.marketing_strategy.output.strategy_result
+      crowd_result: $.crowd_selection.output.crowd_result
+      product_result: $.product_selection.output.product_result
     output:
       approval_result: $.result
       approved: $.result.approved
