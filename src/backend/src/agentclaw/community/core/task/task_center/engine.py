@@ -840,7 +840,7 @@ class ExecutionEngine:
 
     def _static_auto_report_delay(self, task_id: str) -> float:
         """自驱 mock 上报延迟秒数:execution_config.static_auto_report_delay →
-        env OCB_TASK_STATIC_AUTO_REPORT_DELAY → random.uniform(60,120)(每节点完成节奏不一,
+        env OCB_TASK_STATIC_AUTO_REPORT_DELAY → random.uniform(20,60)(每节点完成节奏不一,
         演示时能看出节点状态逐次流转而非瞬间全 DONE)。"""
         cfg = self._graph._execution_config(task_id)
         v = cfg.get("static_auto_report_delay")
@@ -848,9 +848,9 @@ class ExecutionEngine:
             raw = os.environ.get("OCB_TASK_STATIC_AUTO_REPORT_DELAY")
             v = raw if raw not in (None, "") else None
         try:
-            return float(v) if v is not None else random.uniform(60.0, 120.0)
+            return float(v) if v is not None else random.uniform(20.0, 60.0)
         except (TypeError, ValueError):
-            return random.uniform(60.0, 120.0)
+            return random.uniform(20.0, 60.0)
 
     def _bbs_handoff_delay(self, task_id: str) -> float:
         """BBS 交接"被接"延迟秒数(①入广场→②被接):execution_config.bbs_handoff_claim_delay →
