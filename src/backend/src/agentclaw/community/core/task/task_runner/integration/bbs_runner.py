@@ -100,7 +100,10 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             context=Context(background=""),
             goal=Goal(objective=msg, acceptances=[]),
         ),
-        run_info=RuntimeInfo(run_mode="bbs"),
+        run_info=RuntimeInfo(
+            run_mode="bbs",
+            assignee=winner_bot_id
+        ),
         node_run_graph=None
     )
 
@@ -130,8 +133,15 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                 output_patch={
                     "output": task_result
                 },
+                acceptance_result = AcceptanceResult(
+                    verdict=AcceptanceVerdict.DONE,
+                    acceptances_metric=list(),
+                    gaps=list()
+                ),
                 extend_props_patch={
-                    "output": task_result
+                    "output": task_result,
+                    "assignee_bot_id": winner_bot_id,
+                    "session_id": "",
                 }
             )
         )
