@@ -57,13 +57,18 @@ class CommunityFsObjectStorage(
         """
         candidate = (self._root / key).resolve()
         if candidate == self._root or self._root in candidate.parents:
-            relative = candidate.relative_to(self._root)
-            if relative.parts and relative.parts[0] == _ATOMIC_STAGING_DIRECTORY:
+            if self._is_atomic_staging_path(candidate):
                 logger.error("ObjectStorage: key uses reserved staging root: %r", key)
                 return None
             return candidate
         logger.error("ObjectStorage: key escapes storage root: %r", key)
         return None
+
+    def _is_atomic_staging_path(self, candidate: Path) -> bool:
+        if candidate == self._root or self._root not in candidate.parents:
+            return False
+        relative = candidate.relative_to(self._root)
+        return bool(relative.parts) and relative.parts[0] == _ATOMIC_STAGING_DIRECTORY
 
     def put_object(self, key: str, content: bytes | str) -> bool:
         path = self._safe_path(key)
@@ -197,6 +202,10 @@ class CommunityFsObjectStorage(
 
     def sign_url(self, key: str, expires: int = 7200) -> str:
         # Single-node filesystem has no presign concept — return a file URL.
+        candidate = (self._root / key).resolve()
+        if self._is_atomic_staging_path(candidate):
+            logger.error("ObjectStorage: refusing staging URL for key: %r", key)
+            return ""
         path = self._safe_path(key)
         target = path if path is not None else (self._root / key)
         return f"file://{target}"

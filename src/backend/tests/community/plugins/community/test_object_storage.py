@@ -143,6 +143,8 @@ def test_fs_atomic_staging_is_not_an_addressable_or_listable_object(tmp_path):
         )
         is ObjectCreateResult.FAILED
     )
+    assert store.sign_url(".object-create-staging/crash-residue.tmp") == ""
+    assert store.sign_url("nested/../.object-create-staging/crash-residue.tmp") == ""
 
 
 def test_fs_nested_key_creates_dirs(tmp_path):
