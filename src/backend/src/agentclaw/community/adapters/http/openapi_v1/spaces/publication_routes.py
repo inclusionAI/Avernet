@@ -37,14 +37,26 @@ router = APIRouter(
     tags=["space-skill-publications"],
     route_class=SpaceSkillPublicAPIRoute,
 )
-SpaceIdPath = Annotated[int, Path(ge=1)]
-SkillIdPath = Annotated[int, Path(ge=1)]
-AttemptIdPath = Annotated[int, Path(ge=1)]
-PageSizeQuery = Annotated[int, Query(ge=1, le=100)]
+SpaceIdPath = Annotated[int, Path(ge=1, description="Space identifier.")]
+SkillIdPath = Annotated[int, Path(ge=1, description="Space Skill identifier.")]
+AttemptIdPath = Annotated[
+    int, Path(ge=1, description="Publication Attempt identifier.")
+]
+PageQuery = Annotated[
+    int,
+    Query(alias="page", ge=1, description="One-based result page."),
+]
+PageSizeQuery = Annotated[
+    int,
+    Query(ge=1, le=100, description="Maximum items returned per page."),
+]
 IdempotencyKeyHeader = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
-    Header(alias="Idempotency-Key"),
+    Header(
+        alias="Idempotency-Key",
+        description="Stable identity of this Publication request.",
+    ),
 ]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
@@ -77,7 +89,7 @@ async def get_publication_impact(
     user_id: UserIdDep,
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
-    page_number: Annotated[int, Query(alias="page", ge=1)] = 1,
+    page_number: PageQuery = 1,
     page_size: PageSizeQuery = 20,
     service: SpaceSkillPublicationServiceProtocol = Injected(
         SpaceSkillPublicationServiceProtocol
@@ -118,7 +130,7 @@ async def create_publication(
         SpaceSkillPublicationServiceProtocol
     ),
 ) -> Envelope[PublicationAttempt]:
-    record = await run_in_threadpool(
+    record = await run_in_threadpool(  # allow-run-in-threadpool
         service.create_publication,
         space_id=space_id,
         skill_id=skill_id,
@@ -139,13 +151,13 @@ async def list_publications(
     user_id: UserIdDep,
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
-    page_number: Annotated[int, Query(alias="page", ge=1)] = 1,
+    page_number: PageQuery = 1,
     page_size: PageSizeQuery = 20,
     service: SpaceSkillPublicationServiceProtocol = Injected(
         SpaceSkillPublicationServiceProtocol
     ),
 ) -> Envelope[Page[PublicationAttempt]]:
-    total, records = await run_in_threadpool(
+    total, records = await run_in_threadpool(  # allow-run-in-threadpool
         service.list_publications,
         space_id=space_id,
         skill_id=skill_id,
@@ -172,7 +184,7 @@ async def get_publication(
         SpaceSkillPublicationServiceProtocol
     ),
 ) -> Envelope[PublicationAttempt]:
-    record = await run_in_threadpool(
+    record = await run_in_threadpool(  # allow-run-in-threadpool
         service.get_publication,
         space_id=space_id,
         skill_id=skill_id,
@@ -206,7 +218,7 @@ async def retry_publication(
         SpaceSkillPublicationServiceProtocol
     ),
 ) -> Envelope[PublicationAttempt]:
-    result = await run_in_threadpool(
+    result = await run_in_threadpool(  # allow-run-in-threadpool
         service.retry_publication,
         space_id=space_id,
         skill_id=skill_id,

@@ -16169,6 +16169,7 @@
         "type": "object"
       },
       "PublicationAttempt": {
+        "description": "Durable progress resource for one Draft publication command.",
         "properties": {
           "attempt_id": {
             "description": "Stable Publication Attempt identifier.",
@@ -16244,7 +16245,7 @@
             "description": "Current persisted Publication state."
           },
           "target_version": {
-            "description": "Frozen TeamClaw business-version ordinal.",
+            "description": "Frozen business-version ordinal.",
             "minimum": 1.0,
             "title": "Target Version",
             "type": "integer"
@@ -16262,6 +16263,7 @@
         "type": "object"
       },
       "PublicationAttemptState": {
+        "description": "Persisted stage or terminal outcome of one Publication Attempt.",
         "enum": [
           "PREPARING",
           "SC_SUBMITTING",
@@ -16272,7 +16274,34 @@
           "RESULT_UNKNOWN"
         ],
         "title": "PublicationAttemptState",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "The frozen Draft package is being prepared.",
+          "The one-shot Skill Center request has started.",
+          "Skill Center processing or exact metadata discovery is pending.",
+          "The exact published Version is passing the Ready Gate.",
+          "The exact Version is Published and ready for consumption.",
+          "Publication was explicitly rejected and the Draft is editable.",
+          "The external publication outcome is not yet confirmed."
+        ],
+        "x-enum-varnames": [
+          "PREPARING",
+          "SC_SUBMITTING",
+          "WAITING_SC",
+          "MATERIALIZING",
+          "SUCCEEDED",
+          "FAILED",
+          "RESULT_UNKNOWN"
+        ],
+        "x-enumNames": [
+          "PREPARING",
+          "SC_SUBMITTING",
+          "WAITING_SC",
+          "MATERIALIZING",
+          "SUCCEEDED",
+          "FAILED",
+          "RESULT_UNKNOWN"
+        ]
       },
       "PublicationAttemptSummary": {
         "description": "Current non-terminal publication attempt, when one exists.",
@@ -16303,6 +16332,7 @@
         "type": "object"
       },
       "PublicationImpactItem": {
+        "description": "One Bot potentially affected after a new Version is Published.",
         "properties": {
           "bot_id": {
             "description": "Potentially affected Bot identifier.",
@@ -16335,6 +16365,7 @@
         "type": "object"
       },
       "PublicationRecovery": {
+        "description": "Safe recovery state selected by the backend.",
         "properties": {
           "kind": {
             "anyOf": [
@@ -16359,22 +16390,54 @@
         "type": "object"
       },
       "PublicationRecoveryKind": {
+        "description": "Backend-owned stage resumed by an Attempt retry.",
         "enum": [
           "PREPARATION",
           "SC_STATUS_CHECK",
           "MATERIALIZATION"
         ],
         "title": "PublicationRecoveryKind",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "Resume package preparation before the first submission.",
+          "Resume status and exact Version discovery without submitting again.",
+          "Resume the Ready Gate for the same exact Version."
+        ],
+        "x-enum-varnames": [
+          "PREPARATION",
+          "SC_STATUS_CHECK",
+          "MATERIALIZATION"
+        ],
+        "x-enumNames": [
+          "PREPARATION",
+          "SC_STATUS_CHECK",
+          "MATERIALIZATION"
+        ]
       },
       "PublicationRecoveryState": {
+        "description": "Availability of safe recovery for one Attempt.",
         "enum": [
           "AUTO_RETRYING",
           "AVAILABLE",
           "NOT_AVAILABLE"
         ],
         "title": "PublicationRecoveryState",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "The backend is retrying automatically.",
+          "The caller may request recovery of this same Attempt.",
+          "No recovery action applies to the current state."
+        ],
+        "x-enum-varnames": [
+          "AUTO_RETRYING",
+          "AVAILABLE",
+          "NOT_AVAILABLE"
+        ],
+        "x-enumNames": [
+          "AUTO_RETRYING",
+          "AVAILABLE",
+          "NOT_AVAILABLE"
+        ]
       },
       "PublishedVersionFileContent": {
         "description": "One UTF-8 text file from an exact Published Version.",
@@ -42636,42 +42699,50 @@
         "operationId": "get_publication_impact_openapi_v1_bots_spaces__space_id__skills__skill_id__publication_impact_get",
         "parameters": [
           {
+            "description": "Space identifier.",
             "in": "path",
             "name": "space_id",
             "required": true,
             "schema": {
+              "description": "Space identifier.",
               "minimum": 1,
               "title": "Space Id",
               "type": "integer"
             }
           },
           {
+            "description": "Space Skill identifier.",
             "in": "path",
             "name": "skill_id",
             "required": true,
             "schema": {
+              "description": "Space Skill identifier.",
               "minimum": 1,
               "title": "Skill Id",
               "type": "integer"
             }
           },
           {
+            "description": "One-based result page.",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "One-based result page.",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
             }
           },
           {
+            "description": "Maximum items returned per page.",
             "in": "query",
             "name": "page_size",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Maximum items returned per page.",
               "maximum": 100,
               "minimum": 1,
               "title": "Page Size",
@@ -42834,42 +42905,50 @@
         "operationId": "list_publications_openapi_v1_bots_spaces__space_id__skills__skill_id__publications_get",
         "parameters": [
           {
+            "description": "Space identifier.",
             "in": "path",
             "name": "space_id",
             "required": true,
             "schema": {
+              "description": "Space identifier.",
               "minimum": 1,
               "title": "Space Id",
               "type": "integer"
             }
           },
           {
+            "description": "Space Skill identifier.",
             "in": "path",
             "name": "skill_id",
             "required": true,
             "schema": {
+              "description": "Space Skill identifier.",
               "minimum": 1,
               "title": "Skill Id",
               "type": "integer"
             }
           },
           {
+            "description": "One-based result page.",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "One-based result page.",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
             }
           },
           {
+            "description": "Maximum items returned per page.",
             "in": "query",
             "name": "page_size",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Maximum items returned per page.",
               "maximum": 100,
               "minimum": 1,
               "title": "Page Size",
@@ -43030,20 +43109,24 @@
         "operationId": "create_publication_openapi_v1_bots_spaces__space_id__skills__skill_id__publications_post",
         "parameters": [
           {
+            "description": "Space identifier.",
             "in": "path",
             "name": "space_id",
             "required": true,
             "schema": {
+              "description": "Space identifier.",
               "minimum": 1,
               "title": "Space Id",
               "type": "integer"
             }
           },
           {
+            "description": "Space Skill identifier.",
             "in": "path",
             "name": "skill_id",
             "required": true,
             "schema": {
+              "description": "Space Skill identifier.",
               "minimum": 1,
               "title": "Skill Id",
               "type": "integer"
@@ -43062,10 +43145,12 @@
             }
           },
           {
+            "description": "Stable identity of this Publication request.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "description": "Stable identity of this Publication request.",
               "maxLength": 128,
               "minLength": 1,
               "title": "Idempotency-Key",
@@ -43216,30 +43301,36 @@
         "operationId": "get_publication_openapi_v1_bots_spaces__space_id__skills__skill_id__publications__attempt_id__get",
         "parameters": [
           {
+            "description": "Space identifier.",
             "in": "path",
             "name": "space_id",
             "required": true,
             "schema": {
+              "description": "Space identifier.",
               "minimum": 1,
               "title": "Space Id",
               "type": "integer"
             }
           },
           {
+            "description": "Space Skill identifier.",
             "in": "path",
             "name": "skill_id",
             "required": true,
             "schema": {
+              "description": "Space Skill identifier.",
               "minimum": 1,
               "title": "Skill Id",
               "type": "integer"
             }
           },
           {
+            "description": "Publication Attempt identifier.",
             "in": "path",
             "name": "attempt_id",
             "required": true,
             "schema": {
+              "description": "Publication Attempt identifier.",
               "minimum": 1,
               "title": "Attempt Id",
               "type": "integer"
@@ -43401,30 +43492,36 @@
         "operationId": "retry_publication_openapi_v1_bots_spaces__space_id__skills__skill_id__publications__attempt_id__retry_post",
         "parameters": [
           {
+            "description": "Space identifier.",
             "in": "path",
             "name": "space_id",
             "required": true,
             "schema": {
+              "description": "Space identifier.",
               "minimum": 1,
               "title": "Space Id",
               "type": "integer"
             }
           },
           {
+            "description": "Space Skill identifier.",
             "in": "path",
             "name": "skill_id",
             "required": true,
             "schema": {
+              "description": "Space Skill identifier.",
               "minimum": 1,
               "title": "Skill Id",
               "type": "integer"
             }
           },
           {
+            "description": "Publication Attempt identifier.",
             "in": "path",
             "name": "attempt_id",
             "required": true,
             "schema": {
+              "description": "Publication Attempt identifier.",
               "minimum": 1,
               "title": "Attempt Id",
               "type": "integer"
