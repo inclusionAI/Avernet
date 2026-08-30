@@ -109,7 +109,9 @@ class StaticPlanDefinition:
                 raise ValueError(f"static plan input {name} must be string")
 
     def validate_bindings(self) -> None:
-        missing = ["<entry>"] if not self.entry_bot_id else []
+        # entry_bot_id 现不再用于 owner_bot_id 兜底(run-template 必填 caller_bot_id);
+        # 保留为模板元信息,不强制必填,不再纳入 binding 校验。
+        missing = []
         for node in self.nodes:
             if node.node_type == "notify":
                 # notify 终端通知节点无 bot 绑定(直走钉钉通道),不参与 bot binding 校验。

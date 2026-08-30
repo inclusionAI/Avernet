@@ -237,7 +237,7 @@ class TaskService:
             ),
             source_type=TaskSourceType.API,
             owner_user_id=owner_user_id,
-            owner_bot_id=definition.entry_bot_id or owner_bot_id,
+            owner_bot_id=owner_bot_id,
             execution_config={
                 "task_type": TaskType.STATIC_PLAN,
                 "static_plan_id": template_id,
