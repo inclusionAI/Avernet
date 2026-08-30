@@ -14,7 +14,14 @@ from uuid import UUID
 
 
 _FORMAT_VERSION = 1
-_RESERVED_NAMES = frozenset({".teamclaw-write.json", ".teamclaw-ready.json"})
+_RESERVED_NAMES = frozenset(
+    {
+        ".teamclaw-write.json",
+        ".teamclaw-ready.json",
+        "write-intent.json",
+        "content-manifest.json",
+    }
+)
 
 
 class CanonicalCenterStoreErrorCode(str, Enum):
@@ -73,7 +80,10 @@ def _safe_file_path(raw: str) -> str:
             f"unsafe canonical file path: {raw!r}",
         )
     normalized = path.as_posix()
-    if normalized in _RESERVED_NAMES or normalized.startswith(".teamclaw-"):
+    if any(
+        part in _RESERVED_NAMES or part.startswith(".teamclaw-")
+        for part in path.parts
+    ):
         raise CanonicalCenterStoreError(
             CanonicalCenterStoreErrorCode.INVALID_FILE_TREE,
             f"reserved canonical file path: {raw!r}",
@@ -89,7 +99,7 @@ class CanonicalCenterVersionIdentity:
     def __post_init__(self) -> None:
         try:
             parsed = UUID(self.skill_uuid)
-        except (ValueError, AttributeError) as error:
+        except (ValueError, AttributeError, TypeError) as error:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.INVALID_IDENTITY,
                 "skill_uuid must be a UUIDv4",
@@ -114,16 +124,26 @@ class CanonicalCenterVersionIdentity:
         return f"center-version://{self.skill_uuid}/{self.sc_version_number}"
 
 
+def _revalidated_identity(
+    identity: CanonicalCenterVersionIdentity,
+) -> CanonicalCenterVersionIdentity:
+    if not isinstance(identity, CanonicalCenterVersionIdentity):
+        raise CanonicalCenterStoreError(
+            CanonicalCenterStoreErrorCode.INVALID_IDENTITY,
+            "canonical value requires a validated exact identity",
+        )
+    return CanonicalCenterVersionIdentity(
+        skill_uuid=identity.skill_uuid,
+        sc_version_number=identity.sc_version_number,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CanonicalCenterVersionRef:
     identity: CanonicalCenterVersionIdentity
 
     def __post_init__(self) -> None:
-        if not isinstance(self.identity, CanonicalCenterVersionIdentity):
-            raise CanonicalCenterStoreError(
-                CanonicalCenterStoreErrorCode.INVALID_IDENTITY,
-                "canonical version ref requires a validated exact identity",
-            )
+        object.__setattr__(self, "identity", _revalidated_identity(self.identity))
 
     @property
     def locator(self) -> str:
@@ -158,11 +178,7 @@ class CanonicalCenterVersion:
     files: tuple[CanonicalCenterFile, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.identity, CanonicalCenterVersionIdentity):
-            raise CanonicalCenterStoreError(
-                CanonicalCenterStoreErrorCode.INVALID_IDENTITY,
-                "canonical version requires a validated exact identity",
-            )
+        object.__setattr__(self, "identity", _revalidated_identity(self.identity))
         if not isinstance(self.files, tuple) or any(
             not isinstance(item, CanonicalCenterFile) for item in self.files
         ):

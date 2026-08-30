@@ -130,6 +130,7 @@ class OssCanonicalCenterVersionStore:
     def read_version(
         self, ref: CanonicalCenterVersionRef
     ) -> CanonicalCenterVersion:
+        ref = CanonicalCenterVersionRef(ref.identity)
         manifest = self._read_manifest(ref, missing_is_error=True)
         if manifest is None:
             raise AssertionError("missing manifest must raise")

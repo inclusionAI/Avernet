@@ -13,6 +13,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterStoreErrorCode,
     CanonicalCenterVersion,
     CanonicalCenterVersionIdentity,
+    CanonicalCenterVersionRef,
     CanonicalCenterVersionStore,
 )
 from agentclaw.community.core.skill_center.services.canonical_center_store import (
@@ -138,6 +139,29 @@ def test_version_requires_safe_unique_files_and_root_skill_md() -> None:
         assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_FILE_TREE
 
 
+@pytest.mark.parametrize(
+    "reserved_path",
+    [
+        "write-intent.json",
+        "content-manifest.json",
+        ".teamclaw-ready.json",
+        "nested/write-intent.json",
+        "nested/content-manifest.json",
+        "nested/.teamclaw-ready.json",
+    ],
+)
+def test_runtime_tree_rejects_control_and_ready_metadata(
+    reserved_path: str,
+) -> None:
+    with pytest.raises(CanonicalCenterStoreError) as error:
+        CanonicalCenterVersion.from_files(
+            _identity(),
+            {"SKILL.md": b"valid", reserved_path: b"control"},
+        )
+
+    assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_FILE_TREE
+
+
 def test_public_values_cannot_bypass_safe_file_tree_construction() -> None:
     with pytest.raises(CanonicalCenterStoreError) as error:
         CanonicalCenterFile(
@@ -155,6 +179,36 @@ def test_public_values_cannot_bypass_safe_file_tree_construction() -> None:
     with pytest.raises(CanonicalCenterStoreError) as error:
         CanonicalCenterVersion(identity=_identity(), files=(skill, skill))
     assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_FILE_TREE
+
+
+@pytest.mark.parametrize("store_kind", ["oss", "fake"])
+def test_store_write_boundary_rejects_a_forged_identity(store_kind: str) -> None:
+    objects = _MemoryObjects()
+    store = _store(objects) if store_kind == "oss" else LocalCanonicalCenterVersionStore()
+    version = _version()
+    object.__setattr__(version.identity, "sc_version_number", "../outside")
+
+    with pytest.raises(CanonicalCenterStoreError) as error:
+        store.write_version(version)
+
+    assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_IDENTITY
+    assert objects.objects == {}
+
+
+@pytest.mark.parametrize("store_kind", ["oss", "fake"])
+def test_store_read_boundary_rejects_a_forged_ref(store_kind: str) -> None:
+    store = (
+        _store(_MemoryObjects())
+        if store_kind == "oss"
+        else LocalCanonicalCenterVersionStore()
+    )
+    ref = CanonicalCenterVersionRef(_identity())
+    object.__setattr__(ref.identity, "sc_version_number", "../outside")
+
+    with pytest.raises(CanonicalCenterStoreError) as error:
+        store.read_version(ref)
+
+    assert error.value.code is CanonicalCenterStoreErrorCode.INVALID_IDENTITY
 
 
 def test_write_uses_exact_canonical_root_and_roundtrips_verified_tree() -> None:

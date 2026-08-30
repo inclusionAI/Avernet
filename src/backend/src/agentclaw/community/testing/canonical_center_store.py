@@ -17,6 +17,10 @@ class LocalCanonicalCenterVersionStore:
     def write_version(
         self, version: CanonicalCenterVersion
     ) -> CanonicalCenterVersionRef:
+        version = CanonicalCenterVersion.from_files(
+            version.identity,
+            version.file_map,
+        )
         ref = CanonicalCenterVersionRef(version.identity)
         existing = self._versions.get(ref.locator)
         if existing is None:
@@ -32,6 +36,7 @@ class LocalCanonicalCenterVersionStore:
     def read_version(
         self, ref: CanonicalCenterVersionRef
     ) -> CanonicalCenterVersion:
+        ref = CanonicalCenterVersionRef(ref.identity)
         try:
             return self._versions[ref.locator]
         except KeyError as error:
@@ -41,4 +46,5 @@ class LocalCanonicalCenterVersionStore:
             ) from error
 
     def verify_version(self, ref: CanonicalCenterVersionRef) -> bool:
+        ref = CanonicalCenterVersionRef(ref.identity)
         return ref.locator in self._versions
