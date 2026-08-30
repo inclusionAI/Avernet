@@ -126,8 +126,6 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                     "Center snapshot must not copy the shared corpus"
                 )
 
-        if not captured.center_skills:
-            return
         center_delivery = next(
             delivery
             for delivery in captured.shared_corpora

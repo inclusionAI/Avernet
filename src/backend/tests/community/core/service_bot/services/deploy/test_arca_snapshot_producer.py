@@ -373,6 +373,66 @@ class _CapabilityReader:
 
 
 @pytest.mark.unit
+def test_pool_artifact_rejects_undeclared_center_link(tmp_path) -> None:
+    target = tmp_path / "openclaw"
+    active = target / "workspace" / "skills"
+    active.mkdir(parents=True)
+    (active / "undeclared").symlink_to(
+        "/home/admin/.openclaw/workspace/skills-pool/skill-center/"
+        "00000000-0000-4000-8000-000000000001/1.0.0"
+    )
+    state = BotSkillLayoutState(
+        scope=BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
+    )
+    producer = ArcaSnapshotProducer(
+        _RecordingBuild(
+            {
+                "success": True,
+                "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
+                ],
+            }
+        ),
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(state),
+            _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="Center links do not match the frozen exact manifest",
+    ):
+        producer.produce_artifact(
+            {
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            },
+            7,
+        )
+
+
+@pytest.mark.unit
 def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
     target = tmp_path / "openclaw"
