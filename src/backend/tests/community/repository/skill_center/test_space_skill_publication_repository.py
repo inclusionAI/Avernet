@@ -299,6 +299,38 @@ def test_begin_materialization_rechecks_status_after_skill_lock(
         )
 
 
+def test_mark_failed_rejects_version_that_appears_during_locking(
+    monkeypatch,
+) -> None:
+    db = _Database()
+    _space_id, _skill_id, attempt_id = _seed_waiting_publication(db)
+    original = publication_repository_module.lock_skill_row
+
+    def _attach_version_after_skill_lock(session, **kwargs):
+        skill = original(session, **kwargs)
+        session.query(SkillPublicationAttempt).filter(
+            SkillPublicationAttempt.id == attempt_id
+        ).update({"skill_version_id": 999999}, synchronize_session=False)
+        return skill
+
+    monkeypatch.setattr(
+        publication_repository_module,
+        "lock_skill_row",
+        _attach_version_after_skill_lock,
+    )
+
+    with pytest.raises(
+        RuntimeError, match="a materializing Version cannot become FAILED"
+    ):
+        SpaceSkillPublicationRepository(db).mark_failed(
+            attempt_id=attempt_id,
+            error_code="SC_PUBLISH_REJECTED",
+            error_message="rejected",
+            completed_at=datetime(2026, 8, 30, 12, 1, tzinfo=UTC),
+            env="test",
+        )
+
+
 @pytest.mark.parametrize(
     ("drift", "message"),
     [
@@ -559,6 +591,52 @@ def test_same_publication_request_key_conflicts_across_skills() -> None:
         )
 
     assert first.created is True
+
+
+def test_create_attempt_rechecks_request_after_skill_lock(monkeypatch) -> None:
+    db = _Database()
+    space_id, skill_id = _seed_draft(db, lease_holder="owner")
+    inserted_attempt_ids: list[int] = []
+    original = publication_repository_module.lock_skill_row
+
+    def _concurrent_replay_after_skill_lock(session, **kwargs):
+        skill = original(session, **kwargs)
+        assert skill is not None
+        replay = SkillPublicationAttempt(
+            skill_id=skill_id,
+            request_id="request-after-skill-lock",
+            frozen_draft_locator=skill.zip_url,
+            active_skill_key=f"teamclaw:test:{skill_id}",
+            target_version_ordinal=int(skill.draft_target_version),
+            sc_version_number="1.0.0",
+            status="PREPARING",
+            recovery_state="AUTO_RETRYING",
+            recovery_kind="PREPARATION",
+            created_by="owner",
+            env="test",
+        )
+        skill.draft_status = "FROZEN"
+        session.add(replay)
+        session.flush()
+        inserted_attempt_ids.append(int(replay.id))
+        return skill
+
+    monkeypatch.setattr(
+        publication_repository_module,
+        "lock_skill_row",
+        _concurrent_replay_after_skill_lock,
+    )
+
+    result = SpaceSkillPublicationRepository(db).create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id="request-after-skill-lock",
+        env="test",
+    )
+
+    assert result.created is False
+    assert result.attempt.attempt_id == inserted_attempt_ids[0]
 
 
 def test_group3_migration_adds_frozen_draft_locator_compatibly() -> None:

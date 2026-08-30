@@ -82,6 +82,59 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                     session,
                     request_id=request_id,
                     env=env,
+                    lock=False,
+                )
+                if replay is not None:
+                    replay = self._attempt_by_request(
+                        session,
+                        request_id=request_id,
+                        env=env,
+                        lock=True,
+                    )
+                    if replay is None:
+                        raise RuntimeError("Publication Attempt disappeared")
+                    self._require_attempt_scope(
+                        session,
+                        attempt=replay,
+                        space_id=space_id,
+                        skill_id=skill_id,
+                        actor_id=actor_id,
+                        env=env,
+                    )
+                    return PublicationAttemptCreation(
+                        attempt=self._record(replay), created=False
+                    )
+                skill = lock_skill_row(session, env=env, skill_id=skill_id)
+                if skill is None:
+                    raise DraftNotFoundError("draft not found")
+                ownership = (
+                    session.query(SkillSpaceBinding, SpaceModel)
+                    .join(
+                        SpaceModel,
+                        (SpaceModel.id == SkillSpaceBinding.space_id)
+                        & (SpaceModel.env == SkillSpaceBinding.env),
+                    )
+                    .filter(
+                        SkillSpaceBinding.skill_id == skill_id,
+                        SkillSpaceBinding.env == env,
+                        SkillSpaceBinding.space_id == space_id,
+                        SpaceModel.deleted_at.is_(None),
+                    )
+                    .one_or_none()
+                )
+                if ownership is None:
+                    raise DraftNotFoundError("draft not found")
+                _binding, space = ownership
+                self._require_publisher(
+                    session,
+                    skill_id=skill_id,
+                    actor_id=actor_id,
+                    env=env,
+                )
+                replay = self._attempt_by_request(
+                    session,
+                    request_id=request_id,
+                    env=env,
                     lock=True,
                 )
                 if replay is not None:
@@ -96,36 +149,6 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                     return PublicationAttemptCreation(
                         attempt=self._record(replay), created=False
                     )
-                row = (
-                    session.query(Skill, SpaceModel)
-                    .join(
-                        SkillSpaceBinding,
-                        (SkillSpaceBinding.skill_id == Skill.id)
-                        & (SkillSpaceBinding.env == Skill.env),
-                    )
-                    .join(
-                        SpaceModel,
-                        (SpaceModel.id == SkillSpaceBinding.space_id)
-                        & (SpaceModel.env == SkillSpaceBinding.env),
-                    )
-                    .filter(
-                        Skill.id == skill_id,
-                        Skill.env == env,
-                        SkillSpaceBinding.space_id == space_id,
-                        SpaceModel.deleted_at.is_(None),
-                    )
-                    .with_for_update()
-                    .one_or_none()
-                )
-                if row is None:
-                    raise DraftNotFoundError("draft not found")
-                skill, space = row
-                self._require_publisher(
-                    session,
-                    skill_id=skill_id,
-                    actor_id=actor_id,
-                    env=env,
-                )
                 if skill.draft_status != "EDITING" or not skill.zip_url:
                     if skill.draft_status == "FROZEN":
                         active = (
@@ -494,7 +517,10 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
     ) -> PublicationAttemptRecord:
         with self._db.transactional_orm_session() as session:
             attempt, skill, version = self._lock_attempt_aggregate(
-                session, attempt_id=attempt_id, env=env
+                session,
+                attempt_id=attempt_id,
+                env=env,
+                allow_version_appearance=True,
             )
             if attempt.status == "SUCCEEDED":
                 return self._record(attempt)
@@ -782,7 +808,12 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         return int(row[0]), int(row[1]) if row[1] is not None else None
 
     def _lock_attempt_aggregate(
-        self, session, *, attempt_id: int, env: str
+        self,
+        session,
+        *,
+        attempt_id: int,
+        env: str,
+        allow_version_appearance: bool = False,
     ) -> tuple[SkillPublicationAttempt, Skill, SkillVersion | None]:
         """Lock one Publication aggregate as Skill [-> Version] -> Attempt."""
         skill_id, located_version_id = self._attempt_version_identity(
@@ -811,6 +842,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             attempt,
             skill_id=skill_id,
             skill_version_id=located_version_id,
+            allow_version_appearance=allow_version_appearance,
         )
         return attempt, skill, version
 
@@ -820,13 +852,21 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         *,
         skill_id: int,
         skill_version_id: int | None,
+        allow_version_appearance: bool = False,
     ) -> None:
         current_version_id = (
             int(attempt.skill_version_id)
             if attempt.skill_version_id is not None
             else None
         )
-        if int(attempt.skill_id) != skill_id or current_version_id != skill_version_id:
+        version_matches = current_version_id == skill_version_id
+        if (
+            allow_version_appearance
+            and skill_version_id is None
+            and current_version_id is not None
+        ):
+            version_matches = True
+        if int(attempt.skill_id) != skill_id or not version_matches:
             raise RuntimeError("Attempt identity changed while acquiring locks")
 
     @staticmethod
