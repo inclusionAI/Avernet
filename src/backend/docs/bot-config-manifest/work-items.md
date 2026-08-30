@@ -662,6 +662,9 @@ moving refs is enforced here"* is unimplementable while the selector does not
 exist, and two implementers would guess opposite behaviours for the same
 document. Settled here:
 
+- **The field is `mode` on the source, with values `strict` and `non_strict`.**
+  Named here so the prose and the acceptance criteria that implement it (W1's
+  refusal list, W7's `Done when`) cannot drift apart.
 - **Per source, on the source declaration** — not per bot and not per manifest.
   The property being described is *"is this ref allowed to move under me"*, which
   belongs to the thing that has the ref. A manifest mixing a pinned vendor
@@ -1406,6 +1409,10 @@ capability table is fully determined.
   - `auth` on an entry that uses `from` (auth is declared on the named source)
     or on a `content` entry;
   - `apply_once` in any position — a v1 reserved word;
+  - an unknown `mode` value on a source: only `strict` and `non_strict` are
+    accepted, defaulting to `non_strict` (§3.2's moving-ref rule). Same shape as
+    the `on_fetch_failure` enum check, and refused here for the same reason — a
+    typo'd mode would otherwise silently take the default and pin nothing;
   - an unknown `${...}` placeholder; only `BOT_ID`, `BOT_ENGINE_TYPE`,
     `BOT_ENV`, `BOT_TENANT` and `BOT_ARCH` are accepted. `BOT_ARCH` resolves to
     the constant `amd64` today (§4, X3): implementing it now rather than merely
@@ -1468,6 +1475,7 @@ capability table is fully determined.
       | --- | --- | --- |
       | §4: `OCB_*` substitution variables | `BOT_*` only | §2.9 renamed them; leaving it would tell a user to write `${OCB_BOT_ID}` and then refuse it |
       | `on_fetch_failure`: `keep_last` / `skip` / `fail` | `keep_last` / `fail` | `skip` was removed with the category-overwrite decision (§2.7, W5); the schema still advertises a value that is now rejected |
+      | no `mode` field on a source | `mode: strict \| non_strict`, default `non_strict` | §3.2 settled the moving-ref selector; the field has to be documented before anyone can write it. **This row is the rule catching its own case** — it was found by applying the rule above to a change made in the same round, not by a reviewer |
 
       Stated as a rule with a table because the divergences arrive one at a time
       and each one has so far been noticed only after it shipped.
@@ -1917,6 +1925,17 @@ instance of it, not a requirement of this item.
       tag changes what the declaration means.
 - [ ] Directory entries from a git source need no `unpack` or
       `strip_components`.
+- [ ] **The source schema carries the moving-ref `mode`** (§3.2): `strict` or
+      `non_strict`, declared on the source because that is what holds the `ref`,
+      defaulting to `non_strict`. Declaring it on a SHA ref is accepted and inert
+      — a SHA cannot move, so neither branch can fire.
+- [ ] **Strict mode is enforced where the ref resolves**: when the resolved SHA
+      differs from the one recorded at the last apply, the entry **fails** and
+      the bot keeps running what it has. Non-strict applies the new content and
+      records a warning on the entry in the apply report, naming the previous and
+      new SHA — the report is the only surface for it, since iteration 1 is
+      pull-only (§2.7). W8's *"whatever D2 decides about moving refs is enforced
+      here"* is apply-time enforcement and depends on this field existing.
 
 **Size.** Medium-large.
 
