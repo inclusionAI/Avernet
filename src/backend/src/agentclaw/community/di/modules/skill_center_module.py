@@ -61,12 +61,6 @@ from agentclaw.community.core.repository.implementations.skill_center.propagatio
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     CapabilityDesiredStateRepository,
 )
-from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
-    SpaceSkillRepository as UnifiedSpaceSkillRepository,
-)
-from agentclaw.community.core.repository.implementations.skill_center.space_skill_draft import SpaceSkillDraftRepository as UnifiedSpaceSkillDraftRepository
-from agentclaw.community.core.repository.implementations.skill_center.space_skill_read import SpaceSkillReadRepository as UnifiedSpaceSkillReadRepository
-from agentclaw.community.core.repository.implementations.skill_center.space_skill_version_read import SpaceSkillVersionReadRepository as UnifiedSpaceSkillVersionReadRepository
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
@@ -93,13 +87,6 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
-)
-from agentclaw.community.core.repository.protocols.skill_center import (
-    DraftEditLeaseRepository,
-    SpaceSkillRepository,
-    SpaceSkillDraftRepository,
-    SpaceSkillReadRepository,
-    SpaceSkillVersionReadRepository,
 )
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
@@ -214,6 +201,9 @@ from agentclaw.community.di.modules.local_skill_upload_module import (
 from agentclaw.community.di.modules.skill_center_protocols import (
     SkillCenterProtocolBindings,
 )
+from agentclaw.community.di.modules.space_skill_repository_bindings import (
+    bind_space_skill_repositories,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -320,34 +310,10 @@ class SkillCenterModule(
             to=UnifiedSkillCenterSyncLogRepository,
             scope=singleton,
         )
-        binder.bind(
-            SpaceSkillRepository,
-            to=UnifiedSpaceSkillRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            SpaceSkillDraftRepository,
-            to=UnifiedSpaceSkillDraftRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            SpaceSkillReadRepository,
-            to=UnifiedSpaceSkillReadRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            SpaceSkillVersionReadRepository,
-            to=UnifiedSpaceSkillVersionReadRepository,
-            scope=singleton,
-        )
+        bind_space_skill_repositories(binder)
         binder.bind(
             SkillEditorRequestRepositoryProtocol,
             to=SkillEditorRequestRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            DraftEditLeaseRepository,
-            to=UnifiedSpaceSkillRepository,
             scope=singleton,
         )
         binder.bind(

@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillSpaceBinding, SkillVersion
-from agentclaw.community.core.repository.protocols.skill_center import (
+from agentclaw.community.core.repository.protocols.space_skill_version import (
     SpaceSkillVersionReadRepository as Protocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center_types import (

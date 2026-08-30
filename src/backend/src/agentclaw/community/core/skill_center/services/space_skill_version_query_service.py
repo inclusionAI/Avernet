@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.skill_center import (
+from agentclaw.community.core.repository.protocols.space_skill_version import (
     SpaceSkillVersionReadRepository,
 )
 from agentclaw.community.core.skill_center.canonical_center_store import (
