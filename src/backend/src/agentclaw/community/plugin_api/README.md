@@ -32,7 +32,10 @@ Changing a Plugin Protocol signature breaks every local + prod impl + the contra
 surface. It provides atomic write-once publication and FOUND/NOT_FOUND/FAILED
 reads for immutable consumers. Composition fails closed when the selected
 object store lacks that capability. Existing `put_object/get_object` retain
-their compatibility behavior for mutable and legacy consumers.
+their compatibility behavior for mutable and legacy consumers. The Community
+filesystem implementation stages conditional creates under a reserved internal
+root on the same filesystem, outside every logical object-key tree; staging
+residue is neither addressable nor returned by `list_objects`.
 
 The Interface belongs here because Avernet-owned consumers include Space Team
 binding today and the governed Publication/Reference flows in the Phase 2

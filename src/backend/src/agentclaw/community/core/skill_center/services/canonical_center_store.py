@@ -200,10 +200,15 @@ class OssCanonicalCenterVersionStore:
                 CanonicalCenterStoreErrorCode.READ_FAILED,
                 f"object storage read failed: {key}",
             )
-        if result.status is ObjectReadStatus.NOT_FOUND or result.content is None:
+        if result.status is ObjectReadStatus.NOT_FOUND:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.NOT_READY,
                 f"required canonical object is missing: {key}",
+            )
+        if result.content is None:
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.READ_FAILED,
+                f"object storage returned FOUND without content: {key}",
             )
         return result.content
 
@@ -220,13 +225,18 @@ class OssCanonicalCenterVersionStore:
                 CanonicalCenterStoreErrorCode.READ_FAILED,
                 f"failed to read integrity manifest: {ref.locator}",
             )
-        if result.status is ObjectReadStatus.NOT_FOUND or result.content is None:
+        if result.status is ObjectReadStatus.NOT_FOUND:
             if missing_is_error:
                 raise CanonicalCenterStoreError(
                     CanonicalCenterStoreErrorCode.NOT_READY,
                     f"canonical version content is incomplete: {ref.locator}",
                 )
             return None
+        if result.content is None:
+            raise CanonicalCenterStoreError(
+                CanonicalCenterStoreErrorCode.READ_FAILED,
+                f"object storage returned FOUND without integrity content: {ref.locator}",
+            )
         return result.content
 
     @staticmethod

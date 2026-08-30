@@ -57,6 +57,7 @@ class _MemoryObjects:
         self.objects: dict[str, bytes] = {}
         self.fail_create_suffix: str | None = None
         self.fail_reads: set[str] = set()
+        self.found_without_content: set[str] = set()
         self.deleted: list[str] = []
 
     def create_object_if_absent(
@@ -73,6 +74,8 @@ class _MemoryObjects:
     def read_object(self, key: str) -> ObjectReadResult:
         if key in self.fail_reads:
             return ObjectReadResult(ObjectReadStatus.FAILED)
+        if key in self.found_without_content:
+            return ObjectReadResult(ObjectReadStatus.FOUND)
         if key not in self.objects:
             return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
         return ObjectReadResult(ObjectReadStatus.FOUND, self.objects[key])
@@ -290,6 +293,21 @@ def test_storage_failure_is_not_reported_as_missing_or_not_ready() -> None:
 
     with pytest.raises(CanonicalCenterStoreError) as error:
         store.verify_version(ref)
+    assert error.value.code is CanonicalCenterStoreErrorCode.READ_FAILED
+
+
+def test_found_without_content_is_reported_as_a_storage_contract_failure() -> None:
+    objects = _MemoryObjects()
+    store = _store(objects)
+    ref = store.write_version(_version())
+    manifest_key = next(
+        key for key in objects.objects if key.endswith("/content-manifest.json")
+    )
+    objects.found_without_content.add(manifest_key)
+
+    with pytest.raises(CanonicalCenterStoreError) as error:
+        store.verify_version(ref)
+
     assert error.value.code is CanonicalCenterStoreErrorCode.READ_FAILED
 
 

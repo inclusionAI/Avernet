@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+_ATOMIC_STAGING_DIRECTORY = ".object-create-staging"
+
 
 class CommunityFsObjectStorage(
     ObjectStoragePlugin, ImmutableObjectStorageCapability
@@ -55,6 +57,10 @@ class CommunityFsObjectStorage(
         """
         candidate = (self._root / key).resolve()
         if candidate == self._root or self._root in candidate.parents:
+            relative = candidate.relative_to(self._root)
+            if relative.parts and relative.parts[0] == _ATOMIC_STAGING_DIRECTORY:
+                logger.error("ObjectStorage: key uses reserved staging root: %r", key)
+                return None
             return candidate
         logger.error("ObjectStorage: key escapes storage root: %r", key)
         return None
@@ -84,8 +90,10 @@ class CommunityFsObjectStorage(
             if isinstance(content, str):
                 content = content.encode("utf-8")
             path.parent.mkdir(parents=True, exist_ok=True)
+            staging_directory = self._root / _ATOMIC_STAGING_DIRECTORY
+            staging_directory.mkdir(parents=True, exist_ok=True)
             descriptor, raw_temp_path = tempfile.mkstemp(
-                dir=path.parent,
+                dir=staging_directory,
                 prefix=f".{path.name}.",
                 suffix=".tmp",
             )
@@ -178,6 +186,7 @@ class CommunityFsObjectStorage(
                 p.relative_to(self._root).as_posix()
                 for p in self._root.rglob("*")
                 if p.is_file()
+                and p.relative_to(self._root).parts[0] != _ATOMIC_STAGING_DIRECTORY
             ]
             keys = [k for k in keys if k.startswith(prefix)]
             keys.sort()

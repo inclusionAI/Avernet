@@ -97,6 +97,8 @@ def test_fs_conditional_create_publishes_only_complete_content(
         assert destination == target
         assert not target.exists()
         assert source.read_bytes() == b"complete-payload"
+        assert source.parent == tmp_path / "store" / ".object-create-staging"
+        assert source.parent != target.parent
         original_link(source, destination)
 
     monkeypatch.setattr(os, "link", assert_complete_then_publish)
@@ -124,7 +126,23 @@ def test_fs_conditional_create_cleans_staging_file_when_publish_fails(
     )
     root = tmp_path / "store"
     assert not (root / "immutable").exists()
-    assert list(root.glob(".immutable.*.tmp")) == []
+    assert list((root / ".object-create-staging").glob(".immutable.*.tmp")) == []
+
+
+def test_fs_atomic_staging_is_not_an_addressable_or_listable_object(tmp_path):
+    store = _fs(tmp_path)
+    staging = tmp_path / "store" / ".object-create-staging"
+    staging.mkdir(parents=True)
+    (staging / "crash-residue.tmp").write_bytes(b"partial")
+
+    assert store.list_objects("") == []
+    assert store.put_object(".object-create-staging/user-key", b"x") is False
+    assert (
+        store.create_object_if_absent(
+            ".object-create-staging/user-key", b"x"
+        )
+        is ObjectCreateResult.FAILED
+    )
 
 
 def test_fs_nested_key_creates_dirs(tmp_path):

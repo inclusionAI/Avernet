@@ -110,6 +110,8 @@ def test_invalid_config_fails_application_boot(monkeypatch) -> None:
     "template",
     [
         "sandbox/{{env}}/skills-center",
+        "./{env}/skills-center",
+        "sandbox/./{env}/skills-center",
         "sandbox/{env!r}/skills-center",
         "sandbox/{env:>10}/skills-center",
         "sandbox/{env}/{env}/skills-center",

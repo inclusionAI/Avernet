@@ -297,8 +297,7 @@ class CanonicalCenterStoreConfig:
         if (
             rendered.startswith("/")
             or "\\" in rendered
-            or "//" in rendered
-            or any(part in {"", ".", ".."} for part in PurePosixPath(rendered).parts)
+            or any(part in {"", ".", ".."} for part in rendered.split("/"))
         ):
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.INVALID_CONFIGURATION,
