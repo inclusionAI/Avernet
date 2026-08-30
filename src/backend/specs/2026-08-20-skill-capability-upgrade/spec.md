@@ -90,7 +90,7 @@ artifact。本文先冻结待实现合同；实现完成后生成的 OpenAPI JSO
 40. 作为文件型 Runtime 用户，我希望 Local、Repo、Center 在统一投影中共存但不互相转换。
 41. 作为历史用户，我希望旧 Local、Repo、Bot-local 和不含 Center 的 Artifact 行为保持不变。
 42. 作为安全负责人，我希望跨 tenant/env、路径穿越、非法压缩包和越权访问失败关闭。
-43. 作为产品负责人，我希望仍被 SkillSet、Artifact 或进行中操作引用的 Skill 不能退役。
+43. 作为产品负责人，我希望仍被 SkillSet、Artifact 或进行中操作引用的 Skill 不能下线。
 44. 作为前端开发者，我希望实现后直接使用 Gateway OpenAPI/Swagger 获取准确请求、响应和错误合同。
 45. 作为发布负责人，我希望 Phase 1 和 Phase 2 各有独立验收门禁，并能定位安全回滚下限。
 46. 作为 Team Space 普通成员，我希望可以向当前 Skill Owner 申请编辑权限，并在工单中查询结果。
@@ -100,7 +100,7 @@ artifact。本文先冻结待实现合同；实现完成后生成的 OpenAPI JSO
 50. 作为 SkillCenter Public 用户，我希望一次选择多个 Skill 后获得可跨刷新恢复的异步引用进度，且只有物化完成后才加入 SkillSet。
 51. 作为发布者，我希望发布前看到可能受 Track Latest 影响的 Bot，但该预览不阻断发布，发布成功后由后端重新计算真实候选。
 52. 作为发布者，我希望自动重试耗尽后可以针对同一个 Attempt 恢复准备、查询 SC 结果或重试物化，而不会重复发布。
-53. 作为 Skill Owner/Manager，我希望退役前看到完整血缘；任何 Membership、Installation、进行中操作或仍可重放 Service Artifact 都必须阻断退役。
+53. 作为 Skill Owner/Manager，我希望下线前看到完整血缘；无引用时保留历史 Published Vn、创建 Vn+1 Draft，并允许修改后重新发布。
 
 ## Implementation Decisions
 
@@ -127,7 +127,7 @@ Backend 真实提供，同时避免在 Review 阶段暴露返回 `501` 的占位
 #### Phase 2：Space Skill 能力升级
 
 - Space Skill Identity、Draft、Version、Edit Lease、Publication Attempt。
-- Skill Center 发布、精确版本物化、升级传播和整体退役。
+- Skill Center 发布、精确版本物化、升级传播和可恢复下线。
 - 七桃负责的 Space、Member、Join Request、Favorite 接口保持现有合同，不在本文重构。
 - 当前 `GET /openapi/v1/bots/spaces/{space_id}/skills` 的旧 `SpaceSkillItem` 尚无真实
   调用方，且已与前端确认不作为兼容合同；Phase 2 直接以本节的
@@ -254,8 +254,11 @@ Phase 2 复用一条 `ac_skill` 作为跨版本稳定 Identity：
 
 - Legacy Local/Repo 可以没有 `skill_uuid`；公开 API 身份仍是 `ac_skill.id`。
 - 新 Space Skill 必须由服务端生成唯一 UUID，并直接作为 SC `skillCode`。
-- `ac_skill` 只增加活动 Draft 目标版本、Draft 状态、Git 来源和整体退役事实；
+- `ac_skill` 只增加活动 Draft 目标版本、Draft 状态、Git 来源和 TeamClaw-local Offline 事实；
   不新增 `ac_skill_draft`，也不把 Version 再写成一条 `ac_skill`。
+- Offline 使用 `offline_at/offline_by`（或实现 Review 时按仓库命名确认的等价字段）；当前尚未
+  被业务使用的 `retired_at/retired_by` 旧骨架不作为最终合同，必须在实现前替换/废弃，禁止用
+  永久退役字段承载可恢复语义。
 - `ac_skill_space_binding` 是一个 Skill 在一个环境下唯一的 Space Ownership。
 - `ac_skill_grant` 表达恰好一个 Owner 和多个 Manager，不读取 Legacy 权限表。
 - `ac_skill_draft_edit_lease` 是永久协作锁事实，保存 holder 与单调递增 fencing
@@ -604,8 +607,8 @@ Version。产品本期不提供“展示名称/描述/图标即时生效”的�
 ##### 10.1.1 工坊列表领域摘要
 
 `GET /openapi/v1/bots/spaces/{space_id}/skills` 是能力工坊的集合读取接口。
-它返回稳定领域摘要，而不是数据库表行或页面按钮 ViewModel。工坊列表包含已退役
-Skill 供历史查看；消费型 Repository/Consumable 列表仍排除已退役 Skill。
+它返回稳定领域摘要，而不是数据库表行或页面按钮 ViewModel。工坊列表包含 Offline Skill
+供继续编辑和重新发布；消费型 Repository/Consumable 列表排除 Offline Skill。
 `keyword` 由 Backend 对名称和描述做不区分大小写过滤，过滤后再分页；默认按
 `gmt_modified DESC, skill_id DESC` 稳定排序。`page` 从 1 开始，`page_size` 默认 20、最大 100。
 
@@ -617,7 +620,7 @@ can_apply_edit` 投影，以本节 `SpaceSkillSummary` 作为唯一响应模型�
 
 ```text
 skill_id / skill_uuid / name / description / space_type / owner
-lifecycle_status = DRAFT_ONLY | PUBLISHED | RETIRED
+lifecycle_status = DRAFT_ONLY | PUBLISHED | OFFLINE
 latest_published_version
 draft = { target_version, status = EDITING | FROZEN } | null
 active_publication = { attempt_id, target_version, status } | null
@@ -641,7 +644,7 @@ edit_draft
 publish_draft
 delete_draft
 create_upgrade_draft
-retire_skill
+offline_skill
 manage_grants
 transfer_owner
 request_edit_access
@@ -663,7 +666,7 @@ holder_display_name
 
 无 Draft 时 `lease_summary=null`；Personal Draft 返回 `required=false,state=NOT_REQUIRED`。列表不返回
 fencing token；点击编辑后通过 Lease 资源重新查询/变更实时状态。列表也不内联全量
-Grants、Versions、Publication 历史、文件树或升级/退役影响列表，这些由对应资源接口提供。
+Grants、Versions、Publication 历史、文件树或发布/下线影响列表，这些由对应资源接口提供。
 
 #### 10.2 Draft 与 Version
 
@@ -759,7 +762,7 @@ Owner 审批，旧 Owner 不得继续审批。
 
 本期不建设 TTL 或续租。关闭编辑抽屉主动释放；遗留锁由 Takeover。旧 fencing token 永久不能写入。
 
-### 12. Phase 2：Publication Attempt 与退役
+### 12. Phase 2：Publication Attempt 与可恢复下线
 
 | Method | Path | 语义 |
 | --- | --- | --- |
@@ -768,8 +771,8 @@ Owner 审批，旧 Owner 不得继续审批。
 | GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications` | Attempt 历史 |
 | GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}` | Attempt 详情 |
 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}/retry` | 恢复同一 Attempt；按最新阶段分流，不要求新幂等键 |
-| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/retirement-impact` | 退役影响检查 |
-| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/retirement` | 整体退役 Skill |
+| GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact` | 下线影响检查 |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline` | 本地隐藏 Published Skill，并创建下一版 Draft |
 
 发布事务：
 
@@ -820,19 +823,24 @@ Latest 是发布成功后的 Best-Effort 异步刷新，不参与发布成功门
 acknowledgement token。预览到 PUBLISHED 之间事实可能变化，Track Latest 必须在发布成功后按
 最新 Installation/迁移期候选重新发现并由 Reader 复核，禁止信任前端预览列表。
 
-#### 12.1 Retirement 与血缘
+#### 12.1 Offline、重新发布与血缘
 
-本期采用 TeamClaw 本地不可逆整体退役：写 `ac_skill.retired_at/retired_by`，隐藏于 TeamClaw
-市场和 consumable 列表，禁止新 Draft、Publication、Direct activation、Membership 和 SC
-Public Reference 复用；不调用 Skill Center 删除/关闭/下线。Published Versions、Canonical
-Store、历史 Attempt/Grant/Binding/Artifact 全部保留；不支持 unretire 或单 Version offline。
+产品“下线”是 TeamClaw-local、可恢复的 Offline，不是永久 Retirement，也不把历史 Published
+Version 改回 Draft。无 blocker 时，Offline 保留不可变 Published Vn，并基于 Vn 创建 Vn+1
+EDITING Draft；用户修改后发布 Vn+1，成功事务清空 `offline_at/offline_by`，恢复 PUBLISHED
+可见性。重新上线必须产生新 Version，禁止覆盖或重新发布旧 Vn。
+
+Offline 期间从 TeamClaw 市场和 consumable 列表隐藏，禁止新的 Direct activation、Membership
+和其他 Bot 消费；Owner/Manager 仍可查看历史、编辑 Draft 和发布。它不调用 Skill Center
+删除/关闭/下线，因此 SC 外部页面可能持续可见。永久 Retirement、SC 全局下线和单 Version
+offline 均不在本期范围。
 
 GET impact 供产品预览，POST 必须在事务内锁定 Skill 并重新检查全部 blocker；没有 force、
 管理员绕过或“已知悉后继续”。Owner 与 Manager 均可查看和执行，普通 Member 无权限。
 
-| blocker | 退役是否拒绝 |
+| blocker | 下线是否拒绝 |
 | --- | --- |
-| Active/Frozen Draft | 是 |
+| Active/Frozen Draft | 是；先放弃或完成当前 Draft/Attempt |
 | 进行中或 RESULT_UNKNOWN Attempt | 是 |
 | 任意普通/Default Membership，含 inactive/excluded | 是 |
 | Bot Skill Installation | 是 |
@@ -846,11 +854,18 @@ Service Artifact 血缘不建新索引表、不 backfill。唯一 `ServiceArtifa
 `skills_manifest.center_skills[]`，Teclaw 解析 `config_artifact.skills[]` 中
 `store=skill-center,path=<skill_uuid>/<version>`。任何 OSS/JSON/分页未知都 fail closed。
 仅把存活 Service Bot 的 SUCCESS/UPGRADED/RELEASED/VALIDATING 等仍可重放记录作为 blocker；
-只下线不释放血缘，必须彻底删除/退役对应 Service Bot。
+Service Bot 仅下线仍可能重新上线，因此仍阻断，必须彻底删除/退役该 Service Bot 才释放血缘。
 
-POST 已退役幂等 `changed=false`；存在 blocker 返回 `409 SKILL_RETIREMENT_BLOCKED` 与最新
-counts。退役与新增引用写入共享 Skill row lock 和 `retired_at IS NULL` 不变量；同一
-`center://external_skill_code` 退役后返回 `SKILL_RETIRED`，不得生成第二个 TeamClaw 资产绕过。
+Offline Application Service 复用 Upgrade Draft 的 exact source 规则：先做只读 impact 预检，
+从 TC Canonical Store 读取 Published Vn（失败时从 SC exact version 修复）并写新 immutable Draft
+Revision，再在一个 DB 事务中锁 Skill、重查 blocker、写 `offline_at/offline_by` 与 Vn+1 Draft
+facts。DB 失败或并发 blocker 出现时清理新 Revision；不存在“已下线但没有 Draft”的半状态。
+
+POST 已 Offline 且 Vn+1 Draft 存在时幂等 `changed=false`。存在 blocker 返回
+`409 SKILL_OFFLINE_BLOCKED` 与最新 counts。Offline 与新增引用共享 Skill row lock 和
+`offline_at IS NULL` 不变量；Offline 期间新引用返回 `SKILL_OFFLINE`。若用户主动放弃 Offline
+Draft，Skill 仍保持 Offline，可再次调用 `draft/upgrade` 重新创建下一版 Draft；只有新 Version
+PUBLISHED 才恢复上线。
 
 ### 13. Skill Center 映射与精确版本物化
 
@@ -1008,7 +1023,7 @@ Repo/Center OSS 只读挂载到 physical runtime 的 `skills-pool/skills-repo` �
 ```
 
 按 `runtime_name + skill_uuid + sc_version_number` 稳定排序。Manifest 只承担 exact-version 审计、
-物理 Artifact 校验、退役血缘和问题定位，不在 restart 时重新解析 latest 或重建软链。旧 Artifact
+物理 Artifact 校验、Offline 血缘和问题定位，不在 restart 时重新解析 latest 或重建软链。旧 Artifact
 没有 `center_skills` 时按无 Center 的原合同读取。Validator 必须保证：不携带完整共享 Corpus；
 Center link 与 manifest 一一对应并指向 exact version；共享 Store 中 `SKILL.md` 可读；不存在
 未声明/版本漂移/越界 link。
@@ -1070,7 +1085,7 @@ Consumer 未识别 Center Store、OSS/Mount/Device 不可用属于发布门禁�
 | 400 | wire/request 格式错误 |
 | 403 | ACL、Owner/Manager、MCP 权限失败 |
 | 404 | Skill/Space/Version/Attempt/Reference 不存在 |
-| 409 | 状态机、Membership、Bot ready、runtime name、Retirement blocker 冲突 |
+| 409 | 状态机、Membership、Bot ready、runtime name、Offline blocker 冲突 |
 | 422 | SKILL.md、本地文件夹、Git 内容或参数校验失败 |
 | 502/503 | Skill Center 或 Runtime 不可用 |
 
@@ -1094,7 +1109,7 @@ Consumer 未识别 Center Store、OSS/Mount/Device 不可用属于发布门禁�
 11. 文件型 `skills_manifest schema_version=1` additive optional `center_skills`，Teclaw 继续 v4
     additive `skill-center` Store；旧 Artifact 不升版、不切流并继续可读。
 12. SC Public 外部 code 与 Local/Repo/Space 同名不复用资产；`center://` locator 与内部 UUID
-    映射必须稳定，退役后不得生成第二个资产绕过。
+    映射必须稳定。
 
 ### 18. 交付、切流与回滚
 
@@ -1159,7 +1174,7 @@ Phase 1 对新产品 PRD 的可测边界：Local 上传、Repo Catalog、MCP Cat
 添加到 SkillSet、SkillSet 整体激活/停用、System Default 和 Runtime 恢复可做完整
 Backend 验收。真实 Space Skill 的本地文件夹/Git 创建、Draft 编辑、Owner/Manager/Edit
 Lease、发布、版本升级、Skill Center 物化、Track Latest、Service Artifact 精确版本
-和退役属于 Phase 2；Phase 1 只能通过兼容 Fixture 验证已有 Space wire 和消费边界，
+和可恢复下线属于 Phase 2；Phase 1 只能通过兼容 Fixture 验证已有 Space wire 和消费边界，
 不能把它计为新产品主流程 E2E。
 
 Phase 2 必测：
@@ -1180,8 +1195,8 @@ Phase 2 必测：
 - Service Release 固化 V1 后，V2 发布不影响 V1 的扩容、重启和回滚。
 - 文件型 manifest v1 additive center_skills、共享 Center mount、排除完整 Corpus、exact symlink
   校验；Teclaw v4 additive Store 与真实 Consumer/offload/re-inline。
-- Retirement 覆盖 Draft/Attempt、inactive/default Membership、Installation、inline/offloaded
-  replayable Artifact 与 UNKNOWN_ARTIFACT；无 force、无 SC 下线。
+- Offline 覆盖 Draft/Attempt、inactive/default Membership、Installation、inline/offloaded
+  replayable Artifact 与 UNKNOWN_ARTIFACT；无 force、无 SC 下线；成功创建 Vn+1 Draft并可重新发布。
 - Local/Repo/Center 并存、Mapping v2/v3、所有实际 Bot/Engine 走共享合同而无静态拒绝分支。
 
 Phase 2 完成定义：产品主流程 E2E、SC pre 联调、多引擎矩阵、Service Artifact
@@ -1200,7 +1215,7 @@ Phase 2 完成定义：产品主流程 E2E、SC pre 联调、多引擎矩阵、S
 - Transactional TaskQueue Pending Writer；本期接受业务事务后 enqueue 的有限窗口。
 - SC Webhook、全量 SC Public 扫描或 SC 全局下线。
 - Reference Operation cancel/delete/原地 retry 与终态 TTL 清理。
-- Retirement force/admin bypass、unretire 和新的 Artifact lineage 索引表/backfill。
+- Offline force/admin bypass、永久 Retirement 和新的 Artifact lineage 索引表/backfill。
 - 长期 feature flag、Center 双协议版本和按 Bot Type × Engine 的静态支持表。
 
 ## Further Notes

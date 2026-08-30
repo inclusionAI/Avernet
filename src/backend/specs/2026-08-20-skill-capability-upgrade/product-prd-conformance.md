@@ -37,8 +37,8 @@
 | 发布失败/RESULT_UNKNOWN/物化失败恢复 | 原型未画 | Attempt Retry + recovery summary | 原型未定义，Spec 有完备合同 |
 | 查看发布影响 | Mock 在“确认升级”时展示 Bot，`CapabilityWorkshop.tsx:1046-1076` | 最终接口为 `publication-impact`，在真正发布前提示；upgrade 仅创建 Draft | **已由产品确认**：PD 后续把影响弹窗从 upgrade 移到 publish confirm |
 | 升级 Vn→Vn+1 | `CapabilityWorkshop.tsx:1046-1076` | 从 exact Published Vn 创建 Vn+1 EDITING Draft | 满足，除影响弹窗时机 |
-| 下线 | Mock 无引用时把 running 改回 draft，`CapabilityWorkshop.tsx:1078-1125` | 不可逆 TeamClaw-local Retirement；Versions/Draft 历史保留，不回 Draft | **前端需对齐**：旧“下线后回草稿”已被最终决策替换 |
-| 下线前引用阻断 | 同上，只展示 Bot refs | Retirement impact 覆盖 Membership、Installation、Attempt、Artifact、UNKNOWN_ARTIFACT | Backend 更严格且满足安全需求；前端需支持非 Bot blocker 分类/counts |
+| 下线 | Mock 无引用时把 running 改回 draft，`CapabilityWorkshop.tsx:1078-1125` | TeamClaw-local Offline；保留 Published Vn 并创建 Vn+1 Draft，重新发布后上线 | 满足产品意图；前端需避免把历史 Vn 真正改成 Draft |
+| 下线前引用阻断 | 同上，只展示 Bot refs | Offline impact 覆盖 Membership、Installation、Attempt、Artifact、UNKNOWN_ARTIFACT | Backend 更严格且满足安全需求；前端需支持非 Bot blocker 分类/counts |
 | 删除未发布 Skill/放弃升级 Draft | Draft 卡片“删除”，`CapabilityWorkshop.tsx:762-770` | `DELETE .../draft` 返回 `deleted_scope=SKILL|DRAFT`，FROZEN 拒绝 | 满足 |
 | Team 编辑锁、抢占、关闭释放 | `CapabilityWorkshop.tsx:572-662,742-751,928-947` | 永久 Lease、fencing、acquire/release/takeover，无 TTL | 满足 |
 | 普通成员申请编辑权限 | `CapabilityWorkshop.tsx:554-569,746-760` | `editor-requests` + `SKILL_COLLABORATOR` Work Order | 满足 |
@@ -106,14 +106,14 @@ presentation metadata，不能映射到 `ac_skill.name` 或绕过 Version。
 | Bot restart/re-ACTIVE | Reader + Resolver + full Projector；首次失败有有界 Retry | Bot 恢复后使用 latest exact Version |
 | Service 新 Release | build 前完整 Projector，Artifact 冻结 exact Center/MCP | 新 Release 使用最新 PUBLISHED |
 | Service restart/scale/rollback | 只读历史 Artifact | 历史版本不漂移 |
-| Retirement | replayable Artifact 是硬 blocker | 产品显示受影响 Service Bot/Version，禁止继续 |
+| Offline | replayable Artifact 是硬 blocker | 产品显示受影响 Service Bot/Version，禁止继续；无 blocker 时进入 Vn+1 Draft |
 
 ## 6. 明确不属于缺口的原型差异
 
 - 原型没有超时、并发、幂等、补偿、Task deadline、RESULT_UNKNOWN 和 UNKNOWN_ARTIFACT；这些是
   Backend 必须补齐的可靠性合同，不需要 Mock 先画出来。
 - 原型把状态压成 `draft/running/offline`；正式 Spec 使用 Asset、Draft、Attempt、Version、
-  Retirement 分离状态，前端必须映射，不能要求 Backend 回到单 status。
+  Offline 分离状态，前端必须映射，不能要求 Backend 把旧 Published Vn 变成 Draft。
 - 原型只模拟文件内容；Canonical OSS、Mapping v3、Pool、Teclaw v4 和 Artifact 冻结不属于页面
   ViewModel，但仍是发布门禁。
 - 产品入口没开放某个 Bot Type × Engine 组合不等于 Center 技术不支持；Backend 不编码静态拒绝。
@@ -121,13 +121,13 @@ presentation metadata，不能映射到 `ac_skill.name` 或绕过 Version。
 ## 7. Review 结论
 
 正式 Spec 已覆盖产品主链路：创建、保存、协作编辑、发布、版本、市场发现/收藏、加入能力集、
-SkillSet 原子开关、MCP、Track Latest、Service 历史重放和退役。
+SkillSet 原子开关、MCP、Track Latest、Service 历史重放和可恢复下线。
 
 产品合同未再保留开放问题。Frontend Guide/Ticket 阶段需要执行的已定稿调整：
 
 1. 删除“展示名称/描述/图标即时生效”的 Backend 依赖；Published 内容只读，修改走 Draft/Version。
 2. 能力工坊搜索调用 Backend `keyword/page/page_size`。
 3. 未物化 SC 详情继续使用现有 `homepageUrl` iframe，不触发物化。
-4. 把升级影响弹窗移到发布确认，把“下线回草稿”替换为 Retirement，并支持完整 blocker。
+4. 把升级影响弹窗移到发布确认；下线时保留 Published Vn、创建 Vn+1 Draft，并支持完整 blocker。
 5. 实现 SC Reference Operation 的处理中、部分成功、刷新恢复；Mock 当前只有同步 toast。
 6. 新建 SkillSet 默认 active；空集合不触发 Runtime，后续新增成员立即生效。
