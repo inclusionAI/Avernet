@@ -443,10 +443,63 @@ Owed by other teams. **None blocks W1–W6.**
 
 | # | What is being asked | Gates | Owner | State |
 | --- | --- | --- | --- | --- |
-| **X1** | Company git hosting: are there repo-scoped read tokens; can the archive API take `ref` + subpath; what is the refs-resolution API; which auth header; is it reachable from the platform (O11) | **W7** | backend + git hosting + business | **Open** — will look at later |
+| **X1** | Ant Code credentials — **largely answered from the published doc**, see below. Two questions remain: does Ant Code offer **Deploy Tokens** (not deploy *keys*), and what is the **maximum token expiry**? | **W7** | backend + git hosting | Mostly answered |
 | **X2** | teclaw readiness/convergence — **answered**, see below | **W8** teclaw arm | teclaw + backend | **Answered**; superseded by W12 |
-| **X3** | `cli_tools` delivery — **narrowed**, see below | **W9** | backend + ARCA engines | Partly answered |
+| **X3** | `cli_tools` — only **one** question is outstanding for others: **O9, is the target container architecture uniform**, or do we need per-arch sources? It changes the schema, so it gates W9's schema. Everything else is our own work, see below | **W9** | business (O9) | One question open |
 | ~~**X4**~~ | ~~desktop in the v1 surface~~ | — | — | **Closed: desktop is out of scope** (§2.5) |
+
+### X1 — Ant Code credential choice
+
+The published Ant Code doc settles most of this, and contains one fact that
+overturns a design decision.
+
+**There is no read-only API scope.** Of the 访问令牌 scopes:
+
+- `api` — *"授予对 API 的完整读/写访问权限，包括所有组和仓库"*: full read **and
+  write**, across every group and repository the account can see;
+- `read_repository` — read-only, but *"使用 Git-over-HTTP（不使用 API）"*: Git
+  transport only, **not** the API.
+
+You can have read-only, or API access, not both.
+
+| Option | Scoping | Transport | Verdict |
+| --- | --- | --- | --- |
+| 访问令牌 + `api` | user-wide, read **and write**, all groups and repos | API | **No.** Write access to everything, for a job that only ever reads |
+| 访问令牌 + `read_repository` | user-wide but **read-only** | Git-over-HTTP | **Recommended**, paired with a machine account |
+| 私有令牌 | the person's full permissions, no expiry control | API + git | **No.** A personal access token by another name — already ruled out in schema §2.1 |
+| SSH 公钥 | *all* of the user's permissions — the doc warns of exactly this | SSH | **No** |
+| 仓库部署公钥 | **repo-scoped, read-only** — the best scoping on offer | SSH only | Best security, wrong transport for v1 |
+
+**Recommendation: a dedicated machine account + 访问令牌 scoped `read_repository`.**
+The documented usage form `https://git:{token}@code.alipay.com/{group}/{project}.git`
+is HTTP Basic, so it stores as `Authorization: Basic base64("git:<token>")` and
+injects as a header — **the v1 credential model needs no change**. Scope narrowing
+comes from the account's *membership* (only the content repos), which is precisely
+the fallback schema §2.1 anticipated for hosts without repo-scoped tokens.
+`allowed_prefixes` remains the platform-side check on top of it.
+
+**Consequence: this reverses design §10.5.** That section compiles git sources
+into a single HTTPS archive fetch through the hosting API, explicitly avoiding
+`git clone` in the backend process. `read_repository` cannot reach the API, so
+W7 would do a **shallow single-ref fetch** instead. Taking the API route means
+accepting the `api` scope — read/write to everything — which is a far worse thing
+to hold in our database than a clone is to run.
+
+**Two questions remain for the Ant Code team:**
+
+1. **Do Deploy *Tokens* exist?** GitLab-family systems usually offer them
+   alongside deploy *keys*: repo-scoped, read-only, HTTPS/Basic. That would be
+   strictly better than everything above and would fit v1 unchanged. The doc
+   covers 公钥 only and does not say either way.
+2. **What is the maximum token expiry?** The doc recommends one day. Unattended
+   fetching on a one-day token requires automated rotation, which is real work we
+   would rather scope deliberately than discover.
+
+Deploy *keys* stay the best security answer on paper — repo-scoped and read-only
+beats user-scoped and read-only — but they are SSH: a second transport in a
+fetcher built HTTPS-only around SSRF guards, host-key verification, and a
+credential model storing a private key rather than a header. A deliberate trade,
+not a default.
 
 ### X2 — answered, and it raised a bigger one
 
@@ -508,6 +561,14 @@ Findings, checked against the code:
   says all task APIs go through `exec` + `curl`/`jq` and
   「**禁止引用 bcs-cli 或任何子命令**」 (forbidden to reference bcs-cli or any
   subcommand). `bcs-coordination` itself declares `allowed-tools: [exec]`.
+
+**What is actually outstanding here.** Only **O9**: is the target container
+architecture uniform (x86_64), or do we need per-arch sources — per-arch URLs, or
+an `${OCB_ARCH}` variable? That changes the manifest *schema*, so it must be
+settled before W9's schema is final. Everything else below is our own work: the
+artifact protocol for teclaw (we design, they implement), the per-engine ARCA PATH
+proposal, and the tools-usage skill. teclaw implementing the protocol is a
+delivery dependency, not a question.
 
 **Is there already a CLI mechanism we would be duplicating? No — and that is the
 answer that matters.** Every `bcs-cli` reference in the repository lives in
