@@ -73,18 +73,6 @@ class SkillPublicationAttemptStatus(StrEnum):
     RESULT_UNKNOWN = "RESULT_UNKNOWN"
 
 
-ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES = tuple(
-    status.value
-    for status in (
-        SkillPublicationAttemptStatus.PREPARING,
-        SkillPublicationAttemptStatus.SC_SUBMITTING,
-        SkillPublicationAttemptStatus.WAITING_SC,
-        SkillPublicationAttemptStatus.MATERIALIZING,
-        SkillPublicationAttemptStatus.RESULT_UNKNOWN,
-    )
-)
-
-
 class SkillDraftUpgradeRequestStatus(StrEnum):
     ACTIVE = "ACTIVE"
     SPENT = "SPENT"
@@ -338,7 +326,6 @@ __all__ = [
     "SkillGrant",
     "SkillPublicationAttempt",
     "SkillPublicationAttemptStatus",
-    "ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES",
     "SkillSpaceBinding",
     "SkillVersion",
     "SkillVersionStatus",

@@ -15,11 +15,13 @@ from agentclaw.community.core.models.skill import (
     SkillSetSkill,
 )
 from agentclaw.community.core.models.space_skill import (
-    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES,
     SkillGrant,
     SkillPublicationAttempt,
     SkillSpaceBinding,
     SkillVersion,
+)
+from agentclaw.community.core.skill_center.publication_contract import (
+    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES,
 )
 from agentclaw.community.core.repository.space_skill_offline_types import (
     OfflineCommit,

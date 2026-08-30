@@ -8,12 +8,14 @@ from sqlalchemy.orm import aliased
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import (
-    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES,
     SkillDraftEditLease,
     SkillGrant,
     SkillPublicationAttempt,
     SkillSpaceBinding,
     SkillVersion,
+)
+from agentclaw.community.core.skill_center.publication_contract import (
+    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillReadRepository as SpaceSkillReadRepositoryProtocol,

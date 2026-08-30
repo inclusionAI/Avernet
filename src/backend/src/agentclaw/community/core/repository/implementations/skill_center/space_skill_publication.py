@@ -37,6 +37,7 @@ from agentclaw.community.core.skill_center.errors import (
     SpaceSkillIdempotencyConflictError,
 )
 from agentclaw.community.core.skill_center.publication_contract import (
+    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES,
     PublicationAttemptCreation,
     PublicationAttemptRecord,
     PublicationAttemptStatus,
@@ -52,15 +53,6 @@ from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-
-
-_ACTIVE_STATUSES = (
-    "PREPARING",
-    "SC_SUBMITTING",
-    "WAITING_SC",
-    "MATERIALIZING",
-    "RESULT_UNKNOWN",
-)
 
 
 class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
@@ -137,7 +129,9 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                             .filter(
                                 SkillPublicationAttempt.skill_id == skill_id,
                                 SkillPublicationAttempt.env == env,
-                                SkillPublicationAttempt.status.in_(_ACTIVE_STATUSES),
+                                SkillPublicationAttempt.status.in_(
+                                    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES
+                                ),
                             )
                             .order_by(SkillPublicationAttempt.id.desc())
                             .first()
@@ -156,7 +150,9 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                     .filter(
                         SkillPublicationAttempt.skill_id == skill_id,
                         SkillPublicationAttempt.env == env,
-                        SkillPublicationAttempt.status.in_(_ACTIVE_STATUSES),
+                        SkillPublicationAttempt.status.in_(
+                            ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES
+                        ),
                     )
                     .with_for_update()
                     .one_or_none()
@@ -239,7 +235,9 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                         .filter(
                             SkillPublicationAttempt.skill_id == skill_id,
                             SkillPublicationAttempt.env == env,
-                            SkillPublicationAttempt.status.in_(_ACTIVE_STATUSES),
+                            SkillPublicationAttempt.status.in_(
+                                ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES
+                            ),
                         )
                         .first()
                     )
@@ -743,7 +741,10 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         if row is None:
             raise PublicationAttemptNotFoundError("publication attempt not found")
         attempt, skill, binding, space = row
-        if attempt.status in _ACTIVE_STATUSES and not attempt.frozen_draft_locator:
+        if (
+            attempt.status in ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES
+            and not attempt.frozen_draft_locator
+        ):
             raise RuntimeError(
                 "active Publication Attempt has no frozen Draft Revision"
             )
