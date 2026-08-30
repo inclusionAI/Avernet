@@ -75,8 +75,15 @@ class InstallationBackfillServiceProtocol(Protocol):
         """Flush one page of the Bots this env holds.
 
         ``owner_id`` and ``engine_type`` are optional filters; ``None`` means
-        "do not filter by it", so an unfiltered call reaches every live Bot in
-        the env one page at a time.
+        "do not filter by it", so an unfiltered call reaches every live Bot the
+        caller's tenant and env hold, one page at a time.
+
+        **Tenant reach.** The Bot query runs under the ambient
+        ``avernet_tenant``, which ``AvernetTenantMiddleware`` resolves only for
+        ``/openapi/v1/*`` — every other path, this one included, is the default
+        tenant. A sweep therefore converges the default tenant's Bots and is
+        blind to a registered external tenant's; those need converging by some
+        other means until this grows an explicit tenant scope.
 
         Pages are cut from a newest-first ordering, so a Bot created while a
         sweep is in flight shifts the window and one Bot can fall between two

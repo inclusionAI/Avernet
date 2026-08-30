@@ -12,6 +12,10 @@ Bearer-token auth, like ``/api/internal/dormant/*``: these run writes across
 whole pages of Bots and are not part of any user-facing surface. They are
 DB-side only — no device is touched, no runtime projection is triggered — so a
 Bot converged here still needs a projection before its engine sees the change.
+
+Like every path outside ``/openapi/v1/*``, these run under the default
+``avernet_tenant`` (see ``AvernetTenantMiddleware``), so a page sweep reaches
+that tenant's Bots and no other.
 """
 
 from __future__ import annotations
