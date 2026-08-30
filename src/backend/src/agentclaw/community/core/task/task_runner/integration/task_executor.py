@@ -59,6 +59,7 @@ class TaskExecutor:
         bcn: BcnService | None = None,
         bot_token_provider=None,
         task_settings=None,
+        on_bbs_report=None,
     ) -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
@@ -80,6 +81,7 @@ class TaskExecutor:
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
         self._task_settings = task_settings
+        self._on_bbs_report = on_bbs_report  # 引擎 on_bbs_report 收口回调(供 run_bbs→notify 走引擎收敛)
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
@@ -658,6 +660,7 @@ class TaskExecutor:
             graph=self._graph,
             backend_url=self._api_base_url,
             skill_name=bbs_runner._BBS_SKILL_NAME,
+            on_bbs_report=self._on_bbs_report,
         )
 
     @staticmethod

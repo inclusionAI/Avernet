@@ -543,6 +543,11 @@ def _unwrap_node_output(d: Any) -> Any:
     return dict(d) if isinstance(d, dict) else d
 
 
+# 内部飞行态标志(纯在途去重/陈旧判定),无 dashboard 价值且恒为 null 噪音 → 不透出到外部 DTO。
+# 持久化与编排核内部仍读 extend_props["dispatching"] 做跨实例/跨协程去重;仅外部序列化剥离。
+_INTERNAL_NODE_EXT_PROPS = frozenset({"dispatching", "dispatching_at"})
+
+
 def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGraphDTO:
     nodes: list[TaskNodeDTO] = []
     for n in graph.tasks:
@@ -586,7 +591,11 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                     end_time=n.run_info.end_time,
                     output=_unwrap_node_output(n.run_info.output),
                     acceptance_result=ar_dto,
-                    extend_props=dict(n.run_info.extend_props),
+                    extend_props={
+                        k: v
+                        for k, v in n.run_info.extend_props.items()
+                        if k not in _INTERNAL_NODE_EXT_PROPS
+                    },
                     action_log=(
                         [
                             NodeActionEventDTO(

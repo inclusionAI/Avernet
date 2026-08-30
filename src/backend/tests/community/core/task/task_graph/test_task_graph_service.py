@@ -182,13 +182,30 @@ class TestUpdateTaskNodeInfo:
         assert r.new_status == Status.DONE
         assert svc._get_node(graph, "c1").status == Status.DONE
 
-    def test_acceptance_fail_no_gaps_raises(self, svc: TaskGraphService, graph):
+    def test_acceptance_fail_empty_gaps_no_raise(self, svc: TaskGraphService, graph):
+        # 乙':verdict=FAILED 不再强制要求 gaps 非空(gaps 空、非空不区分)。无 status(外部/遗留)→FAILED;
+        # 不 raise(原 "FAIL 验收强制要求 gaps" 守卫已移除)。
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
-        with pytest.raises(TaskStateError, match="gaps"):
-            svc.update_task_node_info(
-                _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=[]))
+        r = svc.update_task_node_info(
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=[]))
+        )
+        assert r.new_status == Status.FAILED
+        assert svc._get_node(graph, "c1").status == Status.FAILED
+
+    def test_acceptance_fail_empty_gaps_folds_to_hung(self, svc: TaskGraphService, graph):
+        # 乙' a+R1:verdict=FAILED + 显式 status=HUNG(gaps 空)→折叠直驱 RUNNING→HUNG,不 raise。
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        r = svc.update_task_node_info(
+            _patch(
+                "t1", "c1",
+                acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=[]),
+                status=Status.HUNG,
             )
+        )
+        assert r.new_status == Status.HUNG
+        assert svc._get_node(graph, "c1").status == Status.HUNG
 
     def test_acceptance_fail_with_gaps(self, svc: TaskGraphService, graph):
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
@@ -432,8 +449,8 @@ class TestUpdateTaskGraphInfo:
 class TestMisc:
     def test_execution_config_default(self, svc: TaskGraphService, graph):
         cfg = svc._execution_config("t1")
-        assert cfg["MAX_DEPTH"] == 2  # v4 默认
-        assert cfg["MAX_LOOP"] == 10
+        assert cfg["MAX_DEPTH"] == 3  # 默认
+        assert cfg["MAX_LOOP"] == 3
         assert cfg["MAX_HARNESS"] == 3
 
     def test_execution_config_custom(self, svc: TaskGraphService):
@@ -441,7 +458,7 @@ class TestMisc:
         ti.execution_config["MAX_DEPTH"] = 5
         svc.initialize_graph(ti)
         assert svc._execution_config("tC")["MAX_DEPTH"] == 5
-        assert svc._execution_config("tC")["MAX_LOOP"] == 10  # v4 默认
+        assert svc._execution_config("tC")["MAX_LOOP"] == 3  # 默认
         assert svc._execution_config("tC")["MAX_HARNESS"] == 3  # v4 默认
 
     def test_task_not_found(self, svc: TaskGraphService):
@@ -451,3 +468,91 @@ class TestMisc:
     def test_node_not_found(self, svc: TaskGraphService, graph):
         with pytest.raises(NodeNotFoundError):
             svc.get_child_tasks("t1", "nonexistent")
+
+
+# ===== 乙' a+R1:验收 FAIL 折叠直驱 HUNG(gateway) =====
+class TestFoldAcceptanceFailToHung:
+    """验收 FAIL 纯语义折叠:编排核显式旁路 FAILED 瞬态时携带 ``status=HUNG``,gateway 一次写直驱
+    RUNNING→HUNG(acceptance_result+gaps+hung_reason 同时落库);外部/静态不带 status 仍 FAILED。"""
+
+    def test_fail_with_explicit_hung_status_folds(self, svc: TaskGraphService, graph):
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        r = svc.update_task_node_info(
+            _patch(
+                "t1", "c1",
+                acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]),
+                status=Status.HUNG,
+                extend_props_patch={"hung_reason": "acceptance_fail"},
+            )
+        )
+        assert r.prev_status == Status.RUNNING
+        assert r.new_status == Status.HUNG  # 折叠:不再经 FAILED 瞬态
+        n = svc._get_node(graph, "c1")
+        assert n.status == Status.HUNG
+        assert n.run_info.acceptance_result is not None
+        assert n.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED
+        assert n.run_info.acceptance_result.gaps == ["缺x"]  # 验收结论 + gaps 作 hung 上下文
+        assert n.run_info.extend_props.get("hung_reason") == "acceptance_fail"
+
+    def test_fail_with_asserted_done_ignores_hung_status(self, svc: TaskGraphService, graph):
+        # 折叠仅对 FAIL 生效;DONE verdict 不被显式 status 干扰(始终 DONE)。
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        r = svc.update_task_node_info(
+            _patch(
+                "t1", "c1",
+                acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, acceptances_metric=["ac1"]),
+                status=Status.HUNG,
+            )
+        )
+        assert r.new_status == Status.DONE
+
+    def test_fail_without_status_stays_failed(self, svc: TaskGraphService, graph):
+        # 外部/静态/遗留 caller 不带 status → 仍 FAILED(三方/静态自有终态语义,外侧隔离)。
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        r = svc.update_task_node_info(
+            _patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))
+        )
+        assert r.new_status == Status.FAILED
+
+
+# ===== 乙' c+R2:graph.status 只读派生根态(effective_status) =====
+class TestEffectiveStatus:
+    """图级有效态只读派生根态:有根节点时以根态为准(图状态与根节点状态保持一致);无根回落存储的图级 status。
+    纯只读派生:不改 ``graph.status`` 存储(控制流 ``_is_graph_terminal`` 仍读存储值),不改并发主线。"""
+
+    def test_root_done_derives_done(self, svc: TaskGraphService):
+        svc.initialize_graph(_task_info("te"))
+        # 初始 graph.status=RUNNING, root PENDING;先让根落 DONE
+        svc.update_task_node_info(_patch("te", "te", status=Status.DONE))
+        dash = svc.query_task_dashboard("te")
+        assert dash.status == Status.RUNNING  # 存储的图级态未改(主线写不动)
+        assert dash.effective_status == Status.DONE  # 派生:与根态一致
+        assert svc.effective_graph_status("te") == Status.DONE
+
+    def test_root_hung_derives_hung(self, svc: TaskGraphService):
+        svc.initialize_graph(_task_info("th"))
+        svc.add_task_nodes([_node("c1", "th")], parent_node_id="th")
+        svc.update_task_node_info(_patch("th", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        # 根冒泡到 HUNG(模拟),存储 graph 仍非 HUNG:
+        svc.update_task_node_info(_patch("th", "th", status=Status.HUNG, extend_props_patch={"hung_reason": "child_hung"}))
+        dash = svc.query_task_dashboard("th")
+        assert dash.effective_status == Status.HUNG  # 根态派生 HUNG(图状态与根一致,观测口径)
+        assert svc.effective_graph_status("th") == Status.HUNG
+
+    def test_root_nonterminal_derives_root_status(self, svc: TaskGraphService):
+        svc.initialize_graph(_task_info("tn"))
+        # 根 PLANNING(委托态),存储 graph.status=RUNNING;派生以根态 PLANNING 为准(与 _persist_locked 派生等价)
+        svc.update_task_node_info(_patch("tn", "tn", status=Status.PLANNING))
+        dash = svc.query_task_dashboard("tn")
+        assert dash.status == Status.RUNNING
+        assert dash.effective_status == Status.PLANNING
+
+    def test_effective_status_does_not_mutate_stored(self, svc: TaskGraphService):
+        g = svc.initialize_graph(_task_info("tm"))
+        svc.update_task_node_info(_patch("tm", "tm", status=Status.HUNG, extend_props_patch={"hung_reason": "x"}))
+        before = g.status
+        _ = g.effective_status  # 读派生不写存储
+        assert g.status == before

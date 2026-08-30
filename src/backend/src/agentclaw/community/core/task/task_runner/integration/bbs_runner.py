@@ -27,7 +27,8 @@ _OVERALL_TIMEOUT = 300.0
 
 
 async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
-                 skill_name: str = _BBS_SKILL_NAME) -> None:
+                 skill_name: str = _BBS_SKILL_NAME,
+                 on_bbs_report=None) -> None:
     """查询同时开启 claim/dream 的 provider Bot(复用统一 provider 身份 BcnService),再执行 bid→select→claim→dispatch。
 
     ``bcn``: :class:`BcnService`(由 DI 注入的任务模块普通消费依赖),复用 register/switch provider-bot 同源
@@ -130,52 +131,65 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         )
         logger.info("[task][bbs_mode] send_and_wait, task_id=%s, result_msg=%s", task_id, task_result)
 
-        # 更新bbs节点
-        graph.update_task_node_info(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=bbs_task_node.node_id,
-                status=Status.DONE,
-                output_patch={
-                    "output": task_result.get("result") if isinstance(task_result, dict) else task_result
-                },
-                acceptance_result = AcceptanceResult(
-                    verdict=AcceptanceVerdict.DONE,
-                    acceptances_metric=list(),
-                    gaps=list()
-                ),
-                extend_props_patch={
-                    "output": task_result.get("result") if isinstance(task_result, dict) else task_result,
-                    "assignee_bot_id": winner_bot_id,
-                    "session_id": task_result.get("session_id") if isinstance(task_result, dict) else "",
-                }
-            )
+        _bbs_output = task_result.get("result") if isinstance(task_result, dict) else task_result
+        _bbs_session = task_result.get("session_id") if isinstance(task_result, dict) else ""
+        _scoped_patch = TaskNodePatch(
+            task_id=task_id,
+            node_id=bbs_task_node.node_id,
+            status=Status.DONE,
+            # assignee=持有者身份:on_bbs_report 持有者校验要求 bbs_owner==patch.assignee
+            # (claim_bbs_owner 已置根 bbs_owner=winner_bot_id;此处同源补齐,校验才放行)。
+            assignee=winner_bot_id,
+            output_patch={"output": _bbs_output},
+            acceptance_result=AcceptanceResult(
+                verdict=AcceptanceVerdict.DONE,
+                acceptances_metric=list(),
+                gaps=list(),
+            ),
+            extend_props_patch={
+                "output": _bbs_output,
+                "assignee_bot_id": winner_bot_id,
+                "session_id": _bbs_session,
+            },
         )
-        logger.info("[task][bbs_mode] update_task_node, task_id=%s, node=%s", task_id)
-
-        # 更新根节点
+        if on_bbs_report is not None:
+            # 收口走引擎:翻 scoped DONE → finally 释放 bbs_owner → _on_pass_collect 驱动根重算 gap
+            # (plan(root)→_maybe_finish_graph/HUNG)。不再直写根 status=PLANNING(收敛自驱根态),
+            # 也不再裸写 scoped —— 全部由 on_bbs_report 一次落入 SSOT 并触发收敛。
+            await on_bbs_report(_scoped_patch)
+            logger.info(
+                "[task][bbs_mode] on_bbs_report 收口 task_id=%s node=%s",
+                task_id, bbs_task_node.node_id,
+            )
+        else:
+            # 无引擎回调(轻量/stub):遵守 bbs 模式不变量——只能改根节点状态 + graph 加关系,
+            # 绝不改根节点 output(根 output 仅由 plan 算 gap / runner 执行完成 pull·push 收敛写入)。
+            # 故此处仅落 scoped 接力节点终态(其自身执行产出,属 runner 回投)+ 根翻 PLANNING(可恢复态,
+            # 等下段重 claim/升 BBS);不驱动收敛(需 engine 收口)、不直写根 output/extend_props.output。
+            logger.warning(
+                "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 终态 + 根 PLANNING,"
+                "不驱动收敛、不写根 output(排查 engine._build_executor/build_integration 漏传 on_bbs_report)",
+                task_id,
+            )
+            graph.update_task_node_info(_scoped_patch)
+            graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=task_id,
+                    status=Status.PLANNING,
+                )
+            )
+        logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s", task_id, task_result)
+    except Exception as exc:
+        logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
+        # send 失败 → 回收 claim(释放 bbs_owner,避免泄漏挡住后续重升 BBS)。
+        # 注:FAIL 收口(删 scoped 节点 + 图回可恢复态)语义待定,此处仅做无歧义的 claim 释放。
         graph.update_task_node_info(
             TaskNodePatch(
                 task_id=task_id,
                 node_id=task_id,
                 status=Status.PLANNING,
-                output_patch={
-                    "output": task_result
-                },
-                extend_props_patch={
-                    "output": task_result
-                }
-            )
-        )
-        logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s", task_id, task_result)
-    except Exception as exc:
-        logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
-        # send 失败 → 回收 claim
-        graph.update_task_node_info(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=task_id,
-                status=Status.PLANNING
+                extend_props_patch={"bbs_owner": None},
             )
         )
         logger.warning("[task][bbs_mode] send 失败 bot=%s task=%s:%s", winner_bot_id, task_id, exc)

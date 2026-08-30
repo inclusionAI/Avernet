@@ -14,9 +14,10 @@ def test_task_executor_run_bbs_delegates_to_bbs_runner():
     BBS 候选 roster 经注入的 BcnService(复用统一 provider 身份)查询:notify 以
     ``bcn=``(BcnService)、``bot=`` 透传,不再传 ``bcs``。
     """
+    on_bbs_report = AsyncMock()
     exe = TaskExecutor(bot=MagicMock(), bcs=MagicMock(), bcn=MagicMock(),
                        formatter=None, context=None, sink=None, poller=None,
-                       api_base_url="http://test:8888")
+                       api_base_url="http://test:8888", on_bbs_report=on_bbs_report)
     g = MagicMock()
     g.task_id = "t1"
     with patch("agentclaw.community.core.task.task_runner.integration.bbs_runner.notify", new_callable=AsyncMock) as mock_notify:
@@ -27,3 +28,4 @@ def test_task_executor_run_bbs_delegates_to_bbs_runner():
         assert call_kwargs.kwargs["execution_graph"] is g
         assert call_kwargs.kwargs["bcn"] is exe._bcn
         assert call_kwargs.kwargs["bot"] is exe._bot
+        assert call_kwargs.kwargs["on_bbs_report"] is on_bbs_report  # 引擎收口回调透传 notify

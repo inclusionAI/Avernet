@@ -232,6 +232,18 @@ class TaskExecutionGraph:
                         # 因 run_bbs 链路只拿到 execution_graph、无法回溯 task_id)
     # 派生不持久: depth / child_tasks / parent_task(均从 relations 分解树派生)
 
+    @property
+    def effective_status(self) -> "Status":
+        """图级有效态(乙' c+R2 只读派生根态):有根节点时以根态为准,使"图状态与根节点状态保持一致"
+        落在观测口径;无根(未初始化)回落存储的图级 ``status``。
+
+        纯只读派生,不改并发主线——图级 ``status`` 仍由编排核 ``update_task_graph_info`` 显式写
+        (终态收口 / loop_exhausted / 外部镜像);控制流(``_is_graph_terminal`` 等)继续读 ``status``,
+        本属性供看板/持久化等"以根态为准"的观测口径消费。与 ``_persist_locked`` 既有 root 派生
+        (runtime_status)完全等价,是其单源化的命名口径。"""
+        root = next((n for n in self.tasks if n.node_id == self.task_id), None)
+        return root.status if root is not None else self.status
+
 
 
 @dataclass
@@ -252,7 +264,8 @@ class TaskNodePatch:
     """节点级原子写(``update_task_node_info`` 入参)。
 
     终态翻转三选一(互斥):　
-    ① ``acceptance_result`` 非空 → 验收驱动(RUNNING→DONE/FAILED):PASS→DONE / FAIL+gaps→FAILED;　
+    ① ``acceptance_result`` 非空 → 验收驱动(RUNNING→DONE/[折叠]HUNG):PASS→DONE / FAIL→HUNG(动态折叠,
+       gaps 可空,verdict=FAILED 即统一收口);　
     ② ``exec_error`` 非空 → 执行报错(bot 压根没跑通:run FAILED / SLA 超时 / poll 耗尽),
        不翻终态,由编排核 on_harness 复位重投(计数,达上限→HUNG);　
     ③ ``status`` 非空(无前两者)→ 框架直驱(PENDING→RUNNING 派发 / RUNNING→PENDING harness 复位 等)。　

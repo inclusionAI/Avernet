@@ -63,9 +63,9 @@ _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
 # 可委托(add_task_nodes 时 parent 允许的态):PENDING(初始/根)/FAILED(补救)/PLANNING(前向重规划)
 _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNING, Status.HUNG}
 
-_DEFAULT_MAX_DEPTH = 2
-_DEFAULT_MAX_LOOP = 10  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
-_DEFAULT_MAX_PLAN_ROUND = 10  # 节点级重规划次数(父节点子全 DONE→gap 未闭→重 plan 产新子)
+_DEFAULT_MAX_DEPTH = 3
+_DEFAULT_MAX_LOOP = 3  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
+_DEFAULT_MAX_PLAN_ROUND = 3  # 节点级重规划次数(父节点子全 DONE→gap 未闭→重 plan 产新子)
 _DEFAULT_BBS_MAX_DEPTH = 3
 
 def _consume_pending_callback_audit(task_id: str):
@@ -157,13 +157,12 @@ class TaskGraphService:
         events = action_events or []
         if self._graph_repo is None:
             if self._task_info_repo is not None:
-                root = next((node for node in graph.tasks if node.node_id == graph.task_id), None)
-                runtime_status = root.status if root is not None else graph.status
-                self._task_info_repo.update_status(graph.task_id, runtime_status)
+                # 乙' c+R2:图级有效态只读派生根态(与既有 root 派生等价,单源化)。
+                self._task_info_repo.update_status(graph.task_id, graph.effective_status)
             return
         expected = self._graph_versions.get(graph.task_id, 0)
-        root = next((node for node in graph.tasks if node.node_id == graph.task_id), None)
-        runtime_status = root.status if root is not None else graph.status
+        # 乙' c+R2:图级有效态只读派生根态(与既有 root 派生等价,单源化)。
+        runtime_status = graph.effective_status
         # Attach the inbound callback audit to this mutation's transaction (spec §12).
         callback_audit = _consume_pending_callback_audit(graph.task_id)
         try:
@@ -379,7 +378,8 @@ class TaskGraphService:
 
     def update_task_node_info(self, patch: TaskNodePatch) -> NodeOpResult:
         """节点级原子状态流转网关。双模式:
-        ① acceptance_result 驱动(skill 回投):PASS→DONE / FAIL+gaps→FAILED(强制要求 gaps);
+        ① acceptance_result 驱动(skill 回投):PASS→DONE / FAIL→(折叠)HUNG(动态)或 FAILED(外部;
+           gaps 可空,verdict=FAILED 即统一收口,不强制要求 gaps 非空);
         ② status 直驱(框架内部):PENDING→RUNNING(派发) / RUNNING→PENDING(Harness 复位) /
            PLANNING→DONE(传播)。两者都校验状态机。无 acceptance_result 且无 status 只 fold 不翻态。
         派发写:patch.run_mode(str)/assignee 落库 + 置 RUNNING。"""
@@ -393,10 +393,16 @@ class TaskGraphService:
                 verdict = patch.acceptance_result.verdict
                 if verdict == AcceptanceVerdict.DONE:
                     new_status = Status.DONE
-                else:  # FAIL
-                    if not patch.acceptance_result.gaps:
-                        raise TaskStateError("FAIL 验收强制要求 gaps(验收 skill 契约)")
-                    new_status = Status.FAILED
+                else:  # FAIL(verdict=FAILED;gaps 可空——不区分一律收口,不再强制要求 gaps 非空)
+                    # 乙' a+R1 验收 FAIL 纯语义折叠:verdict=FAILED 即统一 RUNNING→HUNG/FAILED(gaps 空与
+                    # 非空不区分)。编排核动态叶显式直驱(patch.status==HUNG)时一次落 HUNG(acceptance_result
+                    # +hung_reason 同时入库,即便 gaps 空也以 verdict=FAILED 作 hung 上下文);外部/静态
+                    # 不带 status → 仍按 FAILED 落态(三方/静态自有终态语义)。
+                    new_status = (
+                        Status.HUNG
+                        if patch.status == Status.HUNG
+                        else Status.FAILED
+                    )
                 node.run_info.acceptance_result = patch.acceptance_result
             elif patch.exec_error is not None:
                 # 执行报错(非验收):不翻终态,仅 fold extend_props(供 on_harness 读 harness_retries);
@@ -721,6 +727,15 @@ class TaskGraphService:
                 task_id=graph.task_id,
             )
 
+    def effective_graph_status(self, task_id: str) -> "Status":
+        """图级有效态(乙' c+R2 只读派生根态):有根节点时以根态为准,无根回落存储的图级 status。
+
+        与 ``query_task_dashboard(task_id).effective_status`` 同源;控制流不消费本方法(不改并发主线),
+        仅供"以根态为准"的观测口径(看板/持久化派生)使用。"""
+        with self._lock_for(task_id):
+            graph = self._require_graph(task_id)
+            return graph.effective_status
+
     # ===== 派生只读查询(均从 relations 分解树派生)=====
     def query_task_nodes(self, task_id: str, criteria: TaskNodeQueryCriteria) -> list[TaskNode]:
         """按条件查节点。criteria={status=PENDING}→ 返回 PENDING 可派发节点
@@ -810,7 +825,7 @@ class TaskGraphService:
             return depth
 
     def _execution_config(self, task_id: str) -> dict[str, Any]:
-        """读 MAX_DEPTH(结构深度闸门,默认 2)/ MAX_LOOP(图级总轮次,默认 10)/ MAX_HARNESS(默认 3),填默认。"""
+        """读 MAX_DEPTH(结构深度闸门,默认 3)/ MAX_LOOP(图级总轮次,默认 3)/ MAX_HARNESS(默认 3),填默认。"""
         with self._lock_for(task_id):
             graph = self._require_graph(task_id)
             cfg: dict[str, Any] = dict(graph.extend_props.get("execution_config", {}))

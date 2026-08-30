@@ -29,6 +29,7 @@ import logging
 import os
 import random
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -57,6 +58,30 @@ from agentclaw.community.core.task.task_runner.integration.ports import BotSendR
 logger = logging.getLogger("task.engine")
 
 _DEFAULT_MAX_HARNESS = 3  # 执行报错 harness 重投上限(达上限→HUNG)
+
+# 陈旧飞行态阈值(dispatching=True 超此即视为崩溃遗留,redrive 可清理重派)。
+# 默认 60s:正常 start_run 在途远小于此;与默认 recovery lease(60s)对齐——崩溃任务经 recovery
+# 拾起时 dispatching_at 已超阈值,判陈旧;新鲜在途派发保留,不与 redrive 双派发。可经 env 调。
+_DISPATCHING_STALE_SECONDS = int(os.environ.get("OCB_DISPATCHING_STALE_SECONDS", "60"))
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _is_stale_dispatching(node: "object") -> bool:
+    """``dispatching=True`` 是否崩溃遗留的陈旧飞行态(redrive 清理判定用,纯 timestamp)。
+
+    有 dispatching_at 且在途阈值内 → 新鲜在途派发(不清,否则与 start_run 双派发);
+    无 dispatching_at(改动前数据)或超阈值 → 陈旧(崩溃遗留)→ 可清。dispatch_error 不在此处理
+    (harness 自有重试链,不靠 redrive 清)。"""
+    ep = node.run_info.extend_props
+    if not ep.get("dispatching"):
+        return False
+    at = ep.get("dispatching_at")
+    if at is None:
+        return True
+    return (_now_ms() - int(at)) >= _DISPATCHING_STALE_SECONDS * 1000
 
 
 @dataclass(frozen=True)
@@ -187,6 +212,7 @@ class ExecutionEngine:
             bcn=self._bcn,
             bot_token_provider=self._bot_token_provider,
             task_settings=self._task_settings,
+            on_bbs_report=self.on_bbs_report,
         )
         import threading as _t
 
@@ -301,10 +327,10 @@ class ExecutionEngine:
         return int(cfg.get("MAX_HARNESS", _DEFAULT_MAX_HARNESS))
 
     def _max_plan_round(self, task_id: str) -> int:
-        """节点级重规划次数上限 MAX_PLAN_ROUND(default 10)。父节点子全 DONE→gap 未闭→重 plan 产新子,
+        """节点级重规划次数上限 MAX_PLAN_ROUND(default 3)。父节点子全 DONE→gap 未闭→重 plan 产新子,
         每次该路径走一次 +1;达上限父节点 HUNG(不再产子)"""
         cfg = self._graph._execution_config(task_id)
-        return int(cfg.get("MAX_PLAN_ROUND", 10))
+        return int(cfg.get("MAX_PLAN_ROUND", 3))
 
     def _task_type(self, task_id: str) -> str:
         """Return the immutable execution type recorded on the task graph."""
@@ -760,6 +786,7 @@ class ExecutionEngine:
                         run_mode="single_bot",
                         extend_props_patch={
                             "dispatching": True,
+                            "dispatching_at": _now_ms(),
                             "bbs_status": "posted_in_square",
                             "bbs_owner": "",
                             "bbs_handed_to": "",
@@ -797,7 +824,7 @@ class ExecutionEngine:
                         task_id=task_id,
                         node_id=node.node_id,
                         run_mode="coop_group",
-                        extend_props_patch={"dispatching": True},
+                        extend_props_patch={"dispatching": True, "dispatching_at": _now_ms()},
                     )
                 )
                 side.append(("group", node, gf))
@@ -820,7 +847,7 @@ class ExecutionEngine:
                         node_id=node.node_id,
                         run_mode="single_bot",
                         assignee=bot_id,
-                        extend_props_patch={"dispatching": True},
+                        extend_props_patch={"dispatching": True, "dispatching_at": _now_ms()},
                     )
                 )
                 to_run.append(node)
@@ -1186,6 +1213,21 @@ class ExecutionEngine:
                 task_id,
                 graph.status.value,
             )
+            # redrive unstick:清崩溃在途遗留的陈旧 dispatching=True(超阈值的飞行态),否则
+            # _prepare_into/harness 永久跳过 → 节点卡死 PENDING 无法重派。新鲜在途(dispatching_at
+            # < 阈值)不动——redrive 可在本实例正在驱动时被周期 recovery 触发,盲清会与在途 start_run 双派发。
+            for _rn in graph.tasks:
+                if _rn.status == Status.PENDING and _is_stale_dispatching(_rn):
+                    logger.info(
+                        "[task][redrive] task=%s node=%s 清陈旧飞行态 dispatching(崩溃遗留)→可重派",
+                        task_id, _rn.node_id,
+                    )
+                    self._graph.update_task_node_info(
+                        TaskNodePatch(
+                            task_id=task_id, node_id=_rn.node_id,
+                            extend_props_patch={"dispatching": None, "dispatching_at": None},
+                        )
+                    )
             await self._prepare_into(task_id, side)
         await self._drain(task_id, side)
 
@@ -1220,24 +1262,6 @@ class ExecutionEngine:
             return self._graph.update_task_node_info(patch)
 
     # ===== on_report:三路分流(exec_error→harness / PASS→on_pass / FAIL→on_fail)=====
-    def _root_children_terminal_mixed_done_hung(self, task_id: str) -> bool:
-        """HARDCODED(BBS 测试用):根的直接子节点全部 ∈ {DONE, HUNG} 且至少一个 HUNG(无可运行的)。
-
-        无子节点 / 根已终态 / 存在非 {DONE, HUNG} 的子节点(仍可运行或有 FAILED 等)→ False。
-        仅判定根的**直接**子节点;中间父节点的子终态收敛不在本写死规则范围。
-        """
-        root = self._root(task_id)
-        if root is None:
-            return False
-        if root.status in {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}:
-            return False
-        children = self._graph.get_child_tasks(task_id, root.node_id)
-        if not children:
-            return False
-        if not all(c.status in {Status.DONE, Status.HUNG} for c in children):
-            return False
-        return any(c.status == Status.HUNG for c in children)
-
     async def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
         """回投事件:patch 内含 (task_id,node_id)+终态翻转依据。
         三路分流(互斥):
@@ -1254,43 +1278,21 @@ class ExecutionEngine:
         )
         with self._lock_for(patch.task_id):
             logger.info("[task_callback][on_report] begin update task node info, task=%s,", patch.task_id)
+            # 乙' a+R1 动态验收 FAIL 叶折叠 HUNG(纯语义归并):跳过 RUNNING→FAILED 瞬态,一次写直驱
+            # RUNNING→HUNG(acceptance_result+gaps+hung_reason 同时落库)。仅动态(非外部/非静态)且
+            # 调用方未显式置 status 时生效;外部/静态自洽仍按 verdict FAIL→FAILED(三方/静态终态语义)。
+            if (
+                patch.acceptance_result is not None
+                and patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
+                and patch.status is None
+                and not self._is_external_managed_task(patch.task_id)
+                and self._static_runtime(patch.task_id) is None
+            ):
+                patch.status = Status.HUNG
+                _ep = dict(patch.extend_props_patch) if patch.extend_props_patch else {}
+                _ep.setdefault("hung_reason", "acceptance_fail")
+                patch.extend_props_patch = _ep
             result = self._graph.update_task_node_info(patch)
-            # ⚠️ HARDCODED(BBS 测试用):根的直接子节点全部终态 ∈ {DONE, HUNG} 且含 HUNG(无可运行的)
-            # → 根节点 + 图直接 HUNG。绕过 BBS 可恢复态拦截 / verdict 驱动,任何节点更新都触发(含
-            # 手动 status 直驱)。仅用于排查"子全终态(部分DONE部分HUNG)根不收敛"并验证 BBS 恢复,后续
-            # 按正式收敛逻辑替换。
-            if self._root_children_terminal_mixed_done_hung(patch.task_id):
-                root = self._root(patch.task_id)
-                if (
-                    root is not None
-                    and root.status
-                    not in {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}
-                ):
-                    logger.info(
-                        "[task][on_report][hardcoded-bbs-test] task=%s "
-                        "根直接子节点全终态(部分DONE部分HUNG,无可运行)→ 根 HUNG + 图 HUNG",
-                        patch.task_id,
-                    )
-                    self._graph.update_task_node_info(
-                        TaskNodePatch(
-                            task_id=patch.task_id,
-                            node_id=root.node_id,
-                            status=Status.HUNG,
-                            extend_props_patch={"hung_reason": "root_children_mixed_terminal"},
-                        )
-                    )
-                    self._graph.update_task_graph_info(
-                        patch.task_id,
-                        TaskGraphPatch(
-                            status=Status.HUNG,
-                            # bbs_mode=true 使 HUNG 图可被 /bbs/claim 恢复(BBS 接力测试)。
-                            extend_props_patch={
-                                "hung_reason": "root_children_mixed_terminal",
-                                "bbs_mode": True,
-                            },
-                        ),
-                    )
-                    return result
             if self._static_runtime(patch.task_id) is not None:
                 # Static plans use the same harness contract as dynamic tasks.
                 if patch.exec_error is not None:
@@ -1513,11 +1515,10 @@ class ExecutionEngine:
             return
         root = self._root(task_id)
         is_root_parent = parent.node_id == (root.node_id if root else None)
-        # BBS 可恢复态守卫:图已升 BBS(bbs_mode=true)且根未被 BBS 接力持有(bbs_owner=None)→
-        # 普通子节点 DONE 不触发根重规划(避免与 BBS 接力竞态,spec §10.4);由 BBS 接力收口。
-        # **例外**:触发本轮 PASS 的是 ``run_mode=="bbs"`` scoped 节点(BBS 接力刚回投的进展)→ 放行 owner
-        # 复核根 gap,满足则收口(``_maybe_finish_graph``),否则继续接力。无此例外则删去 ``root_verified`` 后
-        # 收口会被守卫死锁(图 bbs_mode 且未 claim 时谁也收不了)。
+        # BBS 可恢复态守卫:图已升 BBS(bbs_mode=true)且根未被 BBS 接力持有(bbs_owner=None)。
+        # 走到此守卫前 step①②已保证兄弟全终态且全 DONE;"停手等 BBS 接力"此时是死锁(无在途接力,
+        # root 非 HUNG 不重升 BBS → 无人收口)。故无论触发叶是否 bbs scoped,一律放行 owner 复核根 gap:
+        # gap 闭→_maybe_finish_graph(根 mode① HUNG→DONE);未闭→重 plan / HUNG 重升 BBS。
         if is_root_parent:
             g_ext = self._graph.query_task_dashboard(task_id).extend_props
             if g_ext.get("bbs_mode") and not g_ext.get("bbs_owner"):
@@ -1538,11 +1539,12 @@ class ExecutionEngine:
                         task_id,
                     )
                 else:
+                    # step①② 已保证兄弟全 DONE 且 bbs_owner=None(无在途接力):停手会死锁
+                    # (无在途接力,root 非 HUNG 不重升 BBS → 无人收口)。普通叶最后 DONE 亦放行 owner 复核根 gap。
                     logger.info(
-                        "[task][on_pass] task=%s 图 bbs_mode 且未 claim,普通叶子→owner 停手等 BBS 接力",
+                        "[task][on_pass] task=%s 图 bbs_mode 未 claim,普通叶最后 DONE→放行 owner 复核根 gap(避免死锁)",
                         task_id,
                     )
-                    return
         self._mark_planning(task_id, parent.node_id)
         graph = self._graph.query_task_dashboard(task_id)
         pr = await self._plan_with_retry(task_id, graph, target_node_id=parent.node_id)
@@ -1557,15 +1559,8 @@ class ExecutionEngine:
             # 节点级重规划次数闸 MAX_PLAN_ROUND(父节点"子全 DONE→gap 未闭→重 plan 产新子"计数):
             # 每个父节点各自计数(extend_props.plan_round);达上限 → 父 HUNG(gap_no_progress_plan_round)
             # + 冒泡终态传播,不再 add 新子。首帧 plan(on_execute)不计;on_miss 拆细不计。
-            plan_round = int(parent.run_info.extend_props.get("plan_round", 0)) + 1
+            plan_round = int(parent.run_info.extend_props.get("plan_round", 0))
             max_plan_round = self._max_plan_round(task_id)
-            self._graph.update_task_node_info(
-                TaskNodePatch(
-                    task_id=task_id,
-                    node_id=parent.node_id,
-                    extend_props_patch={"plan_round": plan_round},
-                )
-            )
             if plan_round >= max_plan_round:
                 logger.warning(
                     "[task][on_pass] task=%s 父=%s plan_round=%d/%d 达上限→HUNG(不再产子)",
@@ -1576,6 +1571,15 @@ class ExecutionEngine:
                 )
                 self._hung_and_escalate(task_id, parent.node_id, "plan_round_exhausted")
                 return
+            # 先判后+1:plan_round 现值为已产次数,0→产首子并+1,1→产第二子并+1,…,MAX-1→产第 MAX 子并+1=MAX,
+            # 下次 plan_round=MAX>=MAX 撞顶不产(故 MAX_PLAN_ROUND=N 允许 N 次重规划产子)。
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=parent.node_id,
+                    extend_props_patch={"plan_round": plan_round + 1},
+                )
+            )
             logger.info(
                 "[task][on_pass] task=%s 父=%s plan_round=%d/%d 重规划产 %d 子",
                 task_id,
@@ -1631,10 +1635,12 @@ class ExecutionEngine:
 
         验收不过属内容 gap:重派同一执行体多为无效重试;且 harness 重派(复位 FAILED→PENDING→重新
         dispatch→RUNNING)不会清上一轮 acceptance_result/output,会产生 dashboard "RUNNING 却顶 FAILED
-        验收"的不一致态。故验收不过直接置 HUNG(保留 FAILED 验收结论 + gaps 作为 hung 上下文),交 BBS
+        验收"的不一致态。故验收不过直接收口 HUNG(保留验收结论 + gaps 作 hung 上下文),交 BBS
         升级兜底(owner 复核/换 bot/协群)。与 exec_error(执行报错/传输失败,如 sofa_tracer httpx)的
         harness 重派不同:后者为临时性失败,重派有意义(见 _on_harness_collect)。
-        FAILED 已由 acceptance patch 落态,此处翻 HUNG 记 hung_reason=acceptance_fail。"""
+        乙' a+R1:节点已由 on_report 折叠直驱 RUNNING→HUNG(acceptance_result+gaps+hung_reason 一次写,
+        无 FAILED 瞬态);此处仅升级传播(bbs_mode + loop_round++ + 冒泡到根——根/图 HUNG 才真 dispatch
+        run_bbs),不重复置节点态。"""
         _n = next(
             (
                 x
@@ -1644,7 +1650,7 @@ class ExecutionEngine:
             None,
         )
         logger.info(
-            "[task][on_fail] task=%s node=%s → HUNG 升 BBS(gaps=%s)",
+            "[task][on_fail] task=%s node=%s → HUNG 升级传播(gaps=%s)",
             task_id,
             node_id,
             (
@@ -1653,7 +1659,16 @@ class ExecutionEngine:
                 else None
             ),
         )
-        self._hung_and_escalate(task_id, node_id, "acceptance_fail")
+        # 节点已折叠 HUNG(态由 on_report 直驱),记 TRANSITION + 升级传播;不重复置态。
+        self._log_action(
+            task_id,
+            node_id,
+            NodeAction.TRANSITION,
+            {"reason": "acceptance_fail", "to": "HUNG"},
+            status_from=Status.RUNNING,
+            status_to=Status.HUNG,
+        )
+        self._escalate_hung(task_id, node_id, "acceptance_fail")
 
     async def _on_harness_collect(
         self, task_id: str, node_id: str, exec_error: str, side: list[tuple]
@@ -1666,8 +1681,25 @@ class ExecutionEngine:
         if node is None:
             return
         retries = int(node.run_info.extend_props.get("harness_retries", 0))
-        retries += 1
         max_harness = self._max_harness(task_id)
+        if retries >= max_harness:
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=node_id,
+                    extend_props_patch={"last_exec_error": exec_error},
+                )
+            )
+            logger.warning(
+                "[task][on_harness] task=%s node=%s 达 MAX_HARNESS(%d)→HUNG(retries=%d)",
+                task_id,
+                node_id,
+                max_harness,
+                retries,
+            )
+            self._hung_and_escalate(task_id, node_id, "exec_stuck")
+            return
+        retries += 1
         logger.info(
             "[task][on_harness] task=%s node=%s reason=%s retries=%d/%d",
             task_id,
@@ -1686,15 +1718,6 @@ class ExecutionEngine:
                 },
             )
         )
-        if retries >= max_harness:
-            logger.warning(
-                "[task][on_harness] task=%s node=%s 达 MAX_HARNESS(%d)→HUNG",
-                task_id,
-                node_id,
-                max_harness,
-            )
-            self._hung_and_escalate(task_id, node_id, "exec_stuck")
-            return
         # 复位到 PENDING 重新派发执行:FAILED/RUNNING→PENDING;PENDING 派发卡住(搜推无响应/派发失败)清
         # dispatch_error 让 prepare 重新派发(harness owns 重试计数+HUNG 上限,正常 cycle 跳过 dispatch_error 节点)
         if node.status in {Status.FAILED, Status.RUNNING}:
@@ -1833,10 +1856,9 @@ class ExecutionEngine:
 
     # ===== HUNG + 升 BBS(loop_round++ / 图 HUNG) + 终态传播 =====
     def _bump_loop_round(self, task_id: str) -> None:
-        """图级 loop_round += 1。v4 仅两处计:根 gap 未闭重 plan(口子 A) + HUNG 升 BBS。达 MAX_LOOP→图 HUNG。"""
-        graph = self._graph.update_task_graph_info(
-            task_id, TaskGraphPatch(loop_round_increment=1)
-        )
+        """图级 loop_round 升 BBS 计次(先判后+1):当前 loop_round>=MAX_LOOP → 图 HUNG(loop_exhausted)
+        硬停;否则 loop_round+1。MAX_LOOP=N 允许 N 次升 BBS 接力,第 N+1 次撞图 HUNG。"""
+        graph = self._graph.query_task_dashboard(task_id)
         max_loop = self._graph._execution_config(task_id)["MAX_LOOP"]
         if graph.loop_round >= max_loop:
             self._graph.update_task_graph_info(
@@ -1849,9 +1871,28 @@ class ExecutionEngine:
             logger.warning(
                 "[task][loop_round] task=%s 达 MAX_LOOP(%d)→图 HUNG", task_id, max_loop
             )
+            return
+        self._graph.update_task_graph_info(
+            task_id, TaskGraphPatch(loop_round_increment=1)
+        )
+
+    def _escalate_hung(self, task_id: str, node_id: str, hung_reason: str) -> None:
+        """HUNG 节点的升级传播(纯同步,锁内):置图级 bbs_mode + loop_round++(节点级升 BBS 计次)
+        + `_maybe_propagate_hung` 冒泡(根/图 HUNG 才真 dispatch run_bbs)。**不置节点态**——调用方须
+        保证节点已 HUNG。乙' a+R1:验收 FAIL 节点已由 on_report 折叠直驱 HUNG,故 _on_fail_collect 直
+        调本方法;其余 HUNG(miss/harness/plan_round/gap_no_progress)经 _hung_and_escalate 一次写 HUNG
+        后复用本方法。"""
+        self._graph.update_task_graph_info(
+            task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True})
+        )
+        self._bump_loop_round(task_id)
+        # 终态传播:查父,若兄弟全终态且含 HUNG→父 HUNG(冒泡,递归)
+        # 传 hung_reason:_maybe_propagate_hung 依据它判"可恢复 vs 硬死锁"(spec §10.5)
+        self._maybe_propagate_hung(task_id, node_id, hung_reason)
 
     def _hung_and_escalate(self, task_id: str, node_id: str, hung_reason: str) -> None:
-        """节点置 HUNG + 父终态传播检查 + 升 BBS(loop_round++,bbs_mode;节点保留不 remove)。纯同步(锁内)。"""
+        """节点置 HUNG + 升级传播(锁内同步)。乙' a+R1:验收 FAIL 不再经此(_on_fail_collect 节点已折叠
+        HUNG,直接 _escalate_hung);其余 HUNG 仍经此一次写 HUNG。"""
         _prev = next(
             (
                 n.status
@@ -1883,13 +1924,7 @@ class ExecutionEngine:
             node_id,
             hung_reason,
         )
-        self._graph.update_task_graph_info(
-            task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True})
-        )
-        self._bump_loop_round(task_id)
-        # 终态传播:查父,若兄弟全终态且含 HUNG→父 HUNG(冒泡,递归)
-        # 传 hung_reason:_maybe_propagate_hung 依据它判"可恢复 vs 硬死锁"(spec §10.5)
-        self._maybe_propagate_hung(task_id, node_id, hung_reason)
+        self._escalate_hung(task_id, node_id, hung_reason)
 
     def _on_bg_done(self, bg: "asyncio.Task") -> None:
         """后台 run_bbs 完成:脱离跟踪集 + 异常可见(记 log,不抛,不阻塞 on_*)。"""
@@ -1908,6 +1943,23 @@ class ExecutionEngine:
         exc = t.exception()
         if exc is not None:
             logger.error("[task][static-plan] auto-report bg task 异常: %s", exc, exc_info=exc)
+
+    def _reset_root_plan_round(self, task_id: str) -> None:
+        """升 BBS 收口时将根节点 plan_round 重置为 loop_round:on_pass 计数为"先判后+1"
+        (plan_round 现值<MAX 产子并 +1,达 MAX 撞顶),故从 plan_round=loop_round 起产子 = MAX-loop_round
+        (plan_round loop..MAX-1 产,MAX 撞),逐轮递减;MAX_LOOP 仍作总轮次兜底。避免 plan_round 残留撞顶值
+        → BBS 接力 on_pass 回根立即再撞 plan_round_exhausted、重新规划白做。"""
+        root = self._root(task_id)
+        if root is None:
+            return
+        loop_round = self._graph.query_task_dashboard(task_id).loop_round
+        self._graph.update_task_node_info(
+            TaskNodePatch(
+                task_id=task_id,
+                node_id=root.node_id,
+                extend_props_patch={"plan_round": loop_round},
+            )
+        )
 
     def _schedule_bbs_notify(self, task_id: str, execution_graph) -> None:
         """可恢复拦截点(spec §5):fire-and-forget ``runner.run_bbs(execution_graph)``。
@@ -1969,6 +2021,7 @@ class ExecutionEngine:
                             task_id,
                             hung_reason,
                         )
+                        self._reset_root_plan_round(task_id)
                         self._schedule_bbs_notify(task_id, g)
                         return
                     # 无 bbs_mode 或已被 BBS claim → 硬 HUNG 收口(不再调度,等在途 BBS 回投)
@@ -2002,6 +2055,7 @@ class ExecutionEngine:
                         "[task][hung-propagate] task=%s 根可恢复态拦截(miss_depth_exhausted),根保持 PLANNING",
                         task_id,
                     )
+                    self._reset_root_plan_round(task_id)
                     self._schedule_bbs_notify(task_id, _g_now)
                     return
                 self._graph.update_task_node_info(
@@ -2095,7 +2149,7 @@ class ExecutionEngine:
                         task_id=task_id,
                         node_id=node.node_id,
                         run_mode="coop_group",
-                        extend_props_patch={"dispatching": True},
+                        extend_props_patch={"dispatching": True, "dispatching_at": _now_ms()},
                     )
                 )
                 side.append(("group", node, gf))
@@ -2115,7 +2169,7 @@ class ExecutionEngine:
                         node_id=node.node_id,
                         run_mode=node.run_info.run_mode,
                         assignee=node.run_info.assignee,
-                        extend_props_patch={"dispatching": True},
+                        extend_props_patch={"dispatching": True, "dispatching_at": _now_ms()},
                     )
                 )
                 to_run.append(node)

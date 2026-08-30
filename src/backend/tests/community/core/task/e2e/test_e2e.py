@@ -49,7 +49,7 @@ def _task_info(task_id: str = "t_case", *, max_depth: int = 3) -> TaskInfo:
         ),
         source_type="bot",
         owner_bot_id="owner_bot",
-        execution_config={"MAX_DEPTH": max_depth},
+        execution_config={"MAX_DEPTH": max_depth, "MAX_PLAN_ROUND": 10, "MAX_LOOP": 10},
     )
 
 
@@ -72,7 +72,7 @@ def _task_info_request(task_id: str = "t_case", *, max_depth: int = 3):
         source_type=TaskSourceType.BOT,
         owner_user_id="owner_user",
         owner_bot_id="owner_bot",
-        execution_config={"MAX_DEPTH": max_depth},
+        execution_config={"MAX_DEPTH": max_depth, "MAX_PLAN_ROUND": 10, "MAX_LOOP": 10},
     )
 
 

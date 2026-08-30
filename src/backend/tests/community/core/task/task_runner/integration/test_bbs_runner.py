@@ -3,9 +3,10 @@ import asyncio
 import json
 from unittest.mock import MagicMock
 
+from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
-    TaskExecutionGraph, TaskNode, TaskSpec,
+    AcceptanceCriteria, AcceptanceVerdict, Context, Goal, Metadata, RuntimeInfo, Status,
+    TaskExecutionGraph, TaskNode, TaskNodePatch, TaskSpec,
 )
 from agentclaw.community.core.task.task_runner.integration.bbs_runner import notify
 
@@ -34,28 +35,46 @@ def _execution_graph(task_id="t1", objective="整理基础架构方向架构师�
 
 
 class _FakeBot:
-    def __init__(self, rates):
-        """rates: {bot_id: completion_rate or None (None=simulate error)}"""
+    """bid 与 dispatch 共用 send_and_wait_async(bid prompt 含 "[bbs-bid]" 标记,dispatch msg 为任务快照)。
+
+    ``rates``: {bot_id: completion_rate or None (None=simulate bid error)}。
+    ``dispatch_raises``: 若为真,dispatch 抛异常 → 走 notify except 收口分支(释放 claim)。
+    """
+
+    def __init__(self, rates, *, dispatch_raises: bool = False):
         self._rates = rates
-        self.sent_messages: list[tuple] = []
-        self.bid_prompts: list[str] = []
+        self.dispatch_raises = dispatch_raises
+        self.sent_messages: list[tuple] = []   # dispatch 消息(给胜出 bot)
+        self.bid_prompts: list[str] = []        # bid prompt
 
     async def send_and_wait_async(self, *, bot_id, message, metadata=None, timeout=180.0, poll_interval=2.0):
-        self.bid_prompts.append(message)
-        rate = self._rates.get(bot_id)
-        if rate is None:
-            raise RuntimeError("bot error")
-        return {"status": "COMPLETED",
-                "result": {"content": json.dumps({"completion_rate": rate})}}
+        if "[bbs-bid]" in message:
+            # Phase 1: bid(并发评估)→ 回 completion_rate(bid prompt 不会被记入 sent_messages)
+            self.bid_prompts.append(message)
+            rate = self._rates.get(bot_id)
+            if rate is None:
+                raise RuntimeError("bot error")
+            return {"status": "COMPLETED",
+                    "result": {"content": json.dumps({"completion_rate": rate})}}
+        # Phase 2: dispatch(给胜出 bot 发任务,等结果)
+        self.sent_messages.append((bot_id, message, metadata))
+        if self.dispatch_raises:
+            raise RuntimeError("dispatch failed")
+        return {
+            "status": "COMPLETED",
+            "result": {"content": "dispatched-task-result"},
+            "session_id": "sess-dispatch",
+        }
 
     async def send_message(self, *, bot_id, message, metadata):
+        # 兼容保留:notify 不再调用 send_message(dispatch 走 send_and_wait_async)
         self.sent_messages.append((bot_id, message, metadata))
         from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
         return BotSendResult(run_id=f"r_{bot_id}", session_id=None)
 
 
 class _FakeBcn:
-    """Fake BcnService.list_bots_by_task_modes: sync (bbs_runner 经 asyncio.to_thread 调)，记录断言。"""
+    """Fake BcnService.list_bots_by_task_modes: sync (bbs_runner 经 asyncio.to_thread 调),记录断言。"""
 
     def __init__(self, roster):
         self._roster = roster
@@ -81,45 +100,88 @@ def _roster(*bot_ids: str) -> list[dict]:
 
 
 class _FakeGraph:
+    """轻量 graph 替身:记账 claim/release/bbs_owner 当前值,坚持 scoped 节点新增(不真实落图)。"""
+
     def __init__(self):
-        self.claimed = None
-        self.cleared = False
+        self.claimed: str | None = None     # 历史 claim 的 winner(不重置,供断言)
+        self.bbs_owner: str | None = None   # 当前根 bbs_owner 值(claim 设,收口/except 清)
+        self.cleared = False                 # bbs_owner 被清回 None 标记(收口 finally / except 释放)
 
     def claim_bbs_owner(self, task_id, bot_id):
         self.claimed = bot_id
+        self.bbs_owner = bot_id
         return MagicMock(success=True)
 
     def update_task_node_info(self, patch):
         if patch.extend_props_patch and patch.extend_props_patch.get("bbs_owner") is None:
+            self.bbs_owner = None
             self.cleared = True
+
+    def add_task_nodes(self, nodes, task_id):
+        # notify 新增 bbs scoped 节点:轻量记账即可(snapshot 取自 execution_graph 真实图)
+        return MagicMock(success=True)
+
+    def add_relations(self, task_id, edges):
+        return MagicMock(success=True)
+
+
+class _FakeOnBbsReport:
+    """模拟 engine.on_bbs_report:持有者校验 → 翻 scoped 节点 → finally 释放 claim(bbs_owner=None)。
+
+    与真实 engine.on_bbs_report 对齐:bbs_owner 须 == patch.assignee,否则 TaskStateError
+    (持卡者死锁保护 —— 非 claim 持有者不得收口)。这同时也是 notify 收口 patch 必须带 assignee 的回归闸。
+    """
+
+    def __init__(self, graph):
+        self.graph = graph
+        self.calls: list[TaskNodePatch] = []
+
+    async def __call__(self, patch):
+        self.calls.append(patch)
+        if patch.assignee is None or patch.assignee != self.graph.bbs_owner:
+            raise TaskStateError(
+                f"on_bbs_report: 非claim持有者 task={patch.task_id}"
+            )
+        try:
+            self.graph.update_task_node_info(patch)
+        finally:
+            self.graph.update_task_node_info(
+                TaskNodePatch(task_id=patch.task_id, node_id=patch.task_id,
+                              extend_props_patch={"bbs_owner": None})
+            )
 
 
 _GOAL = "整理基础架构方向架构师名册"
 
 
 def test_notify_selects_highest_completion_rate_and_claims_and_sends():
-    """bid→select→claim→send: picks highest completion_rate, claims root, sends task message."""
+    """bid→select→claim→dispatch→收口走引擎:选最高 completion_rate 的 bot、claim 根,经 on_bbs_report 收口
+    (翻 scoped DONE + finally 释放 claim)而非裸写根/ scoped 节点。"""
     roster = _roster("A", "B", "C")
     bot = _FakeBot(rates={"A": 50, "B": 90, "C": 70})
     bcn = _FakeBcn(roster)
     graph = _FakeGraph()
     g = _execution_graph("t1", _GOAL)
+    on_bbs_report = _FakeOnBbsReport(graph)
 
-    _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://localhost:8888", skill_name="bbs-relay-single-task"))
+    _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://localhost:8888",
+                skill_name="bbs-relay-single-task", on_bbs_report=on_bbs_report))
 
-    assert graph.claimed == "B"  # highest completion_rate
-    assert len(bot.sent_messages) == 1
+    assert graph.claimed == "B"  # 最高 completion_rate 的 bot 胜出
+    assert len(bot.sent_messages) == 1           # 只给胜出 bot dispatch 一次
     msg_bot, msg_text, msg_meta = bot.sent_messages[0]
     assert msg_bot == "B"
-    assert "bbs-relay-single-task" in msg_text
-    assert "t1" in msg_text
-    assert "http://localhost:8888" in msg_text
-    assert "B" in msg_text  # winner's own bot_id
-    assert not graph.cleared  # send succeeded, claim not rolled back
-    # bid prompt 内联了 task snapshot(goal objective 嵌入),而非只发 task_id
+    # 收口走引擎:on_bbs_report 被调一次,patch 带 assignee(通过持有者校验)、scoped DONE、verdict DONE
+    assert len(on_bbs_report.calls) == 1
+    patch = on_bbs_report.calls[0]
+    assert patch.node_id.startswith("bbs-")
+    assert patch.status == Status.DONE
+    assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
+    assert patch.assignee == "B"
+    assert graph.cleared          # 收口 finally 释放了 claim(bbs_owner=None)
+    # bid prompt + dispatch msg 均内联任务态快照(goal objective 嵌入),而非只发 task_id
     assert bot.bid_prompts, "bid 未发出(空 bid_prompts)"
     assert any(_GOAL in p for p in bot.bid_prompts), "bid prompt 未内联 goal snapshot"
-    # dispatch 消息也内联了 task snapshot(skill 据快照归纳剩余事项,免读 dashboard)
     assert _GOAL in msg_text, "dispatch msg 未内联 snapshot"
 
 
@@ -145,21 +207,67 @@ def test_notify_all_bids_failed_returns_silently():
 
 
 def test_notify_send_message_failure_rolls_back_claim():
-    """send_message 失败 → clear bbs_owner(回收 claim)。"""
+    """dispatch (send_and_wait_async) 失败 → 走 except 收口:释放 claim(bbs_owner=None),不调 on_bbs_report。
+
+    覆盖 except 分支的声明释放逻辑:claim 已置根 bbs_owner=W,dispatch 抛错 → except 写 bbs_owner=None
+    回收声明,避免 claim 泄漏挡住后续重升 BBS;收口 on_bbs_report 不触发(dispatch 未产出)。
+    """
     roster = _roster("W")
-
-    class _BotSendFails(_FakeBot):
-        async def send_message(self, *, bot_id, message, metadata):
-            raise RuntimeError("send failed")
-
-    bot = _BotSendFails(rates={"W": 80})
+    bot = _FakeBot(rates={"W": 80}, dispatch_raises=True)  # bid 成功→选 W→claim→dispatch 抛错
     bcn = _FakeBcn(roster)
     graph = _FakeGraph()
-    _run(notify(_execution_graph("t4"), bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))
-    assert graph.claimed == "W"
-    assert graph.cleared  # bbs_owner cleared
+    on_bbs_report = _FakeOnBbsReport(graph)
+    _run(notify(_execution_graph("t4"), bcn=bcn, bot=bot, graph=graph,
+                backend_url="http://x", skill_name="s", on_bbs_report=on_bbs_report))
+    assert graph.claimed == "W"      # claim 确已发生(claim 在 dispatch 之前)
+    assert graph.bbs_owner is None   # except 释放后根 bbs_owner 回 None
+    assert graph.cleared             # bbs_owner 被清(声明释放)
+    assert on_bbs_report.calls == [] # dispatch 失败,未走收口
 
 
 def test_notify_bcn_none_returns_silently():
     _run(notify(_execution_graph("t5"), bcn=None, bot=_FakeBot({}), graph=_FakeGraph(), backend_url="http://x"))
     # no exception, no claim
+
+
+class _RecordingGraph(_FakeGraph):
+    """记录全部 update_task_node_info patch(供无回回归路径断言 root 写入范围)。"""
+
+    def __init__(self):
+        super().__init__()
+        self.patches: list[TaskNodePatch] = []
+
+    def update_task_node_info(self, patch):
+        self.patches.append(patch)
+        super().update_task_node_info(patch)
+
+
+def test_notify_without_callback_never_writes_root_output():
+    """无 on_bbs_report 回调(else 回退路径)遵守 bbs 模式不变量:只改根节点状态 + graph 加关系,
+    绝不改根节点 output(根 output 仅由 plan 算 gap / runner 执行完成 pull·push 收敛写入)。
+
+    回归 root.run_info.output == bbs output 的污染 bug:else 旧实现把 bbs task_result 直写根
+    output_patch/extend_props.output。修复后根 patch 仅 status=PLANNING,无 output 写入。
+    """
+    roster = _roster("W")
+    bot = _FakeBot(rates={"W": 80})
+    bcn = _FakeBcn(roster)
+    graph = _RecordingGraph()
+    g = _execution_graph("t6", _GOAL)
+
+    _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))  # on_bbs_report 缺省 None
+
+    root_patches = [p for p in graph.patches if p.node_id == "t6"]
+    assert len(root_patches) == 1, f"应只写一次根 patch,实际 {len(root_patches)}"
+    rp = root_patches[0]
+    # 不变量:根节点只允许改状态,不改 output
+    assert rp.status == Status.PLANNING
+    assert rp.output_patch is None, f"else 路径违规直写根 output_patch={rp.output_patch}"
+    assert rp.extend_props_patch is None or "output" not in rp.extend_props_patch, (
+        f"else 路径违规直写根 extend_props.output={rp.extend_props_patch}"
+    )
+    # scoped 接力节点仍落自身执行产出(属 runner 执行完成回投,非根 output 污染)
+    scoped = [p for p in graph.patches if p.node_id != "t6"]
+    # _bbs_output = task_result["result"] = {"content": "dispatched-task-result"}(FakeBot dispatch 返回结构)
+    assert len(scoped) == 1 and scoped[0].output_patch == {"output": {"content": "dispatched-task-result"}}
+    assert graph.claimed == "W"  # bid→select→claim 链路完整
