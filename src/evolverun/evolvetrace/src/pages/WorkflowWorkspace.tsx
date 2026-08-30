@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useWorkflowTypes } from '../api/hooks'
+import { useWorkflowTypes, useCreateWorkflow } from '../api/hooks'
 import { getClientUser } from '../hooks/useClientUser'
 import Sidebar from '../components/workflow-workspace/Sidebar'
 import OverviewTab from '../components/workflow-workspace/OverviewTab'
 import EditorTab from '../components/workflow-workspace/EditorTab'
 import ManagementTab from '../components/workflow-workspace/ManagementTab'
 import EvolutionTab from '../components/workflow-workspace/EvolutionTab'
+import CreateWorkflowModal from '../components/workflow-workspace/CreateWorkflowModal'
 import StatusBadge from '../components/StatusBadge'
 import EmptyState from '../components/EmptyState'
 import ErrorState from '../components/ErrorState'
-import type { NodeStatus } from '../types'
+import type { NodeStatus, WorkflowSpec } from '../types'
 
 type WorkspaceTab = 'overview' | 'editor' | 'management' | 'evolution'
 
@@ -23,7 +24,7 @@ const TAB_CONFIG: { key: WorkspaceTab; label: string }[] = [
 
 export default function WorkflowWorkspace() {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const urlWorkflowId = searchParams.get('workflowId')
   const user = getClientUser()
   const isAdmin = user?.isAdmin === true
@@ -32,6 +33,7 @@ export default function WorkflowWorkspace() {
   const [selectedId, setSelectedId] = useState<string | null>(urlWorkflowId)
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('overview')
   const [legacyOpen, setLegacyOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
 
   const {
     data: workflows,
@@ -40,6 +42,8 @@ export default function WorkflowWorkspace() {
     error,
     refetch,
   } = useWorkflowTypes(isAdmin ? undefined : user?.userId)
+
+  const createMutation = useCreateWorkflow()
 
   const filteredWorkflows = useMemo(() => {
     if (!workflows) return []
@@ -73,10 +77,14 @@ export default function WorkflowWorkspace() {
     return () => window.removeEventListener('keydown', onKey)
   }, [legacyOpen])
 
+  // If currently selected workflow was deleted or filtered away, fall back to the first visible one.
+  // When selectedId is explicitly set (e.g. after creating a new workflow), keep that selection
+  // even before the list refetch completes so the UI opens the new workflow immediately.
   const selectedWorkflow = useMemo(() => {
     if (!workflows) return null
-    const fromList = workflows.find((w) => w.workflow_id === selectedId)
-    if (fromList) return fromList
+    if (selectedId) {
+      return workflows.find((w) => w.workflow_id === selectedId) ?? null
+    }
     if (filteredWorkflows.length > 0) return filteredWorkflows[0]
     return workflows[0] ?? null
   }, [workflows, selectedId, filteredWorkflows])
@@ -92,6 +100,25 @@ export default function WorkflowWorkspace() {
     setSelectedId(remaining[0]?.workflow_id ?? null)
   }
 
+  const handleCreate = useCallback(
+    async (input: { workflowId: string; spec: WorkflowSpec; facade?: { command?: string; remark?: string } }) => {
+      const botOwnerId = user?.userId
+      if (!botOwnerId) {
+        throw new Error('无法获取用户信息，请重新登录')
+      }
+      await createMutation.mutateAsync({
+        workflowId: input.workflowId,
+        spec: input.spec,
+        facade: input.facade,
+        botOwnerId,
+      })
+      setSelectedId(input.workflowId)
+      setSearchParams({ workflowId: input.workflowId })
+      setActiveTab('editor')
+    },
+    [createMutation, setSearchParams, user?.userId],
+  )
+
   if (isError) {
     return (
       <div className="p-6">
@@ -106,7 +133,48 @@ export default function WorkflowWorkspace() {
   if (!isLoading && (!workflows || workflows.length === 0)) {
     return (
       <div className="p-6">
-        <EmptyState title="暂无工作流" description="当前账号暂无可访问的工作流" />
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <svg
+            className="mb-4 h-12 w-12 text-gray-300"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+            />
+          </svg>
+          <h3 className="text-lg font-medium text-gray-700">暂无工作流</h3>
+          <p className="mt-1 text-sm text-gray-400">当前账号暂无可访问的工作流</p>
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="mt-5 inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2.5}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            新建工作流
+          </button>
+        </div>
+        <CreateWorkflowModal
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          onSubmit={handleCreate}
+          isPending={createMutation.isPending}
+        />
       </div>
     )
   }
@@ -119,6 +187,7 @@ export default function WorkflowWorkspace() {
         search={search}
         onSearchChange={setSearch}
         onSelect={setSelectedId}
+        onCreateClick={() => setCreateOpen(true)}
         loading={isLoading}
       />
 
@@ -220,6 +289,13 @@ export default function WorkflowWorkspace() {
           </div>
         )}
       </main>
+
+      <CreateWorkflowModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onSubmit={handleCreate}
+        isPending={createMutation.isPending}
+      />
     </div>
   )
 }

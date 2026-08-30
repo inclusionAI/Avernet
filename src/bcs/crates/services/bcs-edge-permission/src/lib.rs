@@ -26,6 +26,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tracing::{info, warn};
 use uuid::Uuid;
 use bcs_domain::actor::ActorKind;
 use bcs_domain::edge_permission::{
@@ -226,10 +227,15 @@ impl ConnectService for DbConnectService {
         }
 
         // 5. Existing visibility/status gates.
+        // Bots collaborate under `visibility`; humans add under `user_visibility`
+        // (mirrors /bots/search viewer-kind selection). `visibility=private`
+        // blocks bot→bot collaboration; `user_visibility=private` blocks human→bot
+        // add. The bot-facing `visibility` no longer gates human callers, so a
+        // `visibility=private` + `user_visibility=public` bot stays human-addable.
         if cfg.status == "hidden" {
             return Err(ServiceError::BotHidden(to_bot.to_string()));
         }
-        if is_private_visibility(&cfg.visibility) {
+        if caller_kind == ActorKind::Bot && is_private_visibility(&cfg.visibility) {
             return Err(ServiceError::PrivateBotCannotCollaborate);
         }
         if caller_kind == ActorKind::Human && is_private_visibility(&cfg.user_visibility) {
@@ -244,7 +250,15 @@ impl ConnectService for DbConnectService {
                 .caller_department_matches_friend_allowlist(caller, &cfg, request_auth.as_ref())
                 .await;
         let needs_approval = !(friend_strategy == "open" || dept_free_auto_approved);
-        match normalize_policy_value(&cfg.visibility).as_str() {
+        // Dispatch on the caller-appropriate visibility: bots on `visibility`,
+        // humans on `user_visibility`. The matching `private` case is rejected
+        // above for that kind, so only public/protected reach here in practice.
+        let collab_visibility = if caller_kind == ActorKind::Human {
+            normalize_policy_value(&cfg.user_visibility)
+        } else {
+            normalize_policy_value(&cfg.visibility)
+        };
+        match collab_visibility.as_str() {
             "public" | "protected" => {
                 if needs_approval {
                     let request_ids = self
@@ -665,20 +679,73 @@ impl DbConnectService {
         actor_id: &str,
         request_auth: Option<&RequestAuthHeaders>,
     ) -> Option<String> {
-        let user_directory = self.user_directory.as_ref()?;
+        let Some(user_directory) = self.user_directory.as_ref() else {
+            info!(
+                actor_id = %actor_id,
+                env = %self.env,
+                "skip user department lookup because user directory is not configured"
+            );
+            return None;
+        };
         let staff_no = match actor_kind_of(actor_id) {
-            ActorKind::Human => actor_id.strip_prefix("human_")?.to_string(),
+            ActorKind::Human => match actor_id.strip_prefix("human_").filter(|staff_no| !staff_no.is_empty()) {
+                Some(staff_no) => staff_no.to_string(),
+                None => {
+                    warn!(
+                        actor_id = %actor_id,
+                        env = %self.env,
+                        "skip user department lookup because human actor id has no staff_no"
+                    );
+                    return None;
+                }
+            },
             ActorKind::Bot => {
-                let cfg = self.bot_config.get(actor_id, &self.env).await?;
-                cfg.created_by?
+                let Some(cfg) = self.bot_config.get(actor_id, &self.env).await else {
+                    info!(
+                        actor_id = %actor_id,
+                        env = %self.env,
+                        "skip user department lookup because bot config was not found"
+                    );
+                    return None;
+                };
+                let Some(created_by) = cfg.created_by else {
+                    info!(
+                        actor_id = %actor_id,
+                        env = %self.env,
+                        "skip user department lookup because bot owner staff_no is missing"
+                    );
+                    return None;
+                };
+                created_by
             }
         };
         let lookup_context = user_directory_lookup_context(request_auth);
-        user_directory
+        match user_directory
             .lookup_department_by_staff_no_with_context(&staff_no, &lookup_context)
             .await
-            .ok()
-            .flatten()
+        {
+            Ok(department) => {
+                info!(
+                    actor_id = %actor_id,
+                    staff_no = %staff_no,
+                    department_code = department.as_deref().unwrap_or(""),
+                    found = department.is_some(),
+                    env = %self.env,
+                    "resolved user department for friend connect allowlist check"
+                );
+                department
+            }
+            Err(error) => {
+                warn!(
+                    actor_id = %actor_id,
+                    staff_no = %staff_no,
+                    error = %error,
+                    env = %self.env,
+                    "failed to resolve user department for friend connect allowlist check"
+                );
+                None
+            }
+        }
     }
 
     async fn caller_department_matches_friend_allowlist(
@@ -1330,6 +1397,7 @@ mod tests {
                 bot_uuid TEXT NOT NULL, \
                 env TEXT NOT NULL, \
                 visibility TEXT NOT NULL DEFAULT 'public', \
+                user_visibility TEXT NOT NULL DEFAULT 'protected', \
                 bot_info TEXT DEFAULT NULL, \
                 status TEXT NOT NULL DEFAULT 'online', \
                 created_by TEXT, \
@@ -1447,6 +1515,37 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
+    struct FailingUserDirectoryPlugin;
+
+    #[async_trait]
+    impl UserDirectoryPlugin for FailingUserDirectoryPlugin {
+        async fn lookup_by_staff_no(
+            &self,
+            staff_no: &str,
+        ) -> Result<Option<bcs_user_directory_api::UserDirectoryProfile>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(Some(bcs_user_directory_api::UserDirectoryProfile {
+                staff_no: staff_no.to_string(),
+                nick_name: None,
+            }))
+        }
+
+        async fn lookup_department_by_staff_no(
+            &self,
+            _staff_no: &str,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Err(bcs_user_directory_api::UserDirectoryError::Request("boom".to_string()))
+        }
+
+        async fn lookup_department_by_staff_no_with_context(
+            &self,
+            _staff_no: &str,
+            _context: &UserDirectoryLookupContext,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Err(bcs_user_directory_api::UserDirectoryError::Request("boom".to_string()))
+        }
+    }
+
+    #[derive(Clone, Default)]
     struct RecordingFriendConnectNotificationPort {
         events: Arc<tokio::sync::Mutex<Vec<FriendConnectNotificationCommand>>>,
     }
@@ -1510,17 +1609,17 @@ mod tests {
         friend_ext: serde_json::Map<String, serde_json::Value>,
     ) {
         let bot_info = serde_json::json!({
-            "user_visibility": user_visibility,
             "friend_check_in_strategy": friend_check_in_strategy,
             "friend_ext": friend_ext,
         });
         db.execute(DbStatement::with_params(
             "INSERT INTO bcs_bots \
-             (bot_uuid, env, visibility, bot_info, status, created_by) \
-             VALUES (?, 'dev', ?, ?, ?, ?)",
+             (bot_uuid, env, visibility, user_visibility, bot_info, status, created_by) \
+             VALUES (?, 'dev', ?, ?, ?, ?, ?)",
             vec![
                 DbValue::from(bot_uuid),
                 DbValue::from(visibility),
+                DbValue::from(user_visibility),
                 DbValue::from(serde_json::to_string(&bot_info).expect("bot_info json")),
                 DbValue::from(status),
                 match created_by {
@@ -1611,12 +1710,16 @@ mod tests {
     #[tokio::test]
     async fn private_bot_rejected() {
         let (eg, pp, rq, bc, db) = assemble().await;
+        // visibility=private blocks bot→bot collaboration (a bot adding a
+        // private-visibility bot). Human callers are gated by `user_visibility`,
+        // not `visibility` — see user_visibility_private_for_human_caller and
+        // human_adds_visibility_private_user_visibility_public_bot_succeeds.
         seed_bot(&db, "x:priv", "private", "protected", "OPEN", "online", Some("85020")).await;
         let svc = service(&eg, &pp, &rq, &bc);
         let err = svc
-            .create_connect("human_1", "x:priv", None, None)
+            .create_connect("caller_bot:1", "x:priv", None, None)
             .await
-            .expect_err("private → PrivateBotCannotCollaborate");
+            .expect_err("bot→private visibility → PrivateBotCannotCollaborate");
         assert!(
             matches!(err, ServiceError::PrivateBotCannotCollaborate),
             "got {err:?}"
@@ -1633,6 +1736,24 @@ mod tests {
             .await
             .expect_err("user_visibility=private → Forbidden for human caller");
         assert!(matches!(err, ServiceError::Forbidden(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn human_adds_visibility_private_user_visibility_public_bot_succeeds() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        // visibility=private no longer blocks a human caller — humans are gated by
+        // `user_visibility=public`, so this bot is human-addable (mirrors the
+        // /bots/search viewer-kind selection).
+        seed_bot(&db, "x:privuvis", "private", "public", "OPEN", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let res = svc
+            .create_connect("human_1", "x:privuvis", None, None)
+            .await
+            .expect("human→(visibility=private, user_visibility=public) is human-addable");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+        assert_eq!(res.edge_ids.len(), 1);
+        assert!(eg.has_friend_edge("human_1", "x:privuvis", "dev").await);
     }
 
     #[tokio::test]
@@ -1656,6 +1777,83 @@ mod tests {
         assert_eq!(r.edge_id, Some(res.edge_ids[0]));
     }
 
+
+    #[tokio::test]
+    async fn department_lookup_logs_success_result_path() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "F4858".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+
+        assert_eq!(
+            svc.resolve_user_department_code("human_1", None).await.as_deref(),
+            Some("F4858")
+        );
+    }
+
+    #[tokio::test]
+    async fn department_lookup_logs_failure_result_path() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "human_1",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("85020"),
+        )
+        .await;
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, Arc::new(FailingUserDirectoryPlugin));
+
+        assert_eq!(svc.resolve_user_department_code("human_1", None).await, None);
+    }
+
+    #[tokio::test]
+    async fn department_lookup_logs_missing_directory_path() {
+        let (eg, pp, rq, bc, _db) = assemble().await;
+        let svc = service(&eg, &pp, &rq, &bc);
+
+        assert_eq!(svc.resolve_user_department_code("human_1", None).await, None);
+    }
+
+    #[tokio::test]
+    async fn department_lookup_logs_skip_paths() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::new()),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+
+        assert_eq!(svc.resolve_user_department_code("human_", None).await, None);
+        assert_eq!(svc.resolve_user_department_code("x:missing", None).await, None);
+
+        seed_bot(
+            &db,
+            "x:no_owner",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            None,
+        )
+        .await;
+        assert_eq!(svc.resolve_user_department_code("x:no_owner", None).await, None);
+    }
 
     #[tokio::test]
     async fn dept_free_allowlist_stays_pending_with_noop_department_port() {

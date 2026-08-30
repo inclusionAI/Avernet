@@ -984,7 +984,7 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
     class _Runtime:
         calls = 0
 
-        def sync_runtime(self):
+        def project_skills(self):
             self.calls += 1
             return True
 

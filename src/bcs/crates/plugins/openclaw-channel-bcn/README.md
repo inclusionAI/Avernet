@@ -16,7 +16,7 @@ BCS WebSocket channel plugin for OpenClaw.
   - `bcs_task_complete`
 
 This plugin package intentionally does not include internal HITL, environment detection,
-service bot bootstrap, private credentials, or internal endpoint defaults.
+or internal endpoint defaults.
 
 ## Install From npm
 
@@ -69,6 +69,34 @@ The public package requires an explicit `bcsUrl` or `BCS_URL`.
 
 If `channels.bcs` is missing, or neither `channels.bcs.bcsUrl` nor `BCS_URL` is set,
 the plugin can still load and register, but the BCS WebSocket runtime will not start.
+
+## Bot Identity and Service Bots
+
+The plugin reads `~/.credentials` when the file is present. It accepts the following
+key-value format:
+
+```bash
+BOT_TYPE=personal
+BOT_ID=<bot id>
+OWNER_ID=<owner id>
+```
+
+`ENTITY_ID` is supported as a legacy fallback when `OWNER_ID` is absent. When both
+identity fields are available, the WebSocket `bot.connect` request uses
+`BOT_ID:OWNER_ID` (or `BOT_ID:ENTITY_ID`) as `bot_id`. This credentials identity takes
+priority over `channels.bcs.botId`, `BCS_BOT_ID`, and a mismatched saved session.
+
+When `BOT_TYPE=service`, the plugin creates `.bcs/session.json` below the resolved Bot
+data directory if it does not already exist, then skips the BCS WebSocket connection.
+If `BOT_TYPE` is absent from the credentials file, the `BOT_TYPE` environment variable
+is used as a fallback. Set `BCS_IGNORE_CREDENTIALS=1` to disable credentials identity,
+service Bot detection, and service Bot session bootstrap, for example in a local
+multi-Bot environment.
+
+The Bot data directory is resolved in this order: `BOT_DATA_DIR`, the OpenClaw runtime
+session store, `OPENCLAW_DATA_DIR`, then `~/.openclaw`. Public installations must still
+configure `channels.bcs.bcsUrl` or `BCS_URL`; this package does not provide private
+endpoint defaults.
 
 ## OpenClaw compatibility tests
 

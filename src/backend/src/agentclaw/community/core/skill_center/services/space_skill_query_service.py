@@ -17,6 +17,9 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
 from agentclaw.community.core.spaces.services.space_access_service import (
     SpaceAccessService,
 )
+from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
+    space_skill_actor_permissions,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -41,7 +44,7 @@ class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
         page_no: int,
         page_size: int,
     ) -> tuple[int, list[SpaceSkillSummaryRecord]]:
-        self._access_service.require_space_member(
+        space, member = self._access_service.require_space_member(
             space_id=space_id,
             user_id=actor_id,
         )
@@ -56,15 +59,67 @@ class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
             offset=(page_no - 1) * page_size,
             limit=page_size,
         )
-        return total, [self._to_summary(record) for record in records]
+        return total, [
+            self._to_summary(
+                record,
+                actor_id=actor_id,
+                space_type=space.space_type,
+                space_role=member.role,
+            )
+            for record in records
+        ]
 
     @staticmethod
-    def _to_summary(record: SpaceSkillQueryRecord) -> SpaceSkillSummaryRecord:
+    def _to_summary(
+        record: SpaceSkillQueryRecord,
+        *,
+        actor_id: str,
+        space_type,
+        space_role,
+    ) -> SpaceSkillSummaryRecord:
         role = record["current_user_skill_role"]
         is_team = record["space_type"] == "TEAM"
+        holder = record["lease_holder_user_id"]
+        if record["draft_status"] is None:
+            lease_summary = None
+        elif not is_team:
+            lease_summary = {
+                "required": False,
+                "state": "NOT_REQUIRED",
+                "holder_user_id": None,
+                "holder_display_name": None,
+            }
+        elif holder is None:
+            lease_summary = {
+                "required": True,
+                "state": "FREE",
+                "holder_user_id": None,
+                "holder_display_name": None,
+            }
+        else:
+            lease_summary = {
+                "required": True,
+                "state": "HELD_BY_ME" if holder == actor_id else "HELD_BY_OTHER",
+                "holder_user_id": holder,
+                "holder_display_name": record["lease_holder_display_name"],
+            }
         return {
-            **record,
-            "can_edit": role in {"OWNER", "MANAGER"},
-            "can_grant": is_team and role == "OWNER",
-            "can_apply_edit": is_team and role is None,
+            "id": record["id"],
+            "skill_uuid": record["skill_uuid"],
+            "name": record["name"],
+            "description": record["description"],
+            "status": record["status"],
+            "draft_status": record["draft_status"],
+            "space_type": record["space_type"],
+            "actor": {
+                "skill_role": role,
+                "permissions": space_skill_actor_permissions(
+                    space_type=space_type,
+                    space_role=space_role,
+                    skill_role=role,
+                ),
+            },
+            "lease_summary": lease_summary,
+            "gmt_created": record["gmt_created"],
+            "gmt_modified": record["gmt_modified"],
         }

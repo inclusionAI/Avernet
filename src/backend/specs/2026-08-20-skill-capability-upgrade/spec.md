@@ -666,6 +666,19 @@ Latest 是发布成功后的 Best-Effort 异步刷新，不参与发布成功门
   `sc_skill_code` 字段。
 - Skill Center Gateway 只负责 transport、鉴权、配置、请求/响应归一化和错误分类；
   不修改 Skill/Draft/Attempt/Version，也不决定重试和补偿。
+- PUBLIC 市场查询保留已发布 OpenAPI 的 `belongTo` 筛选；SC Team 按外部引用查询在
+  `success=true,data=null` 时归一化为稳定 `TEAM_NOT_FOUND`，不得与上游拒绝、协议错误
+  或不可用混为一类。
+- 发布状态查询按 SC 开放接口只传全局唯一 `skillCode`，响应保留 SC 当前 `version`；
+  Publication Application Service 使用持久化 Attempt 对返回版本做匹配，Gateway 不要求
+  调用方补造 `team_id/version_number`，也不为状态查询执行 Team 列表预检。
+- SC 发布状态中的 `standardCheckResult`、`securityCheckReport` 在稳定归一化字段之外
+  必须无损保留原始 JSON，供既有 OpenAPI 展示字段继续兼容。
+- Version 列表和精确下载的 `PUBLIC/TEAM` scope 及 Team ID 是 Consumer 的信任域预检
+  上下文，不是 SC 开放接口的额外 wire 参数；Adapter 预检后仍按全局唯一
+  `skillCode`（下载再加精确 `version`）调用 SC。
+- SC 当前没有 Team Skill 精确详情接口；若 Adapter 从分页 Team Skill 列表实现
+  `get_team_skill`，必须完整翻页或使用等价权威能力后才能判定不存在，禁止只查首页。
 - Local/Fake Gateway 与 Corp/Prod Gateway 必须通过同一 conformance tests；
   Community 实现明确返回 unavailable。
 - 一个 Publication Attempt 对 SC publish POST 最多调用一次。SC 返回受理成功时已经

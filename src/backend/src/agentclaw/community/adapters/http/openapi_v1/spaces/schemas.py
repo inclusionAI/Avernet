@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_serializer
 
@@ -62,6 +63,126 @@ class SkillRole(_DocumentedEnum):
         "OWNER": "Owns the Skill and may manage its edit grants.",
         "MANAGER": "May edit the Skill without managing its ownership.",
     }
+
+
+class SkillGrantItem(BaseModel):
+    """One active OWNER or MANAGER Grant."""
+
+    user_id: str = Field(description="User holding this active Skill Grant.")
+    role: SkillRole = Field(description="Role held by the user for this Skill.")
+
+
+class SkillActorPermissions(BaseModel):
+    """ACL/Grant qualifications; current command state is checked separately."""
+
+    edit_draft: bool = Field(description="Actor may request a Draft edit command.")
+    publish_draft: bool = Field(description="Actor may request Draft publication.")
+    delete_draft: bool = Field(description="Actor may request Draft deletion.")
+    create_upgrade_draft: bool = Field(
+        description="Actor may request creation of an upgrade Draft."
+    )
+    retire_skill: bool = Field(description="Actor may request Skill retirement.")
+    manage_grants: bool = Field(description="Actor may add or remove MANAGER Grants.")
+    transfer_owner: bool = Field(description="Actor may request OWNER transfer.")
+    request_edit_access: bool = Field(
+        description="Actor may apply for a MANAGER Grant in a Team Space."
+    )
+    takeover_lease: bool = Field(
+        description="Actor may request takeover of the current Draft edit Lease."
+    )
+
+
+class SkillGrantActor(BaseModel):
+    """Current caller's Grant role and command qualifications."""
+
+    skill_role: SkillRole | None = Field(
+        default=None, description="Current active Skill Grant role, or null."
+    )
+    permissions: SkillActorPermissions = Field(
+        description="ACL/Grant qualifications independent of current command state."
+    )
+
+
+class SpaceSkillGrants(BaseModel):
+    """Complete active Grant set for one Space Skill."""
+
+    owner: SkillGrantItem = Field(description="The unique active OWNER Grant.")
+    managers: list[SkillGrantItem] = Field(
+        description="All active MANAGER Grants, ordered by user identifier."
+    )
+    actor: SkillGrantActor = Field(description="Current caller role and permissions.")
+
+
+class DraftEditLeaseState(_DocumentedEnum):
+    """Actor-relative state of a Space Skill Draft's permanent edit Lease."""
+
+    NOT_REQUIRED = "NOT_REQUIRED"
+    FREE = "FREE"
+    HELD_BY_ME = "HELD_BY_ME"
+    HELD_BY_OTHER = "HELD_BY_OTHER"
+
+    __descriptions__ = {
+        "NOT_REQUIRED": "Personal Space Drafts do not use an edit Lease.",
+        "FREE": "No editor currently holds the Team Draft Lease.",
+        "HELD_BY_ME": "The current actor holds the Team Draft Lease.",
+        "HELD_BY_OTHER": "Another OWNER or MANAGER holds the Team Draft Lease.",
+    }
+
+
+class DraftEditLeaseResource(BaseModel):
+    """Live Lease resource; only its current holder receives the fencing token."""
+
+    required: bool = Field(description="Whether this Space Draft requires a Lease.")
+    state: DraftEditLeaseState = Field(description="Actor-relative Lease state.")
+    holder_user_id: str | None = Field(
+        default=None, description="Current holder identifier, or null when unheld."
+    )
+    fencing_token: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Current fencing token only when the caller holds the Lease; list "
+            "summaries and other actors never receive it."
+        ),
+    )
+
+
+class TransferSkillOwnerRequest(BaseModel):
+    """Atomically move the unique OWNER slot to an active Space Member."""
+
+    new_owner_user_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="Active Space Member who will receive the unique OWNER Grant.",
+    )
+    reason: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1024,
+        description="Required audit reason when a Space administrator transfers ownership.",
+    )
+    retain_previous_owner_as_manager: bool = Field(
+        default=False,
+        description="Whether to retain the previous OWNER as an active MANAGER.",
+    )
+
+
+class CreateSkillEditorRequest(BaseModel):
+    """Request Manager edit access to a Team Space Skill."""
+
+    reason: str = Field(
+        min_length=1,
+        max_length=512,
+        description="Reason for requesting Skill edit access.",
+    )
+
+
+class SkillEditorRequestCreated(BaseModel):
+    """Pending Work Order created for a Skill editor application."""
+
+    work_order_id: int = Field(description="Created Work Order identifier.")
+    work_order_no: str = Field(description="Human-readable Work Order number.")
+    status: Literal["PENDING"] = Field(description="Initial Work Order status.")
 
 
 class SpaceJoinStatus(_DocumentedEnum):
@@ -211,6 +332,19 @@ class SpaceMemberItem(_UtcResponseModel):
     )
 
 
+class DraftEditLeaseSummary(BaseModel):
+    """List-card Lease state; fencing tokens only exist on the live resource."""
+
+    required: bool = Field(description="Whether this Space Draft requires a Lease.")
+    state: DraftEditLeaseState = Field(description="Actor-relative Lease state.")
+    holder_user_id: str | None = Field(
+        default=None, description="Current holder identifier, or null when unheld."
+    )
+    holder_display_name: str | None = Field(
+        default=None, description="Current holder display name, when available."
+    )
+
+
 class SpaceSkillItem(_UtcResponseModel):
     """Skill card data owned by one Space."""
 
@@ -229,19 +363,12 @@ class SpaceSkillItem(_UtcResponseModel):
     space_type: SpaceType = Field(
         description="Whether the Skill belongs to a personal or team Space."
     )
-    current_user_skill_role: SkillRole | None = Field(
+    actor: SkillGrantActor = Field(
+        description="Current caller's Grant role and ACL/Grant qualifications."
+    )
+    lease_summary: DraftEditLeaseSummary | None = Field(
         default=None,
-        description="Current user's active Skill grant, or null when ungranted.",
-    )
-    can_edit: bool = Field(description="Whether the current user may edit this Skill.")
-    can_grant: bool = Field(
-        description="Whether the current user may grant team Skill edit access."
-    )
-    can_apply_edit: bool = Field(
-        description=(
-            "Whether the current user is eligible to apply for team Skill edit "
-            "access; this does not represent a pending application state."
-        )
+        description="List-only Lease state without a fencing token; null when no Draft exists.",
     )
     gmt_created: datetime = Field(
         description="UTC time when the Skill was created.",

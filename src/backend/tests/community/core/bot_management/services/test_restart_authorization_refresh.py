@@ -1,11 +1,9 @@
 """Unit tests for AICoding restart authorization refresh.
 
-``refresh_restart_authorization`` now owns both the opt-in decision and the
-AICoding-specific side effects:
+The restart path is best-effort and engine-owned:
   * refresh MCP scope;
-  * project MCP config / mcporter state to runtime;
-  * resync ~/.claude/skills symlinks via SkillSetService.sync_runtime().
-All side effects are best-effort/fire-and-forget.
+  * project MCP details + allow-list to runtime;
+  * resync ~/.claude/skills symlinks.
 """
 
 from __future__ import annotations
@@ -16,6 +14,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.aicoding.restart_authorization_listener import (
+    AicodingRestartAuthorizationBaasPublishListener,
+)
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AicodingProvisioningStrategy,
 )
@@ -25,13 +26,12 @@ from agentclaw.community.core.bot_management.engines.default import (
 from agentclaw.community.core.bot_management.engines.provisioning import (
     BotProvisioningContext,
 )
-from agentclaw.community.core.bot_management.engines.aicoding.restart_authorization_listener import (
-    AicodingRestartAuthorizationBaasPublishListener,
-)
 from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
 from agentclaw.community.core.events.types import BaasPublishCompletedEvent
 
-_AICODING_THREADING = "agentclaw.community.core.bot_management.engines.aicoding.strategy.threading"
+_AICODING_THREADING = (
+    "agentclaw.community.core.bot_management.engines.aicoding.strategy.threading"
+)
 
 
 class _InlineThread:
@@ -60,32 +60,23 @@ def _bot(entity_id: str = "ent-1", entity_type: str = "staff") -> dict:
         "entity_type": entity_type,
         "bot_name": "my-bot",
         "bot_desc": "d",
+        "id": 42,
+        "owner_id": "owner-1",
+        "binding_id": 7,
+        "bot_type": "personal",
+        "active_engine": "claude_code",
+        "template_type": "architect",
     }
 
 
-@pytest.mark.parametrize(
-    "extra_configs",
-    [
-        None,
-        {},
-        {"unrelated_key": True},
-        {"confirmed_template_update": False},
-        {"confirmed_template_update": None},
-        "confirmed_template_update=true",
-        ["confirmed"],
-        True,
-    ],
-)
-def test_aicoding_refresh_is_noop_without_opt_in(extra_configs) -> None:
+def test_aicoding_refresh_is_noop_without_opt_in() -> None:
     strategy = AicodingProvisioningStrategy("claude_code")
     mcp_sync = MagicMock()
     factory = MagicMock()
 
     assert (
         strategy.refresh_restart_authorization(
-            _ctx(), _bot(), extra_configs,
-            mcp_sync=mcp_sync,
-            skill_set_factory=factory,
+            _ctx(), _bot(), None, mcp_sync=mcp_sync, skill_set_factory=factory
         )
         is False
     )
@@ -94,45 +85,38 @@ def test_aicoding_refresh_is_noop_without_opt_in(extra_configs) -> None:
 
 
 @pytest.mark.parametrize("flag", [True, 1, "yes"], ids=["true", "one", "truthy-str"])
-def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
+def test_aicoding_refresh_projects_mcp_runtime_and_skills(flag) -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
     factory = MagicMock()
     skill_set_service = MagicMock()
     skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a", "mcp-b"]
-    skill_set_service.sync_mcp_projection = AsyncMock(return_value=True)
+    skill_set_service.project_mcps = AsyncMock(return_value=True)
     skill_set_service.sync_runtime.return_value = True
     factory.create.return_value = skill_set_service
+    template_service = MagicMock()
+    template_service.get_template_config.return_value = {
+        "template_version_id": 101,
+        "_aicoding_restart": {"resync_authorization": True},
+    }
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
         assert strategy.refresh_restart_authorization(
             _ctx(active_engine="aicoding"),
-            _bot(entity_id="ent-9", entity_type="staff"),
+            _bot(entity_id="ent-9"),
             {"confirmed_template_update": flag},
             mcp_sync=mcp_sync,
             skill_set_factory=factory,
+            template_service=template_service,
         ) is True
 
-    mcp_sync.refresh_mcp_scope.assert_awaited_once()
-    scope_kwargs = mcp_sync.refresh_mcp_scope.await_args.kwargs
-    assert scope_kwargs["user_id"] == "ent-9"
-    assert scope_kwargs["entity_id"] == "ent-9"
-    assert scope_kwargs["bot_id"] == "bot-1"
-    assert scope_kwargs["entity_type"] == "staff"
-    assert scope_kwargs["engine_type"] == "aicoding"
-    assert "extra_cli_items" not in scope_kwargs
-    skill_set_service.get_bot_mcp_codes.assert_called_once_with(
+    mcp_sync.refresh_mcp_scope.assert_awaited_once_with(
+        user_id="ent-9",
         entity_id="ent-9",
         bot_id="bot-1",
-        user_id="ent-9",
         entity_type="staff",
         engine_type="aicoding",
-    )
-    skill_set_service.sync_mcp_projection.assert_awaited_once_with(
-        claimed=frozenset({"mcp-a", "mcp-b"}),
-        released=frozenset(),
-        declared={"mcp-a", "mcp-b"},
     )
     factory.create.assert_called_once_with(
         user_id="ent-9",
@@ -141,32 +125,25 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
         entity_type="staff",
         engine_type="aicoding",
     )
+    skill_set_service.get_bot_mcp_codes.assert_called_once_with(
+        entity_id="ent-9",
+        bot_id="bot-1",
+        user_id="ent-9",
+        entity_type="staff",
+        engine_type="aicoding",
+    )
+    skill_set_service.project_mcps.assert_awaited_once_with(
+        claimed=frozenset({"mcp-a", "mcp-b"}),
+        released=frozenset(),
+        declared={"mcp-a", "mcp-b"},
+    )
     skill_set_service.sync_runtime.assert_called_once_with()
+    template_service.update_template.assert_called_once()
+    cleared = template_service.update_template.call_args.kwargs["template_config"]
+    assert "_aicoding_restart" not in cleared
 
 
-def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_mcp_error() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    mcp_sync = MagicMock()
-    mcp_sync.refresh_mcp_scope = AsyncMock(side_effect=RuntimeError("scope down"))
-    factory = MagicMock()
-    skill_set_service = MagicMock()
-    skill_set_service.sync_runtime.return_value = True
-    factory.create.return_value = skill_set_service
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            _ctx(active_engine="aicoding"),
-            _bot(),
-            {"confirmed_template_update": True},
-            mcp_sync=mcp_sync,
-            skill_set_factory=factory,
-        ) is True
-    factory.create.assert_called_once()
-    skill_set_service.sync_runtime.assert_called_once_with()
-
-
-
-def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
+def test_aicoding_refresh_keeps_runtime_working_when_scope_fails() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(
@@ -174,6 +151,43 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
     )
     factory = MagicMock()
     skill_set_service = MagicMock()
+    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
+    skill_set_service.project_mcps = AsyncMock(return_value=True)
+    skill_set_service.sync_runtime.return_value = True
+    factory.create.return_value = skill_set_service
+    template_service = MagicMock()
+    template_service.get_template_config.return_value = {
+        "template_version_id": 101,
+        "_aicoding_restart": {"resync_authorization": True},
+    }
+
+    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
+        assert strategy.refresh_restart_authorization(
+            _ctx(active_engine="aicoding"),
+            _bot(),
+            {"confirmed_template_update": True},
+            mcp_sync=mcp_sync,
+            skill_set_factory=factory,
+            template_service=template_service,
+        ) is True
+
+    skill_set_service.project_mcps.assert_awaited_once_with(
+        claimed=frozenset({"mcp-a"}),
+        released=frozenset(),
+        declared={"mcp-a"},
+    )
+    skill_set_service.sync_runtime.assert_called_once_with()
+    template_service.update_template.assert_not_called()
+
+
+def test_aicoding_refresh_still_runs_skill_sync_when_projection_fails() -> None:
+    strategy = AicodingProvisioningStrategy("aicoding")
+    mcp_sync = MagicMock()
+    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
+    factory = MagicMock()
+    skill_set_service = MagicMock()
+    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
+    skill_set_service.project_mcps = AsyncMock(return_value=False)
     skill_set_service.sync_runtime.return_value = True
     factory.create.return_value = skill_set_service
 
@@ -186,257 +200,27 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
             skill_set_factory=factory,
         ) is True
 
-    skill_set_service.sync_mcp_projection.assert_not_called()
-    skill_set_service.sync_runtime.assert_called_once_with()
-
-
-def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    mcp_sync = MagicMock()
-    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    factory = MagicMock()
-    skill_set_service = MagicMock()
-    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
-    skill_set_service.sync_mcp_projection = AsyncMock(return_value=False)
-    skill_set_service.sync_runtime.return_value = False
-    factory.create.return_value = skill_set_service
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            _ctx(active_engine="aicoding"),
-            _bot(),
-            {"confirmed_template_update": True},
-            mcp_sync=mcp_sync,
-            skill_set_factory=factory,
-        ) is True
-
-    skill_set_service.sync_mcp_projection.assert_awaited_once_with(
+    skill_set_service.project_mcps.assert_awaited_once_with(
         claimed=frozenset({"mcp-a"}),
         released=frozenset(),
         declared={"mcp-a"},
     )
     skill_set_service.sync_runtime.assert_called_once_with()
 
-
-def test_aicoding_refresh_does_not_retry_mcp_detail_when_runtime_not_ready() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    mcp_sync = MagicMock()
-    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    factory = MagicMock()
-    skill_set_service = MagicMock()
-    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
-    skill_set_service.sync_mcp_projection = AsyncMock(side_effect=[False, True])
-    skill_set_service.sync_runtime.return_value = True
-    factory.create.return_value = skill_set_service
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            _ctx(active_engine="aicoding"),
-            _bot(),
-            {"confirmed_template_update": True},
-            mcp_sync=mcp_sync,
-            skill_set_factory=factory,
-        ) is True
-
-    skill_set_service.sync_mcp_projection.assert_awaited_once_with(
-        claimed=frozenset({"mcp-a"}),
-        released=frozenset(),
-        declared={"mcp-a"},
-    )
-    skill_set_service.sync_runtime.assert_called_once_with()
-
-
-def test_aicoding_refresh_does_not_retry_mcp_detail_exception() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    mcp_sync = MagicMock()
-    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    factory = MagicMock()
-    skill_set_service = MagicMock()
-    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
-    skill_set_service.sync_mcp_projection = AsyncMock(side_effect=RuntimeError("projection down"))
-    skill_set_service.sync_runtime.return_value = True
-    factory.create.return_value = skill_set_service
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            _ctx(active_engine="aicoding"),
-            _bot(),
-            {"confirmed_template_update": True},
-            mcp_sync=mcp_sync,
-            skill_set_factory=factory,
-        ) is True
-
-    skill_set_service.sync_mcp_projection.assert_awaited_once_with(
-        claimed=frozenset({"mcp-a"}),
-        released=frozenset(),
-        declared={"mcp-a"},
-    )
-
-
-def test_aicoding_refresh_does_not_retry_skill_symlink_when_false() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    factory = MagicMock()
-    skill_set_service = MagicMock()
-    skill_set_service.sync_runtime.side_effect = [False, True]
-    factory.create.return_value = skill_set_service
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            _ctx(active_engine="aicoding"),
-            _bot(),
-            {"confirmed_template_update": True},
-            mcp_sync=None,
-            skill_set_factory=factory,
-        ) is True
-
-    skill_set_service.sync_runtime.assert_called_once_with()
-
-
-def test_aicoding_refresh_does_not_retry_skill_symlink_exception() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    factory = MagicMock()
-    skill_set_service = MagicMock()
-    skill_set_service.sync_runtime.side_effect = [
-        RuntimeError("BaaS API error: NO_ACTIVE_DEVICES"),
-        True,
-    ]
-    factory.create.return_value = skill_set_service
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            _ctx(active_engine="aicoding"),
-            _bot(),
-            {"confirmed_template_update": True},
-            mcp_sync=None,
-            skill_set_factory=factory,
-        ) is True
-
-    skill_set_service.sync_runtime.assert_called_once_with()
-
-
-def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    mcp_sync = MagicMock()
-    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    factory = MagicMock()
-    skill_set_service = MagicMock()
-    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
-    skill_set_service.sync_mcp_projection = AsyncMock(side_effect=RuntimeError("projection down"))
-    skill_set_service.sync_runtime.side_effect = RuntimeError("skill down")
-    factory.create.return_value = skill_set_service
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            _ctx(active_engine="aicoding"),
-            _bot(),
-            {"confirmed_template_update": True},
-            mcp_sync=mcp_sync,
-            skill_set_factory=factory,
-        ) is True
-
-    skill_set_service.sync_mcp_projection.assert_awaited_once_with(
-        claimed=frozenset({"mcp-a"}),
-        released=frozenset(),
-        declared={"mcp-a"},
-    )
-    skill_set_service.sync_runtime.assert_called_once_with()
-
-
-def test_aicoding_refresh_swallows_skill_sync_exception() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    factory = MagicMock()
-    factory.create.side_effect = RuntimeError("skill unavailable")
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            _ctx(active_engine="aicoding"),
-            _bot(),
-            {"confirmed_template_update": True},
-            mcp_sync=None,
-            skill_set_factory=factory,
-        ) is True
-
-    factory.create.assert_called_once()
 
 def test_default_strategy_always_returns_false() -> None:
     strategy = DefaultProvisioningStrategy("openclaw")
     assert (
         strategy.refresh_restart_authorization(
-            _ctx(), _bot(), {"confirmed_template_update": True},
+            _ctx(),
+            _bot(),
+            {"confirmed_template_update": True},
             mcp_sync=MagicMock(),
             skill_set_factory=MagicMock(),
+            template_service=MagicMock(),
         )
         is False
     )
-    assert strategy.refresh_restart_authorization(_ctx(), _bot(), None) is False
-
-
-def test_aicoding_refresh_clears_persisted_marker_after_confirmed_extra_success() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    stored_template_config = {
-        "template_version_id": 101,
-        "_aicoding_restart": {
-            "resync_authorization": True,
-            "template_version_id": 101,
-        },
-    }
-    mcp_sync = MagicMock()
-    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    template_service = MagicMock()
-    template_service.get_template_config.return_value = stored_template_config
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            _ctx(active_engine="aicoding"),
-            _bot(),
-            {"confirmed_template_update": True},
-            mcp_sync=mcp_sync,
-            skill_set_factory=None,
-            template_service=template_service,
-        ) is True
-
-    template_service.update_template.assert_called_once()
-    cleared = template_service.update_template.call_args.kwargs["template_config"]
-    assert "_aicoding_restart" not in cleared
-    assert cleared["template_version_id"] == 101
-
-
-def test_aicoding_refresh_uses_persisted_template_marker_and_clears_after_success() -> None:
-    strategy = AicodingProvisioningStrategy("aicoding")
-    template_config = {
-        "template_version_id": 101,
-        "_aicoding_restart": {
-            "resync_authorization": True,
-            "template_version_id": 101,
-        },
-    }
-    ctx = BotProvisioningContext(
-        bot_id="bot-1",
-        owner_id="owner-1",
-        bot_type="personal",
-        active_engine="aicoding",
-        template_type="architect",
-        template_config=template_config,
-    )
-    mcp_sync = MagicMock()
-    mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    template_service = MagicMock()
-    template_service.get_template_config.return_value = template_config
-
-    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
-        assert strategy.refresh_restart_authorization(
-            ctx,
-            _bot(),
-            None,
-            mcp_sync=mcp_sync,
-            skill_set_factory=None,
-            template_service=template_service,
-        ) is True
-
-    template_service.update_template.assert_called_once()
-    cleared = template_service.update_template.call_args.kwargs["template_config"]
-    assert "_aicoding_restart" not in cleared
-    assert cleared["template_version_id"] == 101
 
 
 def test_baas_restart_publish_listener_dispatches_strategy_after_restart_event() -> None:

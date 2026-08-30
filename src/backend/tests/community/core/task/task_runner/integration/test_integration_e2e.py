@@ -5,7 +5,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.integration import build_integration
 
 

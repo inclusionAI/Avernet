@@ -54,6 +54,7 @@
       "arca_template_id_pre": "ARCA-TEMPLATE-000000001403860d",
       "deploy_runtime": "managed",
       "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
+      "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
@@ -241,6 +242,7 @@
       "default_ttl_minutes": 1440,
       "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
       "desktop_ttl_minutes": 0,
+      "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
@@ -358,6 +360,9 @@
       "scan_interval_hours": 1,
       "scan_interval_minutes": 0,
       "storage_dir": "./data/skills_scan"
+    },
+    "task_queue": {
+      "app": "agentclaw"
     },
     "task_queue_worker": {
       "batch_size": 10,

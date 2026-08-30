@@ -5,6 +5,7 @@ from injector import Module, provider, singleton
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
 
@@ -23,6 +24,16 @@ class TestSkillCenterClientModule(Module):
 
         logger.info("SkillCenterClient: LocalSkillCenterClient (test)")
         return LocalSkillCenterClient()
+
+    @singleton
+    @provider
+    def skill_center_gateway(self) -> SkillCenterGateway:
+        from agentclaw.community.plugins.local.skill_center_gateway import (
+            LocalSkillCenterGateway,
+        )
+
+        logger.info("SkillCenterGateway: LocalSkillCenterGateway (test)")
+        return LocalSkillCenterGateway()
 
     @singleton
     @provider

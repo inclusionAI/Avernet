@@ -16,6 +16,7 @@ use bcs_config::resolve_env_str as resolve_env;
 use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotSearchCandidateQuery, BotSearchFriendshipFilter,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotDynamicStatus, BotMetricCount,
@@ -2019,7 +2020,130 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
         Ok((page, total))
     }
 
+    async fn search_control_plane_candidates(
+        &self,
+        query: BotSearchCandidateQuery,
+    ) -> ServiceResult<(Vec<BotCandidateReadRecord>, u64)> {
+        let search_text = query
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                query
+                    .name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            })
+            .map(str::to_lowercase);
+        let visibility_filter = match query.visibility_filter.as_ref() {
+            Some(values) if values.is_empty() => return Ok((Vec::new(), 0)),
+            Some(values) => Some(
+                values
+                    .iter()
+                    .map(|value| value.trim().to_lowercase())
+                    .collect::<Vec<_>>(),
+            ),
+            None => None,
+        };
+        let user_visibility_filter = match query.user_visibility.as_ref() {
+            Some(values) if values.is_empty() => return Ok((Vec::new(), 0)),
+            Some(values) => Some(
+                values
+                    .iter()
+                    .map(|value| value.trim().to_lowercase())
+                    .collect::<Vec<_>>(),
+            ),
+            None => None,
+        };
+        let mut records = Vec::new();
+        for bot_id in self.bots.read().await.keys().cloned().collect::<Vec<_>>() {
+            let Some(bot) = self.get_control_plane(&bot_id, &query.env).await? else {
+                continue;
+            };
+            if bot.bot_id == query.acting_bot_id || bot.kind != bcs_service_api::ActorKind::Bot {
+                continue;
+            }
+            if search_text.as_ref().is_some_and(|needle| {
+                !bot.name.to_lowercase().contains(needle)
+                    && !bot.descriptor.summary.to_lowercase().contains(needle)
+                    && !bot.bot_id.to_lowercase().contains(needle)
+            }) {
+                continue;
+            }
+            if let Some(values) = visibility_filter.as_ref() {
+                if !values.iter().any(|value| value == &bot.visibility) {
+                    continue;
+                }
+            } else {
+                match query.visibility {
+                    BotCandidateVisibility::Discovery => {
+                        if !matches!(bot.visibility.as_str(), "public" | "protected") {
+                            continue;
+                        }
+                    }
+                    BotCandidateVisibility::Collaboration => {
+                        let is_friend = query.friend_ids.contains(&bot.bot_id);
+                        if bot.visibility != "public" && !is_friend {
+                            continue;
+                        }
+                    }
+                }
+            }
+            if let Some(values) = user_visibility_filter.as_ref() {
+                let user_visibility = match bot.user_visibility {
+                    UserVisibility::Public => "public",
+                    UserVisibility::Protected => "protected",
+                    UserVisibility::Private => "private",
+                };
+                if !values.iter().any(|value| value == user_visibility) {
+                    continue;
+                }
+            }
+            let is_friend = query.friend_ids.contains(&bot.bot_id);
+            match query.friendship.unwrap_or_default() {
+                BotSearchFriendshipFilter::All => {}
+                BotSearchFriendshipFilter::Friends => {
+                    if !is_friend {
+                        continue;
+                    }
+                }
+                BotSearchFriendshipFilter::NonFriends => {
+                    if is_friend {
+                        continue;
+                    }
+                }
+            }
+            if let Some(want_tc) = query.tc_bot {
+                let is_tc = bot
+                    .created_by
+                    .as_deref()
+                    .is_some_and(|owner| bot.bot_id.rsplit_once(':').is_some_and(|(_, suffix)| suffix == owner));
+                if is_tc != want_tc {
+                    continue;
+                }
+            }
+            records.push(BotCandidateReadRecord { bot, is_friend });
+        }
+        records.sort_by(|left, right| {
+            right
+                .bot
+                .created_at
+                .cmp(&left.bot.created_at)
+                .then_with(|| left.bot.bot_id.cmp(&right.bot.bot_id))
+        });
+        let total = records.len() as u64;
+        let page = records
+            .into_iter()
+            .skip(query.offset as usize)
+            .take(query.limit as usize)
+            .collect();
+        Ok((page, total))
+    }
+
     async fn list_control_plane_by_creator(
+
         &self,
         query: BotControlPlaneOwnedQuery,
     ) -> ServiceResult<Vec<BotControlPlaneRecord>> {

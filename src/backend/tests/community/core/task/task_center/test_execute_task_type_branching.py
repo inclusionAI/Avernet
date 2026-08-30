@@ -22,7 +22,7 @@ from agentclaw.community.core.task.domain.requests import (
 )
 from agentclaw.community.core.task.task_center.engine import CoopGroupStart
 from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 class _SqliteDB:
@@ -92,7 +92,7 @@ def test_execute_workflow_persists_session_id():
     eng.trigger_single_bot_workflow = trig
     svc, node_repo, run_repo = _service(eng)
 
-    result = asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.WORKFLOW, workflow_id="wf", args=["1", "2"])))
+    result = asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.STATIC_SINGLE_WORKFLOW, workflow_id="wf", args=["1", "2"])))
     assert result.success is True and result.task_id == "t1"
     run = run_repo.get_latest("t1", "t1")
     assert run is not None and run.run_mode == "single_bot" and run.session_id == "wf-session-1"
@@ -116,7 +116,7 @@ def test_execute_yaml_persists_session_id_with_state_machine():
     svc, node_repo, run_repo = _service(eng)
 
     result = asyncio.new_event_loop().run_until_complete(
-        svc.execute(_request(TaskType.YAML, yaml="def: x", participant_bot_ids=["b2"])))
+        svc.execute(_request(TaskType.STATIC_GROUP_WORKFLOW, yaml="def: x", participant_bot_ids=["b2"])))
     assert result.success is True
     run = run_repo.get_latest("t1", "t1")
     assert run.run_mode == "coop_group" and run.session_id == "yaml-session-1" and run.assignee == "grp-1"
@@ -134,7 +134,7 @@ def test_execute_yaml_without_yaml_uses_manager_worker():
         return eng.group_start
     eng.start_coop_group = start
     svc, _, _ = _service(eng)
-    asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.YAML)))
+    asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.STATIC_GROUP_WORKFLOW)))
     assert ("yaml", "manager_worker") in eng.calls
 
 
@@ -166,7 +166,7 @@ def test_execute_yaml_forwards_participant_bindings_to_group():
         "editor": {"bot_ids": ["b3"], "source": "manual"},
     }
     result = asyncio.new_event_loop().run_until_complete(svc.execute(_request(
-        TaskType.YAML, yaml="def: x", participant_bot_ids=["b2", "b3"],
+        TaskType.STATIC_GROUP_WORKFLOW, yaml="def: x", participant_bot_ids=["b2", "b3"],
         participant_bindings=bindings)))
     assert result.success is True
     ep = captured["extend_props"]
@@ -191,7 +191,7 @@ def test_execute_yaml_group_kind_chat_without_yaml():
     _start_recording(eng)
     svc, _, _ = _service(eng)
     asyncio.new_event_loop().run_until_complete(
-        svc.execute(_request(TaskType.YAML, group_kind="chat")))
+        svc.execute(_request(TaskType.STATIC_GROUP_WORKFLOW, group_kind="chat")))
     assert ("yaml", "chat") in eng.calls
 
 
@@ -201,7 +201,7 @@ def test_execute_yaml_group_kind_explicit_manager_worker_without_yaml():
     _start_recording(eng)
     svc, _, _ = _service(eng)
     asyncio.new_event_loop().run_until_complete(
-        svc.execute(_request(TaskType.YAML, group_kind="manager_worker")))
+        svc.execute(_request(TaskType.STATIC_GROUP_WORKFLOW, group_kind="manager_worker")))
     assert ("yaml", "manager_worker") in eng.calls
 
 
@@ -210,7 +210,7 @@ def test_execute_yaml_group_kind_absent_without_yaml_still_manager_worker():
     eng = _FakeEngine(graph=None)
     _start_recording(eng)
     svc, _, _ = _service(eng)
-    asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.YAML)))
+    asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.STATIC_GROUP_WORKFLOW)))
     assert ("yaml", "manager_worker") in eng.calls
 
 
@@ -221,7 +221,7 @@ def test_execute_yaml_group_kind_state_machine_without_yaml_raises():
     svc, _, _ = _service(eng)
     with pytest.raises(ValueError):
         asyncio.new_event_loop().run_until_complete(
-            svc.execute(_request(TaskType.YAML, group_kind="state_machine")))
+            svc.execute(_request(TaskType.STATIC_GROUP_WORKFLOW, group_kind="state_machine")))
     assert not any(c[0] == "yaml" for c in eng.calls)   # 没建群
 
 
@@ -232,7 +232,7 @@ def test_execute_yaml_group_kind_unknown_raises():
     svc, _, _ = _service(eng)
     with pytest.raises(ValueError):
         asyncio.new_event_loop().run_until_complete(
-            svc.execute(_request(TaskType.YAML, group_kind="nonsense")))
+            svc.execute(_request(TaskType.STATIC_GROUP_WORKFLOW, group_kind="nonsense")))
 
 
 def test_execute_yaml_with_yaml_ignores_group_kind_chat():
@@ -245,5 +245,5 @@ def test_execute_yaml_with_yaml_ignores_group_kind_chat():
     eng.start_coop_group = start
     svc, _, _ = _service(eng)
     asyncio.new_event_loop().run_until_complete(
-        svc.execute(_request(TaskType.YAML, yaml="def: x", group_kind="chat")))
+        svc.execute(_request(TaskType.STATIC_GROUP_WORKFLOW, yaml="def: x", group_kind="chat")))
     assert ("yaml", "state_machine", "def: x") in eng.calls

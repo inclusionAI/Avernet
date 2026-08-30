@@ -37,11 +37,6 @@ class _RecordingReconciler:
         if self.error is not None:
             raise self.error
 
-    async def project_for_cleanup(self, **kwargs) -> None:
-        self.calls.append({"operation": "cleanup", **kwargs})
-        if self.error is not None:
-            raise self.error
-
 
 class _Consumer:
     @inject
@@ -114,18 +109,6 @@ async def test_non_skill_service_api_reaches_the_bound_implementation(world) -> 
 
     assert runtime.calls == [
         {"operation": "non_skill", "bot_id": "bot-1", "owner_id": "owner-1"}
-    ]
-
-
-@pytest.mark.asyncio
-async def test_cleanup_service_api_reaches_the_bound_implementation(world) -> None:
-    runtime = _RecordingReconciler()
-    consumer = _consumer(world, runtime)
-
-    await consumer._runtime.project_for_cleanup(bot_id="bot-1", owner_id="owner-1")
-
-    assert runtime.calls == [
-        {"operation": "cleanup", "bot_id": "bot-1", "owner_id": "owner-1"}
     ]
 
 

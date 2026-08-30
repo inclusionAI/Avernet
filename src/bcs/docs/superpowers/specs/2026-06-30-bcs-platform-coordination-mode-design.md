@@ -134,6 +134,7 @@ Manager：
 任务可以结束时，使用：
 `<mcporter_command> call <mcp_server>.bcs_task_complete summary="<最终总结>"`
 
+执行 `mcporter call` 后必须保留并回传完整原始输出；禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理，否则 BCS 无法识别 MCP 调用结果。
 不要直接调用原生发送工具来派发子任务。
 不要在普通回复中伪造工具结果。
 ```
@@ -145,6 +146,7 @@ Worker：
 收到 manager 派发的任务后，使用：
 `<mcporter_command> call <mcp_server>.bcs_send_task_message message="<结果、进展、问题或阻塞>"`
 
+执行 `mcporter call` 后必须保留并回传完整原始输出；禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理，否则 BCS 无法识别 MCP 调用结果。
 不要直接面向用户输出最终答案；最终汇总由 manager 完成。
 不要在普通回复中伪造工具结果。
 ```

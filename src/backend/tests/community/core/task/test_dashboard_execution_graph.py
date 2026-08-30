@@ -21,7 +21,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, TaskNodePatch, TaskInfo, TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TaskCallbackRecord
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 _EG = {"nodes": [{"id": "draft"}, {"id": "finalize"}], "edges": []}
 

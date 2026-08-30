@@ -21,6 +21,15 @@ from agentclaw.community.api.market_favorite_service import (
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
+from agentclaw.community.api.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestServiceProtocol,
+)
+from agentclaw.community.api.draft_edit_lease_service import (
+    DraftEditLeaseServiceProtocol,
+)
 from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
@@ -31,6 +40,7 @@ from agentclaw.community.core.market_favorites.models import (
 )
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceRole
+from agentclaw.community.core.work_orders.models import WorkOrderRecord, WorkOrderStatus
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -134,10 +144,26 @@ def _seed_space_skills(world) -> None:
                 "status": "DEVELOPING",
                 "draft_status": "EDITING",
                 "space_type": "TEAM",
-                "current_user_skill_role": "OWNER",
-                "can_edit": True,
-                "can_grant": True,
-                "can_apply_edit": False,
+                "actor": {
+                    "skill_role": "OWNER",
+                    "permissions": {
+                        "edit_draft": True,
+                        "publish_draft": True,
+                        "delete_draft": True,
+                        "create_upgrade_draft": True,
+                        "retire_skill": True,
+                        "manage_grants": True,
+                        "transfer_owner": True,
+                        "request_edit_access": False,
+                        "takeover_lease": True,
+                    },
+                },
+                "lease_summary": {
+                    "required": True,
+                    "state": "FREE",
+                    "holder_user_id": None,
+                    "holder_display_name": None,
+                },
                 "gmt_created": datetime(2026, 8, 20, 3, 30),
                 "gmt_modified": datetime(2026, 8, 20, 3, 40),
             }
@@ -160,6 +186,105 @@ def _seed_space_skill_error(world) -> None:
     )
 
 
+def _seed_space_skill_grants(world) -> None:
+    _enable_public_auth(world)
+
+    def _grants(owner_id: str = _USER_ID):
+        return {
+            "owner": {"user_id": owner_id, "role": "OWNER"},
+            "managers": [],
+            "actor": {
+                "skill_role": "OWNER" if owner_id == _USER_ID else None,
+                "permissions": {
+                    "edit_draft": owner_id == _USER_ID,
+                    "publish_draft": owner_id == _USER_ID,
+                    "delete_draft": owner_id == _USER_ID,
+                    "create_upgrade_draft": owner_id == _USER_ID,
+                    "retire_skill": owner_id == _USER_ID,
+                    "manage_grants": owner_id == _USER_ID,
+                    "transfer_owner": owner_id == _USER_ID,
+                    "request_edit_access": owner_id != _USER_ID,
+                    "takeover_lease": owner_id == _USER_ID,
+                },
+            },
+        }
+
+    bind_overrides(
+        world,
+        SpaceSkillGrantServiceProtocol,
+        {
+            "list_grants": lambda _self, **_kwargs: _grants(),
+            "add_manager": lambda _self, **kwargs: {
+                "user_id": kwargs["manager_user_id"],
+                "role": "MANAGER",
+            },
+            "remove_manager": lambda _self, **kwargs: {
+                "user_id": kwargs["manager_user_id"],
+                "role": "MANAGER",
+            },
+            "transfer_owner": lambda _self, **kwargs: _grants(
+                kwargs["new_owner_user_id"]
+            ),
+        },
+    )
+
+
+def _seed_space_skill_editor_request(world) -> None:
+    _enable_public_auth(world)
+
+    def _create_request(_self, **kwargs):
+        now = datetime(2026, 8, 26, 8, 0)
+        return WorkOrderRecord(
+            id=91,
+            work_order_no="WO-91",
+            biz_type="SKILL_COLLABORATOR",
+            biz_id=str(kwargs["skill_id"]),
+            applicant_user_id=kwargs["applicant_user_id"],
+            apply_reason=kwargs["reason"],
+            status=WorkOrderStatus.PENDING,
+            reviewer_user_id=None,
+            review_remark=None,
+            reviewed_at=None,
+            env="test",
+            gmt_created=now,
+            gmt_modified=now,
+        )
+
+    bind_overrides(
+        world,
+        SpaceSkillEditorRequestServiceProtocol,
+        {"create_request": _create_request},
+    )
+
+
+def _seed_draft_edit_lease(world) -> None:
+    _enable_public_auth(world)
+
+    def _held(token: int):
+        return {
+            "required": True,
+            "state": "HELD_BY_ME",
+            "holder_user_id": _USER_ID,
+            "fencing_token": token,
+        }
+
+    bind_overrides(
+        world,
+        DraftEditLeaseServiceProtocol,
+        {
+            "get_lease": lambda _self, **_kwargs: _held(7),
+            "acquire": lambda _self, **_kwargs: _held(8),
+            "release": lambda _self, **_kwargs: {
+                "required": True,
+                "state": "FREE",
+                "holder_user_id": None,
+                "fencing_token": None,
+            },
+            "takeover": lambda _self, **_kwargs: _held(9),
+        },
+    )
+
+
 def _mismatched_user(path_params: dict | None = None, json_body: dict | None = None):
     """The uniform error case: naming someone other than the caller is a 403."""
     return CaseInput(
@@ -168,6 +293,314 @@ def _mismatched_user(path_params: dict | None = None, json_body: dict | None = N
         json_body=json_body,
         headers=_principal_headers(),
     )
+
+
+# ── Space Skill Grant management ─────────────────────────────────────────────
+
+
+# ── Draft Edit Lease management ──────────────────────────────────────────────
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="happy",
+    seed=_seed_draft_edit_lease,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"state": "HELD_BY_ME", "fencing_token": 7}},
+    ),
+)
+def get_draft_edit_lease_happy():
+    """The current holder can re-read the live fencing token."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user({"space_id": 1, "skill_id": 9}),
+    expect=ExpectError(status=403),
+)
+def get_draft_edit_lease_wrong_user():
+    """A mismatched explicit actor is refused."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="happy",
+    seed=_seed_draft_edit_lease,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"state": "HELD_BY_ME", "fencing_token": 8}},
+    ),
+)
+def acquire_draft_edit_lease_happy():
+    """Acquire returns the newly generated token."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user({"space_id": 1, "skill_id": 9}),
+    expect=ExpectError(status=403),
+)
+def acquire_draft_edit_lease_wrong_user():
+    """A mismatched actor cannot acquire."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="happy",
+    seed=_seed_draft_edit_lease,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID, "fencing_token": 7},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200, json_contains={"data": {"state": "FREE"}}
+    ),
+)
+def release_draft_edit_lease_happy():
+    """Release consumes the exact current fencing token."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": "someone-else", "fencing_token": 7},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectError(status=403),
+)
+def release_draft_edit_lease_wrong_user():
+    """A mismatched actor is refused before token validation."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover",
+    scenario="happy",
+    seed=_seed_draft_edit_lease,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"state": "HELD_BY_ME", "fencing_token": 9}},
+    ),
+)
+def takeover_draft_edit_lease_happy():
+    """Takeover returns a new fencing token."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user({"space_id": 1, "skill_id": 9}),
+    expect=ExpectError(status=403),
+)
+def takeover_draft_edit_lease_wrong_user():
+    """A mismatched actor cannot take over."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests",
+    scenario="happy",
+    seed=_seed_space_skill_editor_request,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+        json_body={"reason": "maintain together"},
+    ),
+    expect=ExpectSuccess(
+        status=201,
+        json_contains={"data": {"work_order_id": 91, "status": "PENDING"}},
+    ),
+)
+def create_space_skill_editor_request_happy():
+    """An eligible member receives the pending Work Order identity."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        {"space_id": 1, "skill_id": 9},
+        {"reason": "maintain together"},
+    ),
+    expect=ExpectError(status=403),
+)
+def create_space_skill_editor_request_wrong_user():
+    """A mismatched actor is refused before Skill policy executes."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants",
+    scenario="happy",
+    seed=_seed_space_skill_grants,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"owner": {"user_id": _USER_ID}}},
+    ),
+)
+def list_space_skill_grants_happy():
+    """An active Space member receives the current Grant set."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user({"space_id": 1, "skill_id": 9}),
+    expect=ExpectError(status=403),
+)
+def list_space_skill_grants_wrong_user():
+    """The explicit acting user remains bound to the verified principal."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    scenario="happy",
+    seed=_seed_space_skill_grants,
+    input=CaseInput(
+        path_params={
+            "space_id": 1,
+            "skill_id": 9,
+            "manager_user_id": _MEMBER_ID,
+        },
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"user_id": _MEMBER_ID, "role": "MANAGER"}},
+    ),
+)
+def add_space_skill_manager_happy():
+    """The Owner command returns the resulting MANAGER Grant."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        {"space_id": 1, "skill_id": 9, "manager_user_id": _MEMBER_ID}
+    ),
+    expect=ExpectError(status=403),
+)
+def add_space_skill_manager_wrong_user():
+    """A mismatched actor is refused before Grant policy executes."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    scenario="happy",
+    seed=_seed_space_skill_grants,
+    input=CaseInput(
+        path_params={
+            "space_id": 1,
+            "skill_id": 9,
+            "manager_user_id": _MEMBER_ID,
+        },
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"user_id": _MEMBER_ID, "role": "MANAGER"}},
+    ),
+)
+def remove_space_skill_manager_happy():
+    """An idempotent removal returns the addressed MANAGER Grant identity."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        {"space_id": 1, "skill_id": 9, "manager_user_id": _MEMBER_ID}
+    ),
+    expect=ExpectError(status=403),
+)
+def remove_space_skill_manager_wrong_user():
+    """A mismatched actor cannot remove a Grant."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer",
+    scenario="happy",
+    seed=_seed_space_skill_grants,
+    input=CaseInput(
+        path_params={"space_id": 1, "skill_id": 9},
+        query_params={"user_id": _USER_ID},
+        headers=_principal_headers(),
+        json_body={"new_owner_user_id": _MEMBER_ID},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"owner": {"user_id": _MEMBER_ID}}},
+    ),
+)
+def transfer_space_skill_owner_happy():
+    """The transfer response identifies the new unique Owner."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer",
+    scenario="wrong_user",
+    seed=_enable_public_auth,
+    input=_mismatched_user(
+        {"space_id": 1, "skill_id": 9},
+        {"new_owner_user_id": _MEMBER_ID},
+    ),
+    expect=ExpectError(status=403),
+)
+def transfer_space_skill_owner_wrong_user():
+    """A mismatched actor cannot transfer ownership."""
 
 
 # ── GET /openapi/v1/bots/spaces/{space_id}/skills ────────────────────────────────

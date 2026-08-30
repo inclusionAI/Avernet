@@ -36,7 +36,7 @@ src/backend/src/agentclaw/community/
 ├── core/repository/implementations/task/
 │   ├── task_graph_repository.py
 │   └── task_action_log_repository.py
-├── core/task/task_graph/task_graph_service.py
+├── core/task/task_context/task_graph_service.py
 ├── core/task/task_center/task_service.py
 ├── core/task/task_runner/callback_adapter.py
 ├── core/task/task_harness/harness.py

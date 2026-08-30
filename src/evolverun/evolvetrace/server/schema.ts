@@ -70,6 +70,21 @@ export async function initSchema(db: IDatabase): Promise<void> {
       }
     }
 
+    // MySQL: skip DDL if core tables already exist (common in managed RDS where DDL is applied manually).
+    if (db.dbType === "mysql") {
+      try {
+        const existing = await tx.query<{ cnt: number }>(
+          "SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'bot_workflow_permissions'"
+        );
+        if (existing[0]?.cnt > 0) {
+          console.log("[evolvetrace] MySQL core tables already exist; skipping schema init");
+          return;
+        }
+      } catch (err) {
+        console.warn("[evolvetrace] Could not check existing MySQL tables; continuing with schema init:", err instanceof Error ? err.message : String(err));
+      }
+    }
+
     console.log(`[evolvetrace] Applying schema from ${fileName} (target version ${SCHEMA_VERSION})`);
     // Execute the whole SQL file at once. All statements use IF NOT EXISTS,
     // so re-applying on an existing database is safe — it will only create missing tables.

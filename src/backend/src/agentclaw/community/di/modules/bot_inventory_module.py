@@ -14,11 +14,19 @@ from agentclaw.community.adapters.bot_space_context import (
 from agentclaw.community.core.bot_inventory.adapters.service_lifecycle import (
     ServiceLifecycleView,
 )
+from agentclaw.community.core.bot_inventory.adapters.service_edit_lock import (
+    ServiceEditLockView,
+)
+from agentclaw.community.core.bot_inventory.adapters.template_page import (
+    TemplateServiceInventoryTemplatePort,
+)
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryAccessPort,
     BotInventoryBotPort,
+    BotInventoryTemplatePort,
     BusinessSpaceContextProtocol,
     DesktopBotInventoryPort,
+    ServiceEditLockPort,
     ServiceLifecyclePort,
 )
 from agentclaw.community.core.bot_inventory.services.bot_inventory_service import (
@@ -31,6 +39,9 @@ from agentclaw.community.core.bot_inventory.services.local_bot_workflow import (
     LocalBotWorkflowService,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.template_service import (
+    TemplateService,
+)
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
@@ -39,6 +50,10 @@ from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
 )
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotCollabLockRepositoryProtocol,
+    CollaboratorRepositoryProtocol,
 )
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -73,6 +88,16 @@ class BotInventoryModule(Module):
     @singleton
     @provider
     @inject
+    def service_edit_lock_view(
+        self,
+        collaborator_repo: CollaboratorRepositoryProtocol,
+        lock_repo: BotCollabLockRepositoryProtocol,
+    ) -> ServiceEditLockPort:
+        return ServiceEditLockView(collaborator_repo, lock_repo)
+
+    @singleton
+    @provider
+    @inject
     def inventory_bot_port(self, service: BotService) -> BotInventoryBotPort:
         return service
 
@@ -95,6 +120,14 @@ class BotInventoryModule(Module):
     @singleton
     @provider
     @inject
+    def inventory_template_port(
+        self, template_service: TemplateService
+    ) -> BotInventoryTemplatePort:
+        return TemplateServiceInventoryTemplatePort(template_service)
+
+    @singleton
+    @provider
+    @inject
     def bot_inventory_service(
         self,
         bot_service: BotInventoryBotPort,
@@ -102,6 +135,8 @@ class BotInventoryModule(Module):
         access_service: BotInventoryAccessPort,
         business_space: BusinessSpaceContextProtocol,
         lifecycle_view: BotLifecycleView,
+        edit_lock_view: ServiceEditLockPort,
+        template_port: BotInventoryTemplatePort,
     ) -> BotInventoryService:
         return BotInventoryService(
             bot_service=bot_service,
@@ -109,6 +144,8 @@ class BotInventoryModule(Module):
             access_service=access_service,
             business_space=business_space,
             lifecycle_view=lifecycle_view,
+            edit_lock_view=edit_lock_view,
+            template_port=template_port,
         )
 
     @singleton

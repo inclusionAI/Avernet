@@ -100,13 +100,13 @@ done
 if [ -z "$DOCKERFILE" ]; then
     echo "error: missing <dockerfile> argument" >&2
     echo "usage: docker/build-image.sh <dockerfile|service> [--image NAME] [--tag T] [--push] [--build-arg K=V] [--no-cache]
-    services: bcs, bcn, backend, baas, api-gateway, node-fe, bcsfuse" >&2
+    services: bcs, bcn, backend, baas, api-gateway, node-fe, bcsfuse, evolvetrace" >&2
     exit 2
 fi
 
 # --- Service/env-style shortcut (backward compatibility with build_image.sh)
 # Allows: DOCKER_REGISTRY=... DOCKER_TAG=... ./docker/build-image.sh bcsfuse
-# Supported services: bcs/bcn, backend, baas, api-gateway, node-fe, bcsfuse
+# Supported services: bcs/bcn, backend, baas, api-gateway, node-fe, bcsfuse, evolvetrace
 _resolve_service() {
     case "$1" in
         bcs|bcn)
@@ -120,7 +120,10 @@ _resolve_service() {
         node-fe)
             echo "docker/node-fe.Dockerfile node-fe" ;;
         bcsfuse)
-            echo "docker/bcsfuse.Dockerfile bcsfuse" ;;
+            echo "docker/services/bcsfuse.dockerfile bcsfuse" ;;
+        evolvetrace)
+            echo "docker/services/evolvetrace.dockerfile evolvetrace" ;;
+
         *)
             echo "" ;;
     esac

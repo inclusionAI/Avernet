@@ -1,0 +1,23 @@
+// Bot 工坊领域类型统一定义在 Domain 层；这里保留 Service 侧兼容出口。
+export type {
+  AvernetBotCreateRequest,
+  BotAction,
+  BotActionAvailability,
+  BotCompleteness,
+  BotCreateAuthorization,
+  BotCreateAuthorizationPollResult,
+  BotCreateInput,
+  BotCreateResult,
+  BotCreateScenario,
+  BotCreateSpace,
+  BotDeployment,
+  BotDomain,
+  BotHarnessContext,
+  BotLifecycle,
+  BotListQuery,
+  BotListResult,
+  BotLock,
+  BotOwnership,
+  BotRuntimeDomain,
+  BotServiceMode,
+} from '@/domain/botWorkshop';

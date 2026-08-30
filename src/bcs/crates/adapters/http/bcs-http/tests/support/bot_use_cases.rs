@@ -117,6 +117,7 @@ impl BotQueryService for RecordingBotQueryService {
     }
 }
 
+
 /// Recording bot management service for HTTP adapter contract tests.
 pub struct RecordingBotManagementService {
     pub connect_commands: Mutex<Vec<BotConnectCommand>>,

@@ -221,15 +221,41 @@ class TestBaasServiceDelegates:
 
 
 @pytest.mark.unit
-class TestAckComposerIsUnimplemented:
-    @pytest.mark.parametrize("method", _COMPOSER_METHODS)
-    def test_every_method_raises_with_a_usable_message(self, method):
-        """Not ``pass``, and not managed defaults. A composer that guessed would
-        produce bots that start and do not work on a runtime nobody has tested;
-        raising makes the gap visible at the first create instead."""
-        with pytest.raises(NotImplementedError) as exc:
-            getattr(AckDeployConfigComposer(), method)(_CTX)
+class TestAckComposer:
+    def test_build_start_command_uses_engine_bot_id_and_owner_from_context(self):
+        """The start command is a single ``nohup`` that carries the engine,
+        bot_id and owner_id from the context — not the managed image's
+        four-step chain."""
+        cmd = AckDeployConfigComposer().build_start_command(_CTX)
 
-        message = str(exc.value)
-        assert method in message
-        assert "baas.deploy_runtime" in message
+        assert "start_service.sh" in cmd
+        assert "--engine openclaw" in cmd
+        assert "--bot_id b1" in cmd
+        assert "--owner_id owner1" in cmd
+
+    def test_build_start_command_keeps_token_and_client_id_as_placeholders(self):
+        """``{token}`` and ``{client_id}`` stay as literal placeholders for
+        BaaS to substitute at dispatch — the backend cannot know them at
+        compose time."""
+        cmd = AckDeployConfigComposer().build_start_command(_CTX)
+
+        assert "{token}" in cmd
+        assert "{client_id}" in cmd
+
+    def test_build_mount_points_returns_no_bind_mounts(self):
+        """The ACK pod's volumes come from the ``storage`` block, not from
+        pre-existing shared directories."""
+        assert AckDeployConfigComposer().build_mount_points(_CTX) == []
+
+    def test_build_storage_returns_nas_volume(self):
+        """The bot's persistent state lives on a NAS volume at
+        ``/home/admin``. ``storage_id`` carries the ``bot_id`` so BaaS can
+        re-attach the same volume on the next start."""
+        storage = AckDeployConfigComposer().build_storage(_CTX)
+
+        assert storage is not None
+        assert str(storage.type) == "nas"
+        assert storage.path == "/home/admin"
+        assert storage.storage_id == "b1"
+        assert storage.quota == "1Gi"
+        assert storage.permission == "0777"

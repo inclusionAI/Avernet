@@ -95,7 +95,9 @@ class SkillGrant(_ScopedDomainFact, Base):
             "status IN ('ACTIVE', 'REVOKED')", name="ck_skill_grant_status"
         ),
         CheckConstraint(
-            "owner_slot IS NULL OR (owner_slot = 1 AND role = 'OWNER' AND status = 'ACTIVE')",
+            "(role = 'OWNER' AND status = 'ACTIVE' "
+            "AND owner_slot IS NOT NULL AND owner_slot = 1) OR "
+            "((role <> 'OWNER' OR status <> 'ACTIVE') AND owner_slot IS NULL)",
             name="ck_skill_active_owner_slot",
         ),
     )
@@ -107,6 +109,7 @@ class SkillGrant(_ScopedDomainFact, Base):
     status = Column(String(16), nullable=False, server_default="ACTIVE")
     owner_slot = Column(TinyInteger, nullable=True)
     granted_by = Column(String(128), nullable=False)
+    grant_reason = Column(String(1024), nullable=True)
     revoked_at = Column(DateTime, nullable=True)
     revoked_by = Column(String(128), nullable=True)
 
@@ -123,9 +126,7 @@ class SkillDraftEditLease(_ScopedDomainFact, Base):
     skill_id = Column(UnsignedBigInteger, nullable=False)
     holder_user_id = Column(String(128), nullable=True)
     fencing_token = Column(UnsignedBigInteger, nullable=False, server_default="0")
-    expires_at = Column(DateTime, nullable=True)
     acquired_at = Column(DateTime, nullable=True)
-    renewed_at = Column(DateTime, nullable=True)
     last_takeover_by = Column(String(128), nullable=True)
 
 

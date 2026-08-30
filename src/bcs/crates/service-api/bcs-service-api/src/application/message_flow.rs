@@ -1,7 +1,7 @@
 //! Message-flow use-case contracts.
 
 use async_trait::async_trait;
-use bcs_domain::Attachment;
+use bcs_domain::{Attachment, ChannelType};
 use serde_json::Value;
 
 use crate::{
@@ -10,6 +10,19 @@ use crate::{
 };
 
 use super::principal::CallerContext;
+
+/// Opt-in external Channel identity for one Human-authored inbound message.
+///
+/// The Channel application service is the only production caller that should
+/// populate this value. Message flow treats its presence as authorization to
+/// expose the external user id and display name to the target Bot.
+#[derive(Debug, Clone)]
+pub struct ChannelSenderIdentity {
+    pub channel_type: ChannelType,
+    pub user_id: String,
+    pub actor_id: String,
+    pub display_name: String,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +49,8 @@ pub struct WebSendCommand {
     pub idempotency_key: Option<String>,
     /// Original IM message id when this command came from a channel ingress.
     pub source_im_message_id: Option<String>,
+    /// External sender attribution explicitly enabled by the resolved Bot binding.
+    pub channel_sender_identity: Option<ChannelSenderIdentity>,
     pub sender_conn_id: Option<u64>,
     pub provider_bypass_headers: Vec<(String, String)>,
 }

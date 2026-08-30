@@ -1,0 +1,260 @@
+import type {
+  BotCapabilitySet,
+  BotEditorMcp,
+  BotEditorRoutineInput,
+  BotEditorSkill,
+  BotEngineConfig,
+  BotRenderScreenInput,
+} from '@/domain/botEditor';
+import { botEditorController } from '@/services/backendApi/bots/botEditorController';
+import { clearBotCdnConfig, storeBotCdnConfigs } from '@/services/bcs/libraryCdnInjector';
+import {
+  dataOr,
+  mapPublication,
+  mapResource,
+  mapRoutine,
+  mapScreen,
+  mapSkill,
+  toRoutineWrite,
+} from './botEditorMappers';
+export const botEditorService = {
+  async registerRenderScreenLibraries(botId: string) {
+    if (!botId) return 0;
+    try {
+      const response = await botEditorController.listRenderScreens(botId);
+      const screens = response.data?.items ?? [];
+      storeBotCdnConfigs(botId, screens);
+      return screens.length;
+    } catch {
+      clearBotCdnConfig(botId);
+      return 0;
+    }
+  },
+  async load(botId: string, serviceBot = false, spaceId?: string) {
+    const [
+      skills,
+      skillSets,
+      mcps,
+      mcpServers,
+      repositorySkills,
+      spaceSkills,
+      resources,
+      screens,
+      routines,
+      engineConfig,
+      engineStatus,
+      approval,
+    ] = await Promise.allSettled([
+      botEditorController.listSkills(botId),
+      botEditorController.listSkillSets(botId),
+      botEditorController.listBotMcps(botId),
+      botEditorController.listMcpServers(),
+      botEditorController.listRepositorySkills(),
+      spaceId ? botEditorController.listSpaceSkills(spaceId) : Promise.resolve({ data: { total: 0, items: [] } }),
+      botEditorService.listResources(botId),
+      botEditorController.listRenderScreens(botId),
+      botEditorController.listRoutines(botId),
+      botEditorController.getEngineConfig(botId),
+      botEditorController.getEngineStatus(botId),
+      serviceBot ? botEditorController.getApprovalConfig(botId) : Promise.resolve({ data: { should_approval: false } }),
+    ]);
+    const sets: BotCapabilitySet[] = [];
+    let skillSetDetailErrors = 0;
+    if (skillSets.status === 'fulfilled') {
+      const details = await Promise.all(
+        (skillSets.value.data ?? []).map(async (set) => {
+          const [setSkills, setMcps] = await Promise.allSettled([
+            botEditorController.listSkillSetSkills(botId, set.id),
+            botEditorController.listSkillSetMcps(botId, set.id),
+          ]);
+          skillSetDetailErrors += Number(setSkills.status === 'rejected') + Number(setMcps.status === 'rejected');
+          return {
+            id: set.id,
+            name: set.name,
+            description: set.description,
+            isDefault: set.is_default,
+            active: set.is_active,
+            skills: (setSkills.status === 'fulfilled' ? setSkills.value.data ?? [] : []).map((item) => ({
+              id: item.skill_id,
+              name: item.name,
+              description: item.description,
+              active: true,
+            })),
+            mcps: (setMcps.status === 'fulfilled' ? setMcps.value.data ?? [] : []).map((item) => ({
+              serverCode: item.server_code,
+              name: item.name,
+              description: item.description,
+              active: true,
+            })),
+          } satisfies BotCapabilitySet;
+        }),
+      );
+      sets.push(...details);
+    }
+    return {
+      skills: skills.status === 'fulfilled' ? dataOr(skills.value.data?.items, []).map(mapSkill) : [],
+      skillSets: sets,
+      mcps:
+        mcps.status === 'fulfilled'
+          ? dataOr(mcps.value.data, []).map((item): BotEditorMcp => {
+              const detail =
+                mcpServers.status === 'fulfilled'
+                  ? mcpServers.value.data?.items?.find((server) => server.server_code === item.server_code)
+                  : undefined;
+              return {
+                serverCode: item.server_code,
+                name: detail?.name || item.server_code,
+                description: detail?.description,
+                active: item.active,
+              };
+            })
+          : [],
+      availableMcps:
+        mcpServers.status === 'fulfilled'
+          ? dataOr(mcpServers.value.data?.items, []).map(
+              (item): BotEditorMcp => ({
+                serverCode: item.server_code,
+                name: item.name || item.server_code,
+                description: item.description,
+                active:
+                  mcps.status === 'fulfilled'
+                    ? Boolean(mcps.value.data?.some((bound) => bound.server_code === item.server_code && bound.active))
+                    : false,
+              }),
+            )
+          : [],
+      marketSkills:
+        repositorySkills.status === 'fulfilled'
+          ? dataOr(repositorySkills.value.data?.items, []).map(
+              (item): BotEditorSkill => ({
+                id: String(item.skill_id ?? item.id ?? ''),
+                name: item.name,
+                description: item.description,
+                version: item.latest_published_version ?? item.version,
+                source: 'market',
+                active: false,
+              }),
+            )
+          : [],
+      workshopSkills:
+        spaceSkills.status === 'fulfilled'
+          ? dataOr(spaceSkills.value.data?.items, []).map(
+              (item): BotEditorSkill => ({
+                id: item.skill_id,
+                name: item.name,
+                description: item.description,
+                source: 'workshop',
+                active: false,
+              }),
+            )
+          : [],
+      resources: resources.status === 'fulfilled' ? resources.value : [],
+      screens: screens.status === 'fulfilled' ? dataOr(screens.value.data?.items, []).map(mapScreen) : [],
+      routines: routines.status === 'fulfilled' ? dataOr(routines.value.data?.items, []).map(mapRoutine) : [],
+      engineConfig: engineConfig.status === 'fulfilled' ? dataOr(engineConfig.value.data, {}) : ({} as BotEngineConfig),
+      engineStatus:
+        engineStatus.status === 'fulfilled'
+          ? {
+              engine: engineStatus.value.data?.engine ?? '',
+              activeConnections: engineStatus.value.data?.active_connections ?? 0,
+              running: engineStatus.value.data?.running ?? false,
+            }
+          : undefined,
+      approvalRequired: approval.status === 'fulfilled' ? Boolean(approval.value.data?.should_approval) : false,
+      errors:
+        [
+          skills,
+          skillSets,
+          mcps,
+          mcpServers,
+          repositorySkills,
+          spaceSkills,
+          resources,
+          screens,
+          routines,
+          engineConfig,
+          engineStatus,
+          approval,
+        ].filter((item) => item.status === 'rejected').length + skillSetDetailErrors,
+    };
+  },
+  toggleSkill: (botId: string, skill: BotEditorSkill) =>
+    botEditorController.setSkillActive(botId, skill.id, !skill.active),
+  deleteSkill: (botId: string, skillId: string) => botEditorController.deleteSkill(botId, skillId),
+  uploadSkill: (botId: string, file: File) =>
+    file.arrayBuffer().then((body) => botEditorController.uploadSkill(botId, body)),
+  async uploadSkillFolder(botId: string, files: File[]) {
+    const response = await botEditorController.uploadSkillFolder(botId, files);
+    const skill = response.data?.skill;
+    if (!skill?.skill_id) throw new Error('目录上传成功，但响应中缺少 skill_id');
+    return { ...mapSkill(skill), source: 'local' as const };
+  },
+  setMcpActive: (botId: string, mcp: BotEditorMcp, active: boolean) =>
+    botEditorController.setMcpActive(botId, mcp.serverCode, active),
+  createSkillSet: (botId: string, name: string) => botEditorController.createSkillSet(botId, { name }),
+  updateSkillSet: (botId: string, id: string, name: string) => botEditorController.updateSkillSet(botId, id, { name }),
+  deleteSkillSet: (botId: string, id: string) => botEditorController.deleteSkillSet(botId, id),
+  setSkillSetActive: (botId: string, set: BotCapabilitySet, active: boolean) =>
+    botEditorController.setSkillSetActive(botId, set.id, active),
+  setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean) =>
+    botEditorController.setSkillSetSkill(botId, setId, skillId, active),
+  async setSkillSetMcp(botId: string, setId: string, serverCode: string, active: boolean) {
+    if (active) {
+      const permission = await botEditorController.getMcpPermission(serverCode);
+      if (!permission.data?.has_access) {
+        throw new Error('无法添加，请去 MCP 详情页申请权限后重试');
+      }
+    }
+    return botEditorController.setSkillSetMcp(botId, setId, serverCode, active);
+  },
+  createDirectory: (botId: string, path: string) => botEditorController.createDirectory(botId, path),
+  async listResources(botId: string, directory = '') {
+    return (
+      (await botEditorController.listResources(botId, directory)).data?.items?.map((item) =>
+        mapResource(item, directory),
+      ) ?? []
+    );
+  },
+  deleteResource: (botId: string, path: string) => botEditorController.deleteResource(botId, path),
+  uploadResource: (botId: string, path: string, file: File, overwrite = false) =>
+    file.arrayBuffer().then((body) => botEditorController.uploadResource(botId, path, body, overwrite)),
+  async previewResource(botId: string, path: string) {
+    return (await botEditorController.previewResource(botId, path)).data?.content ?? '';
+  },
+  downloadResource: (botId: string, path: string) => botEditorController.downloadResource(botId, path),
+  createScreen: (botId: string, input: BotRenderScreenInput) =>
+    botEditorController.createRenderScreen(botId, { name: input.name, cdn_url: input.cdnUrl }),
+  updateScreen: (botId: string, id: number, input: BotRenderScreenInput) =>
+    botEditorController.updateRenderScreen(botId, id, { name: input.name, cdn_url: input.cdnUrl }),
+  deleteScreen: (botId: string, id: number) => botEditorController.deleteRenderScreen(botId, id),
+  async listLifecycle(botId: string) {
+    return (await botEditorController.getLifecycle(botId)).data?.items.map(mapPublication) ?? [];
+  },
+  upgradeLifecycle: (botId: string, publicationId: number) =>
+    botEditorController.upgradeLifecycle(botId, publicationId),
+  advanceLifecycle: (botId: string, stage: 'prestable' | 'online') =>
+    botEditorController.advanceLifecycle(botId, stage),
+  restartLifecycle: (botId: string, stage: 'prestable' | 'online') =>
+    botEditorController.restartLifecycle(botId, stage),
+  cancelStaging: (botId: string) => botEditorController.cancelStaging(botId),
+  offlineLifecycle: (botId: string) => botEditorController.offlineLifecycle(botId),
+  retryLifecycle: (botId: string) => botEditorController.retryLifecycle(botId),
+  deleteLifecycleDraft: (botId: string) => botEditorController.deleteLifecycleDraft(botId),
+  createRoutine: (botId: string, input: BotEditorRoutineInput) =>
+    botEditorController.createRoutine(botId, toRoutineWrite(input)),
+  updateRoutine: (botId: string, id: string, input: BotEditorRoutineInput) =>
+    botEditorController.updateRoutine(botId, id, toRoutineWrite(input)),
+  deleteRoutine: (botId: string, id: string) => botEditorController.deleteRoutine(botId, id),
+  runRoutine: (botId: string, id: string) => botEditorController.runRoutine(botId, id),
+  async listRoutineRuns(botId: string, id: string) {
+    const response = await botEditorController.listRoutineRuns(botId, id);
+    return (response.data?.items ?? []).map((run) => ({
+      id: run.run_id,
+      status: run.status,
+      startedAt: run.started_at,
+      finishedAt: run.finished_at,
+    }));
+  },
+  saveEngineConfig: (botId: string, config: BotEngineConfig) => botEditorController.updateEngineConfig(botId, config),
+  saveApproval: (botId: string, enabled: boolean) => botEditorController.updateApprovalConfig(botId, enabled),
+};

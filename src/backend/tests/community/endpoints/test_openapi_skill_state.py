@@ -69,7 +69,7 @@ class _Runtime:
     def __init__(self, success: bool) -> None:
         self.success = success
 
-    def sync_runtime(self) -> bool:
+    async def project_skills(self) -> bool:
         return self.success
 
     async def publish_mappings(self, **_kwargs) -> bool:

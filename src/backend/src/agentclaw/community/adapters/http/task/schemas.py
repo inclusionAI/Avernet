@@ -98,7 +98,7 @@ class RequestTaskSpecDTO(BaseModel):
 
 
 class ExecutionConfigDTO(BaseModel):
-    """执行配置(task_type 必填;yaml/workflow_id 可选;其余键允许透传)。"""
+    """执行配置(task_type 必填;静态单工作流/静态组工作流/workflow_id 可选;其余键允许透传)。"""
 
     model_config = ConfigDict(extra="allow")
     task_type: Literal["yaml", "workflow", "dynamic"] = Field(

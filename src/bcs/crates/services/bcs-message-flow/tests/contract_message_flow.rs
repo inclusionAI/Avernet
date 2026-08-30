@@ -1,16 +1,15 @@
 use bcs_message_flow::{BcsGroupMessageHistory, BcsMessageFlow, MemoryBotRunContextStore};
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
-    ActorKind, BotActor, BotDeliveryKind, BotDeliveryTarget, BotEventCommand, BotRegistryCoreService,
-    BotRunContextPort,
-    CallerContext, ChatAbortCommand, ChatEventState, GroupCallbackCommand, GroupChatCommand, GroupHistoryBotRequestPort,
-    FrontendDeliveryTarget, Group, GroupHistoryCommand, GroupKind, GroupMessage, GroupMessageHistoryService, GroupMessageType,
-    GroupCoreService, GroupStatus, GroupStrategy, HumanActor, MessageFlowService, MessageRole, Participant,
-    ParticipantMode, ParticipantRole, PersistentGroupSendCommand, ProviderStreamGrayList,
-    RedactedToken, ServiceError, WebSendCommand,
-    ServiceResult, Session, SessionHistoryCommand, SessionKind, SessionManagementService,
-    SessionStatus, SessionUseCaseError,
-    SystemMessageEvent, SystemMessageService,
+    ActorKind, BotActor, BotDeliveryKind, BotDeliveryTarget, BotEventCommand,
+    BotRegistryCoreService, BotRunContextPort, CallerContext, ChannelSenderIdentity,
+    ChatAbortCommand, ChatEventState, FrontendDeliveryTarget, Group, GroupCallbackCommand,
+    GroupChatCommand, GroupCoreService, GroupHistoryBotRequestPort, GroupHistoryCommand, GroupKind,
+    GroupMessage, GroupMessageHistoryService, GroupMessageType, GroupStatus, GroupStrategy,
+    HumanActor, MessageFlowService, MessageRole, Participant, ParticipantMode, ParticipantRole,
+    PersistentGroupSendCommand, ProviderStreamGrayList, RedactedToken, ServiceError, ServiceResult,
+    Session, SessionHistoryCommand, SessionKind, SessionManagementService, SessionStatus,
+    SessionUseCaseError, SystemMessageEvent, SystemMessageService, WebSendCommand,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
     port::{EventRecordFactoryPort, NewEvent},
 };
@@ -166,12 +165,10 @@ impl GroupHistoryBotRequestPort for RecordingHistoryBotRequest {
         timeout_ms: u64,
     ) -> Result<serde_json::Value, String> {
         let bot_uuid = target.bot_id().to_string();
-        self.calls.write().await.push((
-            bot_uuid.clone(),
-            method.to_string(),
-            params,
-            timeout_ms,
-        ));
+        self.calls
+            .write()
+            .await
+            .push((bot_uuid.clone(), method.to_string(), params, timeout_ms));
         if bot_uuid == "bot-observer" {
             return Err("request_failed: disconnected".to_string());
         }
@@ -372,7 +369,9 @@ impl SessionManagementService for StaticSessionManagement {
     ) -> Result<Vec<String>, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
-    async fn delete(&self, _session_id: &str) -> Result<bool, SessionUseCaseError> { Ok(false) }
+    async fn delete(&self, _session_id: &str) -> Result<bool, SessionUseCaseError> {
+        Ok(false)
+    }
 }
 
 fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>) -> Session {
@@ -487,10 +486,7 @@ impl GroupHistoryBotRequestPort for RecordingTargetHistoryBotRequest {
         _params: serde_json::Value,
         _timeout_ms: u64,
     ) -> Result<serde_json::Value, String> {
-        self.calls
-            .write()
-            .await
-            .push((target, method.to_string()));
+        self.calls.write().await.push((target, method.to_string()));
         Ok(json!({
             "messages": [
                 {"id": "provider-hist-1", "role": "assistant", "content": "provider history", "timestamp": 1}
@@ -503,7 +499,9 @@ impl GroupHistoryBotRequestPort for RecordingTargetHistoryBotRequest {
 async fn session_history_allows_human_who_is_only_session_participant() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
-    group.participants.retain(|participant| participant.is_bot());
+    group
+        .participants
+        .retain(|participant| participant.is_bot());
     support.group.upsert(group).await.unwrap();
 
     let mut responses = HashMap::new();
@@ -815,7 +813,9 @@ async fn session_history_denies_non_participant_bot() {
 async fn session_history_resolves_from_prefix_using_session_participants() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
-    group.participants.retain(|participant| participant.is_bot());
+    group
+        .participants
+        .retain(|participant| participant.is_bot());
     support.group.upsert(group).await.unwrap();
 
     let mut responses = HashMap::new();
@@ -1039,7 +1039,10 @@ async fn group_history_falls_back_to_driver_and_normalizes_bot_history() {
     let calls = history_request.calls.read().await.clone();
     assert_eq!(calls.len(), 2);
 
-    let observer_call = calls.iter().find(|c| c.0 == "bot-observer").expect("observer call");
+    let observer_call = calls
+        .iter()
+        .find(|c| c.0 == "bot-observer")
+        .expect("observer call");
     assert_eq!(observer_call.1, "chat.history");
     assert_eq!(
         observer_call.2,
@@ -1047,7 +1050,10 @@ async fn group_history_falls_back_to_driver_and_normalizes_bot_history() {
     );
     assert_eq!(observer_call.3, 30_000);
 
-    let driver_call = calls.iter().find(|c| c.0 == "bot-driver").expect("driver call");
+    let driver_call = calls
+        .iter()
+        .find(|c| c.0 == "bot-driver")
+        .expect("driver call");
     assert_eq!(driver_call.1, "chat.history");
     assert_eq!(
         driver_call.2,
@@ -1260,6 +1266,7 @@ async fn web_send_resets_message_count_routes_and_delivers() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -1325,6 +1332,7 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -1364,6 +1372,7 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -1408,6 +1417,7 @@ async fn accepted_chat_send_records_run_context_for_callback() {
             thinking: None,
             idempotency_key: Some("idempotency-1".to_string()),
             source_im_message_id: Some("source-msg-1".to_string()),
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -1430,14 +1440,8 @@ async fn accepted_chat_send_records_run_context_for_callback() {
             .as_deref(),
         Some("source-msg-1")
     );
-    assert!(
-        context.deadline_ms
-            >= before_send_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
-    );
-    assert!(
-        context.deadline_ms
-            <= after_send_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
-    );
+    assert!(context.deadline_ms >= before_send_ms.saturating_add(CONFIGURED_TIMEOUT_MS));
+    assert!(context.deadline_ms <= after_send_ms.saturating_add(CONFIGURED_TIMEOUT_MS));
 }
 
 #[tokio::test]
@@ -1497,6 +1501,7 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -1540,6 +1545,7 @@ async fn failed_provider_web_send_uses_unified_system_message() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -1585,6 +1591,7 @@ async fn deprecated_provider_stream_gray_match_keeps_provider_delivery_target() 
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -1624,6 +1631,7 @@ async fn deprecated_provider_stream_gray_miss_keeps_provider_delivery_target() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -1663,6 +1671,7 @@ async fn deprecated_provider_stream_gray_disabled_keeps_provider_delivery_target
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -1720,6 +1729,7 @@ async fn deprecated_provider_stream_gray_does_not_change_inject_delivery_target(
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -1732,10 +1742,7 @@ async fn deprecated_provider_stream_gray_does_not_change_inject_delivery_target(
     assert!(targets[1].is_http_provider());
 }
 
-async fn install_provider_driver_group(
-    support: &support::FlowTestSupport,
-    created_by: &str,
-) {
+async fn install_provider_driver_group(support: &support::FlowTestSupport, created_by: &str) {
     support
         .registry
         .insert_named_actor("bot-provider", "Provider")
@@ -1843,6 +1850,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -1889,6 +1897,7 @@ async fn web_send_in_human_bot_dm_uses_dm_routing_and_keeps_frontend_echo() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -1940,6 +1949,7 @@ async fn web_send_in_human_bot_dm_omits_group_context_by_default() -> ServiceRes
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -1947,7 +1957,9 @@ async fn web_send_in_human_bot_dm_omits_group_context_by_default() -> ServiceRes
 
     let frames = support.bot_delivery.frames().await;
     let Some(BcsFrame::Request(req)) = frames.first() else {
-        return Err(ServiceError::InternalError("expected request frame".to_string()));
+        return Err(ServiceError::InternalError(
+            "expected request frame".to_string(),
+        ));
     };
     let Some(params) = req.params.as_ref() else {
         return Err(ServiceError::InternalError("expected params".to_string()));
@@ -1957,12 +1969,73 @@ async fn web_send_in_human_bot_dm_omits_group_context_by_default() -> ServiceRes
     };
     assert_eq!(text, "hello direct");
     let Some(participants) = params["session_context"]["participants"].as_array() else {
-        return Err(ServiceError::InternalError("expected participants".to_string()));
+        return Err(ServiceError::InternalError(
+            "expected participants".to_string(),
+        ));
     };
     assert_eq!(participants.len(), 0);
     assert!(params["session_context"].get("group_type").is_none());
     assert!(params["session_context"].get("routing_mode").is_none());
     assert!(params["session_context"].get("recipient_role").is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn opted_in_channel_sender_identity_is_projected_to_bot_frame() -> ServiceResult<()> {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support.registry.set_protocol_version("bot-driver", 3).await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_web_send(WebSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_410025".to_string(),
+            staff_no: "410025".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: None,
+        from_actor_id: "human_410025".to_string(),
+        from_name: Some("张三".to_string()),
+        message: "hello direct".to_string(),
+        mentions: Vec::new(),
+        attachments: None,
+        thinking: None,
+        idempotency_key: None,
+        source_im_message_id: None,
+        channel_sender_identity: Some(ChannelSenderIdentity {
+            channel_type: "dingtalk".to_string(),
+            user_id: "410025".to_string(),
+            actor_id: "human_410025".to_string(),
+            display_name: "张三".to_string(),
+        }),
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
+    })
+    .await?;
+
+    let frames = support.bot_delivery.frames().await;
+    assert!(frames.iter().any(
+        |frame| matches!(frame, BcsFrame::Request(request) if request.method == "chat.send")
+    ));
+    assert!(frames.iter().any(
+        |frame| matches!(frame, BcsFrame::Request(request) if request.method == "chat.inject")
+    ));
+    for frame in frames {
+        let BcsFrame::Request(request) = frame else {
+            continue;
+        };
+        let channel = &request.params.as_ref().unwrap()["channel"];
+        assert_eq!(channel["source"], "dingtalk");
+        assert_eq!(channel["user_id"], "410025");
+        assert_eq!(channel["actor_id"], "human_410025");
+        assert_eq!(channel["actor_name"], "张三");
+        assert_eq!(channel["identity_forwarding"], true);
+    }
     Ok(())
 }
 
@@ -1994,6 +2067,7 @@ async fn web_send_blocking_interceptor_prevents_bot_delivery() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -2037,6 +2111,7 @@ async fn web_send_delivery_frame_contains_recipient_group_context() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -2075,14 +2150,11 @@ async fn web_send_with_session_id_routes_v2_by_substituting_wire_group_id() {
     let session = test_session(
         session_id,
         "group-1",
-        vec![
-            Participant::bot("bot-driver", ParticipantRole::Driver),
-            {
-                let mut human = Participant::human("human_1", ParticipantRole::Observer);
-                human.mode = Some(ParticipantMode::Present);
-                human
-            },
-        ],
+        vec![Participant::bot("bot-driver", ParticipantRole::Driver), {
+            let mut human = Participant::human("human_1", ParticipantRole::Observer);
+            human.mode = Some(ParticipantMode::Present);
+            human
+        }],
     );
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -2108,6 +2180,7 @@ async fn web_send_with_session_id_routes_v2_by_substituting_wire_group_id() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -2115,7 +2188,11 @@ async fn web_send_with_session_id_routes_v2_by_substituting_wire_group_id() {
     .unwrap();
 
     let frames = support.bot_delivery.frames().await;
-    assert_eq!(frames.len(), 1, "session participants should exclude bot-observer");
+    assert_eq!(
+        frames.len(),
+        1,
+        "session participants should exclude bot-observer"
+    );
     let frontend_commands = support.frontend_delivery.commands().await;
     assert_eq!(
         frontend_commands[0].target,
@@ -2143,14 +2220,11 @@ async fn web_send_with_legacy_session_id_routes_v2_with_group_wire_id() {
     let session = test_session(
         session_id,
         "group-1",
-        vec![
-            Participant::bot("bot-driver", ParticipantRole::Driver),
-            {
-                let mut human = Participant::human("human_1", ParticipantRole::Observer);
-                human.mode = Some(ParticipantMode::Present);
-                human
-            },
-        ],
+        vec![Participant::bot("bot-driver", ParticipantRole::Driver), {
+            let mut human = Participant::human("human_1", ParticipantRole::Observer);
+            human.mode = Some(ParticipantMode::Present);
+            human
+        }],
     );
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -2176,6 +2250,7 @@ async fn web_send_with_legacy_session_id_routes_v2_with_group_wire_id() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -2201,14 +2276,11 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
     let session = test_session(
         session_id,
         "group-1",
-        vec![
-            Participant::bot("bot-driver", ParticipantRole::Driver),
-            {
-                let mut human = Participant::human("human_1", ParticipantRole::Observer);
-                human.mode = Some(ParticipantMode::Present);
-                human
-            },
-        ],
+        vec![Participant::bot("bot-driver", ParticipantRole::Driver), {
+            let mut human = Participant::human("human_1", ParticipantRole::Observer);
+            human.mode = Some(ParticipantMode::Present);
+            human
+        }],
     );
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -2234,6 +2306,7 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -2268,7 +2341,11 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
         .find(|participant| participant.bot_uuid == "bot-observer")
         .expect("observer participant")
         .tags = vec!["stale-observer-tag".to_string()];
-    support.group.upsert(group).await.expect("update group tags");
+    support
+        .group
+        .upsert(group)
+        .await
+        .expect("update group tags");
     support
         .registry
         .set_delivery_target(
@@ -2290,15 +2367,11 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
     let session = test_session(
         session_id,
         "group-1",
-        vec![
-            provider,
-            observer,
-            {
-                let mut human = Participant::human("human_1", ParticipantRole::Observer);
-                human.mode = Some(ParticipantMode::Present);
-                human
-            },
-        ],
+        vec![provider, observer, {
+            let mut human = Participant::human("human_1", ParticipantRole::Observer);
+            human.mode = Some(ParticipantMode::Present);
+            human
+        }],
     );
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -2324,6 +2397,7 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -2332,12 +2406,14 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
 
     let frames = support.bot_delivery.frames().await;
     assert_eq!(frames.len(), 2);
-    assert!(support
-        .bot_delivery
-        .targets()
-        .await
-        .iter()
-        .all(BotDeliveryTarget::is_http_provider));
+    assert!(
+        support
+            .bot_delivery
+            .targets()
+            .await
+            .iter()
+            .all(BotDeliveryTarget::is_http_provider)
+    );
     let send = frames
         .iter()
         .find(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.send"))
@@ -2371,15 +2447,12 @@ async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResu
     let mut session = test_session(
         session_id,
         "group-1",
-        vec![
-            Participant::bot("bot-driver", ParticipantRole::Driver),
-            {
-                let mut human = Participant::human("human_1", ParticipantRole::Observer);
-                human.mode = Some(ParticipantMode::Present);
-                human.bot_name = Some("张三".to_string());
-                human
-            },
-        ],
+        vec![Participant::bot("bot-driver", ParticipantRole::Driver), {
+            let mut human = Participant::human("human_1", ParticipantRole::Observer);
+            human.mode = Some(ParticipantMode::Present);
+            human.bot_name = Some("张三".to_string());
+            human
+        }],
     );
     session.meta = Some(json!({
         "channel": {
@@ -2411,6 +2484,7 @@ async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResu
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -2418,7 +2492,9 @@ async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResu
 
     let frames = support.bot_delivery.frames().await;
     let Some(BcsFrame::Request(req)) = frames.first() else {
-        return Err(ServiceError::InternalError("expected request frame".to_string()));
+        return Err(ServiceError::InternalError(
+            "expected request frame".to_string(),
+        ));
     };
     let Some(params) = req.params.as_ref() else {
         return Err(ServiceError::InternalError("expected params".to_string()));
@@ -2429,7 +2505,9 @@ async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResu
     assert_eq!(text, "帮我查一下");
     assert_eq!(params["session_context"]["session_id"], session_id);
     let Some(participants) = params["session_context"]["participants"].as_array() else {
-        return Err(ServiceError::InternalError("expected participants".to_string()));
+        return Err(ServiceError::InternalError(
+            "expected participants".to_string(),
+        ));
     };
     assert_eq!(participants.len(), 0);
     assert!(params["session_context"].get("group_type").is_none());
@@ -2472,6 +2550,7 @@ async fn web_send_prefers_human_from_name_in_delivered_frame() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -2525,6 +2604,7 @@ async fn web_send_inject_delivery_uses_event_frame() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })
@@ -2580,6 +2660,7 @@ async fn web_send_delivers_to_private_group_targets() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -2588,16 +2669,20 @@ async fn web_send_delivers_to_private_group_targets() {
 
     assert_eq!(outcome.delivered_count, 2);
     assert_eq!(outcome.failed_count, 0);
-    assert!(outcome
-        .delivery_results
-        .iter()
-        .any(|result| result.bot_uuid == "bot-observer" && result.success));
+    assert!(
+        outcome
+            .delivery_results
+            .iter()
+            .any(|result| result.bot_uuid == "bot-observer" && result.success)
+    );
     assert_eq!(support.bot_delivery.frames().await.len(), 2);
-    assert!(support
-        .bot_delivery
-        .kinds()
-        .await
-        .contains(&BotDeliveryKind::Inject));
+    assert!(
+        support
+            .bot_delivery
+            .kinds()
+            .await
+            .contains(&BotDeliveryKind::Inject)
+    );
 }
 
 #[tokio::test]
@@ -2628,6 +2713,7 @@ async fn web_send_partial_delivery_failure_is_represented_in_outcome() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -2748,10 +2834,7 @@ async fn group_chat_rejects_bot_that_is_not_a_session_participant() {
     let session = test_session(
         session_id,
         "group-1",
-        vec![Participant::bot(
-            "bot-driver",
-            ParticipantRole::Driver,
-        )],
+        vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
     );
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -2789,10 +2872,7 @@ async fn group_chat_rejects_session_from_another_group() {
     let session = test_session(
         session_id,
         "other-group",
-        vec![Participant::bot(
-            "bot-driver",
-            ParticipantRole::Driver,
-        )],
+        vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
     );
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -3667,7 +3747,9 @@ async fn group_history_prefers_high_priority_even_when_low_priority_finishes_fir
         })),
     );
 
-    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(delays, responses));
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        delays, responses,
+    ));
     let history = BcsGroupMessageHistory::new(
         support.group.clone(),
         support.registry.clone(),
@@ -3720,7 +3802,9 @@ async fn group_history_falls_back_to_driver_when_view_bot_fails() {
         })),
     );
 
-    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(delays, responses));
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        delays, responses,
+    ));
     let history = BcsGroupMessageHistory::new(
         support.group.clone(),
         support.registry.clone(),
@@ -3764,12 +3848,11 @@ async fn group_history_falls_back_to_store_when_all_bots_fail() {
         "bot-observer".to_string(),
         Err("observer_timeout".to_string()),
     );
-    responses.insert(
-        "bot-driver".to_string(),
-        Err("driver_timeout".to_string()),
-    );
+    responses.insert("bot-driver".to_string(), Err("driver_timeout".to_string()));
 
-    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(delays, responses));
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        delays, responses,
+    ));
     let history = BcsGroupMessageHistory::new(
         support.group.clone(),
         support.registry.clone(),
@@ -3832,7 +3915,10 @@ fn file_attachment() -> bcs_domain::Attachment {
     }
 }
 
-fn human_web_send(message: &str, attachments: Option<Vec<bcs_domain::Attachment>>) -> WebSendCommand {
+fn human_web_send(
+    message: &str,
+    attachments: Option<Vec<bcs_domain::Attachment>>,
+) -> WebSendCommand {
     WebSendCommand {
         caller: CallerContext::Human(HumanActor {
             actor_id: "human_1".to_string(),
@@ -3848,6 +3934,7 @@ fn human_web_send(message: &str, attachments: Option<Vec<bcs_domain::Attachment>
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     }
@@ -3915,7 +4002,9 @@ async fn temporary_file_attachment_is_sent_only_to_active_chat_send() {
     let inject = frames
         .iter()
         .find_map(|frame| match frame {
-            BcsFrame::Request(request) if request.method == "chat.inject" => request.params.as_ref(),
+            BcsFrame::Request(request) if request.method == "chat.inject" => {
+                request.params.as_ref()
+            }
             _ => None,
         })
         .expect("chat.inject params");
@@ -4009,6 +4098,7 @@ async fn web_send_persists_raw_mention_text_while_bots_receive_cleaned_text() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     })

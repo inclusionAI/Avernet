@@ -65,12 +65,16 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision,
     WorkOrderEventCreatedResult,
 )
+from agentclaw.community.core.work_orders.protocols import (
+    SkillCollaboratorApprovalHandlerProtocol,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.staff_dept import (
     StaffDeptPlugin,
     StaffProfileLookupError,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
 
 
 logger = get_logger()
@@ -89,6 +93,7 @@ class WorkOrderService:
         collaborators: CollaboratorServiceProtocol,
         member_management: MemberManagementCapabilityService,
         staff_dept: StaffDeptPlugin,
+        skill_collaborator_approval_handler: SkillCollaboratorApprovalHandlerProtocol,
         decision_callbacks: WorkOrderDecisionCallbackDispatcher,
     ) -> None:
         self._repository = repository
@@ -100,6 +105,7 @@ class WorkOrderService:
         self._collaborators = collaborators
         self._member_management = member_management
         self._staff_dept = staff_dept
+        self._skill_collaborator_approval_handler = skill_collaborator_approval_handler
         self._decision_callbacks = decision_callbacks
 
     @staticmethod
@@ -154,6 +160,13 @@ class WorkOrderService:
         if registered_category is not event_category:
             raise WorkOrderInvalidEventError(
                 "event_type category does not match event_category"
+            )
+        if (
+            biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value
+            or event_type == WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
+        ):
+            raise WorkOrderInvalidEventError(
+                "Skill editor requests must use the Skill endpoint"
             )
         if event_category is NotificationCategory.APPROVAL:
             if not approvers or recipients:
@@ -273,6 +286,13 @@ class WorkOrderService:
             )
         if detail.work_order.biz_type == WorkOrderBizType.BOT_COLLABORATOR.value:
             return self._review_bot_editor_request(
+                detail=detail,
+                actor_id=actor_id,
+                review_remark=normalized,
+                target_status=WorkOrderStatus(decision.value),
+            )
+        if detail.work_order.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
+            return self._skill_collaborator_approval_handler.process(
                 detail=detail,
                 actor_id=actor_id,
                 review_remark=normalized,
@@ -413,7 +433,7 @@ class WorkOrderService:
     def _get_applicant_name(self, *, applicant_user_id: str) -> str:
         try:
             profile = self._staff_dept.get_profile_by_work_no(
-                work_no=applicant_user_id
+                work_no=normalize_work_no_for_lookup(applicant_user_id)
             )
         except StaffProfileLookupError:
             logger.warning(
@@ -496,6 +516,13 @@ class WorkOrderService:
             self._access.require_space_owner(space_id=detail.space_id, user_id=actor_id)
         except SpaceAccessDeniedError as exc:
             raise WorkOrderAccessDeniedError("space owner role required") from exc
+        applicant_user_name = (
+            self._get_applicant_name(
+                applicant_user_id=detail.work_order.applicant_user_id
+            )
+            if target_status is WorkOrderStatus.APPROVED
+            else None
+        )
         notification = self._notifications.build_space_join_review_result(
             detail=detail,
             target_status=target_status,
@@ -507,6 +534,7 @@ class WorkOrderService:
             review_remark=review_remark,
             target_status=target_status,
             notification=notification,
+            applicant_user_name=applicant_user_name,
             env=get_current_env(),
         )
 

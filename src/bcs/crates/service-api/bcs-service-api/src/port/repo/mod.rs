@@ -2,6 +2,7 @@ pub mod bot;
 pub mod bot_actor_config;
 pub mod bot_control_plane;
 pub mod channel;
+pub mod chat_run;
 pub mod collaboration;
 pub mod collaboration_template;
 pub mod edge_grant;
@@ -20,6 +21,10 @@ pub mod user_identity;
 
 pub use bot::BotRepoPort;
 pub use bot_actor_config::BotActorConfigRepoPort;
+pub use chat_run::{
+    CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
+    ChatRunState, MAX_CONTENT_BYTES,
+};
 pub use bot_control_plane::*;
 pub use channel::{
     ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,

@@ -98,7 +98,7 @@ task callback router (FastAPI, 4 端点)
 | `TaskCallbackData` | `domain/models.py:206` | `loop_task_id`/`workflow_type`/`workflow_id:int`/`instance_id:int`/`result:dict`（**不扩**） |
 | `TaskNodePatch` | `domain/models.py:146` | `task_id`/`node_id` 必填；`status`/`acceptance_result`/`output_patch`/`extend_props_patch` 可选 |
 | `engine.on_report` | `task_center/engine.py:91` | 锁内 `update_task_node_info`；`acceptance_result is None` 早退（fold-only）；PASS→传播/finish，FAIL→补救/BBS |
-| `TaskGraphService.update_task_node_info` | `task_graph/task_graph_service.py:200` | **SSOT 唯一节点写口**；`_ACCEPTANCE_TRANSITIONS`(RUNNING/PLANNING→DONE/FAILED) + `_DIRECT_TRANSITIONS`(PENDING→RUNNING / RUNNING→PENDING / PLANNING→DONE) |
+| `TaskGraphService.update_task_node_info` | `task_context/task_graph_service.py:200` | **SSOT 唯一节点写口**；`_ACCEPTANCE_TRANSITIONS`(RUNNING/PLANNING→DONE/FAILED) + `_DIRECT_TRANSITIONS`(PENDING→RUNNING / RUNNING→PENDING / PLANNING→DONE) |
 | `Status` 枚举 | `domain/models.py:16` | `PENDING` / `PLANNING` / `RUNNING` / `DONE` / `FAILED` / `HUNG` |
 | `TaskService.callback` | `task_center/task_service.py:48` | `@property` 暴露 `TaskLoopCallback`；engine 私有，入站经 `svc.callback.*` |
 | `loop_task_id` 源 | `task_runner/runner.py:75` | `f"{task.task_id}::{node.node_id}"`，派发期 mint |

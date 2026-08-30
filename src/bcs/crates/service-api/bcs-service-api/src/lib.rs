@@ -108,6 +108,8 @@ pub use bot_runtime_use_cases::{
     BotRuntimeConnectCommand, BotRuntimeConnectOutcome, BotRuntimeConnectionService,
     BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotRuntimeStatusOutcome,
 };
+pub use types::{BotSearchCandidateQuery, BotSearchFriendshipFilter};
+
 pub use bot_use_cases::{
     BotConnectCommand, BotDetailCommand, BotDetailResult, BotDiscoveryCommand, BotDiscoveryEntry,
     BotDiscoveryProviderInfo, BotDiscoveryResult, BotDiscoveryService, BotLeaveCommand,
@@ -154,7 +156,7 @@ pub use message_flow::{
     PersistentGroupSendOutcome, ProviderEventIngestCommand, ProviderEventSource,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
     TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
-    WebSendCommand, WebSendOutcome,
+    ChannelSenderIdentity, WebSendCommand, WebSendOutcome,
 };
 pub use onboard::{
     AdminBotOnboardCommand, BotOnboardCommand, BotOnboardResult, BotOnboardingService,
@@ -281,6 +283,11 @@ pub use port::interaction::{
     InteractionFrontendEvent, InteractionInsertResult, InteractionProviderAck,
     InteractionProviderCommand, InteractionProviderPort, InteractionRecord,
     InteractionResolveClaim, InteractionResolveCommit, InteractionStorePort,
+};
+
+pub use port::repo::chat_run::{
+    CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
+    ChatRunState, MAX_CONTENT_BYTES as CHAT_RUN_MAX_CONTENT_BYTES,
 };
 
 pub use bcs_domain::{

@@ -291,6 +291,31 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_groups_service_uuid ON bcs_groups(service_group_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_groups_label ON bcs_groups(label)",
     "CREATE INDEX IF NOT EXISTS idx_groups_visibility ON bcs_groups(visibility)",
+    // ── chat_runs (Direct Chat async governance, #1546) ─────
+    "CREATE TABLE IF NOT EXISTS bcs_chat_runs (
+        env TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        bot_uuid TEXT NOT NULL,
+        from_bot_id TEXT NOT NULL,
+        session_key TEXT NOT NULL,
+        state TEXT NOT NULL,
+        accumulated_content TEXT,
+        error_message TEXT,
+        created_at_ms INTEGER NOT NULL,
+        updated_at_ms INTEGER NOT NULL,
+        completed_at_ms INTEGER,
+        expires_at_ms INTEGER NOT NULL,
+        version INTEGER NOT NULL,
+        content_truncated INTEGER NOT NULL DEFAULT 0,
+        client TEXT,
+        response_mode TEXT NOT NULL,
+        completion_policy TEXT NOT NULL,
+        delivery_ack_at_ms INTEGER,
+        PRIMARY KEY (env, run_id)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_expires ON bcs_chat_runs(env, state, expires_at_ms)",
+    "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_completed ON bcs_chat_runs(env, state, completed_at_ms)",
+    "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_from_bot ON bcs_chat_runs(env, from_bot_id)",
     // ── group_participants ────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_group_participants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

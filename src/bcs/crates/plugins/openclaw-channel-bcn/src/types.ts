@@ -128,6 +128,7 @@ export interface ChannelInfo {
   actor_id?: string;
   actor_name?: string;
   thread_id?: string;
+  identity_forwarding?: boolean;
 }
 
 export type SessionMode = 'agent' | 'fusion' | 'composite';
