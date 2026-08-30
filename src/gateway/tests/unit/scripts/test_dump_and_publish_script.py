@@ -69,11 +69,20 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
     internal = json.loads(
         (tmp_path / "bcn-internal.openapi.json").read_text(encoding="utf-8")
     )
-    assert sum(len(path_item) for path_item in internal["paths"].values()) == 21
+    assert sum(len(path_item) for path_item in internal["paths"].values()) == 22
     assert (
         "post" in internal["paths"]["/api/v1/collaboration/sessions/{session_id}/files"]
     )
     assert "post" in internal["paths"]["/api/v1/collaboration/definitions/validate"]
+    # 21 → 22 with the rerun endpoint bcs added in #1645. Bumped here rather
+    # than by that change because this suite is path-filtered on `src/gateway`
+    # and does not run on a bcs-only commit, so a count this test pins can go
+    # stale on `dev` and only surface on the next gateway PR. Naming the new
+    # operation, and not just the number, is what makes the next drift readable.
+    assert (
+        "post"
+        in internal["paths"]["/api/v1/collaboration/state-machine-runs/{run_id}/reruns"]
+    )
     assert [tag["name"] for tag in document["tags"]] == [
         "Collaboration / Bots",
         "Collaboration / Friendships",
