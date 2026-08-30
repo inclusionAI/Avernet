@@ -478,7 +478,7 @@ class TestUpdateTaskGraphInfo:
 class TestMisc:
     def test_execution_config_default(self, svc: TaskGraphService, graph):
         cfg = svc._execution_config("t1")
-        assert cfg["MAX_DEPTH"] == 3  # 默认
+        assert cfg["MAX_DEPTH"] == 2  # 默认
         assert cfg["MAX_LOOP"] == 3
         assert cfg["MAX_HARNESS"] == 2
 

@@ -9,6 +9,7 @@ import contextvars
 import hashlib
 import json
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.task.repository.types import TaskCallbackRecord
@@ -356,7 +357,11 @@ class TaskLoopCallback:
         logger.info("[task_callback] report_result, begin, data=%s", data)
         payload = data.data if isinstance(data.data, dict) else None
         record = (
-            _to_callback_record(payload, event_id="", process_status="PROCESSED")
+            _to_callback_record(
+                payload,
+                event_id=str(uuid.uuid4()),
+                process_status="PROCESSED",
+            )
             if payload is not None
             else None
         )

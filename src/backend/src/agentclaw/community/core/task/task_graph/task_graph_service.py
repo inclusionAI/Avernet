@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from agentclaw.community.core.repository.protocols.task import (
     TaskGraphRepositoryProtocol,
@@ -17,6 +17,7 @@ from agentclaw.community.core.repository.protocols.task import (
 )
 from agentclaw.community.core.task.domain.errors import (
     GraphAlreadyInitializedError,
+    GraphVersionConflictError,
     GraphIntegrityError,
     NodeNotFoundError,
     TaskNotFoundError,
@@ -66,31 +67,36 @@ _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNI
 # 终态集(无出边):acceptance 回投到终态节点 → 幂等拒绝(DONE/FAILED/HUNG/CANCELLED)。
 _TERMINAL_STATUSES: set[Status] = {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}
 
-_DEFAULT_MAX_DEPTH = 3
+_DEFAULT_MAX_DEPTH = 2
 _DEFAULT_MAX_LOOP = 3  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
 _DEFAULT_MAX_PLAN_ROUND = 3  # 节点级重规划次数(父节点子全 DONE→gap 未闭→重 plan 产新子)
 _DEFAULT_BBS_MAX_DEPTH = 3
+_MAX_GRAPH_VERSION_RETRIES = 3
 
-def _consume_pending_callback_audit(task_id: str):
-    """Return and clear the pending callback audit if it targets ``task_id``.
+def _pending_callback_audit(task_id: str):
+    """Return the pending callback audit for ``task_id`` without consuming it.
 
-    The callback boundary (``callback_adapter``) stages a ``TaskCallbackRecord``
-    in a contextvar before driving a graph mutation; the graph service consumes
-    it on the first persist so the audit commits in the same transaction. Only
-    the audit matching this task is consumed; others stay for their own task's
-    persist.
+    Keeping the record staged until the graph write commits is required for
+    optimistic-version retries: a failed stale write must be replayed with the
+    same audit record, not silently lose the callback audit.
     """
     from agentclaw.community.core.task.task_runner.callback_adapter import (
         _PENDING_CALLBACK_AUDIT,
     )
     record = _PENDING_CALLBACK_AUDIT.get()
-    if record is None:
+    if record is None or getattr(record, "run_id", None) != task_id:
         return None
-    if getattr(record, "run_id", None) != task_id:
-        # Different task's audit; leave it for that task's persist.
-        return None
-    _PENDING_CALLBACK_AUDIT.set(None)
     return record
+
+
+def _clear_pending_callback_audit(record) -> None:
+    if record is None:
+        return
+    from agentclaw.community.core.task.task_runner.callback_adapter import (
+        _PENDING_CALLBACK_AUDIT,
+    )
+    if _PENDING_CALLBACK_AUDIT.get() is record:
+        _PENDING_CALLBACK_AUDIT.set(None)
 
 
 class TaskGraphService:
@@ -167,7 +173,7 @@ class TaskGraphService:
         # 乙' c+R2:图级有效态只读派生根态(与既有 root 派生等价,单源化)。
         runtime_status = graph.effective_status
         # Attach the inbound callback audit to this mutation's transaction (spec §12).
-        callback_audit = _consume_pending_callback_audit(graph.task_id)
+        callback_audit = _pending_callback_audit(graph.task_id)
         try:
             version = self._graph_repo.save_graph(
                 graph,
@@ -177,12 +183,15 @@ class TaskGraphService:
                 callback_audit=callback_audit,
             )
         except Exception:
-            # Never leave a dirty cache after a failed shared-store write.
+            # Never leave a dirty cache after a failed shared-store write. Keep
+            # the pending audit staged so a version-conflict retry can commit it
+            # together with the replayed graph mutation.
             restored = self._graph_repo.load_graph(graph.task_id)
             if restored is not None:
                 self._graphs[graph.task_id] = restored
                 self._graph_versions[graph.task_id] = self._graph_repo.get_version(graph.task_id) or 0
             raise
+        _clear_pending_callback_audit(callback_audit)
         self._graph_versions[graph.task_id] = version
         return
 
@@ -195,6 +204,44 @@ class TaskGraphService:
         self._graphs[task_id] = graph
         self._graph_versions[task_id] = self._graph_repo.get_version(task_id) or 0
         return graph
+
+    def _mutate_with_version_retry(
+        self,
+        task_id: str,
+        mutation: Callable[[TaskExecutionGraph], tuple[Any, list[NodeActionEvent] | None, bool]],
+    ) -> Any:
+        """Run a replayable graph mutation with bounded optimistic-lock retries.
+
+        ``mutation`` must apply its complete change to the supplied graph and
+        return ``(result, action_events, should_persist)``. A version conflict
+        causes ``_persist_locked`` to hydrate the latest snapshot; the mutation
+        is then invoked again against that fresh snapshot. This keeps retries
+        from writing a stale graph over another instance's committed changes.
+        """
+        with self._lock_for(task_id):
+            for attempt in range(1, _MAX_GRAPH_VERSION_RETRIES + 1):
+                graph = self._require_graph(task_id)
+                result, action_events, should_persist = mutation(graph)
+                if not should_persist:
+                    return result
+                try:
+                    self._persist_locked(graph, action_events=action_events)
+                    return result
+                except GraphVersionConflictError:
+                    if attempt >= _MAX_GRAPH_VERSION_RETRIES:
+                        _LOG.exception(
+                            "[task][graph] version conflict retries exhausted task=%s attempts=%d",
+                            task_id,
+                            attempt,
+                        )
+                        raise
+                    _LOG.warning(
+                        "[task][graph] version conflict task=%s retry=%d/%d",
+                        task_id,
+                        attempt,
+                        _MAX_GRAPH_VERSION_RETRIES,
+                    )
+            raise AssertionError("unreachable graph version retry loop")
 
     def _get_node(self, graph: TaskExecutionGraph, node_id: str) -> TaskNode | None:
         for n in graph.tasks:
@@ -274,15 +321,14 @@ class TaskGraphService:
         task_id = tasks[0].task_id
         if any(t.task_id != task_id for t in tasks):
             raise GraphIntegrityError("add_task_nodes: 同批 task_id 不一致")
-        with self._lock_for(task_id):
-            graph = self._require_graph(task_id)
-            self._assert_add_trigger(graph)  # 双检 a/b/c
+
+        def mutation(graph):
+            self._assert_add_trigger(graph)
             parent = self._require_node(graph, parent_node_id)
             if parent.status not in _DELEGATABLE_PARENT:
                 raise GraphIntegrityError(
                     f"add_task_nodes: parent={parent_node_id} 状态={parent.status} 不可委托"
                 )
-            # 单层同构护栏
             existing_ids = {n.node_id for n in graph.tasks}
             new_ids = [t.node_id for t in tasks]
             if len(set(new_ids)) != len(new_ids):
@@ -290,22 +336,18 @@ class TaskGraphService:
             duplicated = existing_ids & set(new_ids)
             if duplicated:
                 raise GraphIntegrityError(f"add_task_nodes: 节点已存在 {duplicated}")
-            # 写 relations + 节点;回填 node_run_graph
             for t in tasks:
                 graph.tasks.append(t)
                 t.node_run_graph = graph
                 if attach_dependency:
-                    # 写 parent→子的单入锚定边;attach_dependency=False 时不写(静态 plan 后续波节点
-                    # 真依赖边由 add_relations 显式补 deps→X,避免每节点冗余 root→X 锚定使 root 误连一切)。
                     graph.relations.append(
                         Relation(src_id=parent_node_id, dst_id=t.node_id, type=RelationType.DEPENDENCY)
                     )
-            # 父进 PLANNING(委托/编排态:等子完成 / 待重算 gap)。v4:规划出子的父永不为 RUNNING,
-            # RUNNING 只给真正派发执行的叶子。
             if parent.status != Status.PLANNING:
                 parent.status = Status.PLANNING
-            self._persist_locked(graph)
-            return graph
+            return graph, None, True
+
+        return self._mutate_with_version_retry(task_id, mutation)
 
     def add_relations(self, task_id: str, edges: list[tuple[str, str]]) -> TaskExecutionGraph:
         """追写 DEPENDENCY 结构边(仅作用于已存在节点)。
@@ -317,12 +359,12 @@ class TaskGraphService:
         约束:
         - 端点必须已入图(节点已存在);自环/空边拒绝;
         - 仅静态 plan 调用,不走动态规划触发校验(a/b/c/d),不改任何节点状态;
-        - 同向边去重,幂等。"""
-        graph = self._require_graph(task_id)
+        - 同向边去重,幂等。
+        """
         if not edges:
-            return graph
-        with self._lock_for(task_id):
-            graph = self._require_graph(task_id)
+            return self._require_graph(task_id)
+
+        def mutation(graph):
             existing_ids = {n.node_id for n in graph.tasks}
             existing_edges = {
                 (r.src_id, r.dst_id)
@@ -344,13 +386,13 @@ class TaskGraphService:
                 )
                 existing_edges.add((src, dst))
                 added += 1
-            if added:
-                self._persist_locked(graph)
             _LOG.info(
                 "[task][graph] add_relations task=%s requested=%s added=%s",
                 task_id, len(edges), added,
             )
-            return graph
+            return graph, None, added > 0
+
+        return self._mutate_with_version_retry(task_id, mutation)
 
     def _assert_add_trigger(self, graph: TaskExecutionGraph) -> None:
         # 根节点由 graph.task_id 唯一标识，不能依赖 graph.tasks 的列表顺序。
@@ -388,28 +430,21 @@ class TaskGraphService:
            gaps 可空,verdict=FAILED 即统一收口,不强制要求 gaps 非空);
         ② status 直驱(框架内部):PENDING→RUNNING(派发) / RUNNING→PENDING(Harness 复位) /
            PLANNING→DONE(传播)。两者都校验状态机。无 acceptance_result 且无 status 只 fold 不翻态。
-        派发写:patch.run_mode(str)/assignee 落库 + 置 RUNNING。"""
-        with self._lock_for(patch.task_id):
-            graph = self._require_graph(patch.task_id)
+        派发写:patch.run_mode(str)/assignee 落库 + 置 RUNNING。
+        """
+        def mutation(graph):
             node = self._require_node(graph, patch.node_id)
             prev_status = node.status
             new_status: Status | None = None
             if patch.acceptance_result is not None:
-                # 模式① acceptance 驱动
                 if node.status in _TERMINAL_STATUSES:
-                    # 验收回投到已终态节点(DONE/FAILED/HUNG/CANCELLED)→ 幂等拒绝抛 TaskStateError
-                    # (如 BBS 对已 DONE scoped 节点再报 PASS);合法验收仅在 RUNNING 叶上(RUNNING→DONE/FAILED/HUNG)。
                     raise TaskStateError(
                         f"验收回投到已终态节点: {node.status}(task={patch.task_id} node={patch.node_id})"
                     )
                 verdict = patch.acceptance_result.verdict
                 if verdict == AcceptanceVerdict.DONE:
                     new_status = Status.DONE
-                else:  # FAIL(verdict=FAILED;gaps 可空——不区分一律收口,不再强制要求 gaps 非空)
-                    # 乙' a+R1 验收 FAIL 纯语义折叠:verdict=FAILED 即统一 RUNNING→HUNG/FAILED(gaps 空与
-                    # 非空不区分)。编排核动态叶显式直驱(patch.status==HUNG)时一次落 HUNG(acceptance_result
-                    # +hung_reason 同时入库,即便 gaps 空也以 verdict=FAILED 作 hung 上下文);外部/静态
-                    # 不带 status → 仍按 FAILED 落态(三方/静态自有终态语义)。
+                else:
                     new_status = (
                         Status.HUNG
                         if patch.status == Status.HUNG
@@ -417,38 +452,25 @@ class TaskGraphService:
                     )
                 node.run_info.acceptance_result = patch.acceptance_result
             elif patch.exec_error is not None:
-                # 执行报错(非验收):不翻终态,仅 fold extend_props(供 on_harness 读 harness_retries);
-                # 翻态/复位由编排核 on_harness 直驱 patch.status 处理。
                 if patch.extend_props_patch is not None:
                     node.run_info.extend_props.update(patch.extend_props_patch)
-                self._persist_locked(graph)
                 return NodeOpResult(
                     task_id=patch.task_id, node_id=patch.node_id, success=True,
                     prev_status=prev_status, new_status=node.status,
-                )
+                ), None, True
             elif patch.status is not None:
-                # 模式② status 直驱(软状态机:非法直驱告警但放行落地——BBS 重新派发需把已 DONE scoped
-                # 叶复位 RUNNING、_maybe_propagate_hung 冒泡到已 HUNG 根等恢复语义依赖此软放行;
-                # 同态复置为幂等 no-op)。严格终态守卫由模式① acceptance 路径 enforce。
                 new_status = patch.status
                 allowed = _DIRECT_TRANSITIONS.get(node.status, set())
                 if new_status not in allowed:
                     _LOG.warning(f"status 直驱非法: {node.status} → {new_status}")
-            # fold 非状态字段(空串归一为 None:run_mode 只有 single_bot/coop_group/bbs 三态,None=非执行/规划态)
             if patch.output_patch is not None:
                 node.run_info.output.update(patch.output_patch)
             if patch.run_mode is not None:
-                # 空串 -> None(规划/复位清执行者场景把 "" 当"清除"语义)
                 node.run_info.run_mode = patch.run_mode or None
             if patch.assignee is not None:
-                # 空串 -> None(同上,清执行者)
                 node.run_info.assignee = patch.assignee or None
             if patch.extend_props_patch is not None:
                 node.run_info.extend_props.update(patch.extend_props_patch)
-            # 时间戳(统一在 SSOT 网关按状态转移自动写):
-            #   进入 RUNNING(真执行) → 写 start_time,清 end_time(新一轮 attempt)
-            #   进入 DONE/FAILED/HUNG(终态) → 写 end_time(start_time 可能仍 None:纯规划后直终态)
-            #   回到 PENDING(harness 复位重投) → 清 start_time/end_time(下次重派重写 start_time)
             if new_status == Status.RUNNING and prev_status != Status.RUNNING:
                 node.run_info.start_time = int(time.time() * 1000)
                 node.run_info.end_time = None
@@ -457,17 +479,17 @@ class TaskGraphService:
             elif new_status == Status.PENDING:
                 node.run_info.start_time = None
                 node.run_info.end_time = None
-            # 应用翻态
             if new_status is not None:
                 node.status = new_status
-            self._persist_locked(graph)
             return NodeOpResult(
                 task_id=patch.task_id,
                 node_id=patch.node_id,
                 success=True,
                 prev_status=prev_status,
                 new_status=node.status,
-            )
+            ), None, True
+
+        return self._mutate_with_version_retry(patch.task_id, mutation)
 
     def append_action_event(
         self,
@@ -482,13 +504,10 @@ class TaskGraphService:
     ) -> None:
         """节点级动作历史快照追加口(append-only;纯可观测,不入状态机)。
 
-        由编排核在各逻辑动作(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/TRANSITION)完成时调用;
-        纯追加,不翻态、不 fold 任何单值字段、不影响驱动决策。``seq``/``ts``/``loop_round``
-        由本网关在锁内填(序号=当前 action_log 长度+1);``status_from``/``status_to`` 由调用方
-        按动作发生前/后态显式传(未翻态时二者相等或均 None)。与 ``update_task_node_info`` 同锁域。
+        每次版本冲突都在最新 graph 上重新计算 action seq 并重建事件,避免
+        复用旧 seq 导致跨实例动作历史重复。
         """
-        with self._lock_for(task_id):
-            graph = self._require_graph(task_id)
+        def mutation(graph):
             node = self._require_node(graph, node_id)
             event_payload = dict(payload)
             event_payload.setdefault("__node_id", node_id)
@@ -506,14 +525,13 @@ class TaskGraphService:
                 payload=event_payload,
             )
             node.run_info.action_log.append(event)
-            self._persist_locked(graph, action_events=[event])
+            return None, [event], True
+
+        self._mutate_with_version_retry(task_id, mutation)
 
     def update_task_graph_info(self, task_id: str, patch: TaskGraphPatch) -> TaskExecutionGraph:
-        """图级原子写口:收口图级终态(``status``=DONE/HUNG、``loop_round`` 原子加、``output`` 浅合并、
-        ``extend_props`` 浅合并承载 ``bbs_mode``/``hung_reason``)。图谱 SSOT 唯一图级写口;编排核升 BBS /
-        根终验完成等图级终态变更一律经此方法,不直写返回的 graph 引用。所有字段增量:未给不动。"""
-        with self._lock_for(task_id):
-            graph = self._require_graph(task_id)
+        """图级原子写口,以可重放 patch 处理跨实例版本冲突。"""
+        def mutation(graph):
             if patch.loop_round_increment is not None:
                 graph.loop_round += patch.loop_round_increment
             if patch.status is not None:
@@ -522,8 +540,9 @@ class TaskGraphService:
                 graph.output.update(patch.output_patch)
             if patch.extend_props_patch is not None:
                 graph.extend_props.update(patch.extend_props_patch)
-            self._persist_locked(graph)
-            return graph
+            return graph, None, True
+
+        return self._mutate_with_version_retry(task_id, mutation)
 
     def claim_bbs_owner(self, task_id: str, bot_id: str) -> NodeOpResult:
         """BBS 接力:任务根级 CAS 占有(root.run_info.extend_props['bbs_owner'])。
@@ -839,7 +858,7 @@ class TaskGraphService:
             return depth
 
     def _execution_config(self, task_id: str) -> dict[str, Any]:
-        """读 MAX_DEPTH(结构深度闸门,默认 3)/ MAX_LOOP(图级总轮次,默认 3)/ MAX_HARNESS(默认 2),填默认。"""
+        """读 MAX_DEPTH(结构深度闸门,默认 2)/ MAX_LOOP(图级总轮次,默认 3)/ MAX_HARNESS(默认 2),填默认。"""
         with self._lock_for(task_id):
             graph = self._require_graph(task_id)
             cfg: dict[str, Any] = dict(graph.extend_props.get("execution_config", {}))

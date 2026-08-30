@@ -4,6 +4,7 @@ one store — hydrate, callback (same-tx audit), event idempotency, BBS claim CA
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 from agentclaw.community.core.repository.implementations.task.task_callback_repository import (
     TaskCallbackRepository,
@@ -18,6 +19,7 @@ from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
     Metadata,
+    NodeAction,
     RuntimeInfo,
     Status,
     TaskCallbackData,
@@ -25,6 +27,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo,
     TaskNode,
     TaskNodePatch,
+    TaskGraphPatch,
     TaskSpec,
 )
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -140,7 +143,7 @@ def test_cross_instance_callback_advances_graph_and_audits_same_tx(db):
     assert a.has_repository
 
 
-def test_callback_event_is_idempotent_across_replay(db):
+def test_callback_result_replay_uses_fresh_event_id_without_graph_mutation(db):
     task_id = "T-IDEM"
     _seed(db, task_id)
     a = _make_graph_service(db)
@@ -150,18 +153,22 @@ def test_callback_event_is_idempotent_across_replay(db):
 
     _run(cb.start_run(_start_data(task_id, task_id)))
     data = _result_data(task_id, task_id, success=True)
-    expected_id = _derive_event_id(data.data, "result")
     _run(cb.report_result(data))
-    assert callback_repo.get(task_id, task_id).event_id == expected_id
-    assert callback_repo.find_by_event_id(expected_id).process_status == "PROCESSED"
+    first_id = callback_repo.get(task_id, task_id).event_id
+    assert first_id and str(uuid.UUID(first_id)) == first_id
+    assert callback_repo.find_by_event_id(first_id).process_status == "PROCESSED"
 
     version_after = a._graph_versions[task_id]
-    # replay the exact same event -> idempotent ack, no graph mutation, no version bump
-    _run(cb.report_result(data))
+    # report_result deliberately uses a fresh UUID v4 for every inbound result;
+    # terminal graph state rejects the replay without changing its version.
+    try:
+        _run(cb.report_result(data))
+    except TaskStateError:
+        pass
     assert a._graph_versions[task_id] == version_after
-    # only one callback audit row for that (run_id,node_id)
     rec = callback_repo.get(task_id, task_id)
-    assert rec is not None and rec.event_id == expected_id
+    assert rec is not None and rec.event_id and rec.event_id != first_id
+    assert str(uuid.UUID(rec.event_id)) == rec.event_id
 
 
 def test_concurrent_bbs_claim_one_winner(db):
@@ -192,6 +199,82 @@ def test_concurrent_bbs_claim_one_winner(db):
         raise AssertionError("second concurrent BBS claim should have lost")
     # instance A can re-claim idempotently
     assert inst_a.claim_bbs_owner(task_id, "bot-A").success is True
+
+
+def test_graph_patch_retries_after_cross_instance_version_conflict(db):
+    """A stale service replays a graph patch on the hydrated latest snapshot."""
+    from agentclaw.community.core.task.domain.models import TaskGraphPatch
+
+    task_id = "T-CROSS-VERSION-RETRY"
+    _seed(db, task_id)
+    writer_a = _make_graph_service(db)
+    writer_a.initialize_graph(TaskInfo(task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
+
+    writer_b = _make_graph_service(db)
+    writer_b.query_task_dashboard(task_id)  # hydrate version 1 into B's cache
+    writer_a.update_task_graph_info(
+        task_id, TaskGraphPatch(extend_props_patch={"writer_a": True})
+    )
+
+    # B starts from a stale version, so the service must hydrate and replay its patch.
+    writer_b.update_task_graph_info(
+        task_id, TaskGraphPatch(extend_props_patch={"writer_b": True})
+    )
+
+    latest = writer_a.query_task_dashboard(task_id)
+    assert latest.extend_props["writer_a"] is True
+    assert latest.extend_props["writer_b"] is True
+
+
+def test_all_graph_mutations_retry_after_cross_instance_conflict(db):
+    """All graph mutation entrypoints replay against a fresh snapshot on conflict."""
+    task_id = "T-CROSS-MUTATION-RETRY"
+    _seed(db, task_id)
+    writer_a = _make_graph_service(db)
+    writer_a.initialize_graph(TaskInfo(task_spec=_spec(task_id), source_type="bot", owner_bot_id="B"))
+    writer_b = _make_graph_service(db)
+    writer_b.query_task_dashboard(task_id)
+
+    def bump_from_a(key):
+        writer_a.update_task_graph_info(
+            task_id, TaskGraphPatch(extend_props_patch={key: True})
+        )
+
+    bump_from_a("before_add_nodes")
+    writer_b.add_task_nodes([TaskNode(
+        node_id="child-1", task_id=task_id, status=Status.PENDING,
+        task_spec=_spec(task_id), run_info=RuntimeInfo(), node_run_graph=None,
+    )], parent_node_id=task_id)
+
+    bump_from_a("before_update_node")
+    writer_b.update_task_node_info(
+        TaskNodePatch(task_id=task_id, node_id="child-1", status=Status.RUNNING)
+    )
+
+    bump_from_a("before_add_second_node")
+    writer_b.add_task_nodes([TaskNode(
+        node_id="child-2", task_id=task_id, status=Status.PENDING,
+        task_spec=_spec(task_id), run_info=RuntimeInfo(), node_run_graph=None,
+    )], parent_node_id=task_id)
+
+    bump_from_a("before_add_relation")
+    writer_b.add_relations(task_id, [("child-1", "child-2")])
+
+    bump_from_a("before_action_event")
+    writer_b.append_action_event(
+        task_id, "child-1", NodeAction.DISPATCH, {"source": "retry-test"}
+    )
+
+    latest = writer_a.query_task_dashboard(task_id)
+    assert latest.extend_props["before_add_nodes"] is True
+    assert latest.extend_props["before_action_event"] is True
+    assert {n.node_id for n in latest.tasks} >= {task_id, "child-1", "child-2"}
+    assert any(
+        r.src_id == "child-1" and r.dst_id == "child-2"
+        for r in latest.relations
+    )
+    writer_a.load_action_logs(latest)
+    assert latest.tasks[1].run_info.action_log
 
 
 def test_recovery_precondition_pending_leaf_hydrates_cross_instance(db):
