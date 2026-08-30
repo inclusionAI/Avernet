@@ -3,7 +3,7 @@
 ``refresh_restart_authorization`` now owns both the opt-in decision and the
 AICoding-specific side effects:
   * refresh MCP scope;
-  * push MCP details to runtime;
+  * declare MCP desired state to runtime;
   * resync ~/.claude/skills symlinks via SkillSetService.project_skills().
 All side effects are best-effort/fire-and-forget.
 """
@@ -98,9 +98,10 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_desired_state = AsyncMock(return_value={"success": True})
     factory = MagicMock()
     skill_set_service = MagicMock()
+    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a", "mcp-b"]
+    skill_set_service.sync_mcp_desired_state = AsyncMock(return_value=True)
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
@@ -121,12 +122,15 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     assert scope_kwargs["entity_type"] == "staff"
     assert scope_kwargs["engine_type"] == "aicoding"
     assert "extra_cli_items" not in scope_kwargs
-    mcp_sync.sync_mcp_desired_state.assert_awaited_once_with(
-        user_id="ent-9",
-        entity_id="ent-9",
-        bot_id="bot-1",
-        entity_type="staff",
-        engine_type="aicoding",
+    skill_set_service.get_bot_mcp_codes.assert_called_once_with(
+        "ent-9",
+        "bot-1",
+        "ent-9",
+        "staff",
+        "aicoding",
+    )
+    skill_set_service.sync_mcp_desired_state.assert_awaited_once_with(
+        server_codes={"mcp-a", "mcp-b"},
     )
     factory.create.assert_called_once_with(
         user_id="ent-9",
@@ -166,9 +170,9 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
     mcp_sync.refresh_mcp_scope = AsyncMock(
         return_value={"success": False, "error": "scope denied"}
     )
-    mcp_sync.sync_mcp_desired_state = AsyncMock()
     factory = MagicMock()
     skill_set_service = MagicMock()
+    skill_set_service.sync_mcp_desired_state = AsyncMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
@@ -181,7 +185,7 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
             skill_set_factory=factory,
         ) is True
 
-    mcp_sync.sync_mcp_desired_state.assert_not_called()
+    skill_set_service.sync_mcp_desired_state.assert_not_called()
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
@@ -189,11 +193,10 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_desired_state = AsyncMock(
-        return_value={"success": False, "error": "detail down"}
-    )
     factory = MagicMock()
     skill_set_service = MagicMock()
+    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
+    skill_set_service.sync_mcp_desired_state = AsyncMock(return_value=False)
     skill_set_service.project_skills = AsyncMock(return_value=False)
     factory.create.return_value = skill_set_service
 
@@ -206,22 +209,22 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
             skill_set_factory=factory,
         ) is True
 
-    mcp_sync.sync_mcp_desired_state.assert_awaited_once()
+    skill_set_service.sync_mcp_desired_state.assert_awaited_once_with(
+        server_codes={"mcp-a"},
+    )
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
-def test_aicoding_refresh_does_not_retry_mcp_detail_when_runtime_not_ready() -> None:
+def test_aicoding_refresh_does_not_retry_mcp_desired_state_when_runtime_not_ready() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_desired_state = AsyncMock(
-        side_effect=[
-            {"success": False, "error": "NO_ACTIVE_DEVICES"},
-            {"success": True},
-        ]
-    )
     factory = MagicMock()
     skill_set_service = MagicMock()
+    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
+    skill_set_service.sync_mcp_desired_state = AsyncMock(
+        side_effect=[False, True]
+    )
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
@@ -234,20 +237,24 @@ def test_aicoding_refresh_does_not_retry_mcp_detail_when_runtime_not_ready() -> 
             skill_set_factory=factory,
         ) is True
 
-    mcp_sync.sync_mcp_desired_state.assert_awaited_once()
+    skill_set_service.sync_mcp_desired_state.assert_awaited_once_with(
+        server_codes={"mcp-a"},
+    )
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
-def test_aicoding_refresh_does_not_retry_mcp_detail_exception() -> None:
+def test_aicoding_refresh_does_not_retry_mcp_desired_state_exception() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_desired_state = AsyncMock(
-        side_effect=[
-            RuntimeError("BaaS API error: NO_ACTIVE_DEVICES"),
-            {"success": True},
-        ]
+    factory = MagicMock()
+    skill_set_service = MagicMock()
+    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
+    skill_set_service.sync_mcp_desired_state = AsyncMock(
+        side_effect=RuntimeError("BaaS API error: NO_ACTIVE_DEVICES")
     )
+    skill_set_service.project_skills = AsyncMock(return_value=True)
+    factory.create.return_value = skill_set_service
 
     with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
         assert strategy.refresh_restart_authorization(
@@ -255,10 +262,13 @@ def test_aicoding_refresh_does_not_retry_mcp_detail_exception() -> None:
             _bot(),
             {"confirmed_template_update": True},
             mcp_sync=mcp_sync,
-            skill_set_factory=None,
+            skill_set_factory=factory,
         ) is True
 
-    mcp_sync.sync_mcp_desired_state.assert_awaited_once()
+    skill_set_service.sync_mcp_desired_state.assert_awaited_once_with(
+        server_codes={"mcp-a"},
+    )
+    skill_set_service.project_skills.assert_awaited_once_with()
 
 
 def test_aicoding_refresh_does_not_retry_skill_symlink_when_false() -> None:
@@ -305,9 +315,10 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
-    mcp_sync.sync_mcp_desired_state = AsyncMock(side_effect=RuntimeError("detail down"))
     factory = MagicMock()
     skill_set_service = MagicMock()
+    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
+    skill_set_service.sync_mcp_desired_state = AsyncMock(side_effect=RuntimeError("detail down"))
     skill_set_service.project_skills = AsyncMock(side_effect=RuntimeError("skill down"))
     factory.create.return_value = skill_set_service
 
@@ -320,7 +331,9 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
             skill_set_factory=factory,
         ) is True
 
-    mcp_sync.sync_mcp_desired_state.assert_awaited_once()
+    skill_set_service.sync_mcp_desired_state.assert_awaited_once_with(
+        server_codes={"mcp-a"},
+    )
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
@@ -339,6 +352,7 @@ def test_aicoding_refresh_swallows_skill_sync_exception() -> None:
         ) is True
 
     factory.create.assert_called_once()
+
 
 def test_default_strategy_always_returns_false() -> None:
     strategy = DefaultProvisioningStrategy("openclaw")

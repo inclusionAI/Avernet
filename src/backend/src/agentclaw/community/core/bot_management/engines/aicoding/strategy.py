@@ -683,9 +683,28 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             import asyncio
 
             refresh_succeeded = True
+            skill_set_service = None
+            if skill_set_factory is not None:
+                try:
+                    skill_set_service = skill_set_factory.create(
+                        user_id=effective_entity_id,
+                        entity_id=effective_entity_id,
+                        bot_id=ctx.bot_id,
+                        entity_type=effective_entity_type,
+                        engine_type=effective_engine,
+                    )
+                except Exception as skill_error:
+                    refresh_succeeded = False
+                    logger.error(
+                        "[aicoding.restart] skill set service create error: "
+                        "bot_id=%s, engine_type=%s, error=%s",
+                        ctx.bot_id, effective_engine, skill_error,
+                        exc_info=True,
+                    )
+
             if mcp_sync is not None:
                 try:
-                    async def _do_mcp_sync() -> tuple[dict, dict | None]:
+                    async def _do_mcp_sync() -> tuple[dict, bool | None]:
                         scope_result = await mcp_sync.refresh_mcp_scope(
                             user_id=effective_entity_id,
                             entity_id=effective_entity_id,
@@ -696,16 +715,24 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         if not scope_result.get("success"):
                             return scope_result, None
 
-                        detail_result = await mcp_sync.sync_mcp_desired_state(
-                            user_id=effective_entity_id,
-                            entity_id=effective_entity_id,
-                            bot_id=ctx.bot_id,
-                            entity_type=effective_entity_type,
-                            engine_type=effective_engine,
-                        )
-                        return scope_result, detail_result
+                        detail_synced = None
+                        if skill_set_service is not None:
+                            declared_server_codes = set(
+                                await asyncio.to_thread(
+                                    skill_set_service.get_bot_mcp_codes,
+                                    effective_entity_id,
+                                    ctx.bot_id,
+                                    effective_entity_id,
+                                    effective_entity_type,
+                                    effective_engine,
+                                )
+                            )
+                            detail_synced = await skill_set_service.sync_mcp_desired_state(
+                                server_codes=declared_server_codes,
+                            )
+                        return scope_result, detail_synced
 
-                    scope_result, detail_result = asyncio.run(_do_mcp_sync())
+                    scope_result, detail_synced = asyncio.run(_do_mcp_sync())
                     if not scope_result.get("success"):
                         refresh_succeeded = False
                         logger.error(
@@ -713,12 +740,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                             "bot_id=%s, engine_type=%s, error=%s",
                             ctx.bot_id, effective_engine, scope_result.get("error"),
                         )
-                    elif detail_result and not detail_result.get("success"):
+                    elif detail_synced is False:
                         refresh_succeeded = False
                         logger.error(
-                            "[aicoding.restart] MCP detail resync failed: "
+                            "[aicoding.restart] MCP desired-state resync failed: "
                             "bot_id=%s, engine_type=%s, error=%s",
-                            ctx.bot_id, effective_engine, detail_result.get("error"),
+                            ctx.bot_id, effective_engine,
+                            "desired-state declaration returned false",
                         )
                     else:
                         logger.info(
@@ -735,15 +763,8 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         exc_info=True,
                     )
 
-            if skill_set_factory is not None:
+            if skill_set_service is not None:
                 try:
-                    skill_set_service = skill_set_factory.create(
-                        user_id=effective_entity_id,
-                        entity_id=effective_entity_id,
-                        bot_id=ctx.bot_id,
-                        entity_type=effective_entity_type,
-                        engine_type=effective_engine,
-                    )
                     # ``project_skills`` is async so that both halves of the
                     # capability boundary are awaited the same way; this is a
                     # worker thread with no running loop, so it bridges the
