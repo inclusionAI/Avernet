@@ -272,6 +272,27 @@ The cost is orphan rows when a user never clicks the link or Passport rejects.
 Accepted for v1 — an orphan manifest occupies no runtime resource — with cleanup
 deferred to #1698.
 
+**A fixed constraint, not a design choice: creation always requires a human.**
+The Passport authorization link is an AgentPass limitation, outside our control.
+So "create a bot" is inherently a one-at-a-time, human-in-the-loop operation, and
+no feature may be planned that assumes otherwise.
+
+Its reach is narrower than it first appears, and the distinction matters:
+
+| | Needs an authorization click? |
+| --- | --- |
+| **Creating** a bot from a manifest (W13) | **Yes, one per bot.** Inherent |
+| `PUT`-ing a manifest to an **existing** bot (§2.6) | No |
+| Applying at republish / restart (W8) | No |
+| Scale-out of an existing bot | No — instances share one platform state (#926) |
+
+So design §9's **O6 (a template-level manifest, one declaration for many bots)**
+survives for the case it was actually written for — *applying* one declaration
+across many **existing** bots involves no authorization at all. What is not
+viable is a "create N bots from one manifest" batch feature: that is N
+authorization clicks, and no amount of platform work removes them. Nothing in
+v1 depends on it; this is recorded so it is not proposed later.
+
 Tracked as **W13**.
 
 ## 3. Design questions
@@ -943,12 +964,12 @@ solved:
 | Mechanism | Does tenant survive? |
 | --- | --- |
 | A thread spawned during the request | **Yes — already solved.** `threading.Thread(target=bind_current_avernet_tenant(fn), daemon=True)` is the established pattern: `bot_publish_service.py:1267` (`_do_restart`, itself an apply point), `baas_publish_poller.py:57` (`_poll`, the natural home of `CREATING → APPLYING`), `bot_service.py:1979`. The wrapper reads the tenant at **bind** time, inside the request thread, and re-establishes it inside the new thread. Follow the pattern and there is nothing to do |
-| The task queue | **No.** `core/task_queue`'s model carries `env` and `idempotency_key` but nothing tenant-shaped, and the module has no tenant handling at all. A task is enqueued now and run later by a worker, so no request context remains to capture and `bind_current_avernet_tenant` cannot help. The tenant must ride in the task `payload` and be re-scoped explicitly in the handler |
+| The task queue | **No** — but **not a scenario today**, so this is a note for later rather than a requirement. `core/task_queue`'s model carries `env` and `idempotency_key` but nothing tenant-shaped, and the module has no tenant handling at all. A task is enqueued now and run later by a worker, so no request context remains to capture and `bind_current_avernet_tenant` cannot help; the tenant would have to ride in the task `payload` and be re-scoped in the handler |
 
-This is worth writing down because the task queue is a natural choice for this
-work — `skills_pool` already uses it (`skills_pool.reconcile`,
-`skills_pool.quarantine.cleanup`) — so it is easy to reach for without noticing
-the difference.
+Recorded only so that whoever *does* reach for the task queue later knows the
+difference — `skills_pool` already uses it (`skills_pool.reconcile`,
+`skills_pool.quarantine.cleanup`), so it is an easy thing to reach for. **No
+current apply path uses it**, and W13 does not need to solve it.
 
 A smaller footgun worth knowing: `bind_current_avernet_tenant` *looks* like a
 decorator (it uses `functools.wraps`) but captures the tenant when the wrapping
