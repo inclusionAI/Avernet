@@ -305,6 +305,22 @@ def test_strict_validator_rejects_a_manifest_without_frontmatter() -> None:
     assert error.value.reason == "invalid_metadata"
 
 
+def test_strict_directory_validation_rejects_a_manifest_without_frontmatter() -> (
+    None
+):
+    with pytest.raises(SkillPackageInvalidError) as error:
+        SkillPackageValidator(SkillParser()).validate_directory(
+            [
+                (
+                    "weather/SKILL.md",
+                    b"name: weather\ndescription: Legacy upload compatibility\n",
+                )
+            ]
+        )
+
+    assert error.value.reason == "invalid_metadata"
+
+
 def test_explicit_legacy_local_validation_accepts_a_manifest_without_frontmatter() -> (
     None
 ):

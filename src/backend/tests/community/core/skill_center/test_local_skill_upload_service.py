@@ -655,6 +655,25 @@ async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
 
 
 @pytest.mark.asyncio
+async def test_local_upload_preserves_legacy_frontmatter_config_compatibility():
+    result = await _service(_Filesystem()).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(
+            {
+                "SKILL.md": (
+                    b"---\nname: upload-skill\ndescription: useful\n"
+                    b"config: not-a-list\n---\n"
+                )
+            }
+        ),
+    )
+
+    assert result["operation"] == "created"
+
+
+@pytest.mark.asyncio
 async def test_invalid_upload_is_rejected_before_device_or_cleanup_side_effects():
     class _UnavailableDeviceResolver:
         def resolve_for_bot(self, *_args):
