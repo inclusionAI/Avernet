@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -25,6 +26,9 @@ from agentclaw.community.core.skill_center.services.bot_capability_state_reader 
 )
 from agentclaw.community.core.skill_center.services.skill_version_resolver import (
     SkillVersionResolver,
+)
+from agentclaw.community.core.skill_center.materialization_contract import (
+    PublishedMaterializedSkillVersion,
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
@@ -248,3 +252,124 @@ def test_reader_returns_runtime_ready_center_asset_from_installation_and_version
     assert assets[0].skill_uuid == "00000000-0000-4000-8000-000000000010"
     assert assets[0].sc_version_number == "1.0.0"
     assert assets[0].mcp_dependencies == ()
+
+
+def test_materialization_publish_is_one_tenant_scoped_compare_and_set() -> None:
+    db = _Database()
+    with db.orm_session() as session:
+        session.add(
+            Skill(
+                id=10,
+                name="weather",
+                description="old description",
+                status="PENDING",
+                git_path="center://public-weather",
+                skill_uuid="00000000-0000-4000-8000-000000000010",
+                user_id="owner",
+                bolt_id="default",
+                env="pre",
+            )
+        )
+    _add_version(
+        db,
+        skill_id=10,
+        version_id=101,
+        ordinal=1,
+        status="MATERIALIZING",
+        number="1.0.0",
+    )
+    repo = SkillVersionRepository(db)
+
+    with avernet_tenant_scope("teamclaw"):
+        target = repo.get_materialization_target(
+            env="pre", skill_id=10, skill_version_id=101
+        )
+        published = repo.publish_materialized(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            metadata_json='{"mcp_dependencies":[]}',
+            description="new description",
+            sc_sha256="a" * 64,
+            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
+        )
+
+    assert target is not None
+    assert target.status == "MATERIALIZING"
+    assert target.skill_uuid == "00000000-0000-4000-8000-000000000010"
+    assert target.skill_code == "public-weather"
+    assert published == PublishedMaterializedSkillVersion(
+        skill_version_id=101,
+        skill_id=10,
+        version_ordinal=1,
+        status="PUBLISHED",
+        skill_uuid="00000000-0000-4000-8000-000000000010",
+        sc_version_number="1.0.0",
+        name="skill-10",
+        description="new description",
+        metadata_json='{"mcp_dependencies":[]}',
+        published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
+    )
+    with db.orm_session() as session:
+        version = session.get(SkillVersion, 101)
+        skill = session.get(Skill, 10)
+        assert version is not None and version.status == "PUBLISHED"
+        assert version.metadata_json == '{"mcp_dependencies":[]}'
+        assert version.sc_sha256 == "a" * 64
+        assert skill is not None and skill.description == "new description"
+        assert skill.status == "PUBLISHED"
+
+
+def test_materialization_publish_replay_requires_the_same_frozen_facts() -> None:
+    db = _Database()
+    with db.orm_session() as session:
+        session.add(
+            Skill(
+                id=10,
+                name="weather",
+                git_path="center://public-weather",
+                skill_uuid="00000000-0000-4000-8000-000000000010",
+                user_id="owner",
+                bolt_id="default",
+                env="pre",
+            )
+        )
+    _add_version(
+        db,
+        skill_id=10,
+        version_id=101,
+        ordinal=1,
+        status="PUBLISHED",
+        number="1.0.0",
+    )
+    with db.orm_session() as session:
+        row = session.get(SkillVersion, 101)
+        assert row is not None
+        row.sc_sha256 = "a" * 64
+        row.description = "same"
+        row.metadata_json = '{"mcp_dependencies":[]}'
+        row.published_at = datetime(2026, 8, 30, 12, 0)
+
+    repo = SkillVersionRepository(db)
+    with avernet_tenant_scope("teamclaw"):
+        replay = repo.publish_materialized(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            metadata_json='{"mcp_dependencies":[]}',
+            description="same",
+            sc_sha256="a" * 64,
+            published_at=datetime(2026, 8, 30, 13, 0, tzinfo=UTC),
+        )
+        with pytest.raises(RuntimeError, match="conflicts"):
+            repo.publish_materialized(
+                env="pre",
+                skill_id=10,
+                skill_version_id=101,
+                metadata_json='{"mcp_dependencies":[{"code":"other"}]}',
+                description="same",
+                sc_sha256="a" * 64,
+                published_at=datetime(2026, 8, 30, 13, 0, tzinfo=UTC),
+            )
+
+    assert replay.status == "PUBLISHED"

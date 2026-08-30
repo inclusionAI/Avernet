@@ -47,6 +47,7 @@ class ValidatedSkillPackage:
     description: str
     files: tuple[tuple[str, bytes], ...]
     canonical_zip: bytes
+    config: tuple[dict[str, Any], ...] = ()
 
 
 @runtime_checkable
@@ -202,10 +203,11 @@ class SkillPackageValidator:
                 metadata = self._metadata_parser.parse_skill_markdown(
                     markdown, path=skill_path
                 ).to_dict()
-                if not allow_legacy_local_manifest:
+                config = tuple(
                     self._metadata_parser.parse_config(
                         self._metadata_parser.decode_content(markdown)
                     )
+                )
             except SkillManifestError as exc:
                 if (
                     not allow_legacy_local_manifest
@@ -214,6 +216,7 @@ class SkillPackageValidator:
                     raise
                 text = self._metadata_parser.decode_content(markdown)
                 metadata = self._metadata_parser.parse_legacy_upload_content(text) or {}
+                config = ()
         except SkillManifestError as exc:
             raise SkillPackageInvalidError("invalid_metadata") from exc
 
@@ -253,6 +256,7 @@ class SkillPackageValidator:
             description=description,
             files=normalized,
             canonical_zip=canonical_zip,
+            config=config,
         )
 
     @staticmethod

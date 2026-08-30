@@ -37,6 +37,9 @@ provides:
   - "BotCapabilityStateReader"
   - "SkillVersionResolver"
   - "SkillVersionResolverProtocol"
+  - "SkillVersionMaterializer"
+  - "SkillVersionMaterializerProtocol"
+  - "PublishedMaterializedSkillVersion"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
   - "LocalSkillCleanupWorkModel"
@@ -83,6 +86,9 @@ consumes:
   - "WorkOrderRepositoryProtocol"
   - "DraftEditLeaseRepository"
   - "SkillVersionRepositoryProtocol"
+  - "SkillVersionMaterializationRepositoryProtocol"
+  - "SkillVersionScannerProtocol"
+  - "HttpClient"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
@@ -117,6 +123,7 @@ internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.log
   - agentclaw.community.plugin_api.cache
+  - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.local_skill_cleanup
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.device_adapter_transport
@@ -153,8 +160,12 @@ their owning application services.
 write intent and integrity manifest live under the derived sibling
 `skills-center-control/` prefix, which Engine Runtime must never mount or copy.
 Those objects protect immutable writes and validate completeness; they are not
-a publication state. Only `ac_skill_version.status=PUBLISHED`, owned by the
-later Materializer workflow, expresses domain readiness.
+a publication state. Only `ac_skill_version.status=PUBLISHED`, owned by
+`SkillVersionMaterializer` after exact download/hash, strict package validation,
+Scanner metadata, MCP dependency and Store verification all succeed, expresses
+domain readiness. Publication and SC Reference producers consume the public
+Materializer Service API; Runtime reads consume only PUBLISHED Versions through
+`SkillVersionResolver`.
 
 `DraftContentStore` persists one canonical ZIP per immutable Draft revision.
 Its business reference is `draft://<skill_uuid>/v<target>/<revision_id>`; only

@@ -1,0 +1,128 @@
+"""Stable application contract for exact Center Version publication."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal, Protocol, runtime_checkable
+
+from agentclaw.community.core.skill_center.skill_package import (
+    ValidatedSkillPackage,
+)
+from agentclaw.community.plugin_api.skill_center_gateway import (
+    SkillCenterReadScope,
+)
+
+
+class SkillVersionMaterializationError(RuntimeError):
+    """An exact Version failed a Ready Gate and remains non-consumable."""
+
+
+@dataclass(frozen=True, slots=True)
+class SkillVersionMaterializationRequest:
+    """Address one already-created MATERIALIZING Version."""
+
+    env: str
+    skill_id: int
+    skill_version_id: int
+    scope: SkillCenterReadScope
+    team_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.env or self.skill_id < 1 or self.skill_version_id < 1:
+            raise ValueError("materialization requires an exact Version identity")
+        if self.scope is SkillCenterReadScope.TEAM:
+            if not self.team_id:
+                raise ValueError("TEAM materialization requires team_id")
+        elif self.team_id is not None:
+            raise ValueError("PUBLIC materialization must not carry team_id")
+
+
+@dataclass(frozen=True, slots=True)
+class MaterializingSkillVersion:
+    """Persisted facts needed to materialize or verify one exact Version."""
+
+    skill_version_id: int
+    skill_id: int
+    version_ordinal: int
+    status: Literal["MATERIALIZING", "PUBLISHED"]
+    skill_uuid: str
+    skill_code: str
+    sc_version_number: str
+    sc_sha256: str | None
+    name: str
+    description: str | None
+    metadata_json: str | None
+    published_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class SkillVersionScanResult:
+    """Scanner-owned immutable facts frozen into Version metadata."""
+
+    risk_tags: tuple[Mapping[str, object], ...]
+    mcp_dependencies: tuple[Mapping[str, object], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PublishedMaterializedSkillVersion:
+    """The stable Version-Published application seam."""
+
+    skill_version_id: int
+    skill_id: int
+    version_ordinal: int
+    status: Literal["PUBLISHED"]
+    skill_uuid: str
+    sc_version_number: str
+    name: str
+    description: str | None
+    metadata_json: str
+    published_at: datetime
+
+
+@runtime_checkable
+class SkillVersionMaterializationRepositoryProtocol(Protocol):
+    """Persistence boundary for Ready-Gate reads and the final CAS publish."""
+
+    def get_materialization_target(
+        self, *, env: str, skill_id: int, skill_version_id: int
+    ) -> MaterializingSkillVersion | None: ...
+
+    def publish_materialized(
+        self,
+        *,
+        env: str,
+        skill_id: int,
+        skill_version_id: int,
+        metadata_json: str,
+        description: str,
+        sc_sha256: str,
+        published_at: datetime,
+    ) -> PublishedMaterializedSkillVersion: ...
+
+
+@runtime_checkable
+class SkillVersionScannerProtocol(Protocol):
+    def scan(self, package: ValidatedSkillPackage) -> SkillVersionScanResult: ...
+
+
+@runtime_checkable
+class SkillVersionMaterializerProtocol(Protocol):
+    """Consumer-first seam reused by future Publication and Reference flows."""
+
+    def materialize(
+        self, request: SkillVersionMaterializationRequest
+    ) -> PublishedMaterializedSkillVersion: ...
+
+
+__all__ = [
+    "MaterializingSkillVersion",
+    "PublishedMaterializedSkillVersion",
+    "SkillVersionMaterializationError",
+    "SkillVersionMaterializationRepositoryProtocol",
+    "SkillVersionMaterializationRequest",
+    "SkillVersionMaterializerProtocol",
+    "SkillVersionScannerProtocol",
+    "SkillVersionScanResult",
+]
