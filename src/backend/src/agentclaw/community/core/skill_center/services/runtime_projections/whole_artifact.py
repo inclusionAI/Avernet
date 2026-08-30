@@ -52,17 +52,12 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         skill_assets: Sequence[RegisteredSkillAsset],
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
-        """Refuse Center-corpus desired state: v4 has no request contract for it.
+        """Accept Resolver-complete Local/Repo/Center desired state.
 
-        Phase 2 adds the OSS-backed Center Store. Until then this must fail
-        before any runtime, MCP, Passport, probe or mapping request is
-        emitted, which is why it is asked during plan resolution rather than
-        at delivery.
+        Center is delivered as an additive v4 ``skill-center`` Store/SkillRef;
+        the composer validates the exact identity and configured Store before
+        any apply request is sent.
         """
-        if any(
-            asset.git_path.startswith("center://") for asset in skill_assets
-        ) or any(mapping.corpus == "center" for mapping in retired_mappings):
-            raise SkillSetRuntimeReconcileError()
 
     async def apply(
         self,
@@ -86,9 +81,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
             )
             return
 
-        # Defence in depth. Plan resolution already refused this, but the
-        # delivery is the thing that would strand Center state on a runtime
-        # with no contract for it, so the guard sits next to the write too.
+        # Defence in depth: plan shape is checked again next to the write.
         self.validate_plan(
             skill_assets=plan.projection.skill_assets,
             retired_mappings=retired_mappings,

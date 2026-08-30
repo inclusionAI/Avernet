@@ -130,6 +130,48 @@ def test_skills_consume_the_delegated_get_active_skills_dict_contract():
 
 
 @pytest.mark.unit
+def test_center_skill_requires_and_emits_exact_store_identity():
+    svc = MagicMock()
+    svc.get_active_skills.return_value = [
+        {
+            "id": "10",
+            "name": "center-weather",
+            "git_path": "center://public-weather",
+            "skill_uuid": "00000000-0000-4000-8000-000000000010",
+            "sc_version_number": "1.0.0",
+        }
+    ]
+
+    skills = _collector(skill_set_service=svc).skills(_req("teclaw"))
+
+    assert [(s.name, s.scope, s.store, s.path) for s in skills] == [
+        (
+            "center-weather",
+            "shared",
+            "skill-center",
+            "00000000-0000-4000-8000-000000000010/1.0.0",
+        )
+    ]
+
+
+@pytest.mark.unit
+def test_center_skill_without_exact_version_fails_closed():
+    svc = MagicMock()
+    svc.get_active_skills.return_value = [
+        {
+            "id": "10",
+            "name": "center-weather",
+            "git_path": "center://public-weather",
+            "skill_uuid": "00000000-0000-4000-8000-000000000010",
+            "sc_version_number": None,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="exact"):
+        _collector(skill_set_service=svc).skills(_req("teclaw"))
+
+
+@pytest.mark.unit
 def test_local_skill_not_emitted_engine_owned():
     """A user (skills-local) skill is engine-owned: the collector does NOT emit a
     ref for it (the running container auto-discovers it; the publish-time gather

@@ -121,22 +121,34 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
     # ``rsync --delete`` alone preserves excluded destination entries.
     stale_active_corpus = artifact_active_root / "skills-repo"
     stale_pool_corpus = artifact_pool_root / "skills-repo"
+    stale_active_center = artifact_active_root / "skill-center"
+    stale_pool_center = artifact_pool_root / "skill-center"
     _write_skill(stale_active_corpus / "stale-active-skill")
     _write_skill(stale_pool_corpus / "stale-pool-skill")
+    _write_skill(stale_active_center / "stale-active-center")
+    _write_skill(stale_pool_center / "stale-center")
 
     repo_target = pool_root / "skills-repo" / "repo-skill"
     local_target = pool_root / "skills-local" / "local-skill"
+    center_uuid = "00000000-0000-4000-8000-000000000001"
+    center_target = pool_root / "skill-center" / center_uuid / "1.0.0"
     _write_skill(repo_target)
     _write_skill(local_target)
+    _write_skill(center_target)
     active_root.mkdir(parents=True)
     runtime_repo_target = runtime_pool_root / "skills-repo" / "repo-skill"
     runtime_local_target = runtime_pool_root / "skills-local" / "local-skill"
+    runtime_center_target = runtime_pool_root / "skill-center" / center_uuid / "1.0.0"
     (active_root / "repo-skill").symlink_to(
         runtime_repo_target,
         target_is_directory=True,
     )
     (active_root / "local-skill").symlink_to(
         runtime_local_target,
+        target_is_directory=True,
+    )
+    (active_root / "center-skill").symlink_to(
+        runtime_center_target,
         target_is_directory=True,
     )
 
@@ -178,9 +190,13 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
     assert (artifact_active_root / "local-skill").is_symlink()
     assert (artifact_active_root / "repo-skill").readlink() == runtime_repo_target
     assert (artifact_active_root / "local-skill").readlink() == runtime_local_target
+    assert (artifact_active_root / "center-skill").is_symlink()
+    assert (artifact_active_root / "center-skill").readlink() == runtime_center_target
     assert (artifact_pool_root / "skills-local" / "local-skill" / "SKILL.md").is_file()
     assert not stale_active_corpus.exists()
     assert not stale_pool_corpus.exists()
+    assert not stale_active_center.exists()
+    assert not stale_pool_center.exists()
     assert all(
         not call.kwargs["shell_cmd"].startswith("rsync ")
         for call in device_service.exec_shell_new.call_args_list

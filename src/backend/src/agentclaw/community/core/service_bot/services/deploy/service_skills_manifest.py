@@ -12,6 +12,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionIdentity,
+)
+from agentclaw.community.core.skill_center.mcp_dependency_scope import (
+    mcp_dependency_codes,
+)
+from agentclaw.community.core.skill_center.runtime_resolver import RuntimeNamePolicy
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayout,
@@ -30,9 +40,12 @@ class CapturedServiceSkillsLayout:
     phase: SkillLayoutPhase
     migration_generation: str | None
     layout_contract_version: str | None
+    center_skills: tuple[dict[str, Any], ...]
 
 
-_SERVICE_MANIFEST_ENGINES = frozenset({"openclaw", "claude_code"})
+_SERVICE_MANIFEST_ENGINES = frozenset(
+    {"openclaw", "claude_code", "aicoding", "hermes"}
+)
 SERVICE_SKILLS_POOL_CONTRACT_VERSION = "skills-pool-p3-v1"
 
 
@@ -46,8 +59,10 @@ class ServiceSkillsManifestBuilder:
     def __init__(
         self,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        capability_reader: BotCapabilityStateReaderProtocol,
     ) -> None:
         self._layout_repository = layout_repository
+        self._capability_reader = capability_reader
 
     def capture(
         self,
@@ -80,20 +95,6 @@ class ServiceSkillsManifestBuilder:
                 "service build found an inconsistent terminal Skills layout"
             )
 
-        if engine == "aicoding":
-            raise ServiceSkillsManifestError(
-                "AICoding service publishing is not supported"
-            )
-        if engine == "hermes":
-            if state.active_layout is SkillLayout.POOL:
-                raise ServiceSkillsManifestError(
-                    "Hermes Pool service manifest is disabled until native "
-                    "service delivery is verified"
-                )
-            # Preserve the pre-Pool Legacy service path.  It has no verified
-            # native Hermes manifest contract, so do not falsely stamp one.
-            return None
-
         if engine not in _SERVICE_MANIFEST_ENGINES:
             raise ServiceSkillsManifestError(
                 f"service Skills manifest is not supported for engine: {engine}"
@@ -109,6 +110,31 @@ class ServiceSkillsManifestBuilder:
                 "Pool service manifest requires a persisted POOL_ACTIVE draft"
             )
 
+        try:
+            assets = self._capability_reader.active_skill_assets(
+                bot_id=str(bot.get("bot_id") or ""),
+                owner_id=str(bot.get("owner_id") or bot.get("entity_id") or ""),
+                bot=bot,
+            )
+            center_skills = tuple(
+                sorted(
+                    (
+                        self._center_skill(asset)
+                        for asset in assets
+                        if asset.git_path.startswith("center://")
+                    ),
+                    key=lambda item: (
+                        item["runtime_name"],
+                        item["skill_uuid"],
+                        item["sc_version_number"],
+                    ),
+                )
+            )
+        except Exception as exc:
+            raise ServiceSkillsManifestError(
+                "service build cannot freeze exact Center Skills"
+            ) from exc
+
         return CapturedServiceSkillsLayout(
             engine=engine,
             scope=scope,
@@ -119,6 +145,7 @@ class ServiceSkillsManifestBuilder:
             # Pool contract, but a concurrent writer changing this field still
             # means the layout state moved while the physical snapshot ran.
             layout_contract_version=state.layout_contract_version,
+            center_skills=center_skills,
         )
 
     def finalize(
@@ -139,7 +166,7 @@ class ServiceSkillsManifestBuilder:
                 "draft Skills layout changed during service build"
             )
 
-        return {
+        manifest = {
             "schema_version": 1,
             "engine": engine,
             "active_layout": captured.active_layout.value,
@@ -148,6 +175,27 @@ class ServiceSkillsManifestBuilder:
                 if captured.active_layout is SkillLayout.POOL
                 else None
             ),
+        }
+        if captured.center_skills:
+            manifest["center_skills"] = [
+                dict(item) for item in captured.center_skills
+            ]
+        return manifest
+
+    @staticmethod
+    def _center_skill(asset) -> dict[str, Any]:
+        RuntimeNamePolicy.name_for(asset)
+        identity = CanonicalCenterVersionIdentity(
+            skill_uuid=asset.skill_uuid,
+            sc_version_number=asset.sc_version_number,
+        )
+        dependencies = list(asset.mcp_dependencies)
+        mcp_dependency_codes(dependencies)
+        return {
+            "runtime_name": asset.name,
+            "skill_uuid": identity.skill_uuid,
+            "sc_version_number": identity.sc_version_number,
+            "mcp_dependencies": dependencies,
         }
 
 
@@ -180,6 +228,54 @@ def validate_service_skills_manifest_for_release(
         raise ServiceSkillsManifestError(
             "Pool service Skills manifest uses an unsupported layout contract"
         )
+    center_skills = manifest.get("center_skills")
+    if center_skills is not None:
+        if not isinstance(center_skills, list):
+            raise ServiceSkillsManifestError("center_skills must be an array")
+        normalized: list[tuple[str, str, str]] = []
+        for item in center_skills:
+            if not isinstance(item, dict) or set(item) != {
+                "runtime_name",
+                "skill_uuid",
+                "sc_version_number",
+                "mcp_dependencies",
+            }:
+                raise ServiceSkillsManifestError(
+                    "invalid exact Center Skill manifest entry"
+                )
+            runtime_name = item["runtime_name"]
+            if (
+                not isinstance(runtime_name, str)
+                or not runtime_name
+                or runtime_name.strip() != runtime_name
+                or "/" in runtime_name
+                or "\\" in runtime_name
+            ):
+                raise ServiceSkillsManifestError("invalid Center runtime name")
+            try:
+                identity = CanonicalCenterVersionIdentity(
+                    skill_uuid=item["skill_uuid"],
+                    sc_version_number=item["sc_version_number"],
+                )
+                dependencies = item["mcp_dependencies"]
+                if not isinstance(dependencies, list):
+                    raise ValueError
+                mcp_dependency_codes(dependencies)
+            except Exception as exc:
+                raise ServiceSkillsManifestError(
+                    "invalid exact Center Skill manifest entry"
+                ) from exc
+            normalized.append(
+                (
+                    runtime_name,
+                    identity.skill_uuid,
+                    identity.sc_version_number,
+                )
+            )
+        if normalized != sorted(normalized) or len(normalized) != len(set(normalized)):
+            raise ServiceSkillsManifestError(
+                "Center Skill manifest must be unique and stably sorted"
+            )
 
 
 def service_skills_manifest_env(

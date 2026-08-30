@@ -22,6 +22,7 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
+from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 
 
 class _RecordingBuild:
@@ -131,7 +132,7 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
 
     artifact = ArcaSnapshotProducer(
         stub,
-        ServiceSkillsManifestBuilder(layout_repository),
+        ServiceSkillsManifestBuilder(layout_repository, _CapabilityReader(())),
     ).produce_artifact(
         {
             "bot_id": "b1",
@@ -164,6 +165,99 @@ class _LayoutRepository:
         return self.state
 
 
+class _CapabilityReader:
+    def __init__(self, assets):
+        self.assets = tuple(assets)
+        self.calls = []
+
+    def active_skill_assets(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.assets
+
+
+@pytest.mark.unit
+def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    reader = _CapabilityReader(
+        [
+            RegisteredSkillAsset(
+                skill_id=2,
+                name="zeta",
+                git_path="center://public-zeta",
+                skill_uuid="00000000-0000-4000-8000-000000000002",
+                sc_version_number="2.0.0",
+                mcp_dependencies=({"code": "mcp.z"},),
+            ),
+            RegisteredSkillAsset(
+                skill_id=1,
+                name="alpha",
+                git_path="center://public-alpha",
+                skill_uuid="00000000-0000-4000-8000-000000000001",
+                sc_version_number="1.0.0",
+                mcp_dependencies=(),
+            ),
+            RegisteredSkillAsset(
+                skill_id=3,
+                name="repo",
+                git_path="git://team/repo",
+            ),
+        ]
+    )
+    producer = ArcaSnapshotProducer(
+        _RecordingBuild(
+            {
+                "success": True,
+                "migration_path": "/snapshot/7/openclaw",
+                "build_target_path": str(tmp_path / "openclaw"),
+            }
+        ),
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
+            reader,
+        ),
+    )
+
+    artifact = producer.produce_artifact(
+        {
+            "bot_id": "b1",
+            "owner_id": "u1",
+            "entity_id": "u1",
+            "env": "dev",
+            "active_engine": "openclaw",
+        },
+        7,
+    )
+
+    assert artifact.ext["skills_manifest"]["schema_version"] == 1
+    assert artifact.ext["skills_manifest"]["center_skills"] == [
+        {
+            "runtime_name": "alpha",
+            "skill_uuid": "00000000-0000-4000-8000-000000000001",
+            "sc_version_number": "1.0.0",
+            "mcp_dependencies": [],
+        },
+        {
+            "runtime_name": "zeta",
+            "skill_uuid": "00000000-0000-4000-8000-000000000002",
+            "sc_version_number": "2.0.0",
+            "mcp_dependencies": [{"code": "mcp.z"}],
+        },
+    ]
+    assert reader.calls == [
+        {
+            "bot_id": "b1",
+            "owner_id": "u1",
+            "bot": {
+                "bot_id": "b1",
+                "owner_id": "u1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            },
+        }
+    ]
+
+
 @pytest.mark.unit
 def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
     target = tmp_path / "openclaw"
@@ -194,7 +288,7 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsManifestBuilder(repository),
+        ServiceSkillsManifestBuilder(repository, _CapabilityReader(())),
     )
 
     with pytest.raises(
@@ -239,10 +333,14 @@ def test_build_rejects_non_terminal_layout_before_physical_snapshot(
         persisted=True,
         layout_contract_version="skills-pool-p3-v1",
     )
-    build = _RecordingBuild({"success": True})
+    build = _RecordingBuild(
+        {"success": True, "build_target_path": "/snapshot/1/aicoding"}
+    )
     producer = ArcaSnapshotProducer(
         build,
-        ServiceSkillsManifestBuilder(_LayoutRepository(state)),
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(state), _CapabilityReader(())
+        ),
     )
 
     with pytest.raises(
@@ -296,7 +394,7 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsManifestBuilder(repository),
+        ServiceSkillsManifestBuilder(repository, _CapabilityReader(())),
     )
 
     with pytest.raises(
@@ -347,7 +445,7 @@ def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsManifestBuilder(repository),
+        ServiceSkillsManifestBuilder(repository, _CapabilityReader(())),
     )
 
     with pytest.raises(
@@ -433,7 +531,8 @@ def test_legacy_draft_builds_a_legacy_artifact_without_pool_contract(
     producer = ArcaSnapshotProducer(
         build,
         ServiceSkillsManifestBuilder(
-            _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
+            _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
+            _CapabilityReader(()),
         ),
     )
 
@@ -465,32 +564,35 @@ def test_historical_publish_without_manifest_is_explicitly_legacy() -> None:
 
 
 @pytest.mark.unit
-def test_aicoding_service_engine_remains_closed() -> None:
+def test_aicoding_service_engine_uses_the_shared_manifest_contract() -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
-    build = _RecordingBuild({"success": True})
+    build = _RecordingBuild(
+        {"success": True, "build_target_path": "/snapshot/1/hermes"}
+    )
     producer = ArcaSnapshotProducer(
         build,
         ServiceSkillsManifestBuilder(
-            _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
+            _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
+            _CapabilityReader(()),
         ),
     )
 
-    with pytest.raises(ServiceSkillsManifestError):
-        producer.produce_artifact(
-            {
-                "bot_id": "b1",
-                "entity_id": "u1",
-                "env": "dev",
-                "active_engine": "aicoding",
-            },
-            1,
-        )
+    artifact = producer.produce_artifact(
+        {
+            "bot_id": "b1",
+            "entity_id": "u1",
+            "env": "dev",
+            "active_engine": "aicoding",
+        },
+        1,
+    )
 
-    assert build.calls == []
+    assert artifact.ext["skills_manifest"]["engine"] == "aicoding"
+    assert build.calls
 
 
 @pytest.mark.unit
-def test_hermes_pool_service_manifest_is_closed_before_physical_build() -> None:
+def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
     pool_state = BotSkillLayoutState(
         scope=scope,
@@ -501,27 +603,33 @@ def test_hermes_pool_service_manifest_is_closed_before_physical_build() -> None:
         persisted=True,
         layout_contract_version="skills-pool-p3-v1",
     )
-    build = _RecordingBuild({"success": True})
+    build = _RecordingBuild(
+        {"success": True, "build_target_path": "/snapshot/1/hermes"}
+    )
     producer = ArcaSnapshotProducer(
         build,
-        ServiceSkillsManifestBuilder(_LayoutRepository(pool_state)),
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(pool_state), _CapabilityReader(())
+        ),
     )
 
-    with pytest.raises(
-        ServiceSkillsManifestError,
-        match="Hermes Pool service manifest is disabled",
-    ):
-        producer.produce_artifact(
-            {
-                "bot_id": "b1",
-                "entity_id": "u1",
-                "env": "dev",
-                "active_engine": "hermes",
-            },
-            1,
-        )
+    artifact = producer.produce_artifact(
+        {
+            "bot_id": "b1",
+            "entity_id": "u1",
+            "env": "dev",
+            "active_engine": "hermes",
+        },
+        1,
+    )
 
-    assert build.calls == []
+    assert artifact.ext["skills_manifest"] == {
+        "schema_version": 1,
+        "engine": "hermes",
+        "active_layout": "pool",
+        "layout_contract_version": "skills-pool-p3-v1",
+    }
+    assert build.calls
 
 
 @pytest.mark.unit
@@ -537,7 +645,8 @@ def test_hermes_legacy_publish_keeps_pre_pool_compatibility() -> None:
     producer = ArcaSnapshotProducer(
         build,
         ServiceSkillsManifestBuilder(
-            _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
+            _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
+            _CapabilityReader(()),
         ),
     )
 
@@ -552,5 +661,10 @@ def test_hermes_legacy_publish_keeps_pre_pool_compatibility() -> None:
     )
 
     assert artifact.success is True
-    assert "skills_manifest" not in artifact.ext
+    assert artifact.ext["skills_manifest"] == {
+        "schema_version": 1,
+        "engine": "hermes",
+        "active_layout": "legacy",
+        "layout_contract_version": None,
+    }
     assert build.calls

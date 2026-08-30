@@ -58,6 +58,7 @@ _CLAUDE_CODE_RSYNC_EXCLUDES = [
     "workspace/skills/skills-repo",
     "workspace/skills/skills-center",
     "workspace/skills-pool/skills-repo",
+    "workspace/skills-pool/skill-center",
     "workspace/skills-pool/.skills-repo*",
     "skills/*/.git/",
     "memory/",

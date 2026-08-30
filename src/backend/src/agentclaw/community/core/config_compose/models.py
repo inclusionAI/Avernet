@@ -73,6 +73,16 @@ class ComposeRequest:
     collector must not fall back to a second read for it.
     """
 
+    desired_skills: tuple[dict[str, Any], ...] | None = field(
+        default=None, compare=False
+    )
+    """Reader-resolved Skill assets, including exact Center identities.
+
+    Whole-artifact runtime projection already resolved these facts before the
+    compose call. ``None`` keeps the build/restart fallback through the same
+    Reader-backed SkillSet service; an empty tuple is a complete empty result.
+    """
+
     _memo: dict[str, Any] = field(
         default_factory=dict, compare=False, repr=False
     )

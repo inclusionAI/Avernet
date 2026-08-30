@@ -52,8 +52,9 @@ class BaasDeviceSyncService(DeviceSync):
         symlinks: list[dict[str, Any]],
         *,
         effective_mcps: Optional[list[dict[str, Any]]] = None,
+        desired_skills: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
-        # ``effective_mcps`` only means something to a device that recomposes
+        # ``effective_mcps`` / ``desired_skills`` only mean something to a device that recomposes
         # its whole configuration; this one is told exactly what to link and
         # ignores it.
         symlinks_count = len(symlinks)

@@ -79,6 +79,9 @@ from agentclaw.community.core.repository.protocols.publishing import PublishOper
 from agentclaw.community.api.bot_capability_state_reader import (
     BotCapabilityStateReaderProtocol,
 )
+from agentclaw.community.api.bot_runtime_projector import (
+    BotRuntimeProjectorProtocol as ApiBotRuntimeProjectorProtocol,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_process import (
@@ -132,6 +135,9 @@ from agentclaw.community.core.workspace.path_factory import (
 from agentclaw.community.core.storage.path import (
     get_skills_repo_path,
     get_teclaw_bolt_data_prefix,
+)
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterStoreConfig,
 )
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.bot_config import StoreRef
@@ -389,11 +395,12 @@ class ServiceBotModule(Module):
         self,
         bot_build_service: BotBuildService,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        capability_reader: BotCapabilityStateReaderProtocol,
     ) -> ArcaSnapshotProducer:
         """ARCA snapshot plus the service draft's frozen Skills layout."""
         return ArcaSnapshotProducer(
             bot_build_service,
-            ServiceSkillsManifestBuilder(layout_repository),
+            ServiceSkillsManifestBuilder(layout_repository, capability_reader),
         )
 
     @singleton
@@ -433,6 +440,7 @@ class ServiceBotModule(Module):
         mcporter_composer: McporterComposer,
         collector: ConfigComposerInputCollector,
         bot_oss: cfg.ObjectStorageConfig,
+        center_store: CanonicalCenterStoreConfig,
     ) -> ConfigComposer:
         """Single backend config composer (Task 8 + collector DI Task 15a).
 
@@ -466,6 +474,11 @@ class ServiceBotModule(Module):
                     type="oss",
                     bucket=bot_oss.bucket_name,
                     base=get_teclaw_bolt_data_prefix(),
+                ),
+                "skill-center": StoreRef(
+                    type="oss",
+                    bucket=bot_oss.bucket_name,
+                    base=center_store.base_prefix,
                 ),
             },
         )
@@ -526,7 +539,7 @@ class ServiceBotModule(Module):
         channel_overrides_reader: ChannelEngineOverridesReader,
         task_queue_service: TaskQueueService,
         publish_operation_repo: PublishOperationRepository,
-        capability_reader: BotCapabilityStateReaderProtocol,
+        runtime_projector: ApiBotRuntimeProjectorProtocol,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 
@@ -551,7 +564,7 @@ class ServiceBotModule(Module):
             channel_overrides_reader=channel_overrides_reader,
             task_queue_service=task_queue_service,
             publish_operation_repo=publish_operation_repo,
-            capability_reader=capability_reader,
+            runtime_projector=runtime_projector,
         )
 
     @singleton

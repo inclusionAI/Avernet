@@ -30,8 +30,11 @@ from agentclaw.community.core.service_bot.services.publish_flow.ext_state import
 from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
     ProviderBehaviorRouter,
 )
-from agentclaw.community.core.skill_center.capability_state_contract import (
-    BotCapabilityStateReaderProtocol,
+from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import (
+    BotRuntimeProjectorProtocol,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
 )
 from agentclaw.community.log import get_logger
 
@@ -54,14 +57,14 @@ class BuildStageRunner:
         baas_service: BaasService,
         producer_router: DeployArtifactProducerRouter,
         provider_behaviors: ProviderBehaviorRouter,
-        capability_reader: BotCapabilityStateReaderProtocol,
+        runtime_projector: BotRuntimeProjectorProtocol,
     ) -> None:
         self._ext_state = ext_state
         self._bot_service = bot_service
         self._baas_service = baas_service
         self._producer_router = producer_router
         self._provider_behaviors = provider_behaviors
-        self._capability_reader = capability_reader
+        self._runtime_projector = runtime_projector
 
     async def build(
         self,
@@ -88,14 +91,14 @@ class BuildStageRunner:
             if not bot:
                 raise PublishFlowServiceError(f"Bot not found: {bot_id}")
 
-            # A new service artifact must capture the same desired state a
-            # runtime projection would read. Reading the Bot's active assets
-            # through the reader flushes Set configuration into Installation
-            # first — the very state the producer below freezes; the returned
-            # assets themselves are re-read inside the producer. This never
-            # runs for restart, scale, or rollback of a frozen artifact.
-            self._capability_reader.active_skill_assets(
-                bot_id=str(bot["bot_id"]), owner_id=str(bot["owner_id"]), bot=bot
+            # A new service build first converges the complete Draft runtime.
+            # The projector owns Reader flush/version resolution and every
+            # engine-specific application contract. Restart/scale/rollback of
+            # a frozen release never enters this build path.
+            await self._runtime_projector.project(
+                bot_id=str(bot["bot_id"]),
+                owner_id=str(bot["owner_id"]),
+                scope=ProjectionScope.everything(),
             )
 
             # Select the artifact producer by device_provider: ARCA/baas → the

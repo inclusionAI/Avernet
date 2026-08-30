@@ -515,6 +515,8 @@ class SkillSetService:
             sync_kwargs: dict[str, Any] = {}
             if effective_mcps is not None:
                 sync_kwargs["effective_mcps"] = effective_mcps
+            if desired_skills is not None:
+                sync_kwargs["desired_skills"] = desired_skills
             sync_result = device_sync.sync_symlinks(symlinks_dict, **sync_kwargs)
 
             if sync_result.get("success"):

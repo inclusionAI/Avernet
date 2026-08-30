@@ -176,9 +176,14 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             [CollectedSkill(name="weather", scope="shared", store="skill-repo",
                             path="team/weather")]
         """
-        svc = self._skill_set_service(req)
+        active = req.desired_skills
+        if active is None:
+            svc = self._skill_set_service(req)
+            active = tuple(
+                svc.get_active_skills(user_id=req.user_id, bolt_id=req.bot_id)
+            )
         collected: list[CollectedSkill] = []
-        for r in svc.get_active_skills(user_id=req.user_id, bolt_id=req.bot_id):
+        for r in active:
             name = r.get("name", "")
             git_path = r.get("git_path", "")
             if git_path.startswith("git://"):
@@ -187,6 +192,31 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     name=name, scope="shared", store="skill-repo",
                     path=git_path[len("git://"):],
                 ))
+            elif git_path.startswith("center://"):
+                from agentclaw.community.core.skill_center.canonical_center_store import (
+                    CanonicalCenterVersionIdentity,
+                )
+
+                try:
+                    identity = CanonicalCenterVersionIdentity(
+                        skill_uuid=r.get("skill_uuid"),
+                        sc_version_number=r.get("sc_version_number"),
+                    )
+                except Exception as exc:
+                    raise ValueError(
+                        "Center Skill requires exact canonical identity"
+                    ) from exc
+                collected.append(
+                    CollectedSkill(
+                        name=name,
+                        scope="shared",
+                        store="skill-center",
+                        path=(
+                            f"{identity.skill_uuid}/"
+                            f"{identity.sc_version_number}"
+                        ),
+                    )
+                )
             # local:// (user upload) intentionally skipped — engine-owned; see docstring.
         return collected
 
