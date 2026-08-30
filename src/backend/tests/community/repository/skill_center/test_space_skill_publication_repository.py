@@ -6,11 +6,12 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 import io
 from pathlib import Path
+from threading import Event, Thread, current_thread
 from uuid import uuid4
 import zipfile
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
@@ -29,6 +30,12 @@ from agentclaw.community.core.models.space_skill import (
 )
 from agentclaw.community.core.repository.implementations.skill_center.space_skill_publication import (
     SpaceSkillPublicationRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.space_skill_offline import (
+    SpaceSkillOfflineRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center import (
+    space_skill_publication as publication_repository_module,
 )
 from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseConflictError,
@@ -92,6 +99,35 @@ class _Database:
             session.close()
 
     transactional_orm_session = orm_session
+
+
+class _ConcurrentDatabase(_Database):
+    def __init__(self, path: Path) -> None:
+        self.engine = create_engine(
+            f"sqlite:///{path}",
+            connect_args={"check_same_thread": False, "timeout": 5},
+        )
+        Base.metadata.create_all(self.engine)
+        self._factory = sessionmaker(bind=self.engine)
+        self.offline_begin_attempted = Event()
+        self.materialization_begin_attempted = Event()
+
+    @contextmanager
+    def transactional_orm_session(self):
+        session = self._factory()
+        try:
+            if current_thread().name == "offline":
+                self.offline_begin_attempted.set()
+            elif current_thread().name == "begin":
+                self.materialization_begin_attempted.set()
+            session.execute(text("BEGIN IMMEDIATE"))
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
 
 def _seed_draft(
@@ -172,6 +208,270 @@ def _seed_draft(
             )
         session.flush()
         return int(space.id), int(skill.id)
+
+
+def _seed_waiting_publication(
+    db: _Database,
+) -> tuple[int, int, int]:
+    space_id, skill_id = _seed_draft(db, lease_holder="owner")
+    repository = SpaceSkillPublicationRepository(db)
+    attempt = repository.create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id=f"complete-{uuid4()}",
+        env="test",
+    ).attempt
+    repository.mark_prepared(
+        attempt_id=attempt.attempt_id,
+        package_url="https://example.invalid/frozen.zip",
+        env="test",
+    )
+    repository.claim_sc_submission(
+        attempt_id=attempt.attempt_id,
+        started_at=datetime(2026, 8, 30, 11, 0, tzinfo=UTC),
+        env="test",
+    )
+    repository.mark_waiting_sc(
+        attempt_id=attempt.attempt_id,
+        accepted_at=datetime(2026, 8, 30, 11, 1, tzinfo=UTC),
+        env="test",
+    )
+    return space_id, skill_id, attempt.attempt_id
+
+
+def _seed_published_materialization(
+    db: _Database,
+) -> tuple[int, int, int, int]:
+    space_id, skill_id, attempt_id = _seed_waiting_publication(db)
+    repository = SpaceSkillPublicationRepository(db)
+    materializing = repository.begin_materialization(
+        attempt_id=attempt_id,
+        sc_skill_id=701,
+        sc_version_id=801,
+        sc_sha256="a" * 64,
+        env="test",
+    ).attempt
+    assert materializing.skill_version_id is not None
+    with db.orm_session() as session:
+        version = session.get(SkillVersion, materializing.skill_version_id)
+        assert version is not None
+        version.status = "PUBLISHED"
+        version.metadata_json = '{"mcp_dependencies":[]}'
+        version.description = "Review risk"
+        version.published_at = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
+    return (
+        space_id,
+        skill_id,
+        attempt_id,
+        materializing.skill_version_id,
+    )
+
+
+def test_begin_materialization_rechecks_status_after_skill_lock(
+    monkeypatch,
+) -> None:
+    db = _Database()
+    _space_id, _skill_id, attempt_id = _seed_waiting_publication(db)
+    repository = SpaceSkillPublicationRepository(db)
+    original = publication_repository_module.lock_skill_row
+
+    def _fail_after_skill_lock(session, **kwargs):
+        skill = original(session, **kwargs)
+        session.query(SkillPublicationAttempt).filter(
+            SkillPublicationAttempt.id == attempt_id
+        ).update({"status": "FAILED"}, synchronize_session=False)
+        return skill
+
+    monkeypatch.setattr(
+        publication_repository_module,
+        "lock_skill_row",
+        _fail_after_skill_lock,
+    )
+
+    with pytest.raises(RuntimeError, match="cannot begin materialization"):
+        repository.begin_materialization(
+            attempt_id=attempt_id,
+            sc_skill_id=701,
+            sc_version_id=801,
+            sc_sha256="a" * 64,
+            env="test",
+        )
+
+
+@pytest.mark.parametrize(
+    ("drift", "message"),
+    [
+        ({"status": "FAILED"}, "Attempt is not materializing"),
+        ({"skill_version_id": 999999}, "Attempt identity changed"),
+    ],
+)
+def test_complete_success_rechecks_attempt_after_canonical_locks(
+    monkeypatch, drift: dict[str, object], message: str
+) -> None:
+    db = _Database()
+    _space_id, _skill_id, attempt_id, version_id = (
+        _seed_published_materialization(db)
+    )
+    original = publication_repository_module.lock_skill_then_exact_version
+
+    def _drift_after_skill_version_lock(session, **kwargs):
+        locked = original(session, **kwargs)
+        session.query(SkillPublicationAttempt).filter(
+            SkillPublicationAttempt.id == attempt_id
+        ).update(drift, synchronize_session=False)
+        return locked
+
+    monkeypatch.setattr(
+        publication_repository_module,
+        "lock_skill_then_exact_version",
+        _drift_after_skill_version_lock,
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        SpaceSkillPublicationRepository(db).complete_success(
+            attempt_id=attempt_id,
+            skill_version_id=version_id,
+            completed_at=datetime(2026, 8, 30, 12, 1, tzinfo=UTC),
+            env="test",
+        )
+
+
+def test_complete_success_and_offline_overlap_without_lock_inversion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    db = _ConcurrentDatabase(tmp_path / "publication-offline.db")
+    space_id, skill_id, attempt_id, version_id = _seed_published_materialization(db)
+    complete_holds_skill_version = Event()
+    failures: list[BaseException] = []
+    original = publication_repository_module.lock_skill_then_exact_version
+
+    def _pause_after_skill_version_lock(session, **kwargs):
+        locked = original(session, **kwargs)
+        complete_holds_skill_version.set()
+        assert db.offline_begin_attempted.wait(timeout=2)
+        return locked
+
+    monkeypatch.setattr(
+        publication_repository_module,
+        "lock_skill_then_exact_version",
+        _pause_after_skill_version_lock,
+    )
+
+    def _complete() -> None:
+        try:
+            SpaceSkillPublicationRepository(db).complete_success(
+                attempt_id=attempt_id,
+                skill_version_id=version_id,
+                completed_at=datetime(2026, 8, 30, 12, 1, tzinfo=UTC),
+                env="test",
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    def _offline() -> None:
+        try:
+            SpaceSkillOfflineRepository(db).commit(
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id="owner",
+                expected_version_id=version_id,
+                target_version=2,
+                new_locator=f"draft://offline-skill/v2/{uuid4()}",
+                new_description="Review risk",
+                env="test",
+                guard=lambda inspection: None,
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    completer = Thread(target=_complete, name="complete")
+    completer.start()
+    assert complete_holds_skill_version.wait(timeout=2)
+    offliner = Thread(target=_offline, name="offline")
+    offliner.start()
+    completer.join(timeout=5)
+    offliner.join(timeout=5)
+
+    assert failures == []
+    assert not completer.is_alive() and not offliner.is_alive()
+    with db.orm_session() as session:
+        attempt = session.get(SkillPublicationAttempt, attempt_id)
+        skill = session.get(Skill, skill_id)
+        assert attempt is not None and attempt.status == "SUCCEEDED"
+        assert skill is not None and skill.offline_at is not None
+
+
+def test_mark_failed_and_begin_materialization_overlap_without_lock_inversion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    db = _ConcurrentDatabase(tmp_path / "publication-failure-begin.db")
+    _space_id, skill_id, attempt_id = _seed_waiting_publication(db)
+    fail_holds_skill = Event()
+    failures: list[BaseException] = []
+    expected_begin_errors: list[RuntimeError] = []
+    lock_threads: list[str] = []
+    original = publication_repository_module.lock_skill_row
+
+    def _observe_skill_lock(session, **kwargs):
+        skill = original(session, **kwargs)
+        lock_threads.append(current_thread().name)
+        if current_thread().name == "fail":
+            fail_holds_skill.set()
+            assert db.materialization_begin_attempted.wait(timeout=2)
+        return skill
+
+    monkeypatch.setattr(
+        publication_repository_module,
+        "lock_skill_row",
+        _observe_skill_lock,
+    )
+
+    def _fail() -> None:
+        try:
+            SpaceSkillPublicationRepository(db).mark_failed(
+                attempt_id=attempt_id,
+                error_code="SC_PUBLISH_REJECTED",
+                error_message="rejected",
+                completed_at=datetime(2026, 8, 30, 12, 1, tzinfo=UTC),
+                env="test",
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    def _begin() -> None:
+        try:
+            SpaceSkillPublicationRepository(db).begin_materialization(
+                attempt_id=attempt_id,
+                sc_skill_id=701,
+                sc_version_id=801,
+                sc_sha256="a" * 64,
+                env="test",
+            )
+        except RuntimeError as exc:
+            expected_begin_errors.append(exc)
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    failure = Thread(target=_fail, name="fail")
+    failure.start()
+    assert fail_holds_skill.wait(timeout=2)
+    materialization = Thread(target=_begin, name="begin")
+    materialization.start()
+    failure.join(timeout=5)
+    materialization.join(timeout=5)
+
+    assert failures == []
+    assert not failure.is_alive() and not materialization.is_alive()
+    assert [str(error) for error in expected_begin_errors] == [
+        "Attempt cannot begin materialization"
+    ]
+    assert lock_threads == ["fail", "begin"]
+    with db.orm_session() as session:
+        attempt = session.get(SkillPublicationAttempt, attempt_id)
+        skill = session.get(Skill, skill_id)
+        assert attempt is not None and attempt.status == "FAILED"
+        assert skill is not None and skill.draft_status == "EDITING"
 
 
 def test_create_attempt_freezes_latest_draft_and_replays_same_request() -> None:

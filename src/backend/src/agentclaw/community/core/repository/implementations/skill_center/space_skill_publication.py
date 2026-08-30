@@ -25,6 +25,10 @@ from agentclaw.community.core.models.space_skill import (
 from agentclaw.community.core.repository.protocols.space_skill_publication import (
     SpaceSkillPublicationRepositoryProtocol,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_version_lock import (
+    lock_skill_row,
+    lock_skill_then_exact_version,
+)
 from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseConflictError,
     DraftNotFoundError,
@@ -403,7 +407,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
 
     def get_work(self, *, attempt_id: int, env: str) -> PublicationWork:
         with self._db.orm_session() as session:
-            return self._work(session, attempt_id=attempt_id, env=env, lock=False)
+            return self._work(session, attempt_id=attempt_id, env=env)
 
     def mark_prepared(
         self, *, attempt_id: int, package_url: str, env: str
@@ -411,20 +415,24 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         if not package_url:
             raise ValueError("package_url is required")
         with self._db.transactional_orm_session() as session:
-            work = self._work(session, attempt_id=attempt_id, env=env, lock=True)
-            if work.attempt.status is not PublicationAttemptStatus.PREPARING:
+            attempt, skill, _version = self._lock_attempt_aggregate(
+                session, attempt_id=attempt_id, env=env
+            )
+            work = self._work(session, attempt_id=attempt_id, env=env)
+            if attempt.status != "PREPARING":
                 return work
-            skill = session.query(Skill).filter(Skill.id == work.attempt.skill_id).one()
             skill.package_url = package_url
             session.flush()
-            return self._work(session, attempt_id=attempt_id, env=env, lock=False)
+            return self._work(session, attempt_id=attempt_id, env=env)
 
     def claim_sc_submission(
         self, *, attempt_id: int, started_at: datetime, env: str
     ) -> PublicationSubmissionClaim:
         with self._db.transactional_orm_session() as session:
-            work = self._work(session, attempt_id=attempt_id, env=env, lock=True)
-            attempt = self._attempt(session, attempt_id=attempt_id, env=env)
+            attempt, _skill, _version = self._lock_attempt_aggregate(
+                session, attempt_id=attempt_id, env=env
+            )
+            work = self._work(session, attempt_id=attempt_id, env=env)
             may_submit = False
             if attempt.status == "PREPARING" and attempt.sc_post_started_at is None:
                 if not work.package_url:
@@ -435,7 +443,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                 attempt.recovery_kind = "SC_STATUS_CHECK"
                 may_submit = True
                 session.flush()
-                work = self._work(session, attempt_id=attempt_id, env=env, lock=False)
+                work = self._work(session, attempt_id=attempt_id, env=env)
             return PublicationSubmissionClaim(work=work, may_submit=may_submit)
 
     def mark_waiting_sc(
@@ -485,17 +493,13 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         env: str,
     ) -> PublicationAttemptRecord:
         with self._db.transactional_orm_session() as session:
-            attempt = self._attempt(session, attempt_id=attempt_id, env=env, lock=True)
+            attempt, skill, version = self._lock_attempt_aggregate(
+                session, attempt_id=attempt_id, env=env
+            )
             if attempt.status == "SUCCEEDED":
                 return self._record(attempt)
-            if attempt.skill_version_id is not None:
+            if version is not None or attempt.skill_version_id is not None:
                 raise RuntimeError("a materializing Version cannot become FAILED")
-            skill = (
-                session.query(Skill)
-                .filter(Skill.id == attempt.skill_id, Skill.env == env)
-                .with_for_update()
-                .one()
-            )
             if skill.draft_status == "FROZEN":
                 skill.draft_status = "EDITING"
             skill.package_url = None
@@ -521,12 +525,15 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         if sc_skill_id < 1 or sc_version_id < 1:
             raise ValueError("exact SC ids must be positive integers")
         with self._db.transactional_orm_session() as session:
-            work = self._work(session, attempt_id=attempt_id, env=env, lock=True)
-            attempt = self._attempt(session, attempt_id=attempt_id, env=env)
+            attempt, skill, locked_version = self._lock_attempt_aggregate(
+                session, attempt_id=attempt_id, env=env
+            )
+            work = self._work(session, attempt_id=attempt_id, env=env)
             if attempt.status == "MATERIALIZING":
-                version = self._version_for_attempt(session, attempt, env=env)
+                if locked_version is None:
+                    raise RuntimeError("MATERIALIZING Attempt has no locked Version")
                 self._require_exact_version(
-                    version,
+                    locked_version,
                     sc_skill_id=sc_skill_id,
                     sc_version_id=sc_version_id,
                     sc_sha256=sc_sha256,
@@ -538,12 +545,6 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                 "RESULT_UNKNOWN",
             ):
                 raise RuntimeError("Attempt cannot begin materialization")
-            skill = (
-                session.query(Skill)
-                .filter(Skill.id == attempt.skill_id, Skill.env == env)
-                .with_for_update()
-                .one()
-            )
             expected_locator = f"center://{skill.skill_uuid}"
             if skill.git_path not in (None, "", expected_locator):
                 raise RuntimeError("Space Skill has a conflicting Center locator")
@@ -574,7 +575,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             attempt.error_code = None
             attempt.error_message = None
             session.flush()
-            return self._work(session, attempt_id=attempt_id, env=env, lock=False)
+            return self._work(session, attempt_id=attempt_id, env=env)
 
     def complete_success(
         self,
@@ -585,34 +586,27 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         env: str,
     ) -> PublicationAttemptRecord:
         with self._db.transactional_orm_session() as session:
-            attempt = self._attempt(session, attempt_id=attempt_id, env=env, lock=True)
+            attempt, skill, version = self._lock_attempt_aggregate(
+                session, attempt_id=attempt_id, env=env
+            )
+            located_version_id = (
+                int(attempt.skill_version_id)
+                if attempt.skill_version_id is not None
+                else None
+            )
+            if located_version_id is None or version is None:
+                raise RuntimeError("Attempt is not materializing a Version")
             if attempt.status == "SUCCEEDED":
-                if int(attempt.skill_version_id or 0) != skill_version_id:
+                if located_version_id != skill_version_id:
                     raise RuntimeError("SUCCEEDED Attempt points at another Version")
                 return self._record(attempt)
             if (
                 attempt.status != "MATERIALIZING"
-                or int(attempt.skill_version_id or 0) != skill_version_id
+                or located_version_id != skill_version_id
             ):
                 raise RuntimeError("Attempt is not materializing this Version")
-            version = (
-                session.query(SkillVersion)
-                .filter(
-                    SkillVersion.id == skill_version_id,
-                    SkillVersion.skill_id == attempt.skill_id,
-                    SkillVersion.env == env,
-                )
-                .with_for_update()
-                .one()
-            )
             if version.status != "PUBLISHED":
                 raise RuntimeError("Version is not PUBLISHED")
-            skill = (
-                session.query(Skill)
-                .filter(Skill.id == attempt.skill_id, Skill.env == env)
-                .with_for_update()
-                .one()
-            )
             if skill.draft_status == "FROZEN":
                 if int(skill.draft_target_version or 0) != int(
                     attempt.target_version_ordinal
@@ -710,9 +704,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                 attempt=self._record(attempt), task_required=True
             )
 
-    def _work(
-        self, session, *, attempt_id: int, env: str, lock: bool
-    ) -> PublicationWork:
+    def _work(self, session, *, attempt_id: int, env: str) -> PublicationWork:
         query = (
             session.query(SkillPublicationAttempt, Skill, SkillSpaceBinding, SpaceModel)
             .join(
@@ -735,8 +727,6 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                 SkillPublicationAttempt.env == env,
             )
         )
-        if lock:
-            query = query.with_for_update()
         row = query.one_or_none()
         if row is None:
             raise PublicationAttemptNotFoundError("publication attempt not found")
@@ -773,18 +763,71 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         return attempt
 
     @staticmethod
-    def _version_for_attempt(session, attempt, *, env: str):
-        if attempt.skill_version_id is None:
-            raise RuntimeError("MATERIALIZING Attempt has no Version")
-        return (
-            session.query(SkillVersion)
-            .filter(
-                SkillVersion.id == attempt.skill_version_id,
-                SkillVersion.skill_id == attempt.skill_id,
-                SkillVersion.env == env,
+    def _attempt_version_identity(
+        session, *, attempt_id: int, env: str
+    ) -> tuple[int, int | None]:
+        row = (
+            session.query(
+                SkillPublicationAttempt.skill_id,
+                SkillPublicationAttempt.skill_version_id,
             )
-            .one()
+            .filter(
+                SkillPublicationAttempt.id == attempt_id,
+                SkillPublicationAttempt.env == env,
+            )
+            .one_or_none()
         )
+        if row is None:
+            raise PublicationAttemptNotFoundError("publication attempt not found")
+        return int(row[0]), int(row[1]) if row[1] is not None else None
+
+    def _lock_attempt_aggregate(
+        self, session, *, attempt_id: int, env: str
+    ) -> tuple[SkillPublicationAttempt, Skill, SkillVersion | None]:
+        """Lock one Publication aggregate as Skill [-> Version] -> Attempt."""
+        skill_id, located_version_id = self._attempt_version_identity(
+            session,
+            attempt_id=attempt_id,
+            env=env,
+        )
+        version = None
+        if located_version_id is None:
+            skill = lock_skill_row(session, env=env, skill_id=skill_id)
+        else:
+            locked = lock_skill_then_exact_version(
+                session,
+                env=env,
+                skill_id=skill_id,
+                skill_version_id=located_version_id,
+            )
+            if locked is None:
+                skill = lock_skill_row(session, env=env, skill_id=skill_id)
+            else:
+                skill, version = locked
+        if skill is None:
+            raise RuntimeError("Publication Skill not found")
+        attempt = self._attempt(session, attempt_id=attempt_id, env=env, lock=True)
+        self._require_attempt_version_identity(
+            attempt,
+            skill_id=skill_id,
+            skill_version_id=located_version_id,
+        )
+        return attempt, skill, version
+
+    @staticmethod
+    def _require_attempt_version_identity(
+        attempt: SkillPublicationAttempt,
+        *,
+        skill_id: int,
+        skill_version_id: int | None,
+    ) -> None:
+        current_version_id = (
+            int(attempt.skill_version_id)
+            if attempt.skill_version_id is not None
+            else None
+        )
+        if int(attempt.skill_id) != skill_id or current_version_id != skill_version_id:
+            raise RuntimeError("Attempt identity changed while acquiring locks")
 
     @staticmethod
     def _require_exact_version(

@@ -8,6 +8,16 @@ from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillVersion
 
 
+def lock_skill_row(session: Any, *, env: str, skill_id: int) -> Skill | None:
+    """Lock one Skill row, the first lock in every Skill lifecycle write."""
+    return (
+        session.query(Skill)
+        .filter(Skill.id == skill_id, Skill.env == env)
+        .with_for_update()
+        .one_or_none()
+    )
+
+
 def lock_skill_then_exact_version(
     session: Any,
     *,
@@ -16,12 +26,7 @@ def lock_skill_then_exact_version(
     skill_version_id: int,
 ) -> tuple[Skill, SkillVersion] | None:
     """Lock the parent Skill before one exact Version in every database."""
-    skill = (
-        session.query(Skill)
-        .filter(Skill.id == skill_id, Skill.env == env)
-        .with_for_update()
-        .one_or_none()
-    )
+    skill = lock_skill_row(session, env=env, skill_id=skill_id)
     if skill is None:
         return None
     version = (
@@ -46,12 +51,7 @@ def lock_skill_then_latest_published_version(
     skill_id: int,
 ) -> tuple[Skill, SkillVersion | None] | None:
     """Lock the parent Skill before its latest PUBLISHED Version."""
-    skill = (
-        session.query(Skill)
-        .filter(Skill.id == skill_id, Skill.env == env)
-        .with_for_update()
-        .one_or_none()
-    )
+    skill = lock_skill_row(session, env=env, skill_id=skill_id)
     if skill is None:
         return None
     latest = (
@@ -69,6 +69,7 @@ def lock_skill_then_latest_published_version(
 
 
 __all__ = [
+    "lock_skill_row",
     "lock_skill_then_exact_version",
     "lock_skill_then_latest_published_version",
 ]
