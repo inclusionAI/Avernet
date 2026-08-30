@@ -295,19 +295,102 @@ impl ChatRunStore {
         self.apply_state_cas(run_id, current.version, new).await
     }
 
+    /// Append a streaming chunk onto an ALREADY-FETCHED base record
+    /// (frame-local merge): the drain path holds the pre-frame snapshot —
+    /// fetched exactly once per frame — so the append does not re-read the
+    /// repo. The base must be the frame's entry snapshot; the single writer
+    /// discipline makes it equivalent to a fresh read except when an
+    /// in-frame mutation (the detach acknowledgement) advanced the version —
+    /// re-fetch the record there before calling.
+    pub async fn append_delta_from_base(&self, base: &ChatRunRecord, chunk: &str) -> bool {
+        if chunk.is_empty() {
+            return false;
+        }
+        if base.state.is_terminal() {
+            return false;
+        }
+
+        let (accumulated, truncated) =
+            Self::append_chunk_with_truncation(&base.accumulated_content, base.content_truncated, chunk);
+
+        self.append_content_at_version(&base.run_id, base.version, accumulated, truncated)
+            .await
+    }
+
     pub async fn append_delta(&self, run_id: &str, chunk: &str) -> bool {
         if chunk.is_empty() {
             return false;
         }
-        let Some(current) = self.get(run_id).await else {
+        let Some(base) = self.get(run_id).await else {
             return false;
         };
-        if current.state.is_terminal() {
+        self.append_delta_from_base(&base, chunk).await
+    }
+
+    /// Replace the record's content from an already-fetched base — see
+    /// [`Self::append_delta_from_base`] for the frame-local-merge contract.
+    pub async fn replace_content_from_base(&self, base: &ChatRunRecord, content: &str) -> bool {
+        if base.state.is_terminal() {
+            return false;
+        }
+        let was_pending = base.state == ChatRunState::Pending;
+
+        let (next, truncated) = Self::truncate_content(content);
+        let changed = base.accumulated_content != next
+            || base.content_truncated != truncated
+            || was_pending;
+        if !changed {
             return false;
         }
 
-        let mut accumulated = current.accumulated_content.clone();
-        let mut truncated = current.content_truncated;
+        self.append_content_at_version(&base.run_id, base.version, next, truncated)
+            .await
+    }
+
+    pub async fn replace_content(&self, run_id: &str, content: &str) -> bool {
+        let Some(base) = self.get(run_id).await else {
+            return false;
+        };
+        self.replace_content_from_base(&base, content).await
+    }
+
+    /// Shared commit path for both content mutators: CAS-expected version,
+    /// notify-on-success, log-only on backend failure (the store remains the
+    /// truth; #1546 forbids masquerading a failed write as success).
+    async fn append_content_at_version(
+        &self,
+        run_id: &str,
+        version: u64,
+        accumulated: String,
+        truncated: bool,
+    ) -> bool {
+        match self
+            .repo
+            .append_streaming_content(run_id, version, accumulated, truncated)
+            .await
+        {
+            Ok(true) => {
+                self.notify_waiters(run_id).await;
+                true
+            }
+            Ok(false) => false,
+            Err(err) => {
+                error!(run_id, error = %err, "chat run append_streaming_content failed");
+                false
+            }
+        }
+    }
+
+    /// Append `chunk` onto `current` with the 1 MiB char-boundary-safe
+    /// truncation rule; returns the new accumulated string plus the
+    /// truncated flag.
+    fn append_chunk_with_truncation(
+        current: &str,
+        truncated: bool,
+        chunk: &str,
+    ) -> (String, bool) {
+        let mut accumulated = current.to_string();
+        let mut truncated = truncated;
         let remaining = MAX_CONTENT_BYTES.saturating_sub(accumulated.len());
         if remaining == 0 {
             truncated = true;
@@ -321,33 +404,11 @@ impl ChatRunStore {
             accumulated.push_str(&chunk[..boundary]);
             truncated = true;
         }
-
-        match self
-            .repo
-            .append_streaming_content(run_id, current.version, accumulated, truncated)
-            .await
-        {
-            Ok(true) => {
-                self.notify_waiters(run_id).await;
-                true
-            }
-            Ok(false) => false,
-            Err(err) => {
-                error!(run_id, error = %err, "chat run append_delta failed");
-                false
-            }
-        }
+        (accumulated, truncated)
     }
 
-    pub async fn replace_content(&self, run_id: &str, content: &str) -> bool {
-        let Some(current) = self.get(run_id).await else {
-            return false;
-        };
-        if current.state.is_terminal() {
-            return false;
-        }
-        let was_pending = current.state == ChatRunState::Pending;
-
+    /// Cap `content` at the 1 MiB char-boundary-safe truncation rule.
+    fn truncate_content(content: &str) -> (String, bool) {
         let mut next = String::new();
         let mut truncated = false;
         if content.len() <= MAX_CONTENT_BYTES {
@@ -360,28 +421,7 @@ impl ChatRunStore {
             next.push_str(&content[..boundary]);
             truncated = true;
         }
-
-        let changed =
-            current.accumulated_content != next || current.content_truncated != truncated || was_pending;
-        if !changed {
-            return false;
-        }
-
-        match self
-            .repo
-            .append_streaming_content(run_id, current.version, next, truncated)
-            .await
-        {
-            Ok(true) => {
-                self.notify_waiters(run_id).await;
-                true
-            }
-            Ok(false) => false,
-            Err(err) => {
-                error!(run_id, error = %err, "chat run replace_content failed");
-                false
-            }
-        }
+        (next, truncated)
     }
 
     pub async fn mark_completed(&self, run_id: &str, final_text: Option<&str>) -> bool {

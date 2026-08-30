@@ -3,16 +3,27 @@
 //! Authority split (see spec):
 //! - MySQL/SQLite is authoritative for state, version, ownership, timestamps,
 //!   terminal content, and is the auditable record.
-//! - The Redis cache holds only the streaming overlay (`{version, state,
-//!   accumulated_content, content_truncated}`) so per-token deltas never hit
-//!   the DB. Reads merge DB (authoritative structure) with the cache overlay
-//!   when the cache version is ahead (i.e. streaming advanced it past the DB).
+//! - The Redis cache holds the streaming overlay as the WHOLE
+//!   `ChatRunRecord` (V2 value; see `OverlayV2`) so per-token deltas never hit
+//!   the DB — and neither do reads: while a run streams, the overlay IS the
+//!   freshest fact (the DB row's content stays at its create/fail-over value),
+//!   so `get` serves a V2 hit directly ("read side follows the authority") and
+//!   only falls back to the historical DB-read + legacy-overlay merge on a
+//!   miss: terminal (terminal CAS deletes the overlay, so terminal reads
+//!   always land on the audit row), cache loss, or the rolling-upgrade window
+//!   where pre-upgrade replicas still write the legacy five-field value.
 //!
 //! The port's `expected_version` is used by memory-mode CAS; the SQL impl gates
 //! transitions on the non-terminal state guard (`state NOT IN (...)`) plus
 //! `version = version + 1`, which is robust to the cache/DB version drift
 //! inherent in streaming-only cache writes. Concurrent terminals resolve to
 //! exactly one winner via the same state guard.
+//!
+//! Accepted degraded window (mirrors the spec's C6 dual-failure stance): if
+//! Redis rejects BOTH the terminal tombstone write and the overlay delete
+//! while reads still work, a pre-terminal V2 snapshot stays readable until its
+//! TTL lapses; writers are unaffected (append bases are version-fenced at the
+//! DB boundary).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -55,9 +66,88 @@ struct StreamingOverlay {
     state: String,
     accumulated_content: String,
     content_truncated: bool,
-    /// Run deadline carried in the overlay so the normal streaming path can
-    /// compute its TTL (and detect a missing run) without a per-delta DB read.
     expires_at_ms: u64,
+}
+
+/// Format tag for [`OverlayV2`]; anything that fails to parse as V2 is tried
+/// as the legacy [`StreamingOverlay`] (rolling-upgrade compat window).
+const OVERLAY_FORMAT_VERSION: u32 = 2;
+
+/// V2 streaming overlay value: the WHOLE `ChatRunRecord` as the in-flight
+/// read-through source. While a run streams, per-delta writes only land here,
+/// so the overlay is the freshest fact and `get` can serve it directly
+/// without a DB read. Terminal CAS deletes the key, so terminal reads always
+/// fall back to the audited DB row.
+///
+/// The cache KEY is env-less (`{prefix}chat_run:{run_id}`) while the DB rows
+/// are env-scoped, so the value carries `env` and every fast-path read must
+/// match it before serving — otherwise a shared Redis would leak one
+/// environment's run into another's cache-first reads.
+///
+/// `completion_policy` / `delivery_ack_at_ms` are carried at the wrapper
+/// level because `ChatRunRecord`'s own serde skips them (the port crate keeps
+/// them out of its serialized shape); the cache must round-trip them or the
+/// detach classification in `record_run_event` would silently degrade on
+/// cache hits.
+#[derive(Serialize, Deserialize, Clone)]
+struct OverlayV2 {
+    v: u32,
+    env: String,
+    record: ChatRunRecord,
+    completion_policy: ChatRunCompletionPolicy,
+    delivery_ack_at_ms: Option<u64>,
+}
+
+impl OverlayV2 {
+    fn from_record(record: &ChatRunRecord, env: &str) -> Self {
+        Self {
+            v: OVERLAY_FORMAT_VERSION,
+            env: env.to_string(),
+            completion_policy: record.completion_policy,
+            delivery_ack_at_ms: record.delivery_ack_at_ms,
+            record: record.clone(),
+        }
+    }
+
+    fn into_record(mut self) -> ChatRunRecord {
+        self.record.completion_policy = self.completion_policy;
+        self.record.delivery_ack_at_ms = self.delivery_ack_at_ms;
+        self.record
+    }
+}
+
+/// Materialized append base. A full record comes from the V2 cache hit or the
+/// DB rebase; a legacy five-field overlay only occurs while pre-upgrade
+/// replicas still write the old value (rolling-upgrade window) — appends on
+/// such a base keep writing the legacy shape so those replicas stay correct,
+/// and the two generations meet at the authoritative DB row.
+#[derive(Clone)]
+enum OverlayBase {
+    Record(ChatRunRecord),
+    Legacy(StreamingOverlay),
+}
+
+impl OverlayBase {
+    fn version(&self) -> u64 {
+        match self {
+            OverlayBase::Record(record) => record.version,
+            OverlayBase::Legacy(overlay) => overlay.version,
+        }
+    }
+
+    /// Streaming content of the base — used by the state-CAS refresh so a
+    /// mid-stream transition never clobbers the streamed text back to the
+    /// DB row's create-time value.
+    fn streaming_content(&self) -> Option<(String, bool)> {
+        match self {
+            OverlayBase::Record(record) => {
+                Some((record.accumulated_content.clone(), record.content_truncated))
+            }
+            OverlayBase::Legacy(overlay) => {
+                Some((overlay.accumulated_content.clone(), overlay.content_truncated))
+            }
+        }
+    }
 }
 
 impl SqlChatRunRepo {
@@ -144,32 +234,75 @@ impl SqlChatRunRepo {
             .transpose()?)
     }
 
-    async fn read_overlay(&self, run_id: &str) -> Option<StreamingOverlay> {
+    async fn read_overlay_bytes(&self, run_id: &str) -> Option<Vec<u8>> {
         match self.cache.get_value(&self.cache_key(run_id)).await {
-            Ok(Some(bytes)) => serde_json::from_slice(&bytes).ok(),
+            Ok(Some(bytes)) => Some(bytes),
             _ => None,
         }
     }
 
-    /// Write the streaming overlay. Returns `Ok(())` only when the store
-    /// confirmed the write (`set_value` → `Ok(true)`). A rejection, or the
-    /// no-write `Ok(false)` for an upsert (which means the delta was NOT
-    /// stored), is surfaced as `Err` so the caller that relies on the overlay
-    /// as the sole delta record (`append_streaming_content`) can fail over to
-    /// the DB. Best-effort callers (`create`, state CAS) ignore the result
-    /// since the DB row is authoritative there.
-    async fn write_overlay(&self, run_id: &str, overlay: &StreamingOverlay) -> Result<(), CacheError> {
+    /// Parse the cached overlay value into a base: V2 (whole record) first —
+    /// served only when `env` matches, since the cache key is env-less and a
+    /// shared Redis may hold another environment's value for the same run_id —
+    /// then the legacy five-field format (rolling-upgrade window). `None`
+    /// when the key is missing, unreadable, or neither format parses.
+    async fn read_overlay_base(&self, run_id: &str) -> Option<OverlayBase> {
+        let bytes = self.read_overlay_bytes(run_id).await?;
+        if let Ok(v2) = serde_json::from_slice::<OverlayV2>(&bytes) {
+            if v2.env == self.env {
+                return Some(OverlayBase::Record(v2.into_record()));
+            }
+        }
+        serde_json::from_slice::<StreamingOverlay>(&bytes)
+            .ok()
+            .map(OverlayBase::Legacy)
+    }
+
+    /// Write the whole-record (V2) streaming overlay. Returns `Ok(())` only
+    /// when the store confirmed the write (`set_value` → `Ok(true)`); a
+    /// rejection, or the no-write `Ok(false)` for an upsert, is surfaced as
+    /// `Err` so the caller that relies on the overlay as the sole delta
+    /// record (`append_streaming_content`) can fail over to the DB.
+    /// Best-effort callers (`create`, state CAS) ignore the result since the
+    /// DB row is authoritative there.
+    async fn write_overlay_record(
+        &self,
+        run_id: &str,
+        record: &ChatRunRecord,
+    ) -> Result<(), CacheError> {
+        let bytes = serde_json::to_vec(&OverlayV2::from_record(record, &self.env))
+            .map_err(|err| CacheError::InvalidInput(err.to_string()))?;
+        self.set_overlay_bytes(run_id, bytes, record.expires_at_ms).await
+    }
+
+    /// Legacy-format overlay write, used only when the append base itself
+    /// came from a legacy value (rolling-upgrade window) so pre-upgrade
+    /// replicas can still read what this replica writes.
+    async fn write_overlay_legacy(
+        &self,
+        run_id: &str,
+        overlay: &StreamingOverlay,
+    ) -> Result<(), CacheError> {
+        let bytes = serde_json::to_vec(overlay)
+            .map_err(|err| CacheError::InvalidInput(err.to_string()))?;
+        self.set_overlay_bytes(run_id, bytes, overlay.expires_at_ms).await
+    }
+
+    /// Store the overlay value with its deadline-derived TTL. The overlay
+    /// must survive the run deadline by the retention grace so the timeout
+    /// sweep (which runs only once `expires_at_ms < now`) can still merge the
+    /// streamed content instead of reading a stale DB row.
+    async fn set_overlay_bytes(
+        &self,
+        run_id: &str,
+        bytes: Vec<u8>,
+        expires_at_ms: u64,
+    ) -> Result<(), CacheError> {
         let now = now_ms();
-        // Overlay must survive the run deadline by the retention grace so the
-        // timeout sweep (which runs only once `expires_at_ms < now`) can still
-        // merge the streamed content instead of reading a stale DB row.
-        let ttl_ms = overlay
-            .expires_at_ms
+        let ttl_ms = expires_at_ms
             .saturating_add(self.overlay_retention_ms)
             .saturating_sub(now)
             .max(1000);
-        let bytes = serde_json::to_vec(overlay)
-            .map_err(|err| CacheError::InvalidInput(err.to_string()))?;
         match self
             .cache
             .set_value(
@@ -223,23 +356,25 @@ impl SqlChatRunRepo {
         Ok(result.affected_rows > 0)
     }
 
-    /// Resolve the base for a streaming append. Fast path: when the overlay is
-    /// present at exactly the caller's expected version it is the streaming
-    /// source of truth and is used directly **without a DB read** (issue spec:
-    /// per-token deltas never hit the DB on the normal path). An overlay newer
-    /// than the caller's expectation means the caller is stale → no base
-    /// (`Ok(None)` → append returns `Ok(false)`). A missing or behind-version
-    /// overlay (Redis outage / stale-after-fail-over) falls back to the
-    /// authoritative DB row — the recovery path that has to read MySQL anyway.
-    /// Returns `Ok(None)` when the run is missing or its version does not match.
+    /// Resolve the base for a streaming append. Fast path: when the cache
+    /// holds an overlay (V2 or legacy) at exactly the caller's expected
+    /// version it is the streaming source of truth and is used directly
+    /// **without a DB read** (issue spec: per-token deltas never hit the DB on
+    /// the normal path). An overlay newer than the caller's expectation means
+    /// the caller is stale → no base (`Ok(None)` → append returns
+    /// `Ok(false)`). A missing or behind-version overlay (Redis outage /
+    /// stale-after-fail-over / legacy-format window) falls back to the
+    /// authoritative DB row — the recovery path that has to read MySQL anyway,
+    /// and the meeting point for the rolling-upgrade format window. Returns
+    /// `Ok(None)` when the run is missing or its version does not match.
     async fn resolve_append_base(
         &self,
         run_id: &str,
         expected_version: u64,
-    ) -> Result<Option<StreamingOverlay>, ChatRunRepoError> {
-        match self.read_overlay(run_id).await {
-            Some(existing) if existing.version == expected_version => return Ok(Some(existing)),
-            Some(existing) if existing.version > expected_version => return Ok(None),
+    ) -> Result<Option<OverlayBase>, ChatRunRepoError> {
+        match self.read_overlay_base(run_id).await {
+            Some(base) if base.version() == expected_version => return Ok(Some(base)),
+            Some(base) if base.version() > expected_version => return Ok(None),
             _ => {}
         }
         let Some(db) = self.read_db(run_id).await? else {
@@ -248,15 +383,8 @@ impl SqlChatRunRepo {
         if db.expires_at_ms == 0 {
             return Ok(None);
         }
-        let overlay = StreamingOverlay {
-            version: db.version,
-            state: state_str(db.state).to_string(),
-            accumulated_content: db.accumulated_content.clone(),
-            content_truncated: db.content_truncated,
-            expires_at_ms: db.expires_at_ms,
-        };
-        Ok(if overlay.version == expected_version {
-            Some(overlay)
+        Ok(if db.version == expected_version {
+            Some(OverlayBase::Record(db))
         } else {
             None
         })
@@ -485,20 +613,10 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         );
         match self.db.execute(stmt).await {
             Ok(_) => {
-                // Overlay here is only a read cache of the just-inserted DB row;
-                // a write blip is benign (a later read falls back to the DB).
-                let _ = self
-                    .write_overlay(
-                        &record.run_id,
-                        &StreamingOverlay {
-                            version: record.version,
-                            state: state_str(record.state).to_string(),
-                            accumulated_content: record.accumulated_content.clone(),
-                            content_truncated: record.content_truncated,
-                            expires_at_ms: record.expires_at_ms,
-                        },
-                    )
-                    .await;
+                // Seed the whole-record overlay so `get` can serve this run
+                // cache-first from the very first poll; a write blip is
+                // benign (the read falls back to the just-inserted DB row).
+                let _ = self.write_overlay_record(&record.run_id, &record).await;
                 Ok(())
             }
             Err(err) if err.is_duplicate_key() => {
@@ -509,11 +627,33 @@ impl ChatRunRepoPort for SqlChatRunRepo {
     }
 
     async fn get(&self, run_id: &str) -> Result<Option<ChatRunRecord>, ChatRunRepoError> {
+        // Read-through fast path ("read side follows the authority"): while a
+        // run streams, the overlay is the freshest fact — per-delta writes
+        // only land there — so a V2 hit answers the whole record with ZERO DB
+        // reads. Misses fall back to the historical DB-read + legacy-overlay
+        // merge: terminal runs (the terminal CAS deletes the overlay, so they
+        // always read the audit row), cache loss, and the rolling-upgrade
+        // window where pre-upgrade replicas write the legacy value. The
+        // fallback keeps `get` side-effect-free: no re-seed on miss; an
+        // active run's lost overlay is re-seeded by the next delta write.
+        let overlay_bytes = self.read_overlay_bytes(run_id).await;
+        if let Some(bytes) = overlay_bytes.as_deref() {
+            if let Ok(v2) = serde_json::from_slice::<OverlayV2>(bytes) {
+                // Env gate: the key is env-less, so a shared Redis may hold
+                // another environment's V2 value for this run_id — only serve
+                // our own; foreign values fall through to the env-scoped DB.
+                if v2.env == self.env {
+                    return Ok(Some(v2.into_record()));
+                }
+            }
+        }
         let Some(record) = self.read_db(run_id).await? else {
             // No DB row; not even created here.
             return Ok(None);
         };
-        let overlay = self.read_overlay(run_id).await;
+        let overlay = overlay_bytes
+            .as_deref()
+            .and_then(|bytes| serde_json::from_slice::<StreamingOverlay>(bytes).ok());
         Ok(Some(Self::merge(record, overlay)))
     }
 
@@ -542,18 +682,23 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             let updated = read_full(self.db.as_ref(), run_id, &self.env).await?.unwrap_or(new.clone());
             // Refresh the read-cache overlay of the just-applied DB state; best
             // effort, since the DB row is authoritative on a read miss.
-            let _ = self
-                .write_overlay(
-                    run_id,
-                    &StreamingOverlay {
-                        version: updated.version,
-                        state: state_str(updated.state).to_string(),
-                        accumulated_content: updated.accumulated_content.clone(),
-                        content_truncated: updated.content_truncated,
-                        expires_at_ms: updated.expires_at_ms,
-                    },
-                )
-                .await;
+            // Compose, don't mirror: the DB row is authoritative for version,
+            // state, ack, and timestamps, but its `accumulated_content` is the
+            // create/fail-over-time value while the run streams — the streamed
+            // text lives only in the overlay. Taking the DB row wholesale here
+            // would clobber the content back to create-time whenever a state
+            // CAS lands mid-stream (e.g. a detach acknowledgement on the
+            // first content-bearing event).
+            let mut refreshed = updated.clone();
+            if let Some((content, truncated)) = self
+                .read_overlay_base(run_id)
+                .await
+                .and_then(|base| base.streaming_content())
+            {
+                refreshed.accumulated_content = content;
+                refreshed.content_truncated = truncated;
+            }
+            let _ = self.write_overlay_record(run_id, &refreshed).await;
             Ok(CasOutcome::Applied(updated))
         } else {
             classify_cas_failure(self.db.as_ref(), run_id, &self.env).await
@@ -587,8 +732,16 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         );
         let result = self.db.execute(stmt).await.map_err(backend)?;
         if result.affected_rows > 0 {
-            self.delete_overlay(run_id).await;
             let updated = read_full(self.db.as_ref(), run_id, &self.env).await?.unwrap_or(new);
+            // Tombstone before delete: best-effort write of the terminal record
+            // first, so a failed delete cannot leave a readable pre-terminal V2
+            // snapshot served cache-first. The delete then reclaims the key so
+            // terminal reads land on the audited DB row. If BOTH fail, the
+            // stale overlay stays readable until its TTL (accepted degraded
+            // window, see module docs); writers remain safe — append bases
+            // are version-fenced at the DB boundary.
+            let _ = self.write_overlay_record(run_id, &updated).await;
+            self.delete_overlay(run_id).await;
             Ok(CasOutcome::Applied(updated))
         } else {
             classify_cas_failure(self.db.as_ref(), run_id, &self.env).await
@@ -606,18 +759,37 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         // from the overlay without a DB read (see `resolve_append_base`); the DB
         // is only touched when the overlay is missing or stale (fail-over /
         // recovery), which is the path that has to read MySQL anyway.
-        let Some(mut overlay) = self.resolve_append_base(run_id, expected_version).await? else {
+        let Some(base) = self.resolve_append_base(run_id, expected_version).await? else {
             return Ok(false);
         };
-        let flipped = overlay.state == "pending";
-        overlay.version += 1;
-        if flipped {
-            overlay.state = "running".to_string();
-        }
-        overlay.accumulated_content = accumulated;
-        overlay.content_truncated = truncated;
-        let intended_version = overlay.version;
-        match self.write_overlay(run_id, &overlay).await {
+        let intended_version = expected_version + 1;
+        let now = now_ms();
+        let cache_write: Result<(), CacheError> = match base {
+            OverlayBase::Record(mut record) => {
+                let flipped = record.state == ChatRunState::Pending;
+                record.version = intended_version;
+                if flipped {
+                    record.state = ChatRunState::Running;
+                }
+                record.accumulated_content = accumulated.clone();
+                record.content_truncated = truncated;
+                record.updated_at_ms = now;
+                self.write_overlay_record(run_id, &record).await
+            }
+            // Legacy-format base (rolling-upgrade window): keep writing the
+            // legacy shape so pre-upgrade replicas can keep reading it.
+            OverlayBase::Legacy(mut overlay) => {
+                let flipped = overlay.state == "pending";
+                overlay.version = intended_version;
+                if flipped {
+                    overlay.state = "running".to_string();
+                }
+                overlay.accumulated_content = accumulated.clone();
+                overlay.content_truncated = truncated;
+                self.write_overlay_legacy(run_id, &overlay).await
+            }
+        };
+        match cache_write {
             // Overlay (the sole delta record) confirmed the write.
             Ok(()) => Ok(true),
             // C4/P1: overlay write rejected — fail the delta over to the DB at the
@@ -625,12 +797,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             // recovery re-bases off the DB. (#1546 forbids swallowing the write.)
             Err(_) => {
                 let applied = self
-                    .fall_back_to_db_append(
-                        run_id,
-                        &overlay.accumulated_content,
-                        truncated,
-                        intended_version,
-                    )
+                    .fall_back_to_db_append(run_id, &accumulated, truncated, intended_version)
                     .await?;
                 if applied {
                     self.delete_overlay(run_id).await;

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,7 +10,10 @@ use bcs_chat_run_store::{
     CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
     ChatRunState, SqlChatRunRepo,
 };
-use bcs_db_api::DbSqlFlavor;
+use bcs_db_api::{
+    DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbSqlFlavor, DbStatement,
+    DbTransactionStep, DbTransactionStepResult,
+};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::ChatResponseMode;
 
@@ -546,4 +550,298 @@ async fn env_scoping_isolates_runs_across_environments() {
     };
     assert!(total(env_b.metric_counts().await.unwrap()) == 0);
     assert!(total(env_a.metric_counts().await.unwrap()) >= 1);
+}
+// ---------------------------------------------------------------------------
+// Read-side-follows-authority (overlay-first get) coverage
+// ---------------------------------------------------------------------------
+
+/// DbPlugin double that counts SELECT-like `query` calls so tests can pin the
+/// "zero DB reads on the normal streaming path" invariant.
+struct CountingDb {
+    inner: Arc<LocalSqliteDbPlugin>,
+    selects: AtomicUsize,
+}
+
+impl CountingDb {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db")),
+            selects: AtomicUsize::new(0),
+        }
+    }
+
+    fn selects(&self) -> usize {
+        self.selects.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl DbPlugin for CountingDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        self.selects.fetch_add(1, Ordering::SeqCst);
+        self.inner.query(statement).await
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
+}
+
+fn repo_counting(db: &Arc<CountingDb>) -> SqlChatRunRepo {
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Sqlite,
+        cache,
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    )
+}
+
+/// Cache double: writes succeed, deletes always fail — models a terminal CAS
+/// whose overlay delete is rejected while the tombstone write still lands.
+struct NoDeleteCache {
+    inner: InMemoryCachePlugin,
+}
+
+#[async_trait]
+impl CachePlugin for NoDeleteCache {
+    async fn get_value(&self, key: &str) -> CacheResult<Option<Vec<u8>>> {
+        self.inner.get_value(key).await
+    }
+
+    async fn set_value(
+        &self,
+        key: &str,
+        value: Vec<u8>,
+        ttl: Option<Duration>,
+        mode: CacheSetMode,
+    ) -> CacheResult<bool> {
+        self.inner.set_value(key, value, ttl, mode).await
+    }
+
+    async fn delete(&self, _key: &str) -> CacheResult<bool> {
+        Err(CacheError::Backend("injected overlay delete failure".to_string()))
+    }
+
+    async fn expire(&self, key: &str, ttl: Duration) -> CacheResult<bool> {
+        self.inner.expire(key, ttl).await
+    }
+
+    async fn ttl(&self, key: &str) -> CacheResult<CacheTtl> {
+        self.inner.ttl(key).await
+    }
+
+    async fn hash_get(&self, key: &str, field: &str) -> CacheResult<Option<Vec<u8>>> {
+        self.inner.hash_get(key, field).await
+    }
+
+    async fn hash_get_all(&self, key: &str) -> CacheResult<BTreeMap<String, Vec<u8>>> {
+        self.inner.hash_get_all(key).await
+    }
+
+    async fn hash_set(&self, key: &str, field: &str, value: Vec<u8>) -> CacheResult<()> {
+        self.inner.hash_set(key, field, value).await
+    }
+
+    async fn hash_set_many(&self, key: &str, fields: BTreeMap<String, Vec<u8>>) -> CacheResult<()> {
+        self.inner.hash_set_many(key, fields).await
+    }
+
+    async fn hash_delete(&self, key: &str, field: &str) -> CacheResult<bool> {
+        self.inner.hash_delete(key, field).await
+    }
+}
+
+#[tokio::test]
+async fn overlay_v2_roundtrips_every_record_field() {
+    // The V2 cache value must round-trip the WHOLE record — including the two
+    // fields ChatRunRecord's own serde skips (completion_policy /
+    // delivery_ack_at_ms). Losing either would silently degrade the detach
+    // classification in `record_run_event` on every cache hit.
+    let repo = repo();
+    let mut full = record("full", 1);
+    full.state = ChatRunState::Running;
+    full.accumulated_content = "text".to_string();
+    full.error_message = Some("err".to_string());
+    full.completed_at_ms = Some(0);
+    full.content_truncated = true;
+    full.response_mode = ChatResponseMode::AfterLastToolCall;
+    full.completion_policy = ChatRunCompletionPolicy::DetachDeliveryAck;
+    full.delivery_ack_at_ms = Some(0);
+    repo.create(full.clone()).await.unwrap();
+    // Create seeds the V2 overlay, so this `get` is served cache-first.
+    let stored = repo.get("full").await.unwrap().unwrap();
+    assert_eq!(stored, full);
+}
+
+#[tokio::test]
+async fn streaming_and_polling_read_path_skips_db_entirely() {
+    // Read side follows the authority: while the run streams, the overlay is
+    // the freshest fact, so appends AND long-poll reads answer from the cache
+    // with zero MySQL SELECTs.
+    let db = Arc::new(CountingDb::new());
+    let repo = repo_counting(&db);
+    repo.create(record("z", 1)).await.unwrap();
+    assert_eq!(db.selects(), 0, "create must not SELECT");
+
+    assert!(
+        repo.append_streaming_content("z", 1, "he".to_string(), false)
+            .await
+            .unwrap()
+    );
+    assert!(
+        repo.append_streaming_content("z", 2, "hell".to_string(), false)
+            .await
+            .unwrap()
+    );
+    assert!(
+        repo.append_streaming_content("z", 3, "hello".to_string(), false)
+            .await
+            .unwrap()
+    );
+
+    for _ in 0..5 {
+        let stored = repo.get("z").await.unwrap().unwrap();
+        assert_eq!(stored.accumulated_content, "hello");
+        assert_eq!(stored.version, 4);
+        assert_eq!(stored.state, ChatRunState::Running);
+    }
+    assert_eq!(
+        db.selects(),
+        0,
+        "appends + polls on the fast path must not SELECT (overlay-first get)"
+    );
+}
+
+#[tokio::test]
+async fn state_cas_midstream_preserves_streamed_overlay_content() {
+    // Step-1 landmine: the state-CAS overlay refresh must compose the DB row's
+    // authority fields with the overlay's streaming content. Taking the DB row
+    // wholesale would clobber the text back to the create-time value whenever
+    // a state CAS lands mid-stream (e.g. a detach ack on the first
+    // content-bearing event).
+    let repo = repo();
+    repo.create(record("s", 1)).await.unwrap();
+    assert!(
+        repo.append_streaming_content("s", 1, "hello".to_string(), false)
+            .await
+            .unwrap()
+    );
+
+    let mut acked = record("s", 2);
+    acked.state = ChatRunState::Running;
+    acked.delivery_ack_at_ms = Some(0);
+    match repo.compare_and_set_state("s", 2, acked).await.unwrap() {
+        // The DB row is still at its create-time version 1 (streaming only
+        // advanced the overlay to 2), so the CAS bumps it 1 -> 2.
+        CasOutcome::Applied(r) => assert_eq!(r.version, 2),
+        other => panic!("expected Applied, got {other:?}"),
+    }
+
+    // Cache-first read: version/state/ack from the DB row's CAS outcome,
+    // content from the streamed overlay.
+    let stored = repo.get("s").await.unwrap().unwrap();
+    assert_eq!(stored.accumulated_content, "hello");
+    assert_eq!(stored.version, 2);
+    assert_eq!(stored.state, ChatRunState::Running);
+    assert_eq!(stored.delivery_ack_at_ms, Some(0));
+}
+
+#[tokio::test]
+async fn legacy_overlay_value_still_reads_through_db_merge() {
+    // Rolling-upgrade window: a pre-upgrade replica wrote the legacy
+    // five-field overlay. The V2-first read must fall back to the historical
+    // DB read + legacy-merge (the two format generations meet at the
+    // authoritative DB row), preserving the pre-change read behavior.
+    let db = Arc::new(CountingDb::new());
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let repo = SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Sqlite,
+        cache.clone(),
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    );
+    repo.create(record("lg", 1)).await.unwrap();
+    let selects_after_create = db.selects();
+
+    // Replace the V2 seed with a legacy-shaped, ahead-of-DB overlay.
+    let legacy = serde_json::to_vec(&serde_json::json!({
+        "version": 2u64,
+        "state": "running",
+        "accumulated_content": "legacy",
+        "content_truncated": false,
+        "expires_at_ms": 9_000_000_000_000u64,
+    }))
+    .unwrap();
+    cache
+        .set_value("bcs:chat_run:lg", legacy, None, CacheSetMode::Upsert)
+        .await
+        .unwrap();
+
+    let stored = repo.get("lg").await.unwrap().unwrap();
+    assert_eq!(stored.accumulated_content, "legacy");
+    assert_eq!(stored.version, 2);
+    assert_eq!(stored.state, ChatRunState::Running);
+    assert_eq!(
+        db.selects(),
+        selects_after_create + 1,
+        "a legacy value falls back to exactly one DB read"
+    );
+}
+
+#[tokio::test]
+async fn terminal_tombstone_covers_failed_overlay_delete() {
+    // Terminal CAS tombstones the overlay (V2 terminal record) before
+    // deleting it. When the delete is rejected but the write landed, the
+    // cache-first read serves the TERMINAL record — never a stale
+    // pre-terminal running snapshot.
+    let db = Arc::new(CountingDb::new());
+    let cache = Arc::new(NoDeleteCache {
+        inner: InMemoryCachePlugin::new(),
+    });
+    let repo = SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Sqlite,
+        cache,
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    );
+    repo.create(record("t", 1)).await.unwrap();
+    assert!(
+        repo.append_streaming_content("t", 1, "hello".to_string(), false)
+            .await
+            .unwrap()
+    );
+
+    let mut completed = record("t", 2);
+    completed.state = ChatRunState::Completed;
+    completed.accumulated_content = "hello final".to_string();
+    repo.compare_and_set_terminal("t", 2, completed)
+        .await
+        .unwrap();
+
+    // The delete failed, so the tombstone V2 record is what a cache-first
+    // read must serve.
+    let stored = repo.get("t").await.unwrap().unwrap();
+    assert_eq!(stored.state, ChatRunState::Completed);
+    assert_eq!(stored.accumulated_content, "hello final");
+    // The terminal CAS bumped the DB row (still at v1) to v2; the tombstone
+    // carries the same version.
+    assert_eq!(stored.version, 2);
 }
