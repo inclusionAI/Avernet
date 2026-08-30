@@ -1240,13 +1240,19 @@ bot has started (§3.4).
 in the design itself. Not scheduled.
 
 **Depends on.** W8.
-**Blocked by.** **X3**, now narrowed (§4): teclaw needs only an artifact protocol
-from us; the ARCA PATH proposal and the default-skill-set skill are ours to
-design. The §4 investigation confirmed there is **no existing CLI mechanism to
-duplicate** — every `bcs-cli` reference is singlebox orchestration, and no
-delivery path handles an executable bit.
+**Blocked by.** — **X3 is closed** (§4): the ARCA fleet is `linux/amd64`, so a
+single URL per tool suffices. teclaw needs only an artifact protocol from us; the
+ARCA PATH proposal and the default-skill-set skill are ours to design. The §4
+investigation confirmed there is **no existing CLI mechanism to duplicate** —
+every `bcs-cli` reference is singlebox orchestration, and no delivery path
+handles an executable bit. This item stays deferred by business priority, not by
+a missing answer.
 
-**Done when (sketch).** `digest` mandatory and enforced as the convergence key;
+**Done when (sketch).** Targets `linux/amd64` with a single URL per tool (§4,
+X3), while `${OCB_ARCH}` stays reserved in W1's whitelist and a fetched binary's
+ELF header is validated — so a wrong-architecture binary fails in the apply report
+rather than as an `exec format error` the model meets mid-task. Then: `digest`
+mandatory and enforced as the convergence key;
 static binary and archive forms only; a platform-defined logical tool directory
 on the agent process's PATH, with users never seeing a physical path; a
 tools-usage skill in the engine-aware **default skill set** (`SkillSetService`
@@ -1258,7 +1264,7 @@ script that hand-places it. Otherwise this ships alongside the one CLI mechanism
 that already exists and we maintain both — and folding it in gives the feature a
 real in-house test case before any customer uses it.
 
-**Size.** Medium, pending X3.
+**Size.** Medium.
 
 ---
 
