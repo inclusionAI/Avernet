@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import NAMESPACE_URL, uuid5
 
 from injector import inject
-from sqlalchemy import Index, func
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill_center_reference import (
@@ -32,17 +32,6 @@ from agentclaw.community.core.skill_center.reference_contract import (
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-
-
-if not any(
-    index.name == "idx_skill_center_public_locator" for index in Skill.__table__.indexes
-):
-    Index(
-        "idx_skill_center_public_locator",
-        Skill.__table__.c.avernet_tenant,
-        Skill.__table__.c.env,
-        Skill.__table__.c.git_path,
-    )
 
 
 class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
