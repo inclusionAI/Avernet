@@ -285,19 +285,20 @@ class ConfigModule(Module):
     def workspace(self) -> cfg.WorkspaceConfig:
         """Bot workspace filesystem layout.
 
-        Sources both roots from the ``workspace`` user_config block;
+        Sources all roots from the ``workspace`` user_config block;
         falls back to the dataclass defaults (sandbox paths) when the
-        block is absent or a field is missing. ``~`` is expanded for
-        each path so application-dev.yaml can use ``~/.openclaw`` and
-        get the dev's home directory at boot.
+        block is absent or a field is missing. Each path is expanded and
+        normalized once so Engine providers always receive the absolute-path
+        contract, including community's ``./data/workspace/...`` defaults.
         """
-        import pathlib
+        import os
+
         block = _block("workspace")
         defaults = cfg.WorkspaceConfig()
 
         def _expand(value: str | None, default: str) -> str:
             raw = value if isinstance(value, str) and value else default
-            return str(pathlib.Path(raw).expanduser())
+            return os.path.abspath(os.path.expanduser(raw))
 
         return cfg.WorkspaceConfig(
             openclaw_root=_expand(block.get("openclaw_root"), defaults.openclaw_root),

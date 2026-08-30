@@ -26,6 +26,9 @@ from agentclaw.community.core.skill_center.services.skill_version_materializer i
     SdkSkillVersionScanner,
     SkillVersionMaterializer,
 )
+from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import (
+    SkillCenterGatewayServiceProtocol,
+)
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionStore,
@@ -34,7 +37,6 @@ from agentclaw.community.plugin_api.http_client import (
     HttpClient,
     QUALIFIER_GENERAL,
 )
-from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
 
 
 class SkillVersionModule(Module):
@@ -68,7 +70,7 @@ class SkillVersionModule(Module):
     def skill_version_materializer(
         self,
         versions: SkillVersionMaterializationRepositoryProtocol,
-        gateway: SkillCenterGateway,
+        gateway: SkillCenterGatewayServiceProtocol,
         http: Annotated[HttpClient, QUALIFIER_GENERAL],
         scanner: SkillVersionScannerProtocol,
         store: CanonicalCenterVersionStore,

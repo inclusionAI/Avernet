@@ -37,10 +37,12 @@ from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageValidator,
     ValidatedSkillPackage,
 )
+from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import (
+    SkillCenterGatewayServiceProtocol,
+)
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterExactDownloadRequest,
-    SkillCenterGateway,
 )
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
@@ -158,7 +160,7 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         self,
         *,
         versions: SkillVersionMaterializationRepositoryProtocol,
-        gateway: SkillCenterGateway,
+        gateway: SkillCenterGatewayServiceProtocol,
         http: HttpClient,
         validator: SkillPackageValidator,
         scanner: SkillVersionScannerProtocol,
