@@ -69,7 +69,7 @@ def _bot(
     )
 
 
-def test_candidates_include_direct_and_active_ordinary_but_skip_default_only() -> None:
+def test_candidate_repository_returns_raw_installation_set_and_bot_facts() -> None:
     db = _Database()
     with avernet_tenant_scope("teamclaw"), db.orm_session() as session:
         session.add(
@@ -182,12 +182,36 @@ def test_candidates_include_direct_and_active_ordinary_but_skip_default_only() -
         )
 
     with avernet_tenant_scope("teamclaw"):
-        candidates = TrackLatestRepository(db).list_candidates(env="pre", skill_id=10)
+        facts = TrackLatestRepository(db).list_candidate_facts(env="pre", skill_id=10)
 
-    assert {(item.owner_id, item.bot_id) for item in candidates} == {
+    assert {(item.owner_id, item.bot_id) for item in facts.installations} == {
         ("owner-direct", "bot-direct"),
         ("owner-ordinary", "bot-ordinary"),
+        ("owner-default", "bot-default"),
         ("owner-service", "service-draft"),
+    }
+    assert {
+        (
+            item.owner_id,
+            item.bot_id,
+            item.engine_type,
+            item.is_default,
+            item.is_active,
+        )
+        for item in facts.skill_sets
+    } == {
+        ("owner-ordinary", "bot-ordinary", "openclaw", False, True),
+        ("owner-service", "service-draft", "openclaw", False, True),
+        (None, "default", "openclaw", True, True),
+    }
+    assert {
+        (item.owner_id, item.bot_id, item.active_engine, item.is_deleted)
+        for item in facts.bots
+    } == {
+        ("owner-direct", "bot-direct", "hermes", False),
+        ("owner-ordinary", "bot-ordinary", "openclaw", False),
+        ("owner-default", "bot-default", "openclaw", False),
+        ("owner-service", "service-draft", "openclaw", False),
     }
 
 

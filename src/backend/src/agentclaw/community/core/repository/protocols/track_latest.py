@@ -8,16 +8,16 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.track_latest_types import (
         PublishedTrackLatestVersion,
-        TrackLatestCandidate,
+        TrackLatestCandidateFacts,
     )
 
 
 @runtime_checkable
 class TrackLatestRepositoryProtocol(Protocol):
     @abstractmethod
-    def list_candidates(
+    def list_candidate_facts(
         self, *, env: str, skill_id: int
-    ) -> tuple[TrackLatestCandidate, ...]: ...
+    ) -> TrackLatestCandidateFacts: ...
 
     @abstractmethod
     def list_published_versions(

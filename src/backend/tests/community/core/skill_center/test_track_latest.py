@@ -6,7 +6,10 @@ from datetime import UTC, datetime
 
 from agentclaw.community.core.repository.track_latest_types import (
     PublishedTrackLatestVersion,
-    TrackLatestCandidate,
+    TrackLatestBotFact,
+    TrackLatestCandidateFacts,
+    TrackLatestInstallationFact,
+    TrackLatestSkillSetFact,
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
@@ -20,6 +23,7 @@ from agentclaw.community.core.skill_center.services.track_latest import (
     TrackLatestService,
 )
 from agentclaw.community.core.skill_center.track_latest_contract import (
+    eligible_track_latest_candidates,
     latest_dependency_delta,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
@@ -101,12 +105,85 @@ def test_dependency_delta_claims_current_when_bot_skipped_intermediate_version()
 
 
 class _Candidates:
-    def list_candidates(self, *, env, skill_id):
+    def list_candidate_facts(self, *, env, skill_id):
         assert (env, skill_id) == ("pre", 10)
-        return (
-            TrackLatestCandidate(owner_id="owner-a", bot_id="bot-a"),
-            TrackLatestCandidate(owner_id="owner-b", bot_id="bot-b"),
+        return _candidate_facts()
+
+
+def _candidate_facts() -> TrackLatestCandidateFacts:
+    return TrackLatestCandidateFacts(
+        installations=(
+            TrackLatestInstallationFact(owner_id="owner-direct", bot_id="direct"),
+            TrackLatestInstallationFact(owner_id="owner-active", bot_id="active"),
+            TrackLatestInstallationFact(owner_id="owner-default", bot_id="default"),
+            TrackLatestInstallationFact(owner_id="owner-inactive", bot_id="inactive"),
+            TrackLatestInstallationFact(owner_id="owner-deleted", bot_id="deleted"),
+        ),
+        skill_sets=(
+            TrackLatestSkillSetFact(
+                owner_id="owner-active",
+                bot_id="active",
+                engine_type="openclaw",
+                is_default=False,
+                is_active=True,
+            ),
+            TrackLatestSkillSetFact(
+                owner_id="owner-inactive",
+                bot_id="inactive",
+                engine_type="openclaw",
+                is_default=False,
+                is_active=False,
+            ),
+            TrackLatestSkillSetFact(
+                owner_id=None,
+                bot_id="default",
+                engine_type="openclaw",
+                is_default=True,
+                is_active=True,
+            ),
+        ),
+        bots=(
+            TrackLatestBotFact(
+                owner_id="owner-direct",
+                bot_id="direct",
+                active_engine="hermes",
+                is_deleted=False,
+            ),
+            TrackLatestBotFact(
+                owner_id="owner-active",
+                bot_id="active",
+                active_engine="openclaw",
+                is_deleted=False,
+            ),
+            TrackLatestBotFact(
+                owner_id="owner-default",
+                bot_id="default",
+                active_engine="openclaw",
+                is_deleted=False,
+            ),
+            TrackLatestBotFact(
+                owner_id="owner-inactive",
+                bot_id="inactive",
+                active_engine="openclaw",
+                is_deleted=False,
+            ),
+            TrackLatestBotFact(
+                owner_id="owner-deleted",
+                bot_id="deleted",
+                active_engine="hermes",
+                is_deleted=True,
+            ),
         )
+    )
+
+
+def test_candidate_policy_selects_active_ordinary_and_unshadowed_direct_only() -> None:
+    candidates = eligible_track_latest_candidates(_candidate_facts())
+
+    assert [(item.owner_id, item.bot_id) for item in candidates] == [
+        ("owner-active", "active"),
+        ("owner-direct", "direct"),
+    ]
 
 
 def test_fanout_enqueues_one_level_triggered_task_per_candidate_bot() -> None:
@@ -123,8 +200,8 @@ def test_fanout_enqueues_one_level_triggered_task_per_candidate_bot() -> None:
         BOT_TRACK_LATEST_RECONCILE_TASK,
     ]
     assert [call["payload"] for call in tasks.calls] == [
-        {"owner_id": "owner-a", "bot_id": "bot-a", "skill_id": 10},
-        {"owner_id": "owner-b", "bot_id": "bot-b", "skill_id": 10},
+        {"owner_id": "owner-active", "bot_id": "active", "skill_id": 10},
+        {"owner_id": "owner-direct", "bot_id": "direct", "skill_id": 10},
     ]
 
 

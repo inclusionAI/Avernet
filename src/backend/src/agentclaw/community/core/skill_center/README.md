@@ -245,6 +245,13 @@ from the unified at-least-once PUBLISHED event to durable fanout. Publication
 still owns no Track Latest policy or task type, and Reference/Sync still own no
 Publication Attempt state.
 
+SC Public Sync's distributed cache lease is a best-effort batch coordinator,
+not a transactional fencing token. If renewal is lost while one exact,
+idempotent materialization is already running, that item may complete; Sync
+observes the loss at the next item boundary, stops subsequent items, and reports
+the stable coordinator error. A later periodic/manual pass converges the
+materialized-only set again.
+
 ### One writer, one flush, one reader, one rule book
 
 Installation (`ac_bot_skill_installation` / `ac_bot_mcp_installation`) is the

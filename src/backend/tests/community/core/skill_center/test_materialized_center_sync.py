@@ -139,6 +139,16 @@ class _RenewUnavailableCache(_Cache):
         raise CacheLockInfrastructureError("redis renew endpoint details")
 
 
+class _SequencedRenewCache(_Cache):
+    def __init__(self, renewals: list[bool]) -> None:
+        super().__init__()
+        self._renewals = iter(renewals)
+
+    def renew_lock_strict(self, key, value, ttl):
+        self.renewed.append((key, value, ttl))
+        return next(self._renewals)
+
+
 def test_sync_continues_after_one_failure_and_tracks_only_new_published_version() -> None:
     materializer = _Materializer()
     track_latest = _TrackLatest()
@@ -225,7 +235,7 @@ def test_manual_sync_maps_cache_renewal_outage_to_stable_unavailable_error() -> 
         service.sync()
 
 
-def test_sync_fails_closed_when_its_distributed_lease_is_lost() -> None:
+def test_sync_stops_before_the_first_item_when_lease_loss_is_observed() -> None:
     materializer = _Materializer()
     service = SkillCenterSyncService(
         assets=_Assets(),
@@ -240,6 +250,23 @@ def test_sync_fails_closed_when_its_distributed_lease_is_lost() -> None:
         service.sync()
 
     assert materializer.calls == []
+
+
+def test_sync_allows_current_idempotent_item_then_stops_after_lease_loss() -> None:
+    materializer = _Materializer()
+    service = SkillCenterSyncService(
+        assets=_Assets(),
+        gateway=_Gateway(),
+        materializer=materializer,
+        track_latest=_TrackLatest(),
+        cache=_SequencedRenewCache([True, False]),
+        env_provider=lambda: "pre",
+    )
+
+    with pytest.raises(SkillCenterSyncInProgressError, match="SYNC_LOCK_LOST"):
+        service.sync()
+
+    assert len(materializer.calls) == 1
 
 
 def test_published_exact_version_reensures_track_latest_before_unchanged() -> None:

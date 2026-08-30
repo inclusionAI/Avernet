@@ -24,6 +24,7 @@ from agentclaw.community.core.skill_center.track_latest_service_protocol import 
     TrackLatestServiceProtocol,
 )
 from agentclaw.community.core.skill_center.track_latest_contract import (
+    eligible_track_latest_candidates,
     latest_dependency_delta,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import (
@@ -77,8 +78,10 @@ class TrackLatestFanoutTaskHandler:
         except ValueError as exc:
             return Fail(str(exc))
         try:
-            candidates = self._candidates.list_candidates(
-                env=self._env_provider(), skill_id=skill_id
+            candidates = eligible_track_latest_candidates(
+                self._candidates.list_candidate_facts(
+                    env=self._env_provider(), skill_id=skill_id
+                )
             )
             for candidate in candidates:
                 self._tasks.enqueue(
