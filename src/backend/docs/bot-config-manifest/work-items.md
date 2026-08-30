@@ -572,9 +572,19 @@ one-line summary suggests.
 
 #### O9 is about CPU architecture, not paths
 
-`cli_tools` ships a **compiled binary**. A binary built for `x86_64` does not run
-on `aarch64` — it fails with `exec format error` inside the container, at the
-moment the model tries to use the tool. A manifest entry names **one** URL:
+`cli_tools` ships a **compiled binary**, and a binary matches its host on **two
+independent axes**:
+
+| Axis | Values | State |
+| --- | --- | --- |
+| OS / libc | linux · darwin · windows | **Answered: Linux** |
+| CPU instruction set | `x86_64`/amd64 · `aarch64`/arm64 | **Open** |
+
+Both live in the conventional filename `mycli-linux-amd64`. A Linux **arm64**
+host cannot run a `linux-amd64` binary — it fails with `exec format error` inside
+the container, at the moment the model tries to use the tool. So knowing the OS
+is Linux settles one axis and leaves the other. A manifest entry names **one**
+URL:
 
 ```yaml
 cli_tools:
@@ -611,6 +621,15 @@ Two cheap choices make the answer non-blocking:
 
 With those, v1 ships a single URL and a mixed fleet becomes an additive change
 rather than a redesign.
+
+**A third option worth checking before assuming anything fleet-wide.** Under
+D4's interim policy (§3.4) delivery happens *after* the bot starts, so the
+container exists when `cli_tools` is materialised. If the engine can report its
+own architecture over an existing channel, `${OCB_ARCH}` could be resolved
+**per bot at delivery time** — which answers the question by construction and
+stays correct if the fleet ever becomes mixed. It needs an engine-side way to
+ask, so W9 should establish feasibility rather than assume it; but it is a better
+shape than a global assumption and costs nothing to check.
 
 Everything else below is our own work: the artifact protocol for teclaw (we
 design, they implement), the per-engine ARCA PATH proposal, and the tools-usage
