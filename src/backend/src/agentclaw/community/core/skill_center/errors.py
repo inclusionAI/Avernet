@@ -167,6 +167,10 @@ class DraftRevisionConflictError(Exception):
     """The expected Draft revision is no longer current."""
 
 
+class DraftAlreadyExistsError(Exception):
+    """The Skill already has a current Draft for another creation request."""
+
+
 class DraftFileNotFoundError(Exception):
     """The addressed file does not exist in the current Draft."""
 

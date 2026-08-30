@@ -501,15 +501,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/diagnostics/health-check",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/available"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/models"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/connection"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # harness — bot-scoped diagnostics and patching under the addressed bot.
     # These operations now go through the addressed-bot grant seam so that both
     # human collaborators and delegated application callers can reach the bot,
@@ -599,42 +590,22 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # GRANT_FILTERED because the result is scoped by the path's space_id.
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.USER_GATED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.REFUSED,
-    (
-        "POST",
-        "/openapi/v1/bots/spaces/{space_id}/skills/import-from-git",
-    ): AdmissionMode.REFUSED,
-    (
-        "GET",
-        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}",
-    ): AdmissionMode.USER_GATED,
-    (
-        "GET",
-        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files",
-    ): AdmissionMode.USER_GATED,
-    (
-        "GET",
-        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}",
-    ): AdmissionMode.USER_GATED,
-    (
-        "PUT",
-        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}",
-    ): AdmissionMode.REFUSED,
-    (
-        "POST",
-        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git",
-    ): AdmissionMode.REFUSED,
-    (
-        "GET",
-        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants",
-    ): AdmissionMode.USER_GATED,
-    (
-        "PUT",
-        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
-    ): AdmissionMode.REFUSED,
-    (
-        "DELETE",
-        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
-    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/import-from-git"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/consumable"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"): AdmissionMode.USER_GATED,
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/upgrade"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"): AdmissionMode.USER_GATED,
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"): AdmissionMode.REFUSED,
     (
         "POST",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer",

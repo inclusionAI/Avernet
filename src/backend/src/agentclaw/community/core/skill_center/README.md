@@ -33,6 +33,8 @@ provides:
   - "SpaceSkillApplicationServiceProtocol"
   - "SpaceSkillDraftRepository"
   - "SpaceSkillReadRepository"
+  - "SpaceSkillVersionQueryService"
+  - "SpaceSkillVersionReadRepository"
   - "GitSnapshotService"
   - "GitSnapshotServiceProtocol"
   - "SpaceSkillEditorRequestService"

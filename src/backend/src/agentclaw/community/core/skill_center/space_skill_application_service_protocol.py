@@ -47,6 +47,12 @@ class DraftMutationResult:
     source_subdir: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class DraftDeleteOutcome:
+    changed: bool
+    deleted_scope: str
+
+
 @runtime_checkable
 class SpaceSkillApplicationServiceProtocol(Protocol):
     @abstractmethod
@@ -91,6 +97,27 @@ class SpaceSkillApplicationServiceProtocol(Protocol):
         actor_id: str,
         expected_revision_id: str,
         fencing_token: int | None,
+    ) -> DraftMutationResult: ...
+
+    @abstractmethod
+    def delete_draft(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+    ) -> DraftDeleteOutcome: ...
+
+    @abstractmethod
+    def create_upgrade_draft(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        request_id: str,
     ) -> DraftMutationResult: ...
 
     @abstractmethod

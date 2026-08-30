@@ -38,7 +38,12 @@ from .skill_center_types import (
     SpaceSkillGrantSetRecord,
     DraftEditLeaseRecord,
     SkillVersionRecord,
+    SpaceSkillVersionRecord,
+    ConsumableSpaceSkillRecord,
     SpaceSkillDraftRecord,
+    DraftDeleteRecord,
+    DraftUpgradeRecord,
+    SkillUpgradeIdentityRecord,
 )
 
 
@@ -257,6 +262,43 @@ class SpaceSkillDraftRepository(Protocol):
         """Commit one EDITING revision CAS and return the previous locator."""
         ...
 
+    @abstractmethod
+    def delete_draft(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+        env: str,
+    ) -> DraftDeleteRecord: ...
+
+    @abstractmethod
+    def get_skill_for_upgrade(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> SkillUpgradeIdentityRecord: ...
+
+    @abstractmethod
+    def get_upgrade_by_request_id(
+        self, *, request_id: str, env: str
+    ) -> SpaceSkillDraftRecord | None: ...
+
+    @abstractmethod
+    def create_upgrade_draft(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        request_id: str,
+        expected_version_id: int,
+        target_version: int,
+        new_locator: str,
+        new_description: str,
+        env: str,
+    ) -> DraftUpgradeRecord: ...
+
 
 @runtime_checkable
 class SkillVersionRepositoryProtocol(Protocol):
@@ -299,6 +341,24 @@ class SkillVersionMaterializationRepositoryProtocol(Protocol):
         published_at: datetime,
     ) -> PublishedMaterializedSkillVersion:
         ...
+
+
+@runtime_checkable
+class SpaceSkillVersionReadRepository(Protocol):
+    @abstractmethod
+    def list_published(
+        self, *, space_id: int, skill_id: int, env: str, offset: int, limit: int
+    ) -> tuple[int, list[SpaceSkillVersionRecord]]: ...
+
+    @abstractmethod
+    def get_published_ordinal(
+        self, *, space_id: int, skill_id: int, version: int, env: str
+    ) -> SpaceSkillVersionRecord: ...
+
+    @abstractmethod
+    def list_consumable_candidates(
+        self, *, space_id: int, env: str, keyword: str | None
+    ) -> list[ConsumableSpaceSkillRecord]: ...
 
 @runtime_checkable
 class SkillRepository(Protocol):

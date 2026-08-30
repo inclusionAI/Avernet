@@ -379,6 +379,30 @@ class SkillVersionSummary(_UtcResponseModel):
     published_at: datetime = Field(description="UTC publication completion time.")
 
 
+class SkillVersionDetail(SkillVersionSummary):
+    name: str
+    description: str | None = None
+    mcp_dependencies: list[str] = Field(default_factory=list)
+
+
+class PublishedVersionFileTree(BaseModel):
+    version: int = Field(ge=1)
+    files: list[DraftFileItem]
+
+
+class PublishedVersionFileContent(BaseModel):
+    version: int = Field(ge=1)
+    path: str
+    content: str
+
+
+class ConsumableSpaceSkill(BaseModel):
+    skill_id: str
+    name: str
+    description: str | None = None
+    latest_published_version: SkillVersionSummary
+
+
 class SkillDraftSummary(BaseModel):
     target_version: int = Field(ge=1, description="Target business version ordinal.")
     status: SkillDraftStatus
@@ -477,6 +501,12 @@ class SaveDraftFileRequest(BaseModel):
 class DraftRevisionRequest(BaseModel):
     expected_revision_id: str = Field(min_length=1, max_length=128)
     fencing_token: int | None = Field(default=None, ge=1)
+
+
+class DraftDeleteResult(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    changed: bool
+    deleted_scope: Literal["DRAFT", "SKILL"]
 
 
 class AddSpaceMemberRequest(BaseModel):

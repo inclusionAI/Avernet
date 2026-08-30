@@ -18,6 +18,9 @@ from agentclaw.community.api.space_skill_query_service import (
 from agentclaw.community.api.space_skill_application_service import (
     SpaceSkillApplicationServiceProtocol,
 )
+from agentclaw.community.api.space_skill_version_query_service import (
+    SpaceSkillVersionQueryServiceProtocol,
+)
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
@@ -40,6 +43,7 @@ from agentclaw.community.core.repository.protocols.market_favorites import (
 )
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillVersionRepositoryProtocol,
     SpaceSkillRepository,
     SpaceSkillDraftRepository,
     DraftEditLeaseRepository,
@@ -56,7 +60,15 @@ from agentclaw.community.core.skill_center.services.space_skill_query_service im
     SpaceSkillQueryService,
 )
 from agentclaw.community.core.skill_center.services.space_skill_application_service import (
+    download_exact_skill_package,
     SpaceSkillApplicationService,
+)
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionStore,
+)
+from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
+from agentclaw.community.core.skill_center.services.space_skill_version_query_service import (
+    SpaceSkillVersionQueryService,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
@@ -111,6 +123,11 @@ class SpacesModule(Module):
         binder.bind(SpaceMemberServiceProtocol, to=SpaceMemberService, scope=singleton)
         binder.bind(GitSnapshotServiceProtocol, to=GitSnapshotService, scope=singleton)
         binder.bind(
+            SpaceSkillVersionQueryServiceProtocol,
+            to=SpaceSkillVersionQueryService,
+            scope=singleton,
+        )
+        binder.bind(
             SpaceSkillQueryServiceProtocol,
             to=SpaceSkillQueryService,
             scope=singleton,
@@ -142,6 +159,9 @@ class SpacesModule(Module):
         draft_repository: SpaceSkillDraftRepository,
         draft_store: DraftContentStore,
         git_snapshots: GitSnapshotServiceProtocol,
+        versions: SkillVersionRepositoryProtocol,
+        canonical_store: CanonicalCenterVersionStore,
+        skill_center: SkillCenterGateway,
     ) -> SpaceSkillApplicationServiceProtocol:
         return SpaceSkillApplicationService(
             access=access,
@@ -150,6 +170,10 @@ class SpacesModule(Module):
             package_validator=SkillPackageValidator(SkillParser()),
             draft_store=draft_store,
             git_snapshots=git_snapshots,
+            versions=versions,
+            canonical_store=canonical_store,
+            skill_center=skill_center,
+            package_fetcher=download_exact_skill_package,
             env_provider=get_current_env,
             tenant_provider=get_current_avernet_tenant,
         )

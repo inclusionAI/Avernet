@@ -7,10 +7,9 @@ reach the operation; Space ownership rules remain in the core services.
 
 from __future__ import annotations
 
-import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Header, Path, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, Header, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
@@ -45,14 +44,12 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     SpaceMemberDeletedResult,
     SpaceMemberItem,
     SpaceMemberMutationResult,
-    SpaceSkillSummary,
-    SpaceSkillDetail,
-    ImportSpaceSkillFromGitRequest,
     DraftFileTree,
     DraftFileContent,
     SaveDraftFileRequest,
     DraftRevisionRequest,
     SkillDraftDetail,
+    DraftDeleteResult,
     SkillGrantItem,
     SpaceSkillGrants,
     TransferSkillOwnerRequest,
@@ -67,9 +64,6 @@ from agentclaw.community.api.market_favorite_service import (
 from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
-)
-from agentclaw.community.api.space_skill_query_service import (
-    SpaceSkillQueryServiceProtocol,
 )
 from agentclaw.community.api.space_skill_application_service import (
     SpaceSkillApplicationServiceProtocol,
@@ -95,10 +89,6 @@ from agentclaw.community.core.spaces.models import (
     SpaceSummaryRecord,
     SpaceType as DomainSpaceType,
 )
-from agentclaw.community.core.repository.protocols.skill_center_types import (
-    SpaceSkillSummaryRecord,
-)
-from agentclaw.community.core.skill_center.skill_package import SkillPackageInvalidError
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
@@ -193,16 +183,6 @@ def _favorite_item(record: MarketFavoriteRecord) -> MarketFavoriteItem:
         target_code=record.target_code,
         favorite_at=record.gmt_created,
     )
-
-
-def _space_skill_summary(record: SpaceSkillSummaryRecord) -> SpaceSkillSummary:
-    return SpaceSkillSummary.model_validate(
-        {**record, "skill_id": str(record["id"])}
-    )
-
-
-def _space_skill_detail(record) -> SpaceSkillDetail:
-    return SpaceSkillDetail.model_validate({**record, "skill_id": str(record["id"])})
 
 
 @router.get("", response_model=Envelope[Page[SpaceItem]])
@@ -300,145 +280,6 @@ async def list_space_members(
 
 
 @router.get(
-    "/{space_id}/skills",
-    response_model=Envelope[Page[SpaceSkillSummary]],
-)
-@envelope_errors
-async def list_space_skills(
-    request: Request,
-    caller: ActingCallerDep,
-    space_id: SpaceIdPath,
-    keyword: Annotated[
-        str | None,
-        Query(
-            max_length=128,
-            description="Optional Skill-name or description search text.",
-        ),
-    ] = None,
-    page_number: Annotated[
-        int, Query(alias="page", ge=1, description="One-based page number.")
-    ] = 1,
-    page_size: PageSizeQuery = 20,
-    service: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
-) -> Envelope[Page[SpaceSkillSummary]]:
-    actor_id = _require_user_delegation(caller)
-    total, records = service.list_space_skills(
-        space_id=space_id,
-        actor_id=actor_id,
-        keyword=keyword,
-        page=page_number,
-        page_size=page_size,
-    )
-    return page(total, [_space_skill_summary(record) for record in records], request)
-
-
-@router.post(
-    "/{space_id}/skills",
-    status_code=201,
-    response_model=Envelope[SpaceSkillDetail],
-    dependencies=_REFUSES_APP_ONLY,
-)
-@envelope_errors
-async def create_space_skill_from_folder(
-    space_id: SpaceIdPath,
-    request: Request,
-    user_id: UserIdDep,
-    idempotency_key: IdempotencyKeyHeader,
-    files: Annotated[list[UploadFile], File(description="Folder files.")],
-    file_paths: Annotated[
-        str,
-        Form(description="JSON array of POSIX relative paths matching files."),
-    ],
-    commands: SpaceSkillApplicationServiceProtocol = Injected(
-        SpaceSkillApplicationServiceProtocol
-    ),
-    queries: SpaceSkillQueryServiceProtocol = Injected(
-        SpaceSkillQueryServiceProtocol
-    ),
-) -> Envelope[SpaceSkillDetail]:
-    try:
-        paths = json.loads(file_paths)
-    except json.JSONDecodeError as exc:
-        raise SkillPackageInvalidError("invalid_file_paths") from exc
-    if (
-        not isinstance(paths, list)
-        or len(paths) != len(files)
-        or any(not isinstance(path, str) for path in paths)
-    ):
-        raise SkillPackageInvalidError("invalid_file_paths")
-    payload = [
-        (path, await uploaded.read()) for path, uploaded in zip(paths, files, strict=True)
-    ]
-    outcome = commands.create_from_folder(
-        space_id=space_id,
-        actor_id=user_id,
-        request_id=idempotency_key,
-        files=payload,
-    )
-    detail = queries.get_space_skill(
-        space_id=space_id, skill_id=outcome.skill_id, actor_id=user_id
-    )
-    return created(_space_skill_detail(detail), request)
-
-
-@router.post(
-    "/{space_id}/skills/import-from-git",
-    status_code=201,
-    response_model=Envelope[SpaceSkillDetail],
-    dependencies=_REFUSES_APP_ONLY,
-)
-@envelope_errors
-async def import_space_skill_from_git(
-    body: ImportSpaceSkillFromGitRequest,
-    space_id: SpaceIdPath,
-    request: Request,
-    user_id: UserIdDep,
-    idempotency_key: IdempotencyKeyHeader,
-    commands: SpaceSkillApplicationServiceProtocol = Injected(
-        SpaceSkillApplicationServiceProtocol
-    ),
-    queries: SpaceSkillQueryServiceProtocol = Injected(
-        SpaceSkillQueryServiceProtocol
-    ),
-) -> Envelope[SpaceSkillDetail]:
-    outcome = commands.create_from_git(
-        space_id=space_id,
-        actor_id=user_id,
-        request_id=idempotency_key,
-        git_url=body.git_url,
-        branch=body.branch,
-        subdir=body.subdir,
-    )
-    detail = queries.get_space_skill(
-        space_id=space_id, skill_id=outcome.skill_id, actor_id=user_id
-    )
-    return created(_space_skill_detail(detail), request)
-
-
-@router.get(
-    "/{space_id}/skills/{skill_id}",
-    response_model=Envelope[SpaceSkillDetail],
-)
-@envelope_errors
-async def get_space_skill_detail(
-    space_id: SpaceIdPath,
-    skill_id: SkillIdPath,
-    request: Request,
-    caller: ActingCallerDep,
-    service: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
-) -> Envelope[SpaceSkillDetail]:
-    actor_id = _require_user_delegation(caller)
-    return envelope(
-        _space_skill_detail(
-            service.get_space_skill(
-                space_id=space_id, skill_id=skill_id, actor_id=actor_id
-            )
-        ),
-        request,
-    )
-
-
-@router.get(
     "/{space_id}/skills/{skill_id}/draft/files",
     response_model=Envelope[DraftFileTree],
 )
@@ -511,6 +352,32 @@ async def save_space_skill_draft_file(
 
 
 @router.post(
+    "/{space_id}/skills/{skill_id}/draft/upgrade",
+    status_code=201,
+    response_model=Envelope[SkillDraftDetail],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def create_space_skill_upgrade_draft(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    idempotency_key: IdempotencyKeyHeader,
+    service: SpaceSkillApplicationServiceProtocol = Injected(
+        SpaceSkillApplicationServiceProtocol
+    ),
+) -> Envelope[SkillDraftDetail]:
+    result = service.create_upgrade_draft(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        request_id=idempotency_key,
+    )
+    return created(SkillDraftDetail.model_validate(result), request)
+
+
+@router.post(
     "/{space_id}/skills/{skill_id}/draft/refresh-from-git",
     response_model=Envelope[SkillDraftDetail],
     dependencies=_REFUSES_APP_ONLY,
@@ -534,6 +401,33 @@ async def refresh_space_skill_draft_from_git(
         fencing_token=body.fencing_token,
     )
     return envelope(SkillDraftDetail.model_validate(result), request)
+
+
+@router.delete(
+    "/{space_id}/skills/{skill_id}/draft",
+    response_model=Envelope[DraftDeleteResult],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def delete_space_skill_draft(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    expected_revision_id: Annotated[str, Query(min_length=1, max_length=128)],
+    fencing_token: Annotated[int | None, Query(ge=1)] = None,
+    service: SpaceSkillApplicationServiceProtocol = Injected(
+        SpaceSkillApplicationServiceProtocol
+    ),
+) -> Envelope[DraftDeleteResult]:
+    result = service.delete_draft(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+        expected_revision_id=expected_revision_id,
+        fencing_token=fencing_token,
+    )
+    return envelope(DraftDeleteResult.model_validate(result), request)
 
 
 @router.get(

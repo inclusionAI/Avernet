@@ -64,12 +64,9 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
 from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
     SpaceSkillRepository as UnifiedSpaceSkillRepository,
 )
-from agentclaw.community.core.repository.implementations.skill_center.space_skill_draft import (
-    SpaceSkillDraftRepository as UnifiedSpaceSkillDraftRepository,
-)
-from agentclaw.community.core.repository.implementations.skill_center.space_skill_read import (
-    SpaceSkillReadRepository as UnifiedSpaceSkillReadRepository,
-)
+from agentclaw.community.core.repository.implementations.skill_center.space_skill_draft import SpaceSkillDraftRepository as UnifiedSpaceSkillDraftRepository
+from agentclaw.community.core.repository.implementations.skill_center.space_skill_read import SpaceSkillReadRepository as UnifiedSpaceSkillReadRepository
+from agentclaw.community.core.repository.implementations.skill_center.space_skill_version_read import SpaceSkillVersionReadRepository as UnifiedSpaceSkillVersionReadRepository
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
@@ -102,6 +99,7 @@ from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillRepository,
     SpaceSkillDraftRepository,
     SpaceSkillReadRepository,
+    SpaceSkillVersionReadRepository,
 )
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
@@ -335,6 +333,11 @@ class SkillCenterModule(
         binder.bind(
             SpaceSkillReadRepository,
             to=UnifiedSpaceSkillReadRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            SpaceSkillVersionReadRepository,
+            to=UnifiedSpaceSkillVersionReadRepository,
             scope=singleton,
         )
         binder.bind(

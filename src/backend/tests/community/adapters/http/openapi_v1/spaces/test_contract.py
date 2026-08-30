@@ -12,6 +12,9 @@ from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.spaces.router import router
+from agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes import (
+    router as skill_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     MarketFavoriteItem,
     SpaceMemberItem,
@@ -36,6 +39,9 @@ from agentclaw.community.api.space_skill_application_service import (
     DraftMutationResult,
     SpaceSkillApplicationServiceProtocol,
     SpaceSkillCreationOutcome,
+)
+from agentclaw.community.api.space_skill_version_query_service import (
+    SpaceSkillVersionQueryServiceProtocol,
 )
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
@@ -123,6 +129,11 @@ def skill_application_service():
 
 
 @pytest.fixture
+def skill_version_query_service():
+    return MagicMock()
+
+
+@pytest.fixture
 def skill_editor_request_service():
     return MagicMock()
 
@@ -140,6 +151,7 @@ def client(
     skill_query_service,
     skill_grant_service,
     skill_application_service,
+    skill_version_query_service,
     skill_editor_request_service,
     draft_edit_lease_service,
 ):
@@ -154,6 +166,10 @@ def client(
                 SpaceSkillApplicationServiceProtocol, to=skill_application_service
             )
             binder.bind(
+                SpaceSkillVersionQueryServiceProtocol,
+                to=skill_version_query_service,
+            )
+            binder.bind(
                 SpaceSkillEditorRequestServiceProtocol,
                 to=skill_editor_request_service,
             )
@@ -161,6 +177,7 @@ def client(
 
     app = FastAPI()
     app.include_router(router)
+    app.include_router(skill_router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "owner-1"}
     attach_injector(app, Injector([_Bindings()]))
     mount_public_error_handlers(app)
@@ -819,6 +836,60 @@ def test_draft_file_routes_preserve_revision_and_fencing_contract(
         expected_revision_id="rev-1",
         fencing_token=7,
     )
+
+
+def test_published_version_and_consumable_routes_use_business_ordinals(
+    client, skill_version_query_service
+):
+    published_at = datetime(2026, 8, 30, 8)
+    version = {
+        "version": 2,
+        "sc_version_number": "2.0.0",
+        "name": "risk-review",
+        "description": "Published",
+        "mcp_dependencies": ["mcp.a"],
+        "published_at": published_at,
+    }
+    skill_version_query_service.list_versions.return_value = (1, [version])
+    skill_version_query_service.get_version.return_value = version
+    skill_version_query_service.get_version_file_tree.return_value = {
+        "version": 2,
+        "files": [{"path": "SKILL.md", "size": 10}],
+    }
+    skill_version_query_service.read_version_file.return_value = {
+        "version": 2,
+        "path": "SKILL.md",
+        "content": "# Published",
+    }
+    skill_version_query_service.list_consumable.return_value = (
+        1,
+        [
+            {
+                "skill_id": "51",
+                "name": "risk-review",
+                "description": "Published",
+                "latest_published_version": {
+                    "version": 2,
+                    "sc_version_number": "2.0.0",
+                    "published_at": published_at,
+                },
+            }
+        ],
+    )
+
+    versions = client.get("/openapi/v1/bots/spaces/7/skills/51/versions")
+    detail = client.get("/openapi/v1/bots/spaces/7/skills/51/versions/2")
+    tree = client.get("/openapi/v1/bots/spaces/7/skills/51/versions/2/files")
+    file = client.get(
+        "/openapi/v1/bots/spaces/7/skills/51/versions/2/files/SKILL.md"
+    )
+    consumable = client.get("/openapi/v1/bots/spaces/7/skills/consumable")
+
+    assert versions.json()["data"]["items"][0]["version"] == 2
+    assert detail.json()["data"]["mcp_dependencies"] == ["mcp.a"]
+    assert tree.json()["data"]["files"][0]["path"] == "SKILL.md"
+    assert file.json()["data"]["content"] == "# Published"
+    assert consumable.json()["data"]["items"][0]["skill_id"] == "51"
 
 
 @pytest.mark.parametrize(

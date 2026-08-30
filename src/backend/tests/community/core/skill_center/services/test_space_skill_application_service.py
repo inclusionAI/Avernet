@@ -11,6 +11,13 @@ from agentclaw.community.core.skill_center.draft_content import (
     DraftContentStoreErrorCode,
     DraftRevisionRef,
 )
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterStoreError,
+    CanonicalCenterStoreErrorCode,
+    CanonicalCenterVersion,
+    CanonicalCenterVersionIdentity,
+)
+from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterExactDownload
 from agentclaw.community.core.skill_center.errors import (
     DraftRevisionConflictError,
     SpaceSkillIdempotencyConflictError,
@@ -45,6 +52,10 @@ def _service():
     access.require_space_member.return_value = (MagicMock(), MagicMock())
     repository = MagicMock()
     draft_repository = MagicMock()
+    versions = MagicMock()
+    canonical = MagicMock()
+    gateway = MagicMock()
+    package_fetcher = MagicMock()
     repository.get_creation_by_request_id.return_value = None
     repository.create_space_skill.return_value = {
         "created": True,
@@ -76,14 +87,29 @@ def _service():
         package_validator=validator,
         draft_store=store,
         git_snapshots=git_snapshots,
+        versions=versions,
+        canonical_store=canonical,
+        skill_center=gateway,
+        package_fetcher=package_fetcher,
         env_provider=lambda: "test",
         tenant_provider=lambda: "tenant-a",
     )
-    return service, access, repository, draft_repository, store, git_snapshots
+    return (
+        service,
+        access,
+        repository,
+        draft_repository,
+        store,
+        git_snapshots,
+        versions,
+        canonical,
+        gateway,
+        package_fetcher,
+    )
 
 
 def test_folder_creation_writes_revision_then_commits_one_skill_aggregate():
-    service, access, repository, _drafts, store, _git = _service()
+    service, access, repository, _drafts, store, _git, *_extra = _service()
 
     result = service.create_from_folder(
         space_id=7,
@@ -118,7 +144,7 @@ def test_folder_creation_writes_revision_then_commits_one_skill_aggregate():
 
 
 def test_folder_creation_replays_original_without_writing_another_revision():
-    service, _access, repository, _drafts, store, _git = _service()
+    service, _access, repository, _drafts, store, _git, *_extra = _service()
     store.write_revision = MagicMock(wraps=store.write_revision)
     first = service.create_from_folder(
         space_id=7,
@@ -147,7 +173,7 @@ def test_folder_creation_replays_original_without_writing_another_revision():
 
 
 def test_folder_creation_rejects_key_reuse_for_different_content_or_space():
-    service, _access, repository, _drafts, _store, _git = _service()
+    service, _access, repository, _drafts, _store, _git, *_extra = _service()
     repository.get_creation_by_request_id.return_value = {
         "skill_id": 51,
         "space_id": 8,
@@ -166,7 +192,7 @@ def test_folder_creation_rejects_key_reuse_for_different_content_or_space():
 
 
 def test_folder_creation_cleans_new_revision_when_database_commit_fails():
-    service, _access, repository, _drafts, store, _git = _service()
+    service, _access, repository, _drafts, store, _git, *_extra = _service()
     repository.create_space_skill.side_effect = RuntimeError("database failed")
     store.delete_revision = MagicMock(wraps=store.delete_revision)
 
@@ -186,7 +212,7 @@ def test_folder_creation_cleans_new_revision_when_database_commit_fails():
 
 
 def test_folder_creation_does_not_hide_cleanup_failure():
-    service, _access, repository, _drafts, store, _git = _service()
+    service, _access, repository, _drafts, store, _git, *_extra = _service()
     repository.create_space_skill.side_effect = RuntimeError("database failed")
     store.delete_revision = MagicMock(
         side_effect=DraftContentStoreError(
@@ -206,7 +232,7 @@ def test_folder_creation_does_not_hide_cleanup_failure():
 
 
 def test_git_creation_uses_the_same_package_and_persistence_pipeline():
-    service, _access, repository, _drafts, store, git_snapshots = _service()
+    service, _access, repository, _drafts, store, git_snapshots, *_extra = _service()
     git_snapshots.fetch.return_value = GitSkillSnapshot(
         repo_url="https://example.com/team/skills.git",
         resolved_branch="main",
@@ -280,7 +306,7 @@ def _seed_draft(store, *, source_kind="FOLDER"):
 
 
 def test_draft_tree_and_utf8_file_read_use_the_current_revision():
-    service, _access, _repository, drafts, store, _git = _service()
+    service, _access, _repository, drafts, store, _git, *_extra = _service()
     drafts.get_draft.return_value = _seed_draft(store)
 
     tree = service.get_draft_file_tree(
@@ -300,7 +326,7 @@ def test_draft_tree_and_utf8_file_read_use_the_current_revision():
 
 
 def test_personal_draft_save_writes_new_revision_and_commits_revision_cas():
-    service, _access, _repository, drafts, store, _git = _service()
+    service, _access, _repository, drafts, store, _git, *_extra = _service()
     current = _seed_draft(store)
     drafts.get_draft.return_value = current
     drafts.replace_draft_revision.return_value = current["locator"]
@@ -325,7 +351,7 @@ def test_personal_draft_save_writes_new_revision_and_commits_revision_cas():
 
 
 def test_draft_save_cleans_new_revision_when_cas_loses():
-    service, _access, _repository, drafts, store, _git = _service()
+    service, _access, _repository, drafts, store, _git, *_extra = _service()
     drafts.get_draft.return_value = _seed_draft(store)
     drafts.replace_draft_revision.side_effect = DraftRevisionConflictError()
     store.delete_revision = MagicMock(wraps=store.delete_revision)
@@ -348,7 +374,7 @@ def test_draft_save_cleans_new_revision_when_cas_loses():
 
 
 def test_git_refresh_failure_leaves_draft_and_store_untouched():
-    service, _access, _repository, drafts, store, git_snapshots = _service()
+    service, _access, _repository, drafts, store, git_snapshots, *_extra = _service()
     drafts.get_draft.return_value = _seed_draft(store, source_kind="GIT")
     git_snapshots.fetch.side_effect = RuntimeError("clone failed")
     store.write_revision = MagicMock(wraps=store.write_revision)
@@ -364,3 +390,181 @@ def test_git_refresh_failure_leaves_draft_and_store_untouched():
 
     assert store.write_revision.call_count == 0
     drafts.replace_draft_revision.assert_not_called()
+
+
+def test_upgrade_creates_one_vn_plus_one_draft_from_exact_published_store():
+    (
+        service,
+        _access,
+        _repository,
+        drafts,
+        store,
+        _git,
+        versions,
+        canonical,
+        _gateway,
+        _fetcher,
+    ) = _service()
+    drafts.get_upgrade_by_request_id.return_value = None
+    versions.list_latest_published.return_value = (
+        {
+            "id": 91,
+            "skill_id": 51,
+            "version_ordinal": 1,
+            "status": "PUBLISHED",
+            "sc_version_number": "1.0.0",
+            "sc_skill_id": None,
+            "sc_version_id": None,
+            "name": "draft-skill",
+            "description": "Published description",
+            "metadata_json": "{}",
+            "published_at": None,
+        },
+    )
+    canonical.read_version.return_value = CanonicalCenterVersion.from_files(
+        CanonicalCenterVersionIdentity(
+            skill_uuid="11111111-1111-4111-8111-111111111111",
+            sc_version_number="1.0.0",
+        ),
+        {
+            "SKILL.md": (
+                b"---\nname: draft-skill\n"
+                b"description: Published description\n---\n"
+            )
+        },
+    )
+    drafts.get_skill_for_upgrade.return_value = {
+        "skill_id": 51,
+        "skill_uuid": "11111111-1111-4111-8111-111111111111",
+        "name": "draft-skill",
+        "space_type": "TEAM",
+        "sc_team_id": 77,
+    }
+    drafts.create_upgrade_draft.return_value = {
+        "created": True,
+        "draft": {
+            "skill_id": 51,
+            "skill_uuid": "11111111-1111-4111-8111-111111111111",
+            "name": "draft-skill",
+            "draft_description": "Published description",
+            "target_version": 2,
+            "status": "EDITING",
+            "locator": "unused",
+            "source_kind": "PUBLISHED_VERSION",
+            "source_repo_url": None,
+            "source_branch": None,
+            "source_subdir": None,
+            "source_commit_sha": None,
+            "space_type": "TEAM",
+            "sc_team_id": 77,
+        },
+    }
+
+    result = service.create_upgrade_draft(
+        space_id=7, skill_id=51, actor_id="owner-1", request_id="upgrade-2"
+    )
+
+    assert result.target_version == 2
+    assert result.source_kind == "PUBLISHED_VERSION"
+    call = drafts.create_upgrade_draft.call_args.kwargs
+    assert call["expected_version_id"] == 91
+    assert call["target_version"] == 2
+    ref = DraftRevisionRef.from_locator(
+        tenant="tenant-a", env="test", locator=call["new_locator"]
+    )
+    assert store.read_revision(ref).description == "Published description"
+
+
+def test_upgrade_repairs_missing_canonical_store_from_exact_sc_download():
+    (
+        service,
+        _access,
+        _repository,
+        drafts,
+        _store,
+        _git,
+        versions,
+        canonical,
+        gateway,
+        fetcher,
+    ) = _service()
+    drafts.get_upgrade_by_request_id.return_value = None
+    drafts.get_skill_for_upgrade.return_value = {
+        "skill_id": 51,
+        "skill_uuid": "11111111-1111-4111-8111-111111111111",
+        "name": "draft-skill",
+        "space_type": "TEAM",
+        "sc_team_id": 77,
+    }
+    versions.list_latest_published.return_value = (
+        {
+            "id": 91,
+            "skill_id": 51,
+            "version_ordinal": 1,
+            "status": "PUBLISHED",
+            "sc_version_number": "1.0.0",
+            "sc_skill_id": None,
+            "sc_version_id": None,
+            "name": "draft-skill",
+            "description": "Published description",
+            "metadata_json": "{}",
+            "published_at": None,
+        },
+    )
+    exact = CanonicalCenterVersion.from_files(
+        CanonicalCenterVersionIdentity(
+            skill_uuid="11111111-1111-4111-8111-111111111111",
+            sc_version_number="1.0.0",
+        ),
+        {
+            "SKILL.md": (
+                b"---\nname: draft-skill\n"
+                b"description: Published description\n---\n"
+            )
+        },
+    )
+    canonical.read_version.side_effect = [
+        CanonicalCenterStoreError(
+            CanonicalCenterStoreErrorCode.NOT_READY, "missing"
+        ),
+        exact,
+    ]
+    gateway.get_exact_download.return_value = SkillCenterExactDownload(
+        skill_code="11111111-1111-4111-8111-111111111111",
+        version_number="1.0.0",
+        download_url="https://download.example/exact.zip",
+        sha256="a" * 64,
+    )
+    package = SkillPackageValidator(SkillParser()).validate_directory(
+        list(exact.file_map.items())
+    )
+    fetcher.return_value = package.canonical_zip
+    drafts.create_upgrade_draft.return_value = {
+        "created": True,
+        "draft": {
+            "skill_id": 51,
+            "skill_uuid": exact.identity.skill_uuid,
+            "name": "draft-skill",
+            "draft_description": "Published description",
+            "target_version": 2,
+            "status": "EDITING",
+            "locator": (
+                "draft://11111111-1111-4111-8111-111111111111/"
+                "v2/22222222-2222-4222-8222-222222222222"
+            ),
+            "source_kind": "PUBLISHED_VERSION",
+            "source_repo_url": None,
+            "source_branch": None,
+            "source_subdir": None,
+            "source_commit_sha": None,
+            "space_type": "TEAM",
+            "sc_team_id": 77,
+        },
+    }
+
+    service.create_upgrade_draft(
+        space_id=7, skill_id=51, actor_id="owner-1", request_id="upgrade-2"
+    )
+
+    fetcher.assert_called_once_with("https://download.example/exact.zip", "a" * 64)
+    canonical.write_version.assert_called_once()

@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import requests
 from collections.abc import Callable, Sequence
 from uuid import uuid4
 
 from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillVersionRepositoryProtocol,
     SpaceSkillDraftRepository,
     SpaceSkillRepository,
+)
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterStoreError,
+    CanonicalCenterStoreErrorCode,
+    CanonicalCenterVersion,
+    CanonicalCenterVersionIdentity,
+    CanonicalCenterVersionRef,
+    CanonicalCenterVersionStore,
 )
 from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillDraftRecord,
@@ -22,6 +32,7 @@ from agentclaw.community.core.skill_center.draft_content import (
 from agentclaw.community.core.skill_center.errors import (
     DraftFileNotFoundError,
     DraftFileNotTextError,
+    DraftNotFoundError,
     SkillNameChangedError,
     SpaceSkillIdempotencyConflictError,
 )
@@ -37,13 +48,31 @@ from agentclaw.community.core.skill_center.space_skill_application_service_proto
     DraftFileItem,
     DraftFileTree,
     DraftMutationResult,
+    DraftDeleteOutcome,
     SpaceSkillApplicationServiceProtocol,
     SpaceSkillCreationOutcome,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.plugin_api.skill_center_gateway import (
+    SkillCenterExactDownloadRequest,
+    SkillCenterGateway,
+    SkillCenterReadScope,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+def download_exact_skill_package(url: str, expected_sha256: str) -> bytes:
+    try:
+        response = requests.get(url, timeout=60)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError("exact Skill package download failed") from exc
+    content = response.content
+    if hashlib.sha256(content).hexdigest().lower() != expected_sha256.lower():
+        raise RuntimeError("exact Skill package checksum mismatch")
+    return content
 
 
 class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
@@ -56,6 +85,10 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         package_validator: SkillPackageValidator,
         draft_store: DraftContentStore,
         git_snapshots: GitSnapshotServiceProtocol,
+        versions: SkillVersionRepositoryProtocol,
+        canonical_store: CanonicalCenterVersionStore,
+        skill_center: SkillCenterGateway,
+        package_fetcher: Callable[[str, str], bytes],
         env_provider: Callable[[], str],
         tenant_provider: Callable[[], str],
     ) -> None:
@@ -65,6 +98,10 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         self._validator = package_validator
         self._draft_store = draft_store
         self._git_snapshots = git_snapshots
+        self._versions = versions
+        self._canonical = canonical_store
+        self._skill_center = skill_center
+        self._package_fetcher = package_fetcher
         self._env_provider = env_provider
         self._tenant_provider = tenant_provider
 
@@ -236,6 +273,160 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
             expected_revision_id=expected_revision_id,
             fencing_token=fencing_token,
             source_commit_sha=snapshot.commit_sha,
+        )
+
+    def delete_draft(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+    ) -> DraftDeleteOutcome:
+        self._access.require_space_member(space_id=space_id, user_id=actor_id)
+        result = self._draft_repository.delete_draft(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            expected_revision_id=expected_revision_id,
+            fencing_token=fencing_token,
+            env=self._env_provider(),
+        )
+        ref = DraftRevisionRef.from_locator(
+            tenant=self._tenant_provider(),
+            env=self._env_provider(),
+            locator=result["locator"],
+        )
+        self._best_effort_delete(ref)
+        return DraftDeleteOutcome(
+            changed=result["changed"], deleted_scope=result["deleted_scope"]
+        )
+
+    def create_upgrade_draft(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        request_id: str,
+    ) -> DraftMutationResult:
+        self._access.require_space_member(space_id=space_id, user_id=actor_id)
+        request_id = self._request_id(request_id)
+        replay = self._draft_repository.get_upgrade_by_request_id(
+            request_id=request_id, env=self._env_provider()
+        )
+        if replay is not None:
+            if replay["skill_id"] != skill_id:
+                raise SpaceSkillIdempotencyConflictError(
+                    "upgrade request already belongs to another Skill"
+                )
+            return self._draft_result(replay)
+        identity = self._draft_repository.get_skill_for_upgrade(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            env=self._env_provider(),
+        )
+        rows = self._versions.list_latest_published(
+            env=self._env_provider(), skill_ids=(skill_id,)
+        )
+        if not rows:
+            raise DraftNotFoundError("latest Published Version not found")
+        latest = rows[0]
+        exact_identity = CanonicalCenterVersionIdentity(
+            skill_uuid=identity["skill_uuid"],
+            sc_version_number=latest["sc_version_number"],
+        )
+        exact_ref = CanonicalCenterVersionRef(exact_identity)
+        try:
+            exact = self._canonical.read_version(exact_ref)
+        except CanonicalCenterStoreError as exc:
+            if exc.code not in {
+                CanonicalCenterStoreErrorCode.NOT_READY,
+                CanonicalCenterStoreErrorCode.CORRUPT_CONTENT,
+            }:
+                raise
+            exact = self._repair_exact_version(identity, exact_identity)
+        package = self._validator.validate_directory(
+            tuple((item.path, item.content) for item in exact.files)
+        )
+        self._require_stable_name(
+            {
+                "name": identity["name"],
+            },
+            package,
+        )
+        target_version = latest["version_ordinal"] + 1
+        revision = DraftRevisionIdentity(
+            tenant=self._tenant_provider(),
+            env=self._env_provider(),
+            skill_uuid=identity["skill_uuid"],
+            target_version=target_version,
+            revision_id=str(uuid4()),
+        )
+        ref = self._draft_store.write_revision(revision, package)
+        try:
+            result = self._draft_repository.create_upgrade_draft(
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                request_id=request_id,
+                expected_version_id=latest["id"],
+                target_version=target_version,
+                new_locator=ref.locator,
+                new_description=package.description,
+                env=self._env_provider(),
+            )
+        except Exception:
+            self._best_effort_delete(ref)
+            raise
+        if not result["created"]:
+            self._best_effort_delete(ref)
+        return self._draft_result(result["draft"])
+
+    def _repair_exact_version(self, identity, exact_identity):
+        if identity["sc_team_id"] is None:
+            raise RuntimeError("Space Skill has no SkillCenter team identity")
+        download = self._skill_center.get_exact_download(
+            SkillCenterExactDownloadRequest(
+                skill_code=identity["skill_uuid"],
+                version_number=exact_identity.sc_version_number,
+                scope=SkillCenterReadScope.TEAM,
+                team_id=str(identity["sc_team_id"]),
+            )
+        )
+        package = self._validator.validate_zip(
+            self._package_fetcher(download.download_url, download.sha256)
+        )
+        version = CanonicalCenterVersion.from_files(
+            exact_identity, dict(package.files)
+        )
+        self._canonical.write_version(version)
+        return self._canonical.read_version(CanonicalCenterVersionRef(exact_identity))
+
+    @staticmethod
+    def _draft_result(record) -> DraftMutationResult:
+        ref = record["locator"].rsplit("/", 1)[-1]
+        return DraftMutationResult(
+            target_version=record["target_version"],
+            status=record["status"],
+            revision_id=ref,
+            name=record["name"],
+            description=record["draft_description"],
+            source_kind=record["source_kind"],
+            source_repo_url=(
+                record["source_repo_url"] if record["source_kind"] == "GIT" else None
+            ),
+            source_branch=(
+                record["source_branch"] if record["source_kind"] == "GIT" else None
+            ),
+            source_commit_sha=(
+                record["source_commit_sha"] if record["source_kind"] == "GIT" else None
+            ),
+            source_subdir=(
+                record["source_subdir"] if record["source_kind"] == "GIT" else None
+            ),
         )
 
     def _draft_record(

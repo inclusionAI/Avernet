@@ -20,6 +20,9 @@ from agentclaw.community.core.models.space_skill import (
 from agentclaw.community.core.repository.implementations.skill_center.space_skill_read import (
     SpaceSkillReadRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.space_skill_version_read import (
+    SpaceSkillVersionReadRepository,
+)
 from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
     SpaceModel,
@@ -134,6 +137,16 @@ def test_read_model_projects_independent_draft_version_attempt_and_actor_facts()
                     created_by="owner-1",
                     env="test",
                 ),
+                SkillVersion(
+                    skill_id=skill.id,
+                    version_ordinal=2,
+                    status="MATERIALIZING",
+                    sc_version_number="2.0.0",
+                    name="risk-review",
+                    description="Not ready",
+                    created_by="owner-1",
+                    env="test",
+                ),
                 SkillPublicationAttempt(
                     skill_id=skill.id,
                     request_id="publish-2",
@@ -174,3 +187,19 @@ def test_read_model_projects_independent_draft_version_attempt_and_actor_facts()
     assert record["draft_target_version"] == 2
     assert record["active_attempt_status"] == "MATERIALIZING"
     assert record["pending_request_no"] == "WO-1"
+
+    versions = SpaceSkillVersionReadRepository(db)
+    version_total, published = versions.list_published(
+        space_id=space_id, skill_id=skill_id, env="test", offset=0, limit=20
+    )
+    assert version_total == 1
+    assert [row["version_ordinal"] for row in published] == [1]
+    assert [row["skill_id"] for row in versions.list_consumable_candidates(
+        space_id=space_id, env="test", keyword=None
+    )] == [skill_id]
+
+    with db.orm_session() as session:
+        session.query(Skill).filter(Skill.id == skill_id).one().offline_at = timestamp
+    assert versions.list_consumable_candidates(
+        space_id=space_id, env="test", keyword=None
+    ) == []

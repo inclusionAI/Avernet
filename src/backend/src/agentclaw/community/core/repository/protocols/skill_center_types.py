@@ -153,6 +153,26 @@ class SpaceSkillDraftRecord(TypedDict):
     source_subdir: str | None
     source_commit_sha: str | None
     space_type: Literal["PERSONAL", "TEAM"]
+    sc_team_id: int | None
+
+
+class DraftDeleteRecord(TypedDict):
+    changed: bool
+    deleted_scope: Literal["DRAFT", "SKILL"]
+    locator: str
+
+
+class SkillUpgradeIdentityRecord(TypedDict):
+    skill_id: int
+    skill_uuid: str
+    name: str
+    space_type: Literal["PERSONAL", "TEAM"]
+    sc_team_id: int | None
+
+
+class DraftUpgradeRecord(TypedDict):
+    created: bool
+    draft: SpaceSkillDraftRecord
 
 
 class SpaceSkillQueryRecord(TypedDict):
@@ -261,3 +281,17 @@ class SkillVersionRecord(TypedDict):
     description: str | None
     metadata_json: str | None
     published_at: datetime | None
+
+
+class SpaceSkillVersionRecord(SkillVersionRecord):
+    skill_uuid: str
+
+
+class ConsumableSpaceSkillRecord(TypedDict):
+    skill_id: int
+    skill_uuid: str
+    name: str
+    description: str | None
+    version_ordinal: int
+    sc_version_number: str
+    published_at: datetime

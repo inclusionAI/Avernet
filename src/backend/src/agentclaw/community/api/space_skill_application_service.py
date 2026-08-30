@@ -7,6 +7,7 @@ from agentclaw.community.core.skill_center.space_skill_application_service_proto
     DraftFileItem,
     DraftFileTree,
     DraftMutationResult,
+    DraftDeleteOutcome,
 )
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "DraftFileItem",
     "DraftFileTree",
     "DraftMutationResult",
+    "DraftDeleteOutcome",
     "SpaceSkillApplicationServiceProtocol",
     "SpaceSkillCreationOutcome",
 ]
