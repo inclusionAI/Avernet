@@ -128,7 +128,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
             if isinstance(plan, ResolvedCapabilityPlan)
             else None
         )
-        if not await plan.service.project_skills(
+        if not await plan.service.project_whole_artifact(
             desired_skills=self._desired_skills(plan.projection),
             effective_mcps=effective_mcps,
         ):

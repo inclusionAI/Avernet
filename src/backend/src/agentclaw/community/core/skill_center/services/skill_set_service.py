@@ -563,6 +563,40 @@ class SkillSetService:
             effective_mcps,
         )
 
+    def _project_whole_artifact_sync(
+        self,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None,
+    ) -> bool:
+        """Deliver structured desired state without invoking path mapping."""
+        try:
+            effective_user_id = self.user_id or self.entity_id or "default"
+            ctx = self._resolver.resolve_for_bot(self.bot_id, effective_user_id)
+            device_sync = self._device_sync_dispatcher.dispatch(ctx)
+            result = device_sync.sync_symlinks(
+                [],
+                desired_skills=desired_skills,
+                effective_mcps=effective_mcps,
+            )
+            return bool(result.get("success"))
+        except Exception as exc:
+            logger.warning(
+                "[project_whole_artifact] delivery failed: %s", exc, exc_info=True
+            )
+            return False
+
+    async def project_whole_artifact(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._project_whole_artifact_sync,
+            desired_skills,
+            effective_mcps,
+        )
+
     async def project_mcps(
         self,
         *,

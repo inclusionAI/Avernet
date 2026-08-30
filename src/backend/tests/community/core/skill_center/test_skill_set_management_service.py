@@ -528,6 +528,17 @@ class _RuntimeFactoryService:
         self.delivered_effective_mcps.append(effective_mcps)
         return True
 
+    async def project_whole_artifact(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
+        self.desired_skills = desired_skills
+        self.runtime_syncs.append(desired_skills)
+        self.delivered_effective_mcps.append(effective_mcps)
+        return True
+
     async def sync_mcp_delivery(
         self, *, claimed: frozenset[str], released: frozenset[str]
     ) -> bool:
