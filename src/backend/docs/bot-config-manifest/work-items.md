@@ -279,6 +279,48 @@ or a list of protected paths.
   W4 that most needs test coverage — including the case where the entity was
   edited by hand between applies.
 
+#### Per-entity conflict policy
+
+The table above says "in both versions → overwrite", which is the right default
+but not right for everything. A single file can have **three** versions at apply
+time:
+
+1. what manifest **N** materialised,
+2. what manifest **N+1** materialises,
+3. what is **actually on disk** — which the bot may have modified since.
+
+Blind overwrite discards (3) whenever the file is declared. For some entries that
+is exactly right (a persona file, a skill's code). For others the bot's version is
+the valuable one.
+
+Two mechanisms, both cheap because W11 already stores what we wrote:
+
+**a. Detect modification instead of assuming it.** Compare the on-disk bytes with
+what we materialised for version N. If they match, the bot never touched it and
+overwrite is uncontroversial. They differ only when there is a genuine conflict —
+so the policy below applies to a small set of real cases, not to every file.
+
+**b. A per-entry `on_conflict` setting**, with a closed set of values rather than
+an open knob:
+
+| Value | Behaviour when the on-disk copy differs from version N |
+| --- | --- |
+| `overwrite` (default) | The declaration wins. Today's rule |
+| `preserve` | Keep the bot's version; do not overwrite. Still **created** when absent, so the manifest seeds it once and then leaves it alone |
+| `fail` | Report the entry as `failed` and change nothing — for content where silently picking either side is unacceptable |
+
+`preserve` is what an engine-written file like `MEMORY.md` wants if someone
+declares it: seed it on first boot, never clobber the accumulated state after. It
+is design §3.2's reserved `apply_once`, made explicit and given a reason to exist.
+
+**Not offered:** three-way *merge*. Merging two versions of arbitrary text has no
+defined answer and would make behaviour unpredictable, which is the opposite of
+what this policy is for.
+
+Note that a file the manifest never declares needs none of this — it is row 4 of
+the diff table and is already left alone. `on_conflict` matters only for declared
+entries.
+
 #### Moving refs: two modes
 
 A branch ref can still resolve to different content on a restart nobody
@@ -401,9 +443,32 @@ Owed by other teams. **None blocks W1–W6.**
 | # | What is being asked | Gates | Owner | State |
 | --- | --- | --- | --- | --- |
 | **X1** | Company git hosting: are there repo-scoped read tokens; can the archive API take `ref` + subpath; what is the refs-resolution API; which auth header; is it reachable from the platform (O11) | **W7** | backend + git hosting + business | **Open** — will look at later |
-| **X2** | teclaw, three questions: **(T1)** does the engine finish applying the artifact *before* reporting ready to publish-poll; **(T2)** does re-delivering the same artifact converge with no side-effect accumulation, replacing rather than accreting; **(T3)** how does `config/teclaw.json` reach a *first* instance, and does the engine re-read it after start (O1) | **W8** teclaw arm; T3 also touches W4's `engine_config` materialiser | teclaw + backend | Open |
+| **X2** | teclaw readiness/convergence — **answered**, see below | **W8** teclaw arm | teclaw + backend | **Answered**; superseded by W12 |
 | **X3** | `cli_tools` delivery — **narrowed**, see below | **W9** | backend + ARCA engines | Partly answered |
 | ~~**X4**~~ | ~~desktop in the v1 surface~~ | — | — | **Closed: desktop is out of scope** (§2.5) |
+
+### X2 — answered, and it raised a bigger one
+
+- **T1 (readiness ordering) — yes.** teclaw applies the whole artifact to the bot
+  before it reports ready. "Configuration precedes readiness" holds on that side.
+- **T2 (convergent re-delivery) — not ours to worry about.** The apply semantics
+  inside a teclaw container are owned by teclaw.
+- **T3 (engine config on first boot) — removed from scope.** `engine_config` is
+  **excluded from the first iteration**, so the question does not arise yet. This
+  narrows W4's no-fetch materialisers to `mcp` and `script`.
+
+**But T2 exposes the real issue.** We own convergence semantics for BaaS-family
+bots; teclaw owns them for teclaw bots. If the two differ, the same manifest
+produces different behaviour on different engines and users have no way to
+predict either. **The semantics must be one contract, written once and agreed by
+both sides** — tracked as **W12**.
+
+This is not a formality. §3.2's fourth row — *a file declared in neither version
+is left untouched because the bot created it* — cannot be computed on our side for
+teclaw: we hand over a whole artifact and never see their disk, and the artifact
+vocabulary has no way to say "delete this one thing". So row 4 holds on teclaw
+**only if their applier implements it**. Their consent is what makes the rule
+true there, which is why it needs to be explicit rather than assumed.
 
 ### X3 — `cli_tools`, narrowed
 
@@ -443,13 +508,28 @@ Findings, checked against the code:
   「**禁止引用 bcs-cli 或任何子命令**」 (forbidden to reference bcs-cli or any
   subcommand). `bcs-coordination` itself declares `allowed-tools: [exec]`.
 
-**What this means for W9.** There is no production PATH mechanism to generalise —
-`cli_tools` on ARCA is a genuinely new mechanism, not an extension of an existing
-one. And it runs against the grain of a recent, deliberate move to HTTP-over-`exec`.
-Before designing the PATH injection, the prior question is worth putting to the
-business: **do they want a binary on PATH, or an HTTP API the model calls via
-`exec`?** The second needs no new delivery mechanism at all. W9 is deferred
-anyway, so there is time to ask.
+**Is there already a CLI mechanism we would be duplicating? No — and that is the
+answer that matters.** Every `bcs-cli` reference in the repository lives in
+`scripts/modules/*.sh`, the singlebox orchestration. There is no CLI delivery
+mechanism in the platform: no PATH injection in the production start-command
+composition, and **no executable-bit handling anywhere in any delivery path**
+(resources, skill-center, or the artifact). `cli_tools` is therefore new
+machinery, not a second implementation of something that exists.
+
+**The duplication risk is real but points the other way.** Once `cli_tools`
+exists, `bcs-cli` should become **its first consumer** rather than staying a
+singlebox special case — otherwise we do end up with two mechanisms: the script
+that hand-places it locally, and the manifest path that places everything else.
+Folding bcs-cli into `cli_tools` also gives the feature a real in-house test case
+before any customer uses it. Recorded as an explicit goal of W9 rather than
+something to notice afterwards.
+
+**One observation, not an objection.** The newer task skills deliberately avoid
+CLIs — `specs/2026-08-09-task-goal-driven-task-runner-bbs/bbs-relay-pickup/SKILL.md`
+routes every task API through `exec` + `curl`/`jq` and states
+「**禁止引用 bcs-cli 或任何子命令**」 — and `bcs-coordination`'s only declared
+capability is `exec`. That is worth knowing when deciding which tools are worth
+shipping as binaries, but it does not change that `cli_tools` is wanted.
 
 ## 5. Work items
 
@@ -522,6 +602,42 @@ which is why W4 depends on it rather than treating it as an add-on.
 **Size.** Medium.
 
 ---
+
+---
+
+#### W12 — Cross-engine convergence semantics contract
+
+**Goal.** One written statement of what applying a manifest does to what is
+already there, agreed by both sides, so the same manifest behaves the same way on
+a BaaS-family bot and a teclaw bot.
+
+**Why it is a work item and not a note.** We own convergence for the BaaS family;
+teclaw owns it inside their container. Nothing today makes those agree, and the
+asymmetry would be invisible to users until it bit them. Specifically, §3.2's
+fourth row — *a file declared in neither version is left untouched* — **cannot be
+enforced from our side on teclaw**: we hand over a whole artifact, never see their
+disk, and the artifact vocabulary has no "delete this one thing". It holds there
+only if their applier implements it.
+
+**In scope.** Write the policy from §3.2 as an engine-facing contract — the entity
+diff rules, the three-way file rules including row 4, `on_conflict`, and what
+"convergent re-delivery" means. Take it to the teclaw team for review and explicit
+agreement. Record the outcome, including anything they decline.
+
+**Depends on.** §3.2 being settled (it is) · **Blocked by.** —
+
+**Done when.**
+
+- [ ] The contract states each rule as a requirement on an applier, not as a
+      description of our implementation.
+- [ ] Row 4 is called out as the one rule we cannot verify from outside, with its
+      consequence if unmet: a bot's own files silently disappearing on upgrade.
+- [ ] teclaw has reviewed it and either agreed or named the parts they will not
+      implement — the second is a usable answer; silence is not.
+- [ ] Any divergence they declare is written into the capability matrix, so the
+      difference is documented rather than discovered.
+
+**Size.** Small to write, and the calendar time is the other team's review.
 
 ---
 
@@ -759,9 +875,9 @@ materialiser but does not block the item.
       boot leaves the bot inactive rather than active-and-misconfigured.
 - [ ] Apply enforces the same validation and authorisation the public API does
       by calling W10's seam — not a second, hand-written copy of the checks.
-- [ ] `engine_config` merges by **top-level key** — declared keys win,
-      undeclared keys are untouched, and `engine_ext` is unreachable from the
-      manifest on every path.
+- [ ] `engine_ext` is unreachable from the manifest on every path. (The
+      `engine_config` category itself is out of the first iteration; when it
+      returns it merges by top-level key.)
 - [ ] `mcp` refuses a `server_code` the tenant has no permission for, reusing the
       existing permission check rather than a copy.
 - [ ] A category present but **empty** (`skills: []`) drops those entries from
