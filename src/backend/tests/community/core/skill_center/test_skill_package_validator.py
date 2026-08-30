@@ -289,10 +289,26 @@ def test_reserved_content_store_names_are_rejected(name: str) -> None:
     assert error.value.reason == "invalid_metadata"
 
 
-def test_legacy_no_frontmatter_manifest_remains_accepted_for_local_compatibility() -> (
+def test_strict_validator_rejects_a_manifest_without_frontmatter() -> None:
+    with pytest.raises(SkillPackageInvalidError) as error:
+        SkillPackageValidator(SkillParser()).validate_zip(
+            _zip(
+                [
+                    (
+                        "SKILL.md",
+                        b"name: weather\ndescription: Legacy upload compatibility\n",
+                    )
+                ]
+            )
+        )
+
+    assert error.value.reason == "invalid_metadata"
+
+
+def test_explicit_legacy_local_validation_accepts_a_manifest_without_frontmatter() -> (
     None
 ):
-    package = SkillPackageValidator(SkillParser()).validate_zip(
+    package = SkillPackageValidator(SkillParser()).validate_legacy_local_zip(
         _zip(
             [
                 (

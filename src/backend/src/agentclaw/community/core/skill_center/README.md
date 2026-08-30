@@ -134,7 +134,9 @@ internal_dependencies:
 `SkillPackageValidator` is the pure package boundary shared by Local upload and
 future Draft/materialization workflows. It owns safe relative paths, archive
 limits, wrapper normalization, the single `SKILL.md` rule, manifest validation,
-ignored platform metadata, and deterministic canonical ZIP generation. The
+ignored platform metadata, and deterministic canonical ZIP generation. Its
+default ZIP/directory entry points require frontmatter; only the existing Local
+upload lifecycle calls the explicit legacy-compatible ZIP entry point. The
 `ValidatedSkillPackage` value does not authorize a Bot, write a content store,
 mutate desired state, or project Runtime; those lifecycle effects remain in
 their owning application services.

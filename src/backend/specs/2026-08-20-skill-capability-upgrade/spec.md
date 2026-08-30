@@ -237,7 +237,10 @@ Phase 2 复用一条 `ac_skill` 作为跨版本稳定 Identity：
 - `SkillPackageValidator` 是 Local、Draft 和精确版本物化共用的纯 package 边界：负责
   安全相对路径、压缩/展开大小与文件数、唯一 `SKILL.md`、frontmatter 的
   name/description/config、wrapper、平台 metadata 忽略和 deterministic canonical ZIP，
-  返回稳定 `ValidatedSkillPackage`；它不拥有 Bot 授权、容器/Pool 写入、数据库或 Runtime。
+  返回稳定 `ValidatedSkillPackage`；默认入口严格要求 frontmatter。只有既有 Local 上传
+  生命周期可调用显式 legacy-compatible 入口兼容无 frontmatter 历史包，Draft、Git import
+  和精确版本物化不得继承该 fallback。Validator 不拥有 Bot 授权、容器/Pool 写入、数据库
+  或 Runtime。
 - `ac_skill_version` 保存不可变 version ordinal、SC version number/version id、
   冻结元信息和 MATERIALIZING/PUBLISHED 状态，不保存长期 Snapshot URI/Hash。
   `publication_attempt_id` 必须允许为空：TeamClaw 工坊发布产生的 Version 指向

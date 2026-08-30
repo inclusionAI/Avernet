@@ -75,6 +75,16 @@ class SkillPackageValidator:
         self._metadata_parser = metadata_parser
 
     def validate_zip(self, package: bytes) -> ValidatedSkillPackage:
+        """Validate a governed package with mandatory YAML frontmatter."""
+        return self._validate_zip(package, allow_legacy_local_manifest=False)
+
+    def validate_legacy_local_zip(self, package: bytes) -> ValidatedSkillPackage:
+        """Validate the historical Local upload wire with explicit fallback."""
+        return self._validate_zip(package, allow_legacy_local_manifest=True)
+
+    def _validate_zip(
+        self, package: bytes, *, allow_legacy_local_manifest: bool
+    ) -> ValidatedSkillPackage:
         if len(package) > MAX_COMPRESSED_BYTES:
             raise SkillPackageTooLargeError()
         try:
@@ -112,7 +122,10 @@ class SkillPackageValidator:
                 if len(content) != info.file_size:
                     raise SkillPackageInvalidError("unreadable_archive")
                 entries.append((normalized_path, content))
-        return self._validate_entries(entries)
+        return self._validate_entries(
+            entries,
+            allow_legacy_local_manifest=allow_legacy_local_manifest,
+        )
 
     def validate_directory(
         self, files: Sequence[tuple[str, bytes]]
@@ -156,7 +169,10 @@ class SkillPackageValidator:
         return canonical_zip
 
     def _validate_entries(
-        self, entries: Sequence[tuple[str, bytes]]
+        self,
+        entries: Sequence[tuple[str, bytes]],
+        *,
+        allow_legacy_local_manifest: bool,
     ) -> ValidatedSkillPackage:
         skill_files = [
             entry for entry in entries if entry[0].split("/")[-1] == "SKILL.md"
@@ -181,7 +197,10 @@ class SkillPackageValidator:
                     self._metadata_parser.decode_content(markdown)
                 )
             except SkillManifestError as exc:
-                if exc.code is not SkillManifestErrorCode.MISSING_FRONTMATTER:
+                if (
+                    not allow_legacy_local_manifest
+                    or exc.code is not SkillManifestErrorCode.MISSING_FRONTMATTER
+                ):
                     raise
                 text = self._metadata_parser.decode_content(markdown)
                 metadata = self._metadata_parser.parse_legacy_upload_content(text) or {}

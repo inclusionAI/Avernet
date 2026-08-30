@@ -567,7 +567,7 @@ class LocalSkillUploadService:
 
     def _validate_zip(self, package: bytes) -> ValidatedSkillPackage:
         try:
-            return self._package_validator.validate_zip(package)
+            return self._package_validator.validate_legacy_local_zip(package)
         except SkillPackageInvalidError as exc:
             raise LocalSkillInvalidPackageError(exc.reason) from exc
         except SkillPackageTooLargeError as exc:
