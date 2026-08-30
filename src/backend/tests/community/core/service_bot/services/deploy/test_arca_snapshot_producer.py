@@ -408,6 +408,8 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
     assert [ref.identity.sc_version_number for ref in center_store.refs] == [
         "1.0.0",
         "2.0.0",
+        "1.0.0",
+        "2.0.0",
     ]
     assert reader.calls == [
         {

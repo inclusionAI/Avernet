@@ -233,26 +233,7 @@ class ServiceSkillsManifestBuilder:
                     store_prefix=self._center_store_prefix,
                 ),
             )
-            try:
-                for item in center_skills:
-                    ready = self._center_store.verify_version(
-                        CanonicalCenterVersionRef(
-                            CanonicalCenterVersionIdentity(
-                                skill_uuid=item["skill_uuid"],
-                                sc_version_number=item["sc_version_number"],
-                            )
-                        )
-                    )
-                    if not ready:
-                        raise ServiceSkillsManifestError(
-                            "Center service build requires every exact Store Version"
-                        )
-            except ServiceSkillsManifestError:
-                raise
-            except Exception as exc:
-                raise ServiceSkillsManifestError(
-                    "Center service build cannot verify every exact Store Version"
-                ) from exc
+            self._verify_exact_store(center_skills)
 
         return CapturedServiceSkillsLayout(
             engine=engine,
@@ -298,6 +279,7 @@ class ServiceSkillsManifestBuilder:
                 raise ServiceSkillsManifestError(
                     "Engine shared corpus delivery changed during service build"
                 )
+            self._verify_exact_store(captured.center_skills)
 
         manifest = {
             "schema_version": 1,
@@ -333,6 +315,31 @@ class ServiceSkillsManifestBuilder:
             "sc_version_number": identity.sc_version_number,
             "mcp_dependencies": dependencies,
         }
+
+    def _verify_exact_store(
+        self,
+        center_skills: tuple[dict[str, Any], ...],
+    ) -> None:
+        try:
+            for item in center_skills:
+                ready = self._center_store.verify_version(
+                    CanonicalCenterVersionRef(
+                        CanonicalCenterVersionIdentity(
+                            skill_uuid=item["skill_uuid"],
+                            sc_version_number=item["sc_version_number"],
+                        )
+                    )
+                )
+                if not ready:
+                    raise ServiceSkillsManifestError(
+                        "Center service build requires every exact Store Version"
+                    )
+        except ServiceSkillsManifestError:
+            raise
+        except Exception as exc:
+            raise ServiceSkillsManifestError(
+                "Center service build cannot verify every exact Store Version"
+            ) from exc
 
 
 def validate_service_skills_manifest_for_release(
