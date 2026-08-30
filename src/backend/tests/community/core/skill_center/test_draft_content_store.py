@@ -215,6 +215,25 @@ def test_draft_stores_reject_forged_validated_package_before_write() -> None:
     assert objects.puts == []
 
 
+def test_draft_stores_reject_a_legacy_package_without_frontmatter() -> None:
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr(
+            "weather/SKILL.md",
+            b"name: weather\ndescription: Legacy Local package\n",
+        )
+    validator = SkillPackageValidator(SkillParser())
+    legacy_package = validator.validate_legacy_local_zip(payload.getvalue())
+    objects = _Objects()
+
+    for store in (LocalDraftContentStore(), _oss_store(objects)):
+        with pytest.raises(DraftContentStoreError) as error:
+            store.write_revision(_identity(), legacy_package)
+        assert error.value.code is DraftContentStoreErrorCode.CORRUPT_CONTENT
+
+    assert objects.puts == []
+
+
 def test_oss_adapter_writes_reads_and_deletes_one_canonical_zip() -> None:
     objects = _Objects()
     store = _oss_store(objects)
