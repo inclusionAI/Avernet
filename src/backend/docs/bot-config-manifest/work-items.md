@@ -19,11 +19,12 @@ Three kinds of entry gate the work and are tracked separately from it:
 | Prefix | Meaning |
 | --- | --- |
 | `W1`–`W11` | Implementation work items — one PR each |
-| `D1`–`D4` | **Design questions**, found while checking the design against the code. Each gates a specific work item. D1–D3 are now **resolved**; **D4 is open and is the largest unanswered question in the feature** |
-| `X1`–`X4` | **External confirmations** owed by other teams. None blocks W1–W4; they gate W7, W8 and W9 |
+| `D1`–`D4` | **Design questions**, found while checking the design against the code. **All four are now settled** — D1–D3 resolved, D4 deferred with an interim policy (deliver after start) that unblocks the work |
+| `X1`–`X3` | **External confirmations** owed by other teams. None blocks W1–W6; they gate W7 and W9, and W8's teclaw arm |
 
 Where this document diverges from the merged design docs — §2.5 (capability
-scope), §2.6 (PUT triggers a restart), §2.7 (first-boot readiness gate) — it
+scope), §2.6 (PUT triggers a restart), §2.7 (first-boot readiness gate), §3.2
+(entity-level three-way diff, superseding the wholesale directory replace) — it
 says so explicitly. Those docs are not edited here; amending them is a separate
 change.
 
@@ -36,9 +37,9 @@ together.
 | | Issue | | Issue |
 | --- | --- | --- | --- |
 | **D1** capability model — *resolved* | #1466 | **W4** apply engine | #1472 |
-| **D2** manifest-upgrade diff policy — *open* | #1467 | **W5** skills + identity | #1473 |
+| **D2** upgrade diff policy — *resolved* | #1467 | **W5** skills + identity | #1473 |
 | **D3** reconcile verification — *resolved* | #1468 | **W6** resources | #1474 |
-| **D4** pre-boot delivery — **open, blocking** | #1508 | **W7** named + git sources | #1475 |
+| **D4** pre-boot delivery — *deferred* | #1508 | **W7** named + git sources | #1475 |
 | **W1** manifest document | #1469 | **W8** lifecycle apply points | #1476 |
 | **W2** guarded fetcher | #1470 | **W9** `cli_tools` (deferred) | #1477 |
 | **W3** source credentials | #1471 | **W10** service-layer seam | #1509 |
@@ -131,7 +132,8 @@ own, with no live lookup and no third "we could not find out" state:
 - `is_teclaw(active_engine)` — the canonical engine test, which is also what
   `provider_resolver.resolve` itself keys on (`teclaw` or else the `baas`
   default);
-- `bot_type == "desktop"` — a separate axis, and a bot-record field.
+- `bot_type == "desktop"` — a separate axis, and a bot-record field. **Desktop
+  is out of scope for this feature**, so this test exists only to refuse it.
 
 **Divergence from `engine-requirements.zh-CN.md` §2:** its matrix says
 ARCA-direct and LOCAL/singlebox are refused at write time. Under new-bots-only
@@ -225,38 +227,70 @@ there is no third case to detect and no ambiguous state to represent. See §2.5.
 LOCAL/singlebox are out of scope rather than enforced; amending that matrix is a
 separate docs change.
 
-### 3.2 D2 — manifest-upgrade diff policy · #1467 · **OPEN**
+### 3.2 D2 — manifest-upgrade diff policy · #1467 · **RESOLVED**
 
-The failure half of this question is settled (§2.7) and `keep_last` no longer
-needs a mechanism of its own. What remains open is the part that was always the
-harder half:
+The failure half was already settled (§2.7). The diff half is now settled too,
+and the answer is **entity-level, three-way**.
 
-> **When a manifest moves from version N to N+1, what exactly happens to what is
-> already there — and is the answer deterministic and published?**
+#### The convergence unit is the entity
 
-"Declaration wins, drift is corrected" (design §3.2) is well defined for
-whole-file replacement and undefined for everything else. The policy must answer,
-per category:
+Not a file, not "the whole declared tree". A skill, an identity file, a resource
+entry, a `cli_tool` — each is one entity, and a skill's entity spans every file
+under its own directory.
 
-1. **What is the convergence unit?** A file, a directory tree, a top-level config
-   key, a whole archive.
-2. **What happens to in-place modifications** made by the agent or the user
-   between applies? Declaration-wins means they are discarded. That is defensible
-   and must be *stated*, because it is destructive and currently unstated.
-3. **What happens to entries that disappear** between N and N+1 — removed, or
-   left behind un-managed?
-4. **Agent-written files.** `MEMORY.md` is the clear case: an engine-generated
-   file that the design merely warns against declaring. A warning is a
-   documentation answer to a data-loss question.
-5. **Agent-created files inside a declared directory.** design §3.2 replaces the
-   tree wholesale, so they are deleted. Same requirement: state it.
-6. **Moving refs** (§2.6's residual case). A branch can resolve to new content on
-   a restart nobody associated with a configuration change. Options: refuse
-   moving refs; or record the resolved SHA and reuse it for any restart not
-   triggered by a manifest `PUT`, so only a `PUT` can change content.
+#### The rules
 
-**Done when** a written, per-category policy exists that a user could predict
-behaviour from without reading the implementation, and W4's spec encodes it.
+Between manifest version **N** and **N+1**:
+
+| | Condition | Action |
+| --- | --- | --- |
+| 1 | Entity in N, **not** in N+1 | **Delete the entity entirely** |
+| 2 | Entity in **both** | Diff its files, per the table below |
+| 3 | Entity **only** in N+1 | Create it |
+
+Within an entity present in both versions, each file is decided by a **three-way
+comparison** — version N, version N+1, and what is on disk:
+
+| In N | In N+1 | Action |
+| --- | --- | --- |
+| ✓ | ✗ | **Delete** — the declaration dropped it |
+| ✓ | ✓ | **Overwrite** — the declaration owns it |
+| ✗ | ✓ | **Write** — newly declared |
+| ✗ | ✗ | **Leave untouched** — nobody declared it, so the bot created it |
+
+#### Why this is better than "declaration wins wholesale"
+
+The fourth row is the whole point, and it is what makes the policy safe to run on
+every restart: **a file the manifest has never mentioned is never touched.** The
+bot's own working files survive an upgrade without needing a warning, an opt-out,
+or a list of protected paths.
+
+#### Consequences worth stating
+
+- **Version N's materialised file list becomes required state.** Row 1 and row 4
+  are only distinguishable if we know what version N declared — "not in N+1" and
+  "in neither" are different actions. This makes **W11 a hard dependency of W4**,
+  not a parallel nicety: the store that keeps materialised content is also the
+  record of what the previous version contained.
+- **Diverges from design §3.2's directory rule**, which replaces a declared tree
+  wholesale and deletes agent-added files inside it. Under this policy those
+  files are preserved. The design's rule is superseded.
+- Rows 1 and 2 are a real delete of user-visible assets, so they are the part of
+  W4 that most needs test coverage — including the case where the entity was
+  edited by hand between applies.
+
+#### Moving refs: two modes
+
+A branch ref can still resolve to different content on a restart nobody
+associated with a configuration change (§2.6's residual case). Resolved with a
+mode switch rather than a blanket rule:
+
+- **Strict mode** — if the resolved SHA differs from the one recorded at the last
+  apply, **reject the change**. The bot keeps running what it has.
+- **Non-strict mode** — apply the new content and **warn**.
+
+Both modes require recording the resolved SHA per apply, which the report already
+carries (design §7).
 
 ### 3.3 D3 — reconcile vs manifest-installed skills · #1468 · **RESOLVED**
 
@@ -278,27 +312,34 @@ acceptance criteria rather than as a question:
 - teclaw does not participate in `skills_pool` at all, so this is a BaaS-family
   concern only.
 
-### 3.4 D4 — delivery before a container exists · #1508 · **OPEN — the blocking question**
+### 3.4 D4 — delivery before a container exists · #1508 · **DEFERRED — no longer blocking**
 
-*Nothing downstream of W4 can be specified until this has an answer.*
+**Interim policy: deliver after the bot starts.** For any category whose only
+delivery API becomes available once the container is up, apply delivers *after*
+start rather than before it. Pre-boot delivery is a separate question to answer
+later, and W5/W6/W8 proceed without it.
 
-**The problem.** design §3.1 promises that the first configuration a bot receives
-already contains the manifest result — apply runs *before* the container. But the
-services apply must call cannot run before a container:
+#### The problem, for the record
+
+`design.zh-CN.md` §3.1 promises the first configuration a bot receives already
+contains the manifest result. But the services apply must call cannot run before
+a container exists, deliberately:
 
 - `IdentityService._device_write` resolves a `DeviceFileSystem` through the
   device binding and **raises if unbound**;
 - `EngineConfigService.write_bot_config` does the same, and raises
   `EngineStageNotLiveError` when the named stage has nothing up.
 
-This is deliberate, not accidental. `identity.py` states it: *"a bot with no
-resolvable device context is a bug and surfaces as the resolver's error (fail
-early, never silently touch a dead local path)."*
+`core/services/identity.py` states the intent: *"a bot with no resolvable device
+context is a bug and surfaces as the resolver's error (fail early, never
+silently touch a dead local path)."*
 
-**teclaw is the easy half.** The artifact *is* the delivery vehicle, so
-materialised content becomes `{store, path}` refs in `BotConfigArtifact` and the
-first artifact carries them. One backend change is required and should be named
-rather than discovered: `ConfigComposerInputCollector.identity_files()` currently
+#### teclaw is unaffected
+
+The artifact **is** the delivery vehicle, so materialised content becomes
+`{store, path}` refs in `BotConfigArtifact` and the first artifact carries them —
+genuinely before start. One backend change is required and should be named rather
+than discovered: `ConfigComposerInputCollector.identity_files()` currently
 returns `[]` for teclaw by design —
 
 ```python
@@ -308,43 +349,107 @@ if req.engine_type == "teclaw":
 ```
 
 — so that branch must learn about manifest-materialised identity. The teclaw
-*team* still does zero work; the "delivery layer: zero additions" claim in
-`engine-requirements.zh-CN.md` §1 does not survive, but only on the backend side.
+*team* still does zero work; `engine-requirements.zh-CN.md` §1's "delivery layer:
+zero additions" does not survive, on the backend side only.
 
-**The BaaS family is the open part.** Content must reach the bot's workspace
-before the container starts. The path is computable without a device —
-`get_bot_file_path` is a pure `path_factory` computation, and the composer
-already calls `.exists()` on those paths, so the backend can see the bot-data
-root. But *writing* there is exactly what the existing service refuses to do
-without a device context, and bypassing it is the one thing §2.1 forbids.
+#### What the interim policy costs, stated plainly
 
-So the answer is a **new, explicitly sanctioned delivery protocol** for the
-pre-container case — not a bypass of the existing one. Options to work through:
+Deferring is a reasonable call — it unblocks most of the plan for the cost of one
+property — but the cost is real and should not be discovered later:
+
+1. **There is a window where the bot is ACTIVE but not yet configured.** This is
+   precisely the race `design.zh-CN.md` §2.4 rejected alternative three for: a bot
+   already accepting messages while its persona is still landing can answer with
+   an unconfigured personality. On a first boot the window is the whole apply.
+2. **It interacts with the §2.7 readiness gate.** "A first boot whose fetch fails
+   leaves the bot inactive" is harder to honour when delivery happens after the
+   bot is already up — the gate has to become "start, apply, and de-activate on
+   failure", or the gate moves to a later readiness signal. W8 must resolve this.
+3. **Scale-out instances** each need the post-start delivery to have completed
+   before they take traffic, or instances diverge — which is #926's original
+   complaint.
+
+Mitigation to consider in W8: keep the bot out of the serving path until the
+post-start apply reports success, so "started" and "ready" stop being the same
+moment.
+
+#### Still to answer, later
+
+For the BaaS family: the workspace path **is** computable without a device
+(`get_bot_file_path` is a pure `path_factory` computation, and the composer
+already calls `.exists()` on those paths), but *writing* there is exactly what the
+service refuses to do unbound, and bypassing it is what §2.1 forbids. So a
+pre-boot answer needs a sanctioned protocol, not a bypass:
 
 | | Approach | Question it raises |
 | --- | --- | --- |
-| a | A device-less writer that shares path resolution with `DeviceFileSystem` and is only reachable before first boot | What guarantees it is *only* used pre-boot, so "never touch a dead local path" still holds afterwards? |
+| a | A device-less writer sharing path resolution with `DeviceFileSystem`, reachable only before first boot | What structurally guarantees it is only used pre-boot? |
 | b | Deliver during the start sequence — the container pulls materialised content on boot | Reintroduces an in-container step; interacts with #935's start-command contract |
-| c | Extend the device abstraction with a pre-binding mode the dispatcher can resolve | Largest change, cleanest boundary |
-
-**Blocks:** the delivery half of W5, W6 and W8. W1–W4 and W10/W11 are unaffected
-and can proceed while this is settled.
+| c | Extend the device abstraction with a pre-binding mode the dispatcher resolves | Largest change, cleanest boundary |
 
 ## 4. External confirmations
 
-Owed by other teams. **None of these blocks W1–W6.** X1 and X2 are the long
-pole and should be sent now, because their owners are not on this team.
+Owed by other teams. **None blocks W1–W6.**
 
-| # | What | Design ref | Gates | Owner |
+> **On the letters.** `T`, `A` and `O` are not work items. They are the
+> confirmation lists in `engine-requirements.zh-CN.md`: **T1–T5** are questions
+> for the teclaw team (§3), **A1–A2** for the ARCA-family engine owners (§4), and
+> **O1–O11** are the design's own open questions (§5). They are cited here only
+> so each row can be traced back; the row itself says what is actually being
+> asked, so no cross-reading is needed.
+
+| # | What is being asked | Gates | Owner | State |
 | --- | --- | --- | --- | --- |
-| **X1** | Company git hosting capability: repo-scoped read tokens, archive-by-`ref`+subpath API, refs-resolution API, auth header shape, platform-side reachability | O11 | **W7** | backend + git hosting + business |
-| **X2** | teclaw: T1 readiness ordering, T2 convergent re-delivery, T3 how `config/teclaw.json` reaches a *first* instance and when the engine reads it | T1–T3 / O1 | **W8** (teclaw arm); T3 also affects the `engine_config` materialiser in W4 | teclaw + backend |
-| **X3** | `cli_tools`: teclaw executable-bit / PATH / sandbox policy (T4), ARCA-family PATH injection point (A2), target architecture (O9) | T4 / A2 / O9 | **W9** | teclaw + engines + business |
-| **X4** | Is `desktop` in the v1 manifest surface, and by which delivery path? | O2 | **W1**'s capability table | desktop owner |
+| **X1** | Company git hosting: are there repo-scoped read tokens; can the archive API take `ref` + subpath; what is the refs-resolution API; which auth header; is it reachable from the platform (O11) | **W7** | backend + git hosting + business | **Open** — will look at later |
+| **X2** | teclaw, three questions: **(T1)** does the engine finish applying the artifact *before* reporting ready to publish-poll; **(T2)** does re-delivering the same artifact converge with no side-effect accumulation, replacing rather than accreting; **(T3)** how does `config/teclaw.json` reach a *first* instance, and does the engine re-read it after start (O1) | **W8** teclaw arm; T3 also touches W4's `engine_config` materialiser | teclaw + backend | Open |
+| **X3** | `cli_tools` delivery — **narrowed**, see below | **W9** | backend + ARCA engines | Partly answered |
+| ~~**X4**~~ | ~~desktop in the v1 surface~~ | — | — | **Closed: desktop is out of scope** (§2.5) |
 
-X4 has a cheap default if unanswered: mark desktop **unsupported** for manifest
-in v1 and widen later. Fail-closed is the design's own rule (§5.1), and widening
-a capability is compatible where narrowing one is not.
+### X3 — `cli_tools`, narrowed
+
+**teclaw needs nothing from us on PATH.** The artifact is the delivery vehicle,
+so our side of it is a protocol design: how a CLI tool is represented in
+`BotConfigArtifact` so teclaw can place and expose it. Executable-bit and PATH
+handling inside their container is theirs to decide once the protocol exists.
+
+**ARCA is engine-specific and needs a proposal from us** — where the platform tool
+directory should land on each engine's agent-process PATH. Plus a **skill in the
+default skill set** so the model knows the tools exist and how to invoke them.
+
+#### Investigation: what exists today (asked for before proceeding)
+
+Findings, checked against the code:
+
+- **There is a working CLI pattern, but only in singlebox.**
+  `scripts/modules/bots.sh` starts the openclaw gateway with
+  `PATH="$bcs_cli_dir:$PATH"` (line ~954) and separately copies the
+  `bcs-coordination` skill into the bot's `workspace/skills/`
+  (`bots_dynamic_setup_bcs_skill`, line ~704). That is the "binary on PATH +
+  SKILL.md that teaches it" double act the design cites.
+- **It does not exist in production.** No PATH injection appears anywhere in the
+  production start-command composition (`baas_service.py`, `core/devices/`).
+  `Dockerfile.ocb` bakes `bcs-cli` into the all-in-one OSS image at
+  `/opt/ocb/src/bcs/target/debug/bcs-cli`, but that is the singlebox image, not
+  the ARCA bot container.
+- **In production the skill arrives through skill-center**, not a file copy —
+  `bcs-coordination` is referenced as `git://default/bcs-coordination` and
+  installed via the skill-set mechanism. `SkillSetService` already has an
+  engine-type-aware **default skill set** with a selection policy
+  (`_default_skill_set_selection`, `DefaultSkillSetSelectionPolicy`), which is the
+  natural home for the tools-usage skill.
+- **The direction of travel is away from CLIs.** The newer task skills
+  deliberately forbid it — `specs/2026-08-09-task-goal-driven-task-runner-bbs/bbs-relay-pickup/SKILL.md`
+  says all task APIs go through `exec` + `curl`/`jq` and
+  「**禁止引用 bcs-cli 或任何子命令**」 (forbidden to reference bcs-cli or any
+  subcommand). `bcs-coordination` itself declares `allowed-tools: [exec]`.
+
+**What this means for W9.** There is no production PATH mechanism to generalise —
+`cli_tools` on ARCA is a genuinely new mechanism, not an extension of an existing
+one. And it runs against the grain of a recent, deliberate move to HTTP-over-`exec`.
+Before designing the PATH injection, the prior question is worth putting to the
+business: **do they want a binary on PATH, or an HTTP API the model calls via
+`exec`?** The second needs no new delivery mechanism at all. W9 is deferred
+anyway, so there is time to ask.
 
 ## 5. Work items
 
@@ -452,8 +557,8 @@ is applied.
 existing `/startup-script` endpoints. Any change to `BaasService`.
 
 **Depends on.** —
-**Blocked by.** — (D1 is resolved; see §2.5). **X4** (desktop) affects one row of
-the capability table and has a fail-closed default.
+**Blocked by.** — D1 is resolved (§2.5) and desktop is out of scope, so the
+capability table is fully determined.
 
 **Done when.**
 
@@ -630,11 +735,13 @@ categories that need no fetching.
 **Out of scope.** Fetching. Lifecycle triggers (W8) — explicit apply is the only
 entry point in this item.
 
-**Depends on.** W1, W10 (the seam apply calls through), W11 (the store
-materialised content lands in).
-**Blocked by.** **D2** — the upgrade diff policy must be written before the
-convergence logic can be specified. X2/T3 affects the teclaw behaviour of the
-`engine_config` materialiser but does not block the item.
+**Depends on.** W1, W10 (the seam apply calls through), and **W11 as a hard
+dependency** — §3.2's three-way diff cannot distinguish "dropped from the
+declaration" from "created by the bot" without version N's materialised file
+list, which is what W11 stores.
+**Blocked by.** — D2 is resolved (§3.2) and its rules are what this item
+implements. X2/T3 affects the teclaw behaviour of the `engine_config`
+materialiser but does not block the item.
 
 **Done when.**
 
@@ -687,8 +794,8 @@ files.
 **Out of scope.** Named sources and git (W7). `resources` (W6).
 
 **Depends on.** W2, W3, W4.
-**Blocked by.** **D4** for the pre-boot delivery half on the BaaS family;
-materialisation and entity creation are unaffected. D3 is resolved (§3.3).
+**Blocked by.** — D3 and D4 are both settled. Delivery on the BaaS family
+follows D4's interim policy: deliver after the bot starts (§3.4).
 
 **Done when.**
 
@@ -708,6 +815,9 @@ materialisation and entity creation are unaffected. D3 is resolved (§3.3).
 - [ ] `${OCB_*}` substitution happens before fetch and before prefix
       authorisation, so a substituted URL cannot escape its credential's
       `allowed_prefixes`.
+- [ ] The §3.2 diff rules are enforced per entity, including the fourth row: a
+      file present on disk but declared in neither version N nor N+1 is **left
+      untouched**.
 - [ ] A manifest-installed skill is **registered** through the service (DB row +
       files), never dropped on disk — activation enumerates unregistered
       filesystem content into the pool without creating records (§3.3).
@@ -733,7 +843,7 @@ archives.
 directory-level ownership semantics; teclaw per-file expansion.
 
 **Depends on.** W5 (the fetch-to-entity pattern it follows).
-**Blocked by.** **D4** for the pre-boot delivery half on the BaaS family.
+**Blocked by.** — delivery follows D4's interim post-start policy (§3.4).
 
 **Done when.**
 
@@ -802,14 +912,17 @@ composed; teclaw before the first artifact is assembled), at publish/republish,
 and at rebuild-style restart.
 
 **Depends on.** W4, W5, W6.
-**Blocked by.** **D4** — without a pre-boot delivery answer, "the first config
-already contains the manifest result" cannot be implemented for the BaaS family
-at all. **X2** additionally gates the teclaw arm (T1–T3).
+**Blocked by.** **X2** gates the teclaw arm (T1–T3). D4 is deferred rather than
+blocking, but this item owns its two consequences: the ACTIVE-but-unconfigured
+window, and where the §2.7 readiness gate lands when delivery happens after the
+bot has started (§3.4).
 
 **Done when.**
 
-- [ ] The **first** configuration a bot receives already contains the manifest
-      result — there is no "start, then patch it in" window.
+- [ ] On teclaw, the **first** artifact already contains the manifest result.
+- [ ] On the BaaS family, post-start delivery (§3.4) completes before the bot
+      takes traffic — "started" and "ready" must stop being the same moment, or
+      the ACTIVE-but-unconfigured window becomes user-visible.
 - [ ] Scale-out does **not** re-apply; instances stay identical because they
       share one platform state. This is #926's actual requirement.
 - [ ] A manifest `PUT` **triggers a restart** (§2.6), so the running bot always
@@ -840,9 +953,11 @@ at all. **X2** additionally gates the teclaw arm (T1–T3).
 in the design itself. Not scheduled.
 
 **Depends on.** W8.
-**Blocked by.** **X3** in full — without the teclaw policy answer the capability
-matrix cannot be written, and without the PATH injection points the ARCA arm has
-nowhere to land.
+**Blocked by.** **X3**, now narrowed (§4): teclaw needs only an artifact
+protocol from us, and the ARCA PATH proposal plus a default-skill-set skill are
+ours to design. The investigation recorded in §4 found **no production PATH
+mechanism to generalise**, so the prior question — binary on PATH vs. an HTTP API
+called through `exec` — should go to the business first.
 
 **Done when (sketch).** `digest` mandatory and enforced as the convergence key;
 static binary and archive forms only; a platform-defined logical tool directory
@@ -872,12 +987,17 @@ deferred                                                           └─► W9
 
 **Available parallelism:** W2, W3, W10 and W11 all run alongside W1 with no
 coordination — W11 needs only W2's output shape. That is five independent
-starting points, which is the most this plan will ever offer at once.
+starting points, which is the most this plan will ever offer at once, and
+nothing is waiting on a decision to begin.
 
-**Gating.** D2 must be answered before W4 is specified. **D4 must be answered
-before the delivery half of W5, W6 or W8 can be specified at all** — and it is
-the largest open question in the feature. X1 gates W7; X2 gates W8's teclaw arm;
-X3 gates W9.
+**Gating.** **No design question blocks the work any more.** D1–D3 are resolved
+and D4 is deferred behind an interim policy (deliver after start, §3.4). What
+remains is external: X1 gates W7, X2 gates W8's teclaw arm, X3 gates W9 — and W9
+is deferred regardless.
+
+The one dependency the resolutions *tightened*: **W11 is now a hard dependency of
+W4**, because §3.2's three-way diff needs version N's materialised file list to
+tell "the declaration dropped it" apart from "the bot created it".
 
 **Why lifecycle wiring is last.** Explicit `POST .../apply` exercises the whole
 engine from W4 onward, so W8 touches the create and publish flows only after the
@@ -917,7 +1037,7 @@ product.
 | W6 | schema §3.2; design §10.1 |
 | W7 | design §4.2, §10.5; schema §2.2, §2.3 |
 | W8 | design §3.1, §3.4, §4.3, §10.1, §10.4 |
-| W9 | schema §3.7; engine-requirements T4, A2, O9 |
+| W9 | schema §3.7; engine-requirements T4, A2, O9 — narrowed by §4's investigation |
 | W10 | no design section — arises from §2.9, an implementation constraint the design does not cover |
 | W11 | no design section — arises from §2.8, a requirement added after #1031 |
 
@@ -929,7 +1049,10 @@ branch is not).
 
 Points where this document **diverges** from the merged design, each argued in
 place: §2.3 (the managed marker shrinks to an internal record), §2.5 (capability
-scope), §2.6 (`PUT` triggers a restart rather than being lazy — design §3.1),
-§2.7 (a first-boot readiness gate, which design §4.3 defers to v2), and §2.8
-(platform-side materialisation, which the design does not have). Amending the
+scope; desktop out), §2.6 (`PUT` triggers a restart rather than being lazy —
+design §3.1), §2.7 (a first-boot readiness gate, which design §4.3 defers to v2),
+§2.8 (platform-side materialisation, which the design does not have), §3.2 (an
+entity-level three-way diff that preserves bot-created files, superseding design
+§3.2's wholesale directory replace), and §3.4 (post-start delivery on the BaaS
+family, where design §3.1 requires configuration to precede readiness). Amending the
 Chinese docs to match is a separate change, deliberately not made here.
