@@ -151,6 +151,10 @@ class DraftEditLeaseTokenRejectedError(Exception):
     """The supplied fencing token is stale or belongs to another holder."""
 
 
+class SpaceSkillIdempotencyConflictError(Exception):
+    """An Idempotency-Key was already bound to a different creation intent."""
+
+
 # ── SkillSet control plane ────────────────────────────────────────────────
 # These are ``DomainError`` subclasses so the SkillSet routers can raise the
 # situation and let the HTTP adapter decide the status: the mapping lives in

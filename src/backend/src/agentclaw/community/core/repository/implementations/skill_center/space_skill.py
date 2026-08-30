@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import uuid4
-
 from injector import inject
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import aliased
@@ -28,6 +26,7 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceRecord,
     SpaceSkillCreateData,
     SpaceSkillCreationRecord,
+    SpaceSkillCreationReplayRecord,
     SpaceSkillGrantRecord,
     SpaceSkillGrantItem,
     SpaceSkillGrantSetRecord,
@@ -110,6 +109,11 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             raise ValueError("Space Skill facts must share one env")
 
         with self._db.orm_session() as session:
+            replay = self._creation_by_request(
+                session, request_id=skill_data["creation_request_id"], env=env
+            )
+            if replay is not None:
+                return self._creation_replay_result(session, replay, env=env)
             space = (
                 session.query(SpaceModel)
                 .filter(
@@ -135,13 +139,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             if member is None:
                 raise ValueError("Space Skill Owner must be an active Space Member")
 
-            skill_payload = dict(skill_data)
-            skill_payload.update(
-                skill_uuid=str(uuid4()),
-                draft_target_version=1,
-                draft_status="EDITING",
-            )
-            skill = Skill(**skill_payload)
+            skill = Skill(**dict(skill_data))
             session.add(skill)
             session.flush()
 
@@ -157,10 +155,82 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             session.add_all((ownership, owner_grant))
             session.flush()
             return {
+                "created": True,
                 "skill": self._skill_to_dict(skill),
                 "ownership": self._ownership_to_dict(ownership),
                 "owner_grant": self._grant_to_dict(owner_grant),
             }
+
+    def get_creation_by_request_id(
+        self, *, request_id: str, env: str
+    ) -> SpaceSkillCreationReplayRecord | None:
+        with self._db.orm_session() as session:
+            return self._creation_by_request(session, request_id=request_id, env=env)
+
+    @staticmethod
+    def _creation_by_request(
+        session, *, request_id: str, env: str
+    ) -> SpaceSkillCreationReplayRecord | None:
+        row = (
+            session.query(
+                Skill.id,
+                SkillSpaceBinding.space_id,
+                Skill.creation_request_hash,
+            )
+            .join(
+                SkillSpaceBinding,
+                and_(
+                    SkillSpaceBinding.skill_id == Skill.id,
+                    SkillSpaceBinding.env == Skill.env,
+                ),
+            )
+            .filter(
+                Skill.creation_request_id == request_id,
+                Skill.env == env,
+            )
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return {
+            "skill_id": row[0],
+            "space_id": row[1],
+            "request_hash": row[2],
+        }
+
+    def _creation_replay_result(
+        self,
+        session,
+        replay: SpaceSkillCreationReplayRecord,
+        *,
+        env: str,
+    ) -> SpaceSkillCreationRecord:
+        skill = session.query(Skill).filter(Skill.id == replay["skill_id"], Skill.env == env).one()
+        ownership = (
+            session.query(SkillSpaceBinding)
+            .filter(
+                SkillSpaceBinding.skill_id == skill.id,
+                SkillSpaceBinding.env == env,
+            )
+            .one()
+        )
+        owner = (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill.id,
+                SkillGrant.env == env,
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.role == "OWNER",
+                SkillGrant.owner_slot == 1,
+            )
+            .one()
+        )
+        return {
+            "created": False,
+            "skill": self._skill_to_dict(skill),
+            "ownership": self._ownership_to_dict(ownership),
+            "owner_grant": self._grant_to_dict(owner),
+        }
 
     def list_space_skills(
         self,

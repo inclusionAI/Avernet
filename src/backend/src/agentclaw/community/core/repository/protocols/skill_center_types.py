@@ -35,6 +35,14 @@ class SpaceRecord(TypedDict):
 class SpaceSkillCreateData(TypedDict):
     name: str
     env: str
+    skill_uuid: str
+    zip_url: str
+    draft_target_version: int
+    draft_status: Literal["EDITING", "FROZEN"]
+    draft_description: str | None
+    draft_source_kind: Literal["FOLDER", "GIT", "PUBLISHED_VERSION"]
+    creation_request_id: str
+    creation_request_hash: str
     description: NotRequired[str | None]
     source_type: NotRequired[str | None]
     source_repo_url: NotRequired[str | None]
@@ -119,9 +127,16 @@ class SpaceSkillGrantViewRecord(TypedDict):
 
 
 class SpaceSkillCreationRecord(TypedDict):
+    created: bool
     skill: SpaceSkillIdentityRecord
     ownership: SpaceSkillOwnershipRecord
     owner_grant: SpaceSkillGrantRecord
+
+
+class SpaceSkillCreationReplayRecord(TypedDict):
+    skill_id: int
+    space_id: int
+    request_hash: str
 
 
 class SpaceSkillQueryRecord(TypedDict):

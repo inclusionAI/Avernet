@@ -114,6 +114,9 @@ from agentclaw.community.api.space_service import (
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
+from agentclaw.community.api.space_skill_application_service import (
+    SpaceSkillApplicationServiceProtocol,
+)
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
 )
@@ -182,6 +185,9 @@ from agentclaw.community.core.skill_center.services.skill_version_materializer i
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     SpaceSkillGrantService,
 )
+from agentclaw.community.core.skill_center.services.space_skill_application_service import (
+    SpaceSkillApplicationService,
+)
 from agentclaw.community.core.skill_center.services.space_skill_editor_request_service import (
     SpaceSkillEditorRequestService,
 )
@@ -218,6 +224,7 @@ _PAIRS = [
     (SkillQueryServiceProtocol, SkillQueryService),
     (SkillMetadataParserProtocol, SkillParser),
     (SpaceSkillGrantServiceProtocol, SpaceSkillGrantService),
+    (SpaceSkillApplicationServiceProtocol, SpaceSkillApplicationService),
     (SpaceSkillEditorRequestServiceProtocol, SpaceSkillEditorRequestService),
     (DraftEditLeaseServiceProtocol, DraftEditLeaseService),
     (SkillCenterGatewayServiceProtocol, SkillCenterGatewayService),

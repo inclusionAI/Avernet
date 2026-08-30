@@ -29,6 +29,8 @@ provides:
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
   - "SpaceSkillGrantService"
+  - "SpaceSkillApplicationService"
+  - "SpaceSkillApplicationServiceProtocol"
   - "SpaceSkillEditorRequestService"
   - "SkillCollaboratorApprovalHandler"
   - "DraftEditLeaseService"

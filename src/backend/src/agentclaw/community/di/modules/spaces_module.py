@@ -15,6 +15,9 @@ from agentclaw.community.api.space_service import (
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_application_service import (
+    SpaceSkillApplicationServiceProtocol,
+)
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
@@ -51,6 +54,12 @@ from agentclaw.community.core.spaces.services import (
 from agentclaw.community.core.skill_center.services.space_skill_query_service import (
     SpaceSkillQueryService,
 )
+from agentclaw.community.core.skill_center.services.space_skill_application_service import (
+    SpaceSkillApplicationService,
+)
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
+from agentclaw.community.core.skill_center.draft_content import DraftContentStore
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     SpaceSkillGrantService,
 )
@@ -64,6 +73,7 @@ from agentclaw.community.core.spaces.protocols import (
     SpaceAccessServiceProtocol as CoreSpaceAccessServiceProtocol,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 
 class SpacesModule(Module):
@@ -113,6 +123,24 @@ class SpacesModule(Module):
     ) -> SpaceSkillGrantServiceProtocol:
         """Assemble Grant policy with environment resolution at the DI boundary."""
         return SpaceSkillGrantService(access, repository, get_current_env)
+
+    @singleton
+    @provider
+    @inject
+    def space_skill_application_service(
+        self,
+        access: CoreSpaceAccessServiceProtocol,
+        repository: SpaceSkillRepository,
+        draft_store: DraftContentStore,
+    ) -> SpaceSkillApplicationServiceProtocol:
+        return SpaceSkillApplicationService(
+            access=access,
+            repository=repository,
+            package_validator=SkillPackageValidator(SkillParser()),
+            draft_store=draft_store,
+            env_provider=get_current_env,
+            tenant_provider=get_current_avernet_tenant,
+        )
 
     @singleton
     @provider

@@ -6,6 +6,7 @@
 -- may use them. Fresh databases receive only the final columns from F01.
 
 ALTER TABLE ac_skill
+  ADD COLUMN IF NOT EXISTS draft_description TEXT NULL COMMENT '当前 Draft 的 SKILL.md description',
   ADD COLUMN IF NOT EXISTS draft_source_kind VARCHAR(32) NULL COMMENT 'FOLDER/GIT/PUBLISHED_VERSION',
   ADD COLUMN IF NOT EXISTS creation_request_id VARCHAR(128) NULL COMMENT '创建幂等请求身份',
   ADD COLUMN IF NOT EXISTS creation_request_hash VARCHAR(64) NULL COMMENT '创建命令指纹',

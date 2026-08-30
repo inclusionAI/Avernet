@@ -29,6 +29,7 @@ from .skill_center_types import (
     SpaceRecord,
     SpaceSkillCreateData,
     SpaceSkillCreationRecord,
+    SpaceSkillCreationReplayRecord,
     SpaceSkillOwnerGrantData,
     SpaceSkillOwnershipData,
     SpaceSkillQueryRecord,
@@ -60,6 +61,13 @@ class SpaceSkillRepository(Protocol):
         owner_grant_data: SpaceSkillOwnerGrantData,
     ) -> SpaceSkillCreationRecord:
         """Atomically persist the initial identity, ownership and owner grant."""
+        ...
+
+    @abstractmethod
+    def get_creation_by_request_id(
+        self, *, request_id: str, env: str
+    ) -> SpaceSkillCreationReplayRecord | None:
+        """Resolve the resource permanently bound to one creation request."""
         ...
 
     @abstractmethod

@@ -127,6 +127,7 @@ def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
     assert {
         "draft_target_version",
         "draft_status",
+        "draft_description",
         "draft_source_kind",
         "creation_request_id",
         "creation_request_hash",
@@ -314,7 +315,19 @@ def test_repository_creates_stable_identity_ownership_and_owner_grant_atomically
     created = repo.create_space_skill(
         skill_data={
             "name": "risk-review",
+            "description": None,
             "env": "dev",
+            "skill_uuid": "11111111-1111-4111-8111-111111111111",
+            "zip_url": (
+                "draft://11111111-1111-4111-8111-111111111111/"
+                "v1/22222222-2222-4222-8222-222222222222"
+            ),
+            "draft_target_version": 1,
+            "draft_status": "EDITING",
+            "draft_description": "Risk review draft",
+            "draft_source_kind": "FOLDER",
+            "creation_request_id": "create-risk-review",
+            "creation_request_hash": "a" * 64,
         },
         ownership_data={"space_id": space["id"], "created_by": "owner-1", "env": "dev"},
         owner_grant_data={
@@ -332,6 +345,41 @@ def test_repository_creates_stable_identity_ownership_and_owner_grant_atomically
     assert created["ownership"]["skill_id"] == created["skill"]["id"]
     assert created["owner_grant"]["owner_slot"] == 1
 
+    replay = repo.create_space_skill(
+        skill_data={
+            "name": "ignored-on-replay",
+            "description": None,
+            "env": "dev",
+            "skill_uuid": "33333333-3333-4333-8333-333333333333",
+            "zip_url": (
+                "draft://33333333-3333-4333-8333-333333333333/"
+                "v1/44444444-4444-4444-8444-444444444444"
+            ),
+            "draft_target_version": 1,
+            "draft_status": "EDITING",
+            "draft_description": "ignored",
+            "draft_source_kind": "FOLDER",
+            "creation_request_id": "create-risk-review",
+            "creation_request_hash": "a" * 64,
+        },
+        ownership_data={"space_id": space["id"], "created_by": "owner-1", "env": "dev"},
+        owner_grant_data={
+            "user_id": "owner-1",
+            "granted_by": "owner-1",
+            "env": "dev",
+        },
+    )
+
+    assert replay["created"] is False
+    assert replay["skill"]["id"] == created["skill"]["id"]
+    assert repo.get_creation_by_request_id(
+        request_id="create-risk-review", env="dev"
+    ) == {
+        "skill_id": created["skill"]["id"],
+        "space_id": space["id"],
+        "request_hash": "a" * 64,
+    }
+
 
 def test_repository_rejects_space_skill_without_an_active_owner_membership(db):
     repo = _space_skills(db)
@@ -347,7 +395,22 @@ def test_repository_rejects_space_skill_without_an_active_owner_membership(db):
 
     with pytest.raises(ValueError, match="active Space Member"):
         repo.create_space_skill(
-            skill_data={"name": "unowned", "env": "dev"},
+            skill_data={
+                "name": "unowned",
+                "description": None,
+                "env": "dev",
+                "skill_uuid": "55555555-5555-4555-8555-555555555555",
+                "zip_url": (
+                    "draft://55555555-5555-4555-8555-555555555555/"
+                    "v1/66666666-6666-4666-8666-666666666666"
+                ),
+                "draft_target_version": 1,
+                "draft_status": "EDITING",
+                "draft_description": "Unowned",
+                "draft_source_kind": "FOLDER",
+                "creation_request_id": "create-unowned",
+                "creation_request_hash": "b" * 64,
+            },
             ownership_data={
                 "space_id": space["id"],
                 "created_by": "creator",

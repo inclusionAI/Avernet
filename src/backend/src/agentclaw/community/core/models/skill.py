@@ -152,6 +152,7 @@ class Skill(Base):
     # untouched while the Space Skill feature flag is off.
     draft_target_version = Column(Integer, nullable=True)
     draft_status = Column(String(16), nullable=True)
+    draft_description = Column(Text, nullable=True)
     draft_source_kind = Column(String(32), nullable=True)
     creation_request_id = Column(String(128), nullable=True)
     creation_request_hash = Column(String(64), nullable=True)
