@@ -16,6 +16,9 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.core.repository.protocols.skill_center_types import (
     SkillVersionRecord,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_version_lock import (
+    lock_skill_then_exact_version,
+)
 from agentclaw.community.core.skill_center.materialization_contract import (
     MaterializingSkillVersion,
     PublishedMaterializedSkillVersion,
@@ -138,21 +141,15 @@ class SkillVersionRepository(
         published_at: datetime,
     ) -> PublishedMaterializedSkillVersion:
         with self._db.orm_session() as session:
-            result = (
-                session.query(SkillVersion, Skill)
-                .join(Skill, Skill.id == SkillVersion.skill_id)
-                .filter(
-                    SkillVersion.id == skill_version_id,
-                    SkillVersion.skill_id == skill_id,
-                    SkillVersion.env == env,
-                    Skill.env == env,
-                )
-                .with_for_update()
-                .one_or_none()
+            locked = lock_skill_then_exact_version(
+                session,
+                env=env,
+                skill_id=skill_id,
+                skill_version_id=skill_version_id,
             )
-            if result is None:
+            if locked is None:
                 raise RuntimeError("materializing Skill Version not found")
-            version, skill = result
+            skill, version = locked
             if version.status == "PUBLISHED":
                 if (
                     version.metadata_json != metadata_json
@@ -181,7 +178,10 @@ class SkillVersionRepository(
                     )
                     .one_or_none()
                 )
-                if owns_space is not None:
+                if (
+                    owns_space is not None
+                    and version.publication_attempt_id is not None
+                ):
                     skill.offline_at = None
                     skill.offline_by = None
                 session.flush()

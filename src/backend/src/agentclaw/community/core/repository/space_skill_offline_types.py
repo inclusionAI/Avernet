@@ -5,11 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from agentclaw.community.core.skill_center.space_skill_offline_service_protocol import (
-    OfflineImpactItem,
-)
-
-
 @dataclass(frozen=True, slots=True)
 class OfflineSkillIdentity:
     skill_id: int
@@ -26,9 +21,34 @@ class OfflineSkillIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class OfflinePublicationAttemptFact:
+    id: int
+    target_version_ordinal: int
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class OfflineMembershipFact:
+    id: int
+    skill_set_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class OfflineInstallationFact:
+    id: int
+    bot_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class OfflineInspection:
+    """Raw persistence facts observed in one repository session."""
+
     identity: OfflineSkillIdentity
-    blockers: tuple[OfflineImpactItem, ...]
+    space_bound: bool
+    actor_roles: tuple[str, ...]
+    publication_attempts: tuple[OfflinePublicationAttemptFact, ...]
+    memberships: tuple[OfflineMembershipFact, ...]
+    installations: tuple[OfflineInstallationFact, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,4 +59,11 @@ class OfflineCommit:
     locator: str
 
 
-__all__ = ["OfflineCommit", "OfflineInspection", "OfflineSkillIdentity"]
+__all__ = [
+    "OfflineCommit",
+    "OfflineInspection",
+    "OfflineInstallationFact",
+    "OfflineMembershipFact",
+    "OfflinePublicationAttemptFact",
+    "OfflineSkillIdentity",
+]

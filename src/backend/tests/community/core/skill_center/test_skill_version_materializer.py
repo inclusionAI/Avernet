@@ -419,6 +419,7 @@ def test_offline_vn_plus_one_recovers_through_unified_materializer() -> None:
             SkillVersion(
                 id=102,
                 skill_id=skill_id,
+                publication_attempt_id=701,
                 version_ordinal=3,
                 status="MATERIALIZING",
                 sc_version_number="3.0.0",

@@ -8,10 +8,6 @@ from datetime import datetime, timezone
 from injector import inject
 from sqlalchemy import or_
 
-from agentclaw.community.core.skill_center.space_skill_offline_service_protocol import (
-    OfflineBlockerKind,
-    OfflineImpactItem,
-)
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -19,6 +15,7 @@ from agentclaw.community.core.models.skill import (
     SkillSetSkill,
 )
 from agentclaw.community.core.models.space_skill import (
+    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES,
     SkillGrant,
     SkillPublicationAttempt,
     SkillSpaceBinding,
@@ -27,28 +24,23 @@ from agentclaw.community.core.models.space_skill import (
 from agentclaw.community.core.repository.space_skill_offline_types import (
     OfflineCommit,
     OfflineInspection,
+    OfflineInstallationFact,
+    OfflineMembershipFact,
+    OfflinePublicationAttemptFact,
     OfflineSkillIdentity,
 )
 from agentclaw.community.core.repository.protocols.space_skill_offline import (
     SpaceSkillOfflineRepositoryProtocol,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_version_lock import (
+    lock_skill_then_latest_published_version,
+)
 from agentclaw.community.core.skill_center.errors import (
     DraftNotFoundError,
     DraftRevisionConflictError,
-    SpaceSkillGrantForbiddenError,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.plugin_api.database import DatabasePlugin
-
-
-_ACTIVE_ATTEMPTS = (
-    "PREPARING",
-    "SC_SUBMITTING",
-    "WAITING_SC",
-    "MATERIALIZING",
-    "RESULT_UNKNOWN",
-)
-_BLOCKER_ORDER = {kind: index for index, kind in enumerate(OfflineBlockerKind)}
 
 
 class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
@@ -63,7 +55,7 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
     ) -> OfflineInspection:
         with self._db.orm_session() as session:
-            identity = self._identity(
+            inspection = self._inspection(
                 session,
                 space_id=space_id,
                 skill_id=skill_id,
@@ -71,8 +63,7 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                 env=env,
                 lock=False,
             )
-            blockers = self._db_blockers(session, identity=identity, env=env)
-        return OfflineInspection(identity=identity, blockers=self._ordered(blockers))
+        return inspection
 
     def commit(
         self,
@@ -88,7 +79,7 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
         guard: Callable[[OfflineInspection], None],
     ) -> OfflineCommit:
         with self._db.transactional_orm_session() as session:
-            identity = self._identity(
+            inspection = self._inspection(
                 session,
                 space_id=space_id,
                 skill_id=skill_id,
@@ -96,6 +87,7 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                 env=env,
                 lock=True,
             )
+            identity = inspection.identity
             skill = session.query(Skill).filter(Skill.id == skill_id).one()
             if (
                 skill.offline_at is not None
@@ -110,14 +102,7 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                     locator=str(skill.zip_url),
                 )
 
-            guard(
-                OfflineInspection(
-                    identity=identity,
-                    blockers=self._ordered(
-                        self._db_blockers(session, identity=identity, env=env)
-                    ),
-                )
-            )
+            guard(inspection)
             if identity.latest_version_id != expected_version_id:
                 raise DraftRevisionConflictError("latest Published Version changed")
             if target_version != identity.latest_version_ordinal + 1:
@@ -138,7 +123,7 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                 locator=new_locator,
             )
 
-    def _identity(
+    def _inspection(
         self,
         session,
         *,
@@ -147,11 +132,23 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
         actor_id: str,
         env: str,
         lock: bool,
-    ) -> OfflineSkillIdentity:
+    ) -> OfflineInspection:
         # Lock the Skill row before reading or mutating any related fact.  The
         # membership/direct/default and Artifact-commit paths take this same lock.
-        query = session.query(Skill).filter(Skill.id == skill_id, Skill.env == env)
-        skill = (query.with_for_update() if lock else query).one_or_none()
+        locked_latest = None
+        if lock:
+            locked_latest = lock_skill_then_latest_published_version(
+                session,
+                env=env,
+                skill_id=skill_id,
+            )
+            skill = locked_latest[0] if locked_latest is not None else None
+        else:
+            skill = (
+                session.query(Skill)
+                .filter(Skill.id == skill_id, Skill.env == env)
+                .one_or_none()
+            )
         if skill is None or not skill.skill_uuid:
             raise DraftNotFoundError("space skill not found")
         ownership = (
@@ -169,36 +166,38 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
             )
             .one_or_none()
         )
-        grant = (
-            session.query(SkillGrant.id)
+        actor_roles = tuple(
+            str(row[0])
+            for row in session.query(SkillGrant.role)
             .filter(
                 SkillGrant.skill_id == skill_id,
                 SkillGrant.user_id == actor_id,
                 SkillGrant.env == env,
                 SkillGrant.status == "ACTIVE",
-                SkillGrant.role.in_(("OWNER", "MANAGER")),
             )
-            .one_or_none()
+            .all()
         )
-        if ownership is None or grant is None:
-            raise SpaceSkillGrantForbiddenError("owner or manager required")
-        latest_query = (
-            session.query(SkillVersion)
-            .filter(
-                SkillVersion.skill_id == skill_id,
-                SkillVersion.env == env,
-                SkillVersion.status == "PUBLISHED",
+        if lock:
+            assert locked_latest is not None
+            latest = locked_latest[1]
+        else:
+            latest = (
+                session.query(SkillVersion)
+                .filter(
+                    SkillVersion.skill_id == skill_id,
+                    SkillVersion.env == env,
+                    SkillVersion.status == "PUBLISHED",
+                )
+                .order_by(SkillVersion.version_ordinal.desc())
+                .first()
             )
-            .order_by(SkillVersion.version_ordinal.desc())
-        )
-        latest = (latest_query.with_for_update() if lock else latest_query).first()
         if latest is None:
             raise DraftNotFoundError("latest Published Version not found")
-        return OfflineSkillIdentity(
+        identity = OfflineSkillIdentity(
             skill_id=int(skill.id),
             skill_uuid=str(skill.skill_uuid),
             name=str(skill.name),
-            sc_team_id=ownership[1].sc_team_id,
+            sc_team_id=ownership[1].sc_team_id if ownership is not None else None,
             latest_version_id=int(latest.id),
             latest_version_ordinal=int(latest.version_ordinal),
             sc_version_number=str(latest.sc_version_number),
@@ -207,32 +206,22 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
             draft_status=skill.draft_status,
             draft_locator=skill.zip_url,
         )
-
-    def _db_blockers(self, session, *, identity: OfflineSkillIdentity, env: str):
-        blockers: list[OfflineImpactItem] = []
-        if identity.draft_status is not None:
-            blockers.append(
-                OfflineImpactItem(
-                    kind=OfflineBlockerKind.DRAFT,
-                    resource_id=str(identity.skill_id),
-                    display_name=f"Draft V{identity.draft_target_version}",
-                )
-            )
         attempts = (
             session.query(SkillPublicationAttempt)
             .filter(
                 SkillPublicationAttempt.skill_id == identity.skill_id,
                 SkillPublicationAttempt.env == env,
-                SkillPublicationAttempt.status.in_(_ACTIVE_ATTEMPTS),
+                SkillPublicationAttempt.status.in_(
+                    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES
+                ),
             )
-            .order_by(SkillPublicationAttempt.id.asc())
             .all()
         )
-        blockers.extend(
-            OfflineImpactItem(
-                kind=OfflineBlockerKind.PUBLICATION,
-                resource_id=str(attempt.id),
-                display_name=f"Publication V{attempt.target_version_ordinal}",
+        publication_attempts = tuple(
+            OfflinePublicationAttemptFact(
+                id=int(attempt.id),
+                target_version_ordinal=int(attempt.target_version_ordinal),
+                status=str(attempt.status),
             )
             for attempt in attempts
         )
@@ -247,14 +236,12 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                 SkillSet.env == env,
                 or_(*identity_predicates),
             )
-            .order_by(SkillSetSkill.id.asc())
             .all()
         )
-        blockers.extend(
-            OfflineImpactItem(
-                kind=OfflineBlockerKind.MEMBERSHIP,
-                resource_id=str(membership.id),
-                display_name=str(skill_set.name),
+        membership_facts = tuple(
+            OfflineMembershipFact(
+                id=int(membership.id),
+                skill_set_name=str(skill_set.name),
             )
             for membership, skill_set in memberships
         )
@@ -264,30 +251,22 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                 BotSkillInstallation.skill_id == identity.skill_id,
                 BotSkillInstallation.env == env,
             )
-            .order_by(BotSkillInstallation.id.asc())
             .all()
         )
-        blockers.extend(
-            OfflineImpactItem(
-                kind=OfflineBlockerKind.INSTALLATION,
-                resource_id=str(installation.id),
-                display_name=str(installation.bot_id),
+        installation_facts = tuple(
+            OfflineInstallationFact(
+                id=int(installation.id),
+                bot_id=str(installation.bot_id),
             )
             for installation in installations
         )
-        return blockers
-
-    @staticmethod
-    def _ordered(blockers):
-        return tuple(
-            sorted(
-                blockers,
-                key=lambda item: (
-                    _BLOCKER_ORDER[item.kind],
-                    item.resource_id,
-                    item.display_name,
-                ),
-            )
+        return OfflineInspection(
+            identity=identity,
+            space_bound=ownership is not None,
+            actor_roles=actor_roles,
+            publication_attempts=publication_attempts,
+            memberships=membership_facts,
+            installations=installation_facts,
         )
 
 __all__ = ["SpaceSkillOfflineRepository"]

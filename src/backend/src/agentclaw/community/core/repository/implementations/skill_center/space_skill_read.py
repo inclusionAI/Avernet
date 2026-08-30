@@ -8,6 +8,7 @@ from sqlalchemy.orm import aliased
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import (
+    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES,
     SkillDraftEditLease,
     SkillGrant,
     SkillPublicationAttempt,
@@ -31,15 +32,6 @@ from agentclaw.community.core.work_orders.models import (
 )
 from agentclaw.community.core.work_orders.repository.models import WorkOrderModel
 from agentclaw.community.plugin_api.database import DatabasePlugin
-
-
-_ACTIVE_ATTEMPT_STATES = (
-    "PREPARING",
-    "SC_SUBMITTING",
-    "WAITING_SC",
-    "MATERIALIZING",
-    "RESULT_UNKNOWN",
-)
 
 
 class SpaceSkillReadRepository(SpaceSkillReadRepositoryProtocol):
@@ -202,7 +194,9 @@ class SpaceSkillReadRepository(SpaceSkillReadRepositoryProtocol):
                 and_(
                     SkillPublicationAttempt.skill_id == Skill.id,
                     SkillPublicationAttempt.env == env,
-                    SkillPublicationAttempt.status.in_(_ACTIVE_ATTEMPT_STATES),
+                    SkillPublicationAttempt.status.in_(
+                        ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES
+                    ),
                 ),
             )
             .outerjoin(

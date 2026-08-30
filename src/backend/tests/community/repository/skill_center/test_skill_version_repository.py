@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from threading import Event, Lock, Thread
 
 import pytest
 from sqlalchemy import create_engine
@@ -21,6 +22,10 @@ from agentclaw.community.core.repository.implementations.skill_center.skill impo
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_version import (
     SkillVersionRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.skill_version_lock import (
+    lock_skill_then_exact_version,
+    lock_skill_then_latest_published_version,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
@@ -82,13 +87,14 @@ def _add_version(
     ordinal: int,
     status: str,
     number: str,
+    publication_attempt_id: int | None = None,
 ) -> None:
     with avernet_tenant_scope(tenant), db.orm_session() as session:
         session.add(
             SkillVersion(
                 id=version_id,
                 skill_id=skill_id,
-                publication_attempt_id=None,
+                publication_attempt_id=publication_attempt_id,
                 version_ordinal=ordinal,
                 status=status,
                 sc_version_number=number,
@@ -412,6 +418,7 @@ def test_new_space_publication_clears_offline_but_published_replay_never_does() 
         ordinal=2,
         status="MATERIALIZING",
         number="2.0.0",
+        publication_attempt_id=501,
     )
     repo = SkillVersionRepository(db)
 
@@ -486,3 +493,167 @@ def test_sc_public_materialization_never_clears_offline_without_space_binding() 
         assert skill is not None
         assert skill.offline_at == offline_at
         assert skill.offline_by == "owner"
+
+
+def test_space_binding_without_publication_attempt_never_clears_offline() -> None:
+    db = _Database()
+    offline_at = datetime(2026, 8, 30, 10, 0)
+    with db.orm_session() as session:
+        space = SpaceModel(
+            space_code="space-null-attempt",
+            space_type="TEAM",
+            name="Space",
+            created_by="owner",
+            updated_by="owner",
+            env="pre",
+        )
+        skill = Skill(
+            id=10,
+            name="weather",
+            git_path="center://space-weather",
+            skill_uuid="00000000-0000-4000-8000-000000000010",
+            offline_at=offline_at,
+            offline_by="owner",
+            env="pre",
+        )
+        session.add_all((space, skill))
+        session.flush()
+        session.add(
+            SkillSpaceBinding(
+                skill_id=10,
+                space_id=space.id,
+                created_by="owner",
+                env="pre",
+            )
+        )
+    _add_version(
+        db,
+        skill_id=10,
+        version_id=101,
+        ordinal=2,
+        status="MATERIALIZING",
+        number="2.0.0",
+        publication_attempt_id=None,
+    )
+
+    with avernet_tenant_scope("teamclaw"):
+        SkillVersionRepository(db).publish_materialized(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            metadata_json='{"mcp_dependencies":[]}',
+            description="updated",
+            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
+        )
+
+    with db.orm_session() as session:
+        skill = session.get(Skill, 10)
+        assert skill is not None
+        assert skill.offline_at == offline_at
+        assert skill.offline_by == "owner"
+
+
+class _LockCoordinator:
+    """Model row locks used to expose overlapping lock acquisition intent."""
+
+    def __init__(self) -> None:
+        self.locks = {Skill: Lock(), SkillVersion: Lock()}
+        self.publisher_has_skill = Event()
+        self.offline_waits_for_skill = Event()
+        self.orders: dict[str, list[type]] = {"publish": [], "offline": []}
+
+
+class _LockQuery:
+    def __init__(self, session: "_LockSession", model: type) -> None:
+        self._session = session
+        self._model = model
+
+    def filter(self, *_criteria):
+        return self
+
+    def order_by(self, *_criteria):
+        return self
+
+    def with_for_update(self):
+        return self
+
+    def one_or_none(self):
+        return self._lock()
+
+    def first(self):
+        return self._lock()
+
+    def _lock(self):
+        coordinator = self._session.coordinator
+        if self._session.name == "offline" and self._model is Skill:
+            coordinator.offline_waits_for_skill.set()
+        lock = coordinator.locks[self._model]
+        lock.acquire()
+        self._session.held.append(lock)
+        coordinator.orders[self._session.name].append(self._model)
+        if self._session.name == "publish" and self._model is Skill:
+            coordinator.publisher_has_skill.set()
+            assert coordinator.offline_waits_for_skill.wait(timeout=2)
+        return Skill(id=10, env="pre") if self._model is Skill else SkillVersion(id=101)
+
+
+class _LockSession:
+    def __init__(self, coordinator: _LockCoordinator, name: str) -> None:
+        self.coordinator = coordinator
+        self.name = name
+        self.held: list[Lock] = []
+
+    def query(self, model: type) -> _LockQuery:
+        return _LockQuery(self, model)
+
+    def release(self) -> None:
+        for lock in reversed(self.held):
+            lock.release()
+        self.held.clear()
+
+
+def test_materialization_and_offline_overlap_use_skill_then_version_lock_order() -> None:
+    coordinator = _LockCoordinator()
+    failures: list[BaseException] = []
+
+    def _publish() -> None:
+        session = _LockSession(coordinator, "publish")
+        try:
+            lock_skill_then_exact_version(
+                session,
+                env="pre",
+                skill_id=10,
+                skill_version_id=101,
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+        finally:
+            session.release()
+
+    def _offline() -> None:
+        session = _LockSession(coordinator, "offline")
+        try:
+            lock_skill_then_latest_published_version(
+                session,
+                env="pre",
+                skill_id=10,
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+        finally:
+            session.release()
+
+    publisher = Thread(target=_publish)
+    publisher.start()
+    assert coordinator.publisher_has_skill.wait(timeout=2)
+    offliner = Thread(target=_offline)
+    offliner.start()
+    publisher.join(timeout=2)
+    offliner.join(timeout=2)
+
+    assert failures == []
+    assert not publisher.is_alive() and not offliner.is_alive()
+    assert coordinator.orders == {
+        "publish": [Skill, SkillVersion],
+        "offline": [Skill, SkillVersion],
+    }

@@ -8,11 +8,6 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.api.space_skill_offline_service import (
-    OfflineBlockerKind,
-    OfflineImpact,
-    OfflineImpactItem,
-)
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
@@ -29,7 +24,6 @@ from agentclaw.community.core.models.space_skill import (
 from agentclaw.community.core.repository.implementations.skill_center.space_skill_offline import (
     SpaceSkillOfflineRepository,
 )
-from agentclaw.community.core.skill_center.errors import SkillOfflineBlockedError
 from agentclaw.community.core.spaces.repository.models import SpaceModel
 
 
@@ -170,12 +164,16 @@ def test_inspection_includes_inactive_membership_installation_and_attempt():
         env="test",
     )
 
-    assert [item.kind for item in inspection.blockers] == [
-        OfflineBlockerKind.PUBLICATION,
-        OfflineBlockerKind.MEMBERSHIP,
-        OfflineBlockerKind.MEMBERSHIP,
-        OfflineBlockerKind.INSTALLATION,
+    assert [(item.target_version_ordinal, item.status) for item in inspection.publication_attempts] == [
+        (3, "RESULT_UNKNOWN")
     ]
+    assert {item.skill_set_name for item in inspection.memberships} == {
+        "Inactive Set",
+        "Default Set",
+    }
+    assert [(item.bot_id) for item in inspection.installations] == ["service-a"]
+    assert inspection.space_bound is True
+    assert inspection.actor_roles == ("OWNER",)
 
 
 def test_offline_commit_preserves_published_version_and_creates_editing_vn_plus_one():
@@ -217,24 +215,13 @@ def test_transaction_guard_runs_after_locked_db_recheck_and_can_abort():
         space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="test"
     ).identity
 
-    latest = OfflineImpactItem(
-        kind=OfflineBlockerKind.SERVICE_ARTIFACT,
-        resource_id="88",
-        display_name="Service A V4 (Skill 2.0.0)",
-    )
-
     def _guard(locked):
         assert locked.identity.skill_id == skill_id
-        raise SkillOfflineBlockedError(
-            OfflineImpact(
-                blocked=True,
-                total=1,
-                counts={"SERVICE_ARTIFACT": 1},
-                items=(latest,),
-            )
-        )
+        assert locked.space_bound is True
+        assert locked.actor_roles == ("OWNER",)
+        raise RuntimeError("artifact guard blocked")
 
-    with pytest.raises(SkillOfflineBlockedError) as blocked:
+    with pytest.raises(RuntimeError, match="artifact guard blocked"):
         repo.commit(
             space_id=space_id,
             skill_id=skill_id,
@@ -247,7 +234,6 @@ def test_transaction_guard_runs_after_locked_db_recheck_and_can_abort():
             guard=_guard,
         )
 
-    assert blocked.value.impact.counts == {"SERVICE_ARTIFACT": 1}
     with db.orm_session() as session:
         skill = session.query(Skill).filter_by(id=skill_id).one()
         assert skill.offline_at is None

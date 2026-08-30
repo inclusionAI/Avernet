@@ -15,13 +15,22 @@ from agentclaw.community.api.service_artifact_lineage import (
     ServiceArtifactLineage,
     ServiceArtifactReference,
 )
+from agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol import (
+    UnknownServiceArtifact,
+)
 from agentclaw.community.core.repository.space_skill_offline_types import (
     OfflineCommit,
     OfflineInspection,
+    OfflineInstallationFact,
+    OfflineMembershipFact,
+    OfflinePublicationAttemptFact,
     OfflineSkillIdentity,
 )
 from agentclaw.community.core.skill_center.draft_content import DraftRevisionRef
-from agentclaw.community.core.skill_center.errors import SkillOfflineBlockedError
+from agentclaw.community.core.skill_center.errors import (
+    SkillOfflineBlockedError,
+    SpaceSkillGrantForbiddenError,
+)
 from agentclaw.community.core.skill_center.services.published_version_draft import (
     PreparedPublishedVersionDraft,
 )
@@ -51,12 +60,31 @@ def _identity(*, offline=False, draft=False):
     )
 
 
-def _service(*, inspection):
+def _inspection(
+    *,
+    identity=None,
+    space_bound=True,
+    actor_roles=("OWNER",),
+    publication_attempts=(),
+    memberships=(),
+    installations=(),
+):
+    return OfflineInspection(
+        identity=identity or _identity(),
+        space_bound=space_bound,
+        actor_roles=actor_roles,
+        publication_attempts=publication_attempts,
+        memberships=memberships,
+        installations=installations,
+    )
+
+
+def _service(*, inspection, lineage_result=None):
     access = MagicMock()
     repository = MagicMock()
     repository.inspect.return_value = inspection
     lineage = MagicMock()
-    lineage.scan.return_value = ServiceArtifactLineage((), ())
+    lineage.scan.return_value = lineage_result or ServiceArtifactLineage((), ())
     drafts = MagicMock()
     prepared = PreparedPublishedVersionDraft(
         expected_version_id=61,
@@ -89,22 +117,37 @@ def _service(*, inspection):
 
 
 def test_impact_counts_all_blocker_kinds_then_paginates_items():
-    blockers = tuple(
-        OfflineImpactItem(kind=kind, resource_id=str(index), display_name=kind.value)
-        for index, kind in enumerate(
-            (
-                OfflineBlockerKind.DRAFT,
-                OfflineBlockerKind.PUBLICATION,
-                OfflineBlockerKind.MEMBERSHIP,
-                OfflineBlockerKind.INSTALLATION,
-                OfflineBlockerKind.SERVICE_ARTIFACT,
-                OfflineBlockerKind.UNKNOWN_ARTIFACT,
+    inspection = _inspection(
+        identity=_identity(draft=True),
+        publication_attempts=(
+            OfflinePublicationAttemptFact(
+                id=2,
+                target_version_ordinal=3,
+                status="MATERIALIZING",
             ),
-            start=1,
-        )
+        ),
+        memberships=(OfflineMembershipFact(id=3, skill_set_name="Set"),),
+        installations=(OfflineInstallationFact(id=4, bot_id="Bot"),),
     )
     service, access, *_ = _service(
-        inspection=OfflineInspection(identity=_identity(), blockers=blockers)
+        inspection=inspection,
+        lineage_result=ServiceArtifactLineage(
+            references=(
+                ServiceArtifactReference(
+                    publish_id=5,
+                    source_bot_id="service-5",
+                    source_bot_name="Service",
+                    service_version=1,
+                    sc_version_number="2.0.0",
+                ),
+            ),
+            unknown=(
+                UnknownServiceArtifact(
+                    resource_id="6",
+                    display_name="Unknown artifact",
+                ),
+            ),
+        ),
     )
 
     impact = service.impact(
@@ -125,7 +168,7 @@ def test_impact_counts_all_blocker_kinds_then_paginates_items():
 
 def test_offline_prepares_exact_revision_then_commits_and_returns_vn_plus_one():
     service, _access, repository, _lineage, drafts, prepared = _service(
-        inspection=OfflineInspection(identity=_identity(), blockers=())
+        inspection=_inspection()
     )
 
     result = service.offline(space_id=7, skill_id=51, actor_id="owner-1")
@@ -150,7 +193,7 @@ def test_offline_prepares_exact_revision_then_commits_and_returns_vn_plus_one():
 
 def test_offline_idempotent_replay_does_not_prepare_another_revision():
     service, _access, repository, _lineage, drafts, _prepared = _service(
-        inspection=OfflineInspection(identity=_identity(offline=True, draft=True), blockers=())
+        inspection=_inspection(identity=_identity(offline=True, draft=True))
     )
 
     result = service.offline(space_id=7, skill_id=51, actor_id="owner-1")
@@ -163,7 +206,7 @@ def test_offline_idempotent_replay_does_not_prepare_another_revision():
 
 def test_concurrent_blocker_from_transaction_recheck_discards_prepared_revision():
     service, _access, repository, lineage, drafts, prepared = _service(
-        inspection=OfflineInspection(identity=_identity(), blockers=())
+        inspection=_inspection()
     )
     latest = OfflineImpactItem(
         kind=OfflineBlockerKind.SERVICE_ARTIFACT,
@@ -187,7 +230,7 @@ def test_concurrent_blocker_from_transaction_recheck_discards_prepared_revision(
     ]
 
     def _commit(**kwargs):
-        kwargs["guard"](OfflineInspection(identity=_identity(), blockers=()))
+        kwargs["guard"](_inspection())
 
     repository.commit.side_effect = _commit
 
@@ -196,3 +239,25 @@ def test_concurrent_blocker_from_transaction_recheck_discards_prepared_revision(
 
     assert blocked.value.impact.items == (latest,)
     drafts.discard.assert_called_once_with(prepared)
+
+
+@pytest.mark.parametrize(
+    ("space_bound", "actor_roles"),
+    [(False, ("OWNER",)), (True, ()), (True, ("MEMBER",))],
+)
+def test_owner_manager_policy_is_enforced_by_service(
+    space_bound: bool, actor_roles: tuple[str, ...]
+) -> None:
+    service, _access, repository, lineage, drafts, _prepared = _service(
+        inspection=_inspection(
+            space_bound=space_bound,
+            actor_roles=actor_roles,
+        )
+    )
+
+    with pytest.raises(SpaceSkillGrantForbiddenError, match="owner or manager"):
+        service.offline(space_id=7, skill_id=51, actor_id="member")
+
+    repository.commit.assert_not_called()
+    lineage.scan.assert_not_called()
+    drafts.prepare.assert_not_called()
