@@ -204,8 +204,9 @@ that way:
   transaction; nothing else re-derives those decisions.
 
 Writes go through two command services, one per scope, with identical shape —
-authorize, mutate desired state in one UoW transaction, project the complete
-runtime, compensate on failure: `SkillSetManagementService` for Set-scoped
+authorize, mutate desired state in one UoW transaction, project the runtime
+halves declared by `ProjectionScope`, compensate on failure:
+`SkillSetManagementService` for Set-scoped
 mutations (Default-Set edits become per-Bot exclusion rows) and
 `DirectActivationService` for Set-free single-capability activation, Skills
 and MCPs alike.
@@ -237,14 +238,17 @@ resolves template Default MCP context strictly; a provider failure aborts the
 projection and enters command compensation rather than becoming an empty
 Default policy.
 
-`RuntimeProjectionResolver` is the only source of a mutation/restart runtime
-snapshot. It receives Installation, active ordinary SkillSet membership,
-System Default assets and required configuration, then produces a complete
-Local/Repo/Center/MCP/CLI projection. Engine adapters receive that snapshot;
-they do not reconstruct it from Default exclusions or BFF state.
+`RuntimeProjectionResolver` is the only source of Projector snapshots.
+`resolve_skills` produces the complete Local/Repo/Center Skill half for a
+Skill-only command; `resolve` additionally receives Installation, System
+Default MCP and CLI facts and produces the complete Skill/MCP/CLI projection.
+The two results have distinct types, so an Engine Adapter cannot interpret an
+unresolved Non-Skill half as an empty final state. A whole-artifact runtime's
+existing ConfigComposer still rebuilds its persisted MCP artifact at delivery;
+CLI authorization remains an overwrite-style Passport projection.
 
 Direct activation and canonical SkillSet mutations commit desired state in the
-repository transaction and then reconcile the complete runtime projection.
+repository transaction and then reconcile the declared runtime projection.
 They do not acquire `SkillsPoolEditGuard`: Pool editing is a file-corpus and
 layout-migration concern, retained only by Local package upload/replacement/
 deletion and Pool cutover/rollback paths. Phase 1 intentionally has no

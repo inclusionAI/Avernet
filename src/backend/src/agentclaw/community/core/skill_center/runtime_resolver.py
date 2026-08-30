@@ -1,10 +1,11 @@
-"""Resolve one complete, transport-independent Skill/MCP runtime projection.
+"""Resolve typed, transport-independent Skill and Skill/MCP projections.
 
 The resolver is deliberately a pure domain service.  Its only input is the
 already-authorized desired state: active Installation assets, active normal
 SkillSet members, System Defaults, and the MCP/CLI facts those inputs select.
 It neither reads legacy Default exclusions nor treats a runtime result as
-desired state.
+desired state. ``resolve_skills`` returns the complete Skill half;
+``resolve`` returns the complete Skill/MCP/CLI snapshot.
 """
 
 from __future__ import annotations
@@ -39,11 +40,17 @@ class RuntimeDesiredState:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeProjection:
-    """Engine-neutral full snapshot; adapters must apply it as a whole."""
+class RuntimeSkillProjection:
+    """Engine-neutral Skill snapshot used by a Skill-only projection."""
 
     skill_mappings: tuple[PoolSkillMapping, ...]
     skill_assets: tuple[RegisteredSkillAsset, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeProjection(RuntimeSkillProjection):
+    """Engine-neutral full snapshot; adapters must apply it as a whole."""
+
     mcp_server_codes: tuple[str, ...]
     cli_commands: tuple[str, ...]
 
@@ -92,10 +99,13 @@ def resolve_effective_mcp_server_codes(
 class RuntimeProjectionResolver:
     """Build the deduplicated Local/Repo/Center/MCP/CLI snapshot."""
 
-    def resolve(self, state: RuntimeDesiredState) -> RuntimeProjection:
+    def resolve_skills(
+        self, skills: tuple[RegisteredSkillAsset, ...]
+    ) -> RuntimeSkillProjection:
+        """Build the complete Skill half without inventing Non-Skill state."""
         # Validate all names before mapping so unsupported/ambiguous desired
         # state cannot be partially delivered by an Engine Adapter.
-        assets = tuple(state.skills)
+        assets = tuple(skills)
         for asset in assets:
             RuntimeNamePolicy.name_for(asset)
             if not asset.git_path.startswith(("local://", "git://", "center://")):
@@ -104,9 +114,16 @@ class RuntimeProjectionResolver:
             mappings = build_logical_skill_mappings(list(assets))
         except RuntimeMappingNameConflictError as exc:
             raise RuntimeNameConflictError() from exc
-        return RuntimeProjection(
+        return RuntimeSkillProjection(
             skill_mappings=tuple(mappings),
             skill_assets=assets,
+        )
+
+    def resolve(self, state: RuntimeDesiredState) -> RuntimeProjection:
+        skills = self.resolve_skills(state.skills)
+        return RuntimeProjection(
+            skill_mappings=skills.skill_mappings,
+            skill_assets=skills.skill_assets,
             mcp_server_codes=resolve_effective_mcp_server_codes(state),
             cli_commands=tuple(dict.fromkeys(state.system_default_cli_commands)),
         )
@@ -118,5 +135,6 @@ __all__ = [
     "RuntimeNamePolicy",
     "RuntimeProjection",
     "RuntimeProjectionResolver",
+    "RuntimeSkillProjection",
     "resolve_effective_mcp_server_codes",
 ]

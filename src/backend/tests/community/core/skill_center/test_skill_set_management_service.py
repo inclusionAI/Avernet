@@ -659,12 +659,16 @@ class _TeclawRuntimeBots(_RuntimeBots):
 class _McpInstallations:
     def __init__(self) -> None:
         self.flush_calls: list[dict] = []
+        self.list_installed_calls: list[dict] = []
 
     def flush_installations(self, **kwargs) -> InstallationFlushPlan:
         self.flush_calls.append(kwargs)
         return InstallationFlushPlan(frozenset(), frozenset(), frozenset())
 
     def list_installed_mcps(self, *, bot_id: str, owner_id: str) -> set[str]:
+        self.list_installed_calls.append(
+            {"bot_id": bot_id, "owner_id": owner_id}
+        )
         assert bot_id == "bot-1"
         assert owner_id == "true-owner"
         return {"mcp.weather"}
@@ -763,11 +767,13 @@ class _RuntimeLayouts:
 class _RuntimePassport:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.query_calls: list[tuple[str, str]] = []
 
     def update_passport(self, **kwargs) -> None:
         self.calls.append(kwargs)
 
     def query_passport_clis(self, bot_id: str, owner_id: str) -> list[dict]:
+        self.query_calls.append((bot_id, owner_id))
         assert (bot_id, owner_id) == ("bot-1", "true-owner")
         # This is the effective Default CLI scope after a user removed a
         # static default. A reconcile must preserve it exactly, not revive the
@@ -2623,20 +2629,34 @@ async def test_non_skill_projection_never_writes_skill_mappings():
     assert pool.verify_calls == []
 
 
+@pytest.mark.asyncio
+async def test_non_skill_entry_rejects_a_scope_without_mcp():
+    runtime = _scoped_projector()
 
-def _teclaw_runtime(factory, *, pool=None, passport=None):
+    with pytest.raises(ValueError, match="requires scope.mcp=True"):
+        await runtime.project_mcp_and_cli(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            scope=ProjectionScope(skills=True),
+        )
+
+
+
+def _teclaw_runtime(
+    factory, *, pool=None, passport=None, repository=None, identity=None
+):
     """A projector over a teclaw Bot, wired the way production wires one."""
     return BotRuntimeProjector(
         factory=factory,
         bot_repo=_TeclawRuntimeBots(),
-        repository=_McpInstallations(),
+        repository=repository or _McpInstallations(),
         reader=_reader(_TeclawRuntimeSkills()),
         registry=_registry(
             pool_runtime=pool or _RuntimePool(),
             pool_layouts=_RuntimeLayouts(),
         ),
         passport=passport or _RuntimePassport(),
-        caller_identity_repo=_RuntimeCallerIdentity(),
+        caller_identity_repo=identity or _RuntimeCallerIdentity(),
     )
 
 
@@ -2788,7 +2808,14 @@ async def test_teclaw_still_updates_the_passport_with_identity_coloured_items():
 async def test_teclaw_skill_only_scope_makes_no_passport_call():
     """No MCP change declared, no manifest write — unchanged from today."""
     passport = _RuntimePassport()
-    runtime = _teclaw_runtime(_RuntimeFactory(), passport=passport)
+    factory = _RuntimeFactory()
+    repository, identity = _McpInstallations(), _RuntimeCallerIdentity()
+    runtime = _teclaw_runtime(
+        factory,
+        passport=passport,
+        repository=repository,
+        identity=identity,
+    )
 
     await runtime.project(
         bot_id="bot-1", owner_id="true-owner",
@@ -2796,6 +2823,15 @@ async def test_teclaw_skill_only_scope_makes_no_passport_call():
     )
 
     assert passport.calls == []
+    # Teclaw still delivers exactly one full artifact, whose ConfigComposer
+    # independently reads persisted MCP/CLI state. The projector must not
+    # duplicate those reads for a Skill-only mutation.
+    assert len(factory.service.runtime_syncs) == 1
+    assert factory.service.delivered_effective_mcps == [None]
+    assert factory.service.collect_calls == []
+    assert repository.list_installed_calls == []
+    assert passport.query_calls == []
+    assert identity.calls == []
 
 
 @pytest.mark.asyncio
@@ -3414,15 +3450,17 @@ async def test_an_inactive_set_still_skips_projection_entirely():
 # already there. The scope the command declares is what decides.
 
 
-def _scoped_projector(pool=None, passport=None, factory=None):
+def _scoped_projector(
+    pool=None, passport=None, factory=None, repository=None, identity=None
+):
     return BotRuntimeProjector(
         factory=factory or _RuntimeFactory(),
         bot_repo=_RuntimeBots(),
-        repository=_McpInstallations(),
+        repository=repository or _McpInstallations(),
         reader=_reader(_RuntimeSkills()),
         registry=_registry(pool_runtime=pool or _RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport or _RuntimePassport(),
-        caller_identity_repo=_RuntimeCallerIdentity(),
+        caller_identity_repo=identity or _RuntimeCallerIdentity(),
     )
 
 
@@ -3459,7 +3497,13 @@ async def test_a_skill_only_scope_touches_neither_the_device_mcps_nor_passport()
     mutation.
     """
     passport, factory = _RuntimePassport(), _RuntimeFactory()
-    runtime = _scoped_projector(passport=passport, factory=factory)
+    repository, identity = _McpInstallations(), _RuntimeCallerIdentity()
+    runtime = _scoped_projector(
+        passport=passport,
+        factory=factory,
+        repository=repository,
+        identity=identity,
+    )
 
     await runtime.project(
         bot_id="bot-1", owner_id="true-owner", scope=ProjectionScope(skills=True)
@@ -3469,6 +3513,60 @@ async def test_a_skill_only_scope_touches_neither_the_device_mcps_nor_passport()
     assert factory.service.mcp_codes is None
     assert factory.service.deliveries == []
     assert passport.calls == []
+    # No MCP mutation means no MCP/CLI read-side pre-flight either.  Those
+    # facts would only be consumed by a device-MCP write or Passport update,
+    # both of which this scope explicitly omits.
+    assert factory.service.collect_calls == []
+    assert repository.list_installed_calls == []
+    assert passport.query_calls == []
+    assert identity.calls == []
+
+
+@pytest.mark.asyncio
+async def test_projector_exposes_skill_and_complete_plan_shapes_at_the_engine_seam():
+    """The engine seam receives an honest type, never an incomplete full plan."""
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        EngineRuntimeProjection,
+        ResolvedCapabilityPlan,
+        ResolvedSkillPlan,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
+        EngineRuntimeProjectionRegistry,
+    )
+
+    plans = []
+
+    class _RecordingProjection(EngineRuntimeProjection):
+        def validate_plan(self, *, skill_assets, retired_mappings=()) -> None:
+            return None
+
+        async def apply(self, *, plan, scope, retired_mappings=()) -> None:
+            plans.append(plan)
+
+    projection = _RecordingProjection()
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=EngineRuntimeProjectionRegistry(default=projection),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(skills=True),
+    )
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(mcp=True),
+    )
+
+    assert type(plans[0]) is ResolvedSkillPlan
+    assert type(plans[1]) is ResolvedCapabilityPlan
 
 
 @pytest.mark.asyncio
