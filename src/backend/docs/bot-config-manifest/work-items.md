@@ -1987,6 +1987,14 @@ manifest level, so there is no de-activation for W8 to place.)
       response says so. It is baked into the start command at payload-build time
       (§2.12), so it is the one category whose effect is deferred — consistent
       with §2.7's delivery-not-execution boundary, not an exception to it.
+- [ ] **The legacy `/startup-script` endpoints write through to the manifest**
+      (§2.2). On a bot **with** a manifest, `PUT`/`DELETE
+      .../bots/{bot_id}/startup-script` updates the manifest document's `script`
+      field and then materialises, and `GET` reads the manifest's `script`. On a
+      bot **without** a manifest, behaviour is byte-for-byte what it is today.
+      Without this the endpoint returns `200` and the next apply silently
+      overwrites the user's edit — the bug §2.2 exists to prevent, and this item
+      owns the apply points where it would surface. A test pins both arms.
 - [ ] **§2.7 holds on both engine families: apply writes nothing to the bot
       record, and does not branch on first boot.** Apply's record ends at
       delivery — the `ac_bot_startup_script` row written, the artifact handed

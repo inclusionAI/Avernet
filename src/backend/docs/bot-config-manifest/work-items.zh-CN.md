@@ -1620,6 +1620,12 @@ manifest 层，所以 W8 没有「去激活」需要安放。）
 - [ ] **`script` 立即下发、下次启动生效**，且响应要说清楚。它在构造 payload 时被
       烤进启动命令（§2.12），所以它是唯一效果被延后的类目——这与 §2.7「记录下发而
       非执行」的边界一致，不是它的例外。
+- [ ] **老的 `/startup-script` 端点写穿到 manifest**（§2.2）。在**有** manifest 的
+      bot 上，`PUT`/`DELETE .../bots/{bot_id}/startup-script` 先更新 manifest 文档的
+      `script` 字段再物化，`GET` 读 manifest 里的 `script`；在**没有** manifest 的
+      bot 上，行为与今天逐字节一致。不做这件事，端点就会返回 `200` 然后被下一次
+      apply 静默覆盖——正是 §2.2 要防的那个 bug，而分歧浮现的那些 apply 点归本项管。
+      两条臂都要有测试钉住。
 - [ ] **§2.7 在两个引擎系上都成立：apply 不往 bot 记录写任何东西，也不按是否首启
       分支。**apply 的记录到「下发」为止——`ac_bot_startup_script` 那一行写入、
       artifact 递交、逐文件写落地。容器的启动命令或引擎之后拿它做什么，是另一层的
