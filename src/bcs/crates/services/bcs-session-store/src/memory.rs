@@ -15,8 +15,9 @@ use bcs_service_api::core::session::{
     can_reactivate, new_channel_session_id, new_session_id, validate_session_id,
 };
 use bcs_service_api::port::repo::{
-    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent,
-    NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,
+    AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
+    CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
 };
 use bcs_service_api::{
     GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, Participant, ParticipantMode,
@@ -98,9 +99,35 @@ fn validate_session_event_scope(
 #[derive(Default)]
 struct MemoryState {
     sessions: HashMap<String, Session>,
+    callback_leases: HashMap<String, CallbackLeaseState>,
     /// (session_id, bot_uuid) -> 收藏事件时间（epoch ms）。
     /// 仅在 collect 时插入（幂等：已存在则保留原时间，不刷新），uncollect 移除。
     collected: HashMap<(String, String), u64>,
+}
+
+#[derive(Default)]
+struct CallbackLeaseState {
+    token: Option<i64>,
+    owner: Option<String>,
+    until_ms: Option<u64>,
+}
+
+impl CallbackLeaseState {
+    fn for_session_kind(kind: SessionKind) -> Self {
+        Self {
+            token: matches!(kind, SessionKind::ServiceInvocation).then_some(0),
+            owner: None,
+            until_ms: None,
+        }
+    }
+}
+
+fn insert_session(state: &mut MemoryState, session: Session) {
+    state.callback_leases.insert(
+        session.id.clone(),
+        CallbackLeaseState::for_session_kind(session.session_kind),
+    );
+    state.sessions.insert(session.id.clone(), session);
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +201,7 @@ impl SessionRepoPort for MemorySessionRepo {
                 )));
             }
             let sess = session_from_params(id.clone(), group_id, &params, now);
-            st.sessions.insert(id.clone(), sess.clone());
+            insert_session(&mut st, sess.clone());
             return Ok(sess);
         }
 
@@ -187,7 +214,7 @@ impl SessionRepoPort for MemorySessionRepo {
                 continue;
             }
             let sess = session_from_params(id.clone(), group_id, &params, now);
-            st.sessions.insert(id.clone(), sess.clone());
+            insert_session(&mut st, sess.clone());
             return Ok(sess);
         }
 
@@ -229,7 +256,7 @@ impl SessionRepoPort for MemorySessionRepo {
         }
         event_store
             .commit_business_mutation(&command.event, || {
-                state.sessions.insert(session_id, candidate.clone());
+                insert_session(&mut state, candidate.clone());
                 Ok(())
             })
             .await
@@ -251,7 +278,7 @@ impl SessionRepoPort for MemorySessionRepo {
                 continue;
             }
             let session = session_from_params(id.clone(), group_id, &params, now_ms());
-            state.sessions.insert(id, session.clone());
+            insert_session(&mut state, session.clone());
             return Ok(session);
         }
         Err(ServiceError::SessionInvalidParams(
@@ -382,6 +409,33 @@ impl SessionRepoPort for MemorySessionRepo {
             .collect()
     }
 
+    async fn list_recoverable_callbacks(
+        &self,
+        now_ms: u64,
+        after_session_id: Option<&str>,
+        limit: u64,
+    ) -> ServiceResult<Vec<Session>> {
+        let st = self.state.read().await;
+        let mut sessions: Vec<_> = st
+            .sessions
+            .values()
+            .filter(|session| {
+                matches!(session.session_kind, SessionKind::ServiceInvocation)
+                    && matches!(session.status, SessionStatus::Completed)
+                    && session.callback_status.as_deref() == Some("pending")
+                    && after_session_id.map_or(true, |after| session.id.as_str() > after)
+                    && st.callback_leases.get(&session.id).is_some_and(|lease| {
+                        lease.token.is_some()
+                            && lease.until_ms.map_or(true, |until_ms| until_ms <= now_ms)
+                    })
+            })
+            .cloned()
+            .collect();
+        sessions.sort_by(|left, right| left.id.cmp(&right.id));
+        sessions.truncate(limit as usize);
+        Ok(sessions)
+    }
+
     /// CAS complete: only flips status if currently Running.
     /// Returns `Ok(None)` if already Completed (idempotent).
     async fn complete_if_running(
@@ -491,8 +545,65 @@ impl SessionRepoPort for MemorySessionRepo {
         sess.activation_count += 1;
         sess.updated_at = now;
         sess.completed_at = None;
-        debug!(session_id = %session_id, activation_count = sess.activation_count, "Session reactivated");
-        Ok(sess.clone())
+        let result = sess.clone();
+        let activation_count = sess.activation_count;
+        st.callback_leases.insert(
+            session_id.to_string(),
+            CallbackLeaseState::for_session_kind(SessionKind::ServiceInvocation),
+        );
+        debug!(session_id = %session_id, activation_count, "Session reactivated");
+        Ok(result)
+    }
+
+    async fn reactivate_if_completed_activation(
+        &self,
+        session_id: &str,
+        expected_activation_count: i32,
+        new_input: Option<serde_json::Value>,
+    ) -> ServiceResult<Option<Session>> {
+        let now = now_ms();
+        let mut state = self.state.write().await;
+        let session = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+        if session.status != SessionStatus::Completed
+            || session.session_kind != SessionKind::ServiceInvocation
+            || session.activation_count != expected_activation_count
+        {
+            return Ok(None);
+        }
+        can_reactivate(
+            session.status,
+            session.session_kind,
+            session.callback_status.as_deref(),
+        )
+        .map_err(|message| {
+            if message == "callback is still pending" {
+                ServiceError::SessionCallbackPending(session_id.to_string())
+            } else {
+                ServiceError::SessionInvalidParams(format!("{session_id}: {message}"))
+            }
+        })?;
+
+        session.status = SessionStatus::Running;
+        session.output = None;
+        session.error_message = None;
+        session.callback_status = Some("pending".to_string());
+        if let Some(input) = new_input {
+            session.input = Some(input);
+        }
+        session.activation_count += 1;
+        session.updated_at = now;
+        session.completed_at = None;
+        let result = session.clone();
+        let activation_count = session.activation_count;
+        state.callback_leases.insert(
+            session_id.to_string(),
+            CallbackLeaseState::for_session_kind(SessionKind::ServiceInvocation),
+        );
+        debug!(session_id = %session_id, activation_count, "Session reactivated with CAS");
+        Ok(Some(result))
     }
 
     async fn add_participant(
@@ -692,13 +803,105 @@ impl SessionRepoPort for MemorySessionRepo {
 
     async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()> {
         let mut st = self.state.write().await;
-        let sess = st
-            .sessions
-            .get_mut(session_id)
-            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
-        sess.callback_status = Some(status.to_string());
-        sess.updated_at = now_ms();
+        {
+            let sess = st
+                .sessions
+                .get_mut(session_id)
+                .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+            sess.callback_status = Some(status.to_string());
+            sess.updated_at = now_ms();
+        }
+        if status != "pending"
+            && let Some(lease) = st.callback_leases.get_mut(session_id)
+        {
+            lease.owner = None;
+            lease.until_ms = None;
+        }
         Ok(())
+    }
+
+    async fn claim_callback(
+        &self,
+        command: ClaimSessionCallback,
+    ) -> ServiceResult<Option<SessionCallbackClaim>> {
+        let mut state = self.state.write().await;
+        let session = state
+            .sessions
+            .get(&command.session_id)
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if session.status != SessionStatus::Completed
+            || session.session_kind != SessionKind::ServiceInvocation
+            || session.activation_count != command.expected_activation_count
+            || session.callback_status.as_deref() != Some("pending")
+        {
+            return Ok(None);
+        }
+        let Some(lease) = state.callback_leases.get_mut(&command.session_id) else {
+            return Ok(None);
+        };
+        let Some(current_token) = lease.token else {
+            return Ok(None);
+        };
+        if lease
+            .until_ms
+            .is_some_and(|until_ms| until_ms > command.now_ms)
+        {
+            return Ok(None);
+        }
+        let next_token = current_token.checked_add(1).ok_or_else(|| {
+            ServiceError::InternalError("Session callback lease token overflow".to_string())
+        })?;
+        lease.token = Some(next_token);
+        lease.owner = Some(command.lease_owner);
+        lease.until_ms = Some(command.lease_until_ms);
+        Ok(Some(SessionCallbackClaim {
+            lease_token: next_token,
+        }))
+    }
+
+    async fn complete_callback(&self, command: CompleteSessionCallback) -> ServiceResult<bool> {
+        if !matches!(
+            command.terminal_status.as_str(),
+            "succeeded" | "partial_failed" | "failed" | "not_applicable"
+        ) {
+            return Err(ServiceError::SessionInvalidParams(format!(
+                "invalid terminal callback status: {}",
+                command.terminal_status
+            )));
+        }
+        let mut state = self.state.write().await;
+        let session = state
+            .sessions
+            .get(&command.session_id)
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if session.status != SessionStatus::Completed
+            || session.session_kind != SessionKind::ServiceInvocation
+            || session.activation_count != command.expected_activation_count
+            || session.callback_status.as_deref() != Some("pending")
+        {
+            return Ok(false);
+        }
+        let Some(lease) = state.callback_leases.get(&command.session_id) else {
+            return Ok(false);
+        };
+        if lease.token != Some(command.lease_token)
+            || lease.owner.as_deref() != Some(command.lease_owner.as_str())
+        {
+            return Ok(false);
+        }
+        let session = state
+            .sessions
+            .get_mut(&command.session_id)
+            .expect("Session existence checked above");
+        session.callback_status = Some(command.terminal_status);
+        session.updated_at = now_ms();
+        let lease = state
+            .callback_leases
+            .get_mut(&command.session_id)
+            .expect("Callback lease existence checked above");
+        lease.owner = None;
+        lease.until_ms = None;
+        Ok(true)
     }
 
     async fn update_title(
@@ -731,6 +934,7 @@ impl SessionRepoPort for MemorySessionRepo {
         let mut st = self.state.write().await;
         let existed = st.sessions.remove(session_id).is_some();
         if existed {
+            st.callback_leases.remove(session_id);
             st.collected.retain(|key, _| key.0 != session_id);
         }
         Ok(existed)

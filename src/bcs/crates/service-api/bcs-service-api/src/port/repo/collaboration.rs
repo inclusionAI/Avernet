@@ -19,6 +19,21 @@ pub struct MarkHumanNodeRunningCommand {
 }
 
 #[derive(Debug, Clone)]
+pub struct CreateStateMachineRerun {
+    pub source_run_id: String,
+    pub run: StateMachineRun,
+    pub nodes: Vec<StateMachineNodeRun>,
+    pub reactivate_service_session: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum CreateStateMachineRerunOutcome {
+    Created,
+    Existing(StateMachineRun),
+    Conflict,
+}
+
+#[derive(Debug, Clone)]
 pub enum StateMachineEventfulTransition {
     StartRun {
         run_id: String,
@@ -193,6 +208,35 @@ pub trait StateMachineRunRepoPort: Send + Sync {
         }
         self.create_run(run, nodes).await?;
         Ok(true)
+    }
+
+    /// Atomically create the sole direct child of a terminal source Run.
+    ///
+    /// Implementations must serialize on the Session, reject another active
+    /// Run, copy the immutable source snapshot, and reactivate a Service
+    /// Session in the same transaction/critical section when requested.
+    async fn create_rerun_if_session_idle(
+        &self,
+        _command: CreateStateMachineRerun,
+    ) -> ServiceResult<CreateStateMachineRerunOutcome> {
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "Atomic state-machine rerun is not configured".to_string(),
+            request_id: None,
+        })
+    }
+
+    async fn get_direct_rerun(
+        &self,
+        source_run_id: &str,
+    ) -> ServiceResult<Option<StateMachineRun>> {
+        let Some(source) = self.get_run(source_run_id).await? else {
+            return Ok(None);
+        };
+        Ok(self
+            .list_runs_by_session_id(&source.session_id)
+            .await?
+            .into_iter()
+            .find(|run| run.rerun_of.as_deref() == Some(source_run_id)))
     }
 
     async fn get_run(&self, run_id: &str) -> ServiceResult<Option<StateMachineRun>>;

@@ -1282,6 +1282,10 @@ StateMachineRun:
   properties:
     run_id:
       type: string
+    root_run_id:
+      type: string
+    rerun_of:
+      type: string
     definition_id:
       type: string
     definition_version:
@@ -1292,6 +1296,9 @@ StateMachineRun:
       type: integer
     session_id:
       type: string
+    session_activation_count:
+      type: integer
+      minimum: 1
     created_by:
       type: string
     status:
