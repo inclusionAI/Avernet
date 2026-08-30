@@ -272,7 +272,6 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
         target = self._assets.ensure_public_version(
             env=env,
             actor_id="system:skill-center-sync",
-            skill_code=asset.skill_code,
             locator=identity.locator,
             skill_uuid=identity.skill_uuid,
             skill_name=detail.skill_name,

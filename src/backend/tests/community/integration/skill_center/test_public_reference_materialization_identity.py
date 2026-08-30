@@ -123,7 +123,6 @@ def test_deterministic_public_identity_passes_real_canonical_ready_gate() -> Non
         target = references.ensure_public_version(
             env="pre",
             actor_id="actor",
-            skill_code="public-weather",
             locator=identity.locator,
             skill_uuid=identity.skill_uuid,
             skill_name="weather",

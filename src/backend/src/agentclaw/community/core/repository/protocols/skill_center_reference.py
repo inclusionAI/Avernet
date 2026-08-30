@@ -64,7 +64,6 @@ class SkillCenterReferenceRepositoryProtocol(Protocol):
         *,
         env: str,
         actor_id: str,
-        skill_code: str,
         locator: str,
         skill_uuid: str,
         skill_name: str,

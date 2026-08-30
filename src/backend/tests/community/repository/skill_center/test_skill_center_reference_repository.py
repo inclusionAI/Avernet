@@ -51,7 +51,6 @@ def _ensure_public(repo, *, env: str, skill_code: str, **facts):
     )
     return repo.ensure_public_version(
         env=env,
-        skill_code=skill_code,
         locator=identity.locator,
         skill_uuid=identity.skill_uuid,
         **facts,

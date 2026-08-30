@@ -184,7 +184,6 @@ class SkillCenterReferenceProcessor:
             target = self._references.ensure_public_version(
                 env=batch.env,
                 actor_id=batch.actor_id,
-                skill_code=item.skill_code,
                 locator=identity.locator,
                 skill_uuid=identity.skill_uuid,
                 skill_name=detail.skill_name,
