@@ -1789,6 +1789,20 @@ instance of it, not a requirement of this item.
       W2's guarded transport and its size, timeout and concurrency caps.
 - [ ] The fetch is read-only and never executes repository-supplied hooks or
       filters.
+- [ ] **W2's containment guards apply to git content too.** A git source is not
+      unpacked, so it bypasses the archive-member checks by construction — yet a
+      repository can contain exactly the same hazards: a symlink such as
+      `payload -> /etc`, a gitlink/submodule entry, or a device/special entry. A
+      materialiser traversing the requested subtree would read outside the
+      checkout or deliver an escaping link to the bot. Apply the same canonical
+      containment and special-entry rejection **before git content enters W11's
+      store or any delivery service**.
+- [ ] **The expanded checkout is bounded, not just the transfer.** W2's streaming
+      byte cap governs bytes on the wire; a small pack can expand into an
+      enormous tree, and `--depth` bounds *history*, not the selected commit's
+      blobs or trees. Enforce caps on expanded total bytes, object/file count and
+      individual file size, and **clean up the temporary checkout on failure** —
+      otherwise an authenticated manifest author can exhaust backend disk.
 - [ ] A re-pointed tag converges to the new content at the next apply — moving a
       tag changes what the declaration means.
 - [ ] Directory entries from a git source need no `unpack` or
