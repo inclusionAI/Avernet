@@ -51,7 +51,8 @@ class MaterializingSkillVersion:
     skill_uuid: str
     skill_code: str
     sc_version_number: str
-    sc_sha256: str | None
+    sc_skill_id: int
+    sc_version_id: int
     name: str
     description: str | None
     metadata_json: str | None
@@ -76,6 +77,8 @@ class PublishedMaterializedSkillVersion:
     status: Literal["PUBLISHED"]
     skill_uuid: str
     sc_version_number: str
+    sc_skill_id: int
+    sc_version_id: int
     name: str
     description: str | None
     metadata_json: str

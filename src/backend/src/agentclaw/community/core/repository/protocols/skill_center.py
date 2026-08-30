@@ -237,7 +237,6 @@ class SkillVersionMaterializationRepositoryProtocol(Protocol):
         skill_version_id: int,
         metadata_json: str,
         description: str,
-        sc_sha256: str,
         published_at: datetime,
     ) -> PublishedMaterializedSkillVersion:
         ...

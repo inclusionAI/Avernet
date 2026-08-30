@@ -135,7 +135,6 @@ class SkillVersionRepository(
         skill_version_id: int,
         metadata_json: str,
         description: str,
-        sc_sha256: str,
         published_at: datetime,
     ) -> PublishedMaterializedSkillVersion:
         with self._db.orm_session() as session:
@@ -158,7 +157,6 @@ class SkillVersionRepository(
                 if (
                     version.metadata_json != metadata_json
                     or version.description != description
-                    or version.sc_sha256 != sc_sha256
                     or version.published_at is None
                 ):
                     raise RuntimeError(
@@ -167,7 +165,6 @@ class SkillVersionRepository(
             elif version.status == "MATERIALIZING":
                 version.metadata_json = metadata_json
                 version.description = description
-                version.sc_sha256 = sc_sha256
                 version.published_at = published_at
                 version.status = "PUBLISHED"
                 skill.description = description
@@ -178,6 +175,8 @@ class SkillVersionRepository(
             skill_uuid = skill.skill_uuid
             if not isinstance(skill_uuid, str) or not skill_uuid:
                 raise RuntimeError("Center Version has no stable skill_uuid")
+            if version.sc_skill_id is None or version.sc_version_id is None:
+                raise RuntimeError("Center Version has incomplete exact SC identity")
             assert version.published_at is not None
             return PublishedMaterializedSkillVersion(
                 skill_version_id=int(version.id),
@@ -186,6 +185,8 @@ class SkillVersionRepository(
                 status="PUBLISHED",
                 skill_uuid=skill_uuid,
                 sc_version_number=version.sc_version_number,
+                sc_skill_id=int(version.sc_skill_id),
+                sc_version_id=int(version.sc_version_id),
                 name=version.name,
                 description=version.description,
                 metadata_json=version.metadata_json,
@@ -196,6 +197,8 @@ class SkillVersionRepository(
     def _materializing(
         row: SkillVersion, *, skill_uuid: str, skill_code: str
     ) -> MaterializingSkillVersion:
+        if row.sc_skill_id is None or row.sc_version_id is None:
+            raise RuntimeError("Center Version has incomplete exact SC identity")
         return MaterializingSkillVersion(
             skill_version_id=int(row.id),
             skill_id=int(row.skill_id),
@@ -204,7 +207,8 @@ class SkillVersionRepository(
             skill_uuid=skill_uuid,
             skill_code=skill_code,
             sc_version_number=row.sc_version_number,
-            sc_sha256=row.sc_sha256,
+            sc_skill_id=int(row.sc_skill_id),
+            sc_version_id=int(row.sc_version_id),
             name=row.name,
             description=row.description,
             metadata_json=row.metadata_json,

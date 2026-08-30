@@ -189,6 +189,8 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 sc_version_number=target.sc_version_number,
             )
             ref = CanonicalCenterVersionRef(identity)
+            if target.sc_skill_id < 1 or target.sc_version_id < 1:
+                raise ValueError("exact SC identity is incomplete")
             if target.status == "PUBLISHED":
                 if not self._store.verify_version(ref):
                     raise ValueError("PUBLISHED Version has no verified canonical content")
@@ -209,8 +211,6 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
             ):
                 raise ValueError("Skill Center returned a different exact Version")
             expected_digest = exact.sha256.lower()
-            if target.sc_sha256 and target.sc_sha256.lower() != expected_digest:
-                raise ValueError("persisted SC digest conflicts with exact download")
             response = self._http.get(exact.download_url, timeout=30.0)
             response.raise_for_status()
             package_bytes = bytes(response.content)
@@ -261,7 +261,6 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 skill_version_id=request.skill_version_id,
                 metadata_json=metadata_json,
                 description=package.description,
-                sc_sha256=expected_digest,
                 published_at=self._clock(),
             )
         except SkillVersionMaterializationError:
@@ -289,6 +288,8 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
             status="PUBLISHED",
             skill_uuid=target.skill_uuid,
             sc_version_number=target.sc_version_number,
+            sc_skill_id=target.sc_skill_id,
+            sc_version_id=target.sc_version_id,
             name=target.name,
             description=target.description,
             metadata_json=target.metadata_json,

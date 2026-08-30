@@ -118,6 +118,8 @@ class _Versions:
             status="PUBLISHED",
             skill_uuid=self.target.skill_uuid,
             sc_version_number=self.target.sc_version_number,
+            sc_skill_id=self.target.sc_skill_id,
+            sc_version_id=self.target.sc_version_id,
             name=self.target.name,
             description=kwargs["description"],
             metadata_json=kwargs["metadata_json"],
@@ -134,7 +136,8 @@ def _target() -> MaterializingSkillVersion:
         skill_uuid="00000000-0000-4000-8000-000000000010",
         skill_code="public-weather",
         sc_version_number="1.0.0",
-        sc_sha256=None,
+        sc_skill_id=10010,
+        sc_version_id=20101,
         name="weather",
         description=None,
         metadata_json=None,
@@ -184,7 +187,7 @@ def test_exact_package_becomes_published_only_after_all_ready_inputs_exist() -> 
         ],
         "risk_tags": [{"level": "LOW", "name": "network"}],
     }
-    assert versions.published["sc_sha256"] == hashlib.sha256(package).hexdigest()
+    assert "sc_sha256" not in versions.published
 
 
 @pytest.mark.parametrize(

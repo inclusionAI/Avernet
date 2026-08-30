@@ -290,7 +290,6 @@ def test_materialization_publish_is_one_tenant_scoped_compare_and_set() -> None:
             skill_version_id=101,
             metadata_json='{"mcp_dependencies":[]}',
             description="new description",
-            sc_sha256="a" * 64,
             published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
         )
 
@@ -305,6 +304,8 @@ def test_materialization_publish_is_one_tenant_scoped_compare_and_set() -> None:
         status="PUBLISHED",
         skill_uuid="00000000-0000-4000-8000-000000000010",
         sc_version_number="1.0.0",
+        sc_skill_id=1010,
+        sc_version_id=2101,
         name="skill-10",
         description="new description",
         metadata_json='{"mcp_dependencies":[]}',
@@ -315,7 +316,7 @@ def test_materialization_publish_is_one_tenant_scoped_compare_and_set() -> None:
         skill = session.get(Skill, 10)
         assert version is not None and version.status == "PUBLISHED"
         assert version.metadata_json == '{"mcp_dependencies":[]}'
-        assert version.sc_sha256 == "a" * 64
+        assert version.sc_sha256 is None
         assert skill is not None and skill.description == "new description"
         assert skill.status == "PUBLISHED"
 
@@ -345,7 +346,6 @@ def test_materialization_publish_replay_requires_the_same_frozen_facts() -> None
     with db.orm_session() as session:
         row = session.get(SkillVersion, 101)
         assert row is not None
-        row.sc_sha256 = "a" * 64
         row.description = "same"
         row.metadata_json = '{"mcp_dependencies":[]}'
         row.published_at = datetime(2026, 8, 30, 12, 0)
@@ -358,7 +358,6 @@ def test_materialization_publish_replay_requires_the_same_frozen_facts() -> None
             skill_version_id=101,
             metadata_json='{"mcp_dependencies":[]}',
             description="same",
-            sc_sha256="a" * 64,
             published_at=datetime(2026, 8, 30, 13, 0, tzinfo=UTC),
         )
         with pytest.raises(RuntimeError, match="conflicts"):
@@ -368,7 +367,6 @@ def test_materialization_publish_replay_requires_the_same_frozen_facts() -> None
                 skill_version_id=101,
                 metadata_json='{"mcp_dependencies":[{"code":"other"}]}',
                 description="same",
-                sc_sha256="a" * 64,
                 published_at=datetime(2026, 8, 30, 13, 0, tzinfo=UTC),
             )
 
