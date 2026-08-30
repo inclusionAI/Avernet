@@ -88,6 +88,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.skill_center_gateway
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
+  - agentclaw.community.plugin_api.space_skill_source
   - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.plugin_api.storage
   - agentclaw.community.plugin_api.token_exchange

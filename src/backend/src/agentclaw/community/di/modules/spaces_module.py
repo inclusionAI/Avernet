@@ -60,7 +60,6 @@ from agentclaw.community.core.skill_center.services.space_skill_query_service im
     SpaceSkillQueryService,
 )
 from agentclaw.community.core.skill_center.services.space_skill_application_service import (
-    download_exact_skill_package,
     SpaceSkillApplicationService,
 )
 from agentclaw.community.core.skill_center.canonical_center_store import (
@@ -73,12 +72,7 @@ from agentclaw.community.core.skill_center.services.space_skill_version_query_se
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.skill_center.draft_content import DraftContentStore
-from agentclaw.community.core.skill_center.git_snapshot import (
-    GitSnapshotServiceProtocol,
-)
-from agentclaw.community.core.skill_center.services.git_snapshot import (
-    GitSnapshotService,
-)
+from agentclaw.community.plugin_api.space_skill_source import SpaceSkillSourcePlugin
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     SpaceSkillGrantService,
 )
@@ -121,7 +115,6 @@ class SpacesModule(Module):
         )
         binder.bind(SpaceServiceProtocol, to=SpaceService, scope=singleton)
         binder.bind(SpaceMemberServiceProtocol, to=SpaceMemberService, scope=singleton)
-        binder.bind(GitSnapshotServiceProtocol, to=GitSnapshotService, scope=singleton)
         binder.bind(
             SpaceSkillVersionQueryServiceProtocol,
             to=SpaceSkillVersionQueryService,
@@ -158,7 +151,7 @@ class SpacesModule(Module):
         repository: SpaceSkillRepository,
         draft_repository: SpaceSkillDraftRepository,
         draft_store: DraftContentStore,
-        git_snapshots: GitSnapshotServiceProtocol,
+        sources: SpaceSkillSourcePlugin,
         versions: SkillVersionRepositoryProtocol,
         canonical_store: CanonicalCenterVersionStore,
         skill_center: SkillCenterGateway,
@@ -169,11 +162,10 @@ class SpacesModule(Module):
             draft_repository=draft_repository,
             package_validator=SkillPackageValidator(SkillParser()),
             draft_store=draft_store,
-            git_snapshots=git_snapshots,
+            sources=sources,
             versions=versions,
             canonical_store=canonical_store,
             skill_center=skill_center,
-            package_fetcher=download_exact_skill_package,
             env_provider=get_current_env,
             tenant_provider=get_current_avernet_tenant,
         )

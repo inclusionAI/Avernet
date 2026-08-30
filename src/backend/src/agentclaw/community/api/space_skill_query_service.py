@@ -9,9 +9,13 @@ it from here.
 from __future__ import annotations
 
 from agentclaw.community.core.skill_center.space_skill_query_service_protocol import (
+    SpaceSkillDetailRecord,
+    SpaceSkillSummaryRecord,
     SpaceSkillQueryServiceProtocol,
 )
 
 __all__ = [
     "SpaceSkillQueryServiceProtocol",
+    "SpaceSkillDetailRecord",
+    "SpaceSkillSummaryRecord",
 ]

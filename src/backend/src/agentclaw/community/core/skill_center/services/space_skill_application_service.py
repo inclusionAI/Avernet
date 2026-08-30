@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import requests
 from collections.abc import Callable, Sequence
 from uuid import uuid4
 
@@ -24,6 +23,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
 from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillDraftRecord,
 )
+from agentclaw.community.core.models.space_skill import DraftStatus
 from agentclaw.community.core.skill_center.draft_content import (
     DraftContentStore,
     DraftRevisionIdentity,
@@ -32,12 +32,10 @@ from agentclaw.community.core.skill_center.draft_content import (
 from agentclaw.community.core.skill_center.errors import (
     DraftFileNotFoundError,
     DraftFileNotTextError,
+    DraftFrozenError,
     DraftNotFoundError,
     SkillNameChangedError,
     SpaceSkillIdempotencyConflictError,
-)
-from agentclaw.community.core.skill_center.git_snapshot import (
-    GitSnapshotServiceProtocol,
 )
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageValidator,
@@ -58,21 +56,12 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterGateway,
     SkillCenterReadScope,
 )
+from agentclaw.community.plugin_api.space_skill_source import (
+    SpaceSkillSourcePlugin,
+)
 
 
 logger = logging.getLogger(__name__)
-
-
-def download_exact_skill_package(url: str, expected_sha256: str) -> bytes:
-    try:
-        response = requests.get(url, timeout=60)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise RuntimeError("exact Skill package download failed") from exc
-    content = response.content
-    if hashlib.sha256(content).hexdigest().lower() != expected_sha256.lower():
-        raise RuntimeError("exact Skill package checksum mismatch")
-    return content
 
 
 class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
@@ -84,11 +73,10 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         draft_repository: SpaceSkillDraftRepository,
         package_validator: SkillPackageValidator,
         draft_store: DraftContentStore,
-        git_snapshots: GitSnapshotServiceProtocol,
+        sources: SpaceSkillSourcePlugin,
         versions: SkillVersionRepositoryProtocol,
         canonical_store: CanonicalCenterVersionStore,
         skill_center: SkillCenterGateway,
-        package_fetcher: Callable[[str, str], bytes],
         env_provider: Callable[[], str],
         tenant_provider: Callable[[], str],
     ) -> None:
@@ -97,11 +85,10 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         self._draft_repository = draft_repository
         self._validator = package_validator
         self._draft_store = draft_store
-        self._git_snapshots = git_snapshots
+        self._sources = sources
         self._versions = versions
         self._canonical = canonical_store
         self._skill_center = skill_center
-        self._package_fetcher = package_fetcher
         self._env_provider = env_provider
         self._tenant_provider = tenant_provider
 
@@ -117,10 +104,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         package = self._validator.validate_directory(files)
         request_id = self._request_id(request_id)
         request_hash = hashlib.sha256(
-            b"FOLDER\0"
-            + str(space_id).encode("ascii")
-            + b"\0"
-            + package.canonical_zip
+            b"FOLDER\0" + str(space_id).encode("ascii") + b"\0" + package.canonical_zip
         ).hexdigest()
         replay = self._creation_replay(
             space_id=space_id, request_id=request_id, request_hash=request_hash
@@ -161,7 +145,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         )
         if replay is not None:
             return replay
-        snapshot = self._git_snapshots.fetch(
+        snapshot = self._sources.fetch_git_snapshot(
             git_url=git_url, branch=branch, subdir=subdir
         )
         package = self._validator.validate_directory(snapshot.files)
@@ -210,9 +194,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
             content = files[path].decode("utf-8")
         except UnicodeDecodeError as exc:
             raise DraftFileNotTextError("draft file is not UTF-8 text") from exc
-        return DraftFileContent(
-            path=path, content=content, revision_id=ref.revision_id
-        )
+        return DraftFileContent(path=path, content=content, revision_id=ref.revision_id)
 
     def save_draft_file(
         self,
@@ -225,9 +207,11 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         expected_revision_id: str,
         fencing_token: int | None,
     ) -> DraftMutationResult:
-        record, _ref, package = self._read_draft(
+        record = self._draft_record(
             space_id=space_id, skill_id=skill_id, actor_id=actor_id
         )
+        self._require_editing(record)
+        package = self._read_draft_package(record)
         path = self._validator.normalize_relative_path(path)
         files = dict(package.files)
         files[path] = content.encode("utf-8")
@@ -255,9 +239,10 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         record = self._draft_record(
             space_id=space_id, skill_id=skill_id, actor_id=actor_id
         )
+        self._require_editing(record)
         if record["source_kind"] != "GIT" or not record["source_repo_url"]:
             raise ValueError("Draft is not backed by a Git snapshot")
-        snapshot = self._git_snapshots.fetch(
+        snapshot = self._sources.fetch_git_snapshot(
             git_url=record["source_repo_url"],
             branch=record["source_branch"],
             subdir=record["source_subdir"],
@@ -397,11 +382,11 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
             )
         )
         package = self._validator.validate_zip(
-            self._package_fetcher(download.download_url, download.sha256)
+            self._sources.fetch_exact_package(
+                url=download.download_url, expected_sha256=download.sha256
+            )
         )
-        version = CanonicalCenterVersion.from_files(
-            exact_identity, dict(package.files)
-        )
+        version = CanonicalCenterVersion.from_files(exact_identity, dict(package.files))
         self._canonical.write_version(version)
         return self._canonical.read_version(CanonicalCenterVersionRef(exact_identity))
 
@@ -447,6 +432,19 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
             locator=record["locator"],
         )
         return record, ref, self._draft_store.read_revision(ref)
+
+    def _read_draft_package(self, record: SpaceSkillDraftRecord):
+        ref = DraftRevisionRef.from_locator(
+            tenant=self._tenant_provider(),
+            env=self._env_provider(),
+            locator=record["locator"],
+        )
+        return self._draft_store.read_revision(ref)
+
+    @staticmethod
+    def _require_editing(record: SpaceSkillDraftRecord) -> None:
+        if record["status"] == DraftStatus.FROZEN:
+            raise DraftFrozenError("draft is frozen")
 
     @staticmethod
     def _require_stable_name(
@@ -518,10 +516,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         )
         if existing is None:
             return None
-        if (
-            existing["space_id"] != space_id
-            or existing["request_hash"] != request_hash
-        ):
+        if existing["space_id"] != space_id or existing["request_hash"] != request_hash:
             raise SpaceSkillIdempotencyConflictError(
                 "creation request already belongs to another intent"
             )

@@ -217,31 +217,6 @@ class SpaceSkillReadRecord(SpaceSkillQueryRecord):
     pending_request_no: str | None
 
 
-class SpaceSkillSummaryRecord(TypedDict):
-    """Final stable workshop summary."""
-
-    id: int
-    skill_uuid: str
-    name: str
-    description: str | None
-    lifecycle_status: Literal["DRAFT_ONLY", "PUBLISHED", "OFFLINE"]
-    space_type: Literal["PERSONAL", "TEAM"]
-    owner: dict
-    latest_published_version: dict | None
-    draft: dict | None
-    active_publication: dict | None
-    actor: dict
-    gmt_created: datetime
-    gmt_modified: datetime
-    lease_summary: DraftEditLeaseSummaryRecord | None
-
-
-class SpaceSkillDetailRecord(SpaceSkillSummaryRecord):
-    source: Literal["FOLDER", "GIT"]
-    offline_at: datetime | None
-    offline_by: str | None
-
-
 class DraftEditLeaseRecord(TypedDict):
     """Current durable lease row; its token monotonically increases forever."""
 
@@ -256,15 +231,6 @@ class DraftEditLeaseViewRecord(TypedDict):
     state: Literal["NOT_REQUIRED", "FREE", "HELD_BY_ME", "HELD_BY_OTHER"]
     holder_user_id: str | None
     fencing_token: int | None
-
-
-class DraftEditLeaseSummaryRecord(TypedDict):
-    """List-card Lease projection that deliberately excludes fencing tokens."""
-
-    required: bool
-    state: Literal["NOT_REQUIRED", "FREE", "HELD_BY_ME", "HELD_BY_OTHER"]
-    holder_user_id: str | None
-    holder_display_name: str | None
 
 
 class SkillVersionRecord(TypedDict):

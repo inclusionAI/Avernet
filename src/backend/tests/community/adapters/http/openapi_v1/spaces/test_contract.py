@@ -33,12 +33,16 @@ from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
 from agentclaw.community.api.space_skill_application_service import (
+    DraftDeleteOutcome,
     DraftFileContent,
     DraftFileItem,
     DraftFileTree,
     DraftMutationResult,
     SpaceSkillApplicationServiceProtocol,
     SpaceSkillCreationOutcome,
+)
+from agentclaw.community.plugin_api.space_skill_source import (
+    ExactSkillPackageFetchError,
 )
 from agentclaw.community.api.space_skill_version_query_service import (
     SpaceSkillVersionQueryServiceProtocol,
@@ -54,6 +58,11 @@ from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
     MarketSource,
+)
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillManifestMissingError,
+    SkillManifestMultipleError,
+    SkillPathInvalidError,
 )
 from agentclaw.community.core.spaces.models import (
     SpaceJoinStatus,
@@ -311,7 +320,7 @@ def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
                 "publish_draft": True,
                 "delete_draft": True,
                 "create_upgrade_draft": True,
-                    "offline_skill": True,
+                "offline_skill": True,
                 "manage_grants": True,
                 "transfer_owner": True,
                 "request_edit_access": False,
@@ -337,7 +346,7 @@ def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
                 "publish_draft": False,
                 "delete_draft": False,
                 "create_upgrade_draft": False,
-                    "offline_skill": False,
+                "offline_skill": False,
                 "manage_grants": False,
                 "transfer_owner": False,
                 "request_edit_access": True,
@@ -747,8 +756,8 @@ def test_folder_and_git_creation_publish_real_idempotent_routes(
     skill_application_service.create_from_folder.return_value = (
         SpaceSkillCreationOutcome(skill_id=51, created=True)
     )
-    skill_application_service.create_from_git.return_value = (
-        SpaceSkillCreationOutcome(skill_id=51, created=True)
+    skill_application_service.create_from_git.return_value = SpaceSkillCreationOutcome(
+        skill_id=51, created=True
     )
     skill_query_service.get_space_skill.return_value = _skill_detail_record()
 
@@ -786,6 +795,30 @@ def test_folder_and_git_creation_publish_real_idempotent_routes(
         branch=None,
         subdir=None,
     )
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (SkillManifestMissingError(), 422205),
+        (SkillManifestMultipleError(), 422206),
+        (SkillPathInvalidError(), 422207),
+    ],
+)
+def test_folder_creation_publishes_specific_package_error_codes(
+    client, skill_application_service, error, code
+):
+    skill_application_service.create_from_folder.side_effect = error
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-invalid"},
+        files=[("files", ("SKILL.md", b"manifest", "text/markdown"))],
+        data={"file_paths": '["SKILL.md"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == code
 
 
 def test_draft_file_routes_preserve_revision_and_fencing_contract(
@@ -838,6 +871,81 @@ def test_draft_file_routes_preserve_revision_and_fencing_contract(
     )
 
 
+def test_upgrade_refresh_and_delete_routes_publish_command_contracts(
+    client, skill_application_service
+):
+    mutation = DraftMutationResult(
+        target_version=2,
+        status="EDITING",
+        revision_id="rev-2",
+        name="draft-skill",
+        description="Draft description",
+        source_kind="PUBLISHED_VERSION",
+        source_repo_url=None,
+        source_branch=None,
+        source_commit_sha=None,
+        source_subdir=None,
+    )
+    skill_application_service.create_upgrade_draft.return_value = mutation
+    skill_application_service.refresh_draft_from_git.return_value = mutation
+    skill_application_service.delete_draft.return_value = DraftDeleteOutcome(
+        changed=True, deleted_scope="DRAFT"
+    )
+
+    upgraded = client.post(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/upgrade",
+        headers={"Idempotency-Key": "upgrade-2"},
+    )
+    refreshed = client.post(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/refresh-from-git",
+        json={"expected_revision_id": "rev-1", "fencing_token": 7},
+    )
+    deleted = client.delete(
+        "/openapi/v1/bots/spaces/7/skills/51/draft",
+        params={"expected_revision_id": "rev-2", "fencing_token": 7},
+    )
+
+    assert upgraded.status_code == 201
+    assert refreshed.json()["data"]["revision_id"] == "rev-2"
+    assert deleted.json()["data"] == {"changed": True, "deleted_scope": "DRAFT"}
+    skill_application_service.create_upgrade_draft.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        request_id="upgrade-2",
+    )
+    skill_application_service.refresh_draft_from_git.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        expected_revision_id="rev-1",
+        fencing_token=7,
+    )
+    skill_application_service.delete_draft.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        expected_revision_id="rev-2",
+        fencing_token=7,
+    )
+
+
+def test_upgrade_maps_exact_source_failure_to_sc_unavailable(
+    client, skill_application_service
+):
+    skill_application_service.create_upgrade_draft.side_effect = (
+        ExactSkillPackageFetchError("download failed")
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/upgrade",
+        headers={"Idempotency-Key": "upgrade-failed"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+
+
 def test_published_version_and_consumable_routes_use_business_ordinals(
     client, skill_version_query_service
 ):
@@ -880,9 +988,7 @@ def test_published_version_and_consumable_routes_use_business_ordinals(
     versions = client.get("/openapi/v1/bots/spaces/7/skills/51/versions")
     detail = client.get("/openapi/v1/bots/spaces/7/skills/51/versions/2")
     tree = client.get("/openapi/v1/bots/spaces/7/skills/51/versions/2/files")
-    file = client.get(
-        "/openapi/v1/bots/spaces/7/skills/51/versions/2/files/SKILL.md"
-    )
+    file = client.get("/openapi/v1/bots/spaces/7/skills/51/versions/2/files/SKILL.md")
     consumable = client.get("/openapi/v1/bots/spaces/7/skills/consumable")
 
     assert versions.json()["data"]["items"][0]["version"] == 2
@@ -1002,12 +1108,13 @@ def test_list_spaces_forwards_filters_and_maps_page(client, space_service):
 def test_list_spaces_forwards_accessible_scope(client, space_service):
     space_service.list_spaces.return_value = (0, [])
 
-    response = client.get(
-        "/openapi/v1/bots/spaces", params={"scope": "accessible"}
-    )
+    response = client.get("/openapi/v1/bots/spaces", params={"scope": "accessible"})
 
     assert response.status_code == 200
-    assert space_service.list_spaces.call_args.kwargs["scope"] is DomainSpaceListScope.ACCESSIBLE
+    assert (
+        space_service.list_spaces.call_args.kwargs["scope"]
+        is DomainSpaceListScope.ACCESSIBLE
+    )
 
 
 def test_list_spaces_rejects_unknown_scope(client):

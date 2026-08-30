@@ -35,8 +35,6 @@ provides:
   - "SpaceSkillReadRepository"
   - "SpaceSkillVersionQueryService"
   - "SpaceSkillVersionReadRepository"
-  - "GitSnapshotService"
-  - "GitSnapshotServiceProtocol"
   - "SpaceSkillEditorRequestService"
   - "SkillCollaboratorApprovalHandler"
   - "DraftEditLeaseService"
@@ -85,6 +83,7 @@ consumes:
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillCenterGateway"
+  - "SpaceSkillSourcePlugin"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
@@ -148,6 +147,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.skill_center_gateway
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
+  - agentclaw.community.plugin_api.space_skill_source
   - agentclaw.community.utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils

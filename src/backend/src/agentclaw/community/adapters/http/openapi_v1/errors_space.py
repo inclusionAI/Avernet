@@ -4,6 +4,7 @@ from enum import IntEnum, StrEnum
 
 
 class SpaceErrorCode(IntEnum):
+    SC_MARKET_UNAVAILABLE = 502000
     SKILL_CENTER_TEAM_CREATE_FAILED = 502201
     SKILL_GRANT_FORBIDDEN = 403203
     SKILL_GRANT_NOT_FOUND = 404201
@@ -20,6 +21,8 @@ class SpaceErrorCode(IntEnum):
     DRAFT_REVISION_CONFLICT = 409308
     SKILL_PACKAGE_INVALID = 422202
     SKILL_NAME_CHANGED = 422203
+    SKILL_MANIFEST_MISSING = 422205
+    SKILL_MANIFEST_MULTIPLE = 422206
     DRAFT_NOT_FOUND = 404204
     SKILL_PATH_INVALID = 422207
     SKILL_GIT_UNAVAILABLE = 502202
@@ -27,6 +30,7 @@ class SpaceErrorCode(IntEnum):
 
 
 class SpacePublicErrorMessage(StrEnum):
+    SC_MARKET_UNAVAILABLE = "Skill Center is unavailable"
     SKILL_CENTER_TEAM_CREATE_FAILED = "Skill Center team creation failed"
     SKILL_GRANT_FORBIDDEN = "Forbidden"
     SKILL_GRANT_NOT_FOUND = "Not found"
@@ -43,6 +47,8 @@ class SpacePublicErrorMessage(StrEnum):
     DRAFT_REVISION_CONFLICT = "Draft revision changed"
     SKILL_PACKAGE_INVALID = "Skill package is invalid"
     SKILL_NAME_CHANGED = "SKILL.md name cannot be changed"
+    SKILL_MANIFEST_MISSING = "SKILL.md manifest is missing"
+    SKILL_MANIFEST_MULTIPLE = "Multiple SKILL.md manifests were provided"
     DRAFT_NOT_FOUND = "Not found"
     SKILL_PATH_INVALID = "Skill file path is invalid"
     SKILL_GIT_UNAVAILABLE = "Git snapshot is unavailable"

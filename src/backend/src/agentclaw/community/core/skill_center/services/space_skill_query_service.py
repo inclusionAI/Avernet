@@ -12,6 +12,8 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 )
 from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillReadRecord,
+)
+from agentclaw.community.core.skill_center.space_skill_query_service_protocol import (
     SpaceSkillDetailRecord,
     SpaceSkillSummaryRecord,
 )

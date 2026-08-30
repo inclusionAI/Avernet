@@ -20,6 +20,10 @@ from agentclaw.community.core.skill_center.errors import (
     DraftFileNotTextError,
 )
 from agentclaw.community.core.skill_center.space_skill_version_query_service_protocol import (
+    ConsumableSpaceSkillSummaryRecord,
+    PublishedSkillFileContentRecord,
+    PublishedSkillFileTreeRecord,
+    PublishedSkillVersionRecord,
     SpaceSkillVersionQueryServiceProtocol,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
@@ -40,7 +44,7 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
 
     def list_versions(
         self, *, space_id: int, skill_id: int, actor_id: str, page: int, page_size: int
-    ) -> tuple[int, list[dict]]:
+    ) -> tuple[int, list[PublishedSkillVersionRecord]]:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
         total, rows = self._repository.list_published(
             space_id=space_id,
@@ -53,7 +57,7 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
 
     def get_version(
         self, *, space_id: int, skill_id: int, version: int, actor_id: str
-    ) -> dict:
+    ) -> PublishedSkillVersionRecord:
         row = self._row(
             space_id=space_id, skill_id=skill_id, version=version, actor_id=actor_id
         )
@@ -61,15 +65,14 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
 
     def get_version_file_tree(
         self, *, space_id: int, skill_id: int, version: int, actor_id: str
-    ) -> dict:
+    ) -> PublishedSkillFileTreeRecord:
         row, content = self._content(
             space_id=space_id, skill_id=skill_id, version=version, actor_id=actor_id
         )
         return {
             "version": row["version_ordinal"],
             "files": [
-                {"path": item.path, "size": len(item.content)}
-                for item in content.files
+                {"path": item.path, "size": len(item.content)} for item in content.files
             ],
         }
 
@@ -81,7 +84,7 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
         version: int,
         actor_id: str,
         path: str,
-    ) -> dict:
+    ) -> PublishedSkillFileContentRecord:
         row, content = self._content(
             space_id=space_id, skill_id=skill_id, version=version, actor_id=actor_id
         )
@@ -103,16 +106,14 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
         keyword: str | None,
         page: int,
         page_size: int,
-    ) -> tuple[int, list[dict]]:
+    ) -> tuple[int, list[ConsumableSpaceSkillSummaryRecord]]:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
         keyword = keyword.strip() if keyword and keyword.strip() else None
         candidates = self._repository.list_consumable_candidates(
             space_id=space_id, env=get_current_env(), keyword=keyword
         )
         ready = [
-            row
-            for row in candidates
-            if self._canonical.verify_version(self._ref(row))
+            row for row in candidates if self._canonical.verify_version(self._ref(row))
         ]
         start = (page - 1) * page_size
         items = [
@@ -153,12 +154,14 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
         )
 
     @staticmethod
-    def _version(row) -> dict:
+    def _version(row) -> PublishedSkillVersionRecord:
         dependencies: list[str] = []
         if row["metadata_json"]:
             metadata = json.loads(row["metadata_json"])
             raw = metadata.get("mcp_dependencies", [])
-            if not isinstance(raw, list) or any(not isinstance(item, str) for item in raw):
+            if not isinstance(raw, list) or any(
+                not isinstance(item, str) for item in raw
+            ):
                 raise ValueError("Published Version MCP metadata is invalid")
             dependencies = raw
         return {
@@ -172,7 +175,12 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
 
     @staticmethod
     def _path(value: str) -> str:
-        if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
+        if (
+            not isinstance(value, str)
+            or not value
+            or value.startswith("/")
+            or "\\" in value
+        ):
             raise DraftFileNotFoundError("published version file not found")
         path = PurePosixPath(value)
         if any(part in {"", ".", ".."} for part in path.parts):

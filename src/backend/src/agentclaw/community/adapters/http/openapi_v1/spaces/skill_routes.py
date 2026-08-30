@@ -5,7 +5,17 @@ from __future__ import annotations
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Header, Path, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    Path,
+    Query,
+    Request,
+    UploadFile,
+)
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -35,13 +45,11 @@ from agentclaw.community.api.space_skill_application_service import (
     SpaceSkillApplicationServiceProtocol,
 )
 from agentclaw.community.api.space_skill_query_service import (
+    SpaceSkillSummaryRecord,
     SpaceSkillQueryServiceProtocol,
 )
 from agentclaw.community.api.space_skill_version_query_service import (
     SpaceSkillVersionQueryServiceProtocol,
-)
-from agentclaw.community.core.repository.protocols.skill_center_types import (
-    SpaceSkillSummaryRecord,
 )
 from agentclaw.community.core.skill_center.skill_package import SkillPackageInvalidError
 from agentclaw.community.di import Injected
@@ -77,6 +85,7 @@ def _space_skill_summary(record: SpaceSkillSummaryRecord) -> SpaceSkillSummary:
 
 def _space_skill_detail(record) -> SpaceSkillDetail:
     return SpaceSkillDetail.model_validate({**record, "skill_id": str(record["id"])})
+
 
 @router.get(
     "/{space_id}/skills",
@@ -131,9 +140,7 @@ async def create_space_skill_from_folder(
     commands: SpaceSkillApplicationServiceProtocol = Injected(
         SpaceSkillApplicationServiceProtocol
     ),
-    queries: SpaceSkillQueryServiceProtocol = Injected(
-        SpaceSkillQueryServiceProtocol
-    ),
+    queries: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
 ) -> Envelope[SpaceSkillDetail]:
     try:
         paths = json.loads(file_paths)
@@ -146,7 +153,8 @@ async def create_space_skill_from_folder(
     ):
         raise SkillPackageInvalidError("invalid_file_paths")
     payload = [
-        (path, await uploaded.read()) for path, uploaded in zip(paths, files, strict=True)
+        (path, await uploaded.read())
+        for path, uploaded in zip(paths, files, strict=True)
     ]
     outcome = commands.create_from_folder(
         space_id=space_id,
@@ -176,9 +184,7 @@ async def import_space_skill_from_git(
     commands: SpaceSkillApplicationServiceProtocol = Injected(
         SpaceSkillApplicationServiceProtocol
     ),
-    queries: SpaceSkillQueryServiceProtocol = Injected(
-        SpaceSkillQueryServiceProtocol
-    ),
+    queries: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
 ) -> Envelope[SpaceSkillDetail]:
     outcome = commands.create_from_git(
         space_id=space_id,
@@ -366,4 +372,3 @@ async def read_space_skill_version_file(
         ),
         request,
     )
-

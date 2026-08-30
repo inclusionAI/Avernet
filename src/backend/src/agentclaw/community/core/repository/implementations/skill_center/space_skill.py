@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from injector import inject
 from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 
 from agentclaw.community.core.models.skill import Skill
@@ -48,6 +49,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseForbiddenError,
     DraftEditLeaseNotFoundError,
     DraftEditLeaseTokenRejectedError,
+    SpaceSkillIdempotencyConflictError,
 )
 
 
@@ -108,58 +110,79 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         if ownership_data["env"] != env or owner_grant_data["env"] != env:
             raise ValueError("Space Skill facts must share one env")
 
-        with self._db.orm_session() as session:
-            replay = self._creation_by_request(
-                session, request_id=skill_data["creation_request_id"], env=env
+        try:
+            with self._db.transactional_orm_session() as session:
+                replay = self._creation_by_request(
+                    session, request_id=skill_data["creation_request_id"], env=env
+                )
+                if replay is not None:
+                    self._validate_creation_replay(
+                        replay,
+                        request_hash=skill_data["creation_request_hash"],
+                        space_id=ownership_data["space_id"],
+                    )
+                    return self._creation_replay_result(session, replay, env=env)
+                space = (
+                    session.query(SpaceModel)
+                    .filter(
+                        SpaceModel.id == ownership_data["space_id"],
+                        SpaceModel.env == env,
+                        SpaceModel.deleted_at.is_(None),
+                    )
+                    .one_or_none()
+                )
+                if space is None:
+                    raise ValueError("Space Skill ownership requires an active Space")
+
+                member = (
+                    session.query(SpaceMemberModel)
+                    .filter(
+                        SpaceMemberModel.space_id == space.id,
+                        SpaceMemberModel.user_id == owner_grant_data["user_id"],
+                        SpaceMemberModel.status == "ACTIVE",
+                        SpaceMemberModel.env == env,
+                    )
+                    .one_or_none()
+                )
+                if member is None:
+                    raise ValueError("Space Skill Owner must be an active Space Member")
+
+                skill = Skill(**dict(skill_data))
+                session.add(skill)
+                session.flush()
+
+                ownership = SkillSpaceBinding(
+                    **{**ownership_data, "skill_id": skill.id}
+                )
+                owner_grant_payload = dict(owner_grant_data)
+                owner_grant_payload.update(
+                    skill_id=skill.id,
+                    role="OWNER",
+                    status="ACTIVE",
+                    owner_slot=1,
+                )
+                owner_grant = SkillGrant(**owner_grant_payload)
+                session.add_all((ownership, owner_grant))
+                session.flush()
+                return {
+                    "created": True,
+                    "skill": self._skill_to_dict(skill),
+                    "ownership": self._ownership_to_dict(ownership),
+                    "owner_grant": self._grant_to_dict(owner_grant),
+                }
+        except IntegrityError:
+            replay = self.get_creation_by_request_id(
+                request_id=skill_data["creation_request_id"], env=env
             )
-            if replay is not None:
+            if replay is None:
+                raise
+            self._validate_creation_replay(
+                replay,
+                request_hash=skill_data["creation_request_hash"],
+                space_id=ownership_data["space_id"],
+            )
+            with self._db.orm_session() as session:
                 return self._creation_replay_result(session, replay, env=env)
-            space = (
-                session.query(SpaceModel)
-                .filter(
-                    SpaceModel.id == ownership_data["space_id"],
-                    SpaceModel.env == env,
-                    SpaceModel.deleted_at.is_(None),
-                )
-                .one_or_none()
-            )
-            if space is None:
-                raise ValueError("Space Skill ownership requires an active Space")
-
-            member = (
-                session.query(SpaceMemberModel)
-                .filter(
-                    SpaceMemberModel.space_id == space.id,
-                    SpaceMemberModel.user_id == owner_grant_data["user_id"],
-                    SpaceMemberModel.status == "ACTIVE",
-                    SpaceMemberModel.env == env,
-                )
-                .one_or_none()
-            )
-            if member is None:
-                raise ValueError("Space Skill Owner must be an active Space Member")
-
-            skill = Skill(**dict(skill_data))
-            session.add(skill)
-            session.flush()
-
-            ownership = SkillSpaceBinding(**{**ownership_data, "skill_id": skill.id})
-            owner_grant_payload = dict(owner_grant_data)
-            owner_grant_payload.update(
-                skill_id=skill.id,
-                role="OWNER",
-                status="ACTIVE",
-                owner_slot=1,
-            )
-            owner_grant = SkillGrant(**owner_grant_payload)
-            session.add_all((ownership, owner_grant))
-            session.flush()
-            return {
-                "created": True,
-                "skill": self._skill_to_dict(skill),
-                "ownership": self._ownership_to_dict(ownership),
-                "owner_grant": self._grant_to_dict(owner_grant),
-            }
 
     def get_creation_by_request_id(
         self, *, request_id: str, env: str
@@ -205,7 +228,11 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         *,
         env: str,
     ) -> SpaceSkillCreationRecord:
-        skill = session.query(Skill).filter(Skill.id == replay["skill_id"], Skill.env == env).one()
+        skill = (
+            session.query(Skill)
+            .filter(Skill.id == replay["skill_id"], Skill.env == env)
+            .one()
+        )
         ownership = (
             session.query(SkillSpaceBinding)
             .filter(
@@ -231,6 +258,15 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             "ownership": self._ownership_to_dict(ownership),
             "owner_grant": self._grant_to_dict(owner),
         }
+
+    @staticmethod
+    def _validate_creation_replay(
+        replay: SpaceSkillCreationReplayRecord, *, request_hash: str, space_id: int
+    ) -> None:
+        if replay["space_id"] != space_id or replay["request_hash"] != request_hash:
+            raise SpaceSkillIdempotencyConflictError(
+                "creation request already belongs to another intent"
+            )
 
     def list_space_skills(
         self,
@@ -509,11 +545,21 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 .with_for_update()
                 .one_or_none()
             )
-            current_owner.status = "ACTIVE" if retain_previous_owner_as_manager else "REVOKED"
-            current_owner.role = "MANAGER" if retain_previous_owner_as_manager else "OWNER"
+            current_owner.status = (
+                "ACTIVE" if retain_previous_owner_as_manager else "REVOKED"
+            )
+            current_owner.role = (
+                "MANAGER" if retain_previous_owner_as_manager else "OWNER"
+            )
             current_owner.owner_slot = None
-            current_owner.revoked_at = None if retain_previous_owner_as_manager else datetime.now(UTC).replace(tzinfo=None)
-            current_owner.revoked_by = None if retain_previous_owner_as_manager else actor_id
+            current_owner.revoked_at = (
+                None
+                if retain_previous_owner_as_manager
+                else datetime.now(UTC).replace(tzinfo=None)
+            )
+            current_owner.revoked_by = (
+                None if retain_previous_owner_as_manager else actor_id
+            )
             session.flush()
 
             if target is None:
