@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
+from starlette.concurrency import run_in_threadpool as actual_run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.spaces.router import router
@@ -754,8 +756,6 @@ def _skill_detail_record():
 def test_folder_and_git_creation_publish_real_idempotent_routes(
     client, skill_application_service, skill_query_service, monkeypatch
 ):
-    from starlette.concurrency import run_in_threadpool as actual_run_in_threadpool
-
     offload = AsyncMock(side_effect=actual_run_in_threadpool)
     monkeypatch.setattr(
         "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes.run_in_threadpool",
@@ -803,10 +803,12 @@ def test_folder_and_git_creation_publish_real_idempotent_routes(
         branch=None,
         subdir=None,
     )
-    assert offload.await_count == 2
-    assert offload.await_args_list[0].args == (
+    assert [call.args[0] for call in offload.await_args_list] == [
+        skill_application_service.create_from_folder,
+        skill_query_service.get_space_skill,
         skill_application_service.create_from_git,
-    )
+        skill_query_service.get_space_skill,
+    ]
 
 
 def test_folder_creation_rejects_oversized_upload_before_application_service(
@@ -853,8 +855,13 @@ def test_folder_creation_publishes_specific_package_error_codes(
 
 
 def test_draft_file_routes_preserve_revision_and_fencing_contract(
-    client, skill_application_service
+    client, skill_application_service, monkeypatch
 ):
+    offload = AsyncMock(side_effect=actual_run_in_threadpool)
+    spaces_router_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.router"
+    )
+    monkeypatch.setattr(spaces_router_module, "run_in_threadpool", offload)
     skill_application_service.get_draft_file_tree.return_value = DraftFileTree(
         revision_id="rev-1", files=(DraftFileItem(path="SKILL.md", size=10),)
     )
@@ -900,11 +907,21 @@ def test_draft_file_routes_preserve_revision_and_fencing_contract(
         expected_revision_id="rev-1",
         fencing_token=7,
     )
+    assert [call.args[0] for call in offload.await_args_list] == [
+        skill_application_service.get_draft_file_tree,
+        skill_application_service.read_draft_file,
+        skill_application_service.save_draft_file,
+    ]
 
 
 def test_upgrade_refresh_and_delete_routes_publish_command_contracts(
-    client, skill_application_service
+    client, skill_application_service, monkeypatch
 ):
+    offload = AsyncMock(side_effect=actual_run_in_threadpool)
+    spaces_router_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.router"
+    )
+    monkeypatch.setattr(spaces_router_module, "run_in_threadpool", offload)
     mutation = DraftMutationResult(
         target_version=2,
         status="EDITING",
@@ -959,6 +976,11 @@ def test_upgrade_refresh_and_delete_routes_publish_command_contracts(
         expected_revision_id="rev-2",
         fencing_token=7,
     )
+    assert [call.args[0] for call in offload.await_args_list] == [
+        skill_application_service.create_upgrade_draft,
+        skill_application_service.refresh_draft_from_git,
+        skill_application_service.delete_draft,
+    ]
 
 
 def test_upgrade_maps_exact_source_failure_to_sc_unavailable(
@@ -978,8 +1000,13 @@ def test_upgrade_maps_exact_source_failure_to_sc_unavailable(
 
 
 def test_published_version_and_consumable_routes_use_business_ordinals(
-    client, skill_version_query_service
+    client, skill_version_query_service, monkeypatch
 ):
+    offload = AsyncMock(side_effect=actual_run_in_threadpool)
+    monkeypatch.setattr(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes.run_in_threadpool",
+        offload,
+    )
     published_at = datetime(2026, 8, 30, 8)
     version = {
         "version": 2,
@@ -1027,6 +1054,10 @@ def test_published_version_and_consumable_routes_use_business_ordinals(
     assert tree.json()["data"]["files"][0]["path"] == "SKILL.md"
     assert file.json()["data"]["content"] == "# Published"
     assert consumable.json()["data"]["items"][0]["skill_id"] == "51"
+    assert [call.args[0] for call in offload.await_args_list] == [
+        skill_version_query_service.get_version_file_tree,
+        skill_version_query_service.read_version_file,
+    ]
 
 
 @pytest.mark.parametrize(

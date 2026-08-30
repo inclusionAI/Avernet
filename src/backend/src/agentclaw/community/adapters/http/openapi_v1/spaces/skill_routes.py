@@ -177,14 +177,18 @@ async def create_space_skill_from_folder(
         if total > MAX_EXPANDED_BYTES:
             raise SkillPackageTooLargeError()
         files.append((path, content))
-    outcome = commands.create_from_folder(
+    outcome = await run_in_threadpool(
+        commands.create_from_folder,
         space_id=space_id,
         actor_id=user_id,
         request_id=idempotency_key,
         files=files,
     )
-    detail = queries.get_space_skill(
-        space_id=space_id, skill_id=outcome.skill_id, actor_id=user_id
+    detail = await run_in_threadpool(
+        queries.get_space_skill,
+        space_id=space_id,
+        skill_id=outcome.skill_id,
+        actor_id=user_id,
     )
     return created(_space_skill_detail(detail), request)
 
@@ -362,15 +366,15 @@ async def get_space_skill_version_file_tree(
     ),
 ) -> Envelope[PublishedVersionFileTree]:
     actor_id = _require_user_delegation(caller)
+    result = await run_in_threadpool(
+        service.get_version_file_tree,
+        space_id=space_id,
+        skill_id=skill_id,
+        version=version,
+        actor_id=actor_id,
+    )
     return envelope(
-        PublishedVersionFileTree.model_validate(
-            service.get_version_file_tree(
-                space_id=space_id,
-                skill_id=skill_id,
-                version=version,
-                actor_id=actor_id,
-            )
-        ),
+        PublishedVersionFileTree.model_validate(result),
         request,
     )
 
@@ -392,15 +396,15 @@ async def read_space_skill_version_file(
     ),
 ) -> Envelope[PublishedVersionFileContent]:
     actor_id = _require_user_delegation(caller)
+    result = await run_in_threadpool(
+        service.read_version_file,
+        space_id=space_id,
+        skill_id=skill_id,
+        version=version,
+        actor_id=actor_id,
+        path=path,
+    )
     return envelope(
-        PublishedVersionFileContent.model_validate(
-            service.read_version_file(
-                space_id=space_id,
-                skill_id=skill_id,
-                version=version,
-                actor_id=actor_id,
-                path=path,
-            )
-        ),
+        PublishedVersionFileContent.model_validate(result),
         request,
     )

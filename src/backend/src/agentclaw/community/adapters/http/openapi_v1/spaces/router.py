@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Path, Query, Request
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
@@ -294,8 +295,11 @@ async def get_space_skill_draft_file_tree(
     ),
 ) -> Envelope[DraftFileTree]:
     actor_id = _require_user_delegation(caller)
-    result = service.get_draft_file_tree(
-        space_id=space_id, skill_id=skill_id, actor_id=actor_id
+    result = await run_in_threadpool(
+        service.get_draft_file_tree,
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=actor_id,
     )
     return envelope(DraftFileTree.model_validate(result), request)
 
@@ -318,8 +322,12 @@ async def read_space_skill_draft_file(
     ),
 ) -> Envelope[DraftFileContent]:
     actor_id = _require_user_delegation(caller)
-    result = service.read_draft_file(
-        space_id=space_id, skill_id=skill_id, actor_id=actor_id, path=path
+    result = await run_in_threadpool(
+        service.read_draft_file,
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=actor_id,
+        path=path,
     )
     return envelope(DraftFileContent.model_validate(result), request)
 
@@ -343,7 +351,8 @@ async def save_space_skill_draft_file(
         SpaceSkillApplicationServiceProtocol
     ),
 ) -> Envelope[SkillDraftDetail]:
-    result = service.save_draft_file(
+    result = await run_in_threadpool(
+        service.save_draft_file,
         space_id=space_id,
         skill_id=skill_id,
         actor_id=user_id,
@@ -372,7 +381,8 @@ async def create_space_skill_upgrade_draft(
         SpaceSkillApplicationServiceProtocol
     ),
 ) -> Envelope[SkillDraftDetail]:
-    result = service.create_upgrade_draft(
+    result = await run_in_threadpool(
+        service.create_upgrade_draft,
         space_id=space_id,
         skill_id=skill_id,
         actor_id=user_id,
@@ -397,7 +407,8 @@ async def refresh_space_skill_draft_from_git(
         SpaceSkillApplicationServiceProtocol
     ),
 ) -> Envelope[SkillDraftDetail]:
-    result = service.refresh_draft_from_git(
+    result = await run_in_threadpool(
+        service.refresh_draft_from_git,
         space_id=space_id,
         skill_id=skill_id,
         actor_id=user_id,
@@ -434,7 +445,8 @@ async def delete_space_skill_draft(
         SpaceSkillApplicationServiceProtocol
     ),
 ) -> Envelope[DraftDeleteResult]:
-    result = service.delete_draft(
+    result = await run_in_threadpool(
+        service.delete_draft,
         space_id=space_id,
         skill_id=skill_id,
         actor_id=user_id,
