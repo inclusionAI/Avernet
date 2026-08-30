@@ -191,8 +191,11 @@ async def _run_batch_sync_background(
                 env_label = env if env else get_current_env()
                 logger.info("[batch_sync] starting sync for env=%s, effective_codes=%s", env_label, effective_codes)
                 try:
-                    report: BatchSyncReport = await run_in_threadpool(
-                        svc.run, skills_dir=skills_dir, skill_codes=effective_codes, env=env,
+                    report: BatchSyncReport = await asyncio.to_thread(
+                        svc.run,
+                        skills_dir=skills_dir,
+                        skill_codes=effective_codes,
+                        env=env,
                     )
                     report.env = env_label
                     all_reports.append(report)
