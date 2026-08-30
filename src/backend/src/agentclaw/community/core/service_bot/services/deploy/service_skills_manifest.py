@@ -119,11 +119,45 @@ class ResolvedSharedCorpusDelivery:
         bot: dict[str, Any],
         store_prefix: str,
     ) -> ResolvedSharedCorpusDelivery:
+        return cls._from_state(
+            state=state,
+            bot=bot,
+            corpus="center",
+            evidence_field="pool_center",
+            store_prefix=store_prefix,
+        )
+
+    @classmethod
+    def repo_from_state(
+        cls,
+        *,
+        state,
+        bot: dict[str, Any],
+        store_prefix: str,
+    ) -> ResolvedSharedCorpusDelivery:
+        return cls._from_state(
+            state=state,
+            bot=bot,
+            corpus="repo",
+            evidence_field="repo_root",
+            store_prefix=store_prefix,
+        )
+
+    @classmethod
+    def _from_state(
+        cls,
+        *,
+        state,
+        bot: dict[str, Any],
+        corpus: str,
+        evidence_field: str,
+        store_prefix: str,
+    ) -> ResolvedSharedCorpusDelivery:
         resolved = _resolved_ready_layout(state=state, bot=bot)
-        runtime_path = resolved.get("pool_center")
+        runtime_path = resolved.get(evidence_field)
         if not isinstance(runtime_path, str):
             raise ServiceSkillsManifestError(
-                "Center Engine layout evidence is missing pool_center"
+                f"{corpus} Engine layout evidence is missing {evidence_field}"
             )
         path = PurePosixPath(runtime_path)
         if (
@@ -132,7 +166,7 @@ class ResolvedSharedCorpusDelivery:
             or any(part in {"", ".", ".."} for part in path.parts)
         ):
             raise ServiceSkillsManifestError(
-                "Center Engine layout evidence has an invalid pool_center"
+                f"{corpus} Engine layout evidence has an invalid {evidence_field}"
             )
         prefix = PurePosixPath(store_prefix)
         if (
@@ -141,9 +175,11 @@ class ResolvedSharedCorpusDelivery:
             or store_prefix != prefix.as_posix()
             or any(part in {"", ".", ".."} for part in prefix.parts)
         ):
-            raise ServiceSkillsManifestError("invalid Center Store prefix")
+            raise ServiceSkillsManifestError(
+                f"invalid {corpus} Store prefix"
+            )
         return cls(
-            corpus="center",
+            corpus=corpus,
             runtime_path=runtime_path,
             store_prefix=store_prefix,
             layout_contract_version=SERVICE_SKILLS_POOL_CONTRACT_VERSION,
@@ -169,11 +205,13 @@ class ServiceSkillsManifestBuilder:
         capability_reader: BotCapabilityStateReaderProtocol,
         center_store_prefix: str,
         center_store: CanonicalCenterVersionStore,
+        repo_store_prefix: str,
     ) -> None:
         self._layout_repository = layout_repository
         self._capability_reader = capability_reader
         self._center_store_prefix = center_store_prefix
         self._center_store = center_store
+        self._repo_store_prefix = repo_store_prefix
 
     def capture(
         self,
@@ -253,12 +291,20 @@ class ServiceSkillsManifestBuilder:
             ) from exc
 
         shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...] = ()
+        if is_pool:
+            shared_corpora = (
+                ResolvedSharedCorpusDelivery.repo_from_state(
+                    state=state,
+                    bot=bot,
+                    store_prefix=self._repo_store_prefix,
+                ),
+            )
         if center_skills:
             if state.active_layout is not SkillLayout.POOL:
                 raise ServiceSkillsManifestError(
                     "Center service build requires the Pool runtime layout"
                 )
-            shared_corpora = (
+            shared_corpora += (
                 ResolvedSharedCorpusDelivery.center_from_state(
                     state=state,
                     bot=bot,
@@ -300,14 +346,22 @@ class ServiceSkillsManifestBuilder:
                 "draft Skills layout changed during service build"
             )
         if captured.shared_corpora:
-            current_delivery = ResolvedSharedCorpusDelivery.center_from_state(
-                state=current,
-                bot={
-                    "active_engine": captured.runtime_engine,
-                },
-                store_prefix=self._center_store_prefix,
+            current_deliveries = (
+                ResolvedSharedCorpusDelivery.repo_from_state(
+                    state=current,
+                    bot={"active_engine": captured.runtime_engine},
+                    store_prefix=self._repo_store_prefix,
+                ),
             )
-            if (current_delivery,) != captured.shared_corpora:
+            if captured.center_skills:
+                current_deliveries += (
+                    ResolvedSharedCorpusDelivery.center_from_state(
+                        state=current,
+                        bot={"active_engine": captured.runtime_engine},
+                        store_prefix=self._center_store_prefix,
+                    ),
+                )
+            if current_deliveries != captured.shared_corpora:
                 raise ServiceSkillsManifestError(
                     "Engine shared corpus delivery changed during service build"
                 )
@@ -327,6 +381,7 @@ class ServiceSkillsManifestBuilder:
             manifest["center_skills"] = [
                 dict(item) for item in captured.center_skills
             ]
+        if captured.shared_corpora:
             manifest["shared_corpora"] = [
                 delivery.to_manifest() for delivery in captured.shared_corpora
             ]
@@ -453,19 +508,28 @@ def validate_service_skills_manifest_for_release(
             )
 
     shared_corpora = manifest.get("shared_corpora")
-    if center_skills:
-        if not isinstance(shared_corpora, list) or len(shared_corpora) != 1:
+    if active_layout == SkillLayout.POOL.value:
+        # Pool manifests produced before shared-corpus freezing are valid old
+        # artifacts when they contain no Center Skill.  Replay them unchanged.
+        if shared_corpora is None and not center_skills:
+            return
+        expected_corpora = ["repo"] + (["center"] if center_skills else [])
+        if not isinstance(shared_corpora, list):
             raise ServiceSkillsManifestError(
-                "Center Skill manifest requires one frozen shared corpus"
+                "Pool Skill manifest requires frozen shared corpora"
             )
-        _parse_frozen_center_delivery(shared_corpora[0])
+        deliveries = tuple(_parse_frozen_delivery(item) for item in shared_corpora)
+        if [delivery.corpus for delivery in deliveries] != expected_corpora:
+            raise ServiceSkillsManifestError(
+                "Pool shared corpora must contain ordered Repo and exact Center delivery"
+            )
     elif shared_corpora is not None:
         raise ServiceSkillsManifestError(
-            "shared Center corpus requires exact Center Skills"
+            "Legacy Skill manifest cannot carry shared corpora"
         )
 
 
-def _parse_frozen_center_delivery(value: object) -> ResolvedSharedCorpusDelivery:
+def _parse_frozen_delivery(value: object) -> ResolvedSharedCorpusDelivery:
     if not isinstance(value, dict) or set(value) != {
         "corpus",
         "runtime_path",
@@ -474,20 +538,20 @@ def _parse_frozen_center_delivery(value: object) -> ResolvedSharedCorpusDelivery
         "permission",
         "snapshot_policy",
     }:
-        raise ServiceSkillsManifestError("invalid shared Center corpus delivery")
+        raise ServiceSkillsManifestError("invalid shared corpus delivery")
     try:
         delivery = ResolvedSharedCorpusDelivery(**value)
     except TypeError as exc:
         raise ServiceSkillsManifestError(
-            "invalid shared Center corpus delivery"
+            "invalid shared corpus delivery"
         ) from exc
     if (
-        delivery.corpus != "center"
+        delivery.corpus not in {"repo", "center"}
         or delivery.layout_contract_version != SERVICE_SKILLS_POOL_CONTRACT_VERSION
         or delivery.permission != "read_only"
         or delivery.snapshot_policy != "exclude"
     ):
-        raise ServiceSkillsManifestError("invalid shared Center corpus delivery")
+        raise ServiceSkillsManifestError("invalid shared corpus delivery")
     path = PurePosixPath(delivery.runtime_path)
     prefix = PurePosixPath(delivery.store_prefix)
     if (
@@ -499,8 +563,26 @@ def _parse_frozen_center_delivery(value: object) -> ResolvedSharedCorpusDelivery
         or delivery.store_prefix != prefix.as_posix()
         or any(part in {"", ".", ".."} for part in prefix.parts)
     ):
-        raise ServiceSkillsManifestError("invalid shared Center corpus delivery")
+        raise ServiceSkillsManifestError("invalid shared corpus delivery")
     return delivery
+
+
+def frozen_shared_corpus_deliveries_from_ext(
+    ext: dict[str, Any] | None,
+    bot: dict[str, Any],
+) -> tuple[ResolvedSharedCorpusDelivery, ...]:
+    """Read the Engine-resolved shared mounts frozen in this artifact."""
+
+    manifest = (ext or {}).get("skills_manifest")
+    if manifest is None:
+        return ()
+    if not isinstance(manifest, dict):
+        raise ServiceSkillsManifestError("invalid service Skills manifest")
+    validate_service_skills_manifest_for_release(manifest, bot)
+    shared = manifest.get("shared_corpora")
+    if shared is None:
+        return ()
+    return tuple(_parse_frozen_delivery(item) for item in shared)
 
 
 def frozen_center_delivery_from_ext(
@@ -509,16 +591,10 @@ def frozen_center_delivery_from_ext(
 ) -> ResolvedSharedCorpusDelivery | None:
     """Read only the exact delivery frozen in this historical artifact."""
 
-    manifest = (ext or {}).get("skills_manifest")
-    if manifest is None:
-        return None
-    if not isinstance(manifest, dict):
-        raise ServiceSkillsManifestError("invalid service Skills manifest")
-    validate_service_skills_manifest_for_release(manifest, bot)
-    shared = manifest.get("shared_corpora")
-    if shared is None:
-        return None
-    return _parse_frozen_center_delivery(shared[0])
+    for delivery in frozen_shared_corpus_deliveries_from_ext(ext, bot):
+        if delivery.corpus == "center":
+            return delivery
+    return None
 
 
 def service_skills_manifest_env(
@@ -556,6 +632,7 @@ __all__ = [
     "ServiceSkillsManifestError",
     "ResolvedSharedCorpusDelivery",
     "frozen_center_delivery_from_ext",
+    "frozen_shared_corpus_deliveries_from_ext",
     "service_skills_manifest_env",
     "service_skills_env_from_ext",
     "validate_service_skills_manifest_for_release",

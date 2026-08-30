@@ -27,6 +27,7 @@ from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 
 
 _CENTER_STORE_PREFIX = "aidesktop/aidesktop_dev/bolt_shared/skills-center"
+_REPO_STORE_PREFIX = "skills-repo/b1"
 
 
 class _CenterStore:
@@ -106,6 +107,34 @@ def test_shared_center_delivery_uses_engine_runtime_evidence(
     )
 
     assert delivery.runtime_path == runtime_path
+
+
+@pytest.mark.unit
+def test_shared_repo_delivery_uses_engine_runtime_evidence() -> None:
+    pool_center = "/home/admin/.openclaw/workspace/skills-pool/skill-center"
+    state = BotSkillLayoutState(
+        scope=BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout("openclaw", pool_center)
+        },
+    )
+
+    delivery = ResolvedSharedCorpusDelivery.repo_from_state(
+        state=state,
+        bot={"active_engine": "openclaw"},
+        store_prefix=_REPO_STORE_PREFIX,
+    )
+
+    assert delivery.runtime_path == (
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
+    )
 
 
 @pytest.mark.unit
@@ -249,6 +278,13 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
         persisted=True,
         layout_contract_version="skills-pool-p3-v1",
         preparation_id="preparation-1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
     )
     layout_repository = _LayoutRepository(state)
     stub = _RecordingBuild(
@@ -256,13 +292,20 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
             "success": True,
             "migration_path": "/home/admin/nfs/bot-data/7/openclaw",
             "build_target_path": str(target),
+            "shared_corpus_snapshot_paths": [
+                "workspace/skills-pool/skills-repo"
+            ],
         }
     )
 
     artifact = ArcaSnapshotProducer(
         stub,
         ServiceSkillsManifestBuilder(
-            layout_repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore()
+            layout_repository,
+            _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     ).produce_artifact(
         {
@@ -279,6 +322,18 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
         "engine": "openclaw",
         "active_layout": "pool",
         "layout_contract_version": "skills-pool-p3-v1",
+        "shared_corpora": [
+            {
+                "corpus": "repo",
+                "runtime_path": (
+                    "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
+                ),
+                "store_prefix": _REPO_STORE_PREFIX,
+                "layout_contract_version": "skills-pool-p3-v1",
+                "permission": "read_only",
+                "snapshot_policy": "exclude",
+            }
+        ],
     }
     assert layout_repository.scopes == [
         BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
@@ -369,6 +424,7 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
                 "migration_path": "/snapshot/7/openclaw",
                 "build_target_path": str(target),
                 "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
                     "workspace/skills-pool/skill-center"
                 ],
             }
@@ -378,6 +434,7 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
             reader,
             _CENTER_STORE_PREFIX,
             center_store,
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -408,6 +465,14 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
         },
     ]
     assert artifact.ext["skills_manifest"]["shared_corpora"] == [
+        {
+            "corpus": "repo",
+            "runtime_path": "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+            "store_prefix": _REPO_STORE_PREFIX,
+            "layout_contract_version": "skills-pool-p3-v1",
+            "permission": "read_only",
+            "snapshot_policy": "exclude",
+        },
         {
             "corpus": "center",
             "runtime_path": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
@@ -472,6 +537,7 @@ def test_center_service_build_fails_when_exact_store_version_is_missing() -> Non
         ),
         _CENTER_STORE_PREFIX,
         _CenterStore(ready=False),
+        _REPO_STORE_PREFIX,
     )
 
     with pytest.raises(ServiceSkillsManifestError, match="exact Store Version"):
@@ -513,10 +579,14 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
                 "success": True,
                 "migration_path": "/snapshot/8/openclaw",
                 "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo"
+                ],
             }
         ),
         ServiceSkillsManifestBuilder(
-            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore()
+            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -570,6 +640,7 @@ def test_build_rejects_non_terminal_layout_before_physical_snapshot(
         ServiceSkillsManifestBuilder(
             _LayoutRepository(state), _CapabilityReader(()), _CENTER_STORE_PREFIX,
             _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -604,6 +675,13 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
         migration_generation="generation-1",
         persisted=True,
         layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
     )
     repository = _LayoutRepository(initial)
 
@@ -622,10 +700,14 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
                 "success": True,
                 "migration_path": "/snapshot/8/openclaw",
                 "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo"
+                ],
             }
         ),
         ServiceSkillsManifestBuilder(
-            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore()
+            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -678,7 +760,8 @@ def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
             }
         ),
         ServiceSkillsManifestBuilder(
-            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore()
+            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -769,6 +852,7 @@ def test_legacy_draft_builds_a_legacy_artifact_without_pool_contract(
             _CapabilityReader(()),
             _CENTER_STORE_PREFIX,
             _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -803,7 +887,11 @@ def test_historical_publish_without_manifest_is_explicitly_legacy() -> None:
 def test_aicoding_service_engine_uses_the_shared_manifest_contract() -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
     build = _RecordingBuild(
-        {"success": True, "build_target_path": "/snapshot/1/hermes"}
+        {
+            "success": True,
+            "build_target_path": "/snapshot/1/hermes",
+            "shared_corpus_snapshot_paths": ["workspace/skills-pool/skills-repo"],
+        }
     )
     producer = ArcaSnapshotProducer(
         build,
@@ -812,6 +900,7 @@ def test_aicoding_service_engine_uses_the_shared_manifest_contract() -> None:
             _CapabilityReader(()),
             _CENTER_STORE_PREFIX,
             _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -849,13 +938,18 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
         },
     )
     build = _RecordingBuild(
-        {"success": True, "build_target_path": "/snapshot/1/hermes"}
+        {
+            "success": True,
+            "build_target_path": "/snapshot/1/hermes",
+            "shared_corpus_snapshot_paths": ["workspace/skills-pool/skills-repo"],
+        }
     )
     producer = ArcaSnapshotProducer(
         build,
         ServiceSkillsManifestBuilder(
             _LayoutRepository(pool_state), _CapabilityReader(()), _CENTER_STORE_PREFIX,
             _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -874,6 +968,16 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
         "engine": "hermes",
         "active_layout": "pool",
         "layout_contract_version": "skills-pool-p3-v1",
+        "shared_corpora": [
+            {
+                "corpus": "repo",
+                "runtime_path": "/home/admin/.hermes/workspace/skills-pool/skills-repo",
+                "store_prefix": _REPO_STORE_PREFIX,
+                "layout_contract_version": "skills-pool-p3-v1",
+                "permission": "read_only",
+                "snapshot_policy": "exclude",
+            }
+        ],
     }
     assert build.calls
 
@@ -895,6 +999,7 @@ def test_hermes_legacy_publish_fails_without_ready_engine_evidence() -> None:
             _CapabilityReader(()),
             _CENTER_STORE_PREFIX,
             _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 

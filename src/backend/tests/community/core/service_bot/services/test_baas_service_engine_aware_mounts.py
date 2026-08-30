@@ -216,6 +216,14 @@ class TestSetupDirectoryEngineAware:
             ],
             "shared_corpora": [
                 {
+                    "corpus": "repo",
+                    "runtime_path": "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+                    "store_prefix": "skills-repo/b1",
+                    "layout_contract_version": "skills-pool-p3-v1",
+                    "permission": "read_only",
+                    "snapshot_policy": "exclude",
+                },
+                {
                     "corpus": "center",
                     "runtime_path": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
                     "store_prefix": "aidesktop/aidesktop_dev/bolt_shared/skills-center",
@@ -236,6 +244,14 @@ class TestSetupDirectoryEngineAware:
         )
 
         center = next(entry for entry in entries if "skills-center" in entry.remote_dir)
+        repo = next(
+            entry
+            for entry in entries
+            if entry.local_dir
+            == "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
+        )
+        assert repo.remote_dir == "/skills-repo/b1"
+        assert repo.permission == "READ_ONLY"
         assert center.remote_dir == (
             "/aidesktop/aidesktop_dev/bolt_shared/skills-center"
         )

@@ -401,6 +401,8 @@ class ServiceBotModule(Module):
         canonical_center_versions: CanonicalCenterVersionStore,
     ) -> ArcaSnapshotProducer:
         """ARCA snapshot plus the service draft's frozen Skills layout."""
+        from agentclaw.community.core.storage import path as storage_path
+
         return ArcaSnapshotProducer(
             bot_build_service,
             ServiceSkillsManifestBuilder(
@@ -408,6 +410,7 @@ class ServiceBotModule(Module):
                 capability_reader,
                 center_store.base_prefix,
                 canonical_center_versions,
+                storage_path.get_skills_repo_path(),
             ),
         )
 

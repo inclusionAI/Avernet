@@ -73,7 +73,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                 raise ValueError(
                     "successful service build is missing build_target_path"
                 )
-            self._validate_center_snapshot(
+            self._validate_shared_corpus_snapshot(
                 captured=captured_layout,
                 build_target_path=str(build_target_path),
                 snapshot_paths=result.get("shared_corpus_snapshot_paths"),
@@ -91,15 +91,15 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         )
 
     @staticmethod
-    def _validate_center_snapshot(
+    def _validate_shared_corpus_snapshot(
         *,
         captured: CapturedServiceSkillsLayout,
         build_target_path: str,
         snapshot_paths: object,
     ) -> None:
-        """Validate the frozen exact links without dereferencing shared corpus."""
+        """Validate exclusions and exact Center links without dereferencing corpora."""
 
-        if not captured.center_skills:
+        if not captured.shared_corpora:
             return
         if (
             not isinstance(snapshot_paths, list)
@@ -107,7 +107,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
             or any(not isinstance(item, str) for item in snapshot_paths)
         ):
             raise ServiceSkillsManifestError(
-                "Center snapshot is missing resolved corpus exclusions"
+                "shared corpus snapshot is missing resolved exclusions"
             )
         root = Path(build_target_path)
         for relative in snapshot_paths:
@@ -126,7 +126,14 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                     "Center snapshot must not copy the shared corpus"
                 )
 
-        center_root = PurePosixPath(captured.shared_corpora[0].runtime_path)
+        if not captured.center_skills:
+            return
+        center_delivery = next(
+            delivery
+            for delivery in captured.shared_corpora
+            if delivery.corpus == "center"
+        )
+        center_root = PurePosixPath(center_delivery.runtime_path)
         expected = {
             (
                 item["runtime_name"],

@@ -44,7 +44,7 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     StorageType,
 )
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
-    frozen_center_delivery_from_ext,
+    frozen_shared_corpus_deliveries_from_ext,
 )
 from agentclaw.community.core.service_bot.types import PublishStage, is_editable_bot
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -447,15 +447,14 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
                 ]
             )
 
-        center_delivery = frozen_center_delivery_from_ext(
-            ext_info,
-            {"active_engine": engine_type or DEFAULT_ENGINE_TYPE},
+        shared_corpora = frozen_shared_corpus_deliveries_from_ext(
+            ext_info, {"active_engine": engine_type or DEFAULT_ENGINE_TYPE}
         )
-        if center_delivery is not None:
+        for delivery in shared_corpora:
             mount_points.append(
                 MountPointEntry(
-                    remote_dir=f"/{center_delivery.store_prefix}",
-                    local_dir=center_delivery.runtime_path,
+                    remote_dir=f"/{delivery.store_prefix}",
+                    local_dir=delivery.runtime_path,
                     permission=MountPermission.READ_ONLY,
                 )
             )
