@@ -152,7 +152,17 @@ PATH 上，再配一个 SKILL.md 教模型怎么用。`cli_tools` 是把这套�
 2. **可执行位**：`entrypoints` 里列出的每个相对路径，在容器内必须是**可执行**
    的。这一点平台无法代劳：对象存储不保留 POSIX 权限位，所以执行位必须由取
    下来的一方设置。**只对 `entrypoints` 列出的路径设置执行位**——包内其余文件
-   按原样落地即可，不应被批量置为可执行。
+   原样落地即可，不应被批量置为可执行。
+
+   > **这里有一个已知限制，先讲在前面，免得你们踩坑。**因为对象存储不保留权限位，
+   > 「原样」实际上是「全都不可执行」——原始 mode 在到达你们之前就已经丢了。所以
+   > 一个包如果内部会去 exec 自己带的辅助程序（比如 `bin/tk` 调 `libexec/helper`），
+   > 那个 helper 会以 `EACCES` 失败。**第一版的契约就是这样：只有 `entrypoints`
+   > 里的路径保证可执行。**这不是你们要解决的问题——是我们 schema 里缺一个「可执行
+   > 但不上 PATH」的表达方式，我们会在 `cli_tools` 排期时补上（大概率是加一个独立的
+   > `executables` 列表）。补上之前，请按「打包成自包含的、只有 entrypoints 需要执行
+   > 位」来理解这份契约；补上之后，这条会变成「`entrypoints` ∪ `executables` 都要
+   > 置为可执行，但只有 `entrypoints` 上 PATH」，你们那侧是一个很小的增量。
 
 3. **PATH**：`entrypoints` 里列出的命令，必须能被 **agent 进程**直接按名字调用
    （即 `mycli` 而不是 `/some/abs/path/mycli`）。做法由你们决定——放进一个已
@@ -217,8 +227,11 @@ PATH 上，再配一个 SKILL.md 教模型怎么用。`cli_tools` 是把这套�
   `entrypoints: ["mycli"]`。落地后 agent 进程执行 `mycli --version` 应当可用。
 - `toolkit` 是压缩包形态，平台已解包。目录内有 `bin/tk`、`bin/tk-helper` 以及
   其他辅助文件（例如 `lib/`）。**只有 `entrypoints` 列出的两个需要可执行 +
-  上 PATH**，其余文件只需按原样落地（`bin/tk` 可能会在运行时引用 `lib/`，所以
-  **目录结构必须保留**，不能只挑出 entrypoints 两个文件）。
+  上 PATH**，其余文件原样落地（`bin/tk` 可能会在运行时引用 `lib/`，所以
+  **目录结构必须保留**，不能只挑出 entrypoints 两个文件）。注意 `lib/` 下的东西
+  会是**不可执行**的——按 §3.4 第 2 条的限制，第一版里能被 exec 的只有
+  `entrypoints`，所以这个例子里 `lib/` 必须是 `bin/tk` 去**读**的数据或库，
+  而不是它去 exec 的程序。
 - `TOOLS.md` 是普通 identity 文件，走现有通道。它是用户用来告诉模型「有哪些
   命令、怎么用」的——**用法认知不属于 `cli_tools` 的职责**，`cli_tools` 只保证
   命令在 PATH 上。

@@ -379,8 +379,21 @@ for a manifest, which installs skills, identity files, MCP config and a shell
 script, it is not acceptable.
 
 The cost is orphan rows when a user never clicks the link or Passport rejects.
-Accepted for v1 — an orphan manifest occupies no runtime resource — with cleanup
-deferred to #1698.
+Still accepted for v1, with cleanup deferred to #1698 — but the justification has
+to be stated honestly, because *"an orphan manifest occupies no runtime resource"*
+is true and answers the wrong question. **Nothing bounds these rows.** No bot
+record is ever written, so ordinary bot deletion cannot reach them; and phase 1
+allocates a `bot_id` **without consuming bot quota**, so the per-tenant ceiling
+that bounds every other creation path does not apply here either. Innocent
+retries — a user starting creation three times and finishing none — grow the
+table with no ceiling and no reclaim path.
+
+So #1698 is a **precondition for taking this endpoint out from behind the feature
+flag**, not an optional second-phase tidy-up. Either mechanism closes it: expiry
+(a phase-1 manifest unclaimed after N hours is deleted) or terminal-state cleanup
+(delete on `AUTHORIZATION_REJECTED`). Expiry is the one to build, because
+abandonment is the common case and rejection is the rare one. It stays outside
+W13 because it is a small independent job, not because it can wait indefinitely.
 
 **A fixed constraint, not a design choice: creation always requires a human.**
 The Passport authorization link is an AgentPass limitation, outside our control.
@@ -1176,7 +1189,8 @@ phase-1 manifest persistence keyed by the allocated `bot_id`; the poll/status
 endpoint and its states; invoking apply as part of creation.
 
 **Out of scope.** Orphan-manifest cleanup (#1698, deferred to a second phase by
-decision) and creation idempotency (#1697 — a pre-existing gap: `generate_bot_id`
+decision — but see §2.11: it gates lifting the feature flag on this endpoint,
+because nothing else bounds phase-1 rows) and creation idempotency (#1697 — a pre-existing gap: `generate_bot_id`
 mints the id platform-side with no idempotency key, so a retried create makes a
 second bot regardless of manifests).
 
@@ -1452,7 +1466,13 @@ declared but unbound (W3 binds it).
       segments and **never** auto-detects a single top-level directory —
       identical input must behave identically regardless of the archive's
       internal shape (schema §3.2).
-- [ ] Permission bits are flattened: nothing unpacked is executable.
+- [ ] Permission bits are flattened: nothing unpacked is executable. **This is
+      the right default for every category that ships data, and it collides head-on
+      with `cli_tools`, which by definition ships programs.** Object storage does
+      not preserve POSIX bits anyway, so the original mode is gone before any
+      engine sees the file — meaning "leave the rest of the package as it was" is
+      not a thing an engine can do. W9 owns that exception and must resolve it
+      explicitly rather than widening this rule.
 
 **Notes.** `src/engine/.../plugins/resource_materialization.py` is the nearest
 precedent in the monorepo and is worth reading first, but it lives in the engine
@@ -1505,11 +1525,18 @@ binding W2's injection port.
 - [ ] **Both sides are canonicalised before that comparison, structurally.** A
       raw `startswith` is not enough: `https://host/team/content/../admin` begins
       with the prefix as a string but resolves outside it, and the client would
-      send the secret header to the resolved path. Parse the URL, compare scheme
-      and host case-insensitively, resolve percent-encoding (including encoded
-      separators such as `%2F` and `%2E`) and collapse dot segments — **then**
-      compare. Applied identically to the initial target and to every redirect
-      hop, since a redirect is where a hostile server would put it.
+      send the secret header to the resolved path. Parse the URL, compare the
+      whole **origin** — scheme and host case-insensitively **and the effective
+      port**, with the default folded in so `https://host` and `https://host:443`
+      are the same origin — then resolve percent-encoding (including encoded
+      separators such as `%2F` and `%2E`), collapse dot segments, and **only
+      then** compare paths. Applied identically to the initial target and to
+      every redirect hop, since a redirect is where a hostile server would put
+      it.
+- [ ] **The port is part of the origin, not a detail.** `https://host:8443` is a
+      different service from `https://host` — very often an internal one on the
+      same box — so a credential scoped to the latter must never be attached to
+      the former. Comparing scheme and host alone would authorise it.
 - [ ] A target outside every prefix makes the entry **fail** — never
       "continue without the credential".
 - [ ] A redirect that leaves the authorised prefix **fails**; the credential is
@@ -1938,6 +1965,32 @@ investigation confirmed there is **no existing CLI mechanism to duplicate** —
 every `bcs-cli` reference is singlebox orchestration, and no delivery path
 handles an executable bit. This item stays deferred by business priority, not by
 a missing answer.
+
+**An open design question this item must answer: private executable helpers.**
+W2 flattens permission bits — nothing fetched is executable — and the teclaw
+contract restores the bit **only for the paths listed in `entrypoints`**, because
+those are exactly the ones that go on PATH. That leaves no way to express *"this
+file must be executable but must not become a command"*. A packaged CLI whose
+`bin/tk` execs a bundled `libexec/helper` therefore fails at runtime with
+`EACCES`, and the package is not fixable from the manifest — the author can only
+promote the helper to an entrypoint, which puts an internal implementation detail
+on PATH under a name that can then collide.
+
+The contract cannot dodge this by saying the rest of the package "lands as it
+was": object storage does not carry POSIX bits, so the original mode is already
+gone. Two candidate answers, to be decided when this item is scheduled:
+
+1. **A second, non-PATH list** — e.g. `executables`, made executable but never
+   exposed as a command. Explicit, and it keeps `entrypoints` meaning exactly
+   "commands".
+2. **Preserve validated executable bits within the tool's own directory** —
+   requires carrying mode through the platform's fetch/unpack/store path, which
+   nothing does today, and it re-opens the question of trusting an archive's own
+   bits.
+
+Option 1 is the smaller change and does not weaken W2's flattening default for
+any other category. Recorded rather than decided, because the schema addition is
+part of what goes to the teclaw owner and should be settled once, not twice.
 
 **Done when (sketch).** **The content-dependent `entrypoints` checks live here,
 not in W1** — once the archive is unpacked, every entrypoint must exist, be a
