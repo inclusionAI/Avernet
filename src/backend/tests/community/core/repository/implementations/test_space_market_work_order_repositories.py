@@ -19,6 +19,13 @@ from agentclaw.community.core.repository.implementations.spaces.space import (
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
+    SpaceSkillRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
+    SkillEditorRequestRepository,
+)
+from agentclaw.community.core.models.space_skill import SkillGrant
 from agentclaw.community.core.spaces.models import SpaceJoinStatus, SpaceRole, SpaceType
 from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
@@ -31,6 +38,7 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderNoReviewerError,
     WorkOrderNotFoundError,
+    WorkOrderSkillEditorRequestNotAllowedError,
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
@@ -70,6 +78,18 @@ def _team(spaces: SpaceRepository, name="Team", creator="owner-1"):
         return row
 
 
+def _skill_editor_requests(db) -> SkillEditorRequestRepository:
+    return SkillEditorRequestRepository(db)
+
+
+def _work_orders(db) -> WorkOrderRepository:
+    return WorkOrderRepository(db, _skill_editor_requests(db))
+
+
+def _space_skills(db) -> SpaceSkillRepository:
+    return SpaceSkillRepository(db, _skill_editor_requests(db))
+
+
 def _review_notification(
     *, applicant_user_id: str, space_id: int, title: str, content: str
 ) -> WorkOrderNotificationDraft:
@@ -96,6 +116,336 @@ def _bot_review_notification(
         title="Bot 共同编辑申请已通过",
         content="approved",
     )
+
+
+def _skill_review_notification(
+    *, applicant_user_id: str, skill_id: int, approved: bool
+) -> WorkOrderNotificationDraft:
+    return WorkOrderNotificationDraft(
+        recipient_user_id=applicant_user_id,
+        notification_category=NotificationCategory.NOTICE,
+        event_type=WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED,
+        biz_type=WorkOrderBizType.SKILL_COLLABORATOR,
+        biz_id=str(skill_id),
+        title="Skill 共同编辑申请已通过" if approved else "Skill 共同编辑申请未通过",
+        content="reviewed",
+    )
+
+
+def _space_skill(db, spaces: SpaceRepository):
+    team = _team(spaces)
+    spaces.add_member(
+        space_id=team.id,
+        user_id="applicant-1",
+        role=SpaceRole.MEMBER,
+        creator_id="owner-1",
+        env="dev",
+    )
+    created = _space_skills(db).create_space_skill(
+        skill_data={
+            "name": "review-skill",
+            "description": None,
+            "env": "dev",
+            "skill_uuid": "11111111-1111-4111-8111-111111111111",
+            "zip_url": (
+                "draft://11111111-1111-4111-8111-111111111111/"
+                "v1/22222222-2222-4222-8222-222222222222"
+            ),
+            "draft_target_version": 1,
+            "draft_status": "EDITING",
+            "draft_description": "Review skill",
+            "draft_source_kind": "FOLDER",
+            "creation_request_id": "review-skill-create",
+            "creation_request_hash": "a" * 64,
+            "source_type": "FOLDER",
+        },
+        ownership_data={
+            "space_id": team.id,
+            "created_by": "owner-1",
+            "env": "dev",
+        },
+        owner_grant_data={
+            "user_id": "owner-1",
+            "role": "OWNER",
+            "granted_by": "owner-1",
+            "env": "dev",
+        },
+    )
+    return team, created["skill"]["id"]
+
+
+@pytest.mark.parametrize(
+    ("target_status", "manager_expected"),
+    [(WorkOrderStatus.APPROVED, True), (WorkOrderStatus.REJECTED, False)],
+)
+def test_skill_editor_review_atomically_controls_manager_grant(
+    db, target_status, manager_expected
+) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+    repository = _work_orders(db)
+    order = repository.create_skill_editor_request(
+        space_id=team.id,
+        skill_id=skill_id,
+        applicant_user_id="applicant-1",
+        applicant_name="Applicant",
+        apply_reason="maintain together",
+        env="dev",
+    )
+
+    with pytest.raises(WorkOrderAlreadyPendingError):
+        repository.create_skill_editor_request(
+            space_id=team.id,
+            skill_id=skill_id,
+            applicant_user_id="applicant-1",
+            applicant_name="Applicant",
+            apply_reason="duplicate",
+            env="dev",
+        )
+
+    result = repository.review_skill_editor_request(
+        work_order_id=order.id,
+        reviewer_user_id="owner-1",
+        review_remark=None if manager_expected else "not now",
+        target_status=target_status,
+        notification=_skill_review_notification(
+            applicant_user_id="applicant-1",
+            skill_id=skill_id,
+            approved=manager_expected,
+        ),
+        env="dev",
+    )
+
+    assert result.status is target_status
+    with db.orm_session() as session:
+        manager = (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == "applicant-1",
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.env == "dev",
+            )
+            .one_or_none()
+        )
+    assert (manager is not None) is manager_expected
+
+
+def test_skill_editor_request_rejects_personal_space(db) -> None:
+    spaces = SpaceRepository(db)
+    with spaces.create_personal_transaction(
+        user_id="owner-1", creator_user_name=None, env="dev"
+    ) as personal:
+        created = _space_skills(db).create_space_skill(
+            skill_data={
+                "name": "personal-skill",
+                "description": None,
+                "env": "dev",
+                "skill_uuid": "33333333-3333-4333-8333-333333333333",
+                "zip_url": (
+                    "draft://33333333-3333-4333-8333-333333333333/"
+                    "v1/44444444-4444-4444-8444-444444444444"
+                ),
+                "draft_target_version": 1,
+                "draft_status": "EDITING",
+                "draft_description": "Personal skill",
+                "draft_source_kind": "FOLDER",
+                "creation_request_id": "personal-skill-create",
+                "creation_request_hash": "b" * 64,
+                "source_type": "FOLDER",
+            },
+            ownership_data={
+                "space_id": personal.id,
+                "created_by": "owner-1",
+                "env": "dev",
+            },
+            owner_grant_data={
+                "user_id": "owner-1",
+                "role": "OWNER",
+                "granted_by": "owner-1",
+                "env": "dev",
+            },
+        )
+
+    with pytest.raises(WorkOrderSkillEditorRequestNotAllowedError):
+        _work_orders(db).create_skill_editor_request(
+            space_id=personal.id,
+            skill_id=created["skill"]["id"],
+            applicant_user_id="owner-1",
+            applicant_name="Owner",
+            apply_reason="not supported",
+            env="dev",
+        )
+
+
+def test_skill_editor_request_rejects_non_member(db) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+
+    with pytest.raises(WorkOrderAccessDeniedError):
+        _work_orders(db).create_skill_editor_request(
+            space_id=team.id,
+            skill_id=skill_id,
+            applicant_user_id="outsider-1",
+            applicant_name="Outsider",
+            apply_reason="not a member",
+            env="dev",
+        )
+
+
+def test_skill_editor_approval_is_idempotent_when_manager_grant_already_exists(
+    db,
+) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+    work_orders = _work_orders(db)
+    order = work_orders.create_skill_editor_request(
+        space_id=team.id,
+        skill_id=skill_id,
+        applicant_user_id="applicant-1",
+        applicant_name="Applicant",
+        apply_reason="maintain together",
+        env="dev",
+    )
+    _space_skills(db).add_manager(
+        space_id=team.id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        manager_user_id="applicant-1",
+        env="dev",
+    )
+
+    result = work_orders.review_skill_editor_request(
+        work_order_id=order.id,
+        reviewer_user_id="owner-1",
+        review_remark=None,
+        target_status=WorkOrderStatus.APPROVED,
+        notification=_skill_review_notification(
+            applicant_user_id="applicant-1", skill_id=skill_id, approved=True
+        ),
+        env="dev",
+    )
+
+    assert result.status is WorkOrderStatus.APPROVED
+    with db.orm_session() as session:
+        managers = (
+            session.query(SkillGrant)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == "applicant-1",
+                SkillGrant.role == "MANAGER",
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.env == "dev",
+            )
+            .all()
+        )
+    assert len(managers) == 1
+
+
+def test_skill_editor_pending_reviewer_follows_current_owner(db) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+    spaces.add_member(
+        space_id=team.id,
+        user_id="owner-2",
+        role=SpaceRole.MEMBER,
+        creator_id="owner-1",
+        env="dev",
+    )
+    work_orders = _work_orders(db)
+    order = work_orders.create_skill_editor_request(
+        space_id=team.id,
+        skill_id=skill_id,
+        applicant_user_id="applicant-1",
+        applicant_name="Applicant",
+        apply_reason="maintain together",
+        env="dev",
+    )
+
+    _space_skills(db).transfer_owner(
+        space_id=team.id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        new_owner_user_id="owner-2",
+        reason=None,
+        env="dev",
+    )
+
+    with pytest.raises(WorkOrderAccessDeniedError):
+        work_orders.review_skill_editor_request(
+            work_order_id=order.id,
+            reviewer_user_id="owner-1",
+            review_remark=None,
+            target_status=WorkOrderStatus.APPROVED,
+            notification=_skill_review_notification(
+                applicant_user_id="applicant-1", skill_id=skill_id, approved=True
+            ),
+            env="dev",
+        )
+
+    result = work_orders.review_skill_editor_request(
+        work_order_id=order.id,
+        reviewer_user_id="owner-2",
+        review_remark=None,
+        target_status=WorkOrderStatus.APPROVED,
+        notification=_skill_review_notification(
+            applicant_user_id="applicant-1", skill_id=skill_id, approved=True
+        ),
+        env="dev",
+    )
+    assert result.status is WorkOrderStatus.APPROVED
+
+
+def test_skill_editor_approval_rechecks_active_membership_and_rolls_back(db) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+    work_orders = _work_orders(db)
+    order = work_orders.create_skill_editor_request(
+        space_id=team.id,
+        skill_id=skill_id,
+        applicant_user_id="applicant-1",
+        applicant_name="Applicant",
+        apply_reason="maintain together",
+        env="dev",
+    )
+    with db.orm_session() as session:
+        member = (
+            session.query(SpaceMemberModel)
+            .filter(
+                SpaceMemberModel.space_id == team.id,
+                SpaceMemberModel.user_id == "applicant-1",
+                SpaceMemberModel.env == "dev",
+            )
+            .one()
+        )
+        member.status = "INACTIVE"
+
+    with pytest.raises(WorkOrderSkillEditorRequestNotAllowedError):
+        work_orders.review_skill_editor_request(
+            work_order_id=order.id,
+            reviewer_user_id="owner-1",
+            review_remark=None,
+            target_status=WorkOrderStatus.APPROVED,
+            notification=_skill_review_notification(
+                applicant_user_id="applicant-1", skill_id=skill_id, approved=True
+            ),
+            env="dev",
+        )
+
+    with db.orm_session() as session:
+        persisted_status = session.get(WorkOrderModel, order.id).status
+        manager = (
+            session.query(SkillGrant.id)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == "applicant-1",
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.env == "dev",
+            )
+            .one_or_none()
+        )
+    assert persisted_status == WorkOrderStatus.PENDING.value
+    assert manager is None
 
 
 def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
@@ -126,7 +476,7 @@ def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
         session.refresh(bot)
         bot_pk = bot.id
 
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     record = repository.create_bot_editor_request(
         bot_pk=bot_pk,
         bot_id="bot-editor-1",
@@ -194,7 +544,7 @@ def test_bot_editor_request_approval_creates_member_collaborator(db) -> None:
 
 
 def test_unified_work_order_create_and_approval_lifecycle(db) -> None:
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
 
     record = repository.create_work_order(
         biz_type="BOT_COLLABORATOR",
@@ -289,7 +639,7 @@ def test_unified_work_order_create_and_approval_lifecycle(db) -> None:
 
 def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None:
     spaces = SpaceRepository(db)
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     team = _team(spaces, name="Unified Join Team", creator="owner-unified")
 
     record = repository.create_space_join_request(
@@ -315,11 +665,12 @@ def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None
             .filter(WorkOrderModel.id == record.id)
             .scalar()
         )
-        member_role, member_status, member_created_by = (
+        member_role, member_status, member_created_by, member_user_name = (
             session.query(
                 SpaceMemberModel.role,
                 SpaceMemberModel.status,
                 SpaceMemberModel.created_by,
+                SpaceMemberModel.user_name,
             )
             .filter(
                 SpaceMemberModel.space_id == team.id,
@@ -339,6 +690,7 @@ def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None
     assert member_role == SpaceRole.MEMBER.value
     assert member_status == "ACTIVE"
     assert member_created_by == "owner-unified"
+    assert member_user_name == "applicant-unified"
     assert notice_category == NotificationCategory.NOTICE.value
 
     _, items = spaces.list_spaces(
@@ -356,7 +708,7 @@ def test_unified_space_join_approval_adds_member_in_same_transaction(db) -> None
 
 def test_unified_space_join_rejection_does_not_add_member(db) -> None:
     spaces = SpaceRepository(db)
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     team = _team(spaces, name="Unified Reject Team", creator="owner-reject")
     record = repository.create_space_join_request(
         space_id=team.id,
@@ -393,7 +745,7 @@ def test_unified_space_join_rejection_does_not_add_member(db) -> None:
 
 def test_unified_space_join_approval_rolls_back_when_member_already_exists(db) -> None:
     spaces = SpaceRepository(db)
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     team = _team(spaces, name="Unified Rollback Team", creator="owner-rollback")
     record = repository.create_space_join_request(
         space_id=team.id,
@@ -441,7 +793,7 @@ def test_unified_space_join_approval_rolls_back_when_member_already_exists(db) -
 
 
 def test_unified_space_join_approval_rejects_missing_space_and_rolls_back(db) -> None:
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     with db.transactional_orm_session() as session:
         order = WorkOrderModel(
             work_order_no=repository._new_no(),
@@ -495,7 +847,7 @@ def test_unified_space_join_approval_rejects_missing_space_and_rolls_back(db) ->
 
 
 def test_unified_notice_work_order_does_not_create_approvers(db) -> None:
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
 
     record = repository.create_work_order(
         biz_type="SPACE_MEMBER_ADDED",
@@ -613,7 +965,7 @@ def test_market_favorite_repository_is_idempotent_and_searchable(db) -> None:
 def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     spaces = SpaceRepository(db)
     space = _team(spaces)
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
 
     record = repository.create_space_join_request(
         space_id=space.id,
@@ -738,6 +1090,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
                 title="approved",
                 content="approved content",
             ),
+            applicant_user_name="Applicant",
             env="dev",
         )
     approved_notification = _review_notification(
@@ -752,13 +1105,13 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
         review_remark="ok",
         target_status=WorkOrderStatus.APPROVED,
         notification=approved_notification,
+        applicant_user_name="Applicant",
         env="dev",
     )
     assert result.status is WorkOrderStatus.APPROVED
-    assert (
-        spaces.get_member(space_id=space.id, user_id="applicant-1", env="dev")
-        is not None
-    )
+    member = spaces.get_member(space_id=space.id, user_id="applicant-1", env="dev")
+    assert member is not None
+    assert member.user_name == "Applicant"
     _, joined_spaces = spaces.list_spaces(
         user_id="applicant-1",
         env="dev",
@@ -789,6 +1142,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
                 title="rejected",
                 content="rejected content",
             ),
+            applicant_user_name=None,
             env="dev",
         )
 
@@ -882,7 +1236,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
         session.flush()
         session.refresh(no_owner)
         no_owner_id = no_owner.id
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     with pytest.raises(WorkOrderNoReviewerError):
         repository.create_space_join_request(
             space_id=no_owner_id,
@@ -911,6 +1265,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
             title="custom rejected title",
             content="custom rejected content",
         ),
+        applicant_user_name=None,
         env="dev",
     )
     assert result.status is WorkOrderStatus.REJECTED
@@ -945,7 +1300,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
 def test_badge_counts_distinct_pending_work_orders(db) -> None:
     spaces = SpaceRepository(db)
     space = _team(spaces, name="Badge Team")
-    repository = WorkOrderRepository(db)
+    repository = _work_orders(db)
     record = repository.create_space_join_request(
         space_id=space.id,
         applicant_user_id="applicant-badge",
@@ -980,7 +1335,7 @@ def test_badge_counts_distinct_pending_work_orders(db) -> None:
 def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
     db,
 ) -> None:
-    repository = WorkOrderRepository(db)
+    repository = WorkOrderRepository(db, _skill_editor_requests(db))
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
@@ -1030,7 +1385,7 @@ def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
 
 
 def test_get_approval_context_rejects_missing_order(db) -> None:
-    repository = WorkOrderRepository(db)
+    repository = WorkOrderRepository(db, _skill_editor_requests(db))
 
     with pytest.raises(WorkOrderNotFoundError):
         repository.get_approval_context(
@@ -1041,7 +1396,7 @@ def test_get_approval_context_rejects_missing_order(db) -> None:
 
 
 def test_get_approval_context_rejects_non_approver(db) -> None:
-    repository = WorkOrderRepository(db)
+    repository = WorkOrderRepository(db, _skill_editor_requests(db))
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,

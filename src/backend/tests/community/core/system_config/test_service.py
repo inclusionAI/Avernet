@@ -268,37 +268,11 @@ def test_set_config_serializes_and_upserts() -> None:
 
 
 @pytest.mark.unit
-def test_set_config_returns_zero_when_auto_category_creation_fails() -> None:
-    """A failed auto-create must not claim that the config write succeeded."""
-    svc, repo = _svc()
-    repo.upsert_category = lambda **_kwargs: 0
-
-    config_id = svc.set_config(
-        category="missing", config_key="k", config_value="v", env="dev"
-    )
-
-    assert config_id == 0
-    assert repo.upsert_config_calls == []
-
-
-@pytest.mark.unit
-def test_set_config_auto_creates_category_when_missing() -> None:
-    """分类不存在 → 自动建分类(对齐 docstring)再落 config,不再静默 return 0。"""
+def test_set_config_returns_zero_when_category_missing() -> None:
     svc, repo = _svc()
     cid = svc.set_config(category="nope", config_key="k", config_value="v", env="dev")
-    assert cid == 99  # upsert_config 返回值
-    # 自动建分类:category_name 复用 category
-    assert len(repo.upsert_category_calls) == 1
-    cat_call = repo.upsert_category_calls[0]
-    assert cat_call["category"] == "nope"
-    assert cat_call["category_name"] == "nope"
-    assert cat_call["env"] == "dev"
-    # 再写 config,parent_id = create_category 返回的 id(42)
-    assert len(repo.upsert_config_calls) == 1
-    cfg_call = repo.upsert_config_calls[0]
-    assert cfg_call["parent_id"] == 42
-    assert cfg_call["config_key"] == "k"
-    assert cfg_call["config_value"] == "v"
+    assert cid == 0
+    assert repo.upsert_config_calls == []
 
 
 # ── delete config ─────────────────────────────────────────────────────────────

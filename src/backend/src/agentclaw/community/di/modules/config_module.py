@@ -25,7 +25,9 @@ from typing import Any
 
 from injector import Module, inject, provider, singleton
 
+from agentclaw.community.core.skill_center import draft_content
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
+from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
@@ -64,32 +66,34 @@ def _block(name: str) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _object_prefix_setting(name: str, default: str) -> Any:
+    raw = _user_config().get(name)
+    if raw is None:
+        return default
+    if not isinstance(raw, dict):
+        raise ValueError(f"{name} must be a mapping")
+    unknown = sorted(set(raw) - {"base_prefix_template"})
+    if unknown:
+        raise ValueError(f"{name} contains unknown keys: " + ", ".join(unknown))
+    return raw.get("base_prefix_template", default)
+
+
 def _app_name() -> str | None:
     """The **top-level** ``app_name``, or ``None`` when there is no config.
 
-    Three outcomes, deliberately kept apart, because only the consumer knows
-    which are acceptable (see :meth:`ConfigModule.task_queue`):
-
-    - ``None`` — no config source is registered at all. Local mode, an ad-hoc
-      test, any import outside a boot. There is nothing to have got wrong, so a
-      caller may fall back to its default.
-    - ``""`` — a config that names the app nothing. Present and wrong.
-    - anything else — the configured name.
-
-    A *read failure* is deliberately **not** one of them. Unlike
-    :func:`_user_config`, this does not swallow a raising provider: a missing or
-    malformed overlay would then look identical to "no config", and a caller
-    that defaults on ``None`` would quietly adopt somebody else's app name — the
-    exact corruption ``app`` scoping exists to prevent. ``load_config`` already
-    fails loudly; let it.
+    Same defensiveness as :func:`_user_config` — local mode and ad-hoc tests
+    often have no sofa config at all — but the two outcomes are kept apart on
+    purpose: ``None`` means "nothing to read", while ``""`` means an app config
+    that names itself nothing. Only the consumer knows which of those is a
+    misconfiguration worth refusing (see :meth:`ConfigModule.task_queue`).
     """
-    from agentclaw.community.core.config import provider as config_provider
+    try:
+        from agentclaw.community.core.config import sofa
 
-    if not config_provider.has_config_provider():
+        return str(getattr(sofa.sofa_config, "app_name", "") or "")
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("ConfigModule: sofa app_name unavailable (%s)", exc)
         return None
-    from agentclaw.community.core.config import sofa
-
-    return str(getattr(sofa.sofa_config, "app_name", "") or "")
 
 
 # The closed set of HttpClient bindings an ``overrides`` entry may name. Taken
@@ -262,23 +266,35 @@ class ConfigModule(Module):
 
     @singleton
     @provider
-    def workspace(self) -> cfg.WorkspaceConfig:
-        """Bot workspace filesystem layout.
+    def canonical_center_store(self) -> CanonicalCenterStoreConfig:
+        defaults = CanonicalCenterStoreConfig(env=get_current_env())
+        prefix = _object_prefix_setting(
+            "canonical_center_store", defaults.base_prefix_template
+        )
+        if not isinstance(prefix, str):
+            raise ValueError(
+                "canonical_center_store.base_prefix_template must be a string"
+            )
+        return CanonicalCenterStoreConfig(
+            env=get_current_env(),
+            base_prefix_template=prefix,
+        )
 
-        Sources both roots from the ``workspace`` user_config block;
-        falls back to the dataclass defaults (sandbox paths) when the
-        block is absent or a field is missing. ``~`` is expanded for
-        each path so application-dev.yaml can use ``~/.openclaw`` and
-        get the dev's home directory at boot.
+    @singleton
+    @provider
+    def workspace(self) -> cfg.WorkspaceConfig:
+        """Resolve workspace roots to absolute host paths at the DI boundary.
+
+        Missing fields retain the dataclass sandbox defaults.
         """
-        import pathlib
+        import os
 
         block = _block("workspace")
         defaults = cfg.WorkspaceConfig()
 
         def _expand(value: str | None, default: str) -> str:
             raw = value if isinstance(value, str) and value else default
-            return str(pathlib.Path(raw).expanduser())
+            return os.path.abspath(os.path.expanduser(raw))
 
         return cfg.WorkspaceConfig(
             openclaw_root=_expand(block.get("openclaw_root"), defaults.openclaw_root),
@@ -288,6 +304,7 @@ class ConfigModule(Module):
             aicoding_root=_expand(
                 block.get("aicoding_root"), defaults.aicoding_root
             ),
+            hermes_root=_expand(block.get("hermes_root"), defaults.hermes_root),
         )
 
     # ── Access policy ───────────────────────────────────────────────
@@ -445,6 +462,14 @@ class ConfigModule(Module):
                 block.get("access_key_secret", defaults.secret_name),
             ),
         )
+
+    @singleton
+    @provider
+    def draft_content_store(self) -> draft_content.DraftContentStoreConfig:
+        """Immutable Draft revision object-key prefix."""
+        defaults = draft_content.DraftContentStoreConfig()
+        value = _object_prefix_setting("draft_content_store", defaults.base_prefix_template)
+        return draft_content.DraftContentStoreConfig(base_prefix_template=value)
 
     # NOTE: codefuse_token provider moved to ``CorpConfigModule`` (B8).
 
@@ -875,14 +900,10 @@ class ConfigModule(Module):
         deployment's identity; giving it a second, independently settable name
         would only create a way for the two to disagree.
 
-        No config *source* at all (local mode, ad-hoc tests) ⇒
-        ``TaskQueueConfig``'s default, which is the column default on the
-        deployed table, so a deployment that never set ``app_name`` keeps owning
-        exactly the rows it already owned. A config source that exists but
-        cannot be read is a different thing entirely and is never defaulted —
-        ``_app_name`` lets that failure propagate, because a broken overlay
-        defaulting to the shipped name is how a deployment boots as somebody
-        else and claims their queue rows.
+        No config at all (local mode, ad-hoc tests) ⇒ ``TaskQueueConfig``'s
+        default, which is the column default on the deployed table, so a
+        deployment that never set ``app_name`` keeps owning exactly the rows it
+        already owned.
 
         A *present* but unusable value **raises** rather than falling back, and
         the fallback is the reason: the default is the *other* deployment's name

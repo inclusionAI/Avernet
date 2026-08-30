@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     # annotation is never resolved at runtime — same pattern as
     # ``SkillSetServiceFactory`` below.
     from agentclaw.community.di import config as cfg
-    from agentclaw.community.api.policy_service import PolicyServiceProtocol
+    from agentclaw.community.core.access.policy_service_protocol import PolicyServiceProtocol
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
 from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -114,6 +114,7 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_management.bot_service_protocol import BotServiceProtocol
 
 logger = get_logger()
 
@@ -300,7 +301,7 @@ def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
     return f"{date_part}_{random_part}"
 
 
-class BotService:
+class BotService(BotServiceProtocol):
     """Bot service for managing bot lifecycle."""
 
     def __init__(
@@ -1942,6 +1943,7 @@ class BotService:
                             extra_configs,
                             mcp_sync=self._mcp_sync,
                             skill_set_factory=self._skill_set_factory,
+                            template_service=self._template_service,
                         )
                     except Exception as exc:
                         logger.warning(
@@ -4506,34 +4508,6 @@ class BotService:
                 updated_bot = self._restart_bot_baas(
                     bot_id=bot_id, user_id=user_id, binding_id=binding_id, bot=bot,
                 )
-                try:
-                    from agentclaw.community.core.bot_management.engines import (
-                        resolve_provisioning,
-                    )
-
-                    refresh_ctx, refresh_strategy = resolve_provisioning(
-                        bot_id=bot_id,
-                        owner_id=str(bot.get("owner_id") or user_id),
-                        bot_type=str(bot.get("bot_type") or ""),
-                        active_engine=bot.get("active_engine"),
-                        template_type=bot.get("template_type"),
-                        template_config=None,
-                    )
-                    refresh_strategy.refresh_restart_authorization(
-                        refresh_ctx,
-                        bot,
-                        extra_configs,
-                        mcp_sync=self._mcp_sync,
-                        skill_set_factory=self._skill_set_factory,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "[bot_service.restart_bot] restart authorization refresh failed; "
-                        "continue restart: bot_id=%s error=%s",
-                        bot_id,
-                        exc,
-                        exc_info=True,
-                    )
                 logger.info(f"[bot_service.restart_bot] Bot {bot_id} in-place restart via BaaS, binding preserved")
                 return updated_bot
             release_ok = True

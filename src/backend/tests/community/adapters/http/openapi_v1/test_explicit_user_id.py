@@ -325,6 +325,9 @@ _DIRECTORY_USER_ID = {("get", f"{PUBLIC_API_PREFIX}/org/user")}
 # (the Join Request operation is mounted with the Space authorization errors).
 _AUTHENTICATED_SELF = {
     ("post", f"{PUBLIC_API_PREFIX}/bots/spaces/{{space_id}}/join-requests"),
+    # README resolves the acting user from the verified principal; callers do
+    # not get a second, steerable user_id query parameter.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_id}}/readme"),
 }
 
 #: Bot Logs is excluded for a different reason and must stay that way — see the
@@ -410,7 +413,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The task grant/revoke operations also carry the target in ``bcs_bot_id``
 #: request-body fields rather than a ``bot_id`` parameter, adding two more
 #: operations without changing the path/query counts.
-_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 65}
+_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 89}
 
 
 def _schema() -> dict:
@@ -533,9 +536,14 @@ def test_the_pinned_number_of_operations_take_it():
     # count: 182 → 181. execute/dashboard take no user_id at all — see
     # _NO_USER_DIMENSION.
     # Caller identity context and call-type update add two operations.
+    # Space Skill Grant management adds four Space-addressed operations,
+    # editor-request command adds one, and permanent Draft Edit Lease adds four.
     # The owner-level routines aggregate (GET /bots/routines/all) adds one
-    # account-level operation: 183 → 184.
-    assert len(taking) == 184
+    # account-level operation. Phase 2 Group 1 adds fourteen Space-addressed
+    # creation/detail/Draft/Published-Version operations; none addresses a Bot,
+    # and each carries the explicit user dimension. The merged surface contains
+    # 207 operations.
+    assert len(taking) == 207
 
 
 def test_the_exempt_operations_take_none():
