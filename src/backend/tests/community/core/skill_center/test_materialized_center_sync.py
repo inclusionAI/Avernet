@@ -15,6 +15,9 @@ from agentclaw.community.core.repository.skill_center_reference_types import (
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
 )
+from agentclaw.community.core.skill_center.public_center_identity import (
+    PublicCenterSkillIdentity,
+)
 from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
     SkillCenterSyncInProgressError,
     SkillCenterSyncService,
@@ -49,7 +52,11 @@ class _Assets:
         )
 
     def ensure_public_version(self, **kwargs):
-        assert kwargs["skill_code"] == "public-updated"
+        identity = PublicCenterSkillIdentity.derive(
+            tenant="teamclaw", env="pre", skill_code="public-updated"
+        )
+        assert kwargs["locator"] == identity.locator
+        assert kwargs["skill_uuid"] == identity.skill_uuid
         return PublicCenterVersionTarget(
             skill_id=10, skill_version_id=102, status="MATERIALIZING"
         )
