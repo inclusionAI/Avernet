@@ -1149,6 +1149,22 @@ def test_draft_file_save_rejects_decoded_utf8_content_without_full_copy(
     skill_application_service.save_draft_file.assert_not_called()
 
 
+def test_draft_file_save_rejects_json_lone_surrogate_as_invalid_utf8(
+    client, skill_application_service
+):
+    body = b'{"content":"\\ud800","expected_revision_id":"rev-1","fencing_token":7}'
+
+    response = client.put(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md",
+        headers={"Content-Type": "application/json"},
+        content=body,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.save_draft_file.assert_not_called()
+
+
 def test_upgrade_refresh_and_delete_routes_publish_command_contracts(
     client, skill_application_service, monkeypatch
 ):

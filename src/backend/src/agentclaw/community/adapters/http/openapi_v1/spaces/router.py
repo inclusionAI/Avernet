@@ -88,6 +88,7 @@ from agentclaw.community.core.market_favorites.models import (
 )
 from agentclaw.community.core.skill_center.skill_package import (
     MAX_FILE_BYTES,
+    SkillPackageInvalidError,
     SkillPackageTooLargeError,
 )
 from agentclaw.community.core.spaces.models import (
@@ -136,9 +137,12 @@ _UTF8_SIZE_CHUNK_CHARS = 64 * 1024
 def _require_draft_file_content_size(content: str) -> None:
     encoded_size = 0
     for offset in range(0, len(content), _UTF8_SIZE_CHUNK_CHARS):
-        encoded_size += len(
-            content[offset : offset + _UTF8_SIZE_CHUNK_CHARS].encode("utf-8")
-        )
+        try:
+            encoded_size += len(
+                content[offset : offset + _UTF8_SIZE_CHUNK_CHARS].encode("utf-8")
+            )
+        except UnicodeEncodeError as exc:
+            raise SkillPackageInvalidError("invalid_encoding") from exc
         if encoded_size > MAX_FILE_BYTES:
             raise SkillPackageTooLargeError()
 
