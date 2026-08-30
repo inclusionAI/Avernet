@@ -1706,7 +1706,7 @@ directory-level ownership semantics; teclaw per-file expansion.
 **Owner.** `lucas-xzp` · 0.25 d · day 4 · build (§7)
 
 
-**Goal.** One `ref` change upgrades a whole configuration atomically, and
+**Goal.** One `ref` change resolves a whole configuration to one commit, and
 content hosted in the company's git service is a first-class source.
 
 **In scope.** `sources` + `from`; git ref resolution and content retrieval.
@@ -1796,9 +1796,20 @@ manifest level, so there is no de-activation for W8 to place.)
       iteration 1 and §2.7 withdrew the readiness gate, so requiring a traffic
       gate here would contradict both — and no ready/serving state separate from
       `ACTIVE` exists to hang one on (`bot_chat` has no bot-status routing gate).
-      What this item owes instead is that the window is **visible**: W13's
-      `APPLYING` state is what a caller waits through, and #1508 closes the
-      window properly in iteration 2 by delivering before start.
+      What replaces it is **narrower than an earlier revision claimed**, and the
+      difference is per apply point:
+      - **Creation (W13)** — the caller polls, so `APPLYING` is a state they
+        wait through and the window is genuinely observable. That is W13's
+        mechanism, not this item's.
+      - **Republish and rebuild-restart** — this item's actual apply points — have
+        **no poll loop at all**. So for iteration 1 the window is **not
+        observable in real time on these paths**; what exists is
+        `GET .../config-manifest/last-apply` after the fact, which is consistent
+        with §2.7's pull-only decision. Say this rather than imply a state that
+        only creation has.
+
+      #1508 closes the window properly in iteration 2 by delivering before
+      start, on every path at once.
 - [ ] Scale-out does **not** re-apply; instances stay identical because they
       share one platform state. This is #926's actual requirement.
 - [ ] A manifest `PUT` **takes effect immediately and without a restart**
