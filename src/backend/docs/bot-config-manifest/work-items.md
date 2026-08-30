@@ -9,7 +9,7 @@
 
 ## 1. How to use this document
 
-Each work item **W1–W12** is scoped to be picked up on its own, by one person or
+Each work item **W1–W13** is scoped to be picked up on its own, by one person or
 one session, with no need to re-derive the design from the Chinese docs. An item
 states what it delivers, what it deliberately leaves alone, what must land
 first, and criteria concrete enough to review against.
@@ -18,7 +18,7 @@ Three kinds of entry gate the work and are tracked separately from it:
 
 | Prefix | Meaning |
 | --- | --- |
-| `W1`–`W12` | Implementation work items — one PR each. W12 is a written contract plus another team's sign-off rather than code |
+| `W1`–`W13` | Implementation work items — one PR each. W12 is a written contract plus another team's sign-off rather than code |
 | `D1`–`D4` | **Design questions**, found while checking the design against the code. **All four are now settled** — D1–D3 resolved, D4 deferred with an interim policy (deliver after start) that unblocks the work |
 | `X1`–`X3` | **External confirmations** owed by other teams. None blocks W1–W6; they gate W7 and W9, and W8's teclaw arm |
 
@@ -45,6 +45,7 @@ together.
 | **W3** source credentials | #1471 | **W10** service-layer seam | #1509 |
 | | | **W11** platform-side materialisation | #1510 |
 | | | **W12** cross-engine semantics contract | #1684 |
+| | | **W13** create a bot from a manifest | *(to file)* |
 
 Planning PR: #1465.
 
@@ -144,12 +145,16 @@ are out of scope rather than newly enforced. Singlebox remains a dev/test
 concern only: `script` there reports supported and is not dispatched — #935's
 existing behaviour, not something this feature introduces.
 
-### 2.6 A manifest `PUT` triggers a restart
+### 2.6 A manifest `PUT` on an existing bot triggers a restart
 
 **Divergence from design §3.1**, which makes `PUT` lazy (no apply; effective at
 the next restart for unrelated reasons). Instead: writing a new manifest version
-explicitly restarts the bot, so the running bot always reflects the manifest that
-was last accepted.
+to an **existing** bot explicitly restarts it, so the running bot always reflects
+the manifest that was last accepted.
+
+A manifest supplied to the **creation** API (§2.11, W13) is a different case and
+needs no restart: it is applied as part of creation, so the bot's first container
+already carries it.
 
 This is the better semantics and it removes a hazard the lazy model carries — an
 operator restarting a bot to clear a hang would otherwise silently pick up a
@@ -227,6 +232,47 @@ on the public surface). Reimplementing the checks is acceptable; reimplementing
 them *twice, independently* is not.
 
 Tracked as **W10**, sequenced before W4.
+
+### 2.11 A bot can be created *from* a manifest
+
+The manifest is not only something attached to an existing bot. There is a
+public API that **creates a bot from a manifest**, taking the manifest alongside
+the ordinary creation parameters (engine, name, description, …). It is
+asynchronous — creation is slow — and it rides the existing two-phase Passport
+flow, so the caller polls for the outcome.
+
+This resolves what would otherwise be a hole in design §3.1's promise that "the
+first configuration a bot receives already contains the manifest result". Through
+`PUT` alone that promise is unreachable for a genuinely new bot: you cannot write
+a manifest to `/bots/{bot_id}/config-manifest` before the bot exists, so its first
+boot would always be bare. Creation-from-manifest closes it — the manifest is in
+hand before the bot record is written, so apply runs inside creation.
+
+**How it lands on the existing flow** (`core/bot_management/create_flow.py`):
+
+| | What happens | Bot record |
+| --- | --- | --- |
+| Phase 1 `create_bot_with_authorization` | `bot_id` allocated platform-side (`generate_bot_id`, called in the router); preflight; Passport applied; `iframe_url` returned | **Does not exist** — the code's own comment: *"No token yet → authorization pending; nothing is created."* |
+| User clicks the authorization link | | |
+| Phase 2 `complete_bot_authorization` (polled) | Passport status queried; on `ISSUED`, `bot_service.create_bot(...)` runs | **Written here** |
+
+**The manifest is persisted in phase 1**, keyed by the already-allocated
+`bot_id`. This needs **no schema change**: the manifest table's key is
+`(avernet_tenant, sha256(env, entity_id, bot_id))` and all three parts are known
+in phase 1.
+
+The alternative — having the caller re-send the manifest on every poll, which is
+what the existing flow does with `spec` — was rejected: it means **the manifest
+that was validated is not necessarily the manifest that gets applied**, since a
+caller can send a different one on the poll. That is a latent issue for `spec`;
+for a manifest, which installs skills, identity files, MCP config and a shell
+script, it is not acceptable.
+
+The cost is orphan rows when a user never clicks the link or Passport rejects.
+Accepted for v1 — an orphan manifest occupies no runtime resource — with cleanup
+deferred to a follow-up.
+
+Tracked as **W13**.
 
 ## 3. Design questions
 
@@ -815,6 +861,90 @@ agreement. Record the outcome, including anything they decline.
 
 ---
 
+#### W13 — Create a bot from a manifest
+
+**Goal.** A public, asynchronous API that creates a bot from a manifest plus the
+ordinary creation parameters, so the bot's **first** container already carries its
+configuration (§2.11).
+
+**Depends on.** W1 (document storage, schema, capability resolver) and W4 (the
+apply engine it invokes) · **Blocked by.** —
+
+**Why it is its own item rather than part of W1.** W1 is deliberately scoped to
+never touch `create_flow`; that coupling is the one this plan most wants to
+avoid. This item is where the coupling belongs, and it is substantial on its own:
+a new public endpoint, an asynchronous status surface, manifest storage before a
+bot record exists, capability validation from parameters rather than a record,
+and integration with the two-phase Passport flow.
+
+**In scope.** The creation endpoint (manifest + engine, name, description, …);
+phase-1 manifest persistence keyed by the allocated `bot_id`; the poll/status
+endpoint and its states; invoking apply as part of creation.
+
+**Out of scope.** Orphan-manifest cleanup (deferred, tracked separately) and
+creation idempotency (a pre-existing gap in `generate_bot_id`, tracked
+separately).
+
+**Poll states.** Three terminal states, so a caller's loop stays simple:
+
+```text
+AWAITING_AUTHORIZATION   waiting for the user to follow the Passport link
+        │                (response carries iframe_url / redirect_url)
+        ├──► AUTHORIZATION_REJECTED    terminal
+        ▼
+CREATING                 authorized; bot record written, container provisioning
+        ▼
+APPLYING                 manifest apply running (fetch → materialise → deliver)
+        ├──► READY       terminal — succeeded; response carries the apply report
+        └──► FAILED      terminal — response names which entries failed
+```
+
+- An apply result of `PARTIAL` (entries the author explicitly allowed to skip via
+  `on_fetch_failure: skip`) reports as **`READY`**, with the skips visible in the
+  report. It does not get a state of its own: that would add a branch every
+  caller must handle to express something the detail already carries.
+- `FAILED` is the §2.7 first-boot gate — the bot does not become usable.
+- **`APPLYING` turns D4's interim cost into a visible state.** Post-start delivery
+  (§3.4) leaves a window where the bot is ACTIVE but unconfigured; a caller that
+  waits for `READY` never observes it. The window stops being an invisible trap.
+
+**Done when.**
+
+- [ ] The manifest is **validated before Passport is applied** — inside the
+      preflight stage of `create_bot_with_authorization`, alongside the quota,
+      name and engine checks. A user must never complete an authorization only to
+      be told their manifest was invalid; that wastes their time and burns a
+      Passport application.
+- [ ] Capability is validated from the **request parameters** (engine, bot type),
+      not from a bot record, since no record exists in phase 1. W1's resolver
+      grows this entry point.
+- [ ] The manifest is persisted in phase 1 and read in phase 2 — **the manifest
+      that was validated is the manifest that is applied**. It is never re-sent
+      by the caller on a poll.
+- [ ] Storage needs **no schema change**: the existing
+      `(avernet_tenant, sha256(env, entity_id, bot_id))` key works, all three
+      parts being known in phase 1.
+- [ ] **Tenant context is bound explicitly wherever apply runs off the request
+      thread.** This codebase runs slow work as
+      `threading.Thread(target=bind_current_avernet_tenant(fn), daemon=True)` —
+      `bot_publish_service.py:1267` (`_do_restart`, itself an apply point),
+      `devices/services/baas_publish_poller.py:57` (`_poll`, the natural home of
+      the `CREATING → APPLYING` transition), `bot_service.py:1979`
+      (`do_allocate`). Omitting the wrapper makes
+      `get_current_avernet_tenant()` return the default `teamclaw`, which
+      silently substitutes the wrong `${BOT_TENANT}` **and reads and writes the
+      manifest table under the wrong tenant** — an isolation failure, not just a
+      correctness one. Tested, not left to memory.
+- [ ] Polling reports the states above, and both terminal states carry the apply
+      report.
+- [ ] The pre-existing `PUT` path is unchanged: a bot created any other way can
+      still be given a manifest afterwards and have it take effect on restart
+      (§2.6). The two paths coexist.
+
+**Size.** Large.
+
+---
+
 #### W1 — Manifest document: storage, schema v1, capability, API · #1469
 
 **Goal.** A bot can carry a config-manifest document that is stored, validated
@@ -878,6 +1008,9 @@ capability table is fully determined.
 - [ ] The capability resolver is **one function** used by both the read and the
       write path, so `GET .../capabilities` can never claim support that `PUT`
       then refuses. Unknown engine ⇒ unsupported.
+- [ ] That function can also answer from **engine type and bot type alone**, with
+      no bot record — W13 validates a manifest in phase 1, before any record
+      exists. One function, two entry points; never two implementations.
 - [ ] Capability is computed from the bot record alone — `is_teclaw(active_engine)`
       and `bot_type == "desktop"` — with no device-binding lookup and no third
       "unknown" state (§2.5).
@@ -1229,6 +1362,9 @@ bot has started (§3.4).
 **Done when.**
 
 - [ ] On teclaw, the **first** artifact already contains the manifest result.
+- [ ] Bots created through W13 get their manifest applied inside creation, so
+      this item covers the *other* apply points — republish and rebuild-restart —
+      plus the `PUT`-triggered restart of §2.6.
 - [ ] On the BaaS family, post-start delivery (§3.4) completes before the bot
       takes traffic — "started" and "ready" must stop being the same moment, or
       the ACTIVE-but-unconfigured window becomes user-visible.
@@ -1301,7 +1437,8 @@ wave 2       └───────┴────────┴────�
                                                          │
 wave 3                                                   ├─► W6 ──┐
                                                          │        ├─► W8  ◄── W12
-                                                         └─► W7 ──┘
+                                                         ├─► W7 ──┘
+                                                         └─► W13
                                                                    │
 deferred                                                           └─► W9
 
@@ -1331,6 +1468,10 @@ the two engine families.
 
 **Start W12 now.** It is the only remaining item whose critical path runs through
 another team, and it costs us little to write.
+
+**W13 is what actually delivers "a bot comes up configured on its very first
+boot."** W8 covers every *other* apply point; W13 covers creation, which is the
+one the business asked for. It needs W1 and W4 and nothing external.
 
 **Why lifecycle wiring is last.** Explicit `POST .../apply` exercises the whole
 engine from W4 onward, so W8 touches the create and publish flows only after the
@@ -1374,6 +1515,7 @@ product.
 | W10 | no design section — arises from §2.10, an implementation constraint the design does not cover |
 | W11 | no design section — arises from §2.8, a requirement added after #1031 |
 | W12 | design §3.3 (convergence) and engine-requirements T2, turned into a two-sided contract |
+| W13 | design §3.1's create apply point — reachable only through the creation API this item adds; no design section describes that API |
 
 Design decisions this document does **not** re-open: the manifest/script split
 (design §2.1), route B (design §2.3), the four rejected alternatives (design
