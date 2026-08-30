@@ -1,11 +1,10 @@
 """Task 4 — BBS 主动触发引擎接线单测(spec §5:engine trigger)。
 
-验证 ``_maybe_propagate_hung`` 命中根 BBS 可恢复态拦截点(``miss_depth_exhausted`` + ``bbs_mode`` + 未 claim)
-时,调用 ``_schedule_bbs_notify`` 主动通知 dream-mode bot;以及 ``_schedule_bbs_notify`` 本身的
+验证 ``_maybe_propagate_hung`` 将根节点置为 HUNG 后进入 BBS 可恢复态(``miss_depth_exhausted`` + ``bbs_mode`` + 未 claim),
+并调用 ``_schedule_bbs_notify`` 主动通知 claim-enabled bot;以及 ``_schedule_bbs_notify`` 本身的
 fire-and-forget 语义(``asyncio.create_task(runner.run_bbs)`` + ``_bg_tasks`` tracking)与端口缺失静默跳过。
 
-可恢复拦截仅对 ``miss_depth_exhausted``;其它 reason(硬死锁)不触发——不在本单测范围(由既有
-``test_engine.py`` 覆盖 HUNG 冒泡收口)。
+BBS 调度仍由根 HUNG 后的统一入口负责;本文件覆盖 miss 与 harness 两类触发。
 """
 from __future__ import annotations
 
@@ -145,10 +144,9 @@ def test_engine_schedule_bbs_notify_skips_when_no_runner():
     assert engine._bg_tasks == set()
 
 
-# ===== 可恢复拦截点接线:on_miss → miss_depth_exhausted → _schedule_bbs_notify =====
+# ===== 根 HUNG 接线:on_miss → miss_depth_exhausted → _schedule_bbs_notify =====
 def test_engine_schedule_bbs_notify_fires_at_recoverable_intercept(svc):
-    """on_miss 达 MAX_DEPTH → miss_depth_exhausted → _maybe_propagate_hung 根可恢复态拦截
-    (parent-is-root)→ 调用 _schedule_bbs_notify(task_id, graph)。"""
+    """on_miss 达 MAX_DEPTH → miss_depth_exhausted → 根 HUNG → 调用 _schedule_bbs_notify。"""
     g = svc.initialize_graph(_task_info("t4", max_depth=1))
     svc.add_task_nodes([_child("c1", "t4")], parent_node_id="t4")
     eng = _engine(svc, planner=StubPlanner(lambda g: []), dispatcher=StubDispatcher(miss=True))
@@ -157,11 +155,12 @@ def test_engine_schedule_bbs_notify_fires_at_recoverable_intercept(svc):
         _run(eng.on_miss(_patch("t4", "c1", extend_props_patch={"miss_events": ["no_bot"]})))
         mock_sched.assert_called_once()
 
-    # 命中可恢复拦截:根保持 PLANNING(未置图 HUNG)、bbs_mode 已升
+    # 命中统一根 HUNG→BBS 路径:根先置 HUNG,bbs_mode 已升。
     called_args = mock_sched.call_args.args
     assert called_args[0] == "t4"  # task_id
     assert g.extend_props.get("bbs_mode") is True
-    assert g.status != Status.HUNG  # 可恢复态不收口图 HUNG
+    assert g.tasks[0].status == Status.HUNG
+    assert g.status != Status.HUNG  # graph.status 仍是进行态镜像，根 HUNG 是 BBS 可恢复入口
 
 
 def test_engine_harness_exhausted_schedules_bbs_recoverable(svc):

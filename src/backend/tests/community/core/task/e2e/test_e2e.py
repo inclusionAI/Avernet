@@ -434,7 +434,7 @@ class TestMissEscalateBbs:
 
     def test_bbs_bot_claims_and_relays_to_done(self):
         """v5 真实 BBS 接力经 facade API(claim→attach→report PASS 收口;根收口由框架经 owner 复核自判),
-        不需直写复位:MISS at max→HUNG→升 BBS(miss_depth_exhausted 可恢复态)→ 根保 PLANNING 待接力 →
+        不需直写复位:MISS at max→HUNG→升 BBS(miss_depth_exhausted 可恢复态)→ 根先置 HUNG 待接力 →
         BBS bot 经 facade.claim_bbs_task 占根 → facade.attach_bbs_node 挂 run_mode=bbs scoped 节点
         (已 RUNNING)→ facade.report_bbs_result(PASS)→ scoped DONE + claim 释放;框架 _on_pass_collect 复核
         根 gap(case planner 返 has_gap=False)→ 根 DONE + 图 DONE。"""
@@ -444,11 +444,11 @@ class TestMissEscalateBbs:
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
         g = svc.query_task_dashboard("t_case")
-        # miss_depth_exhausted → MISS 节点 HUNG + bbs_mode=true,但 v5 根保持 PLANNING(可恢复态)
+        # miss_depth_exhausted → MISS 节点 HUNG + 根节点 HUNG + bbs_mode=true
         hung_node = next((n for n in g.tasks if n.node_id == "N_practice_bbs"), None)
         assert hung_node is not None and hung_node.status == Status.HUNG
         assert g.extend_props.get("bbs_mode") is True
-        assert svc._get_node(g, "t_case").status == Status.PLANNING
+        assert svc._get_node(g, "t_case").status == Status.HUNG
 
         # BBS 中继接管:claim → attach(run_mode=bbs 自动 PENDING→RUNNING) → report PASS(根收口框架自判)
         bbs_bot_id = "bot_bbs_7"

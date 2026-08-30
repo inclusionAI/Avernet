@@ -502,6 +502,34 @@ class TestOnReportFail:
         assert graph.loop_round == 0
         assert graph.extend_props.get("bbs_mode") is None
 
+    def test_late_terminal_sibling_reconciles_root_hung_and_bbs(self, svc, graph):
+        """A HUNG child seen while a sibling is active is rechecked when that sibling finishes."""
+        svc.add_task_nodes([_child("c1"), _child("c2")], parent_node_id="t1")
+        for node_id in ("c1", "c2"):
+            svc.update_task_node_info(
+                _patch("t1", node_id, status=Status.RUNNING, run_mode="single_bot", assignee="b")
+            )
+        runner = StubRunner()
+        eng = _engine(svc, planner=StubPlanner(lambda g: []), runner=runner)
+
+        async def _go():
+            # First HUNG propagation observes c2 still active and must wait.
+            eng._hung_and_escalate("t1", "c1", "exec_stuck")
+            assert svc._get_node(graph, "t1").status == Status.PLANNING
+            assert graph.loop_round == 0
+
+            # c2 completes through a status-only callback, which historically skipped
+            # _on_pass_collect. The reconciliation hook must close the root.
+            await eng.on_report(_patch("t1", "c2", status=Status.DONE))
+            if eng._bg_tasks:
+                await asyncio.gather(*eng._bg_tasks, return_exceptions=True)
+
+        _run(_go())
+        assert svc._get_node(graph, "t1").status == Status.HUNG
+        assert graph.extend_props.get("bbs_mode") is True
+        assert graph.loop_round == 1
+
+
     def test_exec_error_harness_retry_redispatch(self, svc, graph):
         """exec_error(执行报错/传输失败)→harness 重新派发执行(不拆):RUNNING→PENDING→dispatch→RUNNING。
         与验收 FAIL 不同:执行报错为临时性失败,重派有意义(验收不过属内容 gap,已直接 HUNG)。"""

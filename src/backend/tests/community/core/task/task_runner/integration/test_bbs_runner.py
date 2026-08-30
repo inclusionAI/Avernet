@@ -81,9 +81,27 @@ class _FakeBcn:
 
     def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any"):
         assert claim is True
-        assert dream is True
+        assert dream is None
         assert match == "all"
         return list(self._roster)
+
+
+
+class _FlakyBcn(_FakeBcn):
+    def __init__(self, roster, failures=1):
+        super().__init__(roster)
+        self.failures = failures
+        self.calls = 0
+
+    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any"):
+        self.calls += 1
+        assert claim is True
+        assert dream is None
+        assert match == "all"
+        if self.calls <= self.failures:
+            raise RuntimeError("roster unavailable")
+        return list(self._roster)
+
 
 
 def _roster(*bot_ids: str) -> list[dict]:
@@ -194,6 +212,21 @@ def test_notify_empty_roster_returns_silently():
     assert graph.claimed is None
     assert bot.sent_messages == []
     assert bot.bid_prompts == []
+
+
+def test_notify_retries_roster_failure_and_only_filters_claim(monkeypatch):
+    import agentclaw.community.core.task.task_runner.integration.bbs_runner as module
+
+    monkeypatch.setattr(module, "_ROSTER_RETRY_DELAY", 0)
+    bcn = _FlakyBcn(_roster("A"), failures=1)
+    bot = _FakeBot(rates={"A": 80})
+    graph = _FakeGraph()
+
+    _run(notify(_execution_graph("t-retry"), bcn=bcn, bot=bot, graph=graph, backend_url="http://x"))
+
+    assert bcn.calls == 2
+    assert graph.claimed == "A"
+    assert len(bot.sent_messages) == 1
 
 
 def test_notify_all_bids_failed_returns_silently():
