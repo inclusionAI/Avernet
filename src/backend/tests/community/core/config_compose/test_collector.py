@@ -6,7 +6,6 @@ resource/identity mapping, and the engine_overrides default.
 """
 import tempfile
 import threading
-import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -607,21 +606,34 @@ def test_mcps_keep_raw_order_when_lookups_finish_out_of_order():
     futures as they complete would reorder the artifact for no reason other than
     which Center reply landed first. Here the replies land in exactly reverse
     order.
+
+    Completion order is *forced* with a chain of events rather than staggered
+    sleeps: a thread descheduled longer than a sleep gap would otherwise invert
+    the inversion and fail the test for scheduler timing that has nothing to do
+    with the behaviour under test. Each lookup waits for its turn, so the
+    replies land in reverse order deterministically or the test times out
+    saying so. (The chain needs all entries in flight at once, which holds:
+    the pool is ``min(len(codes), _MCP_DETAIL_WORKERS)`` wide.)
     """
     codes = ["first", "second", "third", "fourth"]
-    delay = {code: 0.05 * (len(codes) - i) for i, code in enumerate(codes)}
+    completion_order = list(reversed(codes))
+    turns = {code: threading.Event() for code in codes}
+    turns[completion_order[0]].set()
     finished: list[str] = []
     lock = threading.Lock()
 
     def lookup(server_code):
-        time.sleep(delay[server_code])
+        assert turns[server_code].wait(timeout=10), f"never got a turn: {server_code}"
         with lock:
             finished.append(server_code)
+            done = len(finished)
+        if done < len(completion_order):
+            turns[completion_order[done]].set()
         return _remote(server_code)
 
     inputs = _mcps_over(codes, lookup)
 
-    assert finished == list(reversed(codes))  # completion order really did invert
+    assert finished == completion_order  # completion order really did invert
     assert [i.mcp_data["server_code"] for i in inputs] == codes
 
 
@@ -632,18 +644,28 @@ def test_mcps_bound_the_fan_out_at_mcp_center():
     Removing the sequential cost is the point; replacing it with an unbounded
     burst at MCP Center is not. More servers than workers, so the ceiling has to
     actually hold some of them back.
+
+    Every worker is held until the pool is provably saturated, so the ceiling is
+    *observed* rather than raced for: peak lands on exactly
+    ``_MCP_DETAIL_WORKERS`` — never above it (that is the bound) and never
+    below (nothing may exit until that many are in flight at once). A
+    sleep-based version would only show "some overlap happened", and would say
+    it on the strength of CI scheduling.
     """
     codes = [f"s{i}" for i in range(_MCP_DETAIL_WORKERS * 2 + 3)]
     lock = threading.Lock()
     in_flight = 0
     peak = 0
+    saturated = threading.Event()
 
     def lookup(server_code):
         nonlocal in_flight, peak
         with lock:
             in_flight += 1
             peak = max(peak, in_flight)
-        time.sleep(0.05)
+            if in_flight >= _MCP_DETAIL_WORKERS:
+                saturated.set()
+        assert saturated.wait(timeout=10), "pool never reached its worker ceiling"
         with lock:
             in_flight -= 1
         return _remote(server_code)
@@ -651,8 +673,7 @@ def test_mcps_bound_the_fan_out_at_mcp_center():
     inputs = _mcps_over(codes, lookup)
 
     assert [i.mcp_data["server_code"] for i in inputs] == codes
-    assert peak <= _MCP_DETAIL_WORKERS
-    assert peak > 1  # …and the bound is a ceiling, not a serial loop in disguise
+    assert peak == _MCP_DETAIL_WORKERS
 
 
 @pytest.mark.unit
