@@ -346,7 +346,7 @@
       "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
       "dormant_internal_token": "",
       "gateway_principal_signing_key": "gateway_principal_signing_key",
-      "skill_center_internal_token": ""
+      "skill_center_internal_token": "other_manual_agentclaw_skill_center_internal_token"
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",
