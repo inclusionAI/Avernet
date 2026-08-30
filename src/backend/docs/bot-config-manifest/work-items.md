@@ -44,7 +44,7 @@ together.
 | **W2** guarded fetcher | #1470 | **W9** `cli_tools` (deferred) | #1477 |
 | **W3** source credentials | #1471 | **W10** service-layer seam | #1509 |
 | | | **W11** platform-side materialisation | #1510 |
-| | | **W12** cross-engine semantics contract | *(to file)* |
+| | | **W12** cross-engine semantics contract | #1684 |
 
 Planning PR: #1465.
 
@@ -606,7 +606,7 @@ which is why W4 depends on it rather than treating it as an add-on.
 
 ---
 
-#### W12 — Cross-engine convergence semantics contract
+#### W12 — Cross-engine convergence semantics contract · #1684
 
 **Goal.** One written statement of what applying a manifest does to what is
 already there, agreed by both sides, so the same manifest behaves the same way on
