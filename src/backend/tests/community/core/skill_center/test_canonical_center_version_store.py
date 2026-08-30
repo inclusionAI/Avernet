@@ -165,11 +165,20 @@ def test_write_uses_exact_canonical_root_and_roundtrips_verified_tree() -> None:
         "aidesktop/aidesktop_prod/bolt_shared/skills-center/"
         f"{SKILL_UUID}/12"
     )
+    control_root = (
+        "aidesktop/aidesktop_prod/bolt_shared/skills-center-control/"
+        f"{SKILL_UUID}/12"
+    )
     assert ref.locator == f"center-version://{SKILL_UUID}/12"
-    assert f"{root}/SKILL.md" in objects.objects
-    assert f"{root}/scripts/run.py" in objects.objects
-    assert f"{root}/.teamclaw-write.json" in objects.objects
-    assert f"{root}/.teamclaw-ready.json" in objects.objects
+    assert {
+        key for key in objects.objects if key.startswith(f"{root}/")
+    } == {
+        f"{root}/SKILL.md",
+        f"{root}/scripts/run.py",
+    }
+    assert f"{control_root}/write-intent.json" in objects.objects
+    assert f"{control_root}/content-manifest.json" in objects.objects
+    assert not any("ready" in key.lower() for key in objects.objects)
     assert store.verify_version(ref) is True
     assert store.read_version(ref) == version
     assert store.read_version(ref).skill_md.startswith(b"---\n")
@@ -189,7 +198,7 @@ def test_same_exact_identity_is_idempotent_but_conflict_fails_closed() -> None:
     assert store.read_version(first) == original
 
 
-def test_partial_write_failure_stays_unready_and_same_content_retry_resumes() -> None:
+def test_partial_write_failure_stays_incomplete_and_same_content_retry_resumes() -> None:
     objects = _MemoryObjects()
     objects.fail_create_suffix = "scripts/run.py"
     store = _store(objects)
@@ -198,7 +207,7 @@ def test_partial_write_failure_stays_unready_and_same_content_retry_resumes() ->
         store.write_version(_version())
 
     assert error.value.code is CanonicalCenterStoreErrorCode.WRITE_FAILED
-    assert not any(key.endswith(".teamclaw-ready.json") for key in objects.objects)
+    assert not any(key.endswith("content-manifest.json") for key in objects.objects)
     assert any(key.endswith("SKILL.md") for key in objects.objects)
 
     objects.fail_create_suffix = None
@@ -206,16 +215,16 @@ def test_partial_write_failure_stays_unready_and_same_content_retry_resumes() ->
     assert store.verify_version(ref) is True
 
 
-def test_ready_publish_failure_keeps_verified_tree_for_same_content_retry() -> None:
+def test_manifest_publish_failure_keeps_verified_tree_for_same_content_retry() -> None:
     objects = _MemoryObjects()
-    objects.fail_create_suffix = ".teamclaw-ready.json"
+    objects.fail_create_suffix = "content-manifest.json"
     store = _store(objects)
 
     with pytest.raises(CanonicalCenterStoreError) as error:
         store.write_version(_version())
 
     assert error.value.code is CanonicalCenterStoreErrorCode.WRITE_FAILED
-    assert not any(key.endswith(".teamclaw-ready.json") for key in objects.objects)
+    assert not any(key.endswith("content-manifest.json") for key in objects.objects)
     objects.fail_create_suffix = None
     ref = store.write_version(_version())
     assert store.verify_version(ref) is True
@@ -234,7 +243,7 @@ def test_transient_prepublish_read_failure_never_rolls_back_partial_tree() -> No
     with pytest.raises(CanonicalCenterStoreError) as error:
         store.write_version(version)
     assert error.value.code is CanonicalCenterStoreErrorCode.READ_FAILED
-    assert not any(key.endswith(".teamclaw-ready.json") for key in objects.objects)
+    assert not any(key.endswith("content-manifest.json") for key in objects.objects)
     assert skill_key in objects.objects
 
     objects.fail_reads.clear()
@@ -242,7 +251,7 @@ def test_transient_prepublish_read_failure_never_rolls_back_partial_tree() -> No
     assert store.read_version(ref) == version
 
 
-def test_missing_or_corrupt_ready_tree_is_unavailable() -> None:
+def test_missing_or_corrupt_canonical_tree_is_unavailable() -> None:
     objects = _MemoryObjects()
     store = _store(objects)
     ref = store.write_version(_version())
@@ -255,14 +264,14 @@ def test_missing_or_corrupt_ready_tree_is_unavailable() -> None:
     assert error.value.code is CanonicalCenterStoreErrorCode.CORRUPT_CONTENT
 
 
-def test_malformed_ready_manifest_is_never_treated_as_ready() -> None:
+def test_malformed_integrity_manifest_is_never_treated_as_complete() -> None:
     objects = _MemoryObjects()
     store = _store(objects)
     ref = store.write_version(_version())
-    ready_key = next(
-        key for key in objects.objects if key.endswith("/.teamclaw-ready.json")
+    manifest_key = next(
+        key for key in objects.objects if key.endswith("/content-manifest.json")
     )
-    objects.objects[ready_key] = b"not-json"
+    objects.objects[manifest_key] = b"not-json"
 
     assert store.verify_version(ref) is False
     with pytest.raises(CanonicalCenterStoreError) as error:
@@ -274,10 +283,10 @@ def test_storage_failure_is_not_reported_as_missing_or_not_ready() -> None:
     objects = _MemoryObjects()
     store = _store(objects)
     ref = store.write_version(_version())
-    ready_key = next(
-        key for key in objects.objects if key.endswith("/.teamclaw-ready.json")
+    manifest_key = next(
+        key for key in objects.objects if key.endswith("/content-manifest.json")
     )
-    objects.fail_reads.add(ready_key)
+    objects.fail_reads.add(manifest_key)
 
     with pytest.raises(CanonicalCenterStoreError) as error:
         store.verify_version(ref)

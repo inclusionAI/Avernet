@@ -359,7 +359,7 @@ Idempotency-Key: required
 POST 返回 `202 Accepted` 与持久 `reference_id`；前端通过 GET 查询
 `PENDING/RUNNING/SUCCEEDED/FAILED`。Reference 首次受理时解析并冻结精确
 `sc_version_number`，内部完成 SC PUBLIC 授权、`ac_skill/ac_skill_version` 幂等创建、
-TeamClaw Canonical Store Ready 和最终 ACL/SkillSet 状态复验；只有 Version=`PUBLISHED` 后才调用
+Canonical Store 完整性校验和最终 ACL/SkillSet 状态复验；只有 Version=`PUBLISHED` 后才调用
 `SkillSetManagementService` 写 Membership，active Set 再维护 Installation 与 Runtime
 Projection。已物化但最终 Membership 失败时保留共享只读 Asset/Version，不写悬空
 Membership。当前阶段只冻结合同；没有真实 Backend 实现前不得加入 Gateway 正式 OpenAPI artifact。
@@ -649,8 +649,8 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
 ```
 
 - 明确失败：Draft 恢复 EDITING，相同 target version 可修改后再次提交。
-- SC Published：创建不可变 Version，记录 `versionId/versionNumber`；只有 TeamClaw
-  Canonical Store Ready 后才将 Version 置为 PUBLISHED、Attempt 置为 SUCCEEDED 并清 Draft。
+- SC Published：创建不可变 Version，记录 `versionId/versionNumber`；只有全部 Canonical Store
+  `verify_version` 通过后才将 Version 置为 PUBLISHED、Attempt 置为 SUCCEEDED 并清 Draft。
 - 物化失败：不再次 POST SC，只重试同一 Version。
 - RESULT_UNKNOWN：Draft 保持 FROZEN，普通用户不能处理。
 - 不建设长期 Snapshot URI/Hash，不提供 Attempt cancel。
@@ -703,12 +703,14 @@ Latest 是发布成功后的 Best-Effort 异步刷新，不参与发布成功门
   `latest/current`、覆盖和按名称寻址。默认 OSS 物理 key 根为
   `aidesktop/aidesktop_<env>/bolt_shared/skills-center/<skill_uuid>/`
   `<sc_version_number>/`，其下保存经过上游 Materializer 规范化的安全文件树，且必须有
-  根级 `SKILL.md`。Store 用 write-once intent 占住 exact identity，逐文件原子
-  create-if-absent，完整校验后最后发布 Ready manifest。Ready 前的部分写入由 intent
-  隔离，不向 Consumer 暴露；同内容重试按 manifest 幂等补齐缺失文件并继续发布，内容不同
-  则冲突失败。为避免删除并发同内容重试已依赖的 immutable file，Store 不物理回滚已完成的
-  partial；这类对象只属于该未 Ready exact identity。Ready 一旦原子发布永不回滚。
-  Ready 缺失、文件缺失、hash/manifest 冲突或对象存储不可用时均不可读、不可向
+  根级 `SKILL.md`，不得混入 intent、manifest 或 Ready marker。Store 在不会被 Runtime
+  mount/rsync 的 sibling 控制根 `skills-center-control/<skill_uuid>/<sc_version_number>/`
+  保存 write-once `write-intent.json` 与 `content-manifest.json`；两者只承担并发冲突和完整性
+  校验，不是第二个领域状态。Store 逐文件原子 create-if-absent，完整校验后最后发布 integrity
+  manifest；manifest 缺失时的部分写入不向 Consumer 暴露，同内容重试按 manifest 幂等补齐
+  缺失文件并继续，内容不同则冲突失败。为避免删除并发同内容重试已依赖的 immutable file，
+  Store 不物理回滚已完成的 partial；这类对象只属于该尚未完整的 exact identity。
+  integrity manifest 缺失、文件缺失、hash/manifest 冲突或对象存储不可用时均不可读、不可向
   Runtime/Artifact 暴露。重复写入同一 exact identity 仅允许同内容幂等验证，任何内容冲突
   fail closed。该 Store 不负责 SC 下载、Scanner、MCP dependency、Version 状态、Runtime
   mapping、Teclaw StoreRef 或 Artifact。
@@ -716,10 +718,10 @@ Latest 是发布成功后的 Best-Effort 异步刷新，不参与发布成功门
   bucket。文件型 Engine Adapter 将它暴露为容器内 `skills-pool/skill-center/` 视图。
 - Teclaw 沿用 Artifact v4，新增 `skill-center` OSS Store，SkillRef path 为
   `<skill_uuid>/<sc_version_number>`；Bucket/Base 来自服务端配置。
-- **TeamClaw Canonical Store Ready** 是发布成功门槛：该 Version 面向本期支持消费者
-  所需的文件型 Store 与 Teclaw Store 全部就绪后，Version 才转 PUBLISHED。SC 已发布
-  或只完成其中一个 Store 都不算 TeamClaw 发布成功；任一失败保持 MATERIALIZING，
-  只重试同一 Version，不再次发布 SC。
+- `ac_skill_version.status=PUBLISHED` 是唯一领域 Ready/发布成功事实：Materializer 只有在
+  文件型 Store `verify_version`、Teclaw Store 和精确 metadata/MCP dependency 全部就绪后
+  才能转 PUBLISHED。SC 已发布、单个 Store 完成或仅存在 integrity manifest 都不算 TeamClaw
+  发布成功；任一失败保持 MATERIALIZING，只重试同一 Version，不再次发布 SC。
 - 禁止 `current/latest`、版本覆盖和数量型 GC；历史 Service Artifact 可能继续引用
   任意旧版本。
 

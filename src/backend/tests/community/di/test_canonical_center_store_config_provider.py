@@ -50,6 +50,9 @@ def test_config_uses_runtime_env_and_frozen_default(monkeypatch) -> None:
     assert config.base_prefix == (
         "aidesktop/aidesktop_pre/bolt_shared/skills-center"
     )
+    assert config.control_prefix == (
+        "aidesktop/aidesktop_pre/bolt_shared/skills-center-control"
+    )
 
 
 def test_config_reads_explicit_prefix_and_rejects_unknown_or_invalid(
@@ -65,9 +68,11 @@ def test_config_reads_explicit_prefix_and_rejects_unknown_or_invalid(
             }
         },
     )
-    assert ConfigModule().canonical_center_store().base_prefix == (
+    config = ConfigModule().canonical_center_store()
+    assert config.base_prefix == (
         "sandbox/aidesktop_prod/skills-center"
     )
+    assert config.control_prefix == "sandbox/aidesktop_prod/skills-center-control"
 
     for raw in ({"unknown": True}, "not-a-mapping"):
         monkeypatch.setattr(

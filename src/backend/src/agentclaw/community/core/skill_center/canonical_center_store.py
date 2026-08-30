@@ -309,6 +309,12 @@ class CanonicalCenterStoreConfig:
     def base_prefix(self) -> str:
         return self.base_prefix_template.format(env=self.env).rstrip("/")
 
+    @property
+    def control_prefix(self) -> str:
+        """Sibling metadata root that is never mounted as Runtime content."""
+        content_root = PurePosixPath(self.base_prefix)
+        return str(content_root.parent / f"{content_root.name}-control")
+
 
 @runtime_checkable
 class CanonicalCenterVersionStore(Protocol):

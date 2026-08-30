@@ -22,7 +22,7 @@ from agentclaw.community.plugin_api.object_storage import (
 
 
 class OssCanonicalCenterVersionStore:
-    """Publish exact file trees behind a write-once Ready manifest."""
+    """Publish exact files with integrity metadata outside the Runtime tree."""
 
     def __init__(
         self,
@@ -51,31 +51,32 @@ class OssCanonicalCenterVersionStore:
         )
         ref = CanonicalCenterVersionRef(version.identity)
         root = self._root(version.identity)
-        lock_key = f"{root}/.teamclaw-write.json"
-        ready_key = f"{root}/.teamclaw-ready.json"
-        lock_body = self._lock_body(version)
-        lock_result = self._immutable_objects.create_object_if_absent(
-            lock_key, lock_body
+        control_root = self._control_root(version.identity)
+        intent_key = f"{control_root}/write-intent.json"
+        manifest_key = f"{control_root}/content-manifest.json"
+        intent_body = self._intent_body(version)
+        intent_result = self._immutable_objects.create_object_if_absent(
+            intent_key, intent_body
         )
-        if lock_result is ObjectCreateResult.ALREADY_EXISTS:
-            existing = self._read_required(lock_key)
-            if existing != lock_body:
+        if intent_result is ObjectCreateResult.ALREADY_EXISTS:
+            existing = self._read_required(intent_key)
+            if existing != intent_body:
                 raise CanonicalCenterStoreError(
                     CanonicalCenterStoreErrorCode.CONTENT_CONFLICT,
                     f"exact version identity already belongs to other content: {ref.locator}",
                 )
-        elif lock_result is ObjectCreateResult.FAILED:
+        elif intent_result is ObjectCreateResult.FAILED:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.WRITE_FAILED,
                 f"failed to reserve exact version identity: {ref.locator}",
             )
 
-        existing_ready = self._read_manifest(ref, missing_is_error=False)
-        if existing_ready is not None:
-            if existing_ready != version.manifest:
+        existing_manifest = self._read_manifest(ref, missing_is_error=False)
+        if existing_manifest is not None:
+            if existing_manifest != version.manifest:
                 raise CanonicalCenterStoreError(
                     CanonicalCenterStoreErrorCode.CONTENT_CONFLICT,
-                    f"Ready manifest conflicts at exact identity: {ref.locator}",
+                    f"integrity manifest conflicts at exact identity: {ref.locator}",
                 )
             self.read_version(ref)
             return ref
@@ -99,8 +100,8 @@ class OssCanonicalCenterVersionStore:
                     f"canonical file conflicts at exact identity: {item.path}",
                 )
 
-        # Verify the complete immutable tree before the one-way Ready publish.
-        # Once Ready is visible it is never compensated or rolled back.
+        # Verify every immutable Runtime file before publishing the out-of-band
+        # integrity manifest. Domain publication remains owned by PUBLISHED.
         for item in version.files:
             if self._read_required(f"{root}/{item.path}") != item.content:
                 raise CanonicalCenterStoreError(
@@ -108,21 +109,21 @@ class OssCanonicalCenterVersionStore:
                     f"canonical file failed prepublish verification: {item.path}",
                 )
 
-        ready_result = self._immutable_objects.create_object_if_absent(
-            ready_key, version.manifest
+        manifest_result = self._immutable_objects.create_object_if_absent(
+            manifest_key, version.manifest
         )
-        if ready_result is ObjectCreateResult.FAILED:
+        if manifest_result is ObjectCreateResult.FAILED:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.WRITE_FAILED,
-                f"failed to publish Ready manifest: {ref.locator}",
+                f"failed to publish integrity manifest: {ref.locator}",
             )
         if (
-            ready_result is ObjectCreateResult.ALREADY_EXISTS
-            and self._read_required(ready_key) != version.manifest
+            manifest_result is ObjectCreateResult.ALREADY_EXISTS
+            and self._read_required(manifest_key) != version.manifest
         ):
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.CONTENT_CONFLICT,
-                f"Ready manifest conflicts at exact identity: {ref.locator}",
+                f"integrity manifest conflicts at exact identity: {ref.locator}",
             )
         return ref
 
@@ -153,7 +154,7 @@ class OssCanonicalCenterVersionStore:
         if actual.manifest != manifest:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.CORRUPT_CONTENT,
-                f"canonical version content does not match Ready manifest: {ref.locator}",
+                f"canonical version content does not match integrity manifest: {ref.locator}",
             )
         return actual
 
@@ -175,8 +176,14 @@ class OssCanonicalCenterVersionStore:
             f"{identity.sc_version_number}"
         )
 
+    def _control_root(self, identity: CanonicalCenterVersionIdentity) -> str:
+        return (
+            f"{self._config.control_prefix}/{identity.skill_uuid}/"
+            f"{identity.sc_version_number}"
+        )
+
     @staticmethod
-    def _lock_body(version: CanonicalCenterVersion) -> bytes:
+    def _intent_body(version: CanonicalCenterVersion) -> bytes:
         return json.dumps(
             {
                 "format_version": 1,
@@ -206,18 +213,18 @@ class OssCanonicalCenterVersionStore:
         *,
         missing_is_error: bool,
     ) -> bytes | None:
-        key = f"{self._root(ref.identity)}/.teamclaw-ready.json"
+        key = f"{self._control_root(ref.identity)}/content-manifest.json"
         result = self._immutable_objects.read_object(key)
         if result.status is ObjectReadStatus.FAILED:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.READ_FAILED,
-                f"failed to read Ready manifest: {ref.locator}",
+                f"failed to read integrity manifest: {ref.locator}",
             )
         if result.status is ObjectReadStatus.NOT_FOUND or result.content is None:
             if missing_is_error:
                 raise CanonicalCenterStoreError(
                     CanonicalCenterStoreErrorCode.NOT_READY,
-                    f"canonical version is not Ready: {ref.locator}",
+                    f"canonical version content is incomplete: {ref.locator}",
                 )
             return None
         return result.content
@@ -269,6 +276,6 @@ class OssCanonicalCenterVersionStore:
         ) as error:
             raise CanonicalCenterStoreError(
                 CanonicalCenterStoreErrorCode.CORRUPT_CONTENT,
-                "Ready manifest identity or file tree is invalid",
+                "integrity manifest identity or file tree is invalid",
             ) from error
         return entries
