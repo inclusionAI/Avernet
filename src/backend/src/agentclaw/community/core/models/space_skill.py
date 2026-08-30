@@ -254,7 +254,7 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
     __tablename__ = "ac_skill_publication_attempt"
     __table_args__ = _scoped_table_args(
         UniqueConstraint(
-            "avernet_tenant", "env", "skill_id", "request_id", name="uk_publish_request"
+            "avernet_tenant", "env", "request_id", name="uk_publish_request"
         ),
         UniqueConstraint("active_skill_key", name="uk_active_skill_publish"),
         Index(
@@ -287,6 +287,10 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     skill_id = Column(UnsignedBigInteger, nullable=False)
     request_id = Column(String(128), nullable=False)
+    # Immutable snapshot of the exact Draft Revision frozen by this Attempt.
+    # Nullable only so additive rollout can read pre-column rows; every new
+    # Publication Attempt must populate it and workers fail closed without it.
+    frozen_draft_locator = Column(String(1028), nullable=True)
     active_skill_key = Column(String(256), nullable=True)
     target_version_ordinal = Column(UnsignedInteger, nullable=False)
     sc_version_number = Column(String(128), nullable=True)

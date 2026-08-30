@@ -187,6 +187,30 @@ class SkillNameChangedError(Exception):
     """A Draft mutation attempted to change the stable SKILL.md name."""
 
 
+class PublicationAttemptNotFoundError(Exception):
+    """The addressed Publication Attempt is absent from the Skill aggregate."""
+
+
+class PublicationInProgressError(Exception):
+    """The Skill already has a non-terminal Publication Attempt."""
+
+
+class PublicationResultUnknownError(Exception):
+    """SC submission may have succeeded, so another publish is forbidden."""
+
+
+class PublicationRecoveryNotAvailableError(Exception):
+    """The addressed Attempt currently has no safe recovery action."""
+
+
+class PublicationRequiresNewAttemptError(Exception):
+    """A clearly failed Attempt requires editing and a new Publication."""
+
+
+class PublicationTaskUnavailableError(Exception):
+    """The Attempt exists, but its durable execution task could not be ensured."""
+
+
 # ── SkillSet control plane ────────────────────────────────────────────────
 # These are ``DomainError`` subclasses so the SkillSet routers can raise the
 # situation and let the HTTP adapter decide the status: the mapping lives in

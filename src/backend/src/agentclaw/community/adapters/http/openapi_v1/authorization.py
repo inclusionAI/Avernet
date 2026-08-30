@@ -513,6 +513,16 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Lease holder and fencing token, adjudicated by the Lease service"),
     ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover"):
         NoCheck("Skill Owner or Manager Grant, adjudicated by the Lease service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publication-impact"):
+        NoCheck("Skill Owner or Manager Grant and current Installation state, adjudicated by the Publication service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"):
+        NoCheck("Skill Grant, Draft, Lease, idempotency and task recovery, adjudicated by the Publication service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"):
+        NoCheck("Space membership and Publication history, adjudicated by the Publication service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}"):
+        NoCheck("Space membership and exact Publication Attempt scope, adjudicated by the Publication service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}/retry"):
+        NoCheck("Skill Grant and Attempt recovery state, adjudicated by the Publication service"),
     ("POST", "/openapi/v1/bots/work-order-notifications/read-all"):
         NoCheck("the named user's own work orders and notifications"),
     ("GET", "/openapi/v1/bots/work-order-notifications/unread-count"):

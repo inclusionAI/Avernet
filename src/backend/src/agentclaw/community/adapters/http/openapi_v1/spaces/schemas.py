@@ -817,3 +817,99 @@ class FavoriteStatusesResult(BaseModel):
     favorited_target_codes: list[str] = Field(
         description="Requested target codes currently favorited in this Space."
     )
+
+
+class PublicationAttemptState(_DocumentedEnum):
+    """Persisted stage or terminal outcome of one Publication Attempt."""
+
+    PREPARING = "PREPARING"
+    SC_SUBMITTING = "SC_SUBMITTING"
+    WAITING_SC = "WAITING_SC"
+    MATERIALIZING = "MATERIALIZING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    RESULT_UNKNOWN = "RESULT_UNKNOWN"
+
+    __descriptions__ = {
+        "PREPARING": "The frozen Draft package is being prepared.",
+        "SC_SUBMITTING": "The one-shot Skill Center request has started.",
+        "WAITING_SC": "Skill Center processing or exact metadata discovery is pending.",
+        "MATERIALIZING": "The exact published Version is passing the Ready Gate.",
+        "SUCCEEDED": "The exact Version is Published and ready for consumption.",
+        "FAILED": "Publication was explicitly rejected and the Draft is editable.",
+        "RESULT_UNKNOWN": "The external publication outcome is not yet confirmed.",
+    }
+
+
+class PublicationRecoveryState(_DocumentedEnum):
+    """Availability of safe recovery for one Attempt."""
+
+    AUTO_RETRYING = "AUTO_RETRYING"
+    AVAILABLE = "AVAILABLE"
+    NOT_AVAILABLE = "NOT_AVAILABLE"
+
+    __descriptions__ = {
+        "AUTO_RETRYING": "The backend is retrying automatically.",
+        "AVAILABLE": "The caller may request recovery of this same Attempt.",
+        "NOT_AVAILABLE": "No recovery action applies to the current state.",
+    }
+
+
+class PublicationRecoveryKind(_DocumentedEnum):
+    """Backend-owned stage resumed by an Attempt retry."""
+
+    PREPARATION = "PREPARATION"
+    SC_STATUS_CHECK = "SC_STATUS_CHECK"
+    MATERIALIZATION = "MATERIALIZATION"
+
+    __descriptions__ = {
+        "PREPARATION": "Resume package preparation before the first submission.",
+        "SC_STATUS_CHECK": "Resume status and exact Version discovery without submitting again.",
+        "MATERIALIZATION": "Resume the Ready Gate for the same exact Version.",
+    }
+
+
+class PublicationRecovery(BaseModel):
+    """Safe recovery state selected by the backend."""
+
+    state: PublicationRecoveryState = Field(
+        description="Whether automatic or actor-triggered recovery is available."
+    )
+    kind: PublicationRecoveryKind | None = Field(
+        default=None,
+        description="The safe recovery stage; clients never choose its implementation.",
+    )
+
+
+class PublicationAttempt(_UtcResponseModel):
+    """Durable progress resource for one Draft publication command."""
+
+    attempt_id: str = Field(description="Stable Publication Attempt identifier.")
+    target_version: int = Field(ge=1, description="Frozen business-version ordinal.")
+    status: PublicationAttemptState = Field(
+        description="Current persisted Publication state."
+    )
+    sc_version_number: str | None = Field(
+        default=None, description="Frozen exact Skill Center version number."
+    )
+    recovery: PublicationRecovery = Field(
+        description="Backend-owned recovery availability and stage."
+    )
+    error_code: str | None = Field(
+        default=None, description="Stable persisted failure category, when present."
+    )
+    error_message: str | None = Field(
+        default=None, description="Auditable failure detail, when present."
+    )
+    gmt_created: datetime = Field(description="UTC creation time.")
+    gmt_modified: datetime = Field(description="UTC last-update time.")
+
+
+class PublicationImpactItem(BaseModel):
+    """One Bot potentially affected after a new Version is Published."""
+
+    owner_id: str = Field(description="Owner of a potentially affected Bot.")
+    bot_id: str = Field(description="Potentially affected Bot identifier.")
+    bot_name: str | None = Field(
+        default=None, description="Current Bot display name, when available."
+    )

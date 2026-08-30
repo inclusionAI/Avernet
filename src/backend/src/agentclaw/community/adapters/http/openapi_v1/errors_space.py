@@ -28,6 +28,12 @@ class SpaceErrorCode(IntEnum):
     DRAFT_SOURCE_NOT_REFRESHABLE = 422208
     SKILL_GIT_UNAVAILABLE = 502202
     SKILL_DRAFT_STORE_UNAVAILABLE = 503202
+    PUBLICATION_ATTEMPT_NOT_FOUND = 404205
+    PUBLICATION_IN_PROGRESS = 409309
+    PUBLICATION_RESULT_UNKNOWN = 409310
+    PUBLICATION_RECOVERY_NOT_AVAILABLE = 409311
+    PUBLICATION_REQUIRES_NEW_ATTEMPT = 409315
+    PUBLICATION_TASK_UNAVAILABLE = 503203
 
 
 class SpacePublicErrorMessage(StrEnum):
@@ -55,3 +61,9 @@ class SpacePublicErrorMessage(StrEnum):
     DRAFT_SOURCE_NOT_REFRESHABLE = "Draft is not backed by a Git snapshot"
     SKILL_GIT_UNAVAILABLE = "Git snapshot is unavailable"
     SKILL_DRAFT_STORE_UNAVAILABLE = "Draft content store is unavailable"
+    PUBLICATION_ATTEMPT_NOT_FOUND = "Not found"
+    PUBLICATION_IN_PROGRESS = "Publication is already in progress"
+    PUBLICATION_RESULT_UNKNOWN = "Publication result is still unknown"
+    PUBLICATION_RECOVERY_NOT_AVAILABLE = "Publication recovery is not available"
+    PUBLICATION_REQUIRES_NEW_ATTEMPT = "Edit the Draft and create a new Publication"
+    PUBLICATION_TASK_UNAVAILABLE = "Publication task is unavailable"
