@@ -16,6 +16,9 @@ from collections.abc import Iterable
 
 from injector import Injector, Module
 
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterStoreConfig,
+)
 from agentclaw.community.di.config import HttpClientPoolConfig, TaskQueueConfig
 
 from agentclaw.community.di.modules.access_module import AccessModule
@@ -174,6 +177,7 @@ def build_injector(
     # TaskWorker binding — an app that boots clean and never runs a queued task.
     # Resolving it here makes a bad owner name fail the boot on every profile.
     _app_injector.get(TaskQueueConfig)
+    _app_injector.get(CanonicalCenterStoreConfig)
 
     return _app_injector
 

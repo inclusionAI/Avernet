@@ -44,6 +44,9 @@ provides:
   - "SkillManifestValidationIssue"
   - "SkillManifestValidationResult"
   - "SkillCenterGatewayService"
+  - "CanonicalCenterVersionStore"
+  - "CanonicalCenterVersion"
+  - "CanonicalCenterVersionIdentity"
   - "enqueue_skill_activation_sync"
   - "build_skill_activation_sync_payload"
   - "parse_skill_activation_sync_payload"
@@ -60,6 +63,7 @@ consumes:
   - "DeviceAdapterTransport"
   - "MCPCenterPlugin"
   - "ObjectStoragePlugin"
+  - "ImmutableObjectStorageCapability"
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillCenterGateway"
@@ -135,6 +139,14 @@ upload lifecycle calls the explicit legacy-compatible ZIP entry point. The
 `ValidatedSkillPackage` value does not authorize a Bot, write a content store,
 mutate desired state, or project Runtime; those lifecycle effects remain in
 their owning application services.
+
+`CanonicalCenterVersionStore` keeps the exact Runtime file tree under
+`skills-center/<skill_uuid>/<sc_version_number>/` free of control objects. Its
+write intent and integrity manifest live under the derived sibling
+`skills-center-control/` prefix, which Engine Runtime must never mount or copy.
+Those objects protect immutable writes and validate completeness; they are not
+a publication state. Only `ac_skill_version.status=PUBLISHED`, owned by the
+later Materializer workflow, expresses domain readiness.
 
 Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols. Changes to `SkillMetadataParserProtocol`, `SkillMetadata`, or stable manifest error codes affect Local folder upload immediately and the shared fixtures consumed by Git import, Draft validation and publication validation; coordinate those consumers before changing fields, limits or codes. List/detail/market readers must continue consuming parser-derived projections rather than inventing a second name or description source.
 

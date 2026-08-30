@@ -20,7 +20,13 @@ the production-shaped service constructors received.
 from __future__ import annotations
 
 from unittest.mock import MagicMock
-from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+from agentclaw.community.plugin_api.object_storage import (
+    ObjectCreateResult,
+    ObjectReadResult,
+    ObjectReadStatus,
+    ImmutableObjectStorageCapability,
+    ObjectStoragePlugin,
+)
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugins.local._mock_seam import MockSeam
 
@@ -39,13 +45,21 @@ def _default_sign_url(key: str, expires: int = 7200) -> str:
     flavor=Flavor.MOCK,
     rationale="MagicMock-backed responses",
 )
-class MockObjectStoragePlugin(MockSeam, ObjectStoragePlugin):
+class MockObjectStoragePlugin(
+    MockSeam, ObjectStoragePlugin, ImmutableObjectStorageCapability
+):
     """Reconfigurable mock satisfying :class:`ObjectStoragePlugin`."""
 
     def __init__(self) -> None:
         self.put_object: MagicMock = MagicMock(return_value=True)
+        self.create_object_if_absent: MagicMock = MagicMock(
+            return_value=ObjectCreateResult.CREATED
+        )
         self.put_file: MagicMock = MagicMock(return_value=True)
         self.get_object: MagicMock = MagicMock(return_value=None)
+        self.read_object: MagicMock = MagicMock(
+            return_value=ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+        )
         self.delete_object: MagicMock = MagicMock(return_value=True)
         self.list_objects: MagicMock = MagicMock(return_value=[])
         self.sign_url: MagicMock = MagicMock(side_effect=_default_sign_url)
@@ -65,6 +79,10 @@ class MockObjectStoragePlugin(MockSeam, ObjectStoragePlugin):
         self.put_object.return_value = True
         self.put_object.side_effect = None
 
+        self.create_object_if_absent.reset_mock()
+        self.create_object_if_absent.return_value = ObjectCreateResult.CREATED
+        self.create_object_if_absent.side_effect = None
+
         self.put_file.reset_mock()
         self.put_file.return_value = True
         self.put_file.side_effect = None
@@ -72,6 +90,10 @@ class MockObjectStoragePlugin(MockSeam, ObjectStoragePlugin):
         self.get_object.reset_mock()
         self.get_object.return_value = None
         self.get_object.side_effect = None
+
+        self.read_object.reset_mock()
+        self.read_object.return_value = ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+        self.read_object.side_effect = None
 
         self.delete_object.reset_mock()
         self.delete_object.return_value = True
