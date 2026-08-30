@@ -568,99 +568,31 @@ impl ChatRunRepoPort for SqlChatRunRepo {
 
     async fn drop_detached_expired(
         &self,
-        now_ms: u64,
-        retention_ms: u64,
+        _now_ms: u64,
+        _retention_ms: u64,
     ) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
-        // MySQL delegates (terminal-row pruning is platform-managed; detached
-        // retirement is analogous — keep the auditable row). SQLite (dev/test)
-        // self-prunes here so the local table stays bounded and the path is
-        // covered by tests.
-        if self.flavor != DbSqlFlavor::Sqlite {
-            return Ok(Vec::new());
-        }
-        let cutoff = now_ms.saturating_sub(retention_ms);
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &format!(
-                    "SELECT {SELECT_COLS} FROM bcs_chat_runs \
-                     WHERE state = 'running' \
-                       AND completion_policy = 'detach_delivery_ack' \
-                       AND delivery_ack_at_ms IS NOT NULL \
-                       AND delivery_ack_at_ms < ? \
-                       AND env = ?"
-                ),
-                vec![DbValue::from(cutoff as i64), DbValue::from(self.env.as_str())],
-            ))
-            .await
-            .map_err(backend)?;
-        let mut dropped = Vec::new();
-        for row in rows {
-            let record = row_to_record(&row)?;
-            let _ = self
-                .db
-                .execute(DbStatement::with_params(
-                    &format!(
-                        "DELETE FROM bcs_chat_runs \
-                         WHERE run_id = ? AND state = 'running' \
-                           AND completion_policy = 'detach_delivery_ack' \
-                           AND delivery_ack_at_ms < ? \
-                           AND env = ?"
-                    ),
-                    vec![DbValue::from(record.run_id.clone()), DbValue::from(cutoff as i64), DbValue::from(self.env.as_str())],
-                ))
-                .await;
-            self.delete_overlay(&record.run_id).await;
-            dropped.push(record);
-        }
-        Ok(dropped)
+        // Persistent (SQL) DBs do not retire rows from the 10s cleanup loop.
+        // Acknowledged detached runs are pruned by the platform's scheduled task
+        // via the spec §11.2 SQL — terminal rows, plus acknowledged detached
+        // running rows past a *short* retention (not audit retention), so an
+        // orphaned-but-delivered run does not sit on the active-run gauge for
+        // 30/90 days. The memory impl performs the actual retirement and emits
+        // the `Dropped` lifecycle; this impl keeps the auditable row. Uniform
+        // across DB flavors — no per-flavor split.
+        Ok(Vec::new())
     }
 
     async fn delete_expired_terminal(
         &self,
-        now_ms: u64,
-        retention_ms: u64,
+        _now_ms: u64,
+        _retention_ms: u64,
     ) -> Result<Vec<ChatRunRecord>, ChatRunRepoError> {
-        // Production MySQL delegates terminal-row pruning to the platform's
-        // scheduled cleanup task (spec §11): keep the auditable rows, do not
-        // hard-delete from the 10s loop. SQLite (dev/test, no platform) still
-        // self-prunes here so the local table stays bounded and the delete path
-        // stays covered by tests.
-        if self.flavor != DbSqlFlavor::Sqlite {
-            return Ok(Vec::new());
-        }
-        let cutoff = now_ms.saturating_sub(retention_ms);
-        let rows = self
-            .db
-            .query(DbStatement::with_params(
-                &format!(
-                    "SELECT {SELECT_COLS} FROM bcs_chat_runs \
-                     WHERE state IN ({TERMINAL_STATES}) AND completed_at_ms < ? AND env = ?"
-                ),
-                vec![DbValue::from(cutoff as i64), DbValue::from(self.env.as_str())],
-            ))
-            .await
-            .map_err(backend)?;
-        let mut dropped = Vec::new();
-        for row in rows {
-            let record = row_to_record(&row)?;
-            // Delete one-by-one reusing the same cutoff guard to stay portable
-            // across SQLite/MySQL (no parameterized IN-list with variable arity).
-            let _ = self
-                .db
-                .execute(DbStatement::with_params(
-                    &format!(
-                        "DELETE FROM bcs_chat_runs \
-                         WHERE run_id = ? AND state IN ({TERMINAL_STATES}) AND completed_at_ms < ? \
-                         AND env = ?"
-                    ),
-                    vec![DbValue::from(record.run_id.clone()), DbValue::from(cutoff as i64), DbValue::from(self.env.as_str())],
-                ))
-                .await;
-            self.delete_overlay(&record.run_id).await;
-            dropped.push(record);
-        }
-        Ok(dropped)
+        // Persistent (SQL) DBs delegate terminal-row pruning to the platform's
+        // scheduled cleanup task (spec §11.2): keep the auditable rows, do not
+        // hard-delete from the 10s cleanup loop. The memory impl still prunes and
+        // emits the `Dropped`/`Expired` lifecycle. Uniform across DB flavors —
+        // no per-flavor split.
+        Ok(Vec::new())
     }
 
     async fn metric_counts(&self) -> Result<Vec<ChatRunMetricCount>, ChatRunRepoError> {
