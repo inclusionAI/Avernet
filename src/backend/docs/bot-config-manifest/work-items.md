@@ -23,7 +23,7 @@ Three kinds of entry gate the work and are tracked separately from it:
 | `X1`–`X3` | **External confirmations** owed by other teams. None blocks W1–W6; they gate W7 and W9, and W8's teclaw arm |
 
 Where this document diverges from the merged design docs — §2.5 (capability
-scope), §2.6 (PUT triggers a restart), §2.7 (first-boot readiness gate), §3.2
+scope), §2.6 (`PUT` takes effect immediately), §2.7 (first-boot readiness gate), §3.2
 (entity-level three-way diff, superseding the wholesale directory replace) — it
 says so explicitly. Those docs are not edited here; amending them is a separate
 change.
@@ -148,12 +148,44 @@ are out of scope rather than newly enforced. Singlebox remains a dev/test
 concern only: `script` there reports supported and is not dispatched — #935's
 existing behaviour, not something this feature introduces.
 
-### 2.6 A manifest `PUT` on an existing bot triggers a restart
+### 2.6 A manifest `PUT` on an existing bot takes effect immediately
 
 **Divergence from design §3.1**, which makes `PUT` lazy (no apply; effective at
 the next restart for unrelated reasons). Instead: writing a new manifest version
-to an **existing** bot explicitly restarts it, so the running bot always reflects
-the manifest that was last accepted.
+to an **existing** bot makes it effective there and then, so the running bot
+always reflects the manifest that was last accepted.
+
+**"Restart" is the wrong word for it, and the difference is not cosmetic.** The
+verb differs per engine family, and on the BaaS family it is conditional on the
+bot's lifecycle state. Both were checked against the code:
+
+| | How a manifest change is made effective | Why not "restart" |
+| --- | --- | --- |
+| **BaaS / ARCA** | `BotService.restart_bot` → `BaasService.upgrade_bot` → `_build_create_bot_payload`, which rebuilds the payload and re-reads every stored input (including `ac_bot_startup_script`) | Correct verb, but **state-conditional** — see below |
+| **teclaw** | `BaasService.update_teclaw_bot` → `POST /api/v1/bots/{uuid}/update` with a recomposed artifact in `deploy_config.teclaw_bot_config`. An **in-place hot update**: "sessions/container identity are preserved" | **Restart is rejected outright.** `BotService.restart_bot` raises `BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")`, and `bot_publish_service.py` records why: a teclaw restart destroys the container, reallocation fails, and the bot is stranded with no binding and its in-container files lost |
+
+Today `update_teclaw_bot` has only two callers, both in `bot_build_service.py`
+(the publish/build upgrade and the draft-restore hot update). Making a manifest
+effective on teclaw therefore needs that primitive reached from a **non-publish**
+path — recompose the artifact, hand it over, poll the publish id — which is real
+work in W8 and not a matter of calling the same "restart" the BaaS family uses.
+
+**On the BaaS family the restart is conditional.** `BotService.restart_bot`
+accepts only `ACTIVE`, `FAILED` and `PENDING`; `REACTIVATING` returns early as a
+no-op; every other state (`RECYCLED`, `RELEASING`, `FAILED_WITHOUT_BINDING`,
+`UNKNOWN`) raises `BotInvalidLifecycleStateError`. So `PUT` may **not** be
+specified as "always restarts" — a caller would get a 4xx for a valid manifest
+because of where the bot happened to be in its lifecycle.
+
+The rule instead:
+
+1. **Persist and validate always.** Accepting the document never depends on the
+   bot's runtime state.
+2. **Make it effective when the bot can take it**, by its family's verb.
+3. **Otherwise it takes effect at the next start** — which is safe, because the
+   stored document is what every start path reads.
+4. **The response says which of the two happened**, so a caller never has to
+   guess whether their change is live.
 
 A manifest supplied to the **creation** API (§2.11, W13) is a different case and
 needs no restart: it is applied as part of creation, so the bot's first container
@@ -161,7 +193,7 @@ already carries it.
 
 This is the better semantics and it removes a hazard the lazy model carries — an
 operator restarting a bot to clear a hang would otherwise silently pick up a
-manifest edit made weeks earlier. With `PUT`-triggers-restart, a restart is not
+manifest edit made weeks earlier. With `PUT`-takes-effect-immediately, a restart is not
 a reconfiguration event; it is a replay of the configuration already in force.
 
 One residual case survives and belongs to **D2**: a manifest whose source is a
@@ -314,8 +346,8 @@ The platform composes it into the start command by itself:
 - So every path that rebuilds a payload re-reads the row: create, service-bot
   release, `upgrade_bot`, and both device services. The user-facing "restart a
   baas bot" goes through `upgrade_bot` (`bot_service.py`), so a rewritten row
-  takes effect on the next restart with no extra machinery — §2.6's restart is
-  already sufficient for `script`.
+  takes effect on the next payload build with no extra machinery — §2.6's
+  BaaS-family verb is already sufficient for `script`.
 
 **The consequence.** Because the script is baked into the start command at
 payload-build time, it executes at container start — while `identity`, `skills`,
@@ -1011,6 +1043,10 @@ APPLYING                 manifest apply running (fetch → materialise → deliv
 - [ ] The pre-existing `PUT` path is unchanged: a bot created any other way can
       still be given a manifest afterwards and have it take effect on restart
       (§2.6). The two paths coexist.
+- [ ] **Apply is invoked in two phases** (W4), and this item is the reason the
+      orchestrator has that shape: **phase A** (`script`) runs before
+      `_build_create_bot_payload` composes the start command, **phase B**
+      (everything else) after the container is up.
 - [ ] **`script` is written before the create payload is built**, not with the
       rest of apply. It is the one category that needs no container (§2.12), and
       `_build_create_bot_payload` reads the row while composing the start
@@ -1255,21 +1291,22 @@ categories that need no fetching.
   design §7.
 - `POST .../config-manifest/apply`, including `dry_run=true` returning the plan
   without acting.
-- Materialisers for the three no-fetch categories: `mcp` (registry reference →
-  the existing enable + configure service), `engine_config` (top-level key merge
-  via `EngineConfigService.write_bot_config`), and `script` (→
+- Materialisers for the two no-fetch categories in iteration 1: `mcp` (registry
+  reference → the existing enable + configure service) and `script` (→
   `BotStartupScriptService`).
 
 **Out of scope.** Fetching. Lifecycle triggers (W8) — explicit apply is the only
-entry point in this item.
+entry point in this item. **`engine_config` is out of iteration 1** by the X2/T3
+decision (§4); when it returns, its materialiser is a top-level key merge via
+`EngineConfigService.write_bot_config` and belongs here.
 
 **Depends on.** W1, W10 (the seam apply calls through), and **W11 as a hard
 dependency** — §3.2's three-way diff cannot distinguish "dropped from the
 declaration" from "created by the bot" without version N's materialised file
 list, which is what W11 stores.
 **Blocked by.** — D2 is resolved (§3.2) and its rules are what this item
-implements. X2/T3 affects the teclaw behaviour of the `engine_config`
-materialiser but does not block the item.
+implements. X2/T3 removed `engine_config` from iteration 1 altogether, so its
+teclaw behaviour is no longer this item's problem.
 
 **Done when.**
 
@@ -1278,8 +1315,19 @@ materialiser but does not block the item.
 - [ ] Outcomes are classified per entry as `created` / `updated` / `unchanged` /
       `skipped` / `failed`, and the apply result is `SUCCEEDED` / `PARTIAL` /
       `FAILED` accordingly.
-- [ ] Category order within one apply is `engine_config → identity → resources →
-      skills → mcp`, with `script` materialised last.
+- [ ] **Apply is two-phase, not one ordered pass.** The orchestrator's shape has
+      to carry this or W13 is forced to bypass it:
+      - **Phase A — no container required.** `script` only. It is a plain write
+        to `ac_bot_startup_script` (§2.12), and on the creation path it must land
+        *before* `_build_create_bot_payload` composes the start command, or the
+        first boot carries no script at all.
+      - **Phase B — container required.** `identity → resources → skills → mcp`,
+        in that order, delivered after the bot is up (§3.4).
+
+      On an already-running bot the two phases run back to back and the split is
+      invisible. On the creation path they are separated by the whole of
+      container provisioning. This **reverses design §3.4's order**, which put
+      `script` last — see §2.12.
 - [ ] Two applies against the same bot serialise; the lock follows the existing
       `BotRestartLockRepository` pattern rather than a new mechanism.
 - [ ] The §2.7 failure policy holds: a fetch failure against an already-running
@@ -1462,26 +1510,47 @@ bot has started (§3.4).
 - [ ] On teclaw, the **first** artifact already contains the manifest result.
 - [ ] Bots created through W13 get their manifest applied inside creation, so
       this item covers the *other* apply points — republish and rebuild-restart —
-      plus the `PUT`-triggered restart of §2.6.
+      plus making a `PUT` effective per §2.6.
 - [ ] On the BaaS family, post-start delivery (§3.4) completes before the bot
       takes traffic — "started" and "ready" must stop being the same moment, or
       the ACTIVE-but-unconfigured window becomes user-visible.
 - [ ] Scale-out does **not** re-apply; instances stay identical because they
       share one platform state. This is #926's actual requirement.
-- [ ] A manifest `PUT` **triggers a restart** (§2.6), so the running bot always
-      reflects the manifest last accepted and an unrelated restart is a replay
-      rather than a reconfiguration.
+- [ ] A manifest `PUT` **takes effect immediately** (§2.6), so the running bot
+      always reflects the manifest last accepted and an unrelated restart is a
+      replay rather than a reconfiguration. This is **two verbs, not one**, and
+      the teclaw half is the larger piece of work:
+      - **BaaS / ARCA** — `BotService.restart_bot`, but only from `ACTIVE`,
+        `FAILED` or `PENDING`. `REACTIVATING` is a no-op; every other state
+        raises `BotInvalidLifecycleStateError`. So the endpoint persists the
+        document unconditionally, makes it effective when the state allows, and
+        **tells the caller which of the two happened** — it must never return a
+        4xx for a valid manifest because of where the bot is in its lifecycle.
+      - **teclaw** — restart is rejected outright and would strand the bot
+        (§2.6). The verb is `BaasService.update_teclaw_bot`: recompose the
+        artifact, hot-update in place, poll the returned `publish_id`. Today its
+        only callers are in `bot_build_service.py`, so reaching it from a
+        non-publish path is new work in this item, not a reused call.
 - [ ] The §2.7 readiness policy holds, and is the divergence from design §4.3
       most in need of testing on both engine families: a fetch failure on a
       **first** boot leaves the bot **inactive**; the same failure against an
       already-running bot changes nothing about it. Landing points are the start
       command's exit status (BaaS family) and publish-poll (teclaw).
+- [ ] **"Inactive" needs a real status, and there isn't one.** The bot lifecycle
+      has `ACTIVE`, `PENDING`, `FAILED`, `FAILED_WITHOUT_BINDING`,
+      `REACTIVATING`, `RECYCLED` and `RELEASING` — no `INACTIVE`. So §2.7's gate
+      lands on `FAILED`, which makes "the container never came up" and "the
+      container came up but its manifest could not be applied" the same row in
+      every list and detail read. Either the apply report is what distinguishes
+      them (and the UI must say so), or this item adds a status. Decide it here
+      rather than in code review.
 - [ ] Whatever D2 decides about moving refs is enforced here — this is where
       restarts nobody associated with a config change actually happen.
 - [ ] `script` is materialised by writing `ac_bot_startup_script` and nothing
       else; the platform composes it into the start command as it already does
       (§2.12). A rewritten row is picked up by the next payload build, which is
-      what §2.6's restart triggers.
+      what §2.6's BaaS-family verb triggers. teclaw does not support `script` at
+      all, so this criterion has no teclaw arm.
 - [ ] **Iteration 1 asserts the opposite of design §3.4**: on a first boot the
       script runs *before* the manifest's other categories, because it is baked
       into the start command while they are delivered post-start. A test pins
@@ -1630,7 +1699,7 @@ branch is not).
 
 Points where this document **diverges** from the merged design, each argued in
 place: §2.3 (the managed marker shrinks to an internal record), §2.5 (capability
-scope; desktop out), §2.6 (`PUT` triggers a restart rather than being lazy —
+scope; desktop out), §2.6 (`PUT` takes effect immediately rather than being lazy —
 design §3.1), §2.7 (a first-boot readiness gate, which design §4.3 defers to v2),
 §2.8 (platform-side materialisation, which the design does not have), §2.9 (substitution
 variables renamed from `OCB_*` to `BOT_*`, since `OCB` is an internal codename),
