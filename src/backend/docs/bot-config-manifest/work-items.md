@@ -23,7 +23,8 @@ Three kinds of entry gate the work and are tracked separately from it:
 | `X1`–`X3` | **External confirmations** owed by other teams. None blocks W1–W6; they gate W7 and W9, and W8's teclaw arm |
 
 Where this document diverges from the merged design docs — §2.5 (capability
-scope), §2.6 (`PUT` takes effect immediately), §2.7 (first-boot readiness gate), §3.2
+scope), §2.6 (`PUT` takes effect immediately), §2.7 (apply failure stays at the
+manifest level), §3.2
 (entity-level three-way diff, superseding the wholesale directory replace) — it
 says so explicitly. Those docs are not edited here; amending them is a separate
 change.
@@ -220,26 +221,60 @@ One residual case survives and belongs to **D2**: a manifest whose source is a
 **moving ref** (a branch rather than a tag or SHA) can resolve to different
 content on a restart nobody associated with a configuration change.
 
-### 2.7 Fetch failure: report, never disturb a running bot, gate the first boot
+### 2.7 Apply failure is recorded at the manifest level, not on the bot
 
 Sources are git or object storage — highly available, and an outage is a
 fetch-time event rather than a configuration error. The policy:
 
+**A failed apply never writes to the bot record.** It is recorded on the
+manifest's own apply state and surfaced from there. The manifest layer does not
+reach down and change the bot's lifecycle status.
+
 | Situation | Behaviour |
 | --- | --- |
-| Bot already running, fetch fails | **Do nothing to it.** It keeps running its current configuration. Record the failure and surface it |
-| First boot, fetch fails | The bot **does not become active**. There is no previous configuration to fall back to, and a bot running with configuration its manifest does not describe is worse than a bot that visibly failed to start |
+| Bot already running, apply fails | **Do nothing to it.** It keeps running its current configuration. Record the failure and surface it |
+| First boot, apply fails | The bot stays as the platform left it — typically `ACTIVE`. The **manifest** reports `FAILED`; the bot record is untouched |
 | Either case | The user must be told — an apply report, and a surfaced notification |
 
-`keep_last` follows from this rather than needing its own mechanism: "reuse what
-we materialised last time" is what "do nothing to a running bot" already means.
-The storage it needs is the same store §2.8 requires.
+**Why not gate the bot's activation on it.** Under §3.4 delivery happens *after*
+the bot is up, so gating would mean starting the bot, applying, and then reaching
+back to de-activate it on failure — an intrusive, racy write from the manifest
+layer into the bot's lifecycle, to express something the manifest's own state
+already says. The lifecycle also has no status for it (`ACTIVE`, `PENDING`,
+`FAILED`, `FAILED_WITHOUT_BINDING`, `REACTIVATING`, `RECYCLED`, `RELEASING` — no
+`INACTIVE`), so it would land on `FAILED` and make "the container never came up"
+indistinguishable from "the container is fine, its manifest is not". Two very
+different investigations, one status.
 
-**Divergence from design §4.3**, which puts apply failure outside the readiness
-gate in v1 and defers strict mode to v2. The first-boot arm above *is* a
-readiness gate. It needs a landing point in both engine families — the start
-command's exit status for the BaaS family, publish-poll for teclaw — and that is
-part of W8.
+**This restores design §4.3** rather than diverging from it: apply failure sits
+outside the readiness gate, which is what the design said in the first place. An
+earlier version of this document made the first-boot arm a readiness gate; that
+is withdrawn.
+
+**What carries the signal instead**, since the bot record no longer does:
+
+- `GET .../config-manifest/last-apply` is the authoritative answer to "is this
+  bot's manifest applied", and W13's poll already reports `READY` / `FAILED` as a
+  manifest-level terminal state without touching the bot.
+- **Any surface that shows a bot as healthy must be able to show that its
+  manifest is not.** This is now a UI/API requirement rather than a status-column
+  one, and W8 owns making sure the signal is actually reachable — a failure
+  recorded where nobody looks is the failure mode this decision trades for.
+
+**Two cases are outside this rule, because the failure genuinely is the bot's:**
+
+| | Why it lands on the bot |
+| --- | --- |
+| `script` | It is appended to the start command (§2.12), and the platform sees **one** command with **one** exit status — #935's stated consequence. A failing script is a failed start, and always was |
+| **teclaw** | The artifact *is* the boot vehicle, and the engine applies it in full before reporting ready (X2/T1). A manifest problem therefore surfaces as a failed publish-poll. Not our choice — the engine folds the two together |
+
+So the rule is "the manifest layer does not write to the bot record", not "a
+manifest problem can never affect bot status". Where the platform's own
+mechanisms already fold them together, they stay folded.
+
+`keep_last` follows from the first row rather than needing its own mechanism:
+"reuse what we materialised last time" is what "do nothing to a running bot"
+already means. The storage it needs is the same store §2.8 requires.
 
 ### 2.8 The platform materialises and persists manifest content itself
 
@@ -593,10 +628,10 @@ property — but the cost is real and should not be discovered later:
    precisely the race `design.zh-CN.md` §2.4 rejected alternative three for: a bot
    already accepting messages while its persona is still landing can answer with
    an unconfigured personality. On a first boot the window is the whole apply.
-2. **It interacts with the §2.7 readiness gate.** "A first boot whose fetch fails
-   leaves the bot inactive" is harder to honour when delivery happens after the
-   bot is already up — the gate has to become "start, apply, and de-activate on
-   failure", or the gate moves to a later readiness signal. W8 must resolve this.
+2. ~~**It interacts with the §2.7 readiness gate.**~~ **Resolved, and this is
+   what resolved it.** Gating the bot's activation on a post-start apply would
+   mean "start, apply, then de-activate on failure" — which is why §2.7 now keeps
+   apply failure at the manifest level and leaves the bot record alone.
 3. **Scale-out instances** each need the post-start delivery to have completed
    before they take traffic, or instances diverge — which is #926's original
    complaint.
@@ -685,9 +720,10 @@ rather than something the platform rotates.
 
 Owner-managed expiry has one design consequence, and it belongs to W3 and W4: an
 expired token is indistinguishable from any other fetch failure unless we make it
-distinguishable. Under §2.7 a running bot is untouched by a failed fetch — correct,
+distinguishable. Under §2.7 a running bot is untouched by a failed apply — correct,
 but it means **a token can silently expire and nothing visibly breaks until a bot
-is next created or restarted**, at which point a first boot stays inactive.
+is next created or restarted**, at which point the failure is reported on the
+manifest rather than the bot (§2.7).
 
 So: an authentication failure (401/403) must be reported in the apply report as
 *"credential `<name>` was rejected"*, named and distinct from a generic fetch
@@ -1032,7 +1068,9 @@ APPLYING                 manifest apply running (fetch → materialise → deliv
   `on_fetch_failure: skip`) reports as **`READY`**, with the skips visible in the
   report. It does not get a state of its own: that would add a branch every
   caller must handle to express something the detail already carries.
-- `FAILED` is the §2.7 first-boot gate — the bot does not become usable.
+- `FAILED` is a **manifest-level** terminal state (§2.7). The bot record is not
+  touched — a caller that polls to `FAILED` has a running bot whose manifest did
+  not apply, and the report says which entries failed.
 - **`APPLYING` turns D4's interim cost into a visible state.** Post-start delivery
   (§3.4) leaves a window where the bot is ACTIVE but unconfigured; a caller that
   waits for `READY` never observes it. The window stops being an invisible trap.
@@ -1350,9 +1388,9 @@ teclaw behaviour is no longer this item's problem.
       `script` last — see §2.12.
 - [ ] Two applies against the same bot serialise; the lock follows the existing
       `BotRestartLockRepository` pattern rather than a new mechanism.
-- [ ] The §2.7 failure policy holds: a fetch failure against an already-running
-      bot changes nothing about it and is reported; a fetch failure on a first
-      boot leaves the bot inactive rather than active-and-misconfigured.
+- [ ] The §2.7 failure policy holds: a failed apply changes nothing about a
+      running bot, and is recorded on the manifest's apply state rather than
+      written to the bot record.
 - [ ] Apply enforces the same validation and authorisation the public API does
       by calling W10's seam — not a second, hand-written copy of the checks.
 - [ ] `engine_ext` is unreachable from the manifest on every path. (The
@@ -1522,8 +1560,8 @@ and at rebuild-style restart.
 agreed before teclaw delivery can be relied on. X2's own questions are answered
 (§4). D4 is deferred rather than blocking, but this item owns its two
 consequences: the ACTIVE-but-unconfigured
-window, and where the §2.7 readiness gate lands when delivery happens after the
-bot has started (§3.4).
+window. (§2.7's readiness gate is withdrawn — a failed apply is recorded at the
+manifest level, so there is no de-activation for W8 to place.)
 
 **Done when.**
 
@@ -1553,19 +1591,18 @@ bot has started (§3.4).
         `TeclawDeviceFileSystem` forwards per-file writes straight to the engine,
         so `identity` and `resources` on a running bot may go through the same
         `DeviceFileSystem` seam as the BaaS family and need no redeliver.
-- [ ] The §2.7 readiness policy holds, and is the divergence from design §4.3
-      most in need of testing on both engine families: a fetch failure on a
-      **first** boot leaves the bot **inactive**; the same failure against an
-      already-running bot changes nothing about it. Landing points are the start
-      command's exit status (BaaS family) and publish-poll (teclaw).
-- [ ] **"Inactive" needs a real status, and there isn't one.** The bot lifecycle
-      has `ACTIVE`, `PENDING`, `FAILED`, `FAILED_WITHOUT_BINDING`,
-      `REACTIVATING`, `RECYCLED` and `RELEASING` — no `INACTIVE`. So §2.7's gate
-      lands on `FAILED`, which makes "the container never came up" and "the
-      container came up but its manifest could not be applied" the same row in
-      every list and detail read. Either the apply report is what distinguishes
-      them (and the UI must say so), or this item adds a status. Decide it here
-      rather than in code review.
+- [ ] **The §2.7 policy holds: a failed apply never writes to the bot record.**
+      Tested on both engine families. The two documented exceptions stay as they
+      are — `script` rides the start command's single exit status (#935), and on
+      teclaw the engine applies the artifact before reporting ready, so a
+      manifest problem surfaces through publish-poll. Neither is the manifest
+      layer reaching into the bot's lifecycle.
+- [ ] **The manifest-level signal is actually reachable.** Since the bot record
+      no longer carries it, a bot showing `ACTIVE` with a failed manifest must be
+      visibly distinguishable somewhere the user looks — `last-apply`, the
+      creation poll, and whatever list or detail surface shows bot health. A
+      failure recorded where nobody looks is the failure mode this decision
+      trades for, and closing it is this item's job.
 - [ ] Whatever D2 decides about moving refs is enforced here — this is where
       restarts nobody associated with a config change actually happen.
 - [ ] `script` is materialised by writing `ac_bot_startup_script` and nothing
@@ -1722,8 +1759,7 @@ branch is not).
 Points where this document **diverges** from the merged design, each argued in
 place: §2.3 (the managed marker shrinks to an internal record), §2.5 (capability
 scope; desktop out), §2.6 (`PUT` takes effect immediately rather than being lazy —
-design §3.1), §2.7 (a first-boot readiness gate, which design §4.3 defers to v2),
-§2.8 (platform-side materialisation, which the design does not have), §2.9 (substitution
+design §3.1), §2.8 (platform-side materialisation, which the design does not have), §2.9 (substitution
 variables renamed from `OCB_*` to `BOT_*`, since `OCB` is an internal codename),
 §3.2 (an entity-level three-way diff that preserves bot-created files, superseding
 design §3.2's wholesale directory replace), §3.4 (post-start delivery on the BaaS
