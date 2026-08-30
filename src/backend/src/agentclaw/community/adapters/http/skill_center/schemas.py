@@ -882,46 +882,13 @@ class BackfillBotRequest(BaseModel):
     owner_id: str = Field(..., min_length=1, description="Owner of that Bot")
 
 
-class BackfillPageRequest(BaseModel):
-    """One page of a scoped run.
-
-    ``owner_id`` and ``engine_type`` are filters, not required scope: omitting
-    both sweeps every live Bot in the env, one page at a time.
-    """
-
-    owner_id: Optional[str] = Field(None, description="Only this owner's Bots")
-    engine_type: Optional[str] = Field(
-        None, description="Only Bots whose active engine is this"
-    )
-    page: int = Field(1, ge=1, description="1-based page number")
-    page_size: int = Field(50, ge=1, le=200, description="Bots per page")
-
-
 class BackfillOutcomeModel(BaseModel):
+    """Echoes the pair that was converged, so a driver can log per-call."""
+
     bot_id: str
     owner_id: str
-    changed: bool = Field(..., description="True only when the flush wrote rows")
-    error: Optional[str] = Field(
-        None, description="Why this Bot could not be converged, if it could not"
-    )
 
 
 class BackfillBotResponse(BaseModel):
     success: bool
     data: BackfillOutcomeModel
-
-
-class BackfillPageData(BaseModel):
-    total: int = Field(..., description="Bots in scope, not just on this page")
-    page: int
-    page_size: int
-    scanned: int
-    changed: int
-    failed: int
-    has_more: bool
-    outcomes: List[BackfillOutcomeModel]
-
-
-class BackfillPageResponse(BaseModel):
-    success: bool
-    data: BackfillPageData

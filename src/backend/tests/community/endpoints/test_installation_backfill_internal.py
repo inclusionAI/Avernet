@@ -1,15 +1,10 @@
-"""Endpoint coverage for the internal Installation backfill routes.
+"""Endpoint coverage for the internal Installation backfill route.
 
-Every case is decided by real state in the per-test database: the bot rows
-the sweep pages over, and the SkillSet configuration the flush reconciles
-against. Nothing is mocked — the request reaches the real
-``CapabilityDesiredStateRepository.flush_installations``, so a green case
-here means the whole path (token → service → flush → report) works.
-
-A seeded bot with no SkillSets converges to ``changed: false``: its
-Installation already agrees with what no Set asks for. That is the correct
-answer, and it is what makes the report trustworthy — the backfill claims a
-write only when it made one.
+Both cases are decided by real state in the per-test database: the bot row the
+flush is scoped to, and the SkillSet configuration it reconciles against.
+Nothing is mocked — the request reaches the real
+``CapabilityDesiredStateRepository.flush_installations``, so a green case here
+means the whole path (token → service → flush) works.
 """
 
 from __future__ import annotations
@@ -55,17 +50,12 @@ def _seed_bot(world) -> None:
         status=200,
         json_contains={
             "success": True,
-            "data": {
-                "bot_id": _BOT_ID,
-                "owner_id": _OWNER_ID,
-                "changed": False,
-                "error": None,
-            },
+            "data": {"bot_id": _BOT_ID, "owner_id": _OWNER_ID},
         },
     ),
 )
 def backfill_bot_ok():
-    """Happy path: the flush runs and reports that it wrote nothing."""
+    """Happy path: the flush runs against the seeded Bot."""
 
 
 @endpoint_test(
@@ -81,39 +71,3 @@ def backfill_bot_ok():
 )
 def backfill_bot_not_found():
     """A Bot that does not exist for this owner must not read as converged."""
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/internal/skill-center/installations/backfill/page",
-    scenario="ok",
-    input=CaseInput(headers=_AUTH_HEADERS, json_body={"page": 1, "page_size": 50}),
-    seed=_seed_bot,
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={
-            "success": True,
-            "data": {
-                "page": 1,
-                "page_size": 50,
-                "failed": 0,
-                "has_more": False,
-                # The sweep reached the seeded Bot rather than skipping it.
-                "outcomes": [{"bot_id": _BOT_ID, "changed": False, "error": None}],
-            },
-        },
-    ),
-)
-def backfill_page_ok():
-    """Happy path: an unfiltered page sweeps the env's Bots and reports each."""
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/internal/skill-center/installations/backfill/page",
-    scenario="invalid_page_size",
-    input=CaseInput(headers=_AUTH_HEADERS, json_body={"page_size": 0}),
-    expect=ExpectError(status=422),
-)
-def backfill_page_invalid_page_size():
-    """A page size outside [1, 200] is refused before any Bot is touched."""

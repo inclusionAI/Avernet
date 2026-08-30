@@ -9,13 +9,9 @@ importing it from here.
 from __future__ import annotations
 
 from agentclaw.community.core.skill_center.installation_backfill_protocol import (
-    BackfillReport,
-    BotBackfillOutcome,
     InstallationBackfillServiceProtocol,
 )
 
 __all__ = [
-    "BackfillReport",
-    "BotBackfillOutcome",
     "InstallationBackfillServiceProtocol",
 ]

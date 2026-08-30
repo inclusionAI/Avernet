@@ -218,10 +218,12 @@ user_config:
   #
   #   secret_names:
   #     dormant_internal_token: "dormant_internal_token"   # gates /api/internal/dormant/*
+  #     skill_center_internal_token: "skill_center_internal_token"  # gates /api/internal/skill-center/*
   #     aiworkbench_repo_url: "aiworkbench_repo_url"       # skills source repo URL
   #
   # ...each read from "{env_prefix}{NAME}_VALUE", so with the prefix above:
   #     AGENTCLAW_SECRET_DORMANT_INTERNAL_TOKEN_VALUE
+  #     AGENTCLAW_SECRET_SKILL_CENTER_INTERNAL_TOKEN_VALUE
   #     AGENTCLAW_SECRET_AIWORKBENCH_REPO_URL_VALUE
   #
   # The gateway principal signing key needs NO entry here — its name already
