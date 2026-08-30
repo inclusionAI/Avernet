@@ -73,6 +73,11 @@ class SkillPublicationAttemptStatus(StrEnum):
     RESULT_UNKNOWN = "RESULT_UNKNOWN"
 
 
+class SkillDraftUpgradeRequestStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    SPENT = "SPENT"
+
+
 def _scoped_table_args(*constraints):
     """Add the non-empty environment invariant shared by new domain tables."""
     return (*constraints, CheckConstraint("env <> ''", name="ck_env_not_empty"))
@@ -156,6 +161,40 @@ class SkillDraftEditLease(_ScopedDomainFact, Base):
     fencing_token = Column(UnsignedBigInteger, nullable=False, server_default="0")
     acquired_at = Column(DateTime, nullable=True)
     last_takeover_by = Column(String(128), nullable=True)
+
+
+class SkillDraftUpgradeRequest(_ScopedDomainFact, Base):
+    """Durable idempotency identity for one upgrade-Draft command."""
+
+    __tablename__ = "ac_skill_draft_upgrade_request"
+    __table_args__ = _scoped_table_args(
+        UniqueConstraint(
+            "avernet_tenant", "env", "request_id", name="uk_skill_upgrade_request"
+        ),
+        Index(
+            "idx_skill_upgrade_history",
+            "avernet_tenant",
+            "env",
+            "skill_id",
+            "gmt_created",
+        ),
+        CheckConstraint(
+            "status IN ('ACTIVE', 'SPENT')",
+            name="ck_skill_upgrade_request_status",
+        ),
+        CheckConstraint(
+            "target_version_ordinal >= 1",
+            name="ck_skill_upgrade_target_ordinal",
+        ),
+    )
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    skill_id = Column(UnsignedBigInteger, nullable=False)
+    space_id = Column(UnsignedBigInteger, nullable=False)
+    request_id = Column(String(128), nullable=False)
+    target_version_ordinal = Column(UnsignedInteger, nullable=False)
+    status = Column(String(16), nullable=False)
+    created_by = Column(String(128), nullable=False)
 
 
 class SkillVersion(_ScopedDomainFact, Base):
@@ -267,6 +306,7 @@ for _model in (
     SkillSpaceBinding,
     SkillGrant,
     SkillDraftEditLease,
+    SkillDraftUpgradeRequest,
     SkillVersion,
     SkillPublicationAttempt,
 ):
@@ -277,6 +317,8 @@ __all__ = [
     "DraftSourceKind",
     "DraftStatus",
     "SkillDraftEditLease",
+    "SkillDraftUpgradeRequest",
+    "SkillDraftUpgradeRequestStatus",
     "SkillGrant",
     "SkillPublicationAttempt",
     "SkillPublicationAttemptStatus",

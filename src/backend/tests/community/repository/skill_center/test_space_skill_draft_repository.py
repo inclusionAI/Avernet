@@ -237,3 +237,81 @@ def test_delete_upgrade_draft_preserves_published_skill_history():
         assert skill.draft_status is None
         assert skill.zip_url is None
         assert session.query(SkillVersion).filter_by(skill_id=skill_id).count() == 1
+
+
+def test_delete_upgrade_draft_preserves_spent_idempotency_request():
+    db = _Database()
+    space_id, skill_id = _seed(db, space_type="PERSONAL")
+    with db.orm_session() as session:
+        skill = session.query(Skill).filter_by(id=skill_id).one()
+        skill.zip_url = None
+        skill.draft_target_version = None
+        skill.draft_status = None
+        skill.draft_description = None
+        skill.draft_source_kind = None
+        version = SkillVersion(
+            skill_id=skill_id,
+            version_ordinal=1,
+            status="PUBLISHED",
+            sc_version_number="1.0.0",
+            name="draft-skill",
+            description="published",
+            created_by="owner-1",
+            env="test",
+        )
+        session.add(version)
+        session.flush()
+        version_id = version.id
+
+    repo = SpaceSkillDraftRepository(db)
+    created = repo.create_upgrade_draft(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        request_id="upgrade-then-delete",
+        expected_version_id=version_id,
+        target_version=2,
+        new_locator=f"draft://{_UUID}/v2/{_NEW_REV}",
+        new_description="upgrade",
+        env="test",
+    )
+    assert created["created"] is True
+    active = repo.get_upgrade_by_request_id(
+        request_id="upgrade-then-delete", env="test"
+    )
+    assert active is not None
+    assert active["status"] == "ACTIVE"
+    assert active["draft"] is not None
+    assert active["draft"]["locator"].endswith(_NEW_REV)
+
+    replayed = repo.create_upgrade_draft(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        request_id="upgrade-then-delete",
+        expected_version_id=version_id,
+        target_version=2,
+        new_locator=f"draft://{_UUID}/v2/unused",
+        new_description="ignored replay",
+        env="test",
+    )
+    assert replayed["created"] is False
+    assert replayed["draft"]["locator"].endswith(_NEW_REV)
+
+    repo.delete_draft(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        expected_revision_id=_NEW_REV,
+        fencing_token=None,
+        env="test",
+    )
+
+    assert repo.get_upgrade_by_request_id(
+        request_id="upgrade-then-delete", env="test"
+    ) == {
+        "skill_id": skill_id,
+        "space_id": space_id,
+        "status": "SPENT",
+        "draft": None,
+    }

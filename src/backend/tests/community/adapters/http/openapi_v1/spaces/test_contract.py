@@ -87,6 +87,7 @@ from agentclaw.community.core.skill_center.errors import (
     SpaceSkillGrantMemberRequiredError,
     SpaceSkillGrantNotFoundError,
     SpaceSkillGrantReasonRequiredError,
+    SpaceSkillIdempotencyConflictError,
     DraftEditLeaseConflictError,
     DraftEditLeaseForbiddenError,
     DraftEditLeaseNotFoundError,
@@ -830,6 +831,198 @@ def test_folder_creation_rejects_oversized_upload_before_application_service(
     skill_application_service.create_from_folder.assert_not_called()
 
 
+def test_folder_creation_caps_each_file_before_multipart_spooling(
+    client, skill_application_service, monkeypatch
+):
+    """The transport rejects a file before Starlette writes past its limit."""
+    import starlette.formparsers
+
+    skill_routes_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    )
+    real_spooled_file = starlette.formparsers.SpooledTemporaryFile
+    file_limit = 8
+
+    class _DiskCap:
+        def __init__(self, *args, **kwargs):
+            self._file = real_spooled_file(*args, **kwargs)
+
+        def write(self, content):
+            if self._file.tell() + len(content) > file_limit:
+                raise AssertionError("multipart parser wrote past the file limit")
+            return self._file.write(content)
+
+        def __getattr__(self, name):
+            return getattr(self._file, name)
+
+    monkeypatch.setattr(skill_routes_module, "MAX_FILE_BYTES", file_limit)
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", _DiskCap)
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-spool-limit"},
+        files=[
+            (
+                "files",
+                ("SKILL.md", b"x" * (file_limit + 1), "application/octet-stream"),
+            )
+        ],
+        data={"file_paths": '["SKILL.md"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+def test_folder_creation_caps_aggregate_files_before_multipart_spooling(
+    client, skill_application_service, monkeypatch
+):
+    """The transport stops aggregate writes even when each file is small."""
+    import starlette.formparsers
+
+    skill_routes_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    )
+    real_spooled_file = starlette.formparsers.SpooledTemporaryFile
+    aggregate_limit = 8
+    written = 0
+
+    class _AggregateDiskCap:
+        def __init__(self, *args, **kwargs):
+            self._file = real_spooled_file(*args, **kwargs)
+
+        def write(self, content):
+            nonlocal written
+            if written + len(content) > aggregate_limit:
+                raise AssertionError("multipart parser wrote past the aggregate limit")
+            written += len(content)
+            return self._file.write(content)
+
+        def __getattr__(self, name):
+            return getattr(self._file, name)
+
+    monkeypatch.setattr(skill_routes_module, "MAX_FILE_BYTES", aggregate_limit)
+    monkeypatch.setattr(skill_routes_module, "MAX_EXPANDED_BYTES", aggregate_limit)
+    monkeypatch.setattr(
+        starlette.formparsers, "SpooledTemporaryFile", _AggregateDiskCap
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-aggregate-limit"},
+        files=[
+            ("files", ("SKILL.md", b"12345", "text/markdown")),
+            ("files", ("README.md", b"67890", "text/markdown")),
+        ],
+        data={"file_paths": '["SKILL.md","README.md"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+def test_folder_creation_caps_file_count_during_multipart_parsing(
+    client, skill_application_service, monkeypatch
+):
+    skill_routes_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    )
+    monkeypatch.setattr(skill_routes_module, "MAX_FILES", 1)
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-file-count-limit"},
+        files=[
+            ("files", ("SKILL.md", b"manifest", "text/markdown")),
+            ("files", ("README.md", b"readme", "text/markdown")),
+        ],
+        data={"file_paths": '["SKILL.md","README.md"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+def test_folder_creation_rejects_oversized_multipart_body_before_spooling(
+    client, skill_application_service, monkeypatch
+):
+    import starlette.formparsers
+
+    skill_routes_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    )
+
+    class _NoSpool:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("oversized multipart body reached temporary storage")
+
+    monkeypatch.setattr(skill_routes_module, "MAX_EXPANDED_BYTES", 1)
+    monkeypatch.setattr(skill_routes_module, "MAX_FILES", 1)
+    monkeypatch.setattr(skill_routes_module, "MAX_PATH_LENGTH", 1, raising=False)
+    monkeypatch.setattr(
+        skill_routes_module, "MAX_MULTIPART_OVERHEAD_BYTES", 0, raising=False
+    )
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", _NoSpool)
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-body-limit"},
+        files=[("files", ("S", b"x", "application/octet-stream"))],
+        data={"file_paths": '["S"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+def test_folder_creation_caps_streamed_body_without_content_length(
+    client, skill_application_service, monkeypatch
+):
+    import starlette.formparsers
+
+    skill_routes_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    )
+
+    class _NoSpool:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("streamed oversized body reached temporary storage")
+
+    monkeypatch.setattr(skill_routes_module, "MAX_EXPANDED_BYTES", 1)
+    monkeypatch.setattr(skill_routes_module, "MAX_FILES", 1)
+    monkeypatch.setattr(skill_routes_module, "MAX_PATH_LENGTH", 1)
+    monkeypatch.setattr(skill_routes_module, "MAX_MULTIPART_OVERHEAD_BYTES", 0)
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", _NoSpool)
+    boundary = "space-skill-boundary"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file_paths"\r\n\r\n'
+        '["S"]\r\n'
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="files"; filename="S"\r\n'
+        "Content-Type: application/octet-stream\r\n\r\n"
+        "x\r\n"
+        f"--{boundary}--\r\n"
+    ).encode()
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={
+            "Idempotency-Key": "create-stream-limit",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        content=iter((body,)),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("error", "code"),
     [
@@ -997,6 +1190,22 @@ def test_upgrade_maps_exact_source_failure_to_sc_unavailable(
 
     assert response.status_code == 502
     assert response.json()["code"] == 502000
+
+
+def test_deleted_upgrade_request_returns_stable_idempotency_conflict(
+    client, skill_application_service
+):
+    skill_application_service.create_upgrade_draft.side_effect = (
+        SpaceSkillIdempotencyConflictError("upgrade request is spent")
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/draft/upgrade",
+        headers={"Idempotency-Key": "upgrade-deleted"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409305
 
 
 def test_published_version_and_consumable_routes_use_business_ordinals(

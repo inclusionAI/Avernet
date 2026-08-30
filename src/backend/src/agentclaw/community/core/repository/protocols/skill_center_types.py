@@ -175,6 +175,15 @@ class DraftUpgradeRecord(TypedDict):
     draft: SpaceSkillDraftRecord
 
 
+class SkillUpgradeRequestRecord(TypedDict):
+    """Durable upgrade-command identity and its optional live Draft."""
+
+    skill_id: int
+    space_id: int
+    status: Literal["ACTIVE", "SPENT"]
+    draft: SpaceSkillDraftRecord | None
+
+
 class SpaceSkillQueryRecord(TypedDict):
     """Persistence projection for a Space-owned Skill and actor grant."""
 

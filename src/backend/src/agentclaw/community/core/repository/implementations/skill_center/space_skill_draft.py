@@ -11,6 +11,7 @@ from agentclaw.community.core.models.skill import (
 )
 from agentclaw.community.core.models.space_skill import (
     SkillDraftEditLease,
+    SkillDraftUpgradeRequest,
     SkillGrant,
     SkillSpaceBinding,
     SkillPublicationAttempt,
@@ -24,6 +25,7 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
     DraftDeleteRecord,
     DraftUpgradeRecord,
     SkillUpgradeIdentityRecord,
+    SkillUpgradeRequestRecord,
 )
 from agentclaw.community.core.skill_center.draft_content import DraftRevisionRef
 from agentclaw.community.core.skill_center.errors import (
@@ -33,6 +35,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftAlreadyExistsError,
     DraftNotFoundError,
     DraftRevisionConflictError,
+    SpaceSkillIdempotencyConflictError,
     SpaceSkillGrantForbiddenError,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
@@ -170,24 +173,25 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
 
     def get_upgrade_by_request_id(
         self, *, request_id: str, env: str
-    ) -> SpaceSkillDraftRecord | None:
+    ) -> SkillUpgradeRequestRecord | None:
         with self._db.orm_session() as session:
-            row = (
-                session.query(Skill, SpaceModel.space_type, SpaceModel.sc_team_id)
-                .join(
-                    SkillSpaceBinding,
-                    (SkillSpaceBinding.skill_id == Skill.id)
-                    & (SkillSpaceBinding.env == Skill.env),
+            request = (
+                session.query(SkillDraftUpgradeRequest)
+                .filter(
+                    SkillDraftUpgradeRequest.request_id == request_id,
+                    SkillDraftUpgradeRequest.env == env,
                 )
-                .join(
-                    SpaceModel,
-                    (SpaceModel.id == SkillSpaceBinding.space_id)
-                    & (SpaceModel.env == SkillSpaceBinding.env),
-                )
-                .filter(Skill.draft_request_id == request_id, Skill.env == env)
                 .one_or_none()
             )
-            return self._record(row[0], row[1], row[2]) if row is not None else None
+            if request is None:
+                return None
+            draft = self._live_upgrade_draft(session, request, env=env)
+            return {
+                "skill_id": request.skill_id,
+                "space_id": request.space_id,
+                "status": request.status,
+                "draft": draft,
+            }
 
     def create_upgrade_draft(
         self,
@@ -239,14 +243,31 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
             )
             if grant is None:
                 raise SpaceSkillGrantForbiddenError("owner or manager required")
+            request = (
+                session.query(SkillDraftUpgradeRequest)
+                .filter(
+                    SkillDraftUpgradeRequest.request_id == request_id,
+                    SkillDraftUpgradeRequest.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if request is not None:
+                if (
+                    request.skill_id != skill_id
+                    or request.space_id != space_id
+                    or request.status != "ACTIVE"
+                ):
+                    raise SpaceSkillIdempotencyConflictError(
+                        "upgrade request already belongs to another intent"
+                    )
+                draft = self._live_upgrade_draft(session, request, env=env)
+                if draft is None:
+                    raise SpaceSkillIdempotencyConflictError(
+                        "upgrade request belongs to a Draft that no longer exists"
+                    )
+                return {"created": False, "draft": draft}
             if skill.draft_status is not None:
-                if skill.draft_request_id == request_id:
-                    return {
-                        "created": False,
-                        "draft": self._record(
-                            skill, space.space_type, space.sc_team_id
-                        ),
-                    }
                 raise DraftAlreadyExistsError("draft already exists")
             latest = (
                 session.query(SkillVersion)
@@ -266,7 +287,17 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
             skill.draft_status = "EDITING"
             skill.draft_description = new_description
             skill.draft_source_kind = "PUBLISHED_VERSION"
-            skill.draft_request_id = request_id
+            session.add(
+                SkillDraftUpgradeRequest(
+                    skill_id=skill_id,
+                    space_id=space_id,
+                    request_id=request_id,
+                    target_version_ordinal=target_version,
+                    status="ACTIVE",
+                    created_by=actor_id,
+                    env=env,
+                )
+            )
             session.flush()
             return {
                 "created": True,
@@ -485,12 +516,19 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                 is not None
             )
             if external:
+                session.query(SkillDraftUpgradeRequest).filter(
+                    SkillDraftUpgradeRequest.skill_id == skill_id,
+                    SkillDraftUpgradeRequest.env == env,
+                    SkillDraftUpgradeRequest.status == "ACTIVE",
+                ).update(
+                    {SkillDraftUpgradeRequest.status: "SPENT"},
+                    synchronize_session=False,
+                )
                 skill.zip_url = None
                 skill.draft_target_version = None
                 skill.draft_status = None
                 skill.draft_description = None
                 skill.draft_source_kind = None
-                skill.draft_request_id = None
                 scope = "DRAFT"
             else:
                 session.query(SkillDraftEditLease).filter_by(
@@ -506,6 +544,39 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                 scope = "SKILL"
             session.flush()
             return {"changed": True, "deleted_scope": scope, "locator": current.locator}
+
+    @staticmethod
+    def _live_upgrade_draft(
+        session, request: SkillDraftUpgradeRequest, *, env: str
+    ) -> SpaceSkillDraftRecord | None:
+        if request.status != "ACTIVE":
+            return None
+        row = (
+            session.query(Skill, SpaceModel.space_type, SpaceModel.sc_team_id)
+            .join(
+                SkillSpaceBinding,
+                (SkillSpaceBinding.skill_id == Skill.id)
+                & (SkillSpaceBinding.env == Skill.env),
+            )
+            .join(
+                SpaceModel,
+                (SpaceModel.id == SkillSpaceBinding.space_id)
+                & (SpaceModel.env == SkillSpaceBinding.env),
+            )
+            .filter(
+                Skill.id == request.skill_id,
+                Skill.env == env,
+                SkillSpaceBinding.space_id == request.space_id,
+                Skill.draft_status.is_not(None),
+                Skill.draft_target_version == request.target_version_ordinal,
+            )
+            .one_or_none()
+        )
+        return (
+            SpaceSkillDraftRepository._record(row[0], row[1], row[2])
+            if row is not None
+            else None
+        )
 
     @staticmethod
     def _record(

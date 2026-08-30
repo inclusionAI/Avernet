@@ -27,6 +27,8 @@ from agentclaw.community.core.models.space_skill import (
     DraftSourceKind,
     DraftStatus,
     SkillDraftEditLease,
+    SkillDraftUpgradeRequest,
+    SkillDraftUpgradeRequestStatus,
     SkillGrant,
     SkillPublicationAttemptStatus,
     SkillPublicationAttempt,
@@ -90,6 +92,7 @@ def test_additive_schema_registers_space_and_skill_fact_scope(db):
         "ac_skill_space_binding",
         "ac_skill_grant",
         "ac_skill_draft_edit_lease",
+        "ac_skill_draft_upgrade_request",
         "ac_skill_version",
         "ac_skill_publication_attempt",
     } <= tables
@@ -104,6 +107,7 @@ def test_additive_schema_registers_space_and_skill_fact_scope(db):
     for model in (
         SkillSpaceBinding,
         SkillGrant,
+        SkillDraftUpgradeRequest,
         SkillVersion,
         SkillPublicationAttempt,
     ):
@@ -132,7 +136,6 @@ def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
         "draft_source_kind",
         "creation_request_id",
         "creation_request_hash",
-        "draft_request_id",
         "offline_at",
         "offline_by",
         "source_repo_url",
@@ -140,7 +143,7 @@ def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
         "source_subdir",
         "source_commit_sha",
     } <= {column.name for column in Skill.__table__.columns}
-    assert {"retired_at", "retired_by"}.isdisjoint(
+    assert {"draft_request_id", "retired_at", "retired_by"}.isdisjoint(
         column.name for column in Skill.__table__.columns
     )
     assert {"avernet_tenant", "skill_version_id"} <= {
@@ -175,6 +178,10 @@ def test_space_skill_enums_match_the_final_phase2_contract():
         "SUCCEEDED",
         "FAILED",
         "RESULT_UNKNOWN",
+    }
+    assert {item.value for item in SkillDraftUpgradeRequestStatus} == {
+        "ACTIVE",
+        "SPENT",
     }
 
 
@@ -481,7 +488,10 @@ def test_additive_migration_is_repeat_safe_and_requires_reviewed_duplicate_clean
         / "2026_08_17_spaces.sql"
     ).read_text()
 
-    assert ddl.count("CREATE TABLE IF NOT EXISTS") == 5
+    assert ddl.count("CREATE TABLE IF NOT EXISTS") == 6
+    assert "CREATE TABLE IF NOT EXISTS ac_skill_draft_upgrade_request" in ddl
+    assert "UNIQUE KEY uk_skill_upgrade_request" in ddl
+    assert "draft_request_id" not in ddl
     assert "CREATE TABLE IF NOT EXISTS ac_space" not in ddl
     assert "ALTER TABLE ac_space" in spaces_sql
     assert "ALTER TABLE ac_space_member" in spaces_sql
@@ -494,6 +504,8 @@ def test_additive_migration_is_repeat_safe_and_requires_reviewed_duplicate_clean
     assert "DROP COLUMN IF EXISTS retired_at" in convergence
     assert "DROP COLUMN IF EXISTS retired_by" in convergence
     assert "DROP COLUMN IF EXISTS failure_code" in convergence
+    assert "ALTER TABLE ac_skill DROP COLUMN draft_request_id" in convergence
+    assert "CREATE TABLE IF NOT EXISTS ac_skill_draft_upgrade_request" in convergence
     assert (
         "DROP CONSTRAINT IF EXISTS ck_skill_publication_attempt_status" in convergence
     )

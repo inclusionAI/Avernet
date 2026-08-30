@@ -565,6 +565,85 @@ def test_upgrade_replay_reauthorizes_space_and_editor_before_returning_metadata(
     canonical.read_version.assert_not_called()
 
 
+def test_active_upgrade_request_replays_the_original_draft_without_store_io():
+    (
+        service,
+        _access,
+        _repository,
+        drafts,
+        store,
+        _sources,
+        versions,
+        canonical,
+        *_extra,
+    ) = _service()
+    replayed_draft = _seed_draft(store, source_kind="PUBLISHED_VERSION")
+    drafts.get_skill_for_upgrade.return_value = {
+        "skill_id": 51,
+        "skill_uuid": "11111111-1111-4111-8111-111111111111",
+        "name": "draft-skill",
+        "space_type": "TEAM",
+        "sc_team_id": 77,
+    }
+    drafts.get_upgrade_by_request_id.return_value = {
+        "skill_id": 51,
+        "space_id": 7,
+        "status": "ACTIVE",
+        "draft": replayed_draft,
+    }
+
+    result = service.create_upgrade_draft(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        request_id="upgrade-replay",
+    )
+
+    assert result.revision_id == replayed_draft["locator"].rsplit("/", 1)[-1]
+    versions.list_latest_published.assert_not_called()
+    canonical.read_version.assert_not_called()
+    drafts.create_upgrade_draft.assert_not_called()
+
+
+def test_deleted_upgrade_request_is_spent_and_never_creates_another_revision():
+    (
+        service,
+        _access,
+        _repository,
+        drafts,
+        store,
+        _sources,
+        versions,
+        canonical,
+        *_extra,
+    ) = _service()
+    drafts.get_skill_for_upgrade.return_value = {
+        "skill_id": 51,
+        "skill_uuid": "11111111-1111-4111-8111-111111111111",
+        "name": "draft-skill",
+        "space_type": "TEAM",
+        "sc_team_id": 77,
+    }
+    drafts.get_upgrade_by_request_id.return_value = {
+        "skill_id": 51,
+        "space_id": 7,
+        "status": "SPENT",
+        "draft": None,
+    }
+
+    with pytest.raises(SpaceSkillIdempotencyConflictError):
+        service.create_upgrade_draft(
+            space_id=7,
+            skill_id=51,
+            actor_id="owner-1",
+            request_id="upgrade-deleted",
+        )
+
+    versions.list_latest_published.assert_not_called()
+    canonical.read_version.assert_not_called()
+    drafts.create_upgrade_draft.assert_not_called()
+
+
 def test_upgrade_repairs_missing_canonical_store_from_exact_sc_download():
     (
         service,

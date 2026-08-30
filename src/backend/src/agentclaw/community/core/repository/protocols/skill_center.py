@@ -45,6 +45,7 @@ from .skill_center_types import (
     DraftDeleteRecord,
     DraftUpgradeRecord,
     SkillUpgradeIdentityRecord,
+    SkillUpgradeRequestRecord,
 )
 
 
@@ -295,7 +296,7 @@ class SpaceSkillDraftRepository(Protocol):
     @abstractmethod
     def get_upgrade_by_request_id(
         self, *, request_id: str, env: str
-    ) -> SpaceSkillDraftRecord | None: ...
+    ) -> SkillUpgradeRequestRecord | None: ...
 
     @abstractmethod
     def create_upgrade_draft(

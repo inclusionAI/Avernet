@@ -320,11 +320,15 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
             request_id=request_id, env=self._env_provider()
         )
         if replay is not None:
-            if replay["skill_id"] != skill_id:
+            if replay["skill_id"] != skill_id or replay["space_id"] != space_id:
                 raise SpaceSkillIdempotencyConflictError(
-                    "upgrade request already belongs to another Skill"
+                    "upgrade request already belongs to another intent"
                 )
-            return self._draft_result(replay)
+            if replay["status"] != "ACTIVE" or replay["draft"] is None:
+                raise SpaceSkillIdempotencyConflictError(
+                    "upgrade request belongs to a Draft that no longer exists"
+                )
+            return self._draft_result(replay["draft"])
         rows = self._versions.list_latest_published(
             env=self._env_provider(), skill_ids=(skill_id,)
         )

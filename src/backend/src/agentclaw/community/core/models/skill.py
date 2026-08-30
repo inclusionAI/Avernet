@@ -156,7 +156,6 @@ class Skill(Base):
     draft_source_kind = Column(String(32), nullable=True)
     creation_request_id = Column(String(128), nullable=True)
     creation_request_hash = Column(String(64), nullable=True)
-    draft_request_id = Column(String(128), nullable=True)
     offline_at = Column(DateTime, nullable=True)
     offline_by = Column(String(128), nullable=True)
     source_repo_url = Column(String(2048), nullable=True)
@@ -177,12 +176,6 @@ class Skill(Base):
             "env",
             "creation_request_id",
             name="uk_skill_creation_request",
-        ),
-        UniqueConstraint(
-            "avernet_tenant",
-            "env",
-            "draft_request_id",
-            name="uk_skill_draft_request",
         ),
         {"extend_existing": True},
     )
