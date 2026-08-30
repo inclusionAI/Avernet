@@ -67,6 +67,9 @@ from agentclaw.community.core.repository.implementations.skill_center.space_skil
 from agentclaw.community.core.repository.implementations.skill_center.space_skill_draft import (
     SpaceSkillDraftRepository as UnifiedSpaceSkillDraftRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.space_skill_read import (
+    SpaceSkillReadRepository as UnifiedSpaceSkillReadRepository,
+)
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
@@ -98,6 +101,7 @@ from agentclaw.community.core.repository.protocols.skill_center import (
     DraftEditLeaseRepository,
     SpaceSkillRepository,
     SpaceSkillDraftRepository,
+    SpaceSkillReadRepository,
 )
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
@@ -326,6 +330,11 @@ class SkillCenterModule(
         binder.bind(
             SpaceSkillDraftRepository,
             to=UnifiedSpaceSkillDraftRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            SpaceSkillReadRepository,
+            to=UnifiedSpaceSkillReadRepository,
             scope=singleton,
         )
         binder.bind(

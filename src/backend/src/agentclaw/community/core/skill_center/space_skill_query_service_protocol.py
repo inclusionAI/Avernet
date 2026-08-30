@@ -8,6 +8,7 @@ from typing import Protocol, TYPE_CHECKING, runtime_checkable
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.protocols.skill_center_types import (
         SpaceSkillSummaryRecord,
+        SpaceSkillDetailRecord,
     )
 
 
@@ -22,6 +23,11 @@ class SpaceSkillQueryServiceProtocol(Protocol):
         space_id: int,
         actor_id: str,
         keyword: str | None,
-        page_no: int,
+        page: int,
         page_size: int,
     ) -> tuple[int, list[SpaceSkillSummaryRecord]]: ...
+
+    @abstractmethod
+    def get_space_skill(
+        self, *, space_id: int, skill_id: int, actor_id: str
+    ) -> SpaceSkillDetailRecord: ...

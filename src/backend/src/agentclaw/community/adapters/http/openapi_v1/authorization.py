@@ -467,6 +467,20 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Space membership, adjudicated by the Space service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"):
         NoCheck("Space membership, adjudicated by the Space service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills"):
+        NoCheck("Space membership and immutable Draft creation, adjudicated by the Skill service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/import-from-git"):
+        NoCheck("Space membership and Git snapshot creation, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"):
+        NoCheck("Space membership and Skill visibility, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"):
+        NoCheck("Space membership and Draft visibility, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):
+        NoCheck("Space membership and Draft file visibility, adjudicated by the Skill service"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):
+        NoCheck("Skill Grant, revision CAS and Lease fencing, adjudicated by the Skill service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git"):
+        NoCheck("Skill Grant, frozen Git source and revision CAS, adjudicated by the Skill service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"):
         NoCheck("Space membership and Skill Grants, adjudicated by the Grant service"),
     ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"):

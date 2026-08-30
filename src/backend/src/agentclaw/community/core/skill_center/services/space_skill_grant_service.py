@@ -39,7 +39,7 @@ def space_skill_actor_permissions(
         "publish_draft": can_edit,
         "delete_draft": can_edit,
         "create_upgrade_draft": can_edit,
-        "retire_skill": can_edit,
+        "offline_skill": can_edit,
         "manage_grants": is_owner,
         "transfer_owner": is_owner or is_admin,
         "request_edit_access": can_request,

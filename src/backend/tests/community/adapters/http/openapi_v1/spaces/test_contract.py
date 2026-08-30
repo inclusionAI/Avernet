@@ -29,6 +29,14 @@ from agentclaw.community.api.space_skill_query_service import (
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
+from agentclaw.community.api.space_skill_application_service import (
+    DraftFileContent,
+    DraftFileItem,
+    DraftFileTree,
+    DraftMutationResult,
+    SpaceSkillApplicationServiceProtocol,
+    SpaceSkillCreationOutcome,
+)
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
 )
@@ -110,6 +118,11 @@ def skill_grant_service():
 
 
 @pytest.fixture
+def skill_application_service():
+    return MagicMock()
+
+
+@pytest.fixture
 def skill_editor_request_service():
     return MagicMock()
 
@@ -126,6 +139,7 @@ def client(
     favorite_service,
     skill_query_service,
     skill_grant_service,
+    skill_application_service,
     skill_editor_request_service,
     draft_edit_lease_service,
 ):
@@ -136,6 +150,9 @@ def client(
             binder.bind(MarketFavoriteServiceProtocol, to=favorite_service)
             binder.bind(SpaceSkillQueryServiceProtocol, to=skill_query_service)
             binder.bind(SpaceSkillGrantServiceProtocol, to=skill_grant_service)
+            binder.bind(
+                SpaceSkillApplicationServiceProtocol, to=skill_application_service
+            )
             binder.bind(
                 SpaceSkillEditorRequestServiceProtocol,
                 to=skill_editor_request_service,
@@ -277,7 +294,7 @@ def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
                 "publish_draft": True,
                 "delete_draft": True,
                 "create_upgrade_draft": True,
-                "retire_skill": True,
+                    "offline_skill": True,
                 "manage_grants": True,
                 "transfer_owner": True,
                 "request_edit_access": False,
@@ -303,7 +320,7 @@ def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
                 "publish_draft": False,
                 "delete_draft": False,
                 "create_upgrade_draft": False,
-                "retire_skill": False,
+                    "offline_skill": False,
                 "manage_grants": False,
                 "transfer_owner": False,
                 "request_edit_access": True,
@@ -543,9 +560,16 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                 "skill_uuid": "0b1b5f8f-demo",
                 "name": "Smart Form Parser",
                 "description": "Parse complex forms",
-                "status": "DEVELOPING",
-                "draft_status": "EDITING",
+                "lifecycle_status": "DRAFT_ONLY",
                 "space_type": "TEAM",
+                "owner": {"user_id": "owner-1", "display_name": "Owner One"},
+                "latest_published_version": None,
+                "draft": {
+                    "target_version": 1,
+                    "status": "EDITING",
+                    "revision_id": "22222222-2222-4222-8222-222222222222",
+                },
+                "active_publication": None,
                 "actor": {
                     "skill_role": None,
                     "permissions": {
@@ -553,12 +577,13 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                         "publish_draft": False,
                         "delete_draft": False,
                         "create_upgrade_draft": False,
-                        "retire_skill": False,
+                        "offline_skill": False,
                         "manage_grants": False,
                         "transfer_owner": False,
                         "request_edit_access": True,
                         "takeover_lease": False,
                     },
+                    "pending_editor_request": None,
                 },
                 "lease_summary": {
                     "required": True,
@@ -574,7 +599,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
 
     response = client.get(
         "/openapi/v1/bots/spaces/7/skills",
-        params={"keyword": "form", "page_no": 2, "page_size": 5},
+        params={"keyword": "form", "page": 2, "page_size": 5},
     )
 
     assert response.status_code == 200
@@ -586,9 +611,16 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                 "skill_uuid": "0b1b5f8f-demo",
                 "name": "Smart Form Parser",
                 "description": "Parse complex forms",
-                "status": "DEVELOPING",
-                "draft_status": "EDITING",
+                "lifecycle_status": "DRAFT_ONLY",
                 "space_type": "TEAM",
+                "owner": {"user_id": "owner-1", "display_name": "Owner One"},
+                "latest_published_version": None,
+                "draft": {
+                    "target_version": 1,
+                    "status": "EDITING",
+                    "revision_id": "22222222-2222-4222-8222-222222222222",
+                },
+                "active_publication": None,
                 "actor": {
                     "skill_role": None,
                     "permissions": {
@@ -596,12 +628,13 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                         "publish_draft": False,
                         "delete_draft": False,
                         "create_upgrade_draft": False,
-                        "retire_skill": False,
+                        "offline_skill": False,
                         "manage_grants": False,
                         "transfer_owner": False,
                         "request_edit_access": True,
                         "takeover_lease": False,
                     },
+                    "pending_editor_request": None,
                 },
                 "lease_summary": {
                     "required": True,
@@ -618,7 +651,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
         space_id=7,
         actor_id="owner-1",
         keyword="form",
-        page_no=2,
+        page=2,
         page_size=5,
     )
 
@@ -626,7 +659,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
 @pytest.mark.parametrize(
     ("params", "expected_status"),
     [
-        ({"page_no": 0}, 422),
+        ({"page": 0}, 422),
         ({"page_size": 101}, 422),
         ({"keyword": "x" * 129}, 422),
     ],
@@ -636,6 +669,156 @@ def test_list_space_skills_validates_query_contract(client, params, expected_sta
 
     assert response.status_code == expected_status
     assert response.json()["code"] == 422000
+
+
+def _skill_detail_record():
+    timestamp = datetime(2026, 8, 30, 8)
+    return {
+        "id": 51,
+        "skill_uuid": "11111111-1111-4111-8111-111111111111",
+        "name": "draft-skill",
+        "description": "Draft description",
+        "lifecycle_status": "DRAFT_ONLY",
+        "space_type": "TEAM",
+        "owner": {"user_id": "owner-1", "display_name": "Owner One"},
+        "latest_published_version": None,
+        "draft": {
+            "target_version": 1,
+            "status": "EDITING",
+            "revision_id": "22222222-2222-4222-8222-222222222222",
+            "name": "draft-skill",
+            "description": "Draft description",
+            "source_kind": "FOLDER",
+            "source_repo_url": None,
+            "source_branch": None,
+            "source_commit_sha": None,
+            "source_subdir": None,
+        },
+        "active_publication": None,
+        "actor": {
+            "skill_role": "OWNER",
+            "permissions": {
+                "edit_draft": True,
+                "publish_draft": True,
+                "delete_draft": True,
+                "create_upgrade_draft": True,
+                "offline_skill": True,
+                "manage_grants": True,
+                "transfer_owner": True,
+                "request_edit_access": False,
+                "takeover_lease": True,
+            },
+            "pending_editor_request": None,
+        },
+        "lease_summary": {
+            "required": True,
+            "state": "FREE",
+            "holder_user_id": None,
+            "holder_display_name": None,
+        },
+        "source": "FOLDER",
+        "offline_at": None,
+        "offline_by": None,
+        "gmt_created": timestamp,
+        "gmt_modified": timestamp,
+    }
+
+
+def test_folder_and_git_creation_publish_real_idempotent_routes(
+    client, skill_application_service, skill_query_service
+):
+    skill_application_service.create_from_folder.return_value = (
+        SpaceSkillCreationOutcome(skill_id=51, created=True)
+    )
+    skill_application_service.create_from_git.return_value = (
+        SpaceSkillCreationOutcome(skill_id=51, created=True)
+    )
+    skill_query_service.get_space_skill.return_value = _skill_detail_record()
+
+    folder = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-1"},
+        files=[
+            ("files", ("SKILL.md", b"manifest", "text/markdown")),
+            ("files", ("example.md", b"example", "text/markdown")),
+        ],
+        data={"file_paths": '["draft-skill/SKILL.md","draft-skill/example.md"]'},
+    )
+    imported = client.post(
+        "/openapi/v1/bots/spaces/7/skills/import-from-git",
+        headers={"Idempotency-Key": "git-1"},
+        json={"git_url": "https://example.com/team/skills.git"},
+    )
+
+    assert folder.status_code == imported.status_code == 201
+    assert folder.json()["data"]["draft"]["revision_id"].endswith("222222222222")
+    skill_application_service.create_from_folder.assert_called_once_with(
+        space_id=7,
+        actor_id="owner-1",
+        request_id="create-1",
+        files=[
+            ("draft-skill/SKILL.md", b"manifest"),
+            ("draft-skill/example.md", b"example"),
+        ],
+    )
+    skill_application_service.create_from_git.assert_called_once_with(
+        space_id=7,
+        actor_id="owner-1",
+        request_id="git-1",
+        git_url="https://example.com/team/skills.git",
+        branch=None,
+        subdir=None,
+    )
+
+
+def test_draft_file_routes_preserve_revision_and_fencing_contract(
+    client, skill_application_service
+):
+    skill_application_service.get_draft_file_tree.return_value = DraftFileTree(
+        revision_id="rev-1", files=(DraftFileItem(path="SKILL.md", size=10),)
+    )
+    skill_application_service.read_draft_file.return_value = DraftFileContent(
+        path="SKILL.md", content="# Skill", revision_id="rev-1"
+    )
+    skill_application_service.save_draft_file.return_value = DraftMutationResult(
+        target_version=1,
+        status="EDITING",
+        revision_id="rev-2",
+        name="draft-skill",
+        description="Draft description",
+        source_kind="FOLDER",
+        source_repo_url=None,
+        source_branch=None,
+        source_commit_sha=None,
+        source_subdir=None,
+    )
+
+    tree = client.get("/openapi/v1/bots/spaces/7/skills/51/draft/files")
+    file = client.get("/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md")
+    saved = client.put(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md",
+        json={
+            "content": "# Updated",
+            "expected_revision_id": "rev-1",
+            "fencing_token": 7,
+        },
+    )
+
+    assert tree.json()["data"] == {
+        "revision_id": "rev-1",
+        "files": [{"path": "SKILL.md", "size": 10}],
+    }
+    assert file.json()["data"]["content"] == "# Skill"
+    assert saved.json()["data"]["revision_id"] == "rev-2"
+    skill_application_service.save_draft_file.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        path="SKILL.md",
+        content="# Updated",
+        expected_revision_id="rev-1",
+        fencing_token=7,
+    )
 
 
 @pytest.mark.parametrize(

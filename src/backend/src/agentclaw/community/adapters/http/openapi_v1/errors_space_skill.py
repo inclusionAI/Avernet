@@ -5,6 +5,13 @@ from agentclaw.community.adapters.http.openapi_v1.errors_space import (
     SpacePublicErrorMessage,
 )
 from agentclaw.community.core.skill_center.errors import (
+    DraftFileNotFoundError,
+    DraftFileNotTextError,
+    DraftFrozenError,
+    DraftNotFoundError,
+    DraftRevisionConflictError,
+    SkillNameChangedError,
+    SpaceSkillIdempotencyConflictError,
     DraftEditLeaseConflictError,
     DraftEditLeaseForbiddenError,
     DraftEditLeaseNotFoundError,
@@ -14,6 +21,15 @@ from agentclaw.community.core.skill_center.errors import (
     SpaceSkillGrantMemberRequiredError,
     SpaceSkillGrantNotFoundError,
     SpaceSkillGrantReasonRequiredError,
+)
+from agentclaw.community.core.skill_center.draft_content import DraftContentStoreError
+from agentclaw.community.core.skill_center.git_snapshot import (
+    GitSnapshotError,
+    GitSnapshotInvalidError,
+)
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageInvalidError,
+    SkillPackageTooLargeError,
 )
 
 SPACE_SKILL_HTTP_ERRORS = {
@@ -26,6 +42,18 @@ SPACE_SKILL_HTTP_ERRORS = {
     DraftEditLeaseNotFoundError: (404, SpacePublicErrorMessage.DRAFT_EDIT_LEASE_NOT_FOUND),
     DraftEditLeaseConflictError: (409, SpacePublicErrorMessage.DRAFT_EDIT_LEASE_CONFLICT),
     DraftEditLeaseTokenRejectedError: (409, SpacePublicErrorMessage.DRAFT_EDIT_LEASE_TOKEN_REJECTED),
+    SpaceSkillIdempotencyConflictError: (409, SpacePublicErrorMessage.IDEMPOTENCY_KEY_REUSED),
+    DraftNotFoundError: (404, SpacePublicErrorMessage.DRAFT_NOT_FOUND),
+    DraftFileNotFoundError: (404, SpacePublicErrorMessage.DRAFT_NOT_FOUND),
+    DraftFileNotTextError: (422, SpacePublicErrorMessage.SKILL_PACKAGE_INVALID),
+    DraftFrozenError: (409, SpacePublicErrorMessage.DRAFT_FROZEN),
+    DraftRevisionConflictError: (409, SpacePublicErrorMessage.DRAFT_REVISION_CONFLICT),
+    SkillNameChangedError: (422, SpacePublicErrorMessage.SKILL_NAME_CHANGED),
+    SkillPackageInvalidError: (422, SpacePublicErrorMessage.SKILL_PACKAGE_INVALID),
+    SkillPackageTooLargeError: (422, SpacePublicErrorMessage.SKILL_PACKAGE_INVALID),
+    GitSnapshotInvalidError: (422, SpacePublicErrorMessage.SKILL_PACKAGE_INVALID),
+    GitSnapshotError: (502, SpacePublicErrorMessage.SKILL_GIT_UNAVAILABLE),
+    DraftContentStoreError: (503, SpacePublicErrorMessage.SKILL_DRAFT_STORE_UNAVAILABLE),
 }
 
 SPACE_SKILL_ERROR_CODES = {
@@ -38,4 +66,16 @@ SPACE_SKILL_ERROR_CODES = {
     DraftEditLeaseNotFoundError: SpaceErrorCode.DRAFT_EDIT_LEASE_NOT_FOUND,
     DraftEditLeaseConflictError: SpaceErrorCode.DRAFT_EDIT_LEASE_CONFLICT,
     DraftEditLeaseTokenRejectedError: SpaceErrorCode.DRAFT_EDIT_LEASE_TOKEN_REJECTED,
+    SpaceSkillIdempotencyConflictError: SpaceErrorCode.IDEMPOTENCY_KEY_REUSED,
+    DraftNotFoundError: SpaceErrorCode.DRAFT_NOT_FOUND,
+    DraftFileNotFoundError: SpaceErrorCode.DRAFT_NOT_FOUND,
+    DraftFileNotTextError: SpaceErrorCode.SKILL_PACKAGE_INVALID,
+    DraftFrozenError: SpaceErrorCode.DRAFT_FROZEN,
+    DraftRevisionConflictError: SpaceErrorCode.DRAFT_REVISION_CONFLICT,
+    SkillNameChangedError: SpaceErrorCode.SKILL_NAME_CHANGED,
+    SkillPackageInvalidError: SpaceErrorCode.SKILL_PACKAGE_INVALID,
+    SkillPackageTooLargeError: SpaceErrorCode.SKILL_PACKAGE_INVALID,
+    GitSnapshotInvalidError: SpaceErrorCode.SKILL_PACKAGE_INVALID,
+    GitSnapshotError: SpaceErrorCode.SKILL_GIT_UNAVAILABLE,
+    DraftContentStoreError: SpaceErrorCode.SKILL_DRAFT_STORE_UNAVAILABLE,
 }

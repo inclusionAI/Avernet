@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 
@@ -81,7 +81,7 @@ class SkillActorPermissions(BaseModel):
     create_upgrade_draft: bool = Field(
         description="Actor may request creation of an upgrade Draft."
     )
-    retire_skill: bool = Field(description="Actor may request Skill retirement.")
+    offline_skill: bool = Field(description="Actor may request recoverable Skill Offline.")
     manage_grants: bool = Field(description="Actor may add or remove MANAGER Grants.")
     transfer_owner: bool = Field(description="Actor may request OWNER transfer.")
     request_edit_access: bool = Field(
@@ -100,6 +100,10 @@ class SkillGrantActor(BaseModel):
     )
     permissions: SkillActorPermissions = Field(
         description="ACL/Grant qualifications independent of current command state."
+    )
+    pending_editor_request: SkillEditorRequestCreated | None = Field(
+        default=None,
+        description="Current actor's pending editor request, when one exists.",
     )
 
 
@@ -237,11 +241,13 @@ class _UtcResponseModel(BaseModel):
         "gmt_created",
         "gmt_modified",
         "favorite_at",
+        "published_at",
+        "offline_at",
         check_fields=False,
         when_used="json",
     )
-    def _serialize_utc_datetime(self, value: datetime) -> str:
-        return _utc_datetime(value)
+    def _serialize_utc_datetime(self, value: datetime | None) -> str | None:
+        return _utc_datetime(value) if value is not None else None
 
 
 class SpaceItem(_UtcResponseModel):
@@ -345,8 +351,59 @@ class DraftEditLeaseSummary(BaseModel):
     )
 
 
-class SpaceSkillItem(_UtcResponseModel):
-    """Skill card data owned by one Space."""
+class SkillLifecycleStatus(_DocumentedEnum):
+    DRAFT_ONLY = "DRAFT_ONLY"
+    PUBLISHED = "PUBLISHED"
+    OFFLINE = "OFFLINE"
+
+
+class SkillDraftStatus(_DocumentedEnum):
+    EDITING = "EDITING"
+    FROZEN = "FROZEN"
+
+
+class SkillDraftSourceKind(_DocumentedEnum):
+    FOLDER = "FOLDER"
+    GIT = "GIT"
+    PUBLISHED_VERSION = "PUBLISHED_VERSION"
+
+
+class SkillOwnerSummary(BaseModel):
+    user_id: str = Field(description="Unique active OWNER user identifier.")
+    display_name: str | None = Field(default=None, description="Owner display name.")
+
+
+class SkillVersionSummary(_UtcResponseModel):
+    version: int = Field(ge=1, description="Business version ordinal.")
+    sc_version_number: str = Field(description="Exact SkillCenter version number.")
+    published_at: datetime = Field(description="UTC publication completion time.")
+
+
+class SkillDraftSummary(BaseModel):
+    target_version: int = Field(ge=1, description="Target business version ordinal.")
+    status: SkillDraftStatus
+    revision_id: str = Field(description="Current immutable Draft revision identity.")
+
+
+class SkillDraftDetail(SkillDraftSummary):
+    model_config = ConfigDict(from_attributes=True)
+    name: str
+    description: str | None = None
+    source_kind: SkillDraftSourceKind
+    source_repo_url: str | None = None
+    source_branch: str | None = None
+    source_commit_sha: str | None = None
+    source_subdir: str | None = None
+
+
+class PublicationAttemptSummary(BaseModel):
+    attempt_id: str
+    target_version: int = Field(ge=1)
+    status: str
+
+
+class SpaceSkillSummary(_UtcResponseModel):
+    """Stable domain summary for one Space-owned Skill."""
 
     skill_id: str = Field(description="Unique numeric Skill identifier.")
     skill_uuid: str = Field(description="Stable Skill identity across versions.")
@@ -354,18 +411,17 @@ class SpaceSkillItem(_UtcResponseModel):
     description: str | None = Field(
         default=None, description="Skill description projected from SKILL.md."
     )
-    status: str | None = Field(
-        default=None, description="Current Skill lifecycle status, when available."
-    )
-    draft_status: str | None = Field(
-        default=None, description="Current draft status, when available."
-    )
+    lifecycle_status: SkillLifecycleStatus
     space_type: SpaceType = Field(
         description="Whether the Skill belongs to a personal or team Space."
     )
     actor: SkillGrantActor = Field(
         description="Current caller's Grant role and ACL/Grant qualifications."
     )
+    owner: SkillOwnerSummary
+    latest_published_version: SkillVersionSummary | None = None
+    draft: SkillDraftSummary | None = None
+    active_publication: PublicationAttemptSummary | None = None
     lease_summary: DraftEditLeaseSummary | None = Field(
         default=None,
         description="List-only Lease state without a fencing token; null when no Draft exists.",
@@ -378,6 +434,49 @@ class SpaceSkillItem(_UtcResponseModel):
         description="UTC time when the Skill metadata was last modified.",
         json_schema_extra={"format": "date-time"},
     )
+
+
+class SpaceSkillDetail(SpaceSkillSummary):
+    draft: SkillDraftDetail | None = None
+    source: Literal["FOLDER", "GIT"]
+    offline_at: datetime | None = None
+    offline_by: str | None = None
+
+
+class ImportSpaceSkillFromGitRequest(BaseModel):
+    git_url: str = Field(min_length=1, max_length=2048)
+    branch: str | None = Field(default=None, max_length=512)
+    subdir: str | None = Field(default=None, max_length=1024)
+
+
+class DraftFileItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    path: str
+    size: int = Field(ge=0)
+
+
+class DraftFileTree(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    revision_id: str
+    files: list[DraftFileItem]
+
+
+class DraftFileContent(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    path: str
+    content: str
+    revision_id: str
+
+
+class SaveDraftFileRequest(BaseModel):
+    content: str
+    expected_revision_id: str = Field(min_length=1, max_length=128)
+    fencing_token: int | None = Field(default=None, ge=1)
+
+
+class DraftRevisionRequest(BaseModel):
+    expected_revision_id: str = Field(min_length=1, max_length=128)
+    fencing_token: int | None = Field(default=None, ge=1)
 
 
 class AddSpaceMemberRequest(BaseModel):

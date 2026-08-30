@@ -108,7 +108,7 @@ class SpaceSkillActorPermissions(TypedDict):
     publish_draft: bool
     delete_draft: bool
     create_upgrade_draft: bool
-    retire_skill: bool
+    offline_skill: bool
     manage_grants: bool
     transfer_owner: bool
     request_edit_access: bool
@@ -172,20 +172,54 @@ class SpaceSkillQueryRecord(TypedDict):
     gmt_modified: datetime
 
 
+class SpaceSkillReadRecord(SpaceSkillQueryRecord):
+    source_type: Literal["FOLDER", "GIT"]
+    draft_target_version: int | None
+    draft_description: str | None
+    draft_locator: str | None
+    draft_source_kind: str | None
+    source_repo_url: str | None
+    source_branch: str | None
+    source_subdir: str | None
+    source_commit_sha: str | None
+    offline_at: datetime | None
+    offline_by: str | None
+    owner_user_id: str
+    owner_display_name: str | None
+    latest_version_id: int | None
+    latest_version_ordinal: int | None
+    latest_sc_version_number: str | None
+    latest_published_at: datetime | None
+    active_attempt_id: int | None
+    active_attempt_target_version: int | None
+    active_attempt_status: str | None
+    pending_request_id: int | None
+    pending_request_no: str | None
+
+
 class SpaceSkillSummaryRecord(TypedDict):
-    """Service projection containing actor qualifications and Lease state."""
+    """Final stable workshop summary."""
 
     id: int
     skill_uuid: str
     name: str
     description: str | None
-    status: str | None
-    draft_status: str | None
+    lifecycle_status: Literal["DRAFT_ONLY", "PUBLISHED", "OFFLINE"]
     space_type: Literal["PERSONAL", "TEAM"]
-    actor: SpaceSkillGrantActorRecord
+    owner: dict
+    latest_published_version: dict | None
+    draft: dict | None
+    active_publication: dict | None
+    actor: dict
     gmt_created: datetime
     gmt_modified: datetime
     lease_summary: DraftEditLeaseSummaryRecord | None
+
+
+class SpaceSkillDetailRecord(SpaceSkillSummaryRecord):
+    source: Literal["FOLDER", "GIT"]
+    offline_at: datetime | None
+    offline_by: str | None
 
 
 class DraftEditLeaseRecord(TypedDict):

@@ -33,6 +33,7 @@ from .skill_center_types import (
     SpaceSkillOwnerGrantData,
     SpaceSkillOwnershipData,
     SpaceSkillQueryRecord,
+    SpaceSkillReadRecord,
     SpaceSkillGrantItem,
     SpaceSkillGrantSetRecord,
     DraftEditLeaseRecord,
@@ -129,6 +130,28 @@ class SpaceSkillRepository(Protocol):
         env: str,
         retain_previous_owner_as_manager: bool = False,
     ) -> SpaceSkillGrantSetRecord: ...
+
+
+@runtime_checkable
+class SpaceSkillReadRepository(Protocol):
+    """Read model for Space Skill workshop summaries and details."""
+
+    @abstractmethod
+    def list_skills(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        env: str,
+        keyword: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[int, list[SpaceSkillReadRecord]]: ...
+
+    @abstractmethod
+    def get_skill(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> SpaceSkillReadRecord: ...
 
 
 @runtime_checkable
