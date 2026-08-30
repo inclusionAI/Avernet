@@ -192,9 +192,10 @@ def test_dependency_delta_uses_execution_time_latest_published_version() -> None
     db = _Database()
     with avernet_tenant_scope("teamclaw"), db.orm_session() as session:
         for version_id, ordinal, status, dependencies in (
-            (101, 1, "PUBLISHED", [{"code": "mcp.old"}, {"code": "mcp.keep"}]),
-            (102, 2, "PUBLISHED", [{"code": "mcp.new"}, {"code": "mcp.keep"}]),
-            (103, 3, "MATERIALIZING", [{"code": "mcp.future"}]),
+            (100, 1, "PUBLISHED", [{"code": "mcp.very-old"}]),
+            (101, 2, "PUBLISHED", [{"code": "mcp.old"}, {"code": "mcp.keep"}]),
+            (102, 3, "PUBLISHED", [{"code": "mcp.new"}, {"code": "mcp.keep"}]),
+            (103, 4, "MATERIALIZING", [{"code": "mcp.future"}]),
         ):
             session.add(
                 SkillVersion(
@@ -231,4 +232,4 @@ def test_dependency_delta_uses_execution_time_latest_published_version() -> None
 
     assert delta.skill_version_id == 102
     assert delta.claimed_mcp == frozenset({"mcp.new"})
-    assert delta.released_mcp == frozenset({"mcp.old"})
+    assert delta.released_mcp == frozenset({"mcp.old", "mcp.very-old"})

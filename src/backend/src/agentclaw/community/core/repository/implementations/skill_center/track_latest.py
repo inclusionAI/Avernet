@@ -134,13 +134,14 @@ class TrackLatestRepository(TrackLatestRepositoryProtocol):
                     SkillVersion.status == "PUBLISHED",
                 )
                 .order_by(SkillVersion.version_ordinal.desc())
-                .limit(2)
                 .all()
             )
             if not rows:
                 raise RuntimeError("Track Latest Skill has no PUBLISHED Version")
             current = _dependency_codes(rows[0])
-            previous = _dependency_codes(rows[1]) if len(rows) > 1 else frozenset()
+            previous = frozenset().union(
+                *(_dependency_codes(version) for version in rows[1:])
+            )
             return TrackLatestDependencyDelta(
                 skill_version_id=int(rows[0].id),
                 claimed_mcp=current - previous,

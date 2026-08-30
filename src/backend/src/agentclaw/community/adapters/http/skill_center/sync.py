@@ -1,19 +1,12 @@
 """Legacy SkillCenter diagnostic routes.
 
-POST /api/v1/skill-center/sync
-Body: { "skill_id": "...", "env": "dev", "version": "..." (可选) }
-
-说明：
-The actual synchronization boundary is the environment-wide G4
-``SkillCenterSyncService.sync`` operation.  These routes no longer own NAS,
-``current`` symlink, or per-row materialization behavior.
-
-响应: { "success": true, "skill_id": "...", "skill_uuid": "...", "skill_code": "...", "version": "...", "message": "..." }
+The retired per-Skill NAS sync address answers 410 and points callers to the
+canonical environment-wide G4 public operation.  This module no longer owns
+``current`` symlinks, name mapping, or caller-selected versions.
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_center_sync_service import SkillCenterSyncServiceProtocol
 from agentclaw.community.api.skill_propagation_service import SkillPropagationServiceProtocol
@@ -25,69 +18,13 @@ logger = get_logger()
 router = APIRouter(prefix="/api/v1/skill-center", tags=["skill-center"])
 
 
-class SyncRequest(BaseModel):
-    skill_id: str
-    env: str = "dev"
-    version: str | None = None
-
-
-class SyncResponse(BaseModel):
-    success: bool
-    skill_id: str
-    skill_uuid: str
-    skill_code: str
-    version: str | None
-    message: str
-
-
-@router.post("/sync", response_model=SyncResponse)
-async def force_sync_skill(
-    request: SyncRequest,
-    skill_repo: SkillRepository = Injected(SkillRepository),
-    sync_svc: SkillCenterSyncServiceProtocol = Injected(SkillCenterSyncServiceProtocol),
-):
-    """Trigger canonical materialized-SC-Public synchronization.
-
-    仅限 DEV 环境使用。
-
-    ``skill_id`` remains only as a legacy diagnostic lookup field; the G4
-    service deliberately owns an environment-wide, filtered reconciliation.
-    """
-    logger.info("[SkillCenterSyncService] API /sync called: skill_id=%s env=%s version=%s",
-                request.skill_id, request.env, request.version)
-
-    # 用 skill_id 查 ac_skill 表
-    skill_record = skill_repo.get_by_id(request.skill_id, env=request.env)
-    if not skill_record:
-        raise HTTPException(status_code=404, detail=f"skill not found: skill_id={request.skill_id}")
-
-    skill_uuid = skill_record.get("skill_uuid") or request.skill_id
-    skill_code = skill_record.get("name", "")
-
-    if not skill_code:
-        raise HTTPException(status_code=400, detail=f"skill has no name (SC skillCode): skill_id={request.skill_id}")
-
-    logger.info("[SkillCenterSyncService] API resolved: skill_id=%s -> skill_uuid=%s skill_code=%s",
-                request.skill_id, skill_uuid, skill_code)
-
-    try:
-        result = sync_svc.sync()
-        return SyncResponse(
-            success=True,
-            skill_id=request.skill_id,
-            skill_uuid=skill_uuid,
-            skill_code=skill_code,
-            version=request.version,
-            message=(
-                "sync completed: "
-                f"updated={result.updated} unchanged={result.unchanged} "
-                f"failed={result.failed}"
-            ),
-        )
-    except Exception as exc:
-        logger.exception("[SkillCenterSyncService] API /sync failed: skill_id=%s error=%s",
-                         request.skill_id, exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+@router.post("/sync", deprecated=True)
+async def retired_force_sync_skill() -> None:
+    """Retired: use POST /openapi/v1/bots/market/skill-center/sync."""
+    raise HTTPException(
+        status_code=410,
+        detail="Use POST /openapi/v1/bots/market/skill-center/sync",
+    )
 
 
 class BootstrapResponse(BaseModel):

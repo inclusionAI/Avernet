@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 
+import pytest
 from agentclaw.community.core.repository.skill_center_reference_types import (
     PublicCenterVersionTarget,
     SkillCenterReferenceWorkBatch,
@@ -132,8 +133,11 @@ class _Materializer:
 
 
 class _SkillSets:
-    def __init__(self, *, offline: bool = False) -> None:
+    def __init__(
+        self, *, offline: bool = False, infrastructure_failure: bool = False
+    ) -> None:
         self.offline = offline
+        self.infrastructure_failure = infrastructure_failure
         self.add_calls: list[dict] = []
         self.membership_ids: set[str] = set()
         self.installation_ids: set[str] = set()
@@ -145,6 +149,8 @@ class _SkillSets:
         self.add_calls.append(kwargs)
         if self.offline:
             raise SkillSetControlPlaneConflictError("SKILL_OFFLINE")
+        if self.infrastructure_failure:
+            raise RuntimeError("database unavailable")
         self.membership_ids.update(kwargs["skill_ids"])
         self.installation_ids.update(kwargs["skill_ids"])
         return [
@@ -319,3 +325,24 @@ def test_transient_sc_failure_retries_three_times_then_fails_each_item() -> None
     assert {item.error_code for item in references.batch.items} == {
         "SC_MARKET_UNAVAILABLE"
     }
+
+
+def test_final_membership_infrastructure_failure_propagates_for_task_retry() -> None:
+    references = _References()
+    processor = _processor(
+        references=references,
+        skill_sets=_SkillSets(infrastructure_failure=True),
+        materializer=_Materializer(),
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        asyncio.run(processor.process("request-a"))
+
+    assert all(
+        item.status is SkillCenterReferenceStatus.PROJECTING_RUNTIME
+        for item in references.batch.items
+    )
+    assert not any(
+        status is SkillCenterReferenceStatus.FAILED
+        for _reference_id, status, _fields in references.transitions
+    )

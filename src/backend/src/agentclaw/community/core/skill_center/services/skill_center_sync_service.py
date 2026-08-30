@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+import threading
 
 from agentclaw.community.core.repository.protocols.skill_center_reference import (
     SkillCenterReferenceRepositoryProtocol,
@@ -34,6 +35,7 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.skill_center_gateway import (
+    SkillCenterGatewayError,
     SkillCenterPublicSkillDetailRequest,
     SkillCenterReadScope,
     SkillCenterVersionListRequest,
@@ -42,6 +44,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 
 logger = get_logger()
+_SYNC_LOCK_TTL_SECONDS = 30 * 60
 
 
 class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
@@ -79,22 +82,54 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
     def sync(self) -> SkillCenterSyncSummary:
         env = self._env_provider()
         lock_key = f"skill-center-public-sync:{env}"
-        lock_value = self._cache.acquire_lock_strict(lock_key, ttl=30 * 60)
+        lock_value = self._cache.acquire_lock_strict(
+            lock_key, ttl=_SYNC_LOCK_TTL_SECONDS
+        )
         if lock_value is None:
             raise SkillCenterSyncInProgressError("SYNC_IN_PROGRESS")
+        stop_renewal = threading.Event()
+        lease_error: list[Exception] = []
+
+        def renew_lease() -> None:
+            while not stop_renewal.wait(_SYNC_LOCK_TTL_SECONDS / 3):
+                try:
+                    if not self._cache.renew_lock_strict(
+                        lock_key,
+                        lock_value,
+                        ttl=_SYNC_LOCK_TTL_SECONDS,
+                    ):
+                        lease_error.append(
+                            SkillCenterSyncInProgressError("SYNC_LOCK_LOST")
+                        )
+                        return
+                except Exception as exc:
+                    lease_error.append(exc)
+                    return
+
+        renewal = threading.Thread(
+            target=renew_lease,
+            name="skill-center-public-sync-lock-renewal",
+            daemon=True,
+        )
+        renewal.start()
         try:
             assets = self._assets.list_materialized_public_assets(env=env)
             updated = 0
             unchanged = 0
             failures: list[SkillCenterSyncFailure] = []
             for asset in assets:
+                self._renew_or_raise(
+                    lock_key=lock_key,
+                    lock_value=lock_value,
+                    lease_error=lease_error,
+                )
                 try:
                     changed = self._sync_asset(env=env, asset=asset)
                     if changed:
                         updated += 1
                     else:
                         unchanged += 1
-                except Exception as exc:
+                except (SkillCenterGatewayError, ValueError, RuntimeError) as exc:
                     failures.append(
                         SkillCenterSyncFailure(
                             skill_id=str(asset.skill_id),
@@ -102,6 +137,8 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
                             error_code=_sync_error_code(exc),
                         )
                     )
+            if lease_error:
+                raise lease_error[0]
             return SkillCenterSyncSummary(
                 scanned=len(assets),
                 updated=updated,
@@ -110,7 +147,25 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
                 failures=tuple(failures),
             )
         finally:
+            stop_renewal.set()
+            renewal.join(timeout=1)
             self._cache.release_lock(lock_key, lock_value)
+
+    def _renew_or_raise(
+        self,
+        *,
+        lock_key: str,
+        lock_value: str,
+        lease_error: list[Exception],
+    ) -> None:
+        if lease_error:
+            raise lease_error[0]
+        if not self._cache.renew_lock_strict(
+            lock_key,
+            lock_value,
+            ttl=_SYNC_LOCK_TTL_SECONDS,
+        ):
+            raise SkillCenterSyncInProgressError("SYNC_LOCK_LOST")
 
     async def sync_bootstrap(self) -> SkillCenterSyncSummary:
         try:

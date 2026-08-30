@@ -250,7 +250,12 @@ class SkillCenterReferenceProcessor:
                 set_id=batch.skill_set_id,
                 skill_ids=tuple(str(item.resolved_skill_id) for item in ready),
             )
-        except Exception as exc:
+        except (
+            SkillSetAccessDeniedError,
+            SkillSetControlPlaneConflictError,
+            SkillSetControlPlaneNotFoundError,
+            SkillSetRuntimeReconcileError,
+        ) as exc:
             code = _final_add_error_code(exc)
             for item in ready:
                 self._fail(batch.env, item.reference_id, code, str(exc))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -242,7 +244,7 @@ async def sync_materialized_skill_center_skills(
 ) -> Envelope[SkillCenterSyncSummary]:
     """Synchronize only SC Public assets already materialized in TeamClaw."""
     del user_id
-    result = service.sync()
+    result = await asyncio.to_thread(service.sync)
     return envelope(
         SkillCenterSyncSummary(
             scanned=result.scanned,

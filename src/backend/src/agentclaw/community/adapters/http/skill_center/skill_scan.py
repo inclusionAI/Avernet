@@ -11,7 +11,6 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     ScanCenterRequest, ScanResultItem, ScanResponse, ServiceStatusResponse, MessageResponse,
 )
 from agentclaw.community.di import Injected
-from agentclaw.community.api.skill_center_sync_service import SkillCenterSyncServiceProtocol
 from agentclaw.community.api.skill_scan_service import SkillScanServiceProtocol
 from agentclaw.community.log import get_logger
 
@@ -117,41 +116,15 @@ async def stop_daily_task() -> MessageResponse:
     raise HTTPException(status_code=501, detail="Daily task is not supported in stateless mode")
 
 
-@router.post("/scan/center", response_model=ScanResponse)
+@router.post("/scan/center", response_model=ScanResponse, deprecated=True)
 async def scan_center(
     request: ScanCenterRequest,
-    sync_svc: SkillCenterSyncServiceProtocol = Injected(SkillCenterSyncServiceProtocol),
 ) -> ScanResponse:
-    """Delegate the legacy scan request to canonical G4 synchronization.
-
-    The request shape remains for compatibility, but no NAS/current directory
-    is scanned and no caller-selected asset can bypass the materialized-public
-    filter.
-    """
+    """Retired: exact metadata scanning is owned by the G2 Materializer."""
     if not request.skill_uuids:
         raise HTTPException(status_code=400, detail="skill_uuids must not be empty")
 
-    logger.info(
-        "[skill_scan.scan_center] Request: uuids=%s env=%s",
-        request.skill_uuids, request.env,
-    )
-
-    summary = sync_svc.sync()
-    failures = {item.skill_id: item.error_code for item in summary.failures}
-    results = [
-        ScanResultItem(
-            skill_path=uuid,
-            success=uuid not in failures,
-            error=failures.get(uuid),
-        )
-        for uuid in request.skill_uuids
-    ]
-    success_count = sum(item.success for item in results)
-
-    return ScanResponse(
-        success=True,
-        total=len(request.skill_uuids),
-        success_count=success_count,
-        results=results,
-        message=f"Scanned {success_count}/{len(request.skill_uuids)} skills",
+    raise HTTPException(
+        status_code=410,
+        detail="Use POST /openapi/v1/bots/market/skill-center/sync",
     )

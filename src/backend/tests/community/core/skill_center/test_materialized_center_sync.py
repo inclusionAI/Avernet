@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from agentclaw.community.core.repository.skill_center_reference_types import (
     MaterializedPublicCenterAsset,
@@ -101,9 +102,11 @@ class _TrackLatest:
 
 
 class _Cache:
-    def __init__(self, *, lock_value="lock-token") -> None:
+    def __init__(self, *, lock_value="lock-token", renew_ok=True) -> None:
         self.lock_value = lock_value
+        self.renew_ok = renew_ok
         self.released = []
+        self.renewed = []
 
     def acquire_lock_strict(self, key, ttl):
         return self.lock_value
@@ -111,6 +114,10 @@ class _Cache:
     def release_lock(self, key, value):
         self.released.append((key, value))
         return True
+
+    def renew_lock_strict(self, key, value, ttl):
+        self.renewed.append((key, value, ttl))
+        return self.renew_ok
 
 
 def test_sync_continues_after_one_failure_and_tracks_only_new_published_version() -> None:
@@ -136,6 +143,7 @@ def test_sync_continues_after_one_failure_and_tracks_only_new_published_version(
     assert summary.failures[0].skill_id == "20"
     assert len(materializer.calls) == 1
     assert len(track_latest.calls) == 1
+    assert len(service._cache.renewed) == 2
 
 
 def test_manual_sync_returns_stable_conflict_when_distributed_lock_is_held() -> None:
@@ -151,6 +159,23 @@ def test_manual_sync_returns_stable_conflict_when_distributed_lock_is_held() -> 
 
     with pytest.raises(SkillCenterSyncInProgressError):
         service.sync()
+
+
+def test_sync_fails_closed_when_its_distributed_lease_is_lost() -> None:
+    materializer = _Materializer()
+    service = SkillCenterSyncService(
+        assets=_Assets(),
+        gateway=_Gateway(),
+        materializer=materializer,
+        track_latest=_TrackLatest(),
+        cache=_Cache(renew_ok=False),
+        env_provider=lambda: "pre",
+    )
+
+    with pytest.raises(SkillCenterSyncInProgressError, match="SYNC_LOCK_LOST"):
+        service.sync()
+
+    assert materializer.calls == []
 
 
 def test_lifecycle_bootstrap_reconciles_once_then_starts_and_stops_periodic_task() -> None:
@@ -173,6 +198,29 @@ def test_lifecycle_bootstrap_reconciles_once_then_starts_and_stops_periodic_task
         assert service._periodic_task is None
 
     asyncio.run(run_lifecycle())
+    assert cache.released == [
+        ("skill-center-public-sync:pre", "lock-token")
+    ]
+
+
+def test_sync_propagates_persistence_failure_instead_of_returning_success() -> None:
+    class _BrokenAssets(_Assets):
+        def ensure_public_version(self, **_kwargs):
+            raise SQLAlchemyError("database unavailable")
+
+    cache = _Cache()
+    service = SkillCenterSyncService(
+        assets=_BrokenAssets(),
+        gateway=_Gateway(),
+        materializer=_Materializer(),
+        track_latest=_TrackLatest(),
+        cache=cache,
+        env_provider=lambda: "pre",
+    )
+
+    with pytest.raises(SQLAlchemyError, match="database unavailable"):
+        service.sync()
+
     assert cache.released == [
         ("skill-center-public-sync:pre", "lock-token")
     ]
