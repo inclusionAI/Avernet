@@ -286,6 +286,7 @@ dependencies = [
  "bcs-channel",
  "bcs-channel-api",
  "bcs-channel-store",
+ "bcs-chat-run-store",
  "bcs-cli",
  "bcs-collaboration-runtime",
  "bcs-collaboration-store",
@@ -679,6 +680,7 @@ dependencies = [
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-domain",
  "bcs-organization",
  "bcs-organization-store",
  "bcs-protocol",
@@ -758,6 +760,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -803,6 +806,22 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-test",
+ "tracing",
+]
+
+[[package]]
+name = "bcs-chat-run-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-cache-api",
+ "bcs-cache-local",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-service-api",
+ "serde",
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 
@@ -874,6 +893,7 @@ dependencies = [
  "bcs-domain",
  "bcs-event-store",
  "bcs-service-api",
+ "bcs-session-store",
  "hex",
  "serde_json",
  "serde_yaml",
@@ -982,6 +1002,7 @@ dependencies = [
  "bcs-user-directory-api",
  "serde_json",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -1339,6 +1360,9 @@ name = "bcs-message-flow"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bcs-cache-api",
+ "bcs-cache-local",
+ "bcs-chat-run-store",
  "bcs-domain",
  "bcs-protocol",
  "bcs-service-api",

@@ -1,13 +1,17 @@
-"""Service API Protocol for aicoding workspace initialization."""
+"""Service API Protocol for aicoding workspace initialization.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/aicoding/workspace_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Dict, Protocol, runtime_checkable
+from agentclaw.community.core.aicoding.workspace_service_protocol import (
+    WorkspaceServiceProtocol,
+)
 
-
-@runtime_checkable
-class WorkspaceServiceProtocol(Protocol):
-    """Service API for aicoding workspace setup + path resolution."""
-
-    def get_workspace_path(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def initialize_workspace(self, *args: Any, **kwargs: Any) -> Dict[str, Any]: ...
+__all__ = [
+    "WorkspaceServiceProtocol",
+]

@@ -291,11 +291,14 @@ async fn mysql_definition_snapshot_writes_run_definition_snapshot_table() {
     let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
     let run = StateMachineRun {
         run_id: "sm-run-1".to_string(),
+        root_run_id: Some("sm-run-1".to_string()),
+        rerun_of: None,
         definition_id: definition.id.clone(),
         definition_version: definition.version,
         group_id: "group-1".to_string(),
         group_version: 7,
         session_id: "group-1:abcdef12".to_string(),
+        session_activation_count: None,
         created_by: Some("tester".to_string()),
         status: StateMachineRunStatus::Running,
         input: json!({"question": "hello"}),
@@ -390,9 +393,10 @@ async fn mysql_runtime_create_run_writes_run_and_node_rows() {
             assert!(stmt.sql().contains("bcs_state_machine_runs"));
             assert!(!stmt.sql().contains("ON DUPLICATE KEY UPDATE"));
             assert_eq!(stmt.params()[1], DbValue::from("sm-run-1"));
-            assert_eq!(stmt.params()[5], DbValue::from(7));
-            assert_eq!(stmt.params()[7], DbValue::from("tester"));
-            assert_eq!(stmt.params()[8], DbValue::from("running"));
+            assert_eq!(stmt.params()[2], DbValue::from("sm-run-1"));
+            assert_eq!(stmt.params()[7], DbValue::from(7));
+            assert_eq!(stmt.params()[10], DbValue::from("tester"));
+            assert_eq!(stmt.params()[11], DbValue::from("running"));
         }
         _ => panic!("expected run execute step"),
     }
@@ -1277,11 +1281,14 @@ impl DbPlugin for RecordingDb {
 fn test_run() -> StateMachineRun {
     StateMachineRun {
         run_id: "sm-run-1".to_string(),
+        root_run_id: Some("sm-run-1".to_string()),
+        rerun_of: None,
         definition_id: "sm_e2e_single".to_string(),
         definition_version: 3,
         group_id: "group-1".to_string(),
         group_version: 7,
         session_id: "group-1:abcdef12".to_string(),
+        session_activation_count: None,
         created_by: Some("tester".to_string()),
         status: StateMachineRunStatus::Running,
         input: json!({"question": "hello"}),

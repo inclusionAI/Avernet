@@ -1,26 +1,17 @@
-"""Service API Protocol for bot collaborator locking."""
+"""Service API Protocol for bot collaborator locking.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_collaborator/collaborator_lock_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.bot_collaborator.collaborator_lock_service_protocol import (
+    CollaboratorLockServiceProtocol,
+)
 
-
-@runtime_checkable
-class CollaboratorLockServiceProtocol(Protocol):
-    """Service API for managing per-bot collaborator locks."""
-
-    def acquire_lock(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def release_lock(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_lock_info(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def steal_lock(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    # 会话级锁（coding 应用，key 为 session:{bot_id}:{owner_id}:{session_id}）
-    def acquire_session_lock(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def release_session_lock(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def steal_session_lock(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_session_lock_info(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "CollaboratorLockServiceProtocol",
+]

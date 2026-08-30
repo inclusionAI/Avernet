@@ -10,10 +10,42 @@ returned URL is the one the mock produced.
 Plugin-hit assertion: ``put_object`` and ``sign_url`` mocks must record
 the call. A consumer bypassing the plugin would never trigger them.
 """
+
 from __future__ import annotations
 
-from agentclaw.community.core.skill_center.services.skill_publish_service import SkillPublishService
-from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+import pytest
+from injector import singleton
+
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterStoreConfig,
+    CanonicalCenterVersion,
+    CanonicalCenterVersionIdentity,
+)
+from agentclaw.community.core.skill_center.services.canonical_center_store import (
+    OssCanonicalCenterVersionStore,
+)
+from agentclaw.community.core.skill_center.draft_content import (
+    DraftContentStore,
+    DraftContentStoreConfig,
+    DraftContentStoreError,
+    DraftContentStoreErrorCode,
+    DraftRevisionIdentity,
+)
+from agentclaw.community.core.skill_center.services.draft_content_store import (
+    OssDraftContentStore,
+)
+from agentclaw.community.core.skill_center.services.skill_publish_service import (
+    SkillPublishService,
+)
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
+from agentclaw.community.plugin_api.object_storage import (
+    ImmutableObjectStorageCapability,
+    ObjectCreateResult,
+    ObjectReadResult,
+    ObjectReadStatus,
+    ObjectStoragePlugin,
+)
 
 
 def test_upload_zip_routes_through_oss_storage_plugin(world, tmp_path) -> None:
@@ -46,3 +78,108 @@ def test_community_column_binds_contract_shaped_object_storage(community_world) 
 
     oss = community_world.get(ObjectStoragePlugin)
     assert isinstance(oss, CommunityFsObjectStorage)
+    assert isinstance(oss, ImmutableObjectStorageCapability)
+
+
+def test_canonical_store_consumer_hits_immutable_object_capability(world) -> None:
+    version = CanonicalCenterVersion.from_files(
+        CanonicalCenterVersionIdentity(
+            skill_uuid="11111111-1111-4111-8111-111111111111",
+            sc_version_number="7",
+        ),
+        {"SKILL.md": b"---\nname: demo\ndescription: Demo\n---\n"},
+    )
+    objects = world.get(ObjectStoragePlugin)
+    written: dict[str, bytes] = {}
+
+    def create_once(key: str, content: bytes | str) -> ObjectCreateResult:
+        raw = content.encode() if isinstance(content, str) else content
+        if key in written:
+            return ObjectCreateResult.ALREADY_EXISTS
+        written[key] = raw
+        return ObjectCreateResult.CREATED
+
+    objects.create_object_if_absent.side_effect = create_once
+
+    def read_written(key: str) -> ObjectReadResult:
+        if key not in written:
+            return ObjectReadResult(ObjectReadStatus.NOT_FOUND)
+        return ObjectReadResult(ObjectReadStatus.FOUND, written[key])
+
+    objects.read_object.side_effect = read_written
+    store = OssCanonicalCenterVersionStore(
+        object_storage=objects,
+        config=CanonicalCenterStoreConfig(),
+    )
+
+    ref = store.write_version(version)
+
+    assert ref.identity == version.identity
+    assert objects.create_object_if_absent.call_count == 3
+    assert objects.read_object.call_count == 2
+
+
+def _draft_consumer(world):
+    validator = SkillPackageValidator(SkillParser())
+    package = validator.validate_directory(
+        [
+            (
+                "draft/SKILL.md",
+                b"---\nname: draft\ndescription: Draft\n---\n",
+            )
+        ]
+    )
+    objects = world.get(ObjectStoragePlugin)
+    world.injector.binder.bind(
+        DraftContentStore,
+        to=OssDraftContentStore(
+            object_storage=objects,
+            package_validator=validator,
+            config=DraftContentStoreConfig(),
+        ),
+        scope=singleton,
+    )
+    return world.get(DraftContentStore), objects, package
+
+
+def test_immutable_draft_consumer_uses_atomic_object_contract(world) -> None:
+    store, objects, package = _draft_consumer(world)
+    objects.create_object_if_absent.return_value = ObjectCreateResult.CREATED
+    objects.read_object.return_value = ObjectReadResult(
+        ObjectReadStatus.FOUND, package.canonical_zip
+    )
+
+    store.write_revision(
+        DraftRevisionIdentity(
+            tenant="tenant",
+            env="pre",
+            skill_uuid="11111111-1111-4111-8111-111111111111",
+            target_version=1,
+            revision_id="22222222-2222-4222-8222-222222222222",
+        ),
+        package,
+    )
+
+    objects.create_object_if_absent.assert_called_once()
+    objects.read_object.assert_called_once()
+
+
+def test_immutable_draft_consumer_propagates_atomic_create_failure(world) -> None:
+    store, objects, package = _draft_consumer(world)
+    objects.create_object_if_absent.return_value = ObjectCreateResult.FAILED
+
+    with pytest.raises(DraftContentStoreError) as error:
+        store.write_revision(
+            DraftRevisionIdentity(
+                tenant="tenant",
+                env="pre",
+                skill_uuid="11111111-1111-4111-8111-111111111111",
+                target_version=1,
+                revision_id="22222222-2222-4222-8222-222222222222",
+            ),
+            package,
+        )
+
+    assert error.value.code is DraftContentStoreErrorCode.WRITE_FAILED
+    objects.create_object_if_absent.assert_called_once()
+    objects.read_object.assert_not_called()

@@ -28,6 +28,7 @@ from agentclaw.community.core.bot_chat.trace_helpers import (
     _extract_user_input,
     _matches_session_key,
 )
+from agentclaw.community.core.bot_chat.bot_chat_service_protocol import BotChatServiceProtocol
 
 logger = get_logger()
 
@@ -91,7 +92,7 @@ def _as_utc(value: datetime) -> datetime:
 # BotChatService
 # ---------------------------------------------------------------------------
 
-class BotChatService:
+class BotChatService(BotChatServiceProtocol):
     """Service for querying bot conversation sessions."""
 
     @inject

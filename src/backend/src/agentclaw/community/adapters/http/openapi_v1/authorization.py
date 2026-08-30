@@ -437,6 +437,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the shared skill repository, owned by no bot"),
     ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"):
         NoCheck("Skill Center publish status, keyed by skill code not by bot"),
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"):
+        NoCheck("Skill README access is adjudicated by the Skill query service"),
     ("GET", "/openapi/v1/bots/spaces"):
         NoCheck("Space membership, adjudicated by the Space service"),
     ("POST", "/openapi/v1/bots/spaces/create"):
@@ -465,6 +467,52 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Space membership, adjudicated by the Space service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"):
         NoCheck("Space membership, adjudicated by the Space service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills"):
+        NoCheck("Space membership and immutable Draft creation, adjudicated by the Skill service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/import-from-git"):
+        NoCheck("Space membership and Git snapshot creation, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"):
+        NoCheck("Space membership and Skill visibility, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/consumable"):
+        NoCheck("Space membership and Canonical Ready state, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions"):
+        NoCheck("Space membership and Published Version visibility, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}"):
+        NoCheck("Space membership and exact Published Version visibility, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files"):
+        NoCheck("Space membership and exact Canonical Version visibility, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}"):
+        NoCheck("Space membership and exact Canonical file visibility, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"):
+        NoCheck("Space membership and Draft visibility, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):
+        NoCheck("Space membership and Draft file visibility, adjudicated by the Skill service"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):
+        NoCheck("Skill Grant, revision CAS and Lease fencing, adjudicated by the Skill service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/upgrade"):
+        NoCheck("Skill Grant, exact Published Version and idempotency, adjudicated by the Skill service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git"):
+        NoCheck("Skill Grant, frozen Git source and revision CAS, adjudicated by the Skill service"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"):
+        NoCheck("Skill Grant, revision CAS, Lease fencing and aggregate history, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"):
+        NoCheck("Space membership and Skill Grants, adjudicated by the Grant service"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"):
+        NoCheck("Skill Owner Grant, adjudicated by the Grant service"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"):
+        NoCheck("Skill Owner Grant, adjudicated by the Grant service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer"):
+        NoCheck("Skill Owner or Space administrator, adjudicated by the Grant service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests"):
+        NoCheck("Team membership and Skill Grant eligibility, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("Space membership and Skill Grants, adjudicated by the Lease service"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("Skill Owner or Manager Grant, adjudicated by the Lease service"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("Lease holder and fencing token, adjudicated by the Lease service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover"):
+        NoCheck("Skill Owner or Manager Grant, adjudicated by the Lease service"),
     ("POST", "/openapi/v1/bots/work-order-notifications/read-all"):
         NoCheck("the named user's own work orders and notifications"),
     ("GET", "/openapi/v1/bots/work-order-notifications/unread-count"):
@@ -485,7 +533,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the named user's own work orders and notifications"),
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/reject"):
         NoCheck("the named user's own work orders and notifications"),
-    # ── Task public surface (run-template/execute/dashboard/list + grant/revoke stateless relay; mounted via the gateway
+    # ── Task public surface (execute/dashboard/list + grant/revoke stateless relay; mounted via the gateway
     # ── `collaboration-tasks` domain → backend). Tasks address no bot, so the
     # ── bot-level `Check` does not apply; the caller identity is resolved by
     # ── the gateway spanner + `_PUBLIC_AUTH`; `list` uses caller-selected

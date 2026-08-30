@@ -273,6 +273,8 @@ pub struct AuthzContext {
 pub struct BotActorConfig {
     pub bot_id: String,
     pub env: String,
+    /// Bot display name (`bcs_bots.name`); used in friend-connect notifications.
+    pub name: String,
     /// `public` | `protected` | `private`.
     pub visibility: String,
     /// `online` | `hidden` — `hidden` ⇒ admission rejects (spec §4.3).

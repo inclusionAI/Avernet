@@ -73,8 +73,12 @@ class TaskSourceType(StrEnum):
 
 
 class TaskType(StrEnum):
-    """任务类型(yaml / workflow / dynamic)。"""
+    """任务类型(static-single-workflow / static-group-workflow / dynamic)。"""
 
+    STATIC_SINGLE_WORKFLOW = "STATIC-SINGLE-WORKFLOW"
+    STATIC_GROUP_WORKFLOW = "STATIC-GROUP-WORKFLOW"
+    # Legacy task-type names remain accepted while persisted/API callers migrate
+    # to the explicit static workflow names.
     YAML = "yaml"
     WORKFLOW = "workflow"
     DYNAMIC = "dynamic"

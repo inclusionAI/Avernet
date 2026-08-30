@@ -151,7 +151,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 def _task_info(task_id: str = "t1") -> TaskInfo:
@@ -1547,7 +1547,7 @@ from agentclaw.community.adapters.http.task.auth import (
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )

@@ -28,9 +28,10 @@ from agentclaw.community.core.bot_inventory.types import (
 from agentclaw.community.core.errors import NotFound
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.core.bot_inventory.local_bot_workflow_service_protocol import LocalBotWorkflowServiceProtocol
 
 
-class LocalBotWorkflowService:
+class LocalBotWorkflowService(LocalBotWorkflowServiceProtocol):
     """Application service for personal local Bot public workflows."""
 
     def __init__(

@@ -6,12 +6,17 @@ and POSTs it to the running container, which re-pulls/applies it.
 
 Outbound HTTP uses an injected ``Annotated[HttpClient, QUALIFIER_GENERAL]``
 instance (full-absolute-URL client). ``info.http_url`` is resolved INSIDE the
-service at ``sync_*`` execution time via :meth:`BaasService.get_http_info`
-(``bind_id`` from :meth:`BaasService.get_bind_id`) — the dispatcher and DI
-service factory never call ``get_http_info`` and never pre-bind
-``info.http_url``, preserving the existing error dicts. The service imports no
-transport module directly; HTTP failure classification goes through the
-transport-neutral exception aliases re-exported from ``plugin_api.http_client``.
+service at ``sync_*`` execution time via :meth:`BaasService.get_http_info` —
+the dispatcher and DI service factory never call ``get_http_info`` and never
+pre-bind ``info.http_url``, preserving the existing error dicts. The service
+imports no transport module directly; HTTP failure classification goes through
+the transport-neutral exception aliases re-exported from
+``plugin_api.http_client``.
+
+The ``bind_id`` that call needs is **not** re-derived here: it arrives as
+``binding_id``, threaded in from the ``DeviceContext`` the factory was handed.
+See :meth:`_deliver` for why that is the same value the old
+:meth:`BaasService.get_bind_id` round trip returned.
 
 Identity fields (read this before wiring a new call site)
 --------------------------------------------------------
@@ -24,8 +29,9 @@ they differ for staff, project and team bots):
   (e.g. ``staff_{user_id}``). Scopes what the composer collects, so it must
   match what :class:`ExternalComposeProducer` uses for the same bot, or the
   runtime push and the publish snapshot would compose different content.
-* ``owner_id`` → :meth:`BaasService.get_bind_id` — the bot's
-  ``ac_bots.owner_id``, which is what the binding lookup filters on.
+* ``owner_id`` — the bot's ``ac_bots.owner_id``, the identity the binding was
+  resolved under and the fallback ``entity_id`` takes when omitted. It no
+  longer keys a binding lookup of its own (``binding_id`` comes in resolved).
 
 ``entity_id`` defaults to ``owner_id`` when omitted, so a call site that
 predates the split keeps its current behavior.
@@ -34,7 +40,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from agentclaw.community.core.config_compose.models import ComposeRequest
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
@@ -90,6 +96,7 @@ class TeclawDeviceSyncService(DeviceSync):
         conn_info: dict[str, Any] | None,
         bot_id: str,
         bot_name: str,
+        binding_id: int,
         user_id: str,
         owner_id: str | None,
         engine_type: str,
@@ -103,8 +110,16 @@ class TeclawDeviceSyncService(DeviceSync):
         self._conn_info = conn_info or {}
         self._bot_id = bot_id
         self._bot_name = bot_name
+        # ``DeviceContext.binding_id`` — the binding the caller's context was
+        # resolved against, threaded straight through to ``get_http_info``
+        # instead of being looked up again per delivery. Required, like the
+        # field it comes from: a bot with no binding raises
+        # ``DeviceNotBoundError`` in the resolver and never reaches this
+        # constructor. See ``_deliver``.
+        self._binding_id = binding_id
         self._user_id = user_id
-        # ``ac_bots.owner_id`` — the binding lookup's filter (get_bind_id).
+        # ``ac_bots.owner_id`` — the identity the binding was resolved under;
+        # also ``entity_id``'s fallback below.
         self._owner_id = owner_id or user_id
         # ``ac_bots.entity_id`` — the composer's collection scope. Distinct from
         # owner_id for staff/project/team bots; falls back to owner_id so a call
@@ -113,7 +128,7 @@ class TeclawDeviceSyncService(DeviceSync):
         self._engine_type = engine_type
         self._composer_provider = composer_provider
         # Resolves the container URL + proxypass token per delivery via
-        # get_http_info (and bind_id via get_bind_id).
+        # get_http_info, keyed by the already-resolved ``binding_id``.
         self._baas_service = baas_service
         self._entity_type = entity_type
         # Injected ``Annotated[HttpClient, QUALIFIER_GENERAL]`` (full-absolute-
@@ -125,9 +140,20 @@ class TeclawDeviceSyncService(DeviceSync):
         # for personal bots / non-draft rows inside ``record_draft_artifact``.
         self._draft_recorder = draft_recorder
 
-    def sync_symlinks(self, symlinks: list[dict[str, str]]) -> dict[str, Any]:
+    def sync_symlinks(
+        self,
+        symlinks: list[dict[str, str]],
+        *,
+        effective_mcps: Optional[list[dict[str, Any]]] = None,
+        desired_skills: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
         # symlinks ignored: teclaw re-pulls the whole composed artifact.
-        return self._compose_and_deliver(caller="sync_symlinks")
+        # ``effective_mcps`` is not ignored — see ``_compose_and_deliver``.
+        return self._compose_and_deliver(
+            caller="sync_symlinks",
+            effective_mcps=effective_mcps,
+            desired_skills=desired_skills,
+        )
 
     def sync_bot_config(
         self,
@@ -168,7 +194,25 @@ class TeclawDeviceSyncService(DeviceSync):
         # arca/baas).
         return True
 
-    def _compose_and_deliver(self, *, caller: str) -> dict[str, Any]:
+    def _compose_and_deliver(
+        self,
+        *,
+        caller: str,
+        effective_mcps: Optional[list[dict[str, Any]]] = None,
+        desired_skills: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        """Compose this bot's whole artifact and POST it to its container.
+
+        ``effective_mcps`` is the bot's effective MCP set when the caller
+        already resolved it (capability projection does, before it decides
+        anything). It rides on the request rather than being re-read: the
+        composer's own read is the same ``collect_bot_active_mcps`` query
+        against the same database, so the only thing a second one adds is its
+        latency. The identifiers below scope the compose to this service's
+        bot, and the entries were resolved for that same bot by the projection
+        that called it, so the two cannot describe different bots. When it is
+        ``None`` the collector reads the set itself, exactly as before.
+        """
         try:
             artifact = self._composer_provider().compose(
                 ComposeRequest(
@@ -177,6 +221,12 @@ class TeclawDeviceSyncService(DeviceSync):
                     user_id=self._user_id,
                     engine_type=self._engine_type,
                     entity_type=self._entity_type,
+                    effective_mcps=(
+                        None if effective_mcps is None else tuple(effective_mcps)
+                    ),
+                    desired_skills=(
+                        None if desired_skills is None else tuple(desired_skills)
+                    ),
                 )
             )
             # Enrich the composer's (empty) engine_ext with the backend identity/stage
@@ -246,27 +296,38 @@ class TeclawDeviceSyncService(DeviceSync):
         """POST the composed full artifact to the running teclaw container.
 
         Resolves the container URL + proxypass token per-request via
-        :meth:`BaasService.get_http_info` (``bind_id`` from
-        :meth:`BaasService.get_bind_id`), derives the teclaw bot id from the
+        :meth:`BaasService.get_http_info`, derives the teclaw bot id from the
         resolved ``target``, and POSTs the ``/api/v1/bot/apply`` contract with
         the proxy token in the ``x-proxypass-token`` header (the auth the
         agentclawproxy ``/proxypass`` gateway expects — same gateway/header
         ARCA uses). The full ``info.http_url`` is posted through the injected
         ``HttpClient`` (resolved INSIDE the service at ``sync_*`` time).
+
+        ``bind_id`` is ``self._binding_id`` — the id the ``DeviceContext``
+        already carried — not a fresh :meth:`BaasService.get_bind_id` round
+        trip. The two are the same value on this path, and the substitution is
+        safe because ``get_bind_id`` only performs publish-stage selection when
+        it is *given* a ``publish_status``:
+
+        * This call site never passed one, so ``get_bind_id`` always took its
+          ``publish_status is None`` branch — ``get_by_id_and_owner`` then the
+          row's ``binding_id`` column. ``select_stage_bind_id`` was unreachable
+          from here (the stage-aware callers pass ``PublishStatus.SUCCESS``
+          explicitly). Its ``bot_type`` argument is not read at all.
+        * Every ``DeviceSync`` ctx in the tree is built by
+          ``DeviceContextResolver.resolve_for_bot``, whose binding comes from
+          ``get_active_by_bot_and_owner`` — an ``ac_bots``⋈``binding`` JOIN on
+          ``ac_bots.binding_id == binding.id``. So ``ctx.binding_id`` *is* that
+          same column of that same row, draft/published split included.
+
+        Threading it also makes the delivery internally consistent: the
+        container is now addressed by the binding the rest of this service's
+        state (conn_info, tenant, port) was built from, rather than by a second
+        lookup that could, in principle, answer for a different row.
         """
         conn = self._conn_info
-        bind_id = self._baas_service.get_bind_id(
-            bot_id=self._bot_id,
-            owner_id=self._owner_id,
-            bot_type=conn.get("bot_type", ""),
-        )
-        if not bind_id:
-            raise ValueError(
-                f"TeclawDeviceSyncService: no bind_id for bot={self._bot_id}"
-            )
-
         info = self._baas_service.get_http_info(
-            bind_id=bind_id,
+            bind_id=self._binding_id,
             port=conn.get("engine_port", 20003),
             path=TECLAW_BOT_APPLY_PATH,
             tenant=conn.get("tenant"),

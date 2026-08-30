@@ -21,7 +21,9 @@ secrets inlined) is the composer's job, not this collector's.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
+from typing import TYPE_CHECKING, Any, Sequence
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
@@ -43,6 +45,11 @@ from agentclaw.community.core.mcp.services.config_service import MCPConfigServic
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionIdentity,
+    CanonicalCenterVersionRef,
+    CanonicalCenterVersionStore,
+)
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bolt_base_dir,
@@ -57,6 +64,35 @@ if TYPE_CHECKING:
     from agentclaw.community.core.services.identity import IdentityService
 
 logger = get_logger()
+
+# Ceiling on simultaneous MCP Center detail lookups. The point of the fan-out is
+# to stop paying ``n`` round trips in sequence, not to hand MCP Center ``n``
+# simultaneous requests: a bot may hold dozens of MCPs, and several bots can
+# compose at once. Eight covers the observed shape (~13 servers, ~90 ms each) in
+# two waves while leaving Center's connection pool room to breathe.
+_MCP_DETAIL_WORKERS = 8
+
+# ONE pool for the process, deliberately not one per compose. A per-call executor
+# would cap each compose at ``_MCP_DETAIL_WORKERS`` and cap nothing across them:
+# ``project_skills`` dispatches every projection through ``asyncio.to_thread``, so
+# concurrent bot projections would multiply into ``8 x in-flight composes`` threads
+# and that many simultaneous Center lookups — the ceiling would describe one
+# compose while the service as a whole had none. Sharing the pool makes the number
+# mean what it says process-wide, and puts it *below* the sequential behaviour it
+# replaced, which already allowed one concurrent Center call per in-flight compose
+# with no ceiling at all.
+#
+# No deadlock risk from sharing: tasks only call ``get_mcp_detail`` and never
+# re-enter this pool, and ``mcps()`` itself runs on the default executor's threads,
+# not on these.
+#
+# Worker threads are spawned lazily on first submit, so importing this module costs
+# nothing. This deployment serves from a single ``uvicorn.run(app)`` process; a
+# pre-fork server would need to build the pool per worker instead, since threads do
+# not survive a fork.
+_MCP_DETAIL_POOL = ThreadPoolExecutor(
+    max_workers=_MCP_DETAIL_WORKERS, thread_name_prefix="mcp-detail"
+)
 
 
 class McpDetailUnavailableError(LookupError):
@@ -104,6 +140,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         path_factory: WorkspacePathFactory,
         identity_service: "IdentityService",
         overrides_reader: ChannelEngineOverridesReader,
+        center_store: CanonicalCenterVersionStore,
         local_mcp_registry: LocalMCPRegistry | None = None,
     ) -> None:
         self._skill_set_service_factory = skill_set_service_factory
@@ -113,6 +150,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         self._path_factory = path_factory
         self._identity_service = identity_service
         self._overrides_reader = overrides_reader
+        self._center_store = center_store
         # Defaulting to the bare registry (its own default config path) matches
         # what ``passport_scope`` already does for every caller, so "is this
         # server local?" has one answer across the codebase. A divergent source
@@ -145,9 +183,14 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             [CollectedSkill(name="weather", scope="shared", store="skill-repo",
                             path="team/weather")]
         """
-        svc = self._skill_set_service(req)
+        active = req.desired_skills
+        if active is None:
+            svc = self._skill_set_service(req)
+            active = tuple(
+                svc.get_active_skills(user_id=req.user_id, bolt_id=req.bot_id)
+            )
         collected: list[CollectedSkill] = []
-        for r in svc.get_active_skills(user_id=req.user_id, bolt_id=req.bot_id):
+        for r in active:
             name = r.get("name", "")
             git_path = r.get("git_path", "")
             if git_path.startswith("git://"):
@@ -156,6 +199,39 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     name=name, scope="shared", store="skill-repo",
                     path=git_path[len("git://"):],
                 ))
+            elif git_path.startswith("center://"):
+                try:
+                    identity = CanonicalCenterVersionIdentity(
+                        skill_uuid=r.get("skill_uuid"),
+                        sc_version_number=r.get("sc_version_number"),
+                    )
+                except Exception as exc:
+                    raise ValueError(
+                        "Center Skill requires exact canonical identity"
+                    ) from exc
+                try:
+                    ready = self._center_store.verify_version(
+                        CanonicalCenterVersionRef(identity)
+                    )
+                except Exception as exc:
+                    raise ValueError(
+                        "Center Skill exact Store Version is unavailable"
+                    ) from exc
+                if not ready:
+                    raise ValueError(
+                        "Center Skill exact Store Version is unavailable"
+                    )
+                collected.append(
+                    CollectedSkill(
+                        name=name,
+                        scope="shared",
+                        store="skill-center",
+                        path=(
+                            f"{identity.skill_uuid}/"
+                            f"{identity.sc_version_number}"
+                        ),
+                    )
+                )
             # local:// (user upload) intentionally skipped — engine-owned; see docstring.
         return collected
 
@@ -189,15 +265,26 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         The plaintext stays here only as an intermediate — inlining it into the
         artifact entry (endpoint query / headers) is the ``McporterComposer``'s
         job downstream, not this collector's.
+
+        Step 1 is skipped when the request already carries the effective set
+        (``ComposeRequest.effective_mcps``): a whole-artifact delivery resolves
+        it during plan resolution and this would otherwise be the *second*
+        ``collect_bot_active_mcps`` of one request — the same query, against the
+        same database, for the same contractual answer. Step 2 runs either way;
+        the threaded value is the bare association set, exactly what step 1
+        returns, so nothing downstream can tell the two apart.
         """
         svc = self._skill_set_service(req)
-        raw = svc.collect_bot_active_mcps(
-            entity_id=req.entity_id,
-            bot_id=req.bot_id,
-            user_id=req.user_id,
-            entity_type=req.entity_type,
-            engine_type=req.engine_type,
-        )
+        raw = req.effective_mcps
+        if raw is None:
+            raw = svc.collect_bot_active_mcps(
+                entity_id=req.entity_id,
+                bot_id=req.bot_id,
+                user_id=req.user_id,
+                entity_type=req.entity_type,
+                engine_type=req.engine_type,
+                strict_policy_context=True,
+            )
         # ``collect_bot_active_mcps`` returns only the skill-set association fields
         # (server_code/name/…) — it deliberately does NOT call MCP Center. The
         # composer needs the full detail (``endpoints``/``runMode``/
@@ -206,13 +293,14 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         # ``get_mcp_detail`` dict straight through); the whole-artifact compose
         # path re-collects from DB, so it must fetch the detail itself or the
         # composer would see ``endpoints=[]`` and raise "no usable endpoint".
+        # The lookups are issued together rather than one at a time — see
+        # :meth:`_enrich_mcp_details`; the list it returns still follows ``raw``.
         # Endpoint-selection policy is per-engine: teclaw selects deterministically
         # by network priority (OFFICE > INTERNET > INTRANET), other engines keep
         # the legacy filter + transport-preference selection (network_priority None).
         network_priority = mcp_network_priority_for(req.engine_type)
         inputs: list[McpComposeInput] = []
-        for md in raw:
-            md, detail_failure = self._enrich_mcp_detail(svc, md)
+        for md, detail_failure in self._enrich_mcp_details(svc, raw):
             server_code = md.get("server_code") or md.get("serverCode") or ""
             stdio = self._stdio_launch_for(server_code, md, req.engine_type)
             if stdio is None and detail_failure is not None:
@@ -335,6 +423,66 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             elif str(declared).strip().lower() == engine_type.strip().lower():
                 return cfg
         return default
+
+    def _enrich_mcp_details(
+        self, svc: Any, raw: Sequence[dict[str, Any]]
+    ) -> list[tuple[dict[str, Any], Exception | None]]:
+        """:meth:`_enrich_mcp_detail` over every entry — concurrently, **in order**.
+
+        ``get_mcp_detail`` is one blocking round trip per server with no batch
+        form and no cache, so enriching in sequence cost this compose ``n`` round
+        trips for a bot holding ``n`` MCPs — ~90 ms each, over *every* MCP the bot
+        holds rather than only the ones a mutation touched. Issuing them together
+        collapses that to roughly one round trip of wall clock.
+
+        Two properties the sequential loop had for free, and which the caller
+        reads as a contract:
+
+        * **Order.** Futures are read back in *submit* order, never completion
+          order, so the result still follows ``raw`` — which is the order the
+          ``McpComposeInput`` list carries into ``McporterComposer``.
+        * **Per-entry failure.** ``_enrich_mcp_detail`` returns its cause instead
+          of raising, so an unresolvable lookup stays attached to its own entry
+          and the caller keeps deciding per entry whether it is fatal (for a
+          local server it is not). Fanning out must not collapse ``n`` separate
+          causes into whichever one happened to surface first.
+
+        Threads rather than async: ``get_mcp_detail`` is a synchronous plugin
+        call and ``mcps`` is a sync method already reached from ``project_skills``'
+        worker thread, so a pool drops into the existing shape where converting
+        the call chain to async would not.
+
+        The pool is the process-wide :data:`_MCP_DETAIL_POOL`, not one built per
+        call, so the ceiling holds across concurrent composes rather than only
+        within one — see the constant for why that distinction matters.
+
+        Each task runs under its own *copy* of the calling context. Pool workers
+        do not inherit context vars — the reason ``bind_current_avernet_tenant``
+        exists — and a Center lookup reads the request's tenant and mints its log
+        lines under the request's trace id; copying the whole context carries both
+        without this having to enumerate them. The copy is taken here, on the
+        calling thread, one per task: a single ``Context`` cannot be entered by
+        two threads at once.
+
+        *Every* lookup goes through the pool, a lone one included. Running a
+        single entry inline would cost less — no hand-off, no future — but a
+        ceiling with a side door is not a ceiling: concurrent one-MCP composes
+        would each add a Center call on top of the pool's
+        ``_MCP_DETAIL_WORKERS``, so the process-wide total would be
+        ``_MCP_DETAIL_WORKERS + <one-MCP composes in flight>``. The hand-off is
+        microseconds against an ~90 ms call, and it buys a bound that actually
+        holds. Only the empty case short-circuits, having nothing to submit.
+        """
+        entries = list(raw)
+        if not entries:
+            return []
+        futures = [
+            _MCP_DETAIL_POOL.submit(
+                copy_context().run, self._enrich_mcp_detail, svc, md
+            )
+            for md in entries
+        ]
+        return [f.result() for f in futures]
 
     def _enrich_mcp_detail(
         self, svc: Any, md: dict[str, Any]
@@ -501,7 +649,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         return bot_data_relpath(host_path)
 
     def _skill_set_service(self, req: ComposeRequest):
-        """Build a per-bot ``SkillSetService`` bound to this compose request.
+        """The per-bot ``SkillSetService`` for this compose request — built once.
 
         Both :meth:`skills` and :meth:`mcps` go through the same per-bot service,
         so this centralizes the factory call (unpacking the request's identifiers).
@@ -509,11 +657,25 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         engine_type="openclaw", entity_type="staff")`` it returns the
         ``SkillSetService`` scoped to that staff/bot/engine, from which
         ``get_symlink_mappings`` / ``collect_bot_active_mcps`` read.
+
+        Building it is not cheap — the factory re-resolves the bot's workspace
+        paths, re-reads the bot row, and mints a ``SkillService`` whose
+        construction mkdirs against the shared ``/aidesktop`` mount — and the
+        request's identifiers fully determine the result, so the two call sites
+        of one compose share a single instance.
+
+        The memo lives on the *request*, not on ``self``: this collector is a
+        singleton and compose runs on a thread pool, so a memo held here would
+        eventually hand bot A's service to bot B's compose. See
+        ``ComposeRequest.memoized``.
         """
-        return self._skill_set_service_factory.create(
-            user_id=req.user_id,
-            entity_id=req.entity_id,
-            bot_id=req.bot_id,
-            engine_type=req.engine_type,
-            entity_type=req.entity_type,
+        return req.memoized(
+            "skill_set_service",
+            lambda: self._skill_set_service_factory.create(
+                user_id=req.user_id,
+                entity_id=req.entity_id,
+                bot_id=req.bot_id,
+                engine_type=req.engine_type,
+                entity_type=req.entity_type,
+            ),
         )

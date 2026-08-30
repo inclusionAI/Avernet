@@ -37,6 +37,24 @@ _ACTIVATE = {
 }
 
 
+def test_hermes_service_build_golden_matches_runtime_layout() -> None:
+    contract_path = (
+        Path(__file__).resolve().parents[2]
+        / "core/skills/contracts/hermes_service_build_layout_v1.json"
+    )
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    layout = resolve_filesystem_skill_layout(
+        LayoutIdentity("hermes", LAYOUT_CONTRACT_VERSION),
+        RuntimeLayoutContext(home=Path("/home/admin")),
+    )
+
+    assert contract["contract_version"] == "hermes-service-build-layout-v1"
+    assert contract["engine"] == layout.engine_type
+    assert contract["active_skills"] == str(layout.active_root)
+    assert contract["pool_repo"] == str(layout.pool_repo)
+    assert contract["pool_center"] == str(layout.pool_center)
+
+
 def _active_desktop_layout(home: Path, engine: str):
     layout = resolve_filesystem_skill_layout(
         LayoutIdentity(engine, LAYOUT_CONTRACT_VERSION),
@@ -102,6 +120,10 @@ def test_stable_repo_bridge_check_is_conditional_and_verified(
         repo_delivery=RepoDelivery.DOWNLOAD,
     )
     assert active.status is RuntimeLayoutInspectionStatus.READY
+    resolved = active.evidence["resolved_layout"]
+    assert resolved["engine"] == engine
+    assert resolved["layout_contract_version"] == LAYOUT_CONTRACT_VERSION
+    assert resolved["pool_center"] == str(layout.pool_center)
     checks = active.evidence["checks"]
     if engine in {"aicoding", "hermes"}:
         assert checks["stable_repo_bridge_valid"] is True

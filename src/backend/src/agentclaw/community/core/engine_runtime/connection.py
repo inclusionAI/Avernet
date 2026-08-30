@@ -54,6 +54,7 @@ from agentclaw.community.core.repository.protocols.publishing import (
 from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.engine_runtime.engine_connection_service_protocol import EngineConnectionServiceProtocol
 
 logger = get_logger()
 
@@ -151,7 +152,7 @@ def _quote_or_reject(value: str, *, safe: str, what: str) -> str:
         ) from exc
 
 
-class EngineConnectionService:
+class EngineConnectionService(EngineConnectionServiceProtocol):
     """Compose the sockets a caller may open against their bot."""
 
     @inject

@@ -8,12 +8,12 @@
 
 ## 0. 模块定位
 
-task_discovery 是 `core/task/` 目录下的独立子模块，与执行框架（`task_center` / `task_graph` / `task_plan` / `task_dispatch` / `task_runner` / `task_harness`）并列但解耦。
+task_discovery 是 `core/task/` 目录下的独立子模块，与执行框架（`task_center` / `task_context` / `task_plan` / `task_dispatch` / `task_runner` / `task_harness`）并列但解耦。
 
 ```
 core/task/
 ├── task_center/          # 执行框架：ExecutionEngine 编排核
-├── task_graph/           # 执行框架：TaskGraphService 图谱 SSOT
+├── task_context/         # 执行框架：TaskGraphService 图谱 SSOT
 ├── task_plan/            # 执行框架：TaskPlanner 规划
 ├── task_dispatch/        # 执行框架：TaskDispatcher 搜推分发
 ├── task_runner/          # 执行框架：TaskRunner 三模态执行

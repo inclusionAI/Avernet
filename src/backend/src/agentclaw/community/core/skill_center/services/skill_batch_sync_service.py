@@ -21,6 +21,7 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillRepo
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.core.skill_center.skill_batch_sync_service_protocol import SkillBatchSyncServiceProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class BatchSyncReport:
     env: str = ""  # 标记来源 env，方便日志追溯
 
 
-class SkillBatchSyncService:
+class SkillBatchSyncService(SkillBatchSyncServiceProtocol):
     """扫描 skills/ 目录，批量打包上传并发布到 SkillCenter。
 
     两阶段架构：

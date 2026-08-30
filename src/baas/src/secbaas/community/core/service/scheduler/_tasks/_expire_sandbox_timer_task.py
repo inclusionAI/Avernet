@@ -25,20 +25,38 @@ bounded concurrency 停 bot。依赖通过构造方法注入，由 DI 容器管�
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import uuid4
 
 from secbaas.community.api.bot_manage import BotManageService
+from secbaas.community.api.config_manage import SystemConfigManageService
 from secbaas.community.core.repository.bot import BotRepository
 from secbaas.community.core.repository.bot_device_rel import BotDeviceRelRepository
 from secbaas.community.core.repository.device import DeviceRepository
+from secbaas.community.core.service.config import SystemConfigKey
 from secbaas.community.core.service.distributed_lock import DistributedLockService
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
 
 log = get_logger("core-scheduler")
+
+#: Delimiters for the whitelist conf_value: comma or newline (incl. CR).
+_WHITELIST_DELIMITERS = re.compile(r"[,\n\r]+")
+
+
+def parse_whitelist_bot_uuids(conf_value: str | None) -> set[str]:
+    """Parse ``conf_value`` into a set of trimmed, non-empty bot_uuids.
+
+    Delimiters are commas or newlines (mixable); each token is stripped; empty
+    tokens are ignored. ``None`` / whitespace / no valid tokens -> empty set.
+    """
+    if not conf_value:
+        return set()
+    tokens = _WHITELIST_DELIMITERS.split(conf_value)
+    return {token.strip() for token in tokens if token.strip()}
 
 
 @dataclass
@@ -118,6 +136,7 @@ class ExpireSandboxTimerTask:
         bot_manage_service: BotManageService,
         bot_repo: BotRepository,
         bot_device_rel_repo: BotDeviceRelRepository,
+        system_config_service: SystemConfigManageService,
     ) -> None:
         self._config = config
         self._lock_service = lock_service
@@ -125,6 +144,7 @@ class ExpireSandboxTimerTask:
         self._bot_manage_service = bot_manage_service
         self._bot_repo = bot_repo
         self._bot_device_rel_repo = bot_device_rel_repo
+        self._system_config_service = system_config_service
         self._running = False
 
     @property
@@ -198,6 +218,8 @@ class ExpireSandboxTimerTask:
         effective_batch = self._config.batch_size
         sem = asyncio.Semaphore(self._config.max_page_concurrency)
 
+        whitelist = self._load_whitelist()
+
         last_id: int = 0
         page_count: int = 0
         scanned: int = 0
@@ -267,6 +289,13 @@ class ExpireSandboxTimerTask:
                             )
                             _mark_skip("no_bot")
                             return
+                        if bot_uuid in whitelist:
+                            log.info(
+                                "[ExpireSandbox] bot %s whitelisted, skip expire",
+                                bot_uuid,
+                            )
+                            _mark_skip("whitelisted")
+                            return
                         await self._bot_manage_service.stop_bot(
                             tenant=tenant,
                             bot_uuid=bot_uuid,
@@ -313,3 +342,18 @@ class ExpireSandboxTimerTask:
         if bot is None:
             return None
         return bot.bot_uuid
+
+    def _load_whitelist(self) -> set[str]:
+        """Read this run's whitelist from system_config (env-scoped); treat failures as empty (fail open)."""
+        try:
+            resp = self._system_config_service.get_config(
+                SystemConfigKey.EXPIRE_SANDBOX_WHITELIST_BOT_UUIDS
+            )
+        except Exception as e:
+            log.warning(
+                "[ExpireSandbox] read whitelist config failed, treating as empty: %s", e
+            )
+            return set()
+        if resp is None:
+            return set()
+        return parse_whitelist_bot_uuids(resp.conf_value)

@@ -1,33 +1,17 @@
-"""Service API Protocol for cron relay (proxy + listing)."""
+"""Service API Protocol for cron relay (proxy + listing).
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/cron/cron_relay_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.cron.cron_relay_service_protocol import (
+    CronRelayServiceProtocol,
+)
 
-
-@runtime_checkable
-class CronRelayServiceProtocol(Protocol):
-    """Service API for cron listing and request forwarding."""
-
-    async def list_all_crons(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def list_running_crons(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def get_cron_status(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def get_cron_detail(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def create_cron(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def update_cron(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def delete_cron(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def run_cron(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def get_cron_runs(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def find_auto_initiate_and_run(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def run_single_auto_initiate(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def forward_request(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "CronRelayServiceProtocol",
+]

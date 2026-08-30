@@ -24,6 +24,7 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetService,
     SynlinkMappingInfo,
 )
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 
 pytestmark = pytest.mark.unit
 
@@ -105,6 +106,7 @@ def test_an_excluded_default_member_is_no_longer_symlinked(tmp_path):
         repository=CapabilityDesiredStateRepository(db),
         bot_repo=_Bots(),
         pool_skills=skills,
+        version_resolver=PassthroughSkillVersionResolver(),
     )
     service = SkillSetService(
         skill_repo=skills,
@@ -154,3 +156,46 @@ def test_synlink_mapping_info_optional_fields_default_none():
     # to_dict should still emit keys (so engine schema is stable)
     assert "skill_uuid" in d
     assert "version" in d
+
+
+@pytest.mark.asyncio
+async def test_whole_artifact_center_projection_skips_legacy_path_mapping(tmp_path):
+    device = MagicMock()
+    device.sync_symlinks.return_value = {"success": True}
+    resolver = MagicMock()
+    resolver.resolve_for_bot.return_value = object()
+    dispatcher = MagicMock()
+    dispatcher.dispatch.return_value = device
+    service = SkillSetService(
+        skill_repo=MagicMock(),
+        skill_set_repo=MagicMock(),
+        mcp_center=MagicMock(),
+        mcp_config_service=MagicMock(),
+        skill_service=MagicMock(),
+        bot_repo=MagicMock(),
+        skills_dir=tmp_path / "skills",
+        repo_dir=tmp_path / "skills-repo",
+        local_dir=tmp_path / "skills-local",
+        user_id="owner",
+        bot_id="bot",
+        engine_type="teclaw",
+        runtime_engine_type="teclaw",
+        resolver=resolver,
+        device_sync_dispatcher=dispatcher,
+        path_factory=MagicMock(),
+    )
+    desired = [
+        {
+            "id": "10",
+            "name": "center",
+            "git_path": "center://public-center",
+            "skill_uuid": "00000000-0000-4000-8000-000000000010",
+            "sc_version_number": "1.0.0",
+        }
+    ]
+
+    assert await service.project_whole_artifact(desired_skills=desired) is True
+
+    device.sync_symlinks.assert_called_once_with(
+        [], desired_skills=desired, effective_mcps=None
+    )

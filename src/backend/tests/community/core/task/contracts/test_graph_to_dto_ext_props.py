@@ -12,9 +12,9 @@ from agentclaw.community.core.task.domain.models import (
     Status,
     TaskNodePatch,
 )
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
-from tests.community.core.task.task_graph.test_task_graph_service import (
+from tests.community.core.task.task_context.test_task_graph_service import (
     _node,
     _task_info,
 )

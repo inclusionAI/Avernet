@@ -2,6 +2,7 @@ pub mod bot;
 pub mod bot_actor_config;
 pub mod bot_control_plane;
 pub mod channel;
+pub mod chat_run;
 pub mod collaboration;
 pub mod collaboration_template;
 pub mod edge_grant;
@@ -20,6 +21,10 @@ pub mod user_identity;
 
 pub use bot::BotRepoPort;
 pub use bot_actor_config::BotActorConfigRepoPort;
+pub use chat_run::{
+    CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
+    ChatRunState, MAX_CONTENT_BYTES,
+};
 pub use bot_control_plane::*;
 pub use channel::{
     ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
@@ -27,8 +32,9 @@ pub use channel::{
 };
 pub use collaboration::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
-    GroupRuntimeBindingRepoPort, MarkHumanNodeRunningCommand, StateMachineDefinitionRepoPort,
-    StateMachineEventfulTransition, StateMachineRunRepoPort,
+    CreateStateMachineRerun, CreateStateMachineRerunOutcome, GroupRuntimeBindingRepoPort,
+    MarkHumanNodeRunningCommand, StateMachineDefinitionRepoPort, StateMachineEventfulTransition,
+    StateMachineRunRepoPort,
 };
 pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};
 pub use edge_grant::EdgeGrantRepoPort;
@@ -53,8 +59,9 @@ pub use relation::RelationRepoPort;
 pub use permission_profile::PermissionProfileRepoPort;
 pub use permission_request::PermissionRequestRepoPort;
 pub use session::{
-    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent,
-    NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,
+    AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
+    CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
 };
 pub use session_file::{
     NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,

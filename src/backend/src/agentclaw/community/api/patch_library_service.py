@@ -1,21 +1,17 @@
-"""Service API Protocol for the harness patch template library."""
+"""Service API Protocol for the harness patch template library.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/harness/patch_library_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.harness.patch_library_service_protocol import (
+    PatchLibraryProtocol,
+)
 
-
-@runtime_checkable
-class PatchLibraryProtocol(Protocol):
-    """Service API for managing patch templates."""
-
-    def list_applicable(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def list_templates(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_template_by_id(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def create_template(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def update_template(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def delete_template(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "PatchLibraryProtocol",
+]

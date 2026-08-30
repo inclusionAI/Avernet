@@ -1,21 +1,17 @@
-"""Service API Protocol for access-policy decisions and quota."""
+"""Service API Protocol for access-policy decisions and quota.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/access/policy_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from agentclaw.community.core.access.policy_service_protocol import (
+    PolicyServiceProtocol,
+)
 
-
-@runtime_checkable
-class PolicyServiceProtocol(Protocol):
-    """Service API for entity allow/disallow + quota policy."""
-
-    def check(self, *, entity_id: str, entity_type: str) -> bool: ...
-
-    def allow(self, *, entity_id: str, entity_type: str) -> None: ...
-
-    def disallow(self, *, entity_id: str, entity_type: str) -> None: ...
-
-    def get_bots_ceiling(self, *, entity_id: str, default: int = 5) -> int: ...
-
-    def set_bots_ceiling(self, *, entity_id: str, ceiling: int) -> None: ...
-
-    def get_quota(self) -> dict: ...
+__all__ = [
+    "PolicyServiceProtocol",
+]

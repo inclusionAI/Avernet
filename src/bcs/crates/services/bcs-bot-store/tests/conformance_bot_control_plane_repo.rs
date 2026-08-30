@@ -15,7 +15,7 @@ use bcs_db_api::{
 };
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities,
+    ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities, BotSearchCandidateQuery, BotSearchFriendshipFilter,
     BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort, BotTaskModesQuery,
     FriendCheckInStrategy, TaskModeMatch, UserVisibility,
@@ -1394,4 +1394,492 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
         .await
         .expect("list prod env");
     assert!(other_env.is_empty());
+}
+
+#[tokio::test]
+async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filters() {
+    let temp = tempfile::tempdir().expect("temp dir");
+    let repo = MemoryBotRepo::with_base_dir(temp.path().to_path_buf());
+    let env = bcs_config::resolve_env_str();
+    repo.register_with_owner_and_token(
+        "acting-memory-search".to_string(),
+        BotCapabilities {
+            name: Some("Acting Memory Search".to_string()),
+            visibility: "private".to_string(),
+            ..Default::default()
+        },
+        "staff-1",
+        "acting-token",
+    )
+    .await
+    .expect("register acting bot");
+    repo.register_with_owner_and_token(
+        "search-match-memory".to_string(),
+        BotCapabilities {
+            name: Some("Needle Match".to_string()),
+            summary: Some("memory needle summary".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+        "staff-2",
+        "search-match-token",
+    )
+    .await
+    .expect("register search match bot");
+    repo.register_with_owner_and_token(
+        "friend-memory".to_string(),
+        BotCapabilities {
+            name: Some("Friend Memory".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+        "staff-3",
+        "friend-token",
+    )
+    .await
+    .expect("register friend bot");
+    repo.register_with_owner_and_token(
+        "tc-memory:200".to_string(),
+        BotCapabilities {
+            name: Some("TC Memory".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+        "200",
+        "tc-token",
+    )
+    .await
+    .expect("register tc bot");
+    repo.register_with_owner_and_token(
+        "non-tc-memory:200".to_string(),
+        BotCapabilities {
+            name: Some("Non TC Memory".to_string()),
+            visibility: "public".to_string(),
+            ..Default::default()
+        },
+        "201",
+        "non-tc-token",
+    )
+    .await
+    .expect("register non tc bot");
+    repo.patch_control_plane(
+        "friend-memory",
+        &env,
+        BotControlPlanePatch {
+            user_visibility: Some(UserVisibility::Private),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch friend visibility")
+    .expect("friend bot exists");
+
+    let match_name = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-memory-search".to_string(),
+            env: env.clone(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::from(["friend-memory".to_string()]),
+            name: Some(" needle ".to_string()),
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: Some(BotSearchFriendshipFilter::All),
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("search by name fallback");
+    assert_eq!(match_name.1, 1);
+    assert_eq!(match_name.0[0].bot.bot_id, "search-match-memory");
+
+    let (empty_visibility, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-memory-search".to_string(),
+            env: env.clone(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: Some(vec![]),
+            user_visibility: None,
+            status: None,
+            friendship: None,
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("empty visibility filter");
+    assert!(empty_visibility.is_empty());
+    assert_eq!(total, 0);
+
+    let (empty_user_visibility, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-memory-search".to_string(),
+            env: env.clone(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: Some(vec![]),
+            status: None,
+            friendship: None,
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("empty user visibility filter");
+    assert!(empty_user_visibility.is_empty());
+    assert_eq!(total, 0);
+
+    let (friends_only, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-memory-search".to_string(),
+            env: env.clone(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: Some(BotSearchFriendshipFilter::Friends),
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("friends filter without friend ids");
+    assert!(friends_only.is_empty());
+    assert_eq!(total, 0);
+
+    let (friends, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-memory-search".to_string(),
+            env: env.clone(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::from(["friend-memory".to_string()]),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: Some(vec!["private".to_string()]),
+            status: None,
+            friendship: Some(BotSearchFriendshipFilter::Friends),
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("friends filter with user visibility");
+    assert_eq!(total, 1);
+    assert_eq!(friends[0].bot.bot_id, "friend-memory");
+    assert!(friends[0].is_friend);
+
+    let (non_friends, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-memory-search".to_string(),
+            env: env.clone(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::from(["friend-memory".to_string()]),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: Some(BotSearchFriendshipFilter::NonFriends),
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("non friends filter");
+    assert_eq!(total, 3);
+    assert!(non_friends.iter().all(|row| row.bot.bot_id != "friend-memory"));
+
+    let (tc_only, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-memory-search".to_string(),
+            env: env.clone(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: None,
+            tc_bot: Some(true),
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("tc filter");
+    assert_eq!(total, 1);
+    assert_eq!(tc_only[0].bot.bot_id, "tc-memory:200");
+
+    let (non_tc_only, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-memory-search".to_string(),
+            env: env,
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: None,
+            tc_bot: Some(false),
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("non tc filter");
+    assert_eq!(total, 3);
+    assert!(non_tc_only.iter().all(|row| row.bot.bot_id != "tc-memory:200"));
+}
+
+#[tokio::test]
+async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_filters() {
+    let (repo, db) = fixture().await;
+    seed_bot(
+        db.as_ref(),
+        "acting-persistent-search",
+        "Acting Persistent Search",
+        "bot",
+        "private",
+        "online",
+        Some("staff-1"),
+        "2026-01-01 00:00:00",
+    )
+    .await;
+    seed_bot(
+        db.as_ref(),
+        "search-match-persistent",
+        "Needle Match",
+        "bot",
+        "public",
+        "online",
+        Some("staff-2"),
+        "2026-01-02 00:00:00",
+    )
+    .await;
+    seed_bot(
+        db.as_ref(),
+        "friend-persistent",
+        "Friend Persistent",
+        "bot",
+        "public",
+        "online",
+        Some("staff-3"),
+        "2026-01-03 00:00:00",
+    )
+    .await;
+    seed_bot(
+        db.as_ref(),
+        "tc-persistent:300",
+        "TC Persistent",
+        "bot",
+        "public",
+        "online",
+        Some("300"),
+        "2026-01-04 00:00:00",
+    )
+    .await;
+    seed_bot(
+        db.as_ref(),
+        "non-tc-persistent:300",
+        "Non TC Persistent",
+        "bot",
+        "public",
+        "online",
+        Some("301"),
+        "2026-01-05 00:00:00",
+    )
+    .await;
+    repo.patch_control_plane(
+        "friend-persistent",
+        "dev",
+        BotControlPlanePatch {
+            user_visibility: Some(UserVisibility::Private),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch friend visibility")
+    .expect("friend bot exists");
+
+    let match_name = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-persistent-search".to_string(),
+            env: "dev".to_string(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::from(["friend-persistent".to_string()]),
+            name: Some(" needle ".to_string()),
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: Some(BotSearchFriendshipFilter::All),
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("search by name fallback");
+    assert_eq!(match_name.1, 1);
+    assert_eq!(match_name.0[0].bot.bot_id, "search-match-persistent");
+
+    let (empty_visibility, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-persistent-search".to_string(),
+            env: "dev".to_string(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: Some(vec![]),
+            user_visibility: None,
+            status: None,
+            friendship: None,
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("empty visibility filter");
+    assert!(empty_visibility.is_empty());
+    assert_eq!(total, 0);
+
+    let (empty_user_visibility, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-persistent-search".to_string(),
+            env: "dev".to_string(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: Some(vec![]),
+            status: None,
+            friendship: None,
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("empty user visibility filter");
+    assert!(empty_user_visibility.is_empty());
+    assert_eq!(total, 0);
+
+    let (friends_only, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-persistent-search".to_string(),
+            env: "dev".to_string(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: Some(BotSearchFriendshipFilter::Friends),
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("friends filter without friend ids");
+    assert!(friends_only.is_empty());
+    assert_eq!(total, 0);
+
+    let (friends, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-persistent-search".to_string(),
+            env: "dev".to_string(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::from(["friend-persistent".to_string()]),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: Some(vec!["private".to_string()]),
+            status: None,
+            friendship: Some(BotSearchFriendshipFilter::Friends),
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("friends filter with user visibility");
+    assert_eq!(total, 1);
+    assert_eq!(friends[0].bot.bot_id, "friend-persistent");
+    assert!(friends[0].is_friend);
+
+    let (non_friends, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-persistent-search".to_string(),
+            env: "dev".to_string(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::from(["friend-persistent".to_string()]),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: Some(BotSearchFriendshipFilter::NonFriends),
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("non friends filter");
+    assert_eq!(total, 3);
+    assert!(non_friends.iter().all(|row| row.bot.bot_id != "friend-persistent"));
+
+    let (tc_only, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-persistent-search".to_string(),
+            env: "dev".to_string(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: None,
+            tc_bot: Some(true),
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("tc filter");
+    assert_eq!(total, 1);
+    assert_eq!(tc_only[0].bot.bot_id, "tc-persistent:300");
+
+    let (non_tc_only, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-persistent-search".to_string(),
+            env: "dev".to_string(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: None,
+            tc_bot: Some(false),
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("non tc filter");
+    assert_eq!(total, 3);
+    assert!(non_tc_only.iter().all(|row| row.bot.bot_id != "tc-persistent:300"));
 }

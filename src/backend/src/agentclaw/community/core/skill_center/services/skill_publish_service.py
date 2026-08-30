@@ -24,6 +24,7 @@ from agentclaw.community.core.skill_center.services.skill_propagation_service im
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.core.skill_center.skill_publish_service_protocol import SkillPublishServiceProtocol
 
 logger = get_logger()
 
@@ -56,7 +57,7 @@ class InvalidTransitionError(Exception):
     """非法状态转移。"""
 
 
-class SkillPublishService:
+class SkillPublishService(SkillPublishServiceProtocol):
     """技能发布核心业务。"""
 
     @inject

@@ -16,6 +16,8 @@ class WorkOrderErrorCode(IntEnum):
     JOIN_NOT_ALLOWED = 409205
     APPLICANT_ALREADY_EDITOR = 409206
     BOT_EDITOR_REQUEST_NOT_ALLOWED = 409207
+    SKILL_EDITOR_REQUEST_NOT_ALLOWED = 409208
+    SKILL_APPLICANT_ALREADY_EDITOR = 409209
     CALLBACK_FAILED = 502201
 
 
@@ -31,4 +33,6 @@ class WorkOrderPublicErrorMessage(StrEnum):
     JOIN_NOT_ALLOWED = "The space does not accept join requests"
     APPLICANT_ALREADY_EDITOR = "Applicant already has Bot editor access"
     BOT_EDITOR_REQUEST_NOT_ALLOWED = "The Bot does not accept editor requests"
+    SKILL_EDITOR_REQUEST_NOT_ALLOWED = "The Skill does not accept editor requests"
+    SKILL_APPLICANT_ALREADY_EDITOR = "Applicant already has Skill editor access"
     CALLBACK_FAILED = "Upstream work-order callback failed"

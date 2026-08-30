@@ -17,7 +17,7 @@ from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 from injector import inject
 
-from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
+from agentclaw.community.core.skill_center.skill_query_service_protocol import SkillQueryServiceProtocol
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -248,6 +248,57 @@ class SkillQueryService(SkillQueryServiceProtocol):
         if isinstance(content, str):
             return content
         return SkillParser.decode_content_for_display(content)
+
+    async def get_readme_by_skill(self, *, skill_id: str, actor_id: str) -> str:
+        """Read a Local or public Repo Skill without a Bot on the wire.
+
+        Public Repo Skills are environment-shared and are resolved solely by
+        their database id. Local Skills still need their device workspace, but
+        their Bot is derived from the persisted Skill row and never trusted
+        from request input.
+        """
+        if not skill_id.isdecimal():
+            raise LocalSkillNotFoundError()
+        skill = self._skill_repo.get_by_id(skill_id)
+        if skill is None:
+            raise LocalSkillNotFoundError()
+
+        kind = self._kind_for(skill)
+        if kind is SkillAssetKind.REPO:
+            content = self._skill_service_factory.create().get_repository_skill_content(
+                skill_id
+            )
+            if content is None:
+                raise LocalSkillNotFoundError()
+            return content
+
+        if kind is not SkillAssetKind.LOCAL:
+            raise LocalSkillNotFoundError()
+
+        bot_id = str(skill.get("bolt_id") or "")
+        if not bot_id:
+            raise LocalSkillNotFoundError()
+        bot = self._bot_repo.get_unique_by_id(bot_id)
+        if bot is None:
+            raise LocalSkillNotFoundError()
+        owner_id = str(bot.get("owner_id") or "")
+        if not owner_id:
+            raise LocalSkillNotFoundError()
+        if actor_id != owner_id:
+            permission = self._collaborators.check_collaborator_permission(
+                bot_id, owner_id, actor_id, PermissionLevel.MEMBER
+            )
+            if not permission.get("has_permission"):
+                raise LocalSkillNotFoundError()
+
+        storage = self._local_storage(skill, bot, owner_id)
+        for filename in ("SKILL.md", "README.md"):
+            content = await storage.read_file(filename)
+            if content:
+                if isinstance(content, str):
+                    return content
+                return SkillParser.decode_content_for_display(content)
+        raise LocalSkillNotFoundError()
 
     async def get_parameters(
         self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str

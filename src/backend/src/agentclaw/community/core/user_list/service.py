@@ -6,12 +6,13 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.user_list.user_list_service_protocol import UserListServiceProtocol
 
 
 logger = get_logger()
 
 
-class UserListService:
+class UserListService(UserListServiceProtocol):
     """Expose only boolean membership, never the underlying list data."""
 
     @inject

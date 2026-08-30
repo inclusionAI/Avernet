@@ -21,7 +21,7 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, TaskInfo, TaskNodePatch, TaskSpec,
 )
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 class _FakeBotService:

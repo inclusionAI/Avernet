@@ -40,7 +40,23 @@ CLOUD = {
     "bot_type": "personal",
     "status": "ACTIVE",
     "owner_id": "u1",
+    "template_type": "applicationCoding",
 }
+
+
+class _TemplatePortStub:
+    """Hands one stored snapshot back — including the secrets that must not
+    survive the wire — so the handler test pins the projection end to end."""
+
+    def list_template_configs_by_bot_ids(self, bot_ids):
+        return {
+            "c1": {
+                "devflow_workflow": "release-notes",
+                "token": "must-not-leak",
+                "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
+                "runtime": "codefuse",
+            }
+        }
 LOCAL = {
     "id": 2,
     "bot_id": "l1",
@@ -84,6 +100,8 @@ def client(bot_service, desktop_service):
                 access_service=access,
                 business_space=space,
                 lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
+                edit_lock_view=MagicMock(states_for_bots=MagicMock(return_value={})),
+                template_port=_TemplatePortStub(),
             )
             binder.bind(BotInventoryBotPort, to=bot_service)
             binder.bind(DesktopBotInventoryPort, to=desktop_service)
@@ -113,10 +131,35 @@ def test_list_inventory_combines_personal_cloud_and_local(client):
     assert ids == {"c1", "l1"}
 
 
+def test_list_inventory_carries_projected_template_fields(client):
+    data = _ok(client.get("/openapi/v1/bots/all"))
+
+    by_id = {item["bot_id"]: item for item in data["items"]}
+    cloud = by_id["c1"]
+    assert cloud["template_type"] == "applicationCoding"
+    assert cloud["template_config"] == {"devflow_workflow": "release-notes"}
+    assert "token" not in cloud["template_config"]
+    assert "bot_template_config" not in cloud["template_config"]
+    assert "runtime" not in cloud["template_config"]
+    # Desktop rows carry no template identity.
+    assert by_id["l1"]["template_type"] is None
+    assert by_id["l1"]["template_config"] is None
+
+
 def test_inventory_openapi_declares_upgrade_action(client):
     schema = client.app.openapi()["components"]["schemas"]["BotInventoryItem"]
 
     assert "upgrade" in schema["properties"]["actions"]["items"]["enum"]
+
+
+def test_inventory_openapi_reuses_edit_lock_contract(client):
+    schemas = client.app.openapi()["components"]["schemas"]
+
+    edit_lock = schemas["BotInventoryItem"]["properties"]["edit_lock"]
+    assert {item.get("$ref") for item in edit_lock["anyOf"]} == {
+        "#/components/schemas/EditLock",
+        None,
+    }
 
 
 def test_list_inventory_filters_non_service_bots(client):

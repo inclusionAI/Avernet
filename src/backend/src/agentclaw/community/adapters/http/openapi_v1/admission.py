@@ -7,34 +7,6 @@ bot it acts on — not from taste. ``test_principal_seam.py`` fails if the surfa
 and this table disagree in either direction, so a route added tomorrow is
 refused until someone puts it in a group on purpose.
 
-Two id models, and both spell their parameter ``user_id``
---------------------------------------------------------
-
-Missing this is the mistake this module exists to prevent.
-
-**User-scoped groups** (``bots``, ``resources``, ``routines``, ``skills``,
-``identity``, ``mcp``) resolve the bot with ``get_by_id_and_owner(bot_id,
-user_id)``. Caller and owner are necessarily the same person; a non-owner gets a
-masked ``404``. A bot merely *shared* with the caller is unreachable here **for
-a human too**, so an application acting as that human inherits the same limit
-without anything being written to enforce it.
-
-**Engine-runtime groups** (``sessions``, ``engine``, ``models``, ``nodes``,
-``approvals``, ``connection``) take ``user_id`` as the *caller* and a second
-``owner_id`` naming the *addressed bot's owner*, then adjudicate through the
-collaborator gate. This is where a shared bot is reachable, and therefore where
-a delegation actually pays off. For an app-only caller the addressed owner comes from the
-**grant record**, never from the request — see ``engine_runtime/params.py``.
-
-The invariant every mode below serves
--------------------------------------
-
-    An application's reach is exactly its granting user's reach, and never more.
-
-Not a copy taken at consent time — the live thing. The grant says only "this
-application may act as this person"; whether that person may still operate that
-bot is asked again on every request, by the same gate they would face
-themselves.
 """
 
 from __future__ import annotations
@@ -529,15 +501,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/diagnostics/health-check",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/available"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/models"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/connection"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # harness — bot-scoped diagnostics and patching under the addressed bot.
     # These operations now go through the addressed-bot grant seam so that both
     # human collaborators and delegated application callers can reach the bot,
@@ -627,6 +590,47 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # concrete space membership; this is deliberately not OPEN or
     # GRANT_FILTERED because the result is scoped by the path's space_id.
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.USER_GATED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/import-from-git"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/consumable"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"): AdmissionMode.USER_GATED,
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/upgrade"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"): AdmissionMode.USER_GATED,
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    ): AdmissionMode.REFUSED,
+    (
+        "PUT",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    ): AdmissionMode.REFUSED,
+    (
+        "DELETE",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover",
+    ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",
@@ -661,6 +665,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/editor-requests",
     ): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/market/skill-center/tags"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/work-orders/events"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/work-orders"): AdmissionMode.USER_GATED,

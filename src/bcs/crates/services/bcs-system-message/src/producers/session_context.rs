@@ -387,12 +387,12 @@ fn mcporter_mcp_instruction(
     let server = surface.mcp_server.as_deref().unwrap_or("bcs");
     if is_manager {
         return format!(
-            "本群为任务群，你是主 Bot。你当前平台通过 mcporter 调用 BCS MCP 工具。需要派发子任务时，使用 `{command} call {server}.bcs_assign_task target_bot=\"<目标Bot名称或ID>\" message=\"<任务内容>\"`；任务可以结束时，使用 `{command} call {server}.bcs_task_complete summary=\"<最终总结>\"`。不要直接调用原生发送工具来派发子任务，不要在普通回复中伪造工具结果。{}",
+            "本群为任务群，你是主 Bot。你当前平台通过 mcporter 调用 BCS MCP 工具。需要派发子任务时，使用 `{command} call {server}.bcs_assign_task target_bot=\"<目标Bot名称或ID>\" message=\"<任务内容>\"`；任务可以结束时，使用 `{command} call {server}.bcs_task_complete summary=\"<最终总结>\"`。执行 `mcporter call` 后必须保留并回传完整原始输出；禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理，否则 BCS 无法识别 MCP 调用结果。不要直接调用原生发送工具来派发子任务，不要在普通回复中伪造工具结果。{}",
             status_line
         );
     }
     format!(
-        "本群为任务群，你是子 Bot。你当前平台通过 mcporter 调用 BCS MCP 工具。收到主 Bot 派发的任务后，使用 `{command} call {server}.bcs_send_task_message message=\"<结果、进展、问题或阻塞>\"`。不要直接面向用户输出最终答案；最终汇总由 manager 完成，不要在普通回复中伪造工具结果。"
+        "本群为任务群，你是子 Bot。你当前平台通过 mcporter 调用 BCS MCP 工具。收到主 Bot 派发的任务后，使用 `{command} call {server}.bcs_send_task_message message=\"<结果、进展、问题或阻塞>\"`。执行 `mcporter call` 后必须保留并回传完整原始输出；禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理，否则 BCS 无法识别 MCP 调用结果。不要直接面向用户输出最终答案；最终汇总由 manager 完成，不要在普通回复中伪造工具结果。"
     )
 }
 

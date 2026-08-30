@@ -34,12 +34,13 @@ from agentclaw.community.core.caller_identity.protocols import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin, AuthRequestContext
+from agentclaw.community.core.caller_identity.caller_iam_token_service_protocol import CallerIamTokenServiceProtocol
 
 
 logger = get_logger()
 
 
-class CallerIamTokenService:
+class CallerIamTokenService(CallerIamTokenServiceProtocol):
     """Keep Caller exchange policy out of the HTTP router."""
 
     def __init__(

@@ -41,7 +41,8 @@ use bcs_service_api::{
     MAX_COLLABORATION_DEFINITION_YAML_BYTES, MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET,
     MarkHumanNodeRunningCommand, MessageLogContent, MessageLogEventType, MessageLogMode,
     MessageLogStatus, NewSessionParams, PatchGroupCollaborationDefinitionCommand,
-    PendingHumanNodeView, RespondHumanNodeCommand, RespondHumanNodeOutcome, RunFallbackDelivery,
+    PendingHumanNodeView, RespondHumanNodeCommand, RespondHumanNodeOutcome,
+    RerunStateMachineCommand, RerunStateMachineOutcome, RunFallbackDelivery,
     ServiceError, SessionChannelDeliveryOutcome, SessionChannelOutboundPort, SessionHistoryResult,
     SessionKind, SessionManagementService, SessionStateMachinePermissionCommand,
     SessionStateMachinePermissionView, SessionStatus, SessionUseCaseError,
@@ -54,6 +55,7 @@ use bcs_service_api::{
     UpgradeGroupCollaborationDefinitionCommand, ValidateCollaborationDefinitionYamlCommand,
     message_log_json,
 };
+use bcs_service_api::{CreateStateMachineRerun, CreateStateMachineRerunOutcome};
 use chrono::{SecondsFormat, TimeZone, Utc};
 use serde_json::Value;
 use tracing::{info, warn};
@@ -1181,6 +1183,145 @@ impl CollaborationRuntime {
             &run.run_id,
             session_title.as_deref(),
         ))
+    }
+
+    async fn resume_materialized_rerun(
+        &self,
+        compiled: &CompiledStateMachine,
+        group: &Group,
+        mut run: StateMachineRun,
+        opening_message: &RenderedOpeningMessage,
+        created: bool,
+    ) -> Result<RerunStateMachineOutcome, CollaborationRuntimeError> {
+        if run.status == StateMachineRunStatus::Pending {
+            let started_at = bcs_protocol::now_ms();
+            let run_mode = if run.session_activation_count.is_some() {
+                "configured"
+            } else {
+                "one_shot"
+            };
+            let mut lineage_fields = BTreeMap::from([
+                (
+                    "definition_id".to_string(),
+                    serde_json::json!(run.definition_id.clone()),
+                ),
+                (
+                    "definition_version".to_string(),
+                    serde_json::json!(run.definition_version),
+                ),
+                (
+                    "root_run_id".to_string(),
+                    serde_json::json!(run.root_run_id.clone()),
+                ),
+                (
+                    "rerun_of".to_string(),
+                    serde_json::json!(run.rerun_of.clone()),
+                ),
+                ("run_mode".to_string(), serde_json::json!(run_mode)),
+                ("status".to_string(), serde_json::json!("running")),
+            ]);
+            if let Some(activation_count) = run.session_activation_count {
+                lineage_fields.insert(
+                    "session_activation_count".to_string(),
+                    serde_json::json!(activation_count),
+                );
+            }
+            let created_event = self.prepare_public_event(
+                "state_machine.run.created",
+                &run,
+                "state_machine.run",
+                &run.run_id,
+                "created",
+                run.created_by.as_deref(),
+                None,
+                started_at,
+                lineage_fields,
+            )?;
+            let started_event = self.prepare_public_event(
+                "state_machine.run.started",
+                &run,
+                "state_machine.run",
+                &run.run_id,
+                "started",
+                run.created_by.as_deref(),
+                None,
+                started_at,
+                BTreeMap::from([
+                    ("run_mode".to_string(), serde_json::json!(run_mode)),
+                    (
+                        "started_at".to_string(),
+                        serde_json::json!(event_timestamp(started_at)?),
+                    ),
+                    ("input".to_string(), content_value(run.input.clone())?),
+                ]),
+            )?;
+            let started = match (created_event, started_event) {
+                (Some(created_event), Some(started_event)) => {
+                    self.runs
+                        .commit_eventful_transition(StateMachineEventfulTransition::StartRun {
+                            run_id: run.run_id.clone(),
+                            started_at_ms: started_at,
+                            events: vec![created_event, started_event],
+                        })
+                        .await?
+                }
+                (None, None) => {
+                    self.runs
+                        .update_run_status(
+                            &run.run_id,
+                            StateMachineRunStatus::Running,
+                            None,
+                            None,
+                            started_at,
+                            None,
+                        )
+                        .await?
+                }
+                _ => {
+                    return Err(CollaborationRuntimeError::Internal(
+                        ServiceError::InternalError(
+                            "rerun Event preparation was inconsistent".to_string(),
+                        ),
+                    ));
+                }
+            };
+            if started {
+                run.status = StateMachineRunStatus::Running;
+                run.updated_at = started_at;
+            } else {
+                run = self
+                    .runs
+                    .get_run(&run.run_id)
+                    .await?
+                    .ok_or_else(|| CollaborationRuntimeError::RunNotFound(run.run_id.clone()))?;
+            }
+        }
+
+        if run.status != StateMachineRunStatus::Running {
+            let view = self
+                .run_view(&run.run_id)
+                .await?
+                .ok_or_else(|| CollaborationRuntimeError::RunNotFound(run.run_id.clone()))?;
+            return Ok(RerunStateMachineOutcome { view, created });
+        }
+
+        if let Err(error) = self
+            .persist_state_machine_panel_message(&run, opening_message)
+            .await
+        {
+            self.fail_run(&run, error.to_string()).await?;
+            return Err(error);
+        }
+        self.publish_state_machine_panel_event(group, &run, opening_message)
+            .await;
+        for node_id in &compiled.initial_nodes {
+            self.dispatch_node(compiled, group, &run, node_id).await?;
+        }
+        let view = self
+            .run_view(&run.run_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::RunNotFound(run.run_id.clone()))?;
+        Ok(RerunStateMachineOutcome { view, created })
     }
 
     async fn publish_state_machine_bot_event(
@@ -2739,11 +2880,15 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let now = bcs_protocol::now_ms();
         let mut run = StateMachineRun {
             run_id: run_id.clone(),
+            root_run_id: Some(run_id.clone()),
+            rerun_of: None,
             definition_id: definition.id.clone(),
             definition_version: definition.version,
             group_id: group.id.clone(),
             group_version: group.version,
             session_id,
+            session_activation_count: (session.session_kind == SessionKind::ServiceInvocation)
+                .then_some(session.activation_count),
             created_by: cmd.caller_id.clone(),
             status: StateMachineRunStatus::Pending,
             input: cmd.input,
@@ -2791,6 +2936,28 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         } else {
             "configured"
         };
+        let mut created_fields = BTreeMap::from([
+            (
+                "definition_id".to_string(),
+                serde_json::json!(run.definition_id.clone()),
+            ),
+            (
+                "definition_version".to_string(),
+                serde_json::json!(run.definition_version),
+            ),
+            (
+                "root_run_id".to_string(),
+                serde_json::json!(run.root_run_id.clone()),
+            ),
+            ("run_mode".to_string(), serde_json::json!(run_mode)),
+            ("status".to_string(), serde_json::json!("running")),
+        ]);
+        if let Some(activation_count) = run.session_activation_count {
+            created_fields.insert(
+                "session_activation_count".to_string(),
+                serde_json::json!(activation_count),
+            );
+        }
         let created_event = self.prepare_public_event(
             "state_machine.run.created",
             &run,
@@ -2800,18 +2967,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             run.created_by.as_deref(),
             None,
             now,
-            BTreeMap::from([
-                (
-                    "definition_id".to_string(),
-                    serde_json::json!(run.definition_id.clone()),
-                ),
-                (
-                    "definition_version".to_string(),
-                    serde_json::json!(run.definition_version),
-                ),
-                ("run_mode".to_string(), serde_json::json!(run_mode)),
-                ("status".to_string(), serde_json::json!("running")),
-            ]),
+            created_fields,
         )?;
         let started_event = self.prepare_public_event(
             "state_machine.run.started",
@@ -2922,6 +3078,147 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         run_id: &str,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         self.run_view(run_id).await
+    }
+
+    async fn rerun_state_machine_run(
+        &self,
+        command: RerunStateMachineCommand,
+    ) -> Result<RerunStateMachineOutcome, CollaborationRuntimeError> {
+        let source = self
+            .runs
+            .get_run(&command.source_run_id)
+            .await?
+            .ok_or_else(|| {
+                CollaborationRuntimeError::RunNotFound(command.source_run_id.clone())
+            })?;
+        self.authorize_run_access(&source, command.authenticated_human.as_ref())
+            .await?;
+        if source.status != StateMachineRunStatus::Failed {
+            return Err(CollaborationRuntimeError::Conflict(
+                "source state-machine Run must be failed before rerun".to_string(),
+            ));
+        }
+        let session = self
+            .sessions
+            .get(&source.session_id)
+            .await
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+            .ok_or_else(|| {
+                CollaborationRuntimeError::InvalidRequest(format!(
+                    "session not found: {}",
+                    source.session_id
+                ))
+            })?;
+        if session.group_id != source.group_id {
+            return Err(CollaborationRuntimeError::Forbidden(
+                "source Run Session no longer belongs to its Group".to_string(),
+            ));
+        }
+        let group = self.groups.get(&source.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!(
+                "group not found: {}",
+                source.group_id
+            ))
+        })?;
+        let definition = self
+            .definitions
+            .get_run_snapshot(&source.run_id)
+            .await?
+            .ok_or_else(|| {
+                CollaborationRuntimeError::Conflict(
+                    "source state-machine Run has no immutable snapshot".to_string(),
+                )
+            })?;
+        let compiled = validate_definition(definition)?;
+        if let Some(existing) = self.runs.get_direct_rerun(&source.run_id).await? {
+            let opening_message = render_state_machine_opening_message(
+                &group,
+                &existing,
+                session.session_title.as_deref(),
+            )?;
+            return self
+                .resume_materialized_rerun(
+                    &compiled,
+                    &group,
+                    existing,
+                    &opening_message,
+                    false,
+                )
+                .await;
+        }
+        let source_nodes = self.runs.list_node_runs(&source.run_id).await?;
+        let run_id = format!("sm-{}", Uuid::new_v4());
+        let now = bcs_protocol::now_ms();
+        let service_session = session.session_kind == SessionKind::ServiceInvocation;
+        let run = StateMachineRun {
+            run_id: run_id.clone(),
+            root_run_id: Some(
+                source
+                    .root_run_id
+                    .clone()
+                    .unwrap_or_else(|| source.run_id.clone()),
+            ),
+            rerun_of: Some(source.run_id.clone()),
+            definition_id: source.definition_id.clone(),
+            definition_version: source.definition_version,
+            group_id: source.group_id.clone(),
+            group_version: source.group_version,
+            session_id: source.session_id.clone(),
+            session_activation_count: service_session
+                .then_some(session.activation_count.saturating_add(1)),
+            created_by: command
+                .authenticated_human
+                .as_ref()
+                .map(|human| human.actor_id.clone())
+                .or_else(|| source.created_by.clone()),
+            status: StateMachineRunStatus::Pending,
+            input: source.input.clone(),
+            output: None,
+            error: None,
+            created_at: now,
+            updated_at: now,
+            completed_at: None,
+        };
+        let nodes = build_rerun_node_runs(&run, source_nodes);
+        let opening_message = render_state_machine_opening_message(
+            &group,
+            &run,
+            session.session_title.as_deref(),
+        )?;
+        let (run, opening_message, created) = match self
+            .runs
+            .create_rerun_if_session_idle(CreateStateMachineRerun {
+                source_run_id: source.run_id.clone(),
+                run: run.clone(),
+                nodes,
+                reactivate_service_session: service_session,
+            })
+            .await?
+        {
+            CreateStateMachineRerunOutcome::Existing(existing) => {
+                let opening_message = render_state_machine_opening_message(
+                    &group,
+                    &existing,
+                    session.session_title.as_deref(),
+                )?;
+                (existing, opening_message, false)
+            }
+            CreateStateMachineRerunOutcome::Conflict => {
+                return Err(CollaborationRuntimeError::Conflict(
+                    "state-machine Session has an active Run or cannot be reactivated"
+                        .to_string(),
+                ));
+            }
+            CreateStateMachineRerunOutcome::Created => (run, opening_message, true),
+        };
+        self.resume_materialized_rerun(
+            &compiled,
+            &group,
+            run,
+            &opening_message,
+            created,
+        )
+        .await
     }
 
     async fn get_state_machine_run_by_session_id(
@@ -3446,15 +3743,23 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 "history limit must be greater than 0".to_string(),
             ));
         }
-        let Some(run) = self.runs.get_run_by_session_id(session_id).await? else {
+        let runs = self.runs.list_runs_by_session_id(session_id).await?;
+        let Some(latest_run) = runs.first() else {
             return Ok(None);
         };
-        let group = self.groups.get(&run.group_id).await.ok_or_else(|| {
-            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", run.group_id))
+        let group = self.groups.get(&latest_run.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!(
+                "group not found: {}",
+                latest_run.group_id
+            ))
         })?;
-        let mut messages = self
-            .state_machine_messages_from_snapshot(&group, &run)
-            .await?;
+        let mut messages = Vec::new();
+        for run in runs {
+            messages.extend(
+                self.state_machine_messages_from_snapshot(&group, &run)
+                    .await?,
+            );
+        }
         messages.sort_by(|left, right| {
             left.timestamp
                 .cmp(&right.timestamp)
@@ -4983,6 +5288,33 @@ fn build_node_runs(
     Ok(nodes)
 }
 
+fn build_rerun_node_runs(
+    run: &StateMachineRun,
+    source_nodes: Vec<StateMachineNodeRun>,
+) -> Vec<StateMachineNodeRun> {
+    source_nodes
+        .into_iter()
+        .map(|source| StateMachineNodeRun {
+            run_id: run.run_id.clone(),
+            node_id: source.node_id,
+            status: StateMachineNodeStatus::Pending,
+            attempt: 0,
+            node_timeout_ms: source.node_timeout_ms,
+            timeout_deadline_ms: None,
+            max_attempts: source.max_attempts,
+            assignee_bot_id: source.assignee_bot_id,
+            outcome: None,
+            responded_by: None,
+            delivery_request_id: None,
+            bot_delivery_run_id: None,
+            artifact_text: None,
+            error: None,
+            started_at: None,
+            completed_at: None,
+        })
+        .collect()
+}
+
 fn run_graph_view(
     run: StateMachineRun,
     node_runs: Vec<StateMachineNodeRun>,
@@ -5752,11 +6084,14 @@ runtime:
         let compiled = validate_definition(definition).unwrap();
         let run = StateMachineRun {
             run_id: "run-timeout-zero".to_string(),
+            root_run_id: Some("run-timeout-zero".to_string()),
+            rerun_of: None,
             definition_id: compiled.definition.id.clone(),
             definition_version: compiled.definition.version,
             group_id: "group".to_string(),
             group_version: 1,
             session_id: "session".to_string(),
+            session_activation_count: None,
             created_by: None,
             status: StateMachineRunStatus::Running,
             input: Value::Null,
@@ -5836,11 +6171,14 @@ runtime:
         let compiled = validate_definition(definition).unwrap();
         let run = StateMachineRun {
             run_id: "run-missing-node".to_string(),
+            root_run_id: Some("run-missing-node".to_string()),
+            rerun_of: None,
             definition_id: compiled.definition.id.clone(),
             definition_version: compiled.definition.version,
             group_id: "group".to_string(),
             group_version: 1,
             session_id: "session".to_string(),
+            session_activation_count: None,
             created_by: None,
             status: StateMachineRunStatus::Running,
             input: Value::Null,

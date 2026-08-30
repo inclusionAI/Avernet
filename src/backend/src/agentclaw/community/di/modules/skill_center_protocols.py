@@ -9,6 +9,9 @@ from agentclaw.community.api.runtime_layout_probe_service import RuntimeLayoutPr
 from agentclaw.community.api.skill_auth_service import SkillAuthServiceProtocol
 from agentclaw.community.api.skill_batch_sync_service import SkillBatchSyncServiceProtocol
 from agentclaw.community.api.skill_center_sync_service import SkillCenterSyncServiceProtocol
+from agentclaw.community.api.skill_center_gateway_service import (
+    SkillCenterGatewayServiceProtocol,
+)
 from agentclaw.community.api.skill_member_service import SkillMemberServiceProtocol
 from agentclaw.community.api.skill_parameter_service_factory import SkillParameterServiceFactoryProtocol
 from agentclaw.community.api.skill_propagation_service import SkillPropagationServiceProtocol
@@ -26,6 +29,9 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 from agentclaw.community.core.skill_center.services.skill_auth_service import SkillAuthService
 from agentclaw.community.core.skill_center.services.skill_batch_sync_service import SkillBatchSyncService
 from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
+from agentclaw.community.core.skill_center.services import (
+    skill_center_gateway_service,
+)
 from agentclaw.community.core.skill_center.services.skill_member_service import SkillMemberService
 from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 from agentclaw.community.core.skill_center.services.skill_publish_service import SkillPublishService
@@ -57,6 +63,14 @@ class SkillCenterProtocolBindings:
     @provider
     @inject
     def _skill_center_sync_service_protocol(self, svc: SkillCenterSyncService) -> SkillCenterSyncServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _skill_center_gateway_service_protocol(
+        self, svc: skill_center_gateway_service.SkillCenterGatewayService
+    ) -> SkillCenterGatewayServiceProtocol:
         return svc
 
     @singleton
@@ -106,4 +120,3 @@ class SkillCenterProtocolBindings:
     @inject
     def _skill_set_service_factory_protocol(self, svc: SkillSetServiceFactory) -> SkillSetServiceFactoryProtocol:
         return svc
-

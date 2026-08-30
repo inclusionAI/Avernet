@@ -398,6 +398,32 @@ async fn remove_session_participant_rejects_non_owner_human() {
 }
 
 #[tokio::test]
+async fn remove_session_participant_allows_human_owner_of_bot_session_principal() {
+    // The session was created and is managed by driver-bot. Alice is acting
+    // with Human authentication and owns driver-bot, so she may remove a
+    // different participant even though she does not own that participant.
+    let (app, sessions, _temp_dir) = owner_app("alice", "driver-bot").await;
+    {
+        let mut stored = sessions.session.lock().await;
+        let session = stored.as_mut().unwrap();
+        session.created_by = Some("driver-bot".to_string());
+        session.caller_principal = Some("driver-bot".to_string());
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/sessions/group-1:00000001/members/worker-bot")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn bot_owner_cannot_remove_driver_bot() {
     // alice owns driver-bot, which is the group's driver. Even as the owner she
     // cannot remove the driver bot.

@@ -1,14 +1,17 @@
-"""Service API Protocol for bot member-management capabilities."""
+"""Service API Protocol for bot member-management capabilities.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_collaborator/member_management_capability_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from agentclaw.community.core.bot_collaborator.member_management_capability_protocol import (
+    MemberManagementCapabilityProtocol,
+)
 
-
-@runtime_checkable
-class MemberManagementCapabilityProtocol(Protocol):
-    """Expose whether a bot uses engine-managed member semantics."""
-
-    def uses_member_management_semantics(
-        self, bot: object, bot_id: str | None = None
-    ) -> bool: ...
+__all__ = [
+    "MemberManagementCapabilityProtocol",
+]

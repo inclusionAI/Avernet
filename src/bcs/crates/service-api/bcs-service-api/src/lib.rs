@@ -62,8 +62,9 @@ pub use application::invite::{
     InviteUseCaseError, JoinByInviteCommand, JoinByInviteResult,
 };
 pub use application::session::{
-    CreateOrReactivateCommand, CreateOrReactivateOutcome, SessionManagementService,
-    SessionUseCaseError,
+    ClaimSessionCallbackCommand, ClaimSessionCallbackOutcome,
+    CompleteSessionCallbackCommand, CreateOrReactivateCommand, CreateOrReactivateOutcome,
+    SessionManagementService, SessionUseCaseError,
 };
 pub use application::session_launch::{
     CreateSessionLaunch, ReactivateSessionLaunch, RequestedSessionRole, SessionCaller,
@@ -86,7 +87,7 @@ pub use application::collaboration_runtime::{
     HandleSessionHumanInputOutcome, HumanResponseSource, HumanRunAccessCommand,
     ListPendingHumanNodesCommand, MAX_COLLABORATION_DEFINITION_YAML_BYTES,
     PatchGroupCollaborationDefinitionCommand, PendingHumanNodeView, RespondHumanNodeCommand,
-    RespondHumanNodeOutcome,
+    RespondHumanNodeOutcome, RerunStateMachineCommand, RerunStateMachineOutcome,
     SessionStateMachinePermissionCommand, SessionStateMachinePermissionView,
     StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
     StartStateMachineRunOutcome, StateMachineGraphDefinitionView,
@@ -108,6 +109,8 @@ pub use bot_runtime_use_cases::{
     BotRuntimeConnectCommand, BotRuntimeConnectOutcome, BotRuntimeConnectionService,
     BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotRuntimeStatusOutcome,
 };
+pub use types::{BotSearchCandidateQuery, BotSearchFriendshipFilter};
+
 pub use bot_use_cases::{
     BotConnectCommand, BotDetailCommand, BotDetailResult, BotDiscoveryCommand, BotDiscoveryEntry,
     BotDiscoveryProviderInfo, BotDiscoveryResult, BotDiscoveryService, BotLeaveCommand,
@@ -154,7 +157,7 @@ pub use message_flow::{
     PersistentGroupSendOutcome, ProviderEventIngestCommand, ProviderEventSource,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
     TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
-    WebSendCommand, WebSendOutcome,
+    ChannelSenderIdentity, WebSendCommand, WebSendOutcome,
 };
 pub use onboard::{
     AdminBotOnboardCommand, BotOnboardCommand, BotOnboardResult, BotOnboardingService,
@@ -213,6 +216,7 @@ pub use port::{
     StateMachineTerminalStatus, UserIdentity, UserIdentityRepoPort,
     CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
+    CreateStateMachineRerun, CreateStateMachineRerunOutcome,
     WsCloseReason, WsErrorKind, WsLifecycleInstrumentationHook, WsPeer,
 };
 pub use workbench_use_cases::{
@@ -281,6 +285,11 @@ pub use port::interaction::{
     InteractionFrontendEvent, InteractionInsertResult, InteractionProviderAck,
     InteractionProviderCommand, InteractionProviderPort, InteractionRecord,
     InteractionResolveClaim, InteractionResolveCommit, InteractionStorePort,
+};
+
+pub use port::repo::chat_run::{
+    CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,
+    ChatRunState, MAX_CONTENT_BYTES as CHAT_RUN_MAX_CONTENT_BYTES,
 };
 
 pub use bcs_domain::{

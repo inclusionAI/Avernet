@@ -32,7 +32,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, Status, TaskInfo, TaskSpec,
 )
 from agentclaw.community.core.task.repository.types import TaskInfoRecord
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 class _MemoryTaskInfoRepository:

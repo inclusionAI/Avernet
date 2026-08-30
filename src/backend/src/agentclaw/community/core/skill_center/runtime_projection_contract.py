@@ -2,11 +2,191 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from abc import abstractmethod
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RegisteredSkillAsset,
+    RuntimeProjection,
+    RuntimeSkillProjection,
+)
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+
+
+@runtime_checkable
+class CapabilityRuntimeBoundary(Protocol):
+    """The runtime writes a capability projection is allowed to make.
+
+    Declared here rather than imported so the contract names a boundary
+    instead of an implementation: an ``EngineRuntimeProjection`` may write
+    the Skill half, the MCP half, or both, and nothing else. ``SkillSetService``
+    satisfies this structurally; the composition root is what pairs the two,
+    and substituting a different runtime service is a change there, not here.
+
+    Both signatures mirror that service exactly, deliberately — this narrows
+    the visible surface, it does not restate or re-specify it. What each call
+    guarantees is documented on ``SkillSetService``.
+    """
+
+    async def project_skills(
+        self,
+        *,
+        desired_skills: Optional[list[dict]] = None,
+        effective_mcps: Optional[list[dict]] = None,
+    ) -> bool:
+        """Apply one complete resolver-owned Skill snapshot to the runtime.
+
+        Blocking work sits behind this — device resolution, and on a
+        whole-artifact engine an artifact compose and the outbound apply
+        request — but keeping off the event loop is the implementation's
+        responsibility, not the caller's. Await it like ``project_mcps``.
+
+        ``effective_mcps`` is for the whole-artifact case only, and for the
+        same reason ``desired_skills`` is passed: the compose behind this call
+        re-reads desired state that plan resolution already read, and handing
+        the resolved value over is what avoids the second pass. A runtime with
+        a separate MCP endpoint composes nothing here and leaves it ``None``.
+        """
+        ...
+
+    async def project_mcps(
+        self,
+        *,
+        claimed: frozenset[str],
+        released: frozenset[str],
+        declared: set[str],
+    ) -> bool:
+        """Apply one MCP projection: deliver, withdraw, and declare the set."""
+        ...
+
+    async def project_whole_artifact(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
+        """Compose and apply one structure-only whole-artifact snapshot.
+
+        No filesystem mapping is built before this call. Exact Center identity
+        reaches the artifact composer as data, so a whole-artifact engine never
+        guesses a path or trips over the legacy symlink adapter.
+        """
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSkillPlan:
+    """One Bot's complete Skill state, resolved and ready to apply.
+
+    The Installation flush, Skill validation, and mapping resolution have all
+    completed before this value crosses the engine seam. It deliberately says
+    nothing about MCP, CLI, or Passport state.
+
+    It exists as a value rather than a tuple because it crosses a seam — an
+    ``EngineRuntimeProjection`` acts from the plan alone — and a positional
+    six-tuple unpacked at three call sites was one reordering away from a
+    silent mix-up.
+    """
+
+    #: The Bot this plan is for, and the owner whose desired state it reads.
+    bot_id: str
+    owner_id: str
+    #: The runtime boundary an implementation writes through. Narrowed to the
+    #: two calls a projection may make; see ``CapabilityRuntimeBoundary``.
+    service: CapabilityRuntimeBoundary
+    #: The ``ac_bots`` row. Carries ``env`` / ``entity_id`` / ``active_engine``
+    #: that a filesystem-layout decision needs.
+    bot: dict
+    #: ``ac_bots.active_engine`` — the registry key. Whose runtime contract
+    #: applies is decided from this and nothing else.
+    engine: str
+    #: The complete Skill half. It is a distinct type from RuntimeProjection,
+    #: so an engine cannot mistake omitted Non-Skill state for an empty final
+    #: MCP/CLI snapshot.
+    projection: RuntimeSkillProjection
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCapabilityPlan(ResolvedSkillPlan):
+    """One Bot's complete Skill/MCP/CLI state, resolved before any write."""
+
+    #: The complete engine-neutral projection. This field deliberately narrows
+    #: the base type: a ResolvedCapabilityPlan can always satisfy a Skill-only
+    #: consumer, while its MCP consumers receive a genuine full snapshot.
+    projection: RuntimeProjection
+    #: Effective Default CLI facts, as the authorization service holds them,
+    #: ready for the overwrite-style Passport update.
+    effective_cli_items: list[dict]
+    #: The Bot's effective MCP set — default policy ∪ installed ∪ Skill
+    #: dependencies — as ``collect_bot_active_mcps`` resolved it for the
+    #: projected MCP codes. Carried rather than recomputed because a
+    #: whole-artifact engine composes its document from the same set: without
+    #: this the delivery would re-read it from the database it was just read
+    #: from. Bare association entries, no MCP Center detail merged in.
+    effective_mcp_entries: list[dict]
+    #: Per-MCP execution identity, resolved during plan resolution because it
+    #: can fail — see ``BotRuntimeProjector._resolve_mcp_identity_modes``.
+    identity_modes: Mapping[str, object]
+
+
+@runtime_checkable
+class EngineRuntimeProjection(Protocol):
+    """How one engine's runtime consumes a capability projection.
+
+    The projector resolves one of these per Bot and delegates; it does not
+    itself know what any engine is. Two things vary between engines and both
+    live here: what desired state a runtime can carry at all, and how many
+    runtime calls converging on it takes.
+
+    That second question is genuinely the engine's. A runtime with separate
+    Skill and MCP endpoints saves a round trip by writing only the half a
+    mutation touched. A whole-artifact runtime recomposes its entire
+    configuration from the database on every call and discards the arguments,
+    so a second call restates in full what the first already delivered. The
+    same ``ProjectionScope`` means different things to the two, and neither
+    reading is more correct — which is why the caller must not pick one.
+
+    Both methods are abstract. The implementations name this protocol as a
+    base, so a subclass that omits one fails at construction — in the
+    composition root, at startup — instead of raising ``AttributeError`` at
+    the moment a projection tries to use it.
+    """
+
+    @abstractmethod
+    def validate_plan(
+        self,
+        *,
+        skill_assets: Sequence[RegisteredSkillAsset],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+    ) -> None:
+        """Refuse desired state this runtime has no contract for.
+
+        Called during plan resolution — before any runtime, MCP, Passport or
+        probe request is emitted — so a refusal costs nothing to unwind.
+        Raises ``SkillSetRuntimeReconcileError``; returns ``None`` when the
+        plan is carryable.
+        """
+        ...
+
+    @abstractmethod
+    async def apply(
+        self,
+        *,
+        plan: ResolvedSkillPlan,
+        scope: ProjectionScope,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+    ) -> None:
+        """Converge this Bot's runtime on ``plan``.
+
+        Raises ``SkillSetRuntimeReconcileError`` if it did not converge, so
+        the caller can compensate. How many runtime calls that took, and in
+        what order, is decided here and is not observable to the caller. MCP
+        writers require ``ResolvedCapabilityPlan``; Skill-only writers accept
+        the narrower ``ResolvedSkillPlan``.
+        """
+        ...
 
 
 @dataclass(frozen=True)
@@ -24,6 +204,18 @@ class ProjectionScope:
     scope can only ever shrink there. That keeps a single-MCP mutation a
     single device write, and stops a release from deleting a code the
     default policy or a Skill dependency still supplies.
+
+    What this scope *causes* is the reading engine's decision, not a promise
+    made here. The guarantees described on these fields — "a single-MCP add
+    stays a single device write", ``claim_all_mcp``'s empty-container
+    premise, the deliver-before-declare ordering — are
+    ``PerDomainRuntimeProjection``'s, and hold where the halves have separate
+    runtime endpoints. A whole-artifact engine carries both halves in one
+    document composed from the database, so for it the scope selects nothing
+    about content and only how many identical copies would be sent; its
+    implementation reads the scope accordingly. See
+    ``EngineRuntimeProjection``. A mutation still declares what it changed
+    the same way for every engine — only the reading differs.
     """
 
     #: Project the Skill half — publish mappings, or sync the legacy runtime.
@@ -125,18 +317,19 @@ class BotRuntimeProjectorProtocol(Protocol):
         owner_id: str,
         scope: ProjectionScope,
     ) -> None:
-        """Project MCP/CLI while an external authority owns Skill mappings."""
-        ...
+        """Project MCP/CLI while an external authority owns Skill mappings.
 
-    async def project_for_cleanup(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        scope: ProjectionScope,
-    ) -> None:
-        """Remove historical capability state through the legacy runtime path."""
+        ``scope.mcp`` must be true; callers cannot use this entry point to
+        smuggle a Skill-only projection around the normal ``project`` seam.
+        """
         ...
 
 
-__all__ = ["BotRuntimeProjectorProtocol", "ProjectionScope"]
+__all__ = [
+    "BotRuntimeProjectorProtocol",
+    "CapabilityRuntimeBoundary",
+    "EngineRuntimeProjection",
+    "ProjectionScope",
+    "ResolvedCapabilityPlan",
+    "ResolvedSkillPlan",
+]

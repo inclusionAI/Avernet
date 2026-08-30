@@ -16,12 +16,36 @@ provides:
   - "CurrentRuntimeLayoutProbeService"
   - "SkillQueryService"
   - "LocalSkillUploadService"
+  - "SkillPackageValidator"
+  - "SkillPackageManifestParserProtocol"
+  - "ValidatedSkillPackage"
+  - "DraftContentStore"
+  - "DraftContentStoreConfig"
+  - "DraftRevisionIdentity"
+  - "DraftRevisionRef"
+  - "OssDraftContentStore"
   - "DirectActivationService"
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
+  - "SpaceSkillGrantService"
+  - "SpaceSkillApplicationService"
+  - "SpaceSkillApplicationServiceProtocol"
+  - "SpaceSkillDraftRepository"
+  - "SpaceSkillReadRepository"
+  - "SpaceSkillVersionQueryService"
+  - "SpaceSkillVersionReadRepository"
+  - "SpaceSkillEditorRequestService"
+  - "SkillCollaboratorApprovalHandler"
+  - "DraftEditLeaseService"
   - "RuntimeProjectionResolver"
+  - "resolve_effective_mcp_server_codes"
   - "BotCapabilityStateReader"
+  - "SkillVersionResolver"
+  - "SkillVersionResolverProtocol"
+  - "SkillVersionMaterializer"
+  - "SkillVersionMaterializerProtocol"
+  - "PublishedMaterializedSkillVersion"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
   - "LocalSkillCleanupWorkModel"
@@ -35,6 +59,10 @@ provides:
   - "SkillManifestErrorCode"
   - "SkillManifestValidationIssue"
   - "SkillManifestValidationResult"
+  - "SkillCenterGatewayService"
+  - "CanonicalCenterVersionStore"
+  - "CanonicalCenterVersion"
+  - "CanonicalCenterVersionIdentity"
   - "enqueue_skill_activation_sync"
   - "build_skill_activation_sync_payload"
   - "parse_skill_activation_sync_payload"
@@ -51,21 +79,32 @@ consumes:
   - "DeviceAdapterTransport"
   - "MCPCenterPlugin"
   - "ObjectStoragePlugin"
+  - "ImmutableObjectStorageCapability"
   - "SecretResolver"
   - "SkillCenterClient"
+  - "SkillCenterGateway"
+  - "SpaceSkillSourcePlugin"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
   - "BotRuntimeProjectorProtocol"
+  - "SpaceAccessServiceProtocol"
+  - "SpaceSkillRepository"
+  - "WorkOrderRepositoryProtocol"
+  - "DraftEditLeaseRepository"
+  - "SpaceSkillDraftRepository"
+  - "SpaceSkillReadRepository"
+  - "SkillVersionRepositoryProtocol"
+  - "SkillVersionMaterializationRepositoryProtocol"
+  - "SkillVersionScannerProtocol"
+  - "HttpClient"
 internal_dependencies:
-  - agentclaw.community.api.skill_parameter_service_factory
-  - agentclaw.community.api.skill_market_service
-  - agentclaw.community.api.space_skill_query_service
-  - agentclaw.community.api.skill_query_service # Protocol SkillQueryService inherits
-  - agentclaw.community.api.bot_capability_state_reader # Protocol BotCapabilityStateReader implements
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.space_skill_version # published Space Skill read contract consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
+  - agentclaw.community.core.repository.protocols.work_orders
+  - agentclaw.community.core.work_orders
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.capability_desired_state
@@ -83,6 +122,9 @@ internal_dependencies:
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
   - agentclaw.community.core.spaces.services
+  - agentclaw.community.core.spaces.errors
+  - agentclaw.community.core.spaces.models
+  - agentclaw.community.core.spaces.protocols
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.task_queue    # durable enqueue for Bot-level activation sync
   - agentclaw.community.core.workspace
@@ -91,6 +133,7 @@ internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.log
   - agentclaw.community.plugin_api.cache
+  - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.local_skill_cleanup
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.device_adapter_transport
@@ -102,8 +145,10 @@ internal_dependencies:
   - agentclaw.community.plugin_api.object_storage
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
+  - agentclaw.community.plugin_api.skill_center_gateway
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
+  - agentclaw.community.plugin_api.space_skill_source
   - agentclaw.community.utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
@@ -111,7 +156,62 @@ internal_dependencies:
 
 ### Change impact
 
+`SkillPackageValidator` is the pure package boundary shared by Local upload and
+future Draft/materialization workflows. It owns safe relative paths, archive
+limits, wrapper normalization, the single `SKILL.md` rule, manifest validation,
+ignored platform metadata, and deterministic canonical ZIP generation. Its
+default ZIP/directory entry points require frontmatter; only the existing Local
+upload lifecycle calls the explicit legacy-compatible ZIP entry point. The
+`ValidatedSkillPackage` value does not authorize a Bot, write a content store,
+mutate desired state, or project Runtime; those lifecycle effects remain in
+their owning application services.
+
+`CanonicalCenterVersionStore` keeps the exact Runtime file tree under
+`skills-center/<skill_uuid>/<sc_version_number>/` free of control objects. Its
+write intent and integrity manifest live under the derived sibling
+`skills-center-control/` prefix, which Engine Runtime must never mount or copy.
+Those objects protect immutable writes and validate completeness; they are not
+a publication state. Only `ac_skill_version.status=PUBLISHED`, owned by
+`SkillVersionMaterializer` after exact download/hash, strict package validation,
+Scanner metadata, MCP dependency and Store verification all succeed, expresses
+domain readiness. Publication and SC Reference producers consume the public
+Materializer Service API; Runtime reads consume only PUBLISHED Versions through
+`SkillVersionResolver`.
+
+`DraftContentStore` persists one canonical ZIP per immutable Draft revision.
+Its business reference is `draft://<skill_uuid>/v<target>/<revision_id>`; only
+the OSS adapter knows the configured physical object prefix. The Store owns no
+Draft status, TTL, READY marker, database command, Publication behavior, or
+Runtime projection. OSS writes use atomic create-if-absent, then compare exact
+canonical bytes for idempotency; storage read failures remain distinct from a
+missing revision.
+
 Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols. Changes to `SkillMetadataParserProtocol`, `SkillMetadata`, or stable manifest error codes affect Local folder upload immediately and the shared fixtures consumed by Git import, Draft validation and publication validation; coordinate those consumers before changing fields, limits or codes. List/detail/market readers must continue consuming parser-derived projections rather than inventing a second name or description source.
+
+`SkillCenterGatewayService` is a typed consumer of the independent SC adapter
+boundary. It accepts already-resolved Team requests and does not modify
+`ac_skill`, create Versions, select an Attempt result, retry publication, or
+materialize runtime content. It also preserves catalogue metadata, tag trees,
+SC publish diagnostics (including lossless raw standard/security reports),
+non-paged versions, and exact download facts without turning any of them into
+HTTP presentation DTOs. A status lookup uses the globally unique `skill_code`
+and returns SC's current version; the future Publication application service
+compares that response to its persisted Attempt rather than making the Gateway
+caller supply a Team or expected version.
+It rejects response identity drift across Team, Skill, page, and exact version;
+retry, Attempt, persistence, and materialization decisions remain above it.
+Public version/download reads use an explicit scope and verify public visibility
+before crossing the exact-version boundary.
+
+This change is the staged outbound seam only. A follow-up OCB change provides
+the Corp HTTP adapter, authentication/configuration binding, and wire mapping.
+A separate Avernet change migrates the `openapi_v1` public catalogue and
+publication consumers onto domain services backed by this seam. Until both are
+present, existing routers keep using the legacy client; this module is not a
+claim that production traffic has migrated.
+No Catalog, Publication, Public Reference, or Track Latest application module
+is introduced speculatively by this change; those modules remain owned by their
+later workflow PRs.
 
 ### One writer, one flush, one reader, one rule book
 
@@ -142,8 +242,9 @@ that way:
   transaction; nothing else re-derives those decisions.
 
 Writes go through two command services, one per scope, with identical shape —
-authorize, mutate desired state in one UoW transaction, project the complete
-runtime, compensate on failure: `SkillSetManagementService` for Set-scoped
+authorize, mutate desired state in one UoW transaction, project the runtime
+halves declared by `ProjectionScope`, compensate on failure:
+`SkillSetManagementService` for Set-scoped
 mutations (Default-Set edits become per-Bot exclusion rows) and
 `DirectActivationService` for Set-free single-capability activation, Skills
 and MCPs alike.
@@ -175,14 +276,17 @@ resolves template Default MCP context strictly; a provider failure aborts the
 projection and enters command compensation rather than becoming an empty
 Default policy.
 
-`RuntimeProjectionResolver` is the only source of a mutation/restart runtime
-snapshot. It receives Installation, active ordinary SkillSet membership,
-System Default assets and required configuration, then produces a complete
-Local/Repo/Center/MCP/CLI projection. Engine adapters receive that snapshot;
-they do not reconstruct it from Default exclusions or BFF state.
+`RuntimeProjectionResolver` is the only source of Projector snapshots.
+`resolve_skills` produces the complete Local/Repo/Center Skill half for a
+Skill-only command; `resolve` additionally receives Installation, System
+Default MCP and CLI facts and produces the complete Skill/MCP/CLI projection.
+The two results have distinct types, so an Engine Adapter cannot interpret an
+unresolved Non-Skill half as an empty final state. A whole-artifact runtime's
+existing ConfigComposer still rebuilds its persisted MCP artifact at delivery;
+CLI authorization remains an overwrite-style Passport projection.
 
 Direct activation and canonical SkillSet mutations commit desired state in the
-repository transaction and then reconcile the complete runtime projection.
+repository transaction and then reconcile the declared runtime projection.
 They do not acquire `SkillsPoolEditGuard`: Pool editing is a file-corpus and
 layout-migration concern, retained only by Local package upload/replacement/
 deletion and Pool cutover/rollback paths. Phase 1 intentionally has no

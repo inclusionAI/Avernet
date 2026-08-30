@@ -9,6 +9,7 @@ import requests
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_public.bot_discover_service_protocol import BotDiscoverServiceProtocol
 
 if TYPE_CHECKING:
     # Type-only: runtime ``from agentclaw.community.di import config`` would form a
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
-class BotDiscoverService:
+class BotDiscoverService(BotDiscoverServiceProtocol):
     """Bot Discover 服务.
 
     封装 BCSFuse recommend 接口的调用，并过滤非 public 的 bot。

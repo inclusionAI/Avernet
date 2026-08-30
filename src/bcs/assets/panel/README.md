@@ -50,6 +50,14 @@ The chat renderer opens components with names such as:
 />
 ```
 
+For a failed Run, the panel shows a **Rerun** action. It sends an empty
+`POST /state-machine-runs/{run_id}/reruns` request. The source panel remains on
+the source Run; presentation of the child is driven by the new Run's opening
+message (the default panel opening creates an independent tab). Repeating the
+action for the same source follows the same response path, so the panel does
+not need to generate an idempotency key. Hosts that provide `onInteraction`
+receive `{ type: "rerun", run }` after a successful response.
+
 ## Development
 
 ```bash

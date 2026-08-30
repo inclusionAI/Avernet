@@ -1,11 +1,17 @@
-"""Service API Protocol for public-bot discovery (search + recommend)."""
+"""Service API Protocol for public-bot discovery (search + recommend).
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_public/bot_discover_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.bot_public.bot_discover_service_protocol import (
+    BotDiscoverServiceProtocol,
+)
 
-
-@runtime_checkable
-class BotDiscoverServiceProtocol(Protocol):
-    """Service API for public bot discovery."""
-
-    def search_by_keyword(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "BotDiscoverServiceProtocol",
+]

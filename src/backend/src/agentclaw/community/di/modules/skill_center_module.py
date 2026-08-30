@@ -17,9 +17,6 @@ from agentclaw.community.api.bot_runtime_projector import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_upload_service import (
-    LocalSkillUploadServiceProtocol,
-)
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
 )
@@ -39,7 +36,9 @@ from agentclaw.community.api.skill_query_service import (
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
-from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
+from agentclaw.community.api.skill_set_service_factory import (
+    SkillSetServiceFactoryProtocol,
+)
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -56,21 +55,24 @@ from agentclaw.community.plugin_api.device_sync_dispatcher import (
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
-from agentclaw.community.core.repository.implementations.skill_center.propagation_log import \
-    SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
+from agentclaw.community.core.repository.implementations.skill_center.propagation_log import (
+    SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository,
+)
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     CapabilityDesiredStateRepository,
 )
-from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
-    SpaceSkillRepository as UnifiedSpaceSkillRepository,
+from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
+    SkillEditorRequestRepository,
 )
-from agentclaw.community.core.repository.implementations.skill_center.sync_log import \
-    SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository
+from agentclaw.community.core.repository.implementations.skill_center.sync_log import (
+    SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
     SkillCategoryRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
@@ -85,9 +87,6 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
-)
-from agentclaw.community.core.repository.protocols.skill_center import (
-    SpaceSkillRepository,
 )
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
@@ -114,6 +113,10 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
     ProjectionScope,
 )
+from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
+    EngineRuntimeProjectionRegistry,
+)
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
 )
@@ -129,9 +132,6 @@ from agentclaw.community.core.skill_center.services.git_sync import (
 )
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
-)
-from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
-    LocalSkillUploadService,
 )
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
 from agentclaw.community.core.skill_center.services.repository_catalog_service import (
@@ -156,7 +156,6 @@ from agentclaw.community.core.skill_center.services.skill_member_service import 
 from agentclaw.community.core.skill_center.services.skill_propagation_service import (
     SkillPropagationService,
 )
-from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.services.skill_publish_service import (
     SkillPublishService,
 )
@@ -190,8 +189,20 @@ from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.modules.canonical_center_store_module import (
+    CanonicalCenterStoreBindings,
+)
+from agentclaw.community.di.modules.draft_content_store_module import (
+    DraftContentStoreBindings,
+)
+from agentclaw.community.di.modules.local_skill_upload_module import (
+    LocalSkillUploadBindings,
+)
 from agentclaw.community.di.modules.skill_center_protocols import (
     SkillCenterProtocolBindings,
+)
+from agentclaw.community.di.modules.space_skill_repository_bindings import (
+    bind_space_skill_repositories,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
@@ -236,7 +247,13 @@ logger = get_logger()
 # ── Module ─────────────────────────────────────────────────────────────────
 
 
-class SkillCenterModule(SkillCenterProtocolBindings, Module):
+class SkillCenterModule(
+    CanonicalCenterStoreBindings,
+    DraftContentStoreBindings,
+    LocalSkillUploadBindings,
+    SkillCenterProtocolBindings,
+    Module,
+):
     """Production singletons + factories for skill_center."""
 
     def configure(self, binder: Binder) -> None:
@@ -258,7 +275,9 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         # injection returns the same instance.
         binder.bind(MarketCache, to=MarketCache, scope=singleton)
         binder.bind(SkillMarketService, to=SkillMarketService, scope=singleton)
-        binder.bind(RepositoryCatalogService, to=RepositoryCatalogService, scope=singleton)
+        binder.bind(
+            RepositoryCatalogService, to=RepositoryCatalogService, scope=singleton
+        )
         # ``GitSyncConfig.__init__`` reads YAML + env vars; bind as a
         # singleton so the file/env scan happens once.
         binder.bind(GitSyncConfig, to=GitSyncConfig, scope=singleton)
@@ -291,9 +310,10 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             to=UnifiedSkillCenterSyncLogRepository,
             scope=singleton,
         )
+        bind_space_skill_repositories(binder)
         binder.bind(
-            SpaceSkillRepository,
-            to=UnifiedSpaceSkillRepository,
+            SkillEditorRequestRepositoryProtocol,
+            to=SkillEditorRequestRepository,
             scope=singleton,
         )
         binder.bind(
@@ -389,10 +409,13 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         self, service: SkillMarketService
     ) -> SkillMarketServiceProtocol:
         return service
+
     @singleton
     @provider
     @inject
-    def repository_catalog_service(self, service: RepositoryCatalogService) -> RepositoryCatalogServiceProtocol:
+    def repository_catalog_service(
+        self, service: RepositoryCatalogService
+    ) -> RepositoryCatalogServiceProtocol:
         return service
 
     @singleton
@@ -477,32 +500,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
     @singleton
     @provider
     @inject
-    def local_skill_upload_service(
-        self,
-        skill_repo: SkillRepository,
-        bot_repo: BotRepository,
-        collaborator_service: CollaboratorServiceProtocol,
-        skill_service_factory: SkillServiceFactory,
-        audit_log_repo: BotCollabLogRepositoryProtocol,
-        edit_guard: SkillsPoolEditGuard,
-        injector: Injector,
-        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
-    ) -> LocalSkillUploadServiceProtocol:
-        return LocalSkillUploadService(
-            skill_repo,
-            bot_repo,
-            collaborator_service,
-            skill_service_factory,
-            audit_log_repo,
-            edit_guard,
-            lambda: injector.get(DeviceContextResolver),
-            runtime_reconciler,
-            SkillParser(),
-        )
-
-    @singleton
-    @provider
-    @inject
     def local_skill_delete_service(
         self,
         skill_repo: SkillRepository,
@@ -542,6 +539,42 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         )
 
         return UnifiedSkillCategoryRepository(db)
+
+    @singleton
+    @provider
+    @inject
+    def engine_runtime_projection_registry(
+        self,
+        pool_runtime: SkillsPoolRuntimeProtocol,
+        pool_layouts: SkillsPoolLayoutRepositoryProtocol,
+    ) -> EngineRuntimeProjectionRegistry:
+        """Which runtime contract each engine's projection obeys.
+
+        Routing only — the same shape as ``CommunityDeviceSyncModule``: adding
+        an engine whose runtime differs means a new implementation and an entry
+        here, with no edit to the others. Per-domain is the *default* rather
+        than an enumerated key, so an ordinary new engine needs no entry at all
+        and mis-routing one takes a wrong entry rather than a forgotten right
+        one.
+
+        Only ``PerDomainRuntimeProjection`` takes collaborators: the Skills
+        Pool runtime and layout repository, which no other implementation and
+        no longer the projector itself needs.
+        """
+        from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+            PerDomainRuntimeProjection,
+        )
+        from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
+            WholeArtifactRuntimeProjection,
+        )
+
+        return EngineRuntimeProjectionRegistry(
+            default=PerDomainRuntimeProjection(
+                pool_runtime=pool_runtime,
+                pool_layouts=pool_layouts,
+            ),
+            by_engine={"teclaw": WholeArtifactRuntimeProjection()},
+        )
 
     @singleton
     @provider

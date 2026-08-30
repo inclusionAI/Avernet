@@ -73,6 +73,7 @@ pub struct Services {
     pub bot_onboarding: Arc<dyn BotOnboardingService>,
     /// Bot query application service.
     pub bot_query: Arc<dyn BotQueryService>,
+    /// Optimized bot search application service.
     /// Bot discovery application service.
     pub bot_discovery: Arc<dyn BotDiscoveryService>,
     /// Bot management application service.
@@ -307,6 +308,8 @@ impl ServicesBuilder {
         self.bot_query = Some(service);
         self
     }
+
+    /// Set the optimized bot search application service.
 
     /// Set the bot discovery application service.
     pub fn bot_discovery(mut self, service: Arc<dyn BotDiscoveryService>) -> Self {

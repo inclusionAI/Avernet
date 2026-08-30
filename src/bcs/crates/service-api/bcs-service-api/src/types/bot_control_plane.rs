@@ -41,6 +41,14 @@ pub enum BotCandidateVisibility {
     Collaboration,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BotSearchFriendshipFilter {
+    #[default]
+    All,
+    Friends,
+    NonFriends,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BotCandidateReadQuery {
     pub acting_bot_id: String,
@@ -48,6 +56,23 @@ pub struct BotCandidateReadQuery {
     pub visibility: BotCandidateVisibility,
     pub friend_ids: HashSet<String>,
     pub name: Option<String>,
+    pub offset: u64,
+    pub limit: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BotSearchCandidateQuery {
+    pub acting_bot_id: String,
+    pub env: String,
+    pub visibility: BotCandidateVisibility,
+    pub friend_ids: HashSet<String>,
+    pub name: Option<String>,
+    pub q: Option<String>,
+    pub visibility_filter: Option<Vec<String>>,
+    pub user_visibility: Option<Vec<String>>,
+    pub status: Option<ActorStatus>,
+    pub friendship: Option<BotSearchFriendshipFilter>,
+    pub tc_bot: Option<bool>,
     pub offset: u64,
     pub limit: u64,
 }

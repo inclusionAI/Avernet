@@ -4,6 +4,7 @@ from injector import inject
 
 from agentclaw.community.core.system_config.service import SystemConfigService
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.system_config.device_config_service_protocol import DeviceConfigServiceProtocol
 
 logger = get_logger()
 
@@ -12,7 +13,7 @@ logger = get_logger()
 # ============================================================
 
 
-class DeviceConfigService:
+class DeviceConfigService(DeviceConfigServiceProtocol):
     """设备配置服务
 
     提供设备相关的配置管理功能：

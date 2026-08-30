@@ -115,6 +115,7 @@ bcs-channel-store = { workspace = true }
 bcs-group    = { workspace = true }
 bcs-interaction = { workspace = true }
 bcs-message-flow = { workspace = true }
+bcs-chat-run-store = { workspace = true }
 bcs-organization = { workspace = true }
 bcs-organization-store = { workspace = true }
 bcs-routing  = { workspace = true }

@@ -25,7 +25,7 @@ core/task/
 ├── task_center/                   # TaskService facade + ExecutionEngine 编排核(非独立模块)
 │   ├── task_service.py            #   facade API(execute / get_task_dashboard / list_tasks)
 │   └── engine.py                  #   ExecutionEngine:on_* 事件驱动 + 状态条件(a/b/c)推进
-├── task_graph/                    # TaskGraphService 图谱 SSOT(7+2 API,独立模块)
+├── task_context/                    # TaskGraphService 图谱 SSOT(7+2 API,独立模块)
 │   └── task_graph_service.py      #   原子变更唯一网关 + relations 分解树派生查询
 ├── task_plan/                     # TaskPlanner 规划编排壳 + DecomposerPort seam(可插拔)
 │   └── planner.py                 #   plan(graph) → 委托 decompose(零 case 知识);protocols.py 延后

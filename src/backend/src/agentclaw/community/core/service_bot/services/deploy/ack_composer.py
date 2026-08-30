@@ -1,40 +1,20 @@
-"""``AckDeployConfigComposer`` — the ACK/ECI deployment. **Unimplemented.**
+"""``AckDeployConfigComposer`` — the open-source engine image on ACK/ECI.
 
-This is the seam's second implementation, declared so the interface has the two
-callers that justify it and so that deployment's work has a named place to
-land. Its three methods raise; the deployment that selects it does not boot until they
-are written.
+The ACK/ECI deployment runs the open-source engine image on managed
+Kubernetes, where the image carries its own entrypoint — so the start command
+is a single ``nohup`` invocation rather than the managed image's four-step
+chain. ``{token}`` and ``{client_id}`` are left as literal placeholders that
+BaaS substitutes at dispatch time (``_safe_format_hook``), ``client_id`` being
+the device UUID.
 
-That is the point. A composer that returned plausible-looking managed values
-would produce bots that come up misconfigured on a runtime nobody has tested —
-the failure would surface as a bot that starts and does not work, which is the
-expensive kind. Raising means a deployment either has a real ACK composer or
-fails loudly at the first create.
+``bot_id`` and ``owner_id`` are resolved from :class:`BotDeployContext` at
+compose time — unlike ``token`` / ``client_id``, the backend knows them.
 
-What each method owes its caller, for whoever implements it:
+``BaasService`` appends the per-bot startup script (issue #926) *after*
+``build_start_command``'s return value, so this method must not include it.
 
-``build_start_command``
-    One command that starts the open-source engine image, not the managed
-    image's four-step chain — the ACK image carries its own entrypoint. May
-    leave ``{token}`` / ``{client_id}`` as literal placeholders; BaaS
-    substitutes them at dispatch (``_safe_format_hook``), ``client_id`` being
-    the device UUID. Do **not** append the per-bot startup script (issue #926)
-    here — ``BaasService`` does that to whatever this returns.
-
-``build_mount_points``
-    The ECI pod's mounts. On ACK these become K8s volumes (NAS or OSS) rather
-    than the managed NAS bind-mounts, so the paths are the deployment's to
-    choose. Note the OSS guidance that a mounted directory should stay under
-    ~1000 files.
-
-``build_storage``
-    The bot's storage volume, or ``None`` to attach none — ``None`` drops the
-    ``storage`` key from the payload entirely, which is the right answer for a
-    pod that keeps its state elsewhere.
-
-``BotDeployContext`` carries everything available at compose time; see
-``ManagedDeployConfigComposer`` for how the managed deployment answers the same
-three questions.
+See ``ManagedDeployConfigComposer`` for how the managed deployment answers the
+same three questions.
 """
 from __future__ import annotations
 
@@ -45,32 +25,46 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer
 from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     MountPointEntry,
     Storage,
+    StorageType,
 )
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
-_UNIMPLEMENTED = (
-    "AckDeployConfigComposer.{method} is not implemented yet — the ACK/ECI "
-    "deployment cannot create bots until it is. Set "
-    "baas.deploy_runtime to 'managed' to use the managed bot image instead."
-)
-
-
 class AckDeployConfigComposer(DeployConfigComposer):
-    """Compose the create-bot payload for the open-source image on ACK/ECI."""
+    """Compose the create-bot payload for the open-source engine image on ACK/ECI."""
 
     @property
     def name(self) -> DeployRuntime:
         return DeployRuntime.ACK
 
     def build_start_command(self, ctx: BotDeployContext) -> str:
-        raise NotImplementedError(
-            _UNIMPLEMENTED.format(method="build_start_command")
+        """The single ``nohup`` that starts the engine inside the ACK image.
+
+        ``{token}`` and ``{client_id}`` remain literal placeholders for BaaS
+        to substitute at dispatch; ``bot_id`` and ``owner_id`` are filled from
+        the context.
+        """
+        return (
+            f"su admin -c 'nohup start_service.sh --token {{token}} "
+            f"--client_id {{client_id}} --engine {ctx.engine} "
+            f"--bot_id {ctx.bot_id} --owner_id {ctx.owner_id} "
+            f">> /home/admin/start.log 2>&1'"
         )
 
     def build_mount_points(self, ctx: BotDeployContext) -> list[MountPointEntry]:
-        raise NotImplementedError(
-            _UNIMPLEMENTED.format(method="build_mount_points")
-        )
+        """No bind-mounts: the ACK pod's volumes come from the ``storage``
+        block, not from pre-existing shared directories."""
+        return []
 
     def build_storage(self, ctx: BotDeployContext) -> Storage | None:
-        raise NotImplementedError(_UNIMPLEMENTED.format(method="build_storage"))
+        """A NAS volume at ``/home/admin`` for the bot's persistent state.
+
+        ``storage_id`` is per-bot — it carries the ``bot_id`` so BaaS can
+        find the same volume again on the next start.
+        """
+        return Storage(
+            type=StorageType.NAS,
+            path="/home/admin",
+            storage_id=ctx.bot_id,
+            quota="1Gi",
+            permission="0777",
+        )

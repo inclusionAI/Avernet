@@ -54,6 +54,9 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
+from agentclaw.community.core.skill_center.skill_parameter_service_factory_protocol import SkillParameterServiceFactoryProtocol
+from agentclaw.community.core.skill_center.skill_service_factory_protocol import SkillServiceFactoryProtocol
+from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import SkillSetServiceFactoryProtocol
 
 if TYPE_CHECKING:
     # Runtime-keyed device dispatchers stay in the DI layer (they bridge
@@ -345,7 +348,7 @@ class LocalSkillPackageStorage:
         return files
 
 
-class SkillServiceFactory:
+class SkillServiceFactory(SkillServiceFactoryProtocol):
     """Mints :class:`SkillService` instances scoped to per-request paths.
 
     Holds the @inject-supplied singletons (``skill_repo``,
@@ -566,7 +569,7 @@ class SkillServiceFactory:
         )
 
 
-class SkillSetServiceFactory:
+class SkillSetServiceFactory(SkillSetServiceFactoryProtocol):
     """Mints :class:`SkillSetService` instances per-request.
 
     ``resolver`` / ``device_sync_dispatcher`` 走 lazy ``Callable`` thunk 注入,
@@ -733,7 +736,7 @@ class SkillSetServiceFactory:
         )
 
 
-class SkillParameterServiceFactory:
+class SkillParameterServiceFactory(SkillParameterServiceFactoryProtocol):
     """Mints :class:`SkillParameterService` for a (bot_id, user_id) pair.
 
     Computes the per-call ``device_fs`` via ``DeviceContextResolver`` +

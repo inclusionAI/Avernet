@@ -7,7 +7,7 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
 from agentclaw.community.core.task.task_dispatch.strategies import DirectDispatchStrategy
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 PLAN = """

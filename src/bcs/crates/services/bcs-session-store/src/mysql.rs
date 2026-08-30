@@ -20,8 +20,9 @@ use bcs_service_api::core::session::{
     can_reactivate, new_channel_session_id, new_session_id, validate_session_id,
 };
 use bcs_service_api::port::repo::{
-    AddSessionParticipantWithEvent, AppendEventRecord, CompleteSessionWithEvent,
-    CreateSessionWithEvent, NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,
+    AddSessionParticipantWithEvent, AppendEventRecord, ClaimSessionCallback,
+    CompleteSessionCallback, CompleteSessionWithEvent, CreateSessionWithEvent,
+    NewSessionParams, RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
 };
 use bcs_service_api::{
     GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, Participant, ParticipantMode,
@@ -35,9 +36,10 @@ use bcs_service_api::{
 const INSERT_SQL: &str = "INSERT INTO bcs_group_sessions \
     (session_id, group_id, session_title, env, status, session_kind, group_version, \
      caller_id, input, caller_principal, activation_count, \
-     callback_status, created_by, participants, completed_at, meta,
+     callback_status, callback_lease_token, callback_lease_owner, callback_lease_until_ms, \
+     created_by, participants, completed_at, meta,
      current_msg_seq, participant_join_seq) \
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, NULL, ?, 0, NULL)";
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, NULL, ?, ?, NULL, ?, 0, NULL)";
 
 // ---------------------------------------------------------------------------
 // Public type
@@ -100,6 +102,12 @@ impl MySqlSessionStore {
     ) -> ServiceResult<Session> {
         let session_kind = params.session_kind;
         let initial_cb = initial_callback_status(session_kind);
+        let initial_callback_lease_token = if matches!(session_kind, SessionKind::ServiceInvocation)
+        {
+            DbValue::I64(0)
+        } else {
+            DbValue::Null
+        };
         let participants_json = serde_json::to_string(&params.participants).map_err(|e| {
             ServiceError::SessionInvalidParams(format!("participants serialize: {e}"))
         })?;
@@ -157,6 +165,7 @@ impl MySqlSessionStore {
                     input_value,
                     DbValue::from(params.caller_principal.as_deref()),
                     DbValue::from(initial_cb.as_deref()),
+                    initial_callback_lease_token,
                     DbValue::from(params.created_by.as_deref()),
                     DbValue::from(participants_json.as_str()),
                     meta_value,
@@ -825,6 +834,8 @@ impl SessionRepoPort for MySqlSessionStore {
             "UPDATE bcs_group_sessions \
              SET status = 'running', output = NULL, error_message = NULL, \
                  callback_status = 'pending', input = ?, \
+                 callback_lease_owner = NULL, callback_lease_token = 0, \
+                 callback_lease_until_ms = NULL, \
                  activation_count = activation_count + 1, \
                  completed_at = NULL, {} \
              WHERE env = ? AND session_id = ?",
@@ -860,7 +871,8 @@ impl SessionRepoPort for MySqlSessionStore {
     async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()> {
         let sql = format!(
             "UPDATE bcs_group_sessions \
-             SET callback_status = ?, {} \
+             SET callback_status = ?, callback_lease_owner = NULL, \
+                 callback_lease_until_ms = NULL, {} \
              WHERE env = ? AND session_id = ?",
             self.flavor.set_modified_now(),
         );
@@ -876,6 +888,107 @@ impl SessionRepoPort for MySqlSessionStore {
             .await
             .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
         Ok(())
+    }
+
+    async fn claim_callback(
+        &self,
+        command: ClaimSessionCallback,
+    ) -> ServiceResult<Option<SessionCallbackClaim>> {
+        let sql = format!(
+            "UPDATE bcs_group_sessions \
+             SET callback_lease_owner = ?, \
+                 callback_lease_token = callback_lease_token + 1, \
+                 callback_lease_until_ms = ?, {} \
+             WHERE env = ? AND session_id = ? \
+               AND status = 'completed' AND session_kind = 'service_invocation' \
+               AND activation_count = ? AND callback_status = 'pending' \
+               AND callback_lease_token IS NOT NULL \
+               AND (callback_lease_until_ms IS NULL OR callback_lease_until_ms <= ?)",
+            self.flavor.set_modified_now(),
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                &sql,
+                vec![
+                    DbValue::from(command.lease_owner.as_str()),
+                    DbValue::from(command.lease_until_ms),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.session_id.as_str()),
+                    DbValue::I64(i64::from(command.expected_activation_count)),
+                    DbValue::from(command.now_ms),
+                ],
+            ))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("session callback claim: {e}")))?;
+        if result.affected_rows == 0 {
+            return Ok(None);
+        }
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT callback_lease_token FROM bcs_group_sessions \
+                 WHERE env = ? AND session_id = ? AND activation_count = ? \
+                   AND callback_lease_owner = ?",
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.session_id.as_str()),
+                    DbValue::I64(i64::from(command.expected_activation_count)),
+                    DbValue::from(command.lease_owner.as_str()),
+                ],
+            ))
+            .await
+            .map_err(|e| {
+                ServiceError::InternalError(format!("session callback claim read: {e}"))
+            })?;
+        let row = rows.into_iter().next().ok_or_else(|| {
+            ServiceError::InternalError(
+                "Session callback claim disappeared before token read".to_string(),
+            )
+        })?;
+        let lease_token: i64 = db_get_column(&row, "callback_lease_token")
+            .map_err(|e| ServiceError::InternalError(format!("callback lease token: {e}")))?;
+        Ok(Some(SessionCallbackClaim { lease_token }))
+    }
+
+    async fn complete_callback(&self, command: CompleteSessionCallback) -> ServiceResult<bool> {
+        if !matches!(
+            command.terminal_status.as_str(),
+            "succeeded" | "partial_failed" | "failed" | "not_applicable"
+        ) {
+            return Err(ServiceError::SessionInvalidParams(format!(
+                "invalid terminal callback status: {}",
+                command.terminal_status
+            )));
+        }
+        let sql = format!(
+            "UPDATE bcs_group_sessions \
+             SET callback_status = ?, callback_lease_owner = NULL, \
+                 callback_lease_until_ms = NULL, {} \
+             WHERE env = ? AND session_id = ? \
+               AND status = 'completed' AND session_kind = 'service_invocation' \
+               AND activation_count = ? AND callback_status = 'pending' \
+               AND callback_lease_owner = ? AND callback_lease_token = ?",
+            self.flavor.set_modified_now(),
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                &sql,
+                vec![
+                    DbValue::from(command.terminal_status.as_str()),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.session_id.as_str()),
+                    DbValue::I64(i64::from(command.expected_activation_count)),
+                    DbValue::from(command.lease_owner.as_str()),
+                    DbValue::I64(command.lease_token),
+                ],
+            ))
+            .await
+            .map_err(|e| {
+                ServiceError::InternalError(format!("session callback completion: {e}"))
+            })?;
+        Ok(result.affected_rows == 1)
     }
 
     async fn update_title(
@@ -1149,6 +1262,43 @@ impl SessionRepoPort for MySqlSessionStore {
             Err(_) => return Vec::new(),
         };
         rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
+    }
+
+    async fn list_recoverable_callbacks(
+        &self,
+        now_ms: u64,
+        after_session_id: Option<&str>,
+        limit: u64,
+    ) -> ServiceResult<Vec<Session>> {
+        let select_cols = self.select_cols();
+        let mut sql = format!(
+            "SELECT {select_cols} FROM bcs_group_sessions \
+             WHERE env = ? AND session_kind = 'service_invocation' \
+             AND status = 'completed' AND callback_status = 'pending' \
+             AND callback_lease_token IS NOT NULL \
+             AND (callback_lease_until_ms IS NULL OR callback_lease_until_ms <= ?)"
+        );
+        let mut params = vec![
+            DbValue::from(self.env.as_str()),
+            DbValue::U64(now_ms),
+        ];
+        if let Some(after_session_id) = after_session_id {
+            sql.push_str(" AND session_id > ?");
+            params.push(DbValue::from(after_session_id));
+        }
+        sql.push_str(" ORDER BY session_id ASC LIMIT ?");
+        params.push(DbValue::U64(limit));
+
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "list recoverable Session callbacks: {error}"
+                ))
+            })?;
+        rows.iter().map(row_to_session).collect()
     }
 
     async fn add_participant(

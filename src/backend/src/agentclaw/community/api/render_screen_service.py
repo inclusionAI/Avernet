@@ -1,34 +1,17 @@
-"""Service API Protocol for bot render-screen records."""
+"""Service API Protocol for bot render-screen records.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_management/render_screen_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.bot_management.render_screen_service_protocol import (
+    RenderScreenServiceProtocol,
+)
 
-
-@runtime_checkable
-class RenderScreenServiceProtocol(Protocol):
-    """Service API for render-screen CRUD."""
-
-    def list_render_screens(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str | None = None,
-        current_user_id: str | None = None,
-    ) -> list[Any]: ...
-
-    def create_render_screen(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def update_render_screen(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def delete_render_screen(self, *, record_id: int) -> None: ...
-
-    def get_render_screen(self, record_id: int) -> Any | None: ...
-
-    def authorize_render_screen_bot(self, *, bot_id: str, user_id: str) -> str: ...
-
-    def authorize_render_screen_record(
-        self,
-        *,
-        record_id: int,
-        user_id: str,
-    ) -> Any: ...
+__all__ = [
+    "RenderScreenServiceProtocol",
+]

@@ -1,19 +1,17 @@
-"""Service API Protocol for dormant Bot activation."""
+"""Service API Protocol for dormant Bot activation.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_dormant/bot_dormant_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.bot_dormant.bot_dormant_service_protocol import (
+    BotDormantActivateServiceProtocol,
+)
 
-
-@runtime_checkable
-class BotDormantActivateServiceProtocol(Protocol):
-    """User-scoped service that reactivates a recycled personal cloud Bot.
-
-    Thin public-facing seam over ``core.bot_dormant.activate_service``; the
-    concrete service owns the Passport unfreeze + start_bot background flow.
-    The HTTP handler retains the ``bot_type == personal`` + cloud-only guard
-    and the owner lookup, and delegates only the reactivation orchestration.
-    """
-
-    def activate(
-        self, bot_id: str, user_id: str, nick_name: str | None = None
-    ) -> dict[str, Any]: ...
+__all__ = [
+    "BotDormantActivateServiceProtocol",
+]

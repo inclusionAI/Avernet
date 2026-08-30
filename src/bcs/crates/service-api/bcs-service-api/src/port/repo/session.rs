@@ -44,6 +44,29 @@ pub struct CompleteSessionWithEvent {
 }
 
 #[derive(Debug, Clone)]
+pub struct ClaimSessionCallback {
+    pub session_id: String,
+    pub expected_activation_count: i32,
+    pub lease_owner: String,
+    pub now_ms: u64,
+    pub lease_until_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionCallbackClaim {
+    pub lease_token: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteSessionCallback {
+    pub session_id: String,
+    pub expected_activation_count: i32,
+    pub lease_owner: String,
+    pub lease_token: i64,
+    pub terminal_status: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct AddSessionParticipantWithEvent {
     pub session_id: String,
     pub expected_participants: Vec<Participant>,
@@ -118,6 +141,18 @@ pub trait SessionRepoPort: Send + Sync {
     async fn count_running_service(&self, group_id: &str) -> u64;
     async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session>;
 
+    /// List completed service Sessions whose current activation still has a
+    /// recoverable callback. Legacy rows are excluded by requiring a
+    /// non-null callback lease token in the concrete store.
+    async fn list_recoverable_callbacks(
+        &self,
+        _now_ms: u64,
+        _after_session_id: Option<&str>,
+        _limit: u64,
+    ) -> ServiceResult<Vec<Session>> {
+        Ok(Vec::new())
+    }
+
     /// Count sessions in a group matching the SAME filters as [`SessionRepoPort::list_by_group`]
     /// (`status` / `title_contains` / `participant_id`), but WITHOUT pagination.
     ///
@@ -166,6 +201,22 @@ pub trait SessionRepoPort: Send + Sync {
         session_id: &str,
         new_input: Option<serde_json::Value>,
     ) -> ServiceResult<Session>;
+
+    /// Reactivate one completed Service Session activation with a compare-and-set.
+    /// Returns `Ok(None)` when the status or activation count changed before the
+    /// mutation. Composite in-memory use cases use this while holding their own
+    /// critical section so a stale rerun cannot activate a Session without its Run.
+    async fn reactivate_if_completed_activation(
+        &self,
+        _session_id: &str,
+        _expected_activation_count: i32,
+        _new_input: Option<serde_json::Value>,
+    ) -> ServiceResult<Option<Session>> {
+        Err(ServiceError::InvalidOperation {
+            message: "Session activation CAS is not configured".to_string(),
+            request_id: None,
+        })
+    }
     async fn add_participant(
         &self,
         session_id: &str,
@@ -199,6 +250,21 @@ pub trait SessionRepoPort: Send + Sync {
         mode: ParticipantMode,
     ) -> ServiceResult<Session>;
     async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()>;
+    async fn claim_callback(
+        &self,
+        _command: ClaimSessionCallback,
+    ) -> ServiceResult<Option<SessionCallbackClaim>> {
+        Err(ServiceError::InvalidOperation {
+            message: "Session callback claim is not configured".to_string(),
+            request_id: None,
+        })
+    }
+    async fn complete_callback(&self, _command: CompleteSessionCallback) -> ServiceResult<bool> {
+        Err(ServiceError::InvalidOperation {
+            message: "Session callback completion is not configured".to_string(),
+            request_id: None,
+        })
+    }
     async fn update_title(&self, session_id: &str, title: Option<String>)
     -> ServiceResult<Session>;
     async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String>;

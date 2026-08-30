@@ -22,6 +22,7 @@ user_config:
     openclaw_root: "./data/workspace/openclaw"
     claude_code_root: "./data/workspace/claude_code"
     aicoding_root: "./data/workspace/aicoding"
+    hermes_root: "./data/workspace/hermes"
 
   # Operator whitelist gating admin endpoints. Empty = no privileged operators
   # by default; a community deployment lists its own admin subject ids.
@@ -35,6 +36,12 @@ user_config:
   #   cors:
   #     allow_origins:
   #       - "https://your-frontend.example.com"
+
+  # Skill scan — community build has no scanner SDK, so disable it to avoid
+  # SkillScanService.start() returning False and start_center_daily_task()
+  # raising RuntimeError("not started").
+  skill_scan:
+    enabled: false
 
   # Per-owner device allocation policy (neutral knobs only).
   device_allocation:
@@ -93,23 +100,26 @@ user_config:
   # itself is owned/operated separately; point api_base_url at that backend.
   # tenant/template are neutral placeholders — set per deployment.
   baas:
-    api_base_url: "http://localhost:8890"
+    api_base_url: "${BASS_URL:-}"
     tenant: "community"
-    template_uuid: ""
+    template_uuid: "${BAAS_TEMPLATE_ID:-}"
+    # ACK/ECI deployment — run the open-source engine image on managed
+    # Kubernetes via AckDeployConfigComposer, not the managed bot image.
+    deploy_runtime: "ack"
 
   # Bot-discovery backend URL (empty = discovery inert).
   bcsfuse:
-    base_url: ""
+    base_url: "${BCS_FUSE_URL:-}"
 
   # ECB downstream-sync URL (empty = the ECB sync leg is inert).
   ecb:
-    base_url: ""
+    base_url: "${ECB_URL:-}"
 
   # Public API gateway host, published to tenants by the connection endpoint
   # (empty = this deployment fronts no gateway, so that endpoint reports so).
   gateway:
-    base_url: ""
-    base_url_pre: ""
+    base_url: "${GATEWAY_URL:-}"
+    base_url_pre: "${GATEWAY_URL_PRE:-}"
 
   # Dormant-bot recycle: dry-run by default (never mutates without opt-in).
   dormant:
@@ -135,7 +145,7 @@ user_config:
   # Prerequisite: BCS must have OAuth configured ([auth.oauth] with jwt_secret,
   # a valid base_url, and >=1 provider); otherwise /auth/user returns 404.
   bcs:
-    base_url: "http://127.0.0.1:21000"
+    base_url: "${BCS_URL:-}"
     user_path: "/auth/user"
     timeout: 10
     operator_subjects: []
@@ -167,7 +177,7 @@ user_config:
   database:
     backend: "mysql"
     url: "${DATABASE_URL}"
-    create_schema: true
+    create_schema: false
 
   # Cache + distributed lock — consumed by the community CommunityCache.
   # Set redis_url to a Redis endpoint for a multi-worker deploy (KV + SET NX
@@ -175,7 +185,7 @@ user_config:
   # in-process lock is unsafe across workers). The REDIS_URL env var, if set,
   # takes precedence.
   cache:
-    redis_url: ""
+    redis_url: "${REDIS_URL:-}"
 
   # Object storage — consumed by the community object-storage impls.
   # backend = "fs" (local filesystem under fs_root, the zero-dependency default)
@@ -195,7 +205,7 @@ user_config:
   # get_secret(name) reads "{env_prefix}{NAME}_USER" / "{env_prefix}{NAME}_VALUE"
   # from the environment (NAME upper-cased, '-' → '_').
   secret:
-    env_prefix: "AGENTCLAW_SECRET_"
+    env_prefix: ""
 
   # Secret-registry key NAMES the app resolves via SecretResolver. Left unset:
   # the dormant-token feature uses a local fallback and git-sync degrades to its
@@ -241,6 +251,29 @@ user_config:
   # MCP servers (configured per user) still work, and permission is allow-all.
   mcp:
     registry_config_path: ""
+
+  # Outbound-header egress rules — consumed by the community
+  # CommunityOutboundRuleProvider. Each entry maps to one HeaderOperationRule
+  # applied to a bot's egress traffic. An empty header_rules list (the default)
+  # means no egress mutation. Set per-deployment to inject auth headers or route
+  # to internal gateways.
+  #
+  # Example:
+  #   outbound_rules:
+  #     header_rules:
+  #       - domains: ["*.example.com"]
+  #         action: "set"            # "set" or "replace"
+  #         header_name: "X-Custom-Header"
+  #         value: "my-value"
+  #         # placeholder: "old"     # only for "replace": substring replaced by value
+  #         # separator: "; "        # only for "replace": join separator
+  outbound_rules:
+    header_rules:
+      - domains: ["${MODEL_API:-}"]
+        action: "replace"
+        header_name: "Authorization"
+        value: "${MODEL_KEY:-}"
+        placeholder: "${API-KEY}"
 
   # Harness-internal LLM utility. Left unset = disabled (feature-off). The
   # harness is an internal dev/diagnostic tool; a community deployment that wants

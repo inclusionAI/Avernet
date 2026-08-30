@@ -47,20 +47,23 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
     ],
     "moltis": [],
     "teclaw": [
-        {"server_code": "mcp.ant.lwawchat.cogmessagemcp", "name": "蚂蚁钉协作群消息相关-MCP服务"},
-        {"server_code": "mcp.ant.antdingopenapi.antdingreportmcpserver", "name": "蚂蚁钉日志服务"},
-        {"server_code": "mcp.ant.antdingopenapi.antdinggroupmcpserver", "name": "蚂蚁钉群服务"},
-        {"server_code": "mcp.ant.lwawchat.cogdocumentmcp", "name": "蚂蚁钉协作群文档相关-MCP服务"},
-        {"server_code": "mcp.ant.antdingopenapi.antdingeventmcpserver", "name": "蚂蚁钉日程相关-MCP服务"},
-        {"server_code": "mcp.ant.antdingopenapi.antdingrobotmcpserver", "name": "蚂蚁钉机器人相关-MCP服务"},
-        {"server_code": "mcp.ant.antdingopenapi.antdingmessagemcpserver", "name": "蚂蚁钉消息相关-MCP服务"},
-        {"server_code": "mcp.ant.antdingopenapi.antdingtodomcpserver", "name": "蚂蚁钉待办服务"},
-        {"server_code": "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver", "name": "语雀 MCP"},
-        {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima-MCP服务"},
-        {"server_code": "mcp.ant.homistudio.recordmcp", "name": "会中会话记录查询服务"},
-        {"server_code": "mcp.ant.rpc.dcanttouch.adminservice", "name": "行政小宝MCP服务"},
+        {"server_code": "mcp.ant.lwawchat.cogmessagemcp"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingreportmcpserver"},
+        {"server_code": "mcp.ant.antdingopenapi.antdinggroupmcpserver"},
+        {"server_code": "mcp.ant.lwawchat.cogdocumentmcp"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingeventmcpserver"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingrobotmcpserver"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingmessagemcpserver"},
+        {"server_code": "mcp.ant.antdingopenapi.antdingtodomcpserver"},
+        {"server_code": "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"},
+        {"server_code": "mcp.ant.arkai.dimamcpserver"},
+        {"server_code": "mcp.ant.homistudio.recordmcp"},
+        {"server_code": "mcp.ant.rpc.dcanttouch.adminservice"},
         # Local/stdio; resolved through LocalMCPRegistry, not MCP Center. Kept
-        # last to match the other engines' lists.
+        # last to match the other engines' lists, and the only entry here that
+        # still carries a ``name``: the codes above are catalogued upstream, so
+        # their display label comes from MCP Center, while this one has no
+        # catalogue entry to be named from.
         {"server_code": "hitl", "name": "HITL"},
     ],
     "claude_code": [

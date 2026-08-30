@@ -45,6 +45,23 @@ class RuntimeLayoutProbeResult:
     evidence: dict[str, Any]
 
 
+class _ResolvedFilesystemLayoutEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    layout_contract_version: str
+    active_root: str
+    local_root: str
+    repo_root: str
+    pool_center: str
+
+
+class _RuntimeLayoutProbeEvidence(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    resolved_layout: _ResolvedFilesystemLayoutEvidence | None = None
+
+
 class _RuntimeLayoutProbeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -52,7 +69,7 @@ class _RuntimeLayoutProbeData(BaseModel):
     engine: str
     layout_contract_version: str
     preparation_id: str | None
-    evidence: dict[str, Any]
+    evidence: _RuntimeLayoutProbeEvidence
 
 
 class _RuntimeLayoutProbeEnvelope(BaseModel):
@@ -176,6 +193,7 @@ class CurrentRuntimeLayoutProbeService:
         except ValidationError:
             return CurrentRuntimeLayoutProbeService._invalid_response(engine)
         data = envelope.data
+        evidence = data.evidence.model_dump(exclude_none=True)
         if (
             data.engine != engine
             or data.layout_contract_version != LAYOUT_CONTRACT_VERSION
@@ -187,7 +205,7 @@ class CurrentRuntimeLayoutProbeService:
             return CurrentRuntimeLayoutProbeService._invalid_response(engine)
         if (
             data.status is RuntimeLayoutProbeStatus.READY
-            and not CurrentRuntimeLayoutProbeService._supports_v2(data.evidence)
+            and not CurrentRuntimeLayoutProbeService._supports_v2(evidence)
         ):
             return CurrentRuntimeLayoutProbeService._not_capable(
                 engine,
@@ -198,7 +216,7 @@ class CurrentRuntimeLayoutProbeService:
             engine=engine,
             layout_contract_version=LAYOUT_CONTRACT_VERSION,
             preparation_id=data.preparation_id,
-            evidence=data.evidence,
+            evidence=evidence,
         )
 
     @staticmethod

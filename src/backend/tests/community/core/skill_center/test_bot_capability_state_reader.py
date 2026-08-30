@@ -74,19 +74,36 @@ class _PoolSkills:
         ]
 
 
+class _Versions:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def resolve_latest_runtime_assets(self, **kwargs):
+        self.calls.append(kwargs)
+        return tuple(kwargs["assets"])
+
+    def resolve_exact_published(self, **kwargs):  # pragma: no cover - not used here
+        raise AssertionError(kwargs)
+
+
 def _reader(
     *, bots: _Bots | None = None
-) -> tuple[BotCapabilityStateReader, _Repository, _PoolSkills, _Bots]:
+) -> tuple[BotCapabilityStateReader, _Repository, _PoolSkills, _Bots, _Versions]:
     repository = _Repository()
     pool_skills = _PoolSkills().bind(repository)
+    versions = _Versions()
     bots = bots if bots is not None else _Bots()
     return (
         BotCapabilityStateReader(
-            repository=repository, bot_repo=bots, pool_skills=pool_skills
+            repository=repository,
+            bot_repo=bots,
+            pool_skills=pool_skills,
+            version_resolver=versions,
         ),
         repository,
         pool_skills,
         bots,
+        versions,
     )
 
 
@@ -100,12 +117,12 @@ _EXPECTED_FLUSH = {
 
 
 def test_the_implementation_satisfies_the_public_protocol():
-    reader, _repository, _pool, _bots = _reader()
+    reader, _repository, _pool, _bots, _versions = _reader()
     assert isinstance(reader, BotCapabilityStateReaderProtocol)
 
 
 def test_skill_read_flushes_then_answers_from_the_installation_join():
-    reader, repository, pool_skills, bots = _reader()
+    reader, repository, pool_skills, bots, versions = _reader()
 
     assets = reader.active_skill_assets(bot_id="bot-1", owner_id="owner")
 
@@ -117,10 +134,18 @@ def test_skill_read_flushes_then_answers_from_the_installation_join():
         RegisteredSkillAsset(skill_id=1, name="qa", git_path="local://qa"),
     )
     assert bots.lookups == [("bot-1", "owner")]
+    assert versions.calls == [
+        {
+            "env": "pre",
+            "assets": (
+                RegisteredSkillAsset(skill_id=1, name="qa", git_path="local://qa"),
+            ),
+        }
+    ]
 
 
 def test_mcp_read_flushes_then_answers_from_installed_codes():
-    reader, repository, _pool, _bots = _reader()
+    reader, repository, _pool, _bots, _versions = _reader()
 
     codes = reader.active_mcp_server_codes(bot_id="bot-1", owner_id="owner")
 
@@ -130,7 +155,7 @@ def test_mcp_read_flushes_then_answers_from_installed_codes():
 
 
 def test_a_caller_supplied_bot_row_skips_the_lookup():
-    reader, repository, _pool, bots = _reader()
+    reader, repository, _pool, bots, _versions = _reader()
 
     reader.active_skill_assets(bot_id="bot-1", owner_id="owner", bot=_BOT)
 
@@ -139,7 +164,7 @@ def test_a_caller_supplied_bot_row_skips_the_lookup():
 
 
 def test_a_missing_bot_raises_before_any_flush():
-    reader, repository, _pool, _bots = _reader(bots=_Bots(bot=None))
+    reader, repository, _pool, _bots, _versions = _reader(bots=_Bots(bot=None))
 
     with pytest.raises(LocalSkillNotFoundError):
         reader.active_skill_assets(bot_id="bot-1", owner_id="owner")
@@ -149,7 +174,7 @@ def test_a_missing_bot_raises_before_any_flush():
 
 
 def test_member_skill_ids_flushes_and_answers_the_set_membership_half():
-    reader, repository, _pool, bots = _reader()
+    reader, repository, _pool, bots, _versions = _reader()
 
     ids = reader.member_skill_ids(bot=_BOT)
 

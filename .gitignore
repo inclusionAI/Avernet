@@ -30,7 +30,7 @@ target/
 
 # Logs and runtime state
 *.log
-logs/
+/logs/
 data/
 tmp/
 temp/

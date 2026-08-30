@@ -25,6 +25,7 @@ from agentclaw.community.core.harness.models import (
 from agentclaw.community.core.harness.services.bot_profile import BotProfile
 from agentclaw.community.core.harness.services.content_scanner import ContentScanner
 from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
+from agentclaw.community.core.harness.patch_engine_service_protocol import PatchEngineProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.services.identity import IdentityService
@@ -41,7 +42,7 @@ class PatchEngineError(Exception):
         super().__init__(f"[{stage}] {message}")
 
 
-class PatchEngine:
+class PatchEngine(PatchEngineProtocol):
     """Execute patch plans with preview, apply, verify, and rollback.
 
     Default L1 implementation of PatchEngineProtocol.

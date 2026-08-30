@@ -58,6 +58,12 @@ StateMachineRun:
     run_id:
       type: string
       minLength: 1
+    root_run_id:
+      type: string
+      minLength: 1
+    rerun_of:
+      type: string
+      minLength: 1
     definition_id:
       type: string
       minLength: 1
@@ -73,6 +79,9 @@ StateMachineRun:
     session_id:
       type: string
       minLength: 1
+    session_activation_count:
+      type: integer
+      minimum: 1
     created_by:
       type: [string, "null"]
     status:
@@ -353,6 +362,38 @@ StateMachineRunViewEnvelope:
     request_id:
       $ref: ../shared.yaml#/RequestId
 
+RerunStateMachineRunResponse:
+  type: object
+  additionalProperties: false
+  required: [run, nodes, idempotent_replay]
+  properties:
+    run:
+      $ref: "#/StateMachineRun"
+    nodes:
+      type: array
+      items:
+        $ref: "#/StateMachineNodeRun"
+    judge_outputs:
+      type: array
+      items:
+        $ref: "#/StateMachineJudgeOutputView"
+    idempotent_replay:
+      type: boolean
+
+RerunStateMachineRunEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/RerunStateMachineRunResponse"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
 StateMachineRunGraphViewEnvelope:
   type: object
   additionalProperties: false
@@ -517,6 +558,40 @@ StateMachineRunGraphPath:
       "401": { $ref: "#/UnauthenticatedResponse" }
       "403": { $ref: "#/ForbiddenResponse" }
       "404": { $ref: "#/NotFoundResponse" }
+      "500": { $ref: ../shared.yaml#/InternalErrorResponse }
+
+RerunStateMachineRunPath:
+  post:
+    operationId: rerun_state_machine_run
+    tags: ["Collaboration / State Machine Runs"]
+    summary: Create the sole direct rerun of a failed state machine run.
+    description: >-
+      The request has no body and is accepted only when the source Run status is
+      failed. The source Run supplies the immutable input, definition snapshot,
+      Session, Group, and participant bindings. Repeating the request for the
+      same source returns the same direct child Run.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: "#/RunIdPath"
+    responses:
+      "200":
+        description: The existing direct child Run was returned as an idempotent replay.
+        content:
+          application/json:
+            schema:
+              $ref: "#/RerunStateMachineRunEnvelope"
+      "201":
+        description: A new direct child Run was created.
+        content:
+          application/json:
+            schema:
+              $ref: "#/RerunStateMachineRunEnvelope"
+      "400": { $ref: "#/BadRequestResponse" }
+      "401": { $ref: "#/UnauthenticatedResponse" }
+      "403": { $ref: "#/ForbiddenResponse" }
+      "404": { $ref: "#/NotFoundResponse" }
+      "409": { $ref: "#/ConflictResponse" }
       "500": { $ref: ../shared.yaml#/InternalErrorResponse }
 
 StateMachineNodeRunPath:

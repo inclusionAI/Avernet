@@ -24,11 +24,12 @@ from agentclaw.community.core.harness.models import (
 from agentclaw.community.core.harness.services.bot_profile import BotProfile
 from agentclaw.community.core.harness.services.llm import LLM
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.harness.content_scanner_service_protocol import ContentScannerProtocol
 
 logger = logging.getLogger(__name__)
 
 
-class ContentScanner:
+class ContentScanner(ContentScannerProtocol):
     """LLM-powered semantic diagnostic engine.
 
     Flow:

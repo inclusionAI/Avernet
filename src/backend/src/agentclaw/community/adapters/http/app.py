@@ -118,7 +118,7 @@ from agentclaw.community.adapters.http.skills_pool import router as skills_pool_
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
-# The task surface is internal: run-template/execute/dashboard/list, the report and bbs
+# The task surface is internal: execute/dashboard/list, the report and bbs
 # operations, the discovery phase and the engine's push callbacks all answer
 # under ``/api/v1/collaboration/tasks`` in ``adapters/http/task``. The
 # ``/openapi/v1`` namespace is reserved for the domains the gateway's shipped
@@ -923,6 +923,7 @@ app.include_router(channel_router)
 app.include_router(quality_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
+app.include_router(task_router)
 app.include_router(work_orders_http_router)
 try:
     app.include_router(render_screen_router)
@@ -981,6 +982,9 @@ app.include_router(economy_governance_router)
 app.include_router(economy_governance_admin_router)
 app.include_router(economy_governance_workflow_router)
 app.include_router(enums_router)
+app.include_router(task_internal_router)
+app.include_router(task_callback_router)
+
 # Runtime-mode-conditional routers (bound by DI: empty in prod, populated
 # in local boots via ``TestingInfrastructureModule``). The app does not
 # branch on mode here — composition root decides what gets mounted.

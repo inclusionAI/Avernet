@@ -1,24 +1,23 @@
-"""Service API Protocol for operator-directed Skills Pool repair."""
+"""Service API Protocol for operator-directed Skills Pool repair.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skills_pool/skills_pool_recovery_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from agentclaw.community.core.skills_pool.recovery_service import (
+from agentclaw.community.core.skills_pool.skills_pool_recovery_service_protocol import (
+    BotSkillLayoutScope,
     ManualRepairResolution,
     SkillsPoolRecoveryResult,
+    SkillsPoolRecoveryServiceProtocol,
 )
-from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 
-
-@runtime_checkable
-class SkillsPoolRecoveryServiceProtocol(Protocol):
-    def resolve_repair_state(
-        self,
-        *,
-        scope: BotSkillLayoutScope,
-        migration_generation: str,
-        operator: str,
-        note: str,
-        resolution: ManualRepairResolution,
-    ) -> SkillsPoolRecoveryResult: ...
+__all__ = [
+    "BotSkillLayoutScope",
+    "ManualRepairResolution",
+    "SkillsPoolRecoveryResult",
+    "SkillsPoolRecoveryServiceProtocol",
+]

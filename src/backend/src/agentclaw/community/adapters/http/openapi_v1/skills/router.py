@@ -27,9 +27,13 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
+    caller_owner_id,
     require_granted_addressed_bot,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -86,7 +90,6 @@ publish_status_router = APIRouter(
     dependencies=[Depends(require_principal)],
     route_class=PublicAPIRoute,
 )
-
 
 @publish_status_router.get(
     "/{skill_code}/publish/status",
@@ -147,6 +150,34 @@ SkillIdPath = Annotated[
         "its bot."
     ),
 ]
+
+readme_router = APIRouter(
+    prefix="/openapi/v1/bots/skills",
+    tags=["skills"],
+    dependencies=[Depends(require_principal)],
+    route_class=PublicAPIRoute,
+)
+
+
+@readme_router.get(
+    "/{skill_id}/readme",
+    response_model=Envelope[SkillContent],
+)
+@envelope_errors
+async def get_skill_readme(
+    request: Request,
+    skill_id: SkillIdPath,
+    principal: Annotated[Principal, Depends(require_principal)],
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
+    ),
+) -> Envelope[SkillContent]:
+    """Read a Local or public-market Skill by its stable Skill ID."""
+    content = await query_service.get_readme_by_skill(
+        skill_id=skill_id,
+        actor_id=caller_owner_id(principal),
+    )
+    return envelope(SkillContent(content=content), request)
 
 
 def _tags(value: Any) -> list[str]:

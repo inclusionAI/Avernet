@@ -1,21 +1,17 @@
-"""Service API for provisioning another user's default bot."""
+"""Service API for provisioning another user's default bot.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_management/create_bot_for_others_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.bot_management.create_bot_for_others_service_protocol import (
+    CreateBotForOthersServiceProtocol,
+)
 
-
-@runtime_checkable
-class CreateBotForOthersServiceProtocol(Protocol):
-    """Create or repair a default bot before any runtime allocation occurs."""
-
-    def execute(
-        self,
-        *,
-        target_user_id: str,
-        target_nick_name: str,
-        bot_type: str | None,
-        operator_user_id: str,
-        operator_name: str,
-        cookie: str,
-    ) -> dict[str, Any]: ...
+__all__ = [
+    "CreateBotForOthersServiceProtocol",
+]

@@ -3,6 +3,7 @@
 Focuses on logic that does NOT require the ant_skills_scan_sdk package
 (config loading, lifecycle, helper methods, update_skill_metadata_by_git_path).
 """
+import asyncio
 import os
 from unittest.mock import MagicMock, patch
 
@@ -80,8 +81,25 @@ class TestServiceLifecycle:
         assert svc._sdk is None
         assert not svc.is_running()
 
-    def test_start_when_disabled_returns_false(self):
+    def test_startup_skips_when_disabled(self):
         svc = _make_skill_scan_service(config={"enabled": False})
+        asyncio.run(svc.startup())
+        assert svc._started is False
+
+    def test_startup_runs_daily_tasks_when_enabled(self):
+        svc = _make_skill_scan_service()
+        svc._scanner.create_sdk.return_value = MagicMock()
+        with (
+            patch.object(svc, "start_daily_task") as mock_daily,
+            patch.object(svc, "start_center_daily_task") as mock_center,
+        ):
+            asyncio.run(svc.startup())
+        mock_daily.assert_not_called()  # no git_archive_url configured
+        mock_center.assert_called_once()
+
+    def test_start_when_scanner_unavailable_returns_false(self):
+        svc = _make_skill_scan_service(config={"enabled": False})
+        svc._scanner.create_sdk.return_value = None
         result = svc.start()
         assert result is False
         assert svc._started is False
@@ -331,10 +349,10 @@ class TestUpdateSkillMetadataByGitPath:
         mock_repo.get_by_git_path.return_value = None
 
         with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"):
-                result = svc.update_skill_metadata_by_git_path(
-                    git_path="git://cat/missing-skill",
-                    risk_tags=[],
-                )
+            result = svc.update_skill_metadata_by_git_path(
+                git_path="git://cat/missing-skill",
+                risk_tags=[],
+            )
         assert result is None
 
     def test_updates_risk_tags(self):
@@ -344,10 +362,10 @@ class TestUpdateSkillMetadataByGitPath:
         mock_repo.update_risk_tags.return_value = {"id": "42", "risk_tags": ["tag1"]}
 
         with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"):
-                result = svc.update_skill_metadata_by_git_path(
-                    git_path="git://cat/skill-x",
-                    risk_tags=[{"type": "tag1"}],
-                )
+            result = svc.update_skill_metadata_by_git_path(
+                git_path="git://cat/skill-x",
+                risk_tags=[{"type": "tag1"}],
+            )
         mock_repo.update_risk_tags.assert_called_once_with("42", [{"type": "tag1"}])
         assert result is not None
 
@@ -358,10 +376,10 @@ class TestUpdateSkillMetadataByGitPath:
         mock_repo.update_mcp_dependencies.return_value = {"id": "10"}
 
         with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"):
-                result = svc.update_skill_metadata_by_git_path(
-                    git_path="git://cat/skill-y",
-                    mcp_dependencies=[{"code": "svc-a", "name": "A", "url": ""}],
-                )
+            result = svc.update_skill_metadata_by_git_path(
+                git_path="git://cat/skill-y",
+                mcp_dependencies=[{"code": "svc-a", "name": "A", "url": ""}],
+            )
         mock_repo.update_mcp_dependencies.assert_called_once()
         assert result is not None
 
@@ -372,10 +390,10 @@ class TestUpdateSkillMetadataByGitPath:
         mock_repo.update_risk_tags.return_value = {"id": "99"}
 
         with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="prod"):
-                svc.update_skill_metadata_by_git_path(
-                    git_path="git://cat/sk",
-                    risk_tags=[{"type": "sensitive-tag"}],
-                )
+            svc.update_skill_metadata_by_git_path(
+                git_path="git://cat/sk",
+                risk_tags=[{"type": "sensitive-tag"}],
+            )
         # In prod env, risk_tags should be cleared to []
         mock_repo.update_risk_tags.assert_called_once_with("99", [])
 
@@ -386,10 +404,10 @@ class TestUpdateSkillMetadataByGitPath:
         mock_repo.update_risk_tags.return_value = None  # failure
 
         with patch("agentclaw.community.utils.env_utils.get_current_env", return_value="dev"):
-                result = svc.update_skill_metadata_by_git_path(
-                    git_path="git://cat/sk",
-                    risk_tags=[],
-                )
+            result = svc.update_skill_metadata_by_git_path(
+                git_path="git://cat/sk",
+                risk_tags=[],
+            )
         assert result is None
 
     def test_exception_returns_none(self):

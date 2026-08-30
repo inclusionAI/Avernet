@@ -68,6 +68,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterHTTPStatusError,
     DeviceAdapterTransport,
 )
+from agentclaw.community.core.engine_runtime.engine_runtime_service_protocol import EngineRuntimeRelayProtocol
 
 logger = get_logger()
 
@@ -83,7 +84,7 @@ _CAPABILITY_UNSUPPORTED_STATUS = 501
 _SERVICE_BOT_TYPE = SERVICE_BOT_TYPE
 
 
-class EngineRuntimeRelay:
+class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
     """Forward one call to a bot's engine adapter and normalise the answer."""
 
     @inject
