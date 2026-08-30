@@ -223,6 +223,7 @@ def test_exact_package_becomes_published_only_after_all_ready_inputs_exist() -> 
         (_package(name="different-name"), _Scanner()),
         (_package(), _Scanner(fail=True)),
     ],
+    ids=("name-mismatch", "scanner-failure"),
 )
 def test_validation_or_scanner_failure_never_publishes(
     package: bytes, scanner: _Scanner
