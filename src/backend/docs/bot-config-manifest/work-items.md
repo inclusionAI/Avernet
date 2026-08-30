@@ -23,8 +23,8 @@ Three kinds of entry gate the work and are tracked separately from it:
 | `X1`–`X3` | **External confirmations** owed by other teams. None blocks W1–W6; they gate W7 and W9, and W8's teclaw arm |
 
 Where this document diverges from the merged design docs — §2.5 (capability
-scope), §2.6 (`PUT` takes effect immediately), §2.7 (apply failure stays at the
-manifest level), §3.2
+scope), §2.6 (`PUT` takes effect immediately), §2.7 (apply records per-entry
+delivery and nothing else), §3.2
 (entity-level three-way diff, superseding the wholesale directory replace) — it
 says so explicitly. Those docs are not edited here; amending them is a separate
 change.
@@ -221,60 +221,63 @@ One residual case survives and belongs to **D2**: a manifest whose source is a
 **moving ref** (a branch rather than a tag or SHA) can resolve to different
 content on a restart nobody associated with a configuration change.
 
-### 2.7 Apply failure is recorded at the manifest level, not on the bot
+### 2.7 Apply records, per entry, whether the configuration was delivered
 
-Sources are git or object storage — highly available, and an outage is a
-fetch-time event rather than a configuration error. The policy:
+**Apply has no notion of "first boot".** Whether a bot is coming up for the first
+time or has been running for a month, apply does exactly the same thing, and
+nothing in it branches on which. Earlier revisions of this section built a policy
+on that distinction; it is withdrawn.
 
-**A failed apply never writes to the bot record.** It is recorded on the
-manifest's own apply state and surfaced from there. The manifest layer does not
-reach down and change the bot's lifecycle status.
+**Its whole job: for every entry in the manifest, was that entry's configuration
+delivered? Record each entry individually.** Those per-entry records *are* the
+report, and they are the only thing apply produces.
 
-| Situation | Behaviour |
-| --- | --- |
-| Bot already running, apply fails | **Do nothing to it.** It keeps running its current configuration. Record the failure and surface it |
-| First boot, apply fails | The bot stays as the platform left it — typically `ACTIVE`. The **manifest** reports `FAILED`; the bot record is untouched |
-| Either case | The user must be told — an apply report, and a surfaced notification |
+Everything this section used to say follows from that, rather than needing to be
+stated as policy:
 
-**Why not gate the bot's activation on it.** Under §3.4 delivery happens *after*
-the bot is up, so gating would mean starting the bot, applying, and then reaching
-back to de-activate it on failure — an intrusive, racy write from the manifest
-layer into the bot's lifecycle, to express something the manifest's own state
-already says. The lifecycle also has no status for it (`ACTIVE`, `PENDING`,
-`FAILED`, `FAILED_WITHOUT_BINDING`, `REACTIVATING`, `RECYCLED`, `RELEASING` — no
-`INACTIVE`), so it would land on `FAILED` and make "the container never came up"
-indistinguishable from "the container is fine, its manifest is not". Two very
-different investigations, one status.
+- **There is no bot-level failure policy, because there is no bot-level
+  decision.** "Do not disturb a running bot when a fetch fails" is not a rule —
+  an entry that failed is an entry that was not delivered, and not delivering is
+  not disturbing. The bot keeps running whatever it already had because nothing
+  wrote over it.
+- **Nothing is ever written to the bot record.** No status change, no
+  de-activation, no readiness gate. This also removes the need for a status the
+  lifecycle does not have — there is no `INACTIVE`, so a gate would have landed
+  on `FAILED` and made "the container never came up" indistinguishable from "the
+  container is fine, its manifest is not". **This restores design §4.3**, which
+  put apply failure outside the readiness gate in the first place.
+- **The unit is the entry, not the apply.** The aggregate `SUCCEEDED` / `PARTIAL`
+  / `FAILED` is a summary derived from the entries for a caller's convenience. It
+  is never an input to a decision — nothing reads the aggregate and then acts on
+  the bot.
+- **`on_fetch_failure` is per entry** (`skip` / `keep_last` / `fail`), which is
+  where "what happens when *this one* fails" belongs. `keep_last` means "reuse
+  what we materialised for this entry last time", and its storage is the same
+  store §2.8 requires.
+- **The user must be told** — the report, plus a surfaced notification.
 
-**This restores design §4.3** rather than diverging from it: apply failure sits
-outside the readiness gate, which is what the design said in the first place. An
-earlier version of this document made the first-boot arm a readiness gate; that
-is withdrawn.
+**Apply records delivery, not execution.** This is the boundary that keeps the
+responsibility as narrow as stated above, and it dissolves two cases an earlier
+revision wrongly carried as exceptions:
 
-**What carries the signal instead**, since the bot record no longer does:
+| | Where apply's record ends | What happens after is a different layer |
+| --- | --- | --- |
+| `script` | The `ac_bot_startup_script` row is written | The script runs in the container at boot, on the start command's single exit status (#935). Apply neither sees nor records that |
+| **teclaw** | The artifact is handed over, or the per-file write lands | The engine applies it — in full, before reporting ready (X2/T1). That is the engine's contract (W12), not apply's record |
+
+So these were never exceptions to a rule about bot status. They are simply
+outside apply's scope: apply answers "did we deliver it", and the container and
+the engine answer "did it work".
+
+**What carries the signal**, since the bot record does not:
 
 - `GET .../config-manifest/last-apply` is the authoritative answer to "is this
-  bot's manifest applied", and W13's poll already reports `READY` / `FAILED` as a
-  manifest-level terminal state without touching the bot.
-- **Any surface that shows a bot as healthy must be able to show that its
-  manifest is not.** This is now a UI/API requirement rather than a status-column
-  one, and W8 owns making sure the signal is actually reachable — a failure
-  recorded where nobody looks is the failure mode this decision trades for.
-
-**Two cases are outside this rule, because the failure genuinely is the bot's:**
-
-| | Why it lands on the bot |
-| --- | --- |
-| `script` | It is appended to the start command (§2.12), and the platform sees **one** command with **one** exit status — #935's stated consequence. A failing script is a failed start, and always was |
-| **teclaw** | The artifact *is* the boot vehicle, and the engine applies it in full before reporting ready (X2/T1). A manifest problem therefore surfaces as a failed publish-poll. Not our choice — the engine folds the two together |
-
-So the rule is "the manifest layer does not write to the bot record", not "a
-manifest problem can never affect bot status". Where the platform's own
-mechanisms already fold them together, they stay folded.
-
-`keep_last` follows from the first row rather than needing its own mechanism:
-"reuse what we materialised last time" is what "do nothing to a running bot"
-already means. The storage it needs is the same store §2.8 requires.
+  bot's manifest applied", and W13's poll reports the same per-entry detail as a
+  terminal state without touching the bot.
+- **Any surface that shows a bot as healthy must be able to show that an entry of
+  its manifest is not.** That is a UI/API requirement rather than a status-column
+  one, and W8 owns making the signal reachable — a failure recorded where nobody
+  looks is the failure mode this trades for.
 
 ### 2.8 The platform materialises and persists manifest content itself
 
@@ -720,7 +723,8 @@ rather than something the platform rotates.
 
 Owner-managed expiry has one design consequence, and it belongs to W3 and W4: an
 expired token is indistinguishable from any other fetch failure unless we make it
-distinguishable. Under §2.7 a running bot is untouched by a failed apply — correct,
+distinguishable. Under §2.7 a failed entry is simply an entry that was not
+delivered, so a running bot is untouched — correct,
 but it means **a token can silently expire and nothing visibly breaks until a bot
 is next created or restarted**, at which point the failure is reported on the
 manifest rather than the bot (§2.7).
@@ -1070,7 +1074,8 @@ APPLYING                 manifest apply running (fetch → materialise → deliv
   caller must handle to express something the detail already carries.
 - `FAILED` is a **manifest-level** terminal state (§2.7). The bot record is not
   touched — a caller that polls to `FAILED` has a running bot whose manifest did
-  not apply, and the report says which entries failed.
+  not fully apply, and the per-entry records say exactly which entries were not
+  delivered.
 - **`APPLYING` turns D4's interim cost into a visible state.** Post-start delivery
   (§3.4) leaves a window where the bot is ACTIVE but unconfigured; a caller that
   waits for `READY` never observes it. The window stops being an invisible trap.
@@ -1388,9 +1393,10 @@ teclaw behaviour is no longer this item's problem.
       `script` last — see §2.12.
 - [ ] Two applies against the same bot serialise; the lock follows the existing
       `BotRestartLockRepository` pattern rather than a new mechanism.
-- [ ] The §2.7 failure policy holds: a failed apply changes nothing about a
-      running bot, and is recorded on the manifest's apply state rather than
-      written to the bot record.
+- [ ] §2.7 holds: apply does not branch on whether this is a first boot, records
+      each entry's delivery outcome individually, and writes nothing to the bot
+      record. The aggregate result is derived from the entries, never an input to
+      a decision.
 - [ ] Apply enforces the same validation and authorisation the public API does
       by calling W10's seam — not a second, hand-written copy of the checks.
 - [ ] `engine_ext` is unreachable from the manifest on every path. (The
@@ -1591,12 +1597,11 @@ manifest level, so there is no de-activation for W8 to place.)
         `TeclawDeviceFileSystem` forwards per-file writes straight to the engine,
         so `identity` and `resources` on a running bot may go through the same
         `DeviceFileSystem` seam as the BaaS family and need no redeliver.
-- [ ] **The §2.7 policy holds: a failed apply never writes to the bot record.**
-      Tested on both engine families. The two documented exceptions stay as they
-      are — `script` rides the start command's single exit status (#935), and on
-      teclaw the engine applies the artifact before reporting ready, so a
-      manifest problem surfaces through publish-poll. Neither is the manifest
-      layer reaching into the bot's lifecycle.
+- [ ] **§2.7 holds on both engine families: apply writes nothing to the bot
+      record, and does not branch on first boot.** Apply's record ends at
+      delivery — the `ac_bot_startup_script` row written, the artifact handed
+      over, the per-file write landed. What the container's start command or the
+      engine then does with it is a different layer and is not apply's outcome.
 - [ ] **The manifest-level signal is actually reachable.** Since the bot record
       no longer carries it, a bot showing `ACTIVE` with a failed manifest must be
       visibly distinguishable somewhere the user looks — `last-apply`, the
