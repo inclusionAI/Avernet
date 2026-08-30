@@ -179,6 +179,10 @@ class DraftFileNotTextError(Exception):
     """The addressed Draft file is not UTF-8 text."""
 
 
+class DraftSourceNotRefreshableError(Exception):
+    """Only a Draft retaining a Git snapshot source can be refreshed."""
+
+
 class SkillNameChangedError(Exception):
     """A Draft mutation attempted to change the stable SKILL.md name."""
 
@@ -226,6 +230,7 @@ class SkillSetRuntimeReconcileError(DomainError):
 
     def __init__(self, detail: str = "Skill set runtime sync failed") -> None:
         super().__init__(detail)
+
 
 class SkillSetControlPlaneLockUnavailableError(DomainError):
     """The runtime layout edit boundary is unavailable; mutation failed closed."""

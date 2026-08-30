@@ -34,6 +34,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftFileNotTextError,
     DraftFrozenError,
     DraftNotFoundError,
+    DraftSourceNotRefreshableError,
     SkillNameChangedError,
     SpaceSkillIdempotencyConflictError,
 )
@@ -253,7 +254,9 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         )
         self._require_editing(record)
         if record["source_kind"] != "GIT" or not record["source_repo_url"]:
-            raise ValueError("Draft is not backed by a Git snapshot")
+            raise DraftSourceNotRefreshableError(
+                "Draft is not backed by a Git snapshot"
+            )
         snapshot = self._sources.fetch_git_snapshot(
             git_url=record["source_repo_url"],
             branch=record["source_branch"],

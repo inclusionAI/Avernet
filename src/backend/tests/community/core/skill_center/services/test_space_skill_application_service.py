@@ -21,6 +21,7 @@ from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterExact
 from agentclaw.community.core.skill_center.errors import (
     DraftFrozenError,
     DraftRevisionConflictError,
+    DraftSourceNotRefreshableError,
     SpaceSkillGrantForbiddenError,
     SpaceSkillIdempotencyConflictError,
 )
@@ -387,6 +388,23 @@ def test_git_refresh_failure_leaves_draft_and_store_untouched():
         )
 
     assert store.write_revision.call_count == 0
+    drafts.replace_draft_revision.assert_not_called()
+
+
+def test_non_git_refresh_returns_a_domain_client_error_before_source_io():
+    service, _access, _repository, drafts, store, sources, *_extra = _service()
+    drafts.get_draft.return_value = _seed_draft(store, source_kind="PUBLISHED_VERSION")
+
+    with pytest.raises(DraftSourceNotRefreshableError):
+        service.refresh_draft_from_git(
+            space_id=7,
+            skill_id=51,
+            actor_id="owner-1",
+            expected_revision_id="22222222-2222-4222-8222-222222222222",
+            fencing_token=None,
+        )
+
+    sources.fetch_git_snapshot.assert_not_called()
     drafts.replace_draft_revision.assert_not_called()
 
 

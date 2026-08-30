@@ -200,6 +200,24 @@ def test_frozen_draft_rejects_revision_mutation():
         _replace(SpaceSkillDraftRepository(db), space_id=space_id, skill_id=skill_id)
 
 
+def test_team_delete_requires_a_held_lease_and_exact_fencing_token():
+    db = _Database()
+    space_id, skill_id = _seed(db, space_type="TEAM")
+    with db.orm_session() as session:
+        lease = session.query(SkillDraftEditLease).filter_by(skill_id=skill_id).one()
+        lease.holder_user_id = None
+
+    with pytest.raises(DraftEditLeaseTokenRejectedError):
+        SpaceSkillDraftRepository(db).delete_draft(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="owner-1",
+            expected_revision_id=_OLD_REV,
+            fencing_token=None,
+            env="test",
+        )
+
+
 def test_delete_first_draft_removes_the_whole_unreferenced_skill_aggregate():
     db = _Database()
     space_id, skill_id = _seed(db, space_type="PERSONAL")

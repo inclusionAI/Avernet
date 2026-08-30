@@ -92,6 +92,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseForbiddenError,
     DraftEditLeaseNotFoundError,
     DraftEditLeaseTokenRejectedError,
+    DraftSourceNotRefreshableError,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
@@ -1105,6 +1106,49 @@ def test_draft_file_routes_preserve_revision_and_fencing_contract(
     ]
 
 
+def test_draft_file_save_caps_streamed_json_before_fastapi_parsing(
+    client, skill_application_service, monkeypatch
+):
+    request_limits = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
+    )
+    monkeypatch.setattr(request_limits, "MAX_FILE_BYTES", 1)
+    monkeypatch.setattr(request_limits, "MAX_DRAFT_JSON_OVERHEAD_BYTES", 0)
+    body = b'{"content":"oversized","expected_revision_id":"rev-1","fencing_token":7}'
+
+    response = client.put(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md",
+        headers={"Content-Type": "application/json"},
+        content=iter((body,)),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.save_draft_file.assert_not_called()
+
+
+def test_draft_file_save_rejects_decoded_utf8_content_without_full_copy(
+    client, skill_application_service, monkeypatch
+):
+    spaces_router_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.router"
+    )
+    monkeypatch.setattr(spaces_router_module, "MAX_FILE_BYTES", 4, raising=False)
+
+    response = client.put(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md",
+        json={
+            "content": "ééé",
+            "expected_revision_id": "rev-1",
+            "fencing_token": 7,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.save_draft_file.assert_not_called()
+
+
 def test_upgrade_refresh_and_delete_routes_publish_command_contracts(
     client, skill_application_service, monkeypatch
 ):
@@ -1204,6 +1248,20 @@ def test_deleted_upgrade_request_returns_stable_idempotency_conflict(
 
     assert response.status_code == 409
     assert response.json()["code"] == 409305
+
+
+def test_non_git_refresh_returns_stable_client_error(client, skill_application_service):
+    skill_application_service.refresh_draft_from_git.side_effect = (
+        DraftSourceNotRefreshableError()
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/draft/refresh-from-git",
+        json={"expected_revision_id": "rev-1", "fencing_token": 7},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422208
 
 
 def test_published_version_and_consumable_routes_use_business_ordinals(

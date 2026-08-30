@@ -530,15 +530,15 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                     .with_for_update()
                     .one_or_none()
                 )
-                if lease is not None and lease.holder_user_id not in {None, actor_id}:
+                if lease is None or lease.holder_user_id is None:
+                    raise DraftEditLeaseTokenRejectedError(
+                        "a held draft lease and fencing token are required"
+                    )
+                if lease.holder_user_id != actor_id:
                     raise DraftEditLeaseConflictError(
                         "draft lease is held by another actor"
                     )
-                if (
-                    lease is not None
-                    and lease.holder_user_id == actor_id
-                    and lease.fencing_token != fencing_token
-                ):
+                if lease.fencing_token != fencing_token:
                     raise DraftEditLeaseTokenRejectedError("stale fencing token")
             external = (
                 any(

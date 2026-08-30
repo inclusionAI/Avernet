@@ -26,6 +26,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page,
 )
+from agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits import (
+    SpaceSkillPublicAPIRoute,
+)
 from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     AddSpaceMemberRequest,
     CreateSpaceRequest,
@@ -83,6 +86,10 @@ from agentclaw.community.core.market_favorites.models import (
     MarketSource as DomainMarketSource,
     MarketFavoriteRecord,
 )
+from agentclaw.community.core.skill_center.skill_package import (
+    MAX_FILE_BYTES,
+    SkillPackageTooLargeError,
+)
 from agentclaw.community.core.spaces.models import (
     SpaceListScope as DomainSpaceListScope,
     SpaceMemberSummaryRecord,
@@ -91,11 +98,11 @@ from agentclaw.community.core.spaces.models import (
     SpaceType as DomainSpaceType,
 )
 from agentclaw.community.di import Injected
-from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
-
 
 router = APIRouter(
-    prefix="/openapi/v1/bots/spaces", tags=["spaces"], route_class=PublicAPIRoute
+    prefix="/openapi/v1/bots/spaces",
+    tags=["spaces"],
+    route_class=SpaceSkillPublicAPIRoute,
 )
 SpaceIdPath = Annotated[int, Path(ge=1, description="Space primary identifier.")]
 SkillIdPath = Annotated[int, Path(ge=1, description="Space Skill primary identifier.")]
@@ -123,6 +130,17 @@ IdempotencyKeyHeader = Annotated[
     ),
 ]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
+_UTF8_SIZE_CHUNK_CHARS = 64 * 1024
+
+
+def _require_draft_file_content_size(content: str) -> None:
+    encoded_size = 0
+    for offset in range(0, len(content), _UTF8_SIZE_CHUNK_CHARS):
+        encoded_size += len(
+            content[offset : offset + _UTF8_SIZE_CHUNK_CHARS].encode("utf-8")
+        )
+        if encoded_size > MAX_FILE_BYTES:
+            raise SkillPackageTooLargeError()
 
 
 def _require_user_delegation(caller: ActingCaller) -> str:
@@ -351,6 +369,7 @@ async def save_space_skill_draft_file(
         SpaceSkillApplicationServiceProtocol
     ),
 ) -> Envelope[SkillDraftDetail]:
+    _require_draft_file_content_size(body.content)
     result = await run_in_threadpool(
         service.save_draft_file,
         space_id=space_id,

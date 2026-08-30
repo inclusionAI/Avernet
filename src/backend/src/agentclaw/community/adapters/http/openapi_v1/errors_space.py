@@ -25,6 +25,7 @@ class SpaceErrorCode(IntEnum):
     SKILL_MANIFEST_MULTIPLE = 422206
     DRAFT_NOT_FOUND = 404204
     SKILL_PATH_INVALID = 422207
+    DRAFT_SOURCE_NOT_REFRESHABLE = 422208
     SKILL_GIT_UNAVAILABLE = 502202
     SKILL_DRAFT_STORE_UNAVAILABLE = 503202
 
@@ -51,5 +52,6 @@ class SpacePublicErrorMessage(StrEnum):
     SKILL_MANIFEST_MULTIPLE = "Multiple SKILL.md manifests were provided"
     DRAFT_NOT_FOUND = "Not found"
     SKILL_PATH_INVALID = "Skill file path is invalid"
+    DRAFT_SOURCE_NOT_REFRESHABLE = "Draft is not backed by a Git snapshot"
     SKILL_GIT_UNAVAILABLE = "Git snapshot is unavailable"
     SKILL_DRAFT_STORE_UNAVAILABLE = "Draft content store is unavailable"

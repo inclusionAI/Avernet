@@ -22,6 +22,7 @@ from agentclaw.community.core.skill_center.skill_package import (
 
 
 MAX_MULTIPART_OVERHEAD_BYTES = 2 * 1024 * 1024
+MAX_DRAFT_JSON_OVERHEAD_BYTES = 64 * 1024
 _SUPPORTED_STARLETTE_SERIES = (1, 3)
 
 
@@ -96,6 +97,11 @@ def _multipart_body_limit() -> int:
     return MAX_EXPANDED_BYTES + _file_paths_field_limit() + MAX_MULTIPART_OVERHEAD_BYTES
 
 
+def _draft_json_body_limit() -> int:
+    # A JSON string may encode one content byte as a six-byte ``\uXXXX`` escape.
+    return MAX_FILE_BYTES * 6 + MAX_DRAFT_JSON_OVERHEAD_BYTES
+
+
 async def _bounded_request_stream(
     request: Request, *, limit: int
 ) -> AsyncIterator[bytes]:
@@ -112,10 +118,44 @@ async def _bounded_request_stream(
 class SpaceSkillPublicAPIRoute(PublicAPIRoute):
     """Public route with receive-time bounds for its sole multipart command."""
 
+    def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs: Any) -> None:
+        methods = set(kwargs.get("methods") or ("GET",))
+        self._limit_draft_file_json = "PUT" in methods and path.endswith(
+            "/draft/files/{path:path}"
+        )
+        super().__init__(path, endpoint, **kwargs)
+
     def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
         original = super().get_route_handler()
 
         async def bounded_multipart_handler(request: Request) -> Response:
+            if self._limit_draft_file_json:
+                body_limit = _draft_json_body_limit()
+                declared_length = request.headers.get("content-length")
+                if declared_length is not None:
+                    try:
+                        if int(declared_length) > body_limit:
+                            response = mapped_error_response(
+                                SkillPackageTooLargeError(), request
+                            )
+                            assert response is not None
+                            return response
+                    except ValueError:
+                        pass
+                chunks: list[bytes] = []
+                received = 0
+                async for chunk in request.stream():
+                    received += len(chunk)
+                    if received > body_limit:
+                        response = mapped_error_response(
+                            SkillPackageTooLargeError(), request
+                        )
+                        assert response is not None
+                        return response
+                    chunks.append(chunk)
+                # Preserve FastAPI's generated JSON DTO and validation path by
+                # seeding the Request body cache before its handler decodes it.
+                request._body = b"".join(chunks)
             if request.headers.get("content-type", "").startswith(
                 "multipart/form-data"
             ):

@@ -604,6 +604,7 @@ reference_id DESC`。目标 Set 已被删除时，历史 Operation 仍可按 Bot
 | `SKILL_MANIFEST_MISSING` | `422205` | 422 | folder/Git 创建 | 缺少目标 SKILL.md |
 | `SKILL_MANIFEST_MULTIPLE` | `422206` | 422 | folder 创建 | 上传包包含多个候选 SKILL.md |
 | `SKILL_PATH_INVALID` | `422207` | 422 | folder/Draft file | 相对路径非法或越界 |
+| `DRAFT_SOURCE_NOT_REFRESHABLE` | `422208` | 422 | Git refresh | 当前 Draft 不是 Git snapshot 来源 |
 | `DRAFT_NOT_FOUND` | `404204` | 404 | Draft | 没有当前 Draft |
 | `DRAFT_ALREADY_EXISTS` | `409306` | 409 | upgrade | 已存在 Draft |
 | `DRAFT_FROZEN` | `409307` | 409 | save/delete/refresh | 发布中的 Draft 不可修改 |
