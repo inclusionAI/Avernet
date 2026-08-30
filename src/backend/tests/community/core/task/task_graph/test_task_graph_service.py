@@ -139,6 +139,33 @@ class TestAddTaskNodes:
         with pytest.raises(GraphIntegrityError):
             svc.add_task_nodes([_node("c1")], parent_node_id="t1")
 
+    def test_trigger_e_uses_task_id_root_not_first_node(self, svc: TaskGraphService, graph):
+        # BBS recover 只要求真正根节点 HUNG。列表顺序变化时仍应允许挂接接力节点。
+        svc.add_task_nodes([_node("c1"), _node("c2")], parent_node_id="t1")
+        for node_id in ("c1", "c2"):
+            svc.update_task_node_info(
+                _patch("t1", node_id, status=Status.RUNNING, run_mode="single_bot", assignee="b")
+            )
+            svc.update_task_node_info(
+                _patch(
+                    "t1",
+                    node_id,
+                    acceptance_result=AcceptanceResult(
+                        verdict=AcceptanceVerdict.DONE,
+                        acceptances_metric=[node_id],
+                    ),
+                )
+            )
+        svc.update_task_node_info(
+            _patch("t1", "t1", status=Status.HUNG, extend_props_patch={"bbs_mode": True})
+        )
+        graph.tasks[:] = [graph.tasks[1], graph.tasks[0], *graph.tasks[2:]]
+
+        result = svc.add_task_nodes([_node("bbs-1")], parent_node_id="t1")
+
+        assert {node.node_id for node in result.tasks} == {"t1", "c1", "c2", "bbs-1"}
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
+
     def test_dual_id_raises(self, svc: TaskGraphService, graph):
         with pytest.raises(GraphIntegrityError, match="重复"):
             svc.add_task_nodes([_node("c1"), _node("c1")], parent_node_id="t1")

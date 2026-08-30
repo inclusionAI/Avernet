@@ -350,9 +350,12 @@ class TaskGraphService:
             return graph
 
     def _assert_add_trigger(self, graph: TaskExecutionGraph) -> None:
+        # 根节点由 graph.task_id 唯一标识，不能依赖 graph.tasks 的列表顺序。
+        root = next((node for node in graph.tasks if node.node_id == graph.task_id), None)
         cond_a = (
             len(graph.tasks) == 1
-            and graph.tasks[0].status == Status.PENDING
+            and root is not None
+            and root.status == Status.PENDING
             and not graph.relations
         )
         cond_b = any(
@@ -371,7 +374,7 @@ class TaskGraphService:
             for n in graph.tasks
         )
 
-        cond_e = graph and graph.tasks and len(graph.tasks) >= 1 and graph.tasks[0].status == Status.HUNG
+        cond_e = root is not None and root.status == Status.HUNG
 
         if not (cond_a or cond_b or cond_c or cond_d or cond_e):
             raise GraphIntegrityError("add_task_nodes: 触发条件 a/b/c/d/e 均不满足")
