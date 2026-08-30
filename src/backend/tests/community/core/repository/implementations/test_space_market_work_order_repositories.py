@@ -142,7 +142,23 @@ def _space_skill(db, spaces: SpaceRepository):
         env="dev",
     )
     created = _space_skills(db).create_space_skill(
-        skill_data={"name": "review-skill", "env": "dev"},
+        skill_data={
+            "name": "review-skill",
+            "description": None,
+            "env": "dev",
+            "skill_uuid": "11111111-1111-4111-8111-111111111111",
+            "zip_url": (
+                "draft://11111111-1111-4111-8111-111111111111/"
+                "v1/22222222-2222-4222-8222-222222222222"
+            ),
+            "draft_target_version": 1,
+            "draft_status": "EDITING",
+            "draft_description": "Review skill",
+            "draft_source_kind": "FOLDER",
+            "creation_request_id": "review-skill-create",
+            "creation_request_hash": "a" * 64,
+            "source_type": "FOLDER",
+        },
         ownership_data={
             "space_id": team.id,
             "created_by": "owner-1",
@@ -220,8 +236,24 @@ def test_skill_editor_request_rejects_personal_space(db) -> None:
     with spaces.create_personal_transaction(
         user_id="owner-1", creator_user_name=None, env="dev"
     ) as personal:
-        created = _space_skills(db).create_space_skill(
-            skill_data={"name": "personal-skill", "env": "dev"},
+            created = _space_skills(db).create_space_skill(
+                skill_data={
+                    "name": "personal-skill",
+                    "description": None,
+                    "env": "dev",
+                    "skill_uuid": "33333333-3333-4333-8333-333333333333",
+                    "zip_url": (
+                        "draft://33333333-3333-4333-8333-333333333333/"
+                        "v1/44444444-4444-4444-8444-444444444444"
+                    ),
+                    "draft_target_version": 1,
+                    "draft_status": "EDITING",
+                    "draft_description": "Personal skill",
+                    "draft_source_kind": "FOLDER",
+                    "creation_request_id": "personal-skill-create",
+                    "creation_request_hash": "b" * 64,
+                    "source_type": "FOLDER",
+                },
             ownership_data={
                 "space_id": personal.id,
                 "created_by": "owner-1",

@@ -308,7 +308,9 @@ async def get_space_skill_draft_file_tree(
 async def read_space_skill_draft_file(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
-    path: str,
+    path: Annotated[
+        str, Path(description="Normalized POSIX-relative Draft file path.")
+    ],
     request: Request,
     caller: ActingCallerDep,
     service: SpaceSkillApplicationServiceProtocol = Injected(
@@ -332,7 +334,9 @@ async def save_space_skill_draft_file(
     body: SaveDraftFileRequest,
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
-    path: str,
+    path: Annotated[
+        str, Path(description="Normalized POSIX-relative Draft file path.")
+    ],
     request: Request,
     user_id: UserIdDep,
     service: SpaceSkillApplicationServiceProtocol = Injected(
@@ -414,8 +418,18 @@ async def delete_space_skill_draft(
     skill_id: SkillIdPath,
     request: Request,
     user_id: UserIdDep,
-    expected_revision_id: Annotated[str, Query(min_length=1, max_length=128)],
-    fencing_token: Annotated[int | None, Query(ge=1)] = None,
+    expected_revision_id: Annotated[
+        str,
+        Query(
+            min_length=1,
+            max_length=128,
+            description="Revision the caller expects to delete.",
+        ),
+    ],
+    fencing_token: Annotated[
+        int | None,
+        Query(ge=1, description="Current Team Lease token; omit for Personal Space."),
+    ] = None,
     service: SpaceSkillApplicationServiceProtocol = Injected(
         SpaceSkillApplicationServiceProtocol
     ),

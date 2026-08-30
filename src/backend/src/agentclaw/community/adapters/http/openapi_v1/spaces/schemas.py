@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from fastapi import UploadFile
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_serializer
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 
@@ -81,7 +82,9 @@ class SkillActorPermissions(BaseModel):
     create_upgrade_draft: bool = Field(
         description="Actor may request creation of an upgrade Draft."
     )
-    offline_skill: bool = Field(description="Actor may request recoverable Skill Offline.")
+    offline_skill: bool = Field(
+        description="Actor may request recoverable Skill Offline."
+    )
     manage_grants: bool = Field(description="Actor may add or remove MANAGER Grants.")
     transfer_owner: bool = Field(description="Actor may request OWNER transfer.")
     request_edit_access: bool = Field(
@@ -352,78 +355,140 @@ class DraftEditLeaseSummary(BaseModel):
 
 
 class SkillLifecycleStatus(_DocumentedEnum):
+    """Recoverable lifecycle of a Space Skill asset."""
+
     DRAFT_ONLY = "DRAFT_ONLY"
     PUBLISHED = "PUBLISHED"
     OFFLINE = "OFFLINE"
 
+    __descriptions__ = {
+        "DRAFT_ONLY": "The Skill has a Draft but no Published Version.",
+        "PUBLISHED": "The Skill has at least one Published Version and is online.",
+        "OFFLINE": "The Skill is recoverably offline but remains editable.",
+    }
+
 
 class SkillDraftStatus(_DocumentedEnum):
+    """Mutability state of the current Draft."""
+
     EDITING = "EDITING"
     FROZEN = "FROZEN"
 
+    __descriptions__ = {
+        "EDITING": "The Draft accepts revision-CAS edit commands.",
+        "FROZEN": "Publication has frozen the Draft against mutation.",
+    }
+
 
 class SkillDraftSourceKind(_DocumentedEnum):
+    """Immutable source used to initialize the current Draft."""
+
     FOLDER = "FOLDER"
     GIT = "GIT"
     PUBLISHED_VERSION = "PUBLISHED_VERSION"
 
+    __descriptions__ = {
+        "FOLDER": "Created from a browser folder upload.",
+        "GIT": "Created or refreshed from a frozen Git snapshot.",
+        "PUBLISHED_VERSION": "Copied from the latest exact Published Version.",
+    }
+
 
 class SkillOwnerSummary(BaseModel):
+    """The unique active owner of one Space Skill."""
+
     user_id: str = Field(description="Unique active OWNER user identifier.")
     display_name: str | None = Field(default=None, description="Owner display name.")
 
 
 class SkillVersionSummary(_UtcResponseModel):
+    """Identity and completion time of one Published Version."""
+
     version: int = Field(ge=1, description="Business version ordinal.")
     sc_version_number: str = Field(description="Exact SkillCenter version number.")
     published_at: datetime = Field(description="UTC publication completion time.")
 
 
 class SkillVersionDetail(SkillVersionSummary):
-    name: str
-    description: str | None = None
-    mcp_dependencies: list[str] = Field(default_factory=list)
+    """Published Version metadata addressed by business ordinal."""
+
+    name: str = Field(description="Name captured from this Version's SKILL.md.")
+    description: str | None = Field(
+        default=None, description="Description captured from this Version's SKILL.md."
+    )
+    mcp_dependencies: list[str] = Field(
+        default_factory=list,
+        description="MCP dependency codes captured in immutable Version metadata.",
+    )
 
 
 class PublishedVersionFileTree(BaseModel):
-    version: int = Field(ge=1)
-    files: list[DraftFileItem]
+    """Complete file tree of one exact Published Version."""
+
+    version: int = Field(ge=1, description="Business version ordinal.")
+    files: list[DraftFileItem] = Field(description="Files ordered by POSIX path.")
 
 
 class PublishedVersionFileContent(BaseModel):
-    version: int = Field(ge=1)
-    path: str
-    content: str
+    """One UTF-8 text file from an exact Published Version."""
+
+    version: int = Field(ge=1, description="Business version ordinal.")
+    path: str = Field(description="Normalized POSIX-relative file path.")
+    content: str = Field(description="UTF-8 decoded file content.")
 
 
 class ConsumableSpaceSkill(BaseModel):
-    skill_id: str
-    name: str
-    description: str | None = None
-    latest_published_version: SkillVersionSummary
+    """Canonical-ready, online Space Skill available to the workshop."""
+
+    skill_id: str = Field(description="Unique numeric Skill identifier.")
+    name: str = Field(description="Name of the latest Published Version.")
+    description: str | None = Field(
+        default=None, description="Description of the latest Published Version."
+    )
+    latest_published_version: SkillVersionSummary = Field(
+        description="Latest Canonical-ready Published Version."
+    )
 
 
 class SkillDraftSummary(BaseModel):
+    """Current immutable Draft revision and target Version."""
+
     target_version: int = Field(ge=1, description="Target business version ordinal.")
-    status: SkillDraftStatus
+    status: SkillDraftStatus = Field(description="Current Draft mutability state.")
     revision_id: str = Field(description="Current immutable Draft revision identity.")
 
 
 class SkillDraftDetail(SkillDraftSummary):
+    """Complete authoring metadata for the current Draft revision."""
+
     model_config = ConfigDict(from_attributes=True)
-    name: str
-    description: str | None = None
-    source_kind: SkillDraftSourceKind
-    source_repo_url: str | None = None
-    source_branch: str | None = None
-    source_commit_sha: str | None = None
-    source_subdir: str | None = None
+    name: str = Field(description="Immutable Skill name parsed from SKILL.md.")
+    description: str | None = Field(
+        default=None, description="Draft description parsed from SKILL.md."
+    )
+    source_kind: SkillDraftSourceKind = Field(
+        description="Source used to initialize this Draft."
+    )
+    source_repo_url: str | None = Field(
+        default=None, description="Credential-free Git repository URL, when Git-backed."
+    )
+    source_branch: str | None = Field(
+        default=None, description="Resolved Git branch frozen for refresh."
+    )
+    source_commit_sha: str | None = Field(
+        default=None, description="Exact Git commit represented by this revision."
+    )
+    source_subdir: str | None = Field(
+        default=None, description="Selected normalized repository subdirectory."
+    )
 
 
 class PublicationAttemptSummary(BaseModel):
-    attempt_id: str
-    target_version: int = Field(ge=1)
-    status: str
+    """Current non-terminal publication attempt, when one exists."""
+
+    attempt_id: str = Field(description="Stable publication attempt identifier.")
+    target_version: int = Field(ge=1, description="Target business version ordinal.")
+    status: str = Field(description="Current final-contract Attempt state.")
 
 
 class SpaceSkillSummary(_UtcResponseModel):
@@ -435,17 +500,26 @@ class SpaceSkillSummary(_UtcResponseModel):
     description: str | None = Field(
         default=None, description="Skill description projected from SKILL.md."
     )
-    lifecycle_status: SkillLifecycleStatus
+    lifecycle_status: SkillLifecycleStatus = Field(
+        description="Recoverable lifecycle derived from Published and Offline facts."
+    )
     space_type: SpaceType = Field(
         description="Whether the Skill belongs to a personal or team Space."
     )
     actor: SkillGrantActor = Field(
         description="Current caller's Grant role and ACL/Grant qualifications."
     )
-    owner: SkillOwnerSummary
-    latest_published_version: SkillVersionSummary | None = None
-    draft: SkillDraftSummary | None = None
-    active_publication: PublicationAttemptSummary | None = None
+    owner: SkillOwnerSummary = Field(description="Unique active Skill owner.")
+    latest_published_version: SkillVersionSummary | None = Field(
+        default=None,
+        description="Latest Published Version, or null before first publish.",
+    )
+    draft: SkillDraftSummary | None = Field(
+        default=None, description="Current Draft summary, or null when no Draft exists."
+    )
+    active_publication: PublicationAttemptSummary | None = Field(
+        default=None, description="Current non-terminal Attempt, or null."
+    )
     lease_summary: DraftEditLeaseSummary | None = Field(
         default=None,
         description="List-only Lease state without a fencing token; null when no Draft exists.",
@@ -461,52 +535,123 @@ class SpaceSkillSummary(_UtcResponseModel):
 
 
 class SpaceSkillDetail(SpaceSkillSummary):
-    draft: SkillDraftDetail | None = None
-    source: Literal["FOLDER", "GIT"]
-    offline_at: datetime | None = None
-    offline_by: str | None = None
+    """Authoring detail for one Space-owned Skill asset."""
+
+    draft: SkillDraftDetail | None = Field(
+        default=None, description="Complete current Draft facts, or null."
+    )
+    source: Literal["FOLDER", "GIT"] = Field(
+        description="Original Space Skill creation source."
+    )
+    offline_at: datetime | None = Field(
+        default=None, description="UTC recoverable Offline time, or null."
+    )
+    offline_by: str | None = Field(
+        default=None, description="Actor that placed the Skill Offline, or null."
+    )
 
 
 class ImportSpaceSkillFromGitRequest(BaseModel):
-    git_url: str = Field(min_length=1, max_length=2048)
-    branch: str | None = Field(default=None, max_length=512)
-    subdir: str | None = Field(default=None, max_length=1024)
+    """Credential-free Git snapshot coordinates for Space Skill creation."""
+
+    git_url: str = Field(
+        min_length=1, max_length=2048, description="Credential-free HTTPS Git URL."
+    )
+    branch: str | None = Field(
+        default=None, max_length=512, description="Optional branch to resolve."
+    )
+    subdir: str | None = Field(
+        default=None,
+        max_length=1024,
+        description="Optional normalized parent directory containing SKILL.md.",
+    )
 
 
 class DraftFileItem(BaseModel):
+    """One file entry in an immutable Draft or Published tree."""
+
     model_config = ConfigDict(from_attributes=True)
-    path: str
-    size: int = Field(ge=0)
+    path: str = Field(description="Normalized POSIX-relative file path.")
+    size: int = Field(ge=0, description="File size in bytes.")
 
 
 class DraftFileTree(BaseModel):
+    """Complete file tree for the current immutable Draft revision."""
+
     model_config = ConfigDict(from_attributes=True)
-    revision_id: str
-    files: list[DraftFileItem]
+    revision_id: str = Field(description="Current immutable Draft revision identity.")
+    files: list[DraftFileItem] = Field(description="Files ordered by POSIX path.")
 
 
 class DraftFileContent(BaseModel):
+    """One UTF-8 file from the current immutable Draft revision."""
+
     model_config = ConfigDict(from_attributes=True)
-    path: str
-    content: str
-    revision_id: str
+    path: str = Field(description="Normalized POSIX-relative file path.")
+    content: str = Field(description="UTF-8 decoded file content.")
+    revision_id: str = Field(description="Revision from which content was read.")
 
 
 class SaveDraftFileRequest(BaseModel):
-    content: str
-    expected_revision_id: str = Field(min_length=1, max_length=128)
-    fencing_token: int | None = Field(default=None, ge=1)
+    """Revision-CAS request to replace one UTF-8 Draft file."""
+
+    content: str = Field(description="Complete replacement UTF-8 text content.")
+    expected_revision_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="Revision the caller read and expects to replace.",
+    )
+    fencing_token: int | None = Field(
+        default=None,
+        ge=1,
+        description="Current Team Lease token; null for Personal Space.",
+    )
 
 
 class DraftRevisionRequest(BaseModel):
-    expected_revision_id: str = Field(min_length=1, max_length=128)
-    fencing_token: int | None = Field(default=None, ge=1)
+    """Revision and optional Team Lease preconditions for a Draft mutation."""
+
+    expected_revision_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="Revision the caller expects to mutate.",
+    )
+    fencing_token: int | None = Field(
+        default=None,
+        ge=1,
+        description="Current Team Lease token; null for Personal Space.",
+    )
 
 
 class DraftDeleteResult(BaseModel):
+    """Result of deleting only a Draft or its unreferenced Skill aggregate."""
+
     model_config = ConfigDict(from_attributes=True)
-    changed: bool
-    deleted_scope: Literal["DRAFT", "SKILL"]
+    changed: bool = Field(description="Whether persisted state was deleted.")
+    deleted_scope: Literal["DRAFT", "SKILL"] = Field(
+        description="DRAFT preserves external facts; SKILL removes the empty aggregate."
+    )
+
+
+SpaceSkillFolderUpload = create_model(
+    "Body_create_space_skill_from_folder_openapi_v1_bots_spaces__space_id__skills_post",
+    __base__=BaseModel,
+    __config__=ConfigDict(
+        json_schema_extra={
+            "description": "Files and aligned POSIX paths for one Space Skill folder."
+        }
+    ),
+    files=(
+        list[UploadFile],
+        Field(description="All files from the selected Space Skill directory."),
+    ),
+    file_paths=(
+        str,
+        Field(
+            description="JSON array of relative paths aligned one-to-one with files."
+        ),
+    ),
+)
 
 
 class AddSpaceMemberRequest(BaseModel):

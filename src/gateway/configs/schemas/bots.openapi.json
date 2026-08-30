@@ -412,14 +412,15 @@
         "type": "object"
       },
       "Body_create_space_skill_from_folder_openapi_v1_bots_spaces__space_id__skills_post": {
+        "description": "Files and aligned POSIX paths for one Space Skill folder.",
         "properties": {
           "file_paths": {
-            "description": "JSON array of POSIX relative paths matching files.",
+            "description": "JSON array of relative paths aligned one-to-one with files.",
             "title": "File Paths",
             "type": "string"
           },
           "files": {
-            "description": "Folder files.",
+            "description": "All files from the selected Space Skill directory.",
             "items": {
               "contentMediaType": "application/octet-stream",
               "type": "string"
@@ -1921,6 +1922,7 @@
         "type": "object"
       },
       "ConsumableSpaceSkill": {
+        "description": "Canonical-ready, online Space Skill available to the workshop.",
         "properties": {
           "description": {
             "anyOf": [
@@ -1931,16 +1933,20 @@
                 "type": "null"
               }
             ],
+            "description": "Description of the latest Published Version.",
             "title": "Description"
           },
           "latest_published_version": {
-            "$ref": "#/components/schemas/SkillVersionSummary"
+            "$ref": "#/components/schemas/SkillVersionSummary",
+            "description": "Latest Canonical-ready Published Version."
           },
           "name": {
+            "description": "Name of the latest Published Version.",
             "title": "Name",
             "type": "string"
           },
           "skill_id": {
+            "description": "Unique numeric Skill identifier.",
             "title": "Skill Id",
             "type": "string"
           }
@@ -4040,12 +4046,15 @@
         "type": "object"
       },
       "DraftDeleteResult": {
+        "description": "Result of deleting only a Draft or its unreferenced Skill aggregate.",
         "properties": {
           "changed": {
+            "description": "Whether persisted state was deleted.",
             "title": "Changed",
             "type": "boolean"
           },
           "deleted_scope": {
+            "description": "DRAFT preserves external facts; SKILL removes the empty aggregate.",
             "enum": [
               "DRAFT",
               "SKILL"
@@ -4180,16 +4189,20 @@
         "type": "object"
       },
       "DraftFileContent": {
+        "description": "One UTF-8 file from the current immutable Draft revision.",
         "properties": {
           "content": {
+            "description": "UTF-8 decoded file content.",
             "title": "Content",
             "type": "string"
           },
           "path": {
+            "description": "Normalized POSIX-relative file path.",
             "title": "Path",
             "type": "string"
           },
           "revision_id": {
+            "description": "Revision from which content was read.",
             "title": "Revision Id",
             "type": "string"
           }
@@ -4203,12 +4216,15 @@
         "type": "object"
       },
       "DraftFileItem": {
+        "description": "One file entry in an immutable Draft or Published tree.",
         "properties": {
           "path": {
+            "description": "Normalized POSIX-relative file path.",
             "title": "Path",
             "type": "string"
           },
           "size": {
+            "description": "File size in bytes.",
             "minimum": 0.0,
             "title": "Size",
             "type": "integer"
@@ -4222,8 +4238,10 @@
         "type": "object"
       },
       "DraftFileTree": {
+        "description": "Complete file tree for the current immutable Draft revision.",
         "properties": {
           "files": {
+            "description": "Files ordered by POSIX path.",
             "items": {
               "$ref": "#/components/schemas/DraftFileItem"
             },
@@ -4231,6 +4249,7 @@
             "type": "array"
           },
           "revision_id": {
+            "description": "Current immutable Draft revision identity.",
             "title": "Revision Id",
             "type": "string"
           }
@@ -4243,8 +4262,10 @@
         "type": "object"
       },
       "DraftRevisionRequest": {
+        "description": "Revision and optional Team Lease preconditions for a Draft mutation.",
         "properties": {
           "expected_revision_id": {
+            "description": "Revision the caller expects to mutate.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Expected Revision Id",
@@ -4260,6 +4281,7 @@
                 "type": "null"
               }
             ],
+            "description": "Current Team Lease token; null for Personal Space.",
             "title": "Fencing Token"
           }
         },
@@ -12140,6 +12162,7 @@
         "type": "object"
       },
       "ImportSpaceSkillFromGitRequest": {
+        "description": "Credential-free Git snapshot coordinates for Space Skill creation.",
         "properties": {
           "branch": {
             "anyOf": [
@@ -12151,9 +12174,11 @@
                 "type": "null"
               }
             ],
+            "description": "Optional branch to resolve.",
             "title": "Branch"
           },
           "git_url": {
+            "description": "Credential-free HTTPS Git URL.",
             "maxLength": 2048,
             "minLength": 1,
             "title": "Git Url",
@@ -12169,6 +12194,7 @@
                 "type": "null"
               }
             ],
+            "description": "Optional normalized parent directory containing SKILL.md.",
             "title": "Subdir"
           }
         },
@@ -15967,16 +15993,20 @@
         "type": "object"
       },
       "PublicationAttemptSummary": {
+        "description": "Current non-terminal publication attempt, when one exists.",
         "properties": {
           "attempt_id": {
+            "description": "Stable publication attempt identifier.",
             "title": "Attempt Id",
             "type": "string"
           },
           "status": {
+            "description": "Current final-contract Attempt state.",
             "title": "Status",
             "type": "string"
           },
           "target_version": {
+            "description": "Target business version ordinal.",
             "minimum": 1.0,
             "title": "Target Version",
             "type": "integer"
@@ -15991,16 +16021,20 @@
         "type": "object"
       },
       "PublishedVersionFileContent": {
+        "description": "One UTF-8 text file from an exact Published Version.",
         "properties": {
           "content": {
+            "description": "UTF-8 decoded file content.",
             "title": "Content",
             "type": "string"
           },
           "path": {
+            "description": "Normalized POSIX-relative file path.",
             "title": "Path",
             "type": "string"
           },
           "version": {
+            "description": "Business version ordinal.",
             "minimum": 1.0,
             "title": "Version",
             "type": "integer"
@@ -16015,8 +16049,10 @@
         "type": "object"
       },
       "PublishedVersionFileTree": {
+        "description": "Complete file tree of one exact Published Version.",
         "properties": {
           "files": {
+            "description": "Files ordered by POSIX path.",
             "items": {
               "$ref": "#/components/schemas/DraftFileItem"
             },
@@ -16024,6 +16060,7 @@
             "type": "array"
           },
           "version": {
+            "description": "Business version ordinal.",
             "minimum": 1.0,
             "title": "Version",
             "type": "integer"
@@ -16793,12 +16830,15 @@
         ]
       },
       "SaveDraftFileRequest": {
+        "description": "Revision-CAS request to replace one UTF-8 Draft file.",
         "properties": {
           "content": {
+            "description": "Complete replacement UTF-8 text content.",
             "title": "Content",
             "type": "string"
           },
           "expected_revision_id": {
+            "description": "Revision the caller read and expects to replace.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Expected Revision Id",
@@ -16814,6 +16854,7 @@
                 "type": "null"
               }
             ],
+            "description": "Current Team Lease token; null for Personal Space.",
             "title": "Fencing Token"
           }
         },
@@ -18387,6 +18428,7 @@
         "type": "object"
       },
       "SkillDraftDetail": {
+        "description": "Complete authoring metadata for the current Draft revision.",
         "properties": {
           "description": {
             "anyOf": [
@@ -18397,9 +18439,11 @@
                 "type": "null"
               }
             ],
+            "description": "Draft description parsed from SKILL.md.",
             "title": "Description"
           },
           "name": {
+            "description": "Immutable Skill name parsed from SKILL.md.",
             "title": "Name",
             "type": "string"
           },
@@ -18417,6 +18461,7 @@
                 "type": "null"
               }
             ],
+            "description": "Resolved Git branch frozen for refresh.",
             "title": "Source Branch"
           },
           "source_commit_sha": {
@@ -18428,10 +18473,12 @@
                 "type": "null"
               }
             ],
+            "description": "Exact Git commit represented by this revision.",
             "title": "Source Commit Sha"
           },
           "source_kind": {
-            "$ref": "#/components/schemas/SkillDraftSourceKind"
+            "$ref": "#/components/schemas/SkillDraftSourceKind",
+            "description": "Source used to initialize this Draft."
           },
           "source_repo_url": {
             "anyOf": [
@@ -18442,6 +18489,7 @@
                 "type": "null"
               }
             ],
+            "description": "Credential-free Git repository URL, when Git-backed.",
             "title": "Source Repo Url"
           },
           "source_subdir": {
@@ -18453,10 +18501,12 @@
                 "type": "null"
               }
             ],
+            "description": "Selected normalized repository subdirectory.",
             "title": "Source Subdir"
           },
           "status": {
-            "$ref": "#/components/schemas/SkillDraftStatus"
+            "$ref": "#/components/schemas/SkillDraftStatus",
+            "description": "Current Draft mutability state."
           },
           "target_version": {
             "description": "Target business version ordinal.",
@@ -18476,23 +18526,53 @@
         "type": "object"
       },
       "SkillDraftSourceKind": {
+        "description": "Immutable source used to initialize the current Draft.",
         "enum": [
           "FOLDER",
           "GIT",
           "PUBLISHED_VERSION"
         ],
         "title": "SkillDraftSourceKind",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "Created from a browser folder upload.",
+          "Created or refreshed from a frozen Git snapshot.",
+          "Copied from the latest exact Published Version."
+        ],
+        "x-enum-varnames": [
+          "FOLDER",
+          "GIT",
+          "PUBLISHED_VERSION"
+        ],
+        "x-enumNames": [
+          "FOLDER",
+          "GIT",
+          "PUBLISHED_VERSION"
+        ]
       },
       "SkillDraftStatus": {
+        "description": "Mutability state of the current Draft.",
         "enum": [
           "EDITING",
           "FROZEN"
         ],
         "title": "SkillDraftStatus",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "The Draft accepts revision-CAS edit commands.",
+          "Publication has frozen the Draft against mutation."
+        ],
+        "x-enum-varnames": [
+          "EDITING",
+          "FROZEN"
+        ],
+        "x-enumNames": [
+          "EDITING",
+          "FROZEN"
+        ]
       },
       "SkillDraftSummary": {
+        "description": "Current immutable Draft revision and target Version.",
         "properties": {
           "revision_id": {
             "description": "Current immutable Draft revision identity.",
@@ -18500,7 +18580,8 @@
             "type": "string"
           },
           "status": {
-            "$ref": "#/components/schemas/SkillDraftStatus"
+            "$ref": "#/components/schemas/SkillDraftStatus",
+            "description": "Current Draft mutability state."
           },
           "target_version": {
             "description": "Target business version ordinal.",
@@ -18602,13 +18683,29 @@
         "type": "object"
       },
       "SkillLifecycleStatus": {
+        "description": "Recoverable lifecycle of a Space Skill asset.",
         "enum": [
           "DRAFT_ONLY",
           "PUBLISHED",
           "OFFLINE"
         ],
         "title": "SkillLifecycleStatus",
-        "type": "string"
+        "type": "string",
+        "x-enum-descriptions": [
+          "The Skill has a Draft but no Published Version.",
+          "The Skill has at least one Published Version and is online.",
+          "The Skill is recoverably offline but remains editable."
+        ],
+        "x-enum-varnames": [
+          "DRAFT_ONLY",
+          "PUBLISHED",
+          "OFFLINE"
+        ],
+        "x-enumNames": [
+          "DRAFT_ONLY",
+          "PUBLISHED",
+          "OFFLINE"
+        ]
       },
       "SkillMarketItem": {
         "additionalProperties": true,
@@ -18736,6 +18833,7 @@
         "type": "object"
       },
       "SkillOwnerSummary": {
+        "description": "The unique active owner of one Space Skill.",
         "properties": {
           "display_name": {
             "anyOf": [
@@ -19232,6 +19330,7 @@
         "type": "object"
       },
       "SkillVersionDetail": {
+        "description": "Published Version metadata addressed by business ordinal.",
         "properties": {
           "description": {
             "anyOf": [
@@ -19242,9 +19341,11 @@
                 "type": "null"
               }
             ],
+            "description": "Description captured from this Version's SKILL.md.",
             "title": "Description"
           },
           "mcp_dependencies": {
+            "description": "MCP dependency codes captured in immutable Version metadata.",
             "items": {
               "type": "string"
             },
@@ -19252,6 +19353,7 @@
             "type": "array"
           },
           "name": {
+            "description": "Name captured from this Version's SKILL.md.",
             "title": "Name",
             "type": "string"
           },
@@ -19289,6 +19391,7 @@
         "type": "object"
       },
       "SkillVersionSummary": {
+        "description": "Identity and completion time of one Published Version.",
         "properties": {
           "published_at": {
             "anyOf": [
@@ -19765,6 +19868,7 @@
         ]
       },
       "SpaceSkillDetail": {
+        "description": "Authoring detail for one Space-owned Skill asset.",
         "properties": {
           "active_publication": {
             "anyOf": [
@@ -19774,7 +19878,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Current non-terminal Attempt, or null."
           },
           "actor": {
             "$ref": "#/components/schemas/SkillGrantActor",
@@ -19800,7 +19905,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Complete current Draft facts, or null."
           },
           "gmt_created": {
             "anyOf": [
@@ -19836,7 +19942,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Latest Published Version, or null before first publish."
           },
           "lease_summary": {
             "anyOf": [
@@ -19850,7 +19957,8 @@
             "description": "List-only Lease state without a fencing token; null when no Draft exists."
           },
           "lifecycle_status": {
-            "$ref": "#/components/schemas/SkillLifecycleStatus"
+            "$ref": "#/components/schemas/SkillLifecycleStatus",
+            "description": "Recoverable lifecycle derived from Published and Offline facts."
           },
           "name": {
             "description": "Skill name projected from SKILL.md.",
@@ -19866,6 +19974,7 @@
                 "type": "null"
               }
             ],
+            "description": "UTC recoverable Offline time, or null.",
             "title": "Offline At"
           },
           "offline_by": {
@@ -19877,10 +19986,12 @@
                 "type": "null"
               }
             ],
+            "description": "Actor that placed the Skill Offline, or null.",
             "title": "Offline By"
           },
           "owner": {
-            "$ref": "#/components/schemas/SkillOwnerSummary"
+            "$ref": "#/components/schemas/SkillOwnerSummary",
+            "description": "Unique active Skill owner."
           },
           "skill_id": {
             "description": "Unique numeric Skill identifier.",
@@ -19893,6 +20004,7 @@
             "type": "string"
           },
           "source": {
+            "description": "Original Space Skill creation source.",
             "enum": [
               "FOLDER",
               "GIT"
@@ -19959,7 +20071,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Current non-terminal Attempt, or null."
           },
           "actor": {
             "$ref": "#/components/schemas/SkillGrantActor",
@@ -19985,7 +20098,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Current Draft summary, or null when no Draft exists."
           },
           "gmt_created": {
             "anyOf": [
@@ -20021,7 +20135,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Latest Published Version, or null before first publish."
           },
           "lease_summary": {
             "anyOf": [
@@ -20035,7 +20150,8 @@
             "description": "List-only Lease state without a fencing token; null when no Draft exists."
           },
           "lifecycle_status": {
-            "$ref": "#/components/schemas/SkillLifecycleStatus"
+            "$ref": "#/components/schemas/SkillLifecycleStatus",
+            "description": "Recoverable lifecycle derived from Published and Offline facts."
           },
           "name": {
             "description": "Skill name projected from SKILL.md.",
@@ -20043,7 +20159,8 @@
             "type": "string"
           },
           "owner": {
-            "$ref": "#/components/schemas/SkillOwnerSummary"
+            "$ref": "#/components/schemas/SkillOwnerSummary",
+            "description": "Unique active Skill owner."
           },
           "skill_id": {
             "description": "Unique numeric Skill identifier.",
@@ -38402,11 +38519,13 @@
             }
           },
           {
+            "description": "Number of records per page.",
             "in": "query",
             "name": "page_size",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Number of records per page.",
               "maximum": 100,
               "minimum": 1,
               "title": "Page Size",
@@ -38591,10 +38710,12 @@
             }
           },
           {
+            "description": "Stable identity for replaying this creation command.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "description": "Stable identity for replaying this creation command.",
               "maxLength": 128,
               "minLength": 1,
               "title": "Idempotency-Key",
@@ -38767,6 +38888,7 @@
             }
           },
           {
+            "description": "Optional name or description search text.",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -38780,26 +38902,31 @@
                   "type": "null"
                 }
               ],
+              "description": "Optional name or description search text.",
               "title": "Keyword"
             }
           },
           {
+            "description": "One-based page number.",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "One-based page number.",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
             }
           },
           {
+            "description": "Number of records per page.",
             "in": "query",
             "name": "page_size",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Number of records per page.",
               "maximum": 100,
               "minimum": 1,
               "title": "Page Size",
@@ -38986,10 +39113,12 @@
             }
           },
           {
+            "description": "Stable identity for replaying this creation command.",
             "in": "header",
             "name": "Idempotency-Key",
             "required": true,
             "schema": {
+              "description": "Stable identity for replaying this creation command.",
               "maxLength": 128,
               "minLength": 1,
               "title": "Idempotency-Key",
@@ -39353,10 +39482,12 @@
             }
           },
           {
+            "description": "Revision the caller expects to delete.",
             "in": "query",
             "name": "expected_revision_id",
             "required": true,
             "schema": {
+              "description": "Revision the caller expects to delete.",
               "maxLength": 128,
               "minLength": 1,
               "title": "Expected Revision Id",
@@ -39364,6 +39495,7 @@
             }
           },
           {
+            "description": "Current Team Lease token; omit for Personal Space.",
             "in": "query",
             "name": "fencing_token",
             "required": false,
@@ -39377,6 +39509,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Current Team Lease token; omit for Personal Space.",
               "title": "Fencing Token"
             }
           },
@@ -39739,10 +39872,12 @@
             }
           },
           {
+            "description": "Normalized POSIX-relative Draft file path.",
             "in": "path",
             "name": "path",
             "required": true,
             "schema": {
+              "description": "Normalized POSIX-relative Draft file path.",
               "title": "Path",
               "type": "string"
             }
@@ -39925,10 +40060,12 @@
             }
           },
           {
+            "description": "Normalized POSIX-relative Draft file path.",
             "in": "path",
             "name": "path",
             "required": true,
             "schema": {
+              "description": "Normalized POSIX-relative Draft file path.",
               "title": "Path",
               "type": "string"
             }
@@ -42167,22 +42304,26 @@
             }
           },
           {
+            "description": "One-based page number.",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "One-based page number.",
               "minimum": 1,
               "title": "Page",
               "type": "integer"
             }
           },
           {
+            "description": "Number of records per page.",
             "in": "query",
             "name": "page_size",
             "required": false,
             "schema": {
               "default": 20,
+              "description": "Number of records per page.",
               "maximum": 100,
               "minimum": 1,
               "title": "Page Size",
@@ -42369,10 +42510,12 @@
             }
           },
           {
+            "description": "Business version ordinal.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
+              "description": "Business version ordinal.",
               "minimum": 1,
               "title": "Version",
               "type": "integer"
@@ -42558,10 +42701,12 @@
             }
           },
           {
+            "description": "Business version ordinal.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
+              "description": "Business version ordinal.",
               "minimum": 1,
               "title": "Version",
               "type": "integer"
@@ -42747,20 +42892,24 @@
             }
           },
           {
+            "description": "Business version ordinal.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
+              "description": "Business version ordinal.",
               "minimum": 1,
               "title": "Version",
               "type": "integer"
             }
           },
           {
+            "description": "Normalized POSIX-relative Published Version file path.",
             "in": "path",
             "name": "path",
             "required": true,
             "schema": {
+              "description": "Normalized POSIX-relative Published Version file path.",
               "title": "Path",
               "type": "string"
             }

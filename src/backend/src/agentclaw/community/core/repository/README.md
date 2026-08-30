@@ -152,6 +152,9 @@ provides:
   - SkillPropagationLogRepository
   - SkillRepository
   - SpaceSkillRepository
+  - SpaceSkillDraftRepository
+  - SpaceSkillReadRepository
+  - SpaceSkillVersionReadRepository
   - SkillEditorRequestRepository
   - DraftEditLeaseRepository
   - SkillVersionRepositoryProtocol

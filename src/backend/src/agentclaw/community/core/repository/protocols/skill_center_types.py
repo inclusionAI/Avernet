@@ -192,7 +192,19 @@ class SpaceSkillQueryRecord(TypedDict):
     gmt_modified: datetime
 
 
-class SpaceSkillReadRecord(SpaceSkillQueryRecord):
+class SpaceSkillReadRecord(TypedDict):
+    id: int
+    skill_uuid: str
+    name: str
+    description: str | None
+    status: str | None
+    draft_status: str | None
+    space_type: Literal["PERSONAL", "TEAM"]
+    current_user_skill_role: Literal["OWNER", "MANAGER"] | None
+    lease_holder_user_id: str | None
+    lease_holder_display_name: str | None
+    gmt_created: datetime
+    gmt_modified: datetime
     source_type: Literal["FOLDER", "GIT"]
     draft_target_version: int | None
     draft_description: str | None
@@ -249,7 +261,18 @@ class SkillVersionRecord(TypedDict):
     published_at: datetime | None
 
 
-class SpaceSkillVersionRecord(SkillVersionRecord):
+class SpaceSkillVersionRecord(TypedDict):
+    id: int
+    skill_id: int
+    version_ordinal: int
+    status: Literal["MATERIALIZING", "PUBLISHED"]
+    sc_version_number: str
+    sc_skill_id: int | None
+    sc_version_id: int | None
+    name: str
+    description: str | None
+    metadata_json: str | None
+    published_at: datetime | None
     skill_uuid: str
 
 

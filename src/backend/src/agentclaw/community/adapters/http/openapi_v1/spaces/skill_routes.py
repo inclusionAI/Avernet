@@ -8,13 +8,11 @@ from typing import Annotated
 from fastapi import (
     APIRouter,
     Depends,
-    File,
     Form,
     Header,
     Path,
     Query,
     Request,
-    UploadFile,
 )
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
@@ -38,6 +36,7 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     PublishedVersionFileContent,
     PublishedVersionFileTree,
     SkillVersionDetail,
+    SpaceSkillFolderUpload,
     SpaceSkillDetail,
     SpaceSkillSummary,
 )
@@ -62,10 +61,21 @@ router = APIRouter(
 )
 SpaceIdPath = Annotated[int, Path(ge=1, description="Space primary identifier.")]
 SkillIdPath = Annotated[int, Path(ge=1, description="Space Skill primary identifier.")]
-PageSizeQuery = Annotated[int, Query(ge=1, le=100)]
+PageSizeQuery = Annotated[
+    int, Query(ge=1, le=100, description="Number of records per page.")
+]
 IdempotencyKeyHeader = Annotated[
     str,
-    Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    Header(
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=128,
+        description="Stable identity for replaying this creation command.",
+    ),
+]
+VersionPath = Annotated[int, Path(ge=1, description="Business version ordinal.")]
+PublishedFilePath = Annotated[
+    str, Path(description="Normalized POSIX-relative Published Version file path.")
 ]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
@@ -132,35 +142,31 @@ async def create_space_skill_from_folder(
     request: Request,
     user_id: UserIdDep,
     idempotency_key: IdempotencyKeyHeader,
-    files: Annotated[list[UploadFile], File(description="Folder files.")],
-    file_paths: Annotated[
-        str,
-        Form(description="JSON array of POSIX relative paths matching files."),
-    ],
+    upload: Annotated[SpaceSkillFolderUpload, Form(media_type="multipart/form-data")],
     commands: SpaceSkillApplicationServiceProtocol = Injected(
         SpaceSkillApplicationServiceProtocol
     ),
     queries: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
 ) -> Envelope[SpaceSkillDetail]:
     try:
-        paths = json.loads(file_paths)
+        paths = json.loads(upload.file_paths)
     except json.JSONDecodeError as exc:
         raise SkillPackageInvalidError("invalid_file_paths") from exc
     if (
         not isinstance(paths, list)
-        or len(paths) != len(files)
+        or len(paths) != len(upload.files)
         or any(not isinstance(path, str) for path in paths)
     ):
         raise SkillPackageInvalidError("invalid_file_paths")
-    payload = [
+    files = [
         (path, await uploaded.read())
-        for path, uploaded in zip(paths, files, strict=True)
+        for path, uploaded in zip(paths, upload.files, strict=True)
     ]
     outcome = commands.create_from_folder(
         space_id=space_id,
         actor_id=user_id,
         request_id=idempotency_key,
-        files=payload,
+        files=files,
     )
     detail = queries.get_space_skill(
         space_id=space_id, skill_id=outcome.skill_id, actor_id=user_id
@@ -209,8 +215,13 @@ async def list_consumable_space_skills(
     space_id: SpaceIdPath,
     request: Request,
     caller: ActingCallerDep,
-    keyword: Annotated[str | None, Query(max_length=128)] = None,
-    page_number: Annotated[int, Query(alias="page", ge=1)] = 1,
+    keyword: Annotated[
+        str | None,
+        Query(max_length=128, description="Optional name or description search text."),
+    ] = None,
+    page_number: Annotated[
+        int, Query(alias="page", ge=1, description="One-based page number.")
+    ] = 1,
     page_size: PageSizeQuery = 20,
     service: SpaceSkillVersionQueryServiceProtocol = Injected(
         SpaceSkillVersionQueryServiceProtocol
@@ -264,7 +275,9 @@ async def list_space_skill_versions(
     skill_id: SkillIdPath,
     request: Request,
     caller: ActingCallerDep,
-    page_number: Annotated[int, Query(alias="page", ge=1)] = 1,
+    page_number: Annotated[
+        int, Query(alias="page", ge=1, description="One-based page number.")
+    ] = 1,
     page_size: PageSizeQuery = 20,
     service: SpaceSkillVersionQueryServiceProtocol = Injected(
         SpaceSkillVersionQueryServiceProtocol
@@ -293,7 +306,7 @@ async def list_space_skill_versions(
 async def get_space_skill_version(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
-    version: Annotated[int, Path(ge=1)],
+    version: VersionPath,
     request: Request,
     caller: ActingCallerDep,
     service: SpaceSkillVersionQueryServiceProtocol = Injected(
@@ -322,7 +335,7 @@ async def get_space_skill_version(
 async def get_space_skill_version_file_tree(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
-    version: Annotated[int, Path(ge=1)],
+    version: VersionPath,
     request: Request,
     caller: ActingCallerDep,
     service: SpaceSkillVersionQueryServiceProtocol = Injected(
@@ -351,8 +364,8 @@ async def get_space_skill_version_file_tree(
 async def read_space_skill_version_file(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
-    version: Annotated[int, Path(ge=1)],
-    path: str,
+    version: VersionPath,
+    path: PublishedFilePath,
     request: Request,
     caller: ActingCallerDep,
     service: SpaceSkillVersionQueryServiceProtocol = Injected(
