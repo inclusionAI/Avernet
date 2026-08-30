@@ -12,6 +12,8 @@ import pytest
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
+from agentclaw.community.core.workspace.engines.hermes import HermesSandboxProvider
+from agentclaw.community.core.workspace.engines import create_engine_sandbox_registry
 from agentclaw.community.di import config as cfg
 
 
@@ -255,6 +257,28 @@ class TestAICodingProvider:
         ]}}}
         plan = provider.get_build_plan(bot=bot)
         assert "workspace/lib" not in plan.rsync_excludes
+
+
+@pytest.mark.unit
+class TestHermesProvider:
+    def test_build_plan_uses_hermes_runtime_layout(self):
+        provider = HermesSandboxProvider(workspace=_workspace())
+
+        plan = provider.get_build_plan()
+
+        assert provider.get_base_path() == "/home/admin/.hermes"
+        assert plan.engine_type == "hermes"
+        assert plan.source_root_name == ".hermes"
+        assert plan.migration_subpath == "hermes"
+        assert plan.skill_source_relpath == "skills"
+        assert plan.skill_target_relpath == "skills"
+        assert "workspace/skills-pool/skills-repo" in plan.rsync_excludes
+        assert all("skill-center" not in item for item in plan.rsync_excludes)
+
+    def test_composition_registry_resolves_hermes_without_fallback(self):
+        provider = create_engine_sandbox_registry(_workspace()).resolve("hermes")
+
+        assert isinstance(provider, HermesSandboxProvider)
 
 _OPENCLAW_ROOT = cfg.WorkspaceConfig().openclaw_root
 _CLAUDE_CODE_ROOT = cfg.WorkspaceConfig().claude_code_root

@@ -292,7 +292,6 @@ class ConfigModule(Module):
         get the dev's home directory at boot.
         """
         import pathlib
-
         block = _block("workspace")
         defaults = cfg.WorkspaceConfig()
 
@@ -308,6 +307,7 @@ class ConfigModule(Module):
             aicoding_root=_expand(
                 block.get("aicoding_root"), defaults.aicoding_root
             ),
+            hermes_root=_expand(block.get("hermes_root"), defaults.hermes_root),
         )
 
     # ── Access policy ───────────────────────────────────────────────
