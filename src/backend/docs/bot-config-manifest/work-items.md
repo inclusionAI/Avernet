@@ -155,20 +155,40 @@ the next restart for unrelated reasons). Instead: writing a new manifest version
 to an **existing** bot makes it effective there and then, so the running bot
 always reflects the manifest that was last accepted.
 
-**"Restart" is the wrong word for it, and the difference is not cosmetic.** The
-verb differs per engine family, and on the BaaS family it is conditional on the
-bot's lifecycle state. Both were checked against the code:
+**This is ordinary work — the same shape as `PUT`-triggers-creation.** What it
+is not is *one* verb: the verb differs per engine family, and on the BaaS family
+it is conditional on the bot's lifecycle state. Both were checked against the
+code:
 
 | | How a manifest change is made effective | Why not "restart" |
 | --- | --- | --- |
 | **BaaS / ARCA** | `BotService.restart_bot` → `BaasService.upgrade_bot` → `_build_create_bot_payload`, which rebuilds the payload and re-reads every stored input (including `ac_bot_startup_script`) | Correct verb, but **state-conditional** — see below |
 | **teclaw** | `BaasService.update_teclaw_bot` → `POST /api/v1/bots/{uuid}/update` with a recomposed artifact in `deploy_config.teclaw_bot_config`. An **in-place hot update**: "sessions/container identity are preserved" | **Restart is rejected outright.** `BotService.restart_bot` raises `BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")`, and `bot_publish_service.py` records why: a teclaw restart destroys the container, reallocation fails, and the bot is stranded with no binding and its in-container files lost |
 
-Today `update_teclaw_bot` has only two callers, both in `bot_build_service.py`
-(the publish/build upgrade and the draft-restore hot update). Making a manifest
-effective on teclaw therefore needs that primitive reached from a **non-publish**
-path — recompose the artifact, hand it over, poll the publish id — which is real
-work in W8 and not a matter of calling the same "restart" the BaaS family uses.
+**Pushing a config change to a running teclaw bot is already a solved,
+one-call operation** — this is wiring, not new machinery. Two existing precedents,
+both outside the publish flow:
+
+- `ChannelService` calls `plugin.sync_symlinks([])`, whose comment states the
+  mechanism plainly: *"`TeclawDeviceSyncPlugin` recomposes + POSTs the artifact;
+  the list arg is ignored (whole-artifact delivery)"*. An ordinary service making
+  a runtime edit effective, in one line.
+- `TeclawProvisionService.provision` composes through
+  `DeployArtifactProducerRouter.resolve(...).produce_artifact(...)` — the same
+  producer the publish build uses — with no publish flow involved.
+
+**And for the file-backed categories teclaw may need no artifact redeliver at
+all.** `TeclawDeviceFileSystem` *"forwards every read/write per-file to the
+engine, so it needs neither OSS nor the whole-artifact device-sync redeliver"*
+(`device_filesystem_resolver.py`). So on a **running** teclaw bot, `identity` and
+`resources` go through the same `DeviceFileSystem` seam as the BaaS family; the
+artifact is the *boot* vehicle, not the only way in. This makes W8's teclaw arm
+smaller than it first looks, and W8 should establish which categories genuinely
+need the whole-artifact path before reaching for it.
+
+The one hard rule: **never route a teclaw manifest change through
+`BotService.restart_bot`.** It raises, and per `bot_publish_service.py` a teclaw
+restart would destroy the container, fail reallocation and strand the bot.
 
 **On the BaaS family the restart is conditional.** `BotService.restart_bot`
 accepts only `ACTIVE`, `FAILED` and `PENDING`; `REACTIVATING` returns early as a
@@ -1518,19 +1538,21 @@ bot has started (§3.4).
       share one platform state. This is #926's actual requirement.
 - [ ] A manifest `PUT` **takes effect immediately** (§2.6), so the running bot
       always reflects the manifest last accepted and an unrelated restart is a
-      replay rather than a reconfiguration. This is **two verbs, not one**, and
-      the teclaw half is the larger piece of work:
+      replay rather than a reconfiguration. This is **two verbs, not one**:
       - **BaaS / ARCA** — `BotService.restart_bot`, but only from `ACTIVE`,
         `FAILED` or `PENDING`. `REACTIVATING` is a no-op; every other state
         raises `BotInvalidLifecycleStateError`. So the endpoint persists the
         document unconditionally, makes it effective when the state allows, and
         **tells the caller which of the two happened** — it must never return a
         4xx for a valid manifest because of where the bot is in its lifecycle.
-      - **teclaw** — restart is rejected outright and would strand the bot
-        (§2.6). The verb is `BaasService.update_teclaw_bot`: recompose the
-        artifact, hot-update in place, poll the returned `publish_id`. Today its
-        only callers are in `bot_build_service.py`, so reaching it from a
-        non-publish path is new work in this item, not a reused call.
+      - **teclaw** — never `BotService.restart_bot`: it raises, and a teclaw
+        restart would strand the bot (§2.6). Recompose and redeliver instead,
+        reusing what already exists — `TeclawDeviceSyncPlugin.sync_symlinks([])`
+        is a one-call whole-artifact redeliver that `ChannelService` already uses
+        for runtime edits. **First establish which categories even need it:**
+        `TeclawDeviceFileSystem` forwards per-file writes straight to the engine,
+        so `identity` and `resources` on a running bot may go through the same
+        `DeviceFileSystem` seam as the BaaS family and need no redeliver.
 - [ ] The §2.7 readiness policy holds, and is the divergence from design §4.3
       most in need of testing on both engine families: a fetch failure on a
       **first** boot leaves the bot **inactive**; the same failure against an
