@@ -67,7 +67,9 @@
 | `manifest-schema.zh-CN.md` | Manifest v1 草案：六类配置的字段、校验、到各引擎的映射 | 平台 & 引擎团队 |
 | `examples.zh-CN.md` | 六类配置的完整案例：业务场景、manifest 写法、apply 动作、交付形态 | 平台 & 引擎团队 & 业务方 |
 | `engine-requirements.zh-CN.md` | 各引擎的工作量与需确认清单、能力矩阵、开放问题 | 平台 & 引擎团队 |
-| `work-items.md` | **实现工作项拆分**（英文）：W1–W9 每项的范围、依赖、验收标准；阻塞性设计问题与外部确认项 | 平台团队 |
+| `work-items.md` | **实现工作项拆分**（英文）：W1–W13 每项的范围、依赖、验收标准；已定决策、设计问题与外部确认项；人员分工 | 平台团队 |
+| `work-items.zh-CN.md` | 上一份的中文版，内容对齐 | 平台团队 |
+| `teclaw-cli-contract.zh-CN.md` | **给 teclaw owner 的实现说明**：下发契约不变，仅新增 `cli_tools` 段。含字段定义、用例与验收清单 | teclaw 团队 |
 
 ## 术语表
 

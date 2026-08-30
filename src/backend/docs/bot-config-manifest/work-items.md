@@ -1753,6 +1753,15 @@ manifest level, so there is no de-activation for W8 to place.)
 in the design itself. Not scheduled.
 
 **Depends on.** W8.
+
+**The teclaw half is written and ready to hand over.**
+`teclaw-cli-contract.zh-CN.md` is the engine-facing specification: the delivery
+contract is unchanged, `cli_tools` is the only addition, and the platform does
+the fetch, digest check and unpack so the engine receives an already-unpacked
+directory. What teclaw implements is placement, the executable bit, PATH, and
+the same full-overwrite semantics every other category already has. It carries
+six worked use cases and an acceptance checklist. `schema_version` goes 4 → 5.
+
 **Blocked by.** — **X3 is closed** (§4): the ARCA fleet is `linux/amd64`, so a
 single URL per tool suffices. teclaw needs only an artifact protocol from us; the
 ARCA PATH proposal and the default-skill-set skill are ours to design. The §4
