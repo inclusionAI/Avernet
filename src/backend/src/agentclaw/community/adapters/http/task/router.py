@@ -161,7 +161,7 @@ async def run_template_internal(
         body.template_id,
         body.input,
         owner_user_id=user.staffId,
-        owner_bot_id="",
+        owner_bot_id=body.caller_bot_id,
         auto_advance=body.auto_advance,
         owner_account_id=user.operatorName,
     )

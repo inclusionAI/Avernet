@@ -113,9 +113,17 @@ class ExecutionConfigDTO(BaseModel):
 
 
 class TemplateRunRequestDTO(BaseModel):
-    """Run a repository-owned static template; identity is supplied by the caller context."""
+    """Run a repository-owned static template; identity is supplied by the caller context.
+
+    触发者身份对称 dynamic execute: ``caller_bot_id`` 必填(触发执行的 bot id),
+    ``owner_user_id``/``owner_account_id`` 仍由 IAM principal 解析注入。
+    """
 
     template_id: str = Field(..., min_length=1)
+    caller_bot_id: str = Field(
+        ..., min_length=1,
+        description="触发执行这条静态模板的 caller bot id(必填,对称 dynamic execute.owner_bot_id)",
+    )
     input: dict[str, Any] = Field(default_factory=dict)
     auto_advance: bool | None = Field(
         default=None,
