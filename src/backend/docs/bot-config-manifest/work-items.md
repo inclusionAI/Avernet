@@ -1328,6 +1328,11 @@ capability table is fully determined.
 - [ ] Validation refuses, each with a message naming the offending entry:
   - two or more of `from` / `source` / `content` / a registry ref on one entry;
   - `from` naming a source not declared in `sources`;
+  - a `source` URL carrying **userinfo** — `https://user:token@host/path`. The
+    schema requires every private-source secret to go through a credential
+    reference (W3), and an inline token would be stored in the document, read
+    back byte-exact by `GET`, and recorded by W11 as provenance — three places
+    the encrypted, never-readable credential store exists to keep it out of;
   - `digest` on a git-source entry (commit SHA is the digest — schema §2.2);
   - `auth` on an entry that uses `from` (auth is declared on the named source)
     or on a `content` entry;
@@ -1418,6 +1423,11 @@ declared but unbound (W3 binds it).
 
 - [ ] Scheme is restricted to `https`; `http` only against a deployment-level
       explicit allowlist.
+- [ ] **A URL carrying userinfo is refused at fetch time too**, not only at
+      `PUT` (W1). Two gates because they catch different things: `PUT` catches
+      what a user wrote, this one catches what a redirect or a `${BOT_*}`
+      substitution produced. A credential belongs in a header from W3's store,
+      never in the URL.
 - [ ] After DNS resolution the target IP is rejected when it is loopback,
       link-local (including `169.254.169.254`), unique-local, multicast,
       reserved, or RFC1918 — unless deployment-level allowlisted.
@@ -1924,7 +1934,11 @@ colliding basenames) because it does no fetching and has no tree to inspect at
 X3), while `${BOT_ARCH}` resolves to `amd64` in W1's whitelist and a fetched binary's
 ELF header is validated — so a wrong-architecture binary fails in the apply report
 rather than as an `exec format error` the model meets mid-task. Then: `digest`
-mandatory and enforced as the convergence key;
+mandatory, and the convergence key is the **whole delivery-relevant
+declaration — `digest` *and* `entrypoints`** — not the digest alone. Same binary
+with `entrypoints` changed from `bin/old` to `bin/new` is a real change: keying
+on digest would report `unchanged`, deliver nothing, and leave `old` exposed on
+PATH while the declaration says `new`;
 static binary and archive forms only; a platform-defined logical tool directory
 on the agent process's PATH, with users never seeing a physical path; a
 tools-usage skill in the engine-aware **default skill set** (`SkillSetService`

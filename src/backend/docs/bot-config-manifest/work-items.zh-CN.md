@@ -1094,6 +1094,10 @@ APPLYING                 manifest apply 进行中（fetch → 物化 → 下发�
 - [ ] 校验会拒绝下列情形，且每条错误消息指名违规条目：
   - 一个条目上同时出现两个及以上的 `from` / `source` / `content` / 注册项引用；
   - `from` 指向 `sources` 里没有声明的源；
+  - `source` URL 里带 **userinfo** —— `https://user:token@host/path`。schema 要求
+    所有私有源的秘密都必须走凭证引用（W3），而内联的 token 会被存进文档、被 `GET`
+    逐字节读回、还被 W11 作为溯源记录下来 —— 这三处正是那个加密、永不可读回的凭证
+    库存在的意义所在；
   - git 源条目上写了 `digest`（commit SHA 就是 digest —— schema §2.2）；
   - 用了 `from` 的条目上写 `auth`（auth 声明在命名源上），或 `content` 条目上写
     `auth`；
@@ -1171,6 +1175,9 @@ manifest 概念。
 **验收标准。**
 
 - [ ] scheme 限制为 `https`；`http` 仅在部署级显式白名单下允许。
+- [ ] **带 userinfo 的 URL 在拉取时也要拒绝**，不只是在 `PUT`（W1）。两道门抓的
+      东西不同：`PUT` 抓用户写下的，这一道抓重定向或 `${BOT_*}` 替换产生的。凭证
+      属于 W3 凭证库里出来的请求头，永远不属于 URL。
 - [ ] DNS 解析之后，目标 IP 若为 loopback、link-local（含 `169.254.169.254`）、
       unique-local、multicast、reserved 或 RFC1918，一律拒绝——除非部署级白名单
       放行。
@@ -1581,7 +1588,11 @@ skill 是我们自己要设计的。§4 的调研确认**不存在会被重复�
 URL（§4, X3）；同时
 `${BOT_ARCH}` 在 W1 的白名单里解析为 `amd64`，并校验拉取到的二进制的 ELF 头——
 于是架构不匹配会在 apply 报告里失败，而不是变成模型在任务中途撞上的
-`exec format error`。然后：`digest` 强制且作为收敛判据；只支持静态二进制与归档
+`exec format error`。然后：`digest` 强制，而**收敛判据是整份与下发相关的声明——
+`digest` **与** `entrypoints` 一起**，不是只看 digest。同一个二进制、只把
+`entrypoints` 从 `bin/old` 改成 `bin/new`，是一次真实变更：只按 digest 判会报
+`unchanged`、什么都不下发，于是 `old` 继续挂在 PATH 上，而声明写的是 `new`；
+只支持静态二进制与归档
 两种形态；一个由平台定义的、在 agent 进程 PATH 上的逻辑工具目录，用户永远看不到
 物理路径；在按引擎区分的**默认技能集**里放一个工具用法 skill（`SkillSetService`
 已经有这个机制），让模型知道有哪些工具、怎么调用；以及给 teclaw 的 artifact
