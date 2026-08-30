@@ -20,7 +20,7 @@ Three kinds of entry gate the work and are tracked separately from it:
 | --- | --- |
 | `W1`–`W13` | Implementation work items — one PR each. W12 is a written contract plus another team's sign-off rather than code |
 | `D1`–`D4` | **Design questions**, found while checking the design against the code. **All four are now settled** — D1–D3 resolved, D4 deferred with an interim policy (deliver after start) that unblocks the work |
-| `X1`–`X3` | **External confirmations** owed by other teams. None blocks W1–W6; they gate W7 and W9, and W8's teclaw arm |
+| `X1`–`X4` | **External confirmations** owed by other teams. **All four are now closed.** |
 
 Where this document diverges from the merged design docs — §2.5 (capability
 scope), §2.6 (`PUT` takes effect immediately), §2.7 (apply records per-entry
@@ -137,7 +137,7 @@ That collapses the capability model to questions the bot record answers on its
 own, with no live lookup and no third "we could not find out" state:
 
 - `is_teclaw(active_engine)` — the canonical engine test, which is also what
-  `provider_resolver.resolve` itself keys on (`teclaw` or else the `baas`
+  `provider_resolver.resolve_device_provider` itself keys on (`teclaw` or else the `baas`
   default);
 - `bot_type == "desktop"` — a separate axis, and a bot-record field. **Desktop
   is out of scope for this feature**, so this test exists only to refuse it.
@@ -1209,8 +1209,10 @@ APPLYING                 manifest apply running (fetch → materialise → deliv
 - [ ] Polling reports the states above, and both terminal states carry the apply
       report.
 - [ ] The pre-existing `PUT` path is unchanged: a bot created any other way can
-      still be given a manifest afterwards and have it take effect on restart
-      (§2.6). The two paths coexist.
+      still be given a manifest afterwards and have it **take effect
+      immediately, by the same no-restart path as any other existing bot**
+      (§2.6). The two paths coexist; neither leaves a bot on stale
+      configuration until its next lifecycle event.
 - [ ] **Apply is invoked in two phases** (W4), and this item is the reason the
       orchestrator has that shape: **phase A** (`script`) runs before
       `_build_create_bot_payload` composes the start command, **phase B**
@@ -1303,6 +1305,11 @@ capability table is fully determined.
     reserving the name means a future mixed fleet changes only where the value
     comes from, with no schema change and nothing for users to rewrite;
   - a `resources.path` that is absolute or contains `../`;
+  - a `cli_tools.entrypoints` value that is absolute, contains `..`, or — once
+    the archive is unpacked — resolves outside its tool directory, does not
+    exist, or is not a regular file. `entrypoints` decides what gets made
+    **executable and put on PATH**, so an unconstrained value would have an
+    engine chmod a file outside the materialised tree;
   - a `resources` entry whose `path` lies under another directory entry's
     `path` (the nesting ban, schema §3.2);
   - an `identity.type` outside the engine's legal set — `VALID_IDENTITY_FILES`
@@ -1670,11 +1677,20 @@ content hosted in the company's git service is a first-class source.
 `read_repository` 访问令牌, injected as HTTP Basic, needing no change to the v1
 credential model. Nothing external remains.
 
-**Scope change forced by X1:** `read_repository` cannot reach the API, so this
-item does a **shallow single-ref git fetch** rather than the archive-API pull
-design §10.5 specifies. That section is superseded. Taking the API route would
-require the `api` scope — read/write across every group and repository — a far
-worse credential to hold in our database than a clone is to run.
+**What this item builds is host-agnostic.** The contract is **git over HTTPS
+with a credential injected as a request header** — the same `header` credential
+type W3 already stores, with no dependency on any hosting provider's API. Any
+git service reachable over HTTPS satisfies it, and a public-local checkout needs
+no company-only service to exercise this code path.
+
+**Scope change forced by X1:** the archive-API pull that design §10.5 specifies
+is replaced by a **shallow single-ref git fetch**. That section is superseded.
+The reason is recorded in §4 (X1) and is a *deployment* fact rather than a design
+dependency: our git host offers no read-only **API** scope, only a read-only
+**Git-over-HTTP** one, so the API route would require a read/write-everything
+credential in our database. Choosing the git-transport route made the resulting
+contract *more* portable, not less — §4's specifics are one deployment's
+instance of it, not a requirement of this item.
 
 **Done when.**
 
@@ -1682,8 +1698,15 @@ worse credential to hold in our database than a clone is to run.
       `source` are mutually exclusive; an unreferenced source is a warning in the
       `PUT` response, not an error.
 - [ ] `auth` is declared on the source, not on entries that use `from`.
-- [ ] **Atomic upgrade:** changing one `ref` moves every entry referencing that
-      source to the same commit within a single apply — no half-upgraded state.
+- [ ] **Atomic *resolution*, not atomic delivery.** Changing one `ref` resolves
+      every entry referencing that source to the **same commit** within a single
+      apply, and that SHA is fetched once and reused. This is the guarantee, and
+      it is deliberately narrower than "no half-upgraded state": §2.7 requires
+      one category's failure never to withhold another's, so `identity` can land
+      while `skills` aborts, leaving categories at different versions. Delivery
+      atomicity across categories would need apply-wide staging and rollback,
+      which v1 does not have. Per-category all-or-nothing (§3.2) is the level at
+      which delivery *is* atomic.
 - [ ] A git `ref` is resolved to a commit SHA at each apply point; the apply
       report records both the declared `ref` and the resolved SHA.
 - [ ] The same `{git, ref}` is fetched **once** per apply and reused across
@@ -1728,9 +1751,15 @@ manifest level, so there is no de-activation for W8 to place.)
 - [ ] Bots created through W13 get their manifest applied inside creation, so
       this item covers the *other* apply points — republish and rebuild-restart —
       plus making a `PUT` effective per §2.6.
-- [ ] On the BaaS family, post-start delivery (§3.4) completes before the bot
-      takes traffic — "started" and "ready" must stop being the same moment, or
-      the ACTIVE-but-unconfigured window becomes user-visible.
+- [ ] **The ACTIVE-but-unconfigured window is accepted, not gated.** An earlier
+      version of this criterion required post-start delivery to complete before
+      the bot takes traffic. That is withdrawn: §3.4 accepts the window for
+      iteration 1 and §2.7 withdrew the readiness gate, so requiring a traffic
+      gate here would contradict both — and no ready/serving state separate from
+      `ACTIVE` exists to hang one on (`bot_chat` has no bot-status routing gate).
+      What this item owes instead is that the window is **visible**: W13's
+      `APPLYING` state is what a caller waits through, and #1508 closes the
+      window properly in iteration 2 by delivering before start.
 - [ ] Scale-out does **not** re-apply; instances stay identical because they
       share one platform state. This is #926's actual requirement.
 - [ ] A manifest `PUT` **takes effect immediately and without a restart**
