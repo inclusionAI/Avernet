@@ -166,7 +166,10 @@ class SkillVersion(_ScopedDomainFact, Base):
 
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     skill_id = Column(UnsignedBigInteger, nullable=False)
-    publication_attempt_id = Column(UnsignedBigInteger, nullable=False)
+    # Space publication Versions reference an Attempt. SC Public lazy
+    # materialization has no TeamClaw publication command, so it must remain
+    # NULL rather than fabricating an Attempt.
+    publication_attempt_id = Column(UnsignedBigInteger, nullable=True)
     version_ordinal = Column(UnsignedInteger, nullable=False)
     status = Column(String(24), nullable=False)
     sc_version_number = Column(String(128), nullable=False)

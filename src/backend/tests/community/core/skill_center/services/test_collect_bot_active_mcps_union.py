@@ -26,6 +26,7 @@ from agentclaw.community.core.skill_center.services.bot_capability_state_reader 
 from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetService,
 )
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 
 pytestmark = pytest.mark.unit
 
@@ -89,6 +90,7 @@ def _service(db: _Database, tmp_path, *, ext_info_provider=None) -> SkillSetServ
             repository=CapabilityDesiredStateRepository(db),
             bot_repo=_Bots(),
             pool_skills=skills,
+            version_resolver=PassthroughSkillVersionResolver(),
         ),
     )
 

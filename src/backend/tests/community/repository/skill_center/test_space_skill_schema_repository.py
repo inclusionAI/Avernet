@@ -116,6 +116,7 @@ def test_additive_schema_registers_space_and_skill_fact_scope(db):
     assert {"status", "removed_at", "removed_by"} <= {
         column.name for column in SpaceMemberModel.__table__.columns
     }
+    assert SkillVersion.__table__.columns["publication_attempt_id"].nullable is True
 
 
 def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):

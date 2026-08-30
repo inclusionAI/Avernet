@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS ac_skill_draft_edit_lease (
 CREATE TABLE IF NOT EXISTS ac_skill_version (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   skill_id BIGINT UNSIGNED NOT NULL,
-  publication_attempt_id BIGINT UNSIGNED NOT NULL,
+  publication_attempt_id BIGINT UNSIGNED NULL,
   version_ordinal INT UNSIGNED NOT NULL,
   status VARCHAR(24) NOT NULL COMMENT 'MATERIALIZING/PUBLISHED',
   sc_version_number VARCHAR(128) NOT NULL,

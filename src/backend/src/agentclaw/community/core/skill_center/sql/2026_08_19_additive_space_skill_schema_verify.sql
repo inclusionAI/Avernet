@@ -42,3 +42,8 @@ SELECT table_name, column_name, is_nullable
    AND table_name IN ('ac_space', 'ac_space_member', 'ac_skill_space_binding',
                       'ac_skill_grant', 'ac_skill_draft_edit_lease',
                       'ac_skill_version', 'ac_skill_publication_attempt');
+SELECT table_name, column_name, is_nullable
+  FROM information_schema.columns
+ WHERE table_schema = DATABASE()
+   AND table_name = 'ac_skill_version'
+   AND column_name = 'publication_attempt_id';

@@ -701,6 +701,25 @@ DELETE 要求 `expected_revision_id`，Team Lease 必须 FREE/HELD_BY_ME；无 P
 
 URL 中 `{version}` 是业务序号 `1/2/3`，不是 `ac_skill_version.id`。Published Version 不可修改、删除或单独下线。
 
+所有回答“Bot 当前真正能使用哪些 Skill”的消费者必须经
+`BotCapabilityStateReader.active_skill_assets()` 读取。Reader 在 Installation flush 和
+`Installation JOIN ac_skill` 后，通过唯一 `SkillVersionResolver` 补齐 Center 资产的精确版本：
+
+```text
+Local / Repo → 保持 ac_skill 内容，不查询 Version
+Center       → 单次批量查询各 skill_id 的最高 version_ordinal PUBLISHED Version
+             → 返回 exact sc_version_number 与版本级 mcp_dependencies
+```
+
+禁止使用 `ac_skill.version/status`、SC latest/current、字符串版本排序或 MATERIALIZING Version。
+Center 缺 `skill_uuid`、PUBLISHED Version、`sc_version_number` 或合法 dependency metadata 时，
+整批 Runtime 解析 fail closed；不能跳过后投影半套运行时。一次 Runtime projection 只能消费
+Reader/Resolver 返回的同一份不可变 assets tuple，避免 Skill mapping 与 MCP dependency 跨版本。
+
+Space 发布产生的 `ac_skill_version.publication_attempt_id` 非空；SC Public 懒物化没有
+TeamClaw Publication Attempt，因此该列必须允许 NULL，不能伪造 Attempt。Published Service
+历史实例不解析 latest，只读取冻结 Artifact 中的 exact Version。
+
 #### 10.3 Owner、Manager、编辑权申请与放弃 Draft
 
 | Method | Path | 语义 |
