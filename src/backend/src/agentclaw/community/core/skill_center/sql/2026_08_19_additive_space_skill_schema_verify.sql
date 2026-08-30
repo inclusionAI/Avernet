@@ -33,6 +33,7 @@ SELECT table_name, index_name
   FROM information_schema.statistics
  WHERE table_schema = DATABASE()
    AND index_name IN ('uk_skill_uuid', 'uk_skill_set_skill',
+                      'uk_skill_creation_request', 'uk_skill_draft_request',
                       'uk_center_version_materialization', 'uk_space_code',
                       'uk_skill_ownership', 'uk_skill_active_owner',
                       'uk_skill_version_ordinal', 'uk_publish_request');
@@ -47,3 +48,11 @@ SELECT table_name, column_name, is_nullable
  WHERE table_schema = DATABASE()
    AND table_name = 'ac_skill_version'
    AND column_name = 'publication_attempt_id';
+SELECT table_name, column_name, is_nullable
+  FROM information_schema.columns
+ WHERE table_schema = DATABASE()
+   AND table_name IN ('ac_skill', 'ac_skill_publication_attempt')
+   AND column_name IN ('draft_source_kind', 'creation_request_id',
+                       'creation_request_hash', 'draft_request_id',
+                       'offline_at', 'offline_by', 'skill_version_id',
+                       'error_code', 'recovery_state', 'recovery_kind');

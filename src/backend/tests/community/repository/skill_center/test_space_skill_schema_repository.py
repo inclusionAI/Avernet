@@ -24,10 +24,14 @@ from agentclaw.community.core.repository.protocols.skill_center import (
     DraftEditLeaseRepository,
 )
 from agentclaw.community.core.models.space_skill import (
+    DraftSourceKind,
+    DraftStatus,
     SkillDraftEditLease,
     SkillGrant,
+    SkillPublicationAttemptStatus,
     SkillPublicationAttempt,
     SkillSpaceBinding,
+    SkillVersionStatus,
     SkillVersion,
     Space,
     SpaceMember,
@@ -123,13 +127,20 @@ def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
     assert {
         "draft_target_version",
         "draft_status",
-        "retired_at",
-        "retired_by",
+        "draft_source_kind",
+        "creation_request_id",
+        "creation_request_hash",
+        "draft_request_id",
+        "offline_at",
+        "offline_by",
         "source_repo_url",
         "source_branch",
         "source_subdir",
         "source_commit_sha",
     } <= {column.name for column in Skill.__table__.columns}
+    assert {"retired_at", "retired_by"}.isdisjoint(
+        column.name for column in Skill.__table__.columns
+    )
     assert {"avernet_tenant", "skill_version_id"} <= {
         column.name for column in SkillCenterSyncLog.__table__.columns
     }
@@ -141,6 +152,38 @@ def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
         or constraint.__class__.__name__ == "UniqueConstraint"
     }
     assert "uk_skill_set_skill" in unique_names
+
+
+def test_space_skill_enums_match_the_final_phase2_contract():
+    assert {item.value for item in DraftStatus} == {"EDITING", "FROZEN"}
+    assert {item.value for item in DraftSourceKind} == {
+        "FOLDER",
+        "GIT",
+        "PUBLISHED_VERSION",
+    }
+    assert {item.value for item in SkillVersionStatus} == {
+        "MATERIALIZING",
+        "PUBLISHED",
+    }
+    assert {item.value for item in SkillPublicationAttemptStatus} == {
+        "PREPARING",
+        "SC_SUBMITTING",
+        "WAITING_SC",
+        "MATERIALIZING",
+        "SUCCEEDED",
+        "FAILED",
+        "RESULT_UNKNOWN",
+    }
+
+
+def test_publication_attempt_orm_uses_final_recovery_and_error_facts(db):
+    columns = SkillPublicationAttempt.__table__.columns
+
+    assert columns["sc_version_number"].nullable is True
+    assert {"skill_version_id", "error_code", "recovery_state", "recovery_kind"} <= {
+        column.name for column in columns
+    }
+    assert "failure_code" not in columns
 
 
 def test_space_repository_is_tenant_env_scoped_and_unique(db):
@@ -329,6 +372,9 @@ def test_additive_migration_is_repeat_safe_and_requires_reviewed_duplicate_clean
         / "sql"
     )
     ddl = (sql_dir / "2026_08_19_additive_space_skill_schema.sql").read_text()
+    convergence = (
+        sql_dir / "2026_08_30_finalize_space_skill_group1_schema.sql"
+    ).read_text()
     verify = (sql_dir / "2026_08_19_additive_space_skill_schema_verify.sql").read_text()
     spaces_sql = (
         Path(__file__).parents[4]
@@ -347,6 +393,11 @@ def test_additive_migration_is_repeat_safe_and_requires_reviewed_duplicate_clean
     assert "ALTER TABLE ac_space_member" in spaces_sql
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_set_skill" in ddl
     assert "DELETE FROM" not in ddl
+    assert "retired_at" not in ddl
+    assert "failure_code" not in ddl
+    assert "ADD COLUMN IF NOT EXISTS offline_at" in convergence
+    assert "ADD COLUMN IF NOT EXISTS error_code" in convergence
+    assert "DROP COLUMN" not in convergence
     assert "ac_skill_set_skill duplicate" in verify
     assert "ac_skill_set_skill orphan skill" in verify
 
@@ -359,7 +410,7 @@ def _add_bound_skill(
     description=None,
     env="dev",
     modified_at=None,
-    retired=False,
+    offline=False,
     grant_user_id=None,
     grant_role="MANAGER",
     grant_status="ACTIVE",
@@ -375,7 +426,7 @@ def _add_bound_skill(
             skill_uuid=f"uuid-{space_id}-{name}-{env}",
             status="DEVELOPING",
             draft_status="EDITING",
-            retired_at=timestamp if retired else None,
+            offline_at=timestamp if offline else None,
             gmt_created=timestamp,
             gmt_modified=timestamp,
         )
@@ -408,7 +459,7 @@ def _add_bound_skill(
         return skill.id
 
 
-def test_list_space_skills_filters_scope_env_and_retired_rows(db):
+def test_list_space_skills_filters_scope_env_and_keeps_offline_rows(db):
     from datetime import datetime, timedelta
 
     repo = _space_skills(db)
@@ -447,7 +498,9 @@ def test_list_space_skills_filters_scope_env_and_retired_rows(db):
     )
     _add_bound_skill(db, space_id=other["id"], name="Other Space")
     _add_bound_skill(db, space_id=space["id"], name="Other Env", env="prod")
-    _add_bound_skill(db, space_id=space["id"], name="Retired", retired=True)
+    offline_id = _add_bound_skill(
+        db, space_id=space["id"], name="Offline", offline=True
+    )
 
     total, records = repo.list_space_skills(
         space_id=space["id"],
@@ -458,8 +511,12 @@ def test_list_space_skills_filters_scope_env_and_retired_rows(db):
         limit=20,
     )
 
-    assert total == 2
-    assert [record["id"] for record in records] == [newer_id, older_id]
+    assert total == 3
+    assert {record["id"] for record in records} == {
+        newer_id,
+        older_id,
+        offline_id,
+    }
 
 
 def test_list_space_skills_searches_name_and_description_case_insensitively(db):

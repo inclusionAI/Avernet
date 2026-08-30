@@ -13,8 +13,12 @@ ALTER TABLE ac_skill
   MODIFY COLUMN env VARCHAR(20) NOT NULL,
   ADD COLUMN IF NOT EXISTS draft_target_version INT NULL COMMENT '活动草稿目标 Version Ordinal',
   ADD COLUMN IF NOT EXISTS draft_status VARCHAR(16) NULL COMMENT 'NULL/EDITING/FROZEN',
-  ADD COLUMN IF NOT EXISTS retired_at TIMESTAMP NULL COMMENT 'Skill 整体退役时间',
-  ADD COLUMN IF NOT EXISTS retired_by VARCHAR(128) NULL COMMENT 'Skill 整体退役操作者',
+  ADD COLUMN IF NOT EXISTS draft_source_kind VARCHAR(32) NULL COMMENT 'FOLDER/GIT/PUBLISHED_VERSION',
+  ADD COLUMN IF NOT EXISTS creation_request_id VARCHAR(128) NULL COMMENT '创建幂等请求身份',
+  ADD COLUMN IF NOT EXISTS creation_request_hash VARCHAR(64) NULL COMMENT '创建命令指纹',
+  ADD COLUMN IF NOT EXISTS draft_request_id VARCHAR(128) NULL COMMENT '当前升级 Draft 幂等请求身份',
+  ADD COLUMN IF NOT EXISTS offline_at TIMESTAMP NULL COMMENT 'TeamClaw 本地可恢复下线时间',
+  ADD COLUMN IF NOT EXISTS offline_by VARCHAR(128) NULL COMMENT 'TeamClaw 本地可恢复下线操作者',
   ADD COLUMN IF NOT EXISTS source_repo_url VARCHAR(2048) NULL COMMENT 'Git 导入仓库 URL',
   ADD COLUMN IF NOT EXISTS source_branch VARCHAR(512) NULL COMMENT '首次导入解析的固定分支',
   ADD COLUMN IF NOT EXISTS source_subdir VARCHAR(1024) NULL COMMENT '仓库内 Skill 子目录',
@@ -22,6 +26,10 @@ ALTER TABLE ac_skill
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_uuid
   ON ac_skill (avernet_tenant, env, skill_uuid);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_creation_request
+  ON ac_skill (avernet_tenant, env, creation_request_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_draft_request
+  ON ac_skill (avernet_tenant, env, draft_request_id);
 
 -- ac_space and ac_space_member are owned by the unified Space migration:
 -- core/spaces/sql/2026_08_17_spaces.sql. Apply that file before this F01 DDL.
@@ -120,10 +128,13 @@ CREATE TABLE IF NOT EXISTS ac_skill_publication_attempt (
   request_id VARCHAR(128) NOT NULL,
   active_skill_key VARCHAR(256) NULL,
   target_version_ordinal INT UNSIGNED NOT NULL,
-  sc_version_number VARCHAR(128) NOT NULL,
+  sc_version_number VARCHAR(128) NULL,
+  skill_version_id BIGINT UNSIGNED NULL,
   status VARCHAR(32) NOT NULL,
-  failure_code VARCHAR(128) NULL,
+  error_code VARCHAR(128) NULL,
   error_message TEXT NULL,
+  recovery_state VARCHAR(24) NULL,
+  recovery_kind VARCHAR(24) NULL,
   sc_post_started_at TIMESTAMP NULL,
   sc_accepted_at TIMESTAMP NULL,
   completed_at TIMESTAMP NULL,
@@ -136,7 +147,9 @@ CREATE TABLE IF NOT EXISTS ac_skill_publication_attempt (
   UNIQUE KEY uk_publish_request (avernet_tenant, env, skill_id, request_id),
   UNIQUE KEY uk_active_skill_publish (active_skill_key),
   KEY idx_publish_skill_history (avernet_tenant, env, skill_id, gmt_created),
-  CONSTRAINT ck_skill_publication_attempt_status CHECK (status IN ('PREPARING', 'VALIDATING', 'SCANNING', 'SC_SUBMITTING', 'WAITING_SC', 'RESULT_UNKNOWN', 'MATERIALIZING', 'SUCCEEDED', 'FAILED', 'MANUAL_RECONCILIATION')),
+  CONSTRAINT ck_skill_publication_attempt_status CHECK (status IN ('PREPARING', 'SC_SUBMITTING', 'WAITING_SC', 'RESULT_UNKNOWN', 'MATERIALIZING', 'SUCCEEDED', 'FAILED')),
+  CONSTRAINT ck_skill_publication_recovery_state CHECK (recovery_state IS NULL OR recovery_state IN ('AUTO_RETRYING', 'AVAILABLE', 'NOT_AVAILABLE')),
+  CONSTRAINT ck_skill_publication_recovery_kind CHECK (recovery_kind IS NULL OR recovery_kind IN ('PREPARATION', 'SC_STATUS_CHECK', 'MATERIALIZATION')),
   CONSTRAINT ck_attempt_target_ordinal CHECK (target_version_ordinal >= 1),
   CONSTRAINT ck_skill_publication_attempt_env_not_empty CHECK (env <> '')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

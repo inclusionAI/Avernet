@@ -226,7 +226,6 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                     SkillSpaceBinding.env == env,
                     Skill.env == env,
                     SpaceModel.deleted_at.is_(None),
-                    Skill.retired_at.is_(None),
                 )
             )
             if keyword is not None:
@@ -612,7 +611,6 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             Skill.id == skill_id,
             Skill.env == env,
             Skill.draft_status == "EDITING",
-            Skill.retired_at.is_(None),
         )
         if lock:
             query = query.with_for_update()

@@ -96,7 +96,6 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                 .filter(
                     Skill.id == skill_id,
                     Skill.env == env,
-                    Skill.retired_at.is_(None),
                 )
                 .with_for_update()
                 .one_or_none()
@@ -270,7 +269,6 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                 .filter(
                     Skill.id == skill_id,
                     Skill.env == env,
-                    Skill.retired_at.is_(None),
                 )
                 .with_for_update()
                 .one_or_none()
