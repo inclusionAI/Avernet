@@ -757,7 +757,7 @@ class ExecutionEngine:
                     TaskNodePatch(
                         task_id=task_id,
                         node_id=node.node_id,
-                        run_mode="single_bot",
+                        run_mode="bbs",
                         extend_props_patch={
                             "dispatching": True,
                             "bbs_status": "posted_in_square",
@@ -863,7 +863,7 @@ class ExecutionEngine:
             return
         definition = runtime.by_id.get(node_id)
         mock_result: Any = {
-            "summary": f"[auto-mock] node={node_id}",
+            "summary": f"[auto] node={node_id}",
             "random": f"{random.randrange(10 ** 6):06d}",
         }
         if definition is not None and any(
@@ -877,8 +877,8 @@ class ExecutionEngine:
             for v in definition.output.values()
         ):
             mock_result["unhandled_tasks"] = [
-                {"id": "uht-auto-1", "title": "[mock] 自动研发任务-1", "reason": "评估认为暂不可实现(mock)"},
-                {"id": "uht-auto-2", "title": "[mock] 自动研发任务-2", "reason": "依赖外部能力暂缺(mock)"},
+                {"id": "uht-auto-1", "title": "自动研发任务-1", "reason": "评估认为暂不可实现"},
+                {"id": "uht-auto-2", "title": "自动研发任务-2", "reason": "依赖外部能力暂缺"},
             ]
         logger.info(
             "[task][static-plan] auto-report fire task=%s node=%s mock=%s -> on_report",
@@ -890,7 +890,7 @@ class ExecutionEngine:
                 node_id=node_id,
                 acceptance_result=AcceptanceResult(
                     verdict=AcceptanceVerdict.DONE,
-                    acceptances_metric=["auto_mock"],
+                    acceptances_metric=["static_auto"],
                 ),
                 output_patch={"result": mock_result},
                 extend_props_patch={"dispatching": None},
@@ -953,18 +953,19 @@ class ExecutionEngine:
                 task_id, node_id, node.status.value if node is not None else None,
             )
             return
-        # ① assignee 先置研发 bot(供 start_run 定位)+ 记录 bbs_owner(暂不翻 claimed,先真派发)
+        # ① assignee 先置研发 bot(供 start_run 定位)+ 记录 bbs_owner; bbs 模式下 dispatch no-op
+        #    (FR-EXT-06: 框架不自动派发),状态机由自驱 auto-report 推进
         node.run_info.assignee = rnd_bot_id
-        node.run_info.run_mode = "single_bot"
+        node.run_info.run_mode = "bbs"
         with self._lock_for(task_id):
             self._graph.update_task_node_info(
                 TaskNodePatch(
                     task_id=task_id, node_id=node_id,
-                    run_mode="single_bot", assignee=rnd_bot_id,
+                    run_mode="bbs", assignee=rnd_bot_id,
                     extend_props_patch={"bbs_owner": rnd_bot_id, "bbs_handed_to": rnd_bot_id},
                 )
             )
-        # ② 锁外真实派发:真发消息给研发 bot
+        # ② start_run([node]) 走(bbs 模式 dispatch no-op 取派发态),不真发消息
         ok = False
         try:
             results = await self._runner.start_run([node])
@@ -980,7 +981,7 @@ class ExecutionEngine:
                 self._graph.update_task_node_info(
                     TaskNodePatch(
                         task_id=task_id, node_id=node_id,
-                        run_mode="", assignee="",
+                        run_mode="bbs", assignee="",
                         extend_props_patch={
                             "dispatching": None,
                             "dispatch_error": "bbs_handoff_start_run_failed",
@@ -994,7 +995,7 @@ class ExecutionEngine:
             self._graph.update_task_node_info(
                 TaskNodePatch(
                     task_id=task_id, node_id=node_id,
-                    status=Status.RUNNING, run_mode="single_bot", assignee=rnd_bot_id,
+                    status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
                     extend_props_patch={"dispatching": None, "bbs_status": "claimed_by_rnd"},
                 )
             )
@@ -1018,7 +1019,7 @@ class ExecutionEngine:
                     task_id=task_id, node_id=node_id,
                     acceptance_result=AcceptanceResult(
                         verdict=AcceptanceVerdict.DONE,
-                        acceptances_metric=["bbs_handoff_mock"],
+                        acceptances_metric=["bbs_handoff"],
                     ),
                     output_patch={
                         "result": {
