@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from agentclaw.community.core.config_compose.models import ComposeRequest
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
@@ -129,7 +129,7 @@ class TeclawDeviceSyncService(DeviceSync):
         self,
         symlinks: list[dict[str, str]],
         *,
-        effective_mcps: list[dict[str, Any]] | None = None,
+        effective_mcps: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         # symlinks ignored: teclaw re-pulls the whole composed artifact.
         # ``effective_mcps`` is not ignored — see ``_compose_and_deliver``.
@@ -180,7 +180,7 @@ class TeclawDeviceSyncService(DeviceSync):
         self,
         *,
         caller: str,
-        effective_mcps: list[dict[str, Any]] | None = None,
+        effective_mcps: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         """Compose this bot's whole artifact and POST it to its container.
 

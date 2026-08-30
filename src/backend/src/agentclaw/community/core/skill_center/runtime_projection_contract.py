@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RegisteredSkillAsset,
@@ -32,8 +32,8 @@ class CapabilityRuntimeBoundary(Protocol):
     async def project_skills(
         self,
         *,
-        desired_skills: list[dict] | None = None,
-        effective_mcps: list[dict] | None = None,
+        desired_skills: Optional[list[dict]] = None,
+        effective_mcps: Optional[list[dict]] = None,
     ) -> bool:
         """Apply one complete resolver-owned Skill snapshot to the runtime.
 

@@ -474,9 +474,9 @@ class SkillSetService:
 
     def _sync_symlinks_to_device_if_needed(
         self,
-        user_id: str | None = None,
-        desired_skills: list[dict] | None = None,
-        effective_mcps: list[dict] | None = None,
+        user_id: Optional[str] = None,
+        desired_skills: Optional[list[dict]] = None,
+        effective_mcps: Optional[list[dict]] = None,
     ) -> bool:
         """如果需要，同步软链配置到设备。
 
@@ -531,8 +531,8 @@ class SkillSetService:
     async def project_skills(
         self,
         *,
-        desired_skills: list[dict] | None = None,
-        effective_mcps: list[dict] | None = None,
+        desired_skills: Optional[list[dict]] = None,
+        effective_mcps: Optional[list[dict]] = None,
     ) -> bool:
         """Apply one complete resolver-owned skill snapshot to the runtime.
 
