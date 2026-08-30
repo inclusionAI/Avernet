@@ -242,7 +242,7 @@ async def sync_materialized_skill_center_skills(
         SkillCenterSyncServiceProtocol
     ),
 ) -> Envelope[SkillCenterSyncSummary]:
-    """Synchronize only SC Public assets already materialized in TeamClaw."""
+    """Synchronize only public Skill Center assets already materialized locally."""
     del user_id
     result = await asyncio.to_thread(service.sync)
     return envelope(
