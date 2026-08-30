@@ -233,3 +233,43 @@ def test_dependency_delta_uses_execution_time_latest_published_version() -> None
     assert delta.skill_version_id == 102
     assert delta.claimed_mcp == frozenset({"mcp.new"})
     assert delta.released_mcp == frozenset({"mcp.old", "mcp.very-old"})
+
+
+def test_dependency_restored_after_one_version_is_claimed_again() -> None:
+    db = _Database()
+    with avernet_tenant_scope("teamclaw"), db.orm_session() as session:
+        for version_id, ordinal, dependencies in (
+            (201, 1, [{"code": "mcp.restored"}]),
+            (202, 2, []),
+            (203, 3, [{"code": "mcp.restored"}]),
+        ):
+            session.add(
+                SkillVersion(
+                    id=version_id,
+                    skill_id=20,
+                    publication_attempt_id=None,
+                    version_ordinal=ordinal,
+                    status="PUBLISHED",
+                    sc_version_number=f"{ordinal}.0.0",
+                    sc_skill_id=9020,
+                    sc_version_id=12000 + version_id,
+                    name="restored",
+                    metadata_json=(
+                        '{"mcp_dependencies":'
+                        + __import__("json").dumps(dependencies)
+                        + "}"
+                    ),
+                    published_at=datetime(2026, 8, 30, tzinfo=UTC),
+                    created_by="owner",
+                    env="pre",
+                    avernet_tenant="teamclaw",
+                )
+            )
+
+    with avernet_tenant_scope("teamclaw"):
+        delta = TrackLatestRepository(db).latest_dependency_delta(
+            env="pre", skill_id=20
+        )
+
+    assert delta.claimed_mcp == frozenset({"mcp.restored"})
+    assert delta.released_mcp == frozenset()

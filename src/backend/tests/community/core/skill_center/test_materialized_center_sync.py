@@ -203,10 +203,16 @@ def test_lifecycle_bootstrap_reconciles_once_then_starts_and_stops_periodic_task
     ]
 
 
-def test_sync_propagates_persistence_failure_instead_of_returning_success() -> None:
+@pytest.mark.parametrize(
+    "error",
+    [SQLAlchemyError("database unavailable"), RuntimeError("database unavailable")],
+)
+def test_sync_propagates_persistence_failure_instead_of_returning_success(
+    error: Exception,
+) -> None:
     class _BrokenAssets(_Assets):
         def ensure_public_version(self, **_kwargs):
-            raise SQLAlchemyError("database unavailable")
+            raise error
 
     cache = _Cache()
     service = SkillCenterSyncService(
@@ -218,7 +224,7 @@ def test_sync_propagates_persistence_failure_instead_of_returning_success() -> N
         env_provider=lambda: "pre",
     )
 
-    with pytest.raises(SQLAlchemyError, match="database unavailable"):
+    with pytest.raises(type(error), match="database unavailable"):
         service.sync()
 
     assert cache.released == [

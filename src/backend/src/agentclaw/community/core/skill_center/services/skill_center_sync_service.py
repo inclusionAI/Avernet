@@ -129,7 +129,12 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
                         updated += 1
                     else:
                         unchanged += 1
-                except (SkillCenterGatewayError, ValueError, RuntimeError) as exc:
+                except (
+                    SkillCenterGatewayError,
+                    SkillVersionMaterializationError,
+                    _SkillCenterSyncAssetError,
+                    ValueError,
+                ) as exc:
                     failures.append(
                         SkillCenterSyncFailure(
                             skill_id=str(asset.skill_id),
@@ -206,7 +211,9 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
             SkillCenterPublicSkillDetailRequest(asset.skill_code)
         )
         if detail is None or detail.skill_id is None or not detail.latest_version_number:
-            raise RuntimeError("SC public Skill has no consumable latest Version")
+            raise _SkillCenterSyncAssetError(
+                "SC public Skill has no consumable latest Version"
+            )
         versions = self._gateway.list_versions(
             SkillCenterVersionListRequest(
                 skill_code=asset.skill_code,
@@ -222,7 +229,9 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
             None,
         )
         if exact is None or exact.version_id is None:
-            raise RuntimeError("SC latest public Version has no exact identity")
+            raise _SkillCenterSyncAssetError(
+                "SC latest public Version has no exact identity"
+            )
         target = self._assets.ensure_public_version(
             env=env,
             actor_id="system:skill-center-sync",
@@ -252,6 +261,10 @@ def _positive_int(value: object) -> int:
     if parsed < 1:
         raise ValueError("Skill Center identity must be positive")
     return parsed
+
+
+class _SkillCenterSyncAssetError(RuntimeError):
+    """One SC asset cannot currently resolve to a consumable exact Version."""
 
 
 def _sync_error_code(error: Exception) -> str:

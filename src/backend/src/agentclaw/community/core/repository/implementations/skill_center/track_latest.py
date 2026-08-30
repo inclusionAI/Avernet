@@ -139,13 +139,20 @@ class TrackLatestRepository(TrackLatestRepositoryProtocol):
             if not rows:
                 raise RuntimeError("Track Latest Skill has no PUBLISHED Version")
             current = _dependency_codes(rows[0])
-            previous = frozenset().union(
+            immediate_previous = (
+                _dependency_codes(rows[1]) if len(rows) > 1 else frozenset()
+            )
+            historical = frozenset().union(
                 *(_dependency_codes(version) for version in rows[1:])
             )
             return TrackLatestDependencyDelta(
                 skill_version_id=int(rows[0].id),
-                claimed_mcp=current - previous,
-                released_mcp=previous - current,
+                # Claim against the immediately preceding release so a
+                # dependency restored in V3 after disappearing in V2 is
+                # delivered. Release against all history so a Bot whose queued
+                # V2 task runs after V3 can still shed V1-only dependencies.
+                claimed_mcp=current - immediate_previous,
+                released_mcp=historical - current,
             )
 
 
