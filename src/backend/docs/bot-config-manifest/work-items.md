@@ -656,6 +656,29 @@ mode switch rather than a blanket rule:
 Both modes require recording the resolved SHA per apply, which the report already
 carries (design §7).
 
+**Where the mode is set, and its default.** An earlier revision left this to
+W4's spec, which is not good enough: W8's criterion *"whatever D2 decides about
+moving refs is enforced here"* is unimplementable while the selector does not
+exist, and two implementers would guess opposite behaviours for the same
+document. Settled here:
+
+- **Per source, on the source declaration** — not per bot and not per manifest.
+  The property being described is *"is this ref allowed to move under me"*, which
+  belongs to the thing that has the ref. A manifest mixing a pinned vendor
+  dependency with a fast-moving internal repo is the normal case, and a per-bot
+  switch cannot express it.
+- **Default: non-strict.** Someone writing `ref: main` instead of a SHA is asking
+  for the moving behaviour; making the default reject it would turn the common
+  case into a surprise. Strict is for a caller who wants pinning semantics
+  without writing the SHA out.
+- **The warning surfaces in the apply report**, on the entry, naming the previous
+  and new SHA. Iteration 1 is pull-only by decision (§2.7), so the report is the
+  only place it can surface — there is no push channel to put it in, and inventing
+  one here would contradict that decision.
+- **A SHA ref ignores the mode entirely.** It cannot move, so neither branch of
+  the switch can fire; setting the mode on one is accepted and inert rather than
+  an error.
+
 ### 3.3 D3 — reconcile vs manifest-installed skills · #1468 · **RESOLVED**
 
 **Correction to the original finding.** It read `skills_pool`'s "quarantine
@@ -1432,14 +1455,22 @@ capability table is fully determined.
       overwrite each other's document; the tenant guard is registered.
 - [ ] The stored document round-trips byte-exact, including a `script` body
       containing quotes, `$(id)` and `{token}`.
-- [ ] **`manifest-schema.zh-CN.md` §4 is amended from `OCB_*` to `BOT_*` in this
-      item's PR.** §2.9 renamed the variables and this item implements the
-      whitelist that rejects the old names, so leaving the schema doc unamended
-      would tell a user to write `${OCB_BOT_ID}` and then refuse it. Unlike the
-      other divergences in §9 — internal planning decisions — this one is a
-      **user-facing contract**, and the two documents cannot disagree about it.
-      It lands here rather than earlier because the schema doc describes an
-      implemented contract, and until this item there is nothing to describe.
+- [ ] **The rule: wherever this item's validator diverges from
+      `manifest-schema.zh-CN.md`, the schema doc is amended in the same PR.**
+      Unlike the other divergences in §9 — internal planning decisions — the
+      schema doc is a **user-facing contract**, so a divergence there means a
+      client that follows the published contract gets rejected. The two documents
+      cannot disagree. It lands here rather than earlier because the schema doc
+      describes an implemented contract, and until this item there is nothing to
+      describe. As of iteration 1 the amendments owed are:
+
+      | Schema doc says | Validator accepts | Why |
+      | --- | --- | --- |
+      | §4: `OCB_*` substitution variables | `BOT_*` only | §2.9 renamed them; leaving it would tell a user to write `${OCB_BOT_ID}` and then refuse it |
+      | `on_fetch_failure`: `keep_last` / `skip` / `fail` | `keep_last` / `fail` | `skip` was removed with the category-overwrite decision (§2.7, W5); the schema still advertises a value that is now rejected |
+
+      Stated as a rule with a table because the divergences arrive one at a time
+      and each one has so far been noticed only after it shipped.
 
 **Notes.** A `PUT` carrying `script` stores it and does nothing else until W4
 materialises it. That is why the feature flag exists.
@@ -1783,11 +1814,21 @@ directory-level ownership semantics; teclaw per-file expansion.
       reporting `unchanged` from source content alone would skip every write and
       leave that drift in place — directly defeating the ownership rule below
       and §3.2's guarantee that making a manifest effective overwrites the
-      declared area. So: skip only when the source is unchanged **and** the
-      deployed tree still matches what W11 recorded us materialising; otherwise
-      re-materialise. W11's record is what makes the cheap check possible — a
-      per-file comparison against the bot is not needed to detect drift, only a
-      comparison against our own record of it.
+      declared area. **There is no cheap way out of this, and an earlier revision
+      of this bullet claimed there was.** W11's record holds only the bytes we
+      *intended* to deliver; drift by definition lives on the bot, so no
+      comparison confined to our own record can see it — same-size edits least of
+      all. Two honest options:
+
+      1. **Always replace on apply** (recommended for v1) — the atomic
+         unpack-and-rename below runs every time, and §3.2's guarantee holds by
+         construction. No read of the bot, no drift question.
+      2. **Read and hash the deployed subtree** through `DeviceFileSystem` and
+         compare it against W11's record, replacing on any difference. A real
+         optimisation only if reading the tree is cheaper than rewriting it.
+
+      Take (1) unless apply cost measurably becomes a problem; (2) is where to go
+      if it does. What is *not* available is skipping on unchanged source alone.
 - [ ] Directory-level ownership: on change, the tree under `path` is replaced
       wholesale — files present before and absent from the new archive are
       removed, including manually added ones. Nothing outside `path` is touched.
