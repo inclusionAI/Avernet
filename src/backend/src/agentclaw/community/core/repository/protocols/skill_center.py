@@ -340,8 +340,7 @@ class SkillVersionMaterializationRepositoryProtocol(Protocol):
     @abstractmethod
     def get_materialization_target(
         self, *, env: str, skill_id: int, skill_version_id: int
-    ) -> MaterializingSkillVersion | None:
-        ...
+    ) -> MaterializingSkillVersion | None: ...
 
     @abstractmethod
     def publish_materialized(
@@ -353,8 +352,7 @@ class SkillVersionMaterializationRepositoryProtocol(Protocol):
         metadata_json: str,
         description: str,
         published_at: datetime,
-    ) -> PublishedMaterializedSkillVersion:
-        ...
+    ) -> PublishedMaterializedSkillVersion: ...
 
 
 @runtime_checkable
