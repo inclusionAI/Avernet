@@ -197,7 +197,22 @@ Two properties beyond audit make this load-bearing:
 
 Tracked as **W11**.
 
-### 2.9 Validation and authorisation move to a reusable seam
+### 2.9 Substitution variables are named `BOT_*`, not `OCB_*`
+
+`design.zh-CN.md` §4 and `manifest-schema.zh-CN.md` name the substitution
+variables `OCB_BOT_ID`, `OCB_ENGINE_TYPE`, `OCB_ENV`, `OCB_TENANT`. **`OCB` is an
+internal codename and nothing a user writing a manifest should need to know.** In
+the code it appears only on internal machinery — `__OCB_RC`, a private shell
+variable inside the start-command wrapper, and `OCB_AGENT_LOG_PRICE_*`, backend
+config. It has never been a user-facing namespace.
+
+They are renamed to **`BOT_ID`, `BOT_ENGINE_TYPE`, `BOT_ENV`, `BOT_TENANT`,
+`BOT_ARCH`**: self-explanatory (the user is configuring a bot), consistent with
+the container environment's existing `BOT_DATA_DIR`, and still prefixed — which
+matters because these are injected as environment variables into `script`, where
+an unprefixed `${ENV}` would collide with the author's own variables.
+
+### 2.10 Validation and authorisation move to a reusable seam
 
 Apply calls the service layer, but a good deal of validation and authorisation
 currently lives in the `openapi_v1` routers — ownership and grant checks,
@@ -589,8 +604,8 @@ Two observations recorded from the same check:
 - The evidence is **one sampled container**. That is strong but not a proof of
   fleet uniformity across clusters or regions. It does not need to be: the ELF
   validation below turns a wrong assumption into a loud apply-time failure rather
-  than a silent one, and `${OCB_ARCH}` stays reserved, so a future mixed fleet is
-  an additive change.
+  than a silent one, and `${BOT_ARCH}` is implemented as a constant, so a future mixed
+  fleet changes only where that value comes from.
 
 The reasoning behind the question is kept below, because the distinction it turns
 on is easy to lose.
@@ -619,7 +634,7 @@ cli_tools:
 
 If every ARCA bot container runs on x86_64, that single URL is always right. If
 the fleet is mixed, it is wrong for some fraction of bots and the schema needs
-per-arch sources — per-arch URLs, or an `${OCB_ARCH}` substitution.
+per-arch sources — per-arch URLs, or an `${BOT_ARCH}` substitution.
 
 This is **not** the question of where the tool directory sits or whether the PATH
 reaches it. That is our design choice, engine-independent, and settled. Nor does
@@ -635,24 +650,31 @@ and placement is ARCA's decision. There is no arch branching anywhere in
 
 Two cheap choices make the answer non-blocking:
 
-- **Reserve `${OCB_ARCH}` in the variable whitelist now.** W1 defines that
-  whitelist and it is versioned with `schema_version`; adding the name costs
-  nothing today and avoids a schema-version bump if per-arch sources are needed
-  later.
+- **Implement `${BOT_ARCH}` now, resolving to the constant `amd64`.** About one
+  line. Users can write `mycli-linux-${BOT_ARCH}` immediately and it works. If the
+  fleet ever stops being uniform we change only *where the value comes from* — a
+  per-bot lookup instead of a constant — with **no schema change, no manifest
+  change, no version bump, and nothing for users to rewrite**. Merely *reserving*
+  the name would reject anyone who used it, which helps nobody; the whitelist is
+  versioned with `schema_version`, so the point is to avoid amending a released
+  contract later, and implementing it achieves that and more.
 - **Validate the binary's architecture at materialisation.** Read the ELF header
   of a fetched binary and refuse it when it does not match the target. A mismatch
   then fails loudly in the apply report, rather than as an `exec format error` the
   model hits mid-task with no explanation.
 
-With the answer in hand, the first is now cheap insurance rather than a
-workaround, and the second is worth keeping regardless: a wrong-architecture
-binary should fail in the apply report, never as an `exec format error` the model
-meets mid-task.
+With the answer in hand, the first makes a future mixed fleet **invisible to
+users**, and the second is worth keeping regardless of architecture: `digest`
+answers *"are these the bytes you asked for"*, ELF validation answers *"can this
+machine run them"*, and a digest of the **wrong** binary is still a valid digest.
+The failures it actually catches are usually user error — a darwin build
+published to the URL, amd64 and arm64 paths swapped, or a 404 HTML page the user
+computed a digest over. All three pass a digest check.
 
 **A third option, no longer needed but recorded.** Under D4's interim policy
 (§3.4) delivery happens *after* the bot starts, so the container exists when
 `cli_tools` is materialised. If the engine can report its own architecture,
-`${OCB_ARCH}` could be resolved **per bot at delivery time**, answering the
+`${BOT_ARCH}` could be resolved **per bot at delivery time**, answering the
 question by construction. Unnecessary for a uniform `amd64` fleet; the natural
 answer if that ever stops being true.
 
@@ -839,11 +861,11 @@ capability table is fully determined.
   - `auth` on an entry that uses `from` (auth is declared on the named source)
     or on a `content` entry;
   - `apply_once` in any position — a v1 reserved word;
-  - an unknown `${...}` placeholder; only `OCB_BOT_ID`, `OCB_ENGINE_TYPE`,
-    `OCB_ENV`, `OCB_TENANT` and the reserved `OCB_ARCH` are accepted. `OCB_ARCH`
-    is reserved now because the whitelist is versioned with `schema_version`:
-    adding the name costs nothing today and avoids a version bump if `cli_tools`
-    later needs per-arch sources (§4, X3/O9);
+  - an unknown `${...}` placeholder; only `BOT_ID`, `BOT_ENGINE_TYPE`,
+    `BOT_ENV`, `BOT_TENANT` and `BOT_ARCH` are accepted. `BOT_ARCH` resolves to
+    the constant `amd64` today (§4, X3): implementing it now rather than merely
+    reserving the name means a future mixed fleet changes only where the value
+    comes from, with no schema change and nothing for users to rewrite;
   - a `resources.path` that is absolute or contains `../`;
   - a `resources` entry whose `path` lies under another directory entry's
     `path` (the nesting ban, schema §3.2);
@@ -1064,7 +1086,7 @@ involved.
 service is fetched at apply time and installed as real skills and identity
 files.
 
-**In scope.** The two materialisers and `${OCB_*}` substitution in source URLs.
+**In scope.** The two materialisers and `${BOT_*}` substitution in source URLs.
 
 **Out of scope.** Named sources and git (W7). `resources` (W6).
 
@@ -1087,7 +1109,7 @@ follows D4's interim policy: deliver after the bot starts (§3.4).
       A skill entry without one is refused at `PUT`.
 - [ ] Archive vs. plain-directory is auto-detected by content type / extension,
       with `unpack` accepted only as an explicit override.
-- [ ] `${OCB_*}` substitution happens before fetch and before prefix
+- [ ] `${BOT_*}` substitution happens before fetch and before prefix
       authorisation, so a substituted URL cannot escape its credential's
       `allowed_prefixes`.
 - [ ] The §3.2 diff rules are enforced per entity, including the fourth row: a
@@ -1249,7 +1271,7 @@ handles an executable bit. This item stays deferred by business priority, not by
 a missing answer.
 
 **Done when (sketch).** Targets `linux/amd64` with a single URL per tool (§4,
-X3), while `${OCB_ARCH}` stays reserved in W1's whitelist and a fetched binary's
+X3), while `${BOT_ARCH}` resolves to `amd64` in W1's whitelist and a fetched binary's
 ELF header is validated — so a wrong-architecture binary fails in the apply report
 rather than as an `exec format error` the model meets mid-task. Then: `digest`
 mandatory and enforced as the convergence key;
@@ -1363,9 +1385,10 @@ Points where this document **diverges** from the merged design, each argued in
 place: §2.3 (the managed marker shrinks to an internal record), §2.5 (capability
 scope; desktop out), §2.6 (`PUT` triggers a restart rather than being lazy —
 design §3.1), §2.7 (a first-boot readiness gate, which design §4.3 defers to v2),
-§2.8 (platform-side materialisation, which the design does not have), §3.2 (an
-entity-level three-way diff that preserves bot-created files, superseding design
-§3.2's wholesale directory replace), §3.4 (post-start delivery on the BaaS
+§2.8 (platform-side materialisation, which the design does not have), §2.9 (substitution
+variables renamed from `OCB_*` to `BOT_*`, since `OCB` is an internal codename),
+§3.2 (an entity-level three-way diff that preserves bot-created files, superseding
+design §3.2's wholesale directory replace), §3.4 (post-start delivery on the BaaS
 family, where design §3.1 requires configuration to precede readiness), and §4's
 X1 (a shallow git fetch rather than design §10.5's archive-API pull, forced by
 Ant Code having no read-only API scope). Amending the Chinese docs to match is a
