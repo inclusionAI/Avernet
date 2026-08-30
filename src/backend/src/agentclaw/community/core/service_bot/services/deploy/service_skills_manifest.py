@@ -47,6 +47,7 @@ class CapturedServiceSkillsLayout:
     phase: SkillLayoutPhase
     migration_generation: str | None
     layout_contract_version: str | None
+    active_runtime_path: str | None
     center_skills: tuple[dict[str, Any], ...]
     shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...]
 
@@ -291,7 +292,11 @@ class ServiceSkillsManifestBuilder:
             ) from exc
 
         shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...] = ()
+        active_runtime_path: str | None = None
         if is_pool:
+            active_runtime_path = _resolved_ready_layout(
+                state=state, bot=bot
+            )["active_root"]
             shared_corpora = (
                 ResolvedSharedCorpusDelivery.repo_from_state(
                     state=state,
@@ -322,6 +327,7 @@ class ServiceSkillsManifestBuilder:
             # Pool contract, but a concurrent writer changing this field still
             # means the layout state moved while the physical snapshot ran.
             layout_contract_version=state.layout_contract_version,
+            active_runtime_path=active_runtime_path,
             center_skills=center_skills,
             shared_corpora=shared_corpora,
         )

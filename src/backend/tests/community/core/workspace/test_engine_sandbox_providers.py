@@ -61,24 +61,6 @@ def test_list_directory_provider_signature_matches_runtime_contract(
     ]
 
 
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    ("provider_type", "expected"),
-    (
-        (OpenClawSandboxProvider, "workspace/skills"),
-        (ClaudeCodeSandboxProvider, "claude/skills"),
-        (AICodingSandboxProvider, "claude/skills"),
-        (HermesSandboxProvider, "skills"),
-    ),
-)
-def test_build_plan_names_the_artifact_active_skills_root(
-    provider_type, expected
-) -> None:
-    plan = provider_type(workspace=_workspace()).get_build_plan()
-
-    assert plan.active_skill_snapshot_relpath == expected
-
-
 def _hermes_cross_component_contract() -> dict:
     repo_root = Path(__file__).resolve().parents[6]
     path = (

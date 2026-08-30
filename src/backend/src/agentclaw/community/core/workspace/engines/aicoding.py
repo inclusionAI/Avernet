@@ -82,7 +82,6 @@ def _make_aicoding_build_plan(rsync_excludes: list[str]) -> EngineBuildPlan:
         skill_target_relpath="workspace/skills",
         extra_sync_source_relpath=".claude",
         extra_sync_target_relpath="claude",
-        active_skill_target_relpath="claude/skills",
         rsync_excludes=rsync_excludes,
         extra_include_files=["sessions/cron-tasks.json"],
     )

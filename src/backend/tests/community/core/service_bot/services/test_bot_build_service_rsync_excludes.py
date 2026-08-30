@@ -99,6 +99,80 @@ def test_center_corpus_outside_snapshot_root_fails_closed() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    (
+        "base_path",
+        "extra_source",
+        "extra_target",
+        "active_runtime_path",
+        "expected",
+    ),
+    (
+        (
+            "/home/admin/.openclaw",
+            "",
+            "",
+            "/home/admin/.openclaw/workspace/skills",
+            "workspace/skills",
+        ),
+        (
+            "/home/admin/.claude_code",
+            ".claude",
+            "claude",
+            "/home/admin/.claude/skills",
+            "claude/skills",
+        ),
+        (
+            "/home/admin/.aicoding",
+            ".claude",
+            "claude",
+            "/home/admin/.claude/skills",
+            "claude/skills",
+        ),
+        (
+            "/home/admin/.hermes",
+            "",
+            "",
+            "/home/admin/.hermes/skills",
+            "skills",
+        ),
+    ),
+)
+def test_engine_active_evidence_maps_through_existing_snapshot_sources(
+    base_path,
+    extra_source,
+    extra_target,
+    active_runtime_path,
+    expected,
+) -> None:
+    provider = MagicMock()
+    provider.get_base_path.return_value = base_path
+    plan = EngineBuildPlan(
+        engine_type="engine",
+        source_root_name=".engine",
+        migration_subpath="engine",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=[],
+        extra_sync_source_relpath=extra_source,
+        extra_sync_target_relpath=extra_target,
+    )
+
+    assert BotBuildService._active_skill_snapshot_path(
+        provider=provider,
+        build_plan=plan,
+        shared_corpora=(
+            _center_delivery(
+                f"{base_path}/workspace/skills-pool/skill-center"
+            ),
+        ),
+        active_runtime_path=active_runtime_path,
+    ) == expected
+
+
+@pytest.mark.unit
 class TestBotBuildServiceRsyncExcludesConfig:
     """测试 Bot 级别 rsync excludes 配置的读取和传递。"""
 

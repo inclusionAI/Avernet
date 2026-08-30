@@ -57,6 +57,9 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         build_kwargs: dict[str, Any] = {"bot": bot, "version": version}
         if captured_layout is not None:
             build_kwargs["shared_corpora"] = captured_layout.shared_corpora
+            build_kwargs["active_runtime_path"] = (
+                captured_layout.active_runtime_path
+            )
         result = self._build_service.build(**build_kwargs)
 
         success = bool(result.get("success"))

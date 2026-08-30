@@ -200,6 +200,11 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
                 layout_contract_version="skills-pool-p3-v1",
             ),
         ),
+        active_runtime_path=str(
+            Path("/home/admin")
+            / (".openclaw" if engine == "openclaw" else ".claude")
+            / ("workspace/skills" if engine == "openclaw" else "skills")
+        ),
     )
 
     assert result["success"] is True

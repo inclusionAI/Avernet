@@ -224,6 +224,7 @@ class BotBuildService:
         version: int = 1,
         *,
         shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...] = (),
+        active_runtime_path: str | None = None,
     ) -> Dict[str, Any]:
         """执行 Bot 构建迁移。
 
@@ -267,6 +268,12 @@ class BotBuildService:
         shared_corpus_snapshot_paths = self._shared_corpus_snapshot_paths(
             provider=provider,
             shared_corpora=shared_corpora,
+        )
+        active_skill_snapshot_path = self._active_skill_snapshot_path(
+            provider=provider,
+            build_plan=build_plan,
+            shared_corpora=shared_corpora,
+            active_runtime_path=active_runtime_path,
         )
         build_plan = self._apply_shared_corpus_excludes(
             build_plan=build_plan,
@@ -376,7 +383,7 @@ class BotBuildService:
                     shared_corpus_snapshot_paths
                 ),
                 "active_skill_snapshot_path": (
-                    build_plan.active_skill_snapshot_relpath
+                    active_skill_snapshot_path
                 ),
             }
 
@@ -392,6 +399,64 @@ class BotBuildService:
         except Exception as e:
             logger.error(f"[BotBuildService.build] Unexpected error: {e}")
             raise BotBuildServiceError(f"Bot build failed: {e}")
+
+    @staticmethod
+    def _active_skill_snapshot_path(
+        *,
+        provider: EngineSandboxProvider,
+        build_plan: EngineBuildPlan,
+        shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...],
+        active_runtime_path: str | None,
+    ) -> str | None:
+        """Map frozen Engine active-root evidence into the artifact snapshot."""
+
+        if not shared_corpora:
+            return None
+        if not active_runtime_path:
+            raise BotBuildServiceError(
+                "shared corpus build requires Engine active-root evidence"
+            )
+        active = PurePosixPath(active_runtime_path)
+        base = PurePosixPath(provider.get_base_path())
+        if (
+            not active.is_absolute()
+            or active.as_posix() != active_runtime_path
+            or not base.is_absolute()
+        ):
+            raise BotBuildServiceError("invalid Engine active-root evidence")
+
+        candidates: list[tuple[PurePosixPath, PurePosixPath]] = [
+            (base, PurePosixPath())
+        ]
+        if (
+            build_plan.extra_sync_source_relpath
+            and build_plan.extra_sync_target_relpath
+        ):
+            source_rel = PurePosixPath(build_plan.extra_sync_source_relpath)
+            target_rel = PurePosixPath(build_plan.extra_sync_target_relpath)
+            if (
+                source_rel.is_absolute()
+                or target_rel.is_absolute()
+                or any(part in {"", ".", ".."} for part in source_rel.parts)
+                or any(part in {"", ".", ".."} for part in target_rel.parts)
+            ):
+                raise BotBuildServiceError("invalid engine extra-sync mapping")
+            candidates.append((base.parent / source_rel, target_rel))
+
+        for source_root, snapshot_root in candidates:
+            try:
+                relative = active.relative_to(source_root)
+            except ValueError:
+                continue
+            if relative.as_posix() in {"", "."} or ".." in relative.parts:
+                break
+            snapshot = snapshot_root / relative
+            if snapshot.is_absolute() or ".." in snapshot.parts:
+                break
+            return snapshot.as_posix()
+        raise BotBuildServiceError(
+            "Engine active-root evidence is outside the snapshot sources"
+        )
 
     @staticmethod
     def _apply_shared_corpus_excludes(

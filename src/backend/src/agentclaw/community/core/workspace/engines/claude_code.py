@@ -99,7 +99,6 @@ def _make_claude_code_build_plan(rsync_excludes: list[str]) -> EngineBuildPlan:
         skill_target_relpath="workspace/skills",
         extra_sync_source_relpath=".claude",
         extra_sync_target_relpath="claude",
-        active_skill_target_relpath="claude/skills",
         rsync_excludes=rsync_excludes,
     )
 

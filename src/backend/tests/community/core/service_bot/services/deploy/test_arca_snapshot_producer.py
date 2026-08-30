@@ -186,6 +186,7 @@ class _RecordingBuild:
         self.result = result
         self.calls: list[tuple[dict[str, Any], int]] = []
         self.shared_corpora: list[tuple[object, ...]] = []
+        self.active_runtime_paths: list[str | None] = []
 
     def build(
         self,
@@ -193,9 +194,11 @@ class _RecordingBuild:
         version: int = 1,
         *,
         shared_corpora=(),
+        active_runtime_path=None,
     ) -> dict[str, Any]:
         self.calls.append((bot, version))
         self.shared_corpora.append(tuple(shared_corpora))
+        self.active_runtime_paths.append(active_runtime_path)
         return self.result
 
 
@@ -715,9 +718,21 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
     )
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(self, bot, version=1, *, shared_corpora=()):
+        def build(
+            self,
+            bot,
+            version=1,
+            *,
+            shared_corpora=(),
+            active_runtime_path=None,
+        ):
             repository.state = pool_state
-            return super().build(bot, version, shared_corpora=shared_corpora)
+            return super().build(
+                bot,
+                version,
+                shared_corpora=shared_corpora,
+                active_runtime_path=active_runtime_path,
+            )
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -834,13 +849,25 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
     repository = _LayoutRepository(initial)
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(self, bot, version=1, *, shared_corpora=()):
+        def build(
+            self,
+            bot,
+            version=1,
+            *,
+            shared_corpora=(),
+            active_runtime_path=None,
+        ):
             repository.state = replace(
                 initial,
                 phase=SkillLayoutPhase.NEEDS_MANUAL_REPAIR,
                 migration_generation="generation-2",
             )
-            return super().build(bot, version, shared_corpora=shared_corpora)
+            return super().build(
+                bot,
+                version,
+                shared_corpora=shared_corpora,
+                active_runtime_path=active_runtime_path,
+            )
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -894,12 +921,24 @@ def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
     repository = _LayoutRepository(initial)
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(self, bot, version=1, *, shared_corpora=()):
+        def build(
+            self,
+            bot,
+            version=1,
+            *,
+            shared_corpora=(),
+            active_runtime_path=None,
+        ):
             repository.state = replace(
                 initial,
                 layout_contract_version="skills-pool-p3-v1",
             )
-            return super().build(bot, version, shared_corpora=shared_corpora)
+            return super().build(
+                bot,
+                version,
+                shared_corpora=shared_corpora,
+                active_runtime_path=active_runtime_path,
+            )
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
