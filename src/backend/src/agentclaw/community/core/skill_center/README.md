@@ -52,6 +52,7 @@ provides:
   - "SpaceSkillPublicationServiceProtocol"
   - "SkillCenterPublicationGatewayProtocol"
   - "SpaceSkillPublicationTaskHandler"
+  - "ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES"
   - "PublicationAttemptRecord"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
