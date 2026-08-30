@@ -99,9 +99,46 @@ def test_center_corpus_outside_snapshot_root_fails_closed() -> None:
 
 
 @pytest.mark.unit
+def test_community_host_root_maps_engine_runtime_evidence_into_snapshot() -> None:
+    provider = MagicMock()
+    provider.get_base_path.return_value = "/srv/avernet/data/workspace/openclaw"
+    plan = EngineBuildPlan(
+        engine_type="openclaw",
+        source_root_name=".openclaw",
+        migration_subpath="openclaw",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=[],
+    )
+    shared_corpora = (
+        _center_delivery(
+            "/home/admin/.openclaw/workspace/skills-pool/skill-center"
+        ),
+    )
+
+    updated = BotBuildService._apply_shared_corpus_excludes(
+        build_plan=plan,
+        provider=provider,
+        shared_corpora=shared_corpora,
+    )
+    active = BotBuildService._active_skill_snapshot_path(
+        provider=provider,
+        build_plan=plan,
+        shared_corpora=shared_corpora,
+        active_runtime_path="/home/admin/.openclaw/workspace/skills",
+    )
+
+    assert updated.rsync_excludes == ["workspace/skills-pool/skill-center"]
+    assert active == "workspace/skills"
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     (
         "base_path",
+        "source_root_name",
         "extra_source",
         "extra_target",
         "active_runtime_path",
@@ -109,28 +146,32 @@ def test_center_corpus_outside_snapshot_root_fails_closed() -> None:
     ),
     (
         (
-            "/home/admin/.openclaw",
+            "/srv/avernet/data/workspace/openclaw",
+            ".openclaw",
             "",
             "",
             "/home/admin/.openclaw/workspace/skills",
             "workspace/skills",
         ),
         (
-            "/home/admin/.claude_code",
+            "/srv/avernet/data/workspace/claude_code",
+            ".claude_code",
             ".claude",
             "claude",
             "/home/admin/.claude/skills",
             "claude/skills",
         ),
         (
-            "/home/admin/.aicoding",
+            "/srv/avernet/data/workspace/aicoding",
+            ".aicoding",
             ".claude",
             "claude",
             "/home/admin/.claude/skills",
             "claude/skills",
         ),
         (
-            "/home/admin/.hermes",
+            "/srv/avernet/data/workspace/hermes",
+            ".hermes",
             "",
             "",
             "/home/admin/.hermes/skills",
@@ -140,6 +181,7 @@ def test_center_corpus_outside_snapshot_root_fails_closed() -> None:
 )
 def test_engine_active_evidence_maps_through_existing_snapshot_sources(
     base_path,
+    source_root_name,
     extra_source,
     extra_target,
     active_runtime_path,
@@ -149,7 +191,7 @@ def test_engine_active_evidence_maps_through_existing_snapshot_sources(
     provider.get_base_path.return_value = base_path
     plan = EngineBuildPlan(
         engine_type="engine",
-        source_root_name=".engine",
+        source_root_name=source_root_name,
         migration_subpath="engine",
         workspace_subdir="workspace",
         mcp_config_relpath="workspace/config/mcporter.json",

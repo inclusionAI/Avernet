@@ -267,6 +267,7 @@ class BotBuildService:
         )
         shared_corpus_snapshot_paths = self._shared_corpus_snapshot_paths(
             provider=provider,
+            build_plan=build_plan,
             shared_corpora=shared_corpora,
         )
         active_skill_snapshot_path = self._active_skill_snapshot_path(
@@ -424,39 +425,70 @@ class BotBuildService:
             or not base.is_absolute()
         ):
             raise BotBuildServiceError("invalid Engine active-root evidence")
+        return BotBuildService._runtime_path_in_snapshot(
+            runtime_path=active,
+            build_plan=build_plan,
+            error_context="Engine active-root evidence",
+        )
 
-        candidates: list[tuple[PurePosixPath, PurePosixPath]] = [
-            (base, PurePosixPath())
+    @staticmethod
+    def _runtime_path_in_snapshot(
+        *,
+        runtime_path: PurePosixPath,
+        build_plan: EngineBuildPlan,
+        error_context: str,
+    ) -> str:
+        """Translate Engine runtime evidence through existing snapshot sources."""
+
+        if (
+            not runtime_path.is_absolute()
+            or ".." in runtime_path.parts
+            or runtime_path.as_posix() in {"", ".", "/"}
+        ):
+            raise BotBuildServiceError(f"invalid {error_context}")
+
+        mappings: list[tuple[PurePosixPath, PurePosixPath]] = [
+            (PurePosixPath(build_plan.source_root_name), PurePosixPath())
         ]
         if (
             build_plan.extra_sync_source_relpath
             and build_plan.extra_sync_target_relpath
         ):
-            source_rel = PurePosixPath(build_plan.extra_sync_source_relpath)
-            target_rel = PurePosixPath(build_plan.extra_sync_target_relpath)
+            mappings.append(
+                (
+                    PurePosixPath(build_plan.extra_sync_source_relpath),
+                    PurePosixPath(build_plan.extra_sync_target_relpath),
+                )
+            )
+
+        candidates: list[str] = []
+        runtime_parts = runtime_path.parts
+        for source_rel, snapshot_root in mappings:
             if (
                 source_rel.is_absolute()
-                or target_rel.is_absolute()
+                or snapshot_root.is_absolute()
+                or not source_rel.parts
                 or any(part in {"", ".", ".."} for part in source_rel.parts)
-                or any(part in {"", ".", ".."} for part in target_rel.parts)
+                or any(part in {"", ".", ".."} for part in snapshot_root.parts)
             ):
-                raise BotBuildServiceError("invalid engine extra-sync mapping")
-            candidates.append((base.parent / source_rel, target_rel))
+                raise BotBuildServiceError("invalid engine snapshot source mapping")
+            width = len(source_rel.parts)
+            for start in range(1, len(runtime_parts) - width + 1):
+                if runtime_parts[start : start + width] != source_rel.parts:
+                    continue
+                relative_parts = runtime_parts[start + width :]
+                if not relative_parts:
+                    continue
+                snapshot = snapshot_root.joinpath(*relative_parts)
+                if snapshot.is_absolute() or ".." in snapshot.parts:
+                    raise BotBuildServiceError(f"invalid {error_context}")
+                candidates.append(snapshot.as_posix())
 
-        for source_root, snapshot_root in candidates:
-            try:
-                relative = active.relative_to(source_root)
-            except ValueError:
-                continue
-            if relative.as_posix() in {"", "."} or ".." in relative.parts:
-                break
-            snapshot = snapshot_root / relative
-            if snapshot.is_absolute() or ".." in snapshot.parts:
-                break
-            return snapshot.as_posix()
-        raise BotBuildServiceError(
-            "Engine active-root evidence is outside the snapshot sources"
-        )
+        if len(candidates) != 1:
+            raise BotBuildServiceError(
+                f"{error_context} is outside or ambiguous across snapshot sources"
+            )
+        return candidates[0]
 
     @staticmethod
     def _apply_shared_corpus_excludes(
@@ -470,6 +502,7 @@ class BotBuildService:
         excludes = list(build_plan.rsync_excludes)
         for relative_path in BotBuildService._shared_corpus_snapshot_paths(
             provider=provider,
+            build_plan=build_plan,
             shared_corpora=shared_corpora,
         ):
             if relative_path not in excludes:
@@ -480,6 +513,7 @@ class BotBuildService:
     def _shared_corpus_snapshot_paths(
         *,
         provider: EngineSandboxProvider,
+        build_plan: EngineBuildPlan,
         shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...],
     ) -> tuple[str, ...]:
         if not shared_corpora:
@@ -492,15 +526,13 @@ class BotBuildService:
             if delivery.snapshot_policy != "exclude":
                 raise BotBuildServiceError("shared corpus must be excluded from snapshot")
             runtime_path = PurePosixPath(delivery.runtime_path)
-            try:
-                relative = runtime_path.relative_to(snapshot_root)
-            except ValueError as exc:
-                raise BotBuildServiceError(
-                    "shared corpus path is outside the engine snapshot root"
-                ) from exc
-            relative_path = relative.as_posix()
-            if not relative_path or relative_path == "." or ".." in relative.parts:
-                raise BotBuildServiceError("invalid shared corpus snapshot path")
+            if runtime_path.as_posix() != delivery.runtime_path:
+                raise BotBuildServiceError("invalid shared corpus path")
+            relative_path = BotBuildService._runtime_path_in_snapshot(
+                runtime_path=runtime_path,
+                build_plan=build_plan,
+                error_context="shared corpus path",
+            )
             if relative_path in result:
                 raise BotBuildServiceError("duplicate shared corpus snapshot path")
             result.append(relative_path)
