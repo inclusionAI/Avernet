@@ -60,12 +60,34 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
-# Ceiling on simultaneous MCP Center detail lookups for one compose. The point of
-# the fan-out is to stop paying ``n`` round trips in sequence, not to hand MCP
-# Center ``n`` simultaneous requests: a bot may hold dozens of MCPs, and several
-# bots can compose at once. Eight covers the observed shape (~13 servers, ~90 ms
-# each) in two waves while leaving Center's connection pool room to breathe.
+# Ceiling on simultaneous MCP Center detail lookups. The point of the fan-out is
+# to stop paying ``n`` round trips in sequence, not to hand MCP Center ``n``
+# simultaneous requests: a bot may hold dozens of MCPs, and several bots can
+# compose at once. Eight covers the observed shape (~13 servers, ~90 ms each) in
+# two waves while leaving Center's connection pool room to breathe.
 _MCP_DETAIL_WORKERS = 8
+
+# ONE pool for the process, deliberately not one per compose. A per-call executor
+# would cap each compose at ``_MCP_DETAIL_WORKERS`` and cap nothing across them:
+# ``project_skills`` dispatches every projection through ``asyncio.to_thread``, so
+# concurrent bot projections would multiply into ``8 x in-flight composes`` threads
+# and that many simultaneous Center lookups — the ceiling would describe one
+# compose while the service as a whole had none. Sharing the pool makes the number
+# mean what it says process-wide, and puts it *below* the sequential behaviour it
+# replaced, which already allowed one concurrent Center call per in-flight compose
+# with no ceiling at all.
+#
+# No deadlock risk from sharing: tasks only call ``get_mcp_detail`` and never
+# re-enter this pool, and ``mcps()`` itself runs on the default executor's threads,
+# not on these.
+#
+# Worker threads are spawned lazily on first submit, so importing this module costs
+# nothing. This deployment serves from a single ``uvicorn.run(app)`` process; a
+# pre-fork server would need to build the pool per worker instead, since threads do
+# not survive a fork.
+_MCP_DETAIL_POOL = ThreadPoolExecutor(
+    max_workers=_MCP_DETAIL_WORKERS, thread_name_prefix="mcp-detail"
+)
 
 
 class McpDetailUnavailableError(LookupError):
@@ -375,6 +397,10 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         worker thread, so a pool drops into the existing shape where converting
         the call chain to async would not.
 
+        The pool is the process-wide :data:`_MCP_DETAIL_POOL`, not one built per
+        call, so the ceiling holds across concurrent composes rather than only
+        within one — see the constant for why that distinction matters.
+
         Each task runs under its own *copy* of the calling context. Pool workers
         do not inherit context vars — the reason ``bind_current_avernet_tenant``
         exists — and a Center lookup reads the request's tenant and mints its log
@@ -389,15 +415,13 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         entries = list(raw)
         if len(entries) < 2:
             return [self._enrich_mcp_detail(svc, md) for md in entries]
-        with ThreadPoolExecutor(
-            max_workers=min(len(entries), _MCP_DETAIL_WORKERS),
-            thread_name_prefix="mcp-detail",
-        ) as pool:
-            futures = [
-                pool.submit(copy_context().run, self._enrich_mcp_detail, svc, md)
-                for md in entries
-            ]
-            return [f.result() for f in futures]
+        futures = [
+            _MCP_DETAIL_POOL.submit(
+                copy_context().run, self._enrich_mcp_detail, svc, md
+            )
+            for md in entries
+        ]
+        return [f.result() for f in futures]
 
     def _enrich_mcp_detail(
         self, svc: Any, md: dict[str, Any]

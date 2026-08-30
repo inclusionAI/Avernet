@@ -677,6 +677,74 @@ def test_mcps_bound_the_fan_out_at_mcp_center():
 
 
 @pytest.mark.unit
+def test_mcps_bound_the_fan_out_across_concurrent_composes():
+    """The ceiling is process-wide, not per compose.
+
+    A pool built per call would cap each compose at ``_MCP_DETAIL_WORKERS`` and
+    cap nothing between them — and composes *do* run concurrently, since
+    ``project_skills`` dispatches each projection through ``asyncio.to_thread``.
+    Two at once would then reach ``2 x _MCP_DETAIL_WORKERS`` simultaneous Center
+    lookups while the constant still claimed eight.
+
+    The breach is detected directly rather than inferred from a peak count: the
+    lookups rendezvous on a barrier needing ``_MCP_DETAIL_WORKERS + 1`` parties,
+    one more than the ceiling allows. Under a shared pool that barrier can never
+    fill — at most ``_MCP_DETAIL_WORKERS`` lookups are ever resident — so it
+    times out and every waiter leaves by the broken-barrier path. Under a
+    per-call pool the two composes bring twice that many workers, the barrier
+    fills, and ``breached`` is set.
+
+    (Counting a peak instead would prove nothing here: whatever releases the
+    workers has to fire at the very threshold the test is trying to exceed, so
+    the count stops at the ceiling under both implementations.)
+    """
+    start = threading.Barrier(2, timeout=10)
+    over_ceiling = threading.Barrier(_MCP_DETAIL_WORKERS + 1, timeout=2)
+    breached = threading.Event()
+    lock = threading.Lock()
+    resident = 0
+    peak = 0
+
+    def lookup(server_code):
+        nonlocal resident, peak
+        with lock:
+            resident += 1
+            peak = max(peak, resident)
+        try:
+            over_ceiling.wait()
+        except threading.BrokenBarrierError:
+            pass  # never enough in flight to fill it — the ceiling held
+        else:
+            breached.set()  # one more than the ceiling was resident at once
+        with lock:
+            resident -= 1
+        return _remote(server_code)
+
+    per_compose = _MCP_DETAIL_WORKERS
+    results: list[list] = []
+
+    def compose(tag):
+        codes = [f"{tag}{i}" for i in range(per_compose)]
+        start.wait()  # both composes submit together, so they really do overlap
+        results.append(_mcps_over(codes, lookup))
+
+    threads = [threading.Thread(target=compose, args=(tag,)) for tag in ("a", "b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert not any(t.is_alive() for t in threads), "a compose never finished"
+    assert len(results) == 2
+    assert all(len(r) == per_compose for r in results)
+    assert not breached.is_set(), (
+        f"{_MCP_DETAIL_WORKERS + 1} lookups were in flight at once — the fan-out "
+        "ceiling is per-compose, not process-wide"
+    )
+    assert peak <= _MCP_DETAIL_WORKERS
+
+
+@pytest.mark.unit
 def test_mcps_carry_each_entrys_own_failure_through_the_fan_out():
     """One server's failure stays that server's, with its own cause chained.
 
