@@ -49,6 +49,7 @@ class LocalDraftContentStore:
         return ref
 
     def read_revision(self, ref: DraftRevisionRef) -> ValidatedSkillPackage:
+        ref = DraftRevisionRef.from_identity(ref)
         try:
             return self._revisions[ref]
         except KeyError as exc:
@@ -58,4 +59,5 @@ class LocalDraftContentStore:
             ) from exc
 
     def delete_revision(self, ref: DraftRevisionRef) -> None:
+        ref = DraftRevisionRef.from_identity(ref)
         self._revisions.pop(ref, None)

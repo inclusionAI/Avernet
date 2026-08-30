@@ -138,6 +138,7 @@ class _Objects:
         self.delete_ok = True
         self.read_override: ObjectReadResult | object = _UNSET
         self.puts: list[tuple[str, bytes]] = []
+        self.reads: list[str] = []
         self.deletes: list[str] = []
 
     def put_object(self, key: str, content: bytes) -> bool:
@@ -159,6 +160,7 @@ class _Objects:
         return self.data.get(key)
 
     def read_object(self, key: str) -> ObjectReadResult:
+        self.reads.append(key)
         if self.read_override is not _UNSET:
             return self.read_override  # type: ignore[return-value]
         if key not in self.data:
@@ -232,6 +234,26 @@ def test_draft_stores_reject_a_legacy_package_without_frontmatter() -> None:
         assert error.value.code is DraftContentStoreErrorCode.CORRUPT_CONTENT
 
     assert objects.puts == []
+
+
+@pytest.mark.parametrize("operation", ["read", "delete"])
+def test_draft_stores_reject_forged_ref_before_storage_access(
+    operation: str,
+) -> None:
+    objects = _Objects()
+    ref = DraftRevisionRef.from_identity(_identity())
+    object.__setattr__(ref, "tenant", "../outside")
+
+    for store in (LocalDraftContentStore(), _oss_store(objects)):
+        with pytest.raises(DraftContentStoreError) as error:
+            if operation == "read":
+                store.read_revision(ref)
+            else:
+                store.delete_revision(ref)
+        assert error.value.code is DraftContentStoreErrorCode.INVALID_IDENTITY
+
+    assert objects.reads == []
+    assert objects.deletes == []
 
 
 def test_oss_adapter_writes_reads_and_deletes_one_canonical_zip() -> None:

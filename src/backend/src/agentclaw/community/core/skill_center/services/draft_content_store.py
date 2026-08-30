@@ -102,6 +102,7 @@ class OssDraftContentStore:
         return ref
 
     def read_revision(self, ref: DraftRevisionRef) -> ValidatedSkillPackage:
+        ref = DraftRevisionRef.from_identity(ref)
         result = self._objects.read_object(self._object_key(ref))
         if result.status is ObjectReadStatus.NOT_FOUND:
             raise DraftContentStoreError(
@@ -134,6 +135,7 @@ class OssDraftContentStore:
         return package
 
     def delete_revision(self, ref: DraftRevisionRef) -> None:
+        ref = DraftRevisionRef.from_identity(ref)
         if not self._objects.delete_object(self._object_key(ref)):
             raise DraftContentStoreError(
                 DraftContentStoreErrorCode.DELETE_FAILED,
