@@ -48,7 +48,7 @@ together.
 | | | **W12** cross-engine semantics contract | #1684 |
 | | | **W13** create a bot from a manifest | #1696 |
 
-Planning PR: #1465.
+Planning PR: #1465. **Ownership for the current 7-person-day round is in §7**; items with an owner carry an **Owner** line.
 
 ## 2. Settled decisions
 
@@ -786,28 +786,38 @@ fetcher built HTTPS-only around SSRF guards, host-key verification, and a
 credential model storing a private key rather than a header. Not worth it for v1
 now that the header route is settled.
 
-### X2 — answered, and it raised a bigger one
+### X2 — fully answered · **CLOSED**
 
 - **T1 (readiness ordering) — yes.** teclaw applies the whole artifact to the bot
   before it reports ready. "Configuration precedes readiness" holds on that side.
-- **T2 (convergent re-delivery) — not ours to worry about.** The apply semantics
-  inside a teclaw container are owned by teclaw.
+- **T2 (convergent re-delivery) — CONFIRMED: teclaw's re-delivery is a full
+  overwrite** (teclaw owner, 2026-08-30). This started as "not ours to worry
+  about — the semantics inside a teclaw container are teclaw's", which was a
+  fine answer while our own policy did not depend on it. It stopped being fine
+  when §3.2 was revised to **adopt** overwrite precisely because teclaw already
+  does it: an assumption load-bearing for our design has to be confirmed, not
+  inherited. It now is.
 - **T3 (engine config on first boot) — removed from scope.** `engine_config` is
   **excluded from the first iteration**, so the question does not arise yet. This
   narrows W4's no-fetch materialisers to `mcp` and `script`.
 
-**But T2 exposes the real issue.** We own convergence semantics for BaaS-family
-bots; teclaw owns them for teclaw bots. If the two differ, the same manifest
-produces different behaviour on different engines and users have no way to
-predict either. **The semantics must be one contract, written once and agreed by
-both sides** — tracked as **W12**.
+**T2's answer is what §3.2 rests on.** We own convergence semantics for
+BaaS-family bots; teclaw owns them for teclaw bots. Rather than reconciling two
+different policies, §3.2 adopted theirs — a declared category is overwritten to
+equal the declaration — so the same manifest now behaves the same way on both
+engine families by construction rather than by negotiation.
 
-This is not a formality. §3.2's fourth row — *a file declared in neither version
-is left untouched because the bot created it* — cannot be computed on our side for
-teclaw: we hand over a whole artifact and never see their disk, and the artifact
-vocabulary has no way to say "delete this one thing". So row 4 holds on teclaw
-**only if their applier implements it**. Their consent is what makes the rule
-true there, which is why it needs to be explicit rather than assumed.
+**What survives as W12 is a write-up, not a negotiation.** The contract states
+what both sides do, plus the one thing an applier must never touch: the reserved
+names `MEMORY.md` and `IDENTITY.md`. That replaces the withdrawn clause asking
+teclaw to preserve every file declared in neither version — an unbounded set we
+could neither compute for them nor verify. Two names is a contract that can be
+agreed and checked.
+
+**The delivery contract itself is unchanged.** The manifest feature adds nothing
+to how an artifact is handed over. The only addition on the teclaw side is
+`cli_tools`, specified in `teclaw-cli-contract.zh-CN.md` — that document is what
+goes to the teclaw owner for implementation.
 
 ### X3 — `cli_tools`, narrowed
 
@@ -973,6 +983,8 @@ shipping as binaries, but it does not change that `cli_tools` is wanted.
 
 #### W10 — A service-layer seam apply and the API can share · #1509
 
+**Owner.** `totalfrank` · ~1.5 d (§7)
+
 **Goal.** The validation and authorisation the public API enforces becomes
 callable by something that is not an HTTP request, so apply enforces the same
 rules without a second copy of them.
@@ -1041,6 +1053,8 @@ which is why W4 depends on it rather than treating it as an add-on.
 
 #### W12 — Cross-engine convergence semantics contract · #1684
 
+**Owner.** `totalfrank` · ~0.5 d (§7)
+
 **Goal.** One written statement of what applying a manifest does to what is
 already there, agreed by both sides, so the same manifest behaves the same way on
 a BaaS-family bot and a teclaw bot.
@@ -1063,13 +1077,26 @@ largely a statement plus one question**, and the item shrank accordingly:
   can actually agree to — unlike the withdrawn "preserve every file declared in
   neither version", which was an unbounded set we could neither compute for them
   nor verify.
-- **Ask:** what does an artifact re-delivery actually do on their side? Is it an
-  overwrite of the delivered namespaces, and is a re-delivery of the same
-  artifact convergent? This is X2/T2, previously waved off as "teclaw owns the
-  semantics" — but §3.2 now *assumes* overwrite, so the assumption has to be
-  confirmed rather than inherited. **The user is taking this one directly.**
+- ~~**Ask:** what does an artifact re-delivery actually do on their side?~~
+  **ANSWERED — it is a full overwrite.** Confirmed with the teclaw owner
+  (2026-08-30). X2/T2 is closed, and §3.2's central assumption is now a
+  confirmed fact rather than an inherited one: our overwrite semantics and
+  theirs are the same operation.
 
 Record the outcome, including anything they decline.
+
+**What the confirmation settles, beyond unblocking this item:**
+
+- **§3.2 rests on verified ground.** Category overwrite was adopted *because*
+  teclaw already replaces wholesale; had that been wrong, the whole revision
+  would have needed reversing.
+- **The delivery contract to teclaw is unchanged.** Nothing about how we hand
+  over an artifact changes for the manifest feature. The only addition on their
+  side is `cli_tools` — specified separately in
+  `teclaw-cli-contract.zh-CN.md`, which is the document to share with them.
+- **This item is now a write-up, not an open question.** It states what both
+  sides do, and its remaining calendar cost is their review of the CLI addition
+  rather than a semantics negotiation.
 
 **Depends on.** §3.2 being settled (it is) · **Blocked by.** —
 
@@ -1077,14 +1104,18 @@ Record the outcome, including anything they decline.
 
 - [ ] The contract states each rule as a requirement on an applier, not as a
       description of our implementation.
-- [ ] Row 4 is called out as the one rule we cannot verify from outside, with its
-      consequence if unmet: a bot's own files silently disappearing on upgrade.
+- [ ] The **reserved names** (`MEMORY.md`, `IDENTITY.md`) are stated as the one
+      thing an applier must never write or remove. This replaces the withdrawn
+      "row 4" clause, which asked for an unbounded set we could not verify.
 - [ ] teclaw has reviewed it and either agreed or named the parts they will not
-      implement — the second is a usable answer; silence is not.
+      implement — the second is a usable answer; silence is not. **The
+      convergence semantics are already confirmed (full overwrite); what remains
+      for their review is the `cli_tools` addition.**
 - [ ] Any divergence they declare is written into the capability matrix, so the
       difference is documented rather than discovered.
 
-**Size.** Small to write, and the calendar time is the other team's review.
+**Size.** Small — smaller now that the semantics question is answered. The
+calendar time is the other team's review of the CLI addition.
 
 ---
 
@@ -1205,6 +1236,8 @@ tenant permanently. Every current call site wraps inline at the
 
 #### W1 — Manifest document: storage, schema v1, capability, API · #1469
 
+**Owner.** `lucas-xzp` · ~3 d (§7)
+
 **Goal.** A bot can carry a config-manifest document that is stored, validated
 and readable, and a caller can ask which categories that bot supports. Nothing
 is applied.
@@ -1289,6 +1322,8 @@ materialises it. That is why the feature flag exists.
 
 #### W2 — Guarded fetcher and archive pipeline · #1470
 
+**Owner.** `lucas-xzp` · ~1 d of ~1.5 d, carries over (§7)
+
 **Goal.** One component that fetches a caller-supplied URL safely, and one that
 unpacks an archive safely. No manifest concepts.
 
@@ -1341,6 +1376,8 @@ it only if a second appears.
 ---
 
 #### W3 — Source credentials · #1471
+
+**Owner.** `totalfrank` · ~1 d of ~1.5 d, carries over (§7)
 
 **Goal.** A tenant can register a named credential once and reference it from
 many manifests, and the platform can present it when fetching — without the
@@ -1799,7 +1836,85 @@ thing it triggers is proven. The trade is stated plainly: **nothing before W8
 delivers the business ask.** W4's explicit apply is a validation vehicle, not the
 product.
 
-## 7. Conventions for each work item
+## 7. Assignment — two developers, 7 person-days
+
+**Team:** `totalfrank` (3 days) · `lucas-xzp` (4 days).
+
+### The capacity gap, stated before the allocation
+
+The full plan is **roughly 24 person-days** of build. Seven does not cover it, and
+no allocation makes it do so — so this section commits the seven days to the
+subset that buys the most, and says plainly what is left.
+
+| | Estimate | | Estimate |
+| --- | --- | --- | --- |
+| W1 manifest document | ~3 d | W8 lifecycle apply points | ~3 d |
+| W2 guarded fetcher | ~1.5 d | W9 `cli_tools` | *deferred* |
+| W3 source credentials | ~1.5 d | W10 service-layer seam | ~1.5 d |
+| W4 apply engine | ~3 d | W11 platform-side materialisation | ~1.5 d |
+| W5 skills + identity | ~2 d | W12 semantics contract | ~0.5 d |
+| W6 resources | ~2 d | W13 create from manifest | ~3 d |
+| W7 named + git sources | ~2 d | **Total (excl. W9)** | **~24 d** |
+
+Day estimates are derived from each item's own **Size** line; they are planning
+figures, not commitments.
+
+**What 7 days buys: the foundations wave, and nothing user-visible.** W4 is the
+first item that does anything a user can see, and it alone is ~3 days *after* its
+dependencies (W1, W10) land. Seven days gets those dependencies done and the
+fetcher started. **At the end of this round there is no working feature** — that
+is a property of the budget, not of the allocation, and it is better known now
+than discovered on day 7.
+
+### The allocation
+
+Chosen so that **neither developer ever waits on the other**: every item below is
+dependency-free at the start of the round.
+
+**`lucas-xzp` — 4 days**
+
+| Item | | Days | Why this one |
+| --- | --- | --- | --- |
+| **W1** manifest document | #1469 | ~3 | The critical-path root — **W4 and W13 both need it** and nothing else can substitute. Largest item that has no dependencies, so it belongs to the larger budget and must start on day 1 |
+| **W2** guarded fetcher | #1470 | ~1 (of ~1.5) | Dependency-free; carries ~0.5 d into the next round |
+
+**`totalfrank` — 3 days**
+
+| Item | | Days | Why this one |
+| --- | --- | --- | --- |
+| **W12** semantics contract | #1684 | ~0.5 | Now a write-up, not a negotiation — the overwrite semantics are confirmed. Assigned here because this developer owns the teclaw relationship and will share `teclaw-cli-contract.zh-CN.md` with them |
+| **W10** service-layer seam | #1509 | ~1.5 | Dependency-free, and **W4 needs it** — pairing it with `lucas-xzp`'s W1 means W4 is fully unblocked when this round ends |
+| **W3** source credentials | #1471 | ~1 (of ~1.5) | Dependency-free; carries ~0.5 d into the next round |
+
+**Total committed: 7.0 person-days.** Two items (W2, W3) each carry roughly half
+a day over — deliberate, because leaving a developer idle to make the arithmetic
+tidy is worse than a small carry-over.
+
+### Why this split rather than another
+
+- **W1 and W10 together unblock W4 completely.** They are W4's only dependencies,
+  so finishing both in this round means the next round opens with the apply
+  engine ready to start — the single most valuable thing 7 days can set up.
+- **W2 and W3 together are W5's remaining dependencies** (W5 needs W2, W3, W4).
+  Getting both most of the way means W5 is close behind W4.
+- **No hand-offs inside the round.** W1, W2, W3, W10 and W12 are all
+  dependency-free, so a slip on one never idles the other developer. The first
+  real hand-off is W4, which is the next round's problem.
+- **W12 goes to the teclaw-facing developer**, not to whoever has spare hours.
+
+### What is explicitly not in this round
+
+W4, W5, W6, W7, W8, W11, W13 — about 17 person-days. Of these, **W8 and W13 are
+the two that deliver the business ask**, so a plan that stops here delivers
+foundations only. W9 (`cli_tools`) stays deferred by product priority, separately
+from this budget.
+
+### Suggested order for the next round
+
+W4 (unblocked by this round) → W5 → then W13 and W6 in parallel → W8 last, since
+it depends on W4, W5 and W6 and is the riskiest item in the plan.
+
+## 8. Conventions for each work item
 
 - **SDD.** Each item gets `specs/<yyyy-mm-dd>-<slug>/{spec,plan,tasks}.md`,
   following `specs/2026-08-10-bot-startup-script/` as the model — that feature is
@@ -1819,7 +1934,7 @@ product.
 - **Pre-push** runs lint-only by default; run `OCB_PRE_PUSH_RUN_CI=1` for items
   touching the apply path.
 
-## 8. Traceability
+## 9. Traceability
 
 | Item | Design sections it implements |
 | --- | --- |
