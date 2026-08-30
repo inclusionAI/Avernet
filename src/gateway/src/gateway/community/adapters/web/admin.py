@@ -230,9 +230,21 @@ async def migrate_baas_key(
     try:
         result = await migrator.migrate(api_key=api_key, app_name=app_name)
     except Exception:
-        # ``payload`` is never passed to the logger: it carries the plaintext
-        # key, and ``logger.exception`` renders whatever it is given.
-        logger.exception("baas key migration failed")
+        # ``.exception`` logs the active traceback (it is ``.error`` with
+        # ``exc_info=True``), so the stack is in the log without being in the
+        # response — a fault here is a server bug, and a caller who can post a
+        # credential should not be shown the internals it failed in.
+        #
+        # ``app_name`` is logged with it because the trace alone does not say
+        # WHICH migration raised, and concurrent attempts produce interleaved
+        # traces that are otherwise indistinguishable. It is the caller's own
+        # value and unique per environment, so it identifies the attempt exactly.
+        #
+        # Neither ``payload`` nor ``api_key`` nor its prefix is passed: the
+        # logger renders whatever it is given, and no part of a live credential
+        # belongs in a log file. The source row is recoverable from ``app_name``
+        # by way of the request that carried it.
+        logger.exception("baas key migration failed: app_name=%s", app_name)
         return _error(500, 1, "baas key migration failed")
 
     if not result.succeeded:

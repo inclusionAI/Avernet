@@ -120,20 +120,52 @@ class MigratedApp:
 
 @dataclass(frozen=True)
 class MigrationResult:
-    """What a migration attempt produced.
-
-    ``app`` is populated if and only if ``outcome`` is
-    :attr:`MigrationOutcome.MIGRATED`. ``detail`` carries whatever the caller
-    needs in order to act on a refusal — the taken name, the offending bot
-    references, the field that overflowed — as plain data the adapter can put
-    straight into a response body.
-    """
+    """What a migration attempt produced — one value for success and refusal alike."""
 
     outcome: MigrationOutcome
+    """Which case this attempt landed in. The only field always populated."""
+
     app: MigratedApp | None = None
+    """The rows that were written, or ``None`` when none were.
+
+    **``None`` for every outcome except :attr:`MigrationOutcome.MIGRATED`.**
+    There is no third state, and no partial one: a refusal writes nothing at all,
+    because the application row, its grants and its log rows are a single
+    transaction. So this being ``None`` always means the caller's secbaas key is
+    still their only working credential.
+
+    The refusals that produce it, by where they are decided:
+
+    * before any lookup — ``value_too_long`` for an over-long ``app_name``;
+    * at the credential check — ``key_not_found`` (no ACTIVE source row matched,
+      or one matched by prefix and its hash did not verify);
+    * while deriving grants from the source row — ``wildcard_policy``,
+      ``invalid_grant_targets``, ``unsupported_app_type``, and
+      ``value_too_long`` for a value no grant column can hold;
+    * at the insert, when a unique key refuses it — ``already_migrated``,
+      ``prefix_conflict``, ``app_name_taken``.
+
+    A database that is down is **not** among them: that raises rather than
+    returning, because it is not something the caller can act on.
+
+    Prefer :attr:`succeeded` over testing this for ``None``. The outcome is the
+    single source of truth for whether anything was written; reading it off this
+    field instead makes two facts that can drift apart.
+    """
+
     message: str = ""
+    """Human-readable reason for a refusal. Empty on success."""
+
     detail: Mapping[str, object] = field(default_factory=dict)
+    """Structured specifics of a refusal, as plain data for a response body.
+
+    Whatever the caller needs in order to act — the taken name and its
+    environment, the offending bot references, the field that overflowed. Empty
+    on success, and empty for a refusal that needs no specifics beyond its
+    outcome.
+    """
 
     @property
     def succeeded(self) -> bool:
+        """Whether anything was written. True exactly when ``app`` is not ``None``."""
         return self.outcome is MigrationOutcome.MIGRATED

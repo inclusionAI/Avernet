@@ -10,6 +10,7 @@ carried.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import pytest
@@ -24,6 +25,7 @@ from gateway.community.core.baas_migration import (
     BotAppGrantLogRow,
     BotAppGrantRow,
 )
+from gateway.community.logger import get_logger
 
 
 @pytest.fixture(autouse=True)
@@ -317,3 +319,62 @@ async def test_registering_a_taken_app_name_returns_409_not_500() -> None:
     assert first.status_code == 201
     assert clash.status_code == 409
     assert clash.json()["data"] == {"app_name": "Same Name", "env": "prod"}
+
+
+async def test_an_unexpected_fault_logs_a_stack_trace_but_never_returns_one() -> None:
+    """A 500 has to be debuggable from the log alone, and disclose nothing.
+
+    ``logger.exception`` records the active traceback, and ``app_name`` rides
+    along so the trace can be tied to one attempt when several run at once. The
+    response carries none of it: a caller who can post a credential should not
+    be shown the internals it failed in. And no part of the key — not the
+    plaintext, not its prefix — reaches the log.
+
+    The handler is attached to the gateway's own logger rather than using
+    ``caplog``: the logger plugin owns its handlers, so the root-propagation
+    ``caplog`` relies on is not something this test should assume.
+    """
+    app = create_app()
+    transport = ASGITransport(app=app)
+    api_key = _seed_baas_key(policy=json.dumps({"allowed_bots": ["bot-1:u1"]}))
+
+    class _Exploding:
+        async def migrate(self, **_: object) -> None:
+            raise RuntimeError("upstream exploded")
+
+    app.state.baas_key_migrator = _Exploding()
+
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture(level=logging.ERROR)
+    admin_logger = get_logger("admin")
+    admin_logger.addHandler(handler)
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/admin/apps/migrate-from-baas",
+                json={"api_key": api_key, "app_name": "Boom"},
+            )
+    finally:
+        admin_logger.removeHandler(handler)
+
+    assert resp.status_code == 500
+    body = json.dumps(resp.json())
+    assert "upstream exploded" not in body
+    assert "Traceback" not in body
+
+    failures = [r for r in records if "baas key migration failed" in r.msg]
+    assert failures, "the fault was not logged at all"
+    (record,) = failures
+    assert record.exc_info is not None, (
+        "no traceback recorded — the 500 would be undebuggable"
+    )
+    formatted = logging.Formatter().format(record)
+    assert "Boom" in formatted, "the trace cannot be tied to a migration attempt"
+    assert "RuntimeError: upstream exploded" in formatted
+    assert api_key not in formatted
+    assert api_key[:8] not in formatted
