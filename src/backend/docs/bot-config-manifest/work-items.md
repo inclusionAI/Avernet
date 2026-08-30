@@ -441,11 +441,16 @@ Owed by other teams. **None blocks W1–W6.**
 > so each row can be traced back; the row itself says what is actually being
 > asked, so no cross-reading is needed.
 
+> **All four rows are now closed or answered.** Nothing in this plan is waiting on
+> another team for a *decision*. What remains across engine boundaries is
+> execution: teclaw agreeing the semantics contract (**W12**) and implementing the
+> `cli_tools` artifact protocol once we design it.
+
 | # | What is being asked | Gates | Owner | State |
 | --- | --- | --- | --- | --- |
 | ~~**X1**~~ | ~~Ant Code credentials~~ | — | — | **Closed: dedicated machine account + `read_repository` 访问令牌**, HTTP Basic. No Deploy Tokens exist; expiry is owner-managed (§4, X1) |
 | **X2** | teclaw readiness/convergence — **answered**, see below | **W8** teclaw arm | teclaw + backend | **Answered**; superseded by W12 |
-| **X3** | `cli_tools` — one question remains: **O9, is every ARCA bot container the same CPU architecture** (x86_64), or is the fleet mixed? Not about paths or engines — about the machine code a shipped binary is compiled for. **W9 can proceed without it**, see below | **W9** | whoever operates the ARCA fleet | One question open, non-blocking |
+| ~~**X3**~~ | ~~`cli_tools` target architecture (O9)~~ | — | — | **Closed: `linux/amd64`** — `uname -m` on an ARCA container returns `x86_64` (§4, X3) |
 | ~~**X4**~~ | ~~desktop in the v1 surface~~ | — | — | **Closed: desktop is out of scope** (§2.5) |
 
 ### X1 — Ant Code credential choice
@@ -570,7 +575,27 @@ Findings, checked against the code:
 **What is actually outstanding here.** Only **O9**, and it is narrower than its
 one-line summary suggests.
 
-#### O9 is about CPU architecture, not paths
+#### Answered: `linux/amd64`
+
+`uname -m` inside an ARCA bot container returns **`x86_64`**, so v1 ships a single
+`*-linux-amd64` URL per tool and needs no per-arch sources.
+
+Two observations recorded from the same check:
+
+- The image is **RPM-based**, not Debian (`dpkg` is absent). Immaterial to
+  `cli_tools`, which ships static binaries and archives, but worth noting because
+  schema §3.7 names `apt` as an example of the package-manager installs that
+  belong in `script` — on this fleet that would be `yum`/`dnf`.
+- The evidence is **one sampled container**. That is strong but not a proof of
+  fleet uniformity across clusters or regions. It does not need to be: the ELF
+  validation below turns a wrong assumption into a loud apply-time failure rather
+  than a silent one, and `${OCB_ARCH}` stays reserved, so a future mixed fleet is
+  an additive change.
+
+The reasoning behind the question is kept below, because the distinction it turns
+on is easy to lose.
+
+#### Why it was about CPU architecture, not paths
 
 `cli_tools` ships a **compiled binary**, and a binary matches its host on **two
 independent axes**:
@@ -619,17 +644,17 @@ Two cheap choices make the answer non-blocking:
   then fails loudly in the apply report, rather than as an `exec format error` the
   model hits mid-task with no explanation.
 
-With those, v1 ships a single URL and a mixed fleet becomes an additive change
-rather than a redesign.
+With the answer in hand, the first is now cheap insurance rather than a
+workaround, and the second is worth keeping regardless: a wrong-architecture
+binary should fail in the apply report, never as an `exec format error` the model
+meets mid-task.
 
-**A third option worth checking before assuming anything fleet-wide.** Under
-D4's interim policy (§3.4) delivery happens *after* the bot starts, so the
-container exists when `cli_tools` is materialised. If the engine can report its
-own architecture over an existing channel, `${OCB_ARCH}` could be resolved
-**per bot at delivery time** — which answers the question by construction and
-stays correct if the fleet ever becomes mixed. It needs an engine-side way to
-ask, so W9 should establish feasibility rather than assume it; but it is a better
-shape than a global assumption and costs nothing to check.
+**A third option, no longer needed but recorded.** Under D4's interim policy
+(§3.4) delivery happens *after* the bot starts, so the container exists when
+`cli_tools` is materialised. If the engine can report its own architecture,
+`${OCB_ARCH}` could be resolved **per bot at delivery time**, answering the
+question by construction. Unnecessary for a uniform `amd64` fleet; the natural
+answer if that ever stops being true.
 
 Everything else below is our own work: the artifact protocol for teclaw (we
 design, they implement), the per-engine ARCA PATH proposal, and the tools-usage
