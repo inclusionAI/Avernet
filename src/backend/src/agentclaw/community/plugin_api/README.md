@@ -37,12 +37,6 @@ filesystem implementation stages conditional creates under a reserved internal
 root on the same filesystem, outside every logical object-key tree; staging
 residue is neither addressable nor returned by `list_objects`.
 
-`ObjectStoragePlugin.create_object_if_absent` is the atomic write-once seam for
-immutable business objects; `read_object` preserves FOUND/NOT_FOUND/FAILED so
-consumers never turn a transport failure into an overwrite or a false 404.
-Existing `put_object/get_object` retain their compatibility behavior for
-mutable and legacy consumers.
-
 The Interface belongs here because Avernet-owned consumers include Space Team
 binding today and the governed Publication/Reference flows in the Phase 2
 contract. This does **not** make Skill Center a community implementation:
