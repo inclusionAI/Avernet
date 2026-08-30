@@ -25,7 +25,7 @@ Three kinds of entry gate the work and are tracked separately from it:
 Where this document diverges from the merged design docs — §2.5 (capability
 scope), §2.6 (`PUT` takes effect immediately), §2.7 (apply records per-entry
 delivery and nothing else), §3.2
-(entity-level three-way diff, superseding the wholesale directory replace) — it
+(category-scoped overwrite with a reserved-name list) — it
 says so explicitly. Those docs are not edited here; amending them is a separate
 change.
 
@@ -105,13 +105,14 @@ same table, same shape. Nothing downstream — reconcile, compose, the UI, the
 engine — can tell them apart, and nothing downstream needs to.
 
 The manifest therefore does **not** stamp a marker on the entities themselves.
-It keeps its own record of *what the last apply materialised*, which exists for
-two jobs and no others:
+It keeps its own record of *what the last apply materialised*, which now exists
+for **one** job: **`keep_last` and audit** (§2.8), which need the last
+successfully materialised content anyway.
 
-1. **Un-marking.** `skills: []` or `DELETE` means "stop managing what you used
-   to manage", and the current document alone cannot say what that was.
-2. **`keep_last` and audit** (§2.8), which need the last successfully
-   materialised content anyway.
+It used to have a second job — "un-marking", knowing what to stop managing when a
+category emptied. §3.2's move to category overwrite removed it: `skills: []` is a
+declaration that the set is empty, so the area is emptied without needing to know
+what was previously declared.
 
 This is deliberately smaller than design §3.2's "`managed by manifest` marker
 visible in UI/API". That marker is a **v2 product nicety**, not a mechanism: no
@@ -149,73 +150,56 @@ are out of scope rather than newly enforced. Singlebox remains a dev/test
 concern only: `script` there reports supported and is not dispatched — #935's
 existing behaviour, not something this feature introduces.
 
-### 2.6 A manifest `PUT` on an existing bot takes effect immediately
+### 2.6 A manifest `PUT` takes effect immediately, without a restart
 
 **Divergence from design §3.1**, which makes `PUT` lazy (no apply; effective at
 the next restart for unrelated reasons). Instead: writing a new manifest version
 to an **existing** bot makes it effective there and then, so the running bot
 always reflects the manifest that was last accepted.
 
-**This is ordinary work — the same shape as `PUT`-triggers-creation.** What it
-is not is *one* verb: the verb differs per engine family, and on the BaaS family
-it is conditional on the bot's lifecycle state. Both were checked against the
-code:
+**The verb is the §3.2 overwrite, and it needs no restart on either engine
+family.** An earlier revision of this section specified a per-family *restart*;
+that is withdrawn — restarting was never what made the configuration effective,
+it was only how the payload got rebuilt.
 
-| | How a manifest change is made effective | Why not "restart" |
+| | How a declared category is overwritten | Restart? |
 | --- | --- | --- |
-| **BaaS / ARCA** | `BotService.restart_bot` → `BaasService.upgrade_bot` → `_build_create_bot_payload`, which rebuilds the payload and re-reads every stored input (including `ac_bot_startup_script`) | Correct verb, but **state-conditional** — see below |
-| **teclaw** | `BaasService.update_teclaw_bot` → `POST /api/v1/bots/{uuid}/update` with a recomposed artifact in `deploy_config.teclaw_bot_config`. An **in-place hot update**: "sessions/container identity are preserved" | **Restart is rejected outright.** `BotService.restart_bot` raises `BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")`, and `bot_publish_service.py` records why: a teclaw restart destroys the container, reallocation fails, and the bot is stranded with no binding and its in-container files lost |
+| **BaaS / ARCA** | `identity` and `resources` are file writes through `DeviceFileSystem`; `skills` are written into the active skill set and reconciled by the existing full symlink sync, reachable on a live bot via `DeviceSyncDispatcher` / `sync_symlinks` | **No** |
+| **teclaw** | Per-file writes through `TeclawDeviceFileSystem`, which *"forwards every read/write per-file to the engine, so it needs neither OSS nor the whole-artifact device-sync redeliver"*; the whole-artifact redeliver (`TeclawDeviceSyncPlugin.sync_symlinks([])`, as `ChannelService` already uses it) remains available where a category needs it | **No** |
 
-**Pushing a config change to a running teclaw bot is already a solved,
-one-call operation** — this is wiring, not new machinery. Two existing precedents,
-both outside the publish flow:
+**`script` is the one exception, and it is not a restart requirement so much as a
+deferral.** It is materialised by writing `ac_bot_startup_script` (§2.12), which
+`_build_create_bot_payload` reads when it composes the start command — so a
+changed script is *delivered* immediately and *takes effect* at the bot's next
+start. That is consistent rather than special: apply records delivery, not
+execution (§2.7).
 
-- `ChannelService` calls `plugin.sync_symlinks([])`, whose comment states the
-  mechanism plainly: *"`TeclawDeviceSyncPlugin` recomposes + POSTs the artifact;
-  the list arg is ignored (whole-artifact delivery)"*. An ordinary service making
-  a runtime edit effective, in one line.
-- `TeclawProvisionService.provision` composes through
-  `DeployArtifactProducerRouter.resolve(...).produce_artifact(...)` — the same
-  producer the publish build uses — with no publish flow involved.
+**Never route a teclaw manifest change through `BotService.restart_bot`.** It
+raises `BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")`, and
+`bot_publish_service.py` records why: a teclaw restart destroys the container,
+fails reallocation, and strands the bot with no binding and its in-container
+files lost. Under this section nothing needs a restart anyway, so the rule is
+easy to keep — it is recorded because an implementer reaching for a "make it
+effective" verb might otherwise reach for that one.
 
-**And for the file-backed categories teclaw may need no artifact redeliver at
-all.** `TeclawDeviceFileSystem` *"forwards every read/write per-file to the
-engine, so it needs neither OSS nor the whole-artifact device-sync redeliver"*
-(`device_filesystem_resolver.py`). So on a **running** teclaw bot, `identity` and
-`resources` go through the same `DeviceFileSystem` seam as the BaaS family; the
-artifact is the *boot* vehicle, not the only way in. This makes W8's teclaw arm
-smaller than it first looks, and W8 should establish which categories genuinely
-need the whole-artifact path before reaching for it.
+**Dropping the restart removes a lifecycle-state problem too.**
+`BotService.restart_bot` accepts only `ACTIVE`, `FAILED` and `PENDING`;
+`REACTIVATING` is a no-op and every other state raises
+`BotInvalidLifecycleStateError`. Had `PUT` been specified as "always restarts", a
+caller would have got a 4xx for a perfectly valid manifest because of where the
+bot happened to sit in its lifecycle. Overwriting files and reconciling skills
+has no such gate.
 
-The one hard rule: **never route a teclaw manifest change through
-`BotService.restart_bot`.** It raises, and per `bot_publish_service.py` a teclaw
-restart would destroy the container, fail reallocation and strand the bot.
-
-**On the BaaS family the restart is conditional.** `BotService.restart_bot`
-accepts only `ACTIVE`, `FAILED` and `PENDING`; `REACTIVATING` returns early as a
-no-op; every other state (`RECYCLED`, `RELEASING`, `FAILED_WITHOUT_BINDING`,
-`UNKNOWN`) raises `BotInvalidLifecycleStateError`. So `PUT` may **not** be
-specified as "always restarts" — a caller would get a 4xx for a valid manifest
-because of where the bot happened to be in its lifecycle.
-
-The rule instead:
+The rule:
 
 1. **Persist and validate always.** Accepting the document never depends on the
    bot's runtime state.
-2. **Make it effective when the bot can take it**, by its family's verb.
-3. **Otherwise it takes effect at the next start** — which is safe, because the
-   stored document is what every start path reads.
-4. **The response says which of the two happened**, so a caller never has to
-   guess whether their change is live.
+2. **Overwrite the declared categories** (§3.2). No restart.
+3. **`script`, if declared, is written now and runs at the next start** — and the
+   response says so, so a caller is never left guessing.
 
-A manifest supplied to the **creation** API (§2.11, W13) is a different case and
-needs no restart: it is applied as part of creation, so the bot's first container
-already carries it.
-
-This is the better semantics and it removes a hazard the lazy model carries — an
-operator restarting a bot to clear a hang would otherwise silently pick up a
-manifest edit made weeks earlier. With `PUT`-takes-effect-immediately, a restart is not
-a reconfiguration event; it is a replay of the configuration already in force.
+A manifest supplied to the **creation** API (§2.11, W13) is the same operation
+run as part of creation, so the bot's first container already carries it.
 
 One residual case survives and belongs to **D2**: a manifest whose source is a
 **moving ref** (a branch rather than a tag or SHA) can resolve to different
@@ -417,10 +401,10 @@ The platform composes it into the start command by itself:
   bakes it into `after_create_cmd_hook`. No production caller passes a script in
   — resolving centrally is what makes every path deliver it.
 - So every path that rebuilds a payload re-reads the row: create, service-bot
-  release, `upgrade_bot`, and both device services. The user-facing "restart a
-  baas bot" goes through `upgrade_bot` (`bot_service.py`), so a rewritten row
-  takes effect on the next payload build with no extra machinery — §2.6's
-  BaaS-family verb is already sufficient for `script`.
+  release, `upgrade_bot`, and both device services. So a rewritten row is picked
+  up by whatever next rebuilds the payload, with no extra machinery — which is
+  why §2.6 does not restart for it: `script` is **delivered** immediately and
+  **effective** at the next start.
 
 **The consequence.** Because the script is baked into the start command at
 payload-build time, it executes at container start — while `identity`, `skills`,
@@ -464,99 +448,92 @@ there is no third case to detect and no ambiguous state to represent. See §2.5.
 LOCAL/singlebox are out of scope rather than enforced; amending that matrix is a
 separate docs change.
 
-### 3.2 D2 — manifest-upgrade diff policy · #1467 · **RESOLVED**
+### 3.2 D2 — manifest-upgrade policy · #1467 · **RESOLVED (revised: overwrite)**
 
-The failure half was already settled (§2.7). The diff half is now settled too,
-and the answer is **entity-level, three-way**.
+The failure half was already settled (§2.7). The convergence half is settled as
+**category-scoped overwrite**, aligned with how teclaw already takes an artifact.
 
-#### The convergence unit is the entity
+**This revises an earlier resolution of D2** — an entity-level three-way diff
+(N, N+1, disk) with a per-entry `on_conflict` policy. That is withdrawn in favour
+of the simpler rule below. What the earlier version was protecting is now
+protected by a named reserved set instead of by a diff.
 
-Not a file, not "the whole declared tree". A skill, an identity file, a resource
-entry, a `cli_tool` — each is one entity, and a skill's entity spans every file
-under its own directory.
+#### The rule
 
-#### The rules
+**Making a manifest effective overwrites each declared category so that it equals
+the declaration.** A category the manifest does not declare is not touched at
+all.
 
-Between manifest version **N** and **N+1**:
-
-| | Condition | Action |
-| --- | --- | --- |
-| 1 | Entity in N, **not** in N+1 | **Delete the entity entirely** |
-| 2 | Entity in **both** | Diff its files, per the table below |
-| 3 | Entity **only** in N+1 | Create it |
-
-Within an entity present in both versions, each file is decided by a **three-way
-comparison** — version N, version N+1, and what is on disk:
-
-| In N | In N+1 | Action |
-| --- | --- | --- |
-| ✓ | ✗ | **Delete** — the declaration dropped it |
-| ✓ | ✓ | **Overwrite** — the declaration owns it |
-| ✗ | ✓ | **Write** — newly declared |
-| ✗ | ✗ | **Leave untouched** — nobody declared it, so the bot created it |
-
-#### Why this is better than "declaration wins wholesale"
-
-The fourth row is the whole point, and it is what makes the policy safe to run on
-every restart: **a file the manifest has never mentioned is never touched.** The
-bot's own working files survive an upgrade without needing a warning, an opt-out,
-or a list of protected paths.
-
-#### Consequences worth stating
-
-- **Version N's materialised file list becomes required state.** Row 1 and row 4
-  are only distinguishable if we know what version N declared — "not in N+1" and
-  "in neither" are different actions. This makes **W11 a hard dependency of W4**,
-  not a parallel nicety: the store that keeps materialised content is also the
-  record of what the previous version contained.
-- **Diverges from design §3.2's directory rule**, which replaces a declared tree
-  wholesale and deletes agent-added files inside it. Under this policy those
-  files are preserved. The design's rule is superseded.
-- Rows 1 and 2 are a real delete of user-visible assets, so they are the part of
-  W4 that most needs test coverage — including the case where the entity was
-  edited by hand between applies.
-
-#### Per-entity conflict policy
-
-The table above says "in both versions → overwrite", which is the right default
-but not right for everything. A single file can have **three** versions at apply
-time:
-
-1. what manifest **N** materialised,
-2. what manifest **N+1** materialises,
-3. what is **actually on disk** — which the bot may have modified since.
-
-Blind overwrite discards (3) whenever the file is declared. For some entries that
-is exactly right (a persona file, a skill's code). For others the bot's version is
-the valuable one.
-
-Two mechanisms, both cheap because W11 already stores what we wrote:
-
-**a. Detect modification instead of assuming it.** Compare the on-disk bytes with
-what we materialised for version N. If they match, the bot never touched it and
-overwrite is uncontroversial. They differ only when there is a genuine conflict —
-so the policy below applies to a small set of real cases, not to every file.
-
-**b. A per-entry `on_conflict` setting**, with a closed set of values rather than
-an open knob:
-
-| Value | Behaviour when the on-disk copy differs from version N |
+| | Behaviour |
 | --- | --- |
-| `overwrite` (default) | The declaration wins. Today's rule |
-| `preserve` | Keep the bot's version; do not overwrite. Still **created** when absent, so the manifest seeds it once and then leaves it alone |
-| `fail` | Report the entry as `failed` and change nothing — for content where silently picking either side is unacceptable |
+| Category declared | The area becomes **exactly** what the manifest says. Anything else in it is removed |
+| Category not declared | **Untouched.** The manifest expresses no opinion, so nothing happens |
+| `skills: []` | The empty set *is* a declaration: **every skill is removed.** This reverses the earlier reading of `[]` as "stop managing without deleting" |
+| Reserved names (below) | Never written, never removed — outside every overwrite |
 
-`preserve` is what an engine-written file like `MEMORY.md` wants if someone
-declares it: seed it on first boot, never clobber the accumulated state after. It
-is design §3.2's reserved `apply_once`, made explicit and given a reason to exist.
+#### Reserved names — the one exception, and it is a list, not a rule
 
-**Not offered:** three-way *merge*. Merging two versions of arbitrary text has no
-defined answer and would make behaviour unpredictable, which is the opposite of
-what this policy is for.
+Two files are engine-generated runtime state that happens to live inside the
+identity area on both engine families (ARCA: flat in the workspace; teclaw: under
+`/identity`):
 
-Note that a file the manifest never declares needs none of this — it is row 4 of
-the diff table and is already left alone. `on_conflict` matters only for declared
-entries.
+```
+MEMORY.md
+IDENTITY.md
+```
+
+They are **never written and never removed by apply**, whether or not a manifest
+declares them. `kernel/bot_config/artifact.py` already names exactly these two as
+engine-generated; today nothing enforces it, and this makes it enforced.
+
+That this is a finite, enumerated list is what makes the policy negotiable with
+another engine team. The previous policy's protection — "preserve every file
+declared in neither version" — is an *unbounded* set, which we could neither
+compute for teclaw nor ask them to honour (that was W12's hardest clause). Two
+names, both sides, is a contract that can actually be agreed.
+
+#### What this accepts, deliberately
+
+- **A skill installed through the UI is removed** when a manifest that declares
+  `skills` is applied. For a declared category the manifest is the sole owner —
+  the manifest and the UI are mutually exclusive there. Accepted by decision.
+- **Bot-created files inside a declared category are removed**, unless they are a
+  reserved name. This is the cost of dropping the three-way diff, and it is why
+  the reserved list exists at all.
+
+#### What it buys
+
+- **One semantics across both engine families**, which was the reason to revisit
+  D2 at all. teclaw takes a whole artifact and replaces; ARCA now does the same
+  thing to the declared categories.
+- **No version-N file list is needed to converge.** The earlier policy needed it
+  to tell "the declaration dropped it" from "the bot created it"; overwrite needs
+  no such distinction. **W11 stops being a hard dependency of W4** — it remains
+  required for §2.8's audit and for `keep_last`, but it no longer gates the apply
+  engine.
+- **No `on_conflict` knob.** `overwrite` / `preserve` / `fail` all disappear; the
+  category rule plus the reserved list covers what they were for.
+- **W12 shrinks from a negotiation to a statement.** We no longer ask teclaw to
+  implement a preservation rule we cannot verify. See W12.
+
+#### Relationship to design §3.2
+
+This moves **back toward** the merged design, which replaces a declared tree
+wholesale. The earlier revision of this section superseded that rule; this one
+largely restores it, with the reserved list as the single documented refinement.
+
+#### On ARCA this is mostly existing machinery
+
+Two findings that make the ARCA side smaller than it looks:
+
+- **Skills already reconcile full-state from the DB.**
+  `skill_symlink_listener` performs a *"full skill-symlink sync … refreshed from
+  the DB's current active skill sets"*, and the same reconcile is reachable on a
+  live bot through `DeviceSyncDispatcher` / `sync_symlinks`. Apply writes the
+  declared set into the active skill set and triggers the existing reconcile; the
+  deletion half is already implemented.
+- **Identity is plain file writes.** Nothing in `core/services/identity.py`
+  involves a restart.
 
 #### Moving refs: two modes
 
@@ -1025,10 +1002,23 @@ enforced from our side on teclaw**: we hand over a whole artifact, never see the
 disk, and the artifact vocabulary has no "delete this one thing". It holds there
 only if their applier implements it.
 
-**In scope.** Write the policy from §3.2 as an engine-facing contract — the entity
-diff rules, the three-way file rules including row 4, `on_conflict`, and what
-"convergent re-delivery" means. Take it to the teclaw team for review and explicit
-agreement. Record the outcome, including anything they decline.
+**In scope.** Write the policy from §3.2 as an engine-facing contract and take it
+to the teclaw team. **The revision to §3.2 turned this from a negotiation into
+largely a statement plus one question**, and the item shrank accordingly:
+
+- **State:** a declared category is overwritten to equal the declaration; an
+  undeclared category is untouched; `MEMORY.md` and `IDENTITY.md` are never
+  written and never removed. Two reserved names is a finite list an engine team
+  can actually agree to — unlike the withdrawn "preserve every file declared in
+  neither version", which was an unbounded set we could neither compute for them
+  nor verify.
+- **Ask:** what does an artifact re-delivery actually do on their side? Is it an
+  overwrite of the delivered namespaces, and is a re-delivery of the same
+  artifact convergent? This is X2/T2, previously waved off as "teclaw owns the
+  semantics" — but §3.2 now *assumes* overwrite, so the assumption has to be
+  confirmed rather than inherited. **The user is taking this one directly.**
+
+Record the outcome, including anything they decline.
 
 **Depends on.** §3.2 being settled (it is) · **Blocked by.** —
 
@@ -1381,10 +1371,11 @@ entry point in this item. **`engine_config` is out of iteration 1** by the X2/T3
 decision (§4); when it returns, its materialiser is a top-level key merge via
 `EngineConfigService.write_bot_config` and belongs here.
 
-**Depends on.** W1, W10 (the seam apply calls through), and **W11 as a hard
-dependency** — §3.2's three-way diff cannot distinguish "dropped from the
-declaration" from "created by the bot" without version N's materialised file
-list, which is what W11 stores.
+**Depends on.** W1 and W10 (the seam apply calls through). **W11 is no longer a
+hard dependency** — the withdrawn three-way diff needed version N's materialised
+file list to tell "the declaration dropped it" from "the bot created it";
+category overwrite needs no such distinction. W11 is still required for §2.8's
+audit and for `keep_last`, but it does not gate this item.
 **Blocked by.** — D2 is resolved (§3.2) and its rules are what this item
 implements. X2/T3 removed `engine_config` from iteration 1 altogether, so its
 teclaw behaviour is no longer this item's problem.
@@ -1422,11 +1413,14 @@ teclaw behaviour is no longer this item's problem.
       returns it merges by top-level key.)
 - [ ] `mcp` refuses a `server_code` the tenant has no permission for, reusing the
       existing permission check rather than a copy.
-- [ ] A category present but **empty** (`skills: []`) drops those entries from
-      the manifest's record without deleting the assets; they become ordinary
-      manual entities.
-- [ ] `DELETE` of the manifest does the same for every category and deletes no
-      asset — "removing the declaration is not removing the thing".
+- [ ] A category present but **empty** (`skills: []`) is a declaration that the
+      set is empty: every skill is **removed** (§3.2). This is the reverse of an
+      earlier rule that read `[]` as "stop managing without deleting".
+- [ ] **`DELETE` of the manifest deletes nothing.** This follows from §3.2 rather
+      than being a separate rule: `[]` is a declaration ("the set is empty"),
+      absence is not a declaration ("no opinion, do not touch"). Removing the
+      document leaves no declared categories, so nothing is overwritten. The two
+      behaviours look opposite and are the same rule.
 - [ ] A failure part-way through leaves the record consistent: nothing recorded
       as materialised that was not.
 - [ ] `dry_run` performs no write of any kind, including to the report store.
@@ -1473,9 +1467,12 @@ follows D4's interim policy: deliver after the bot starts (§3.4).
 - [ ] `${BOT_*}` substitution happens before fetch and before prefix
       authorisation, so a substituted URL cannot escape its credential's
       `allowed_prefixes`.
-- [ ] The §3.2 diff rules are enforced per entity, including the fourth row: a
-      file present on disk but declared in neither version N nor N+1 is **left
-      untouched**.
+- [ ] §3.2's overwrite is enforced per declared category: after apply the area
+      equals the declaration, and `skills: []` removes every skill. A skill
+      installed through the UI is removed too — accepted by decision.
+- [ ] `MEMORY.md` and `IDENTITY.md` are never written and never removed, whether
+      or not the manifest declares them. This is the single exception to
+      overwrite and it needs a test of its own.
 - [ ] A manifest-installed skill is **registered** through the service (DB row +
       files), never dropped on disk — activation enumerates unregistered
       filesystem content into the pool without creating records (§3.3).
@@ -1598,23 +1595,23 @@ manifest level, so there is no de-activation for W8 to place.)
       the ACTIVE-but-unconfigured window becomes user-visible.
 - [ ] Scale-out does **not** re-apply; instances stay identical because they
       share one platform state. This is #926's actual requirement.
-- [ ] A manifest `PUT` **takes effect immediately** (§2.6), so the running bot
-      always reflects the manifest last accepted and an unrelated restart is a
-      replay rather than a reconfiguration. This is **two verbs, not one**:
-      - **BaaS / ARCA** — `BotService.restart_bot`, but only from `ACTIVE`,
-        `FAILED` or `PENDING`. `REACTIVATING` is a no-op; every other state
-        raises `BotInvalidLifecycleStateError`. So the endpoint persists the
-        document unconditionally, makes it effective when the state allows, and
-        **tells the caller which of the two happened** — it must never return a
-        4xx for a valid manifest because of where the bot is in its lifecycle.
-      - **teclaw** — never `BotService.restart_bot`: it raises, and a teclaw
-        restart would strand the bot (§2.6). Recompose and redeliver instead,
-        reusing what already exists — `TeclawDeviceSyncPlugin.sync_symlinks([])`
-        is a one-call whole-artifact redeliver that `ChannelService` already uses
-        for runtime edits. **First establish which categories even need it:**
-        `TeclawDeviceFileSystem` forwards per-file writes straight to the engine,
-        so `identity` and `resources` on a running bot may go through the same
-        `DeviceFileSystem` seam as the BaaS family and need no redeliver.
+- [ ] A manifest `PUT` **takes effect immediately and without a restart**
+      (§2.6), so the running bot always reflects the manifest last accepted.
+      - **BaaS / ARCA** — `identity` and `resources` are `DeviceFileSystem`
+        writes; `skills` go into the active skill set and are reconciled by the
+        existing full symlink sync, reachable on a live bot through
+        `DeviceSyncDispatcher` / `sync_symlinks`.
+      - **teclaw** — per-file writes through `TeclawDeviceFileSystem`, which
+        forwards straight to the engine. `TeclawDeviceSyncPlugin.sync_symlinks([])`
+        (the one-call whole-artifact redeliver `ChannelService` already uses)
+        stays available; **establish which categories actually need it** rather
+        than reaching for it by default.
+      - **Never `BotService.restart_bot` on teclaw** — it raises and would
+        strand the bot (§2.6). Nothing here needs it on either family.
+- [ ] **`script` is delivered now and effective at the next start**, and the
+      response says so. It is baked into the start command at payload-build time
+      (§2.12), so it is the one category whose effect is deferred — consistent
+      with §2.7's delivery-not-execution boundary, not an exception to it.
 - [ ] **§2.7 holds on both engine families: apply writes nothing to the bot
       record, and does not branch on first boot.** Apply's record ends at
       delivery — the `ac_bot_startup_script` row written, the artifact handed
@@ -1713,15 +1710,17 @@ remains is external: X2 gates W8's teclaw arm through W12, and X3's single
 question (O9, fleet CPU architecture) is non-blocking for W9, which is deferred
 regardless. **X1 and X4 are closed**, so W7 has nothing external left.
 
-Two dependencies the resolutions *tightened*: **W11 is a hard dependency of W4**,
-because §3.2's diff needs version N's materialised file list both to tell "the
-declaration dropped it" apart from "the bot created it", and to detect whether
-the bot modified a declared file at all. And **W12 gates W8's teclaw arm** —
-without an agreed semantics contract the same manifest can behave differently on
-the two engine families.
+**§3.2's revision to overwrite loosened the plan's tightest dependency.** W11 was
+a hard dependency of W4 while the three-way diff needed version N's file list;
+category overwrite does not, so W11 and W4 are now independent. W11 is still
+required — §2.8's audit and `keep_last` both need it — but it no longer gates the
+apply engine.
 
-**Start W12 now.** It is the only remaining item whose critical path runs through
-another team, and it costs us little to write.
+**W12 still gates W8's teclaw arm**, and is still the only item whose critical
+path runs through another team — but it is now mostly a statement of what we do
+plus one confirmation (does teclaw's re-delivery overwrite, and is it
+convergent?), rather than asking them to implement a preservation rule we cannot
+verify.
 
 **W13 is what actually delivers "a bot comes up configured on its very first
 boot."** W8 covers every *other* apply point; W13 covers creation, which is the
@@ -1782,8 +1781,7 @@ place: §2.3 (the managed marker shrinks to an internal record), §2.5 (capabili
 scope; desktop out), §2.6 (`PUT` takes effect immediately rather than being lazy —
 design §3.1), §2.8 (platform-side materialisation, which the design does not have), §2.9 (substitution
 variables renamed from `OCB_*` to `BOT_*`, since `OCB` is an internal codename),
-§3.2 (an entity-level three-way diff that preserves bot-created files, superseding
-design §3.2's wholesale directory replace), §3.4 (post-start delivery on the BaaS
+§3.4 (post-start delivery on the BaaS
 family, where design §3.1 requires configuration to precede readiness), and §4's
 X1 (a shallow git fetch rather than design §10.5's archive-API pull, forced by
 Ant Code having no read-only API scope). Amending the Chinese docs to match is a
