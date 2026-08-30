@@ -155,6 +155,7 @@ provides:
   - SkillEditorRequestRepository
   - DraftEditLeaseRepository
   - SkillVersionRepositoryProtocol
+  - SkillVersionMaterializationRepositoryProtocol
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol

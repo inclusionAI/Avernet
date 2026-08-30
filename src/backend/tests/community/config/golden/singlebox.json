@@ -228,6 +228,7 @@
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
       "env_folder": "aidesktop_singlebox",
+      "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     }
   },
@@ -379,6 +380,7 @@
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
       "claude_code_session_root": "/home/admin/.claude",
+      "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     },
     "workspace_hosting": {

@@ -89,6 +89,14 @@ class ConfigComposer:
             )
             for s in self._collector.skills(req)
         ]
+        unknown_skill_stores = sorted(
+            {skill.store for skill in skills if skill.store not in self._stores}
+        )
+        if unknown_skill_stores:
+            raise ValueError(
+                "Skill artifact references unknown store(s): "
+                + ", ".join(unknown_skill_stores)
+            )
 
         # ── mcp ─────────────────────────────────────────────────────────────
         # Delegate to McporterComposer: it takes the collector's McpComposeInput

@@ -283,22 +283,18 @@ class ConfigModule(Module):
     @singleton
     @provider
     def workspace(self) -> cfg.WorkspaceConfig:
-        """Bot workspace filesystem layout.
+        """Resolve workspace roots to absolute host paths at the DI boundary.
 
-        Sources both roots from the ``workspace`` user_config block;
-        falls back to the dataclass defaults (sandbox paths) when the
-        block is absent or a field is missing. ``~`` is expanded for
-        each path so application-dev.yaml can use ``~/.openclaw`` and
-        get the dev's home directory at boot.
+        Missing fields retain the dataclass sandbox defaults.
         """
-        import pathlib
+        import os
 
         block = _block("workspace")
         defaults = cfg.WorkspaceConfig()
 
         def _expand(value: str | None, default: str) -> str:
             raw = value if isinstance(value, str) and value else default
-            return str(pathlib.Path(raw).expanduser())
+            return os.path.abspath(os.path.expanduser(raw))
 
         return cfg.WorkspaceConfig(
             openclaw_root=_expand(block.get("openclaw_root"), defaults.openclaw_root),
@@ -308,6 +304,7 @@ class ConfigModule(Module):
             aicoding_root=_expand(
                 block.get("aicoding_root"), defaults.aicoding_root
             ),
+            hermes_root=_expand(block.get("hermes_root"), defaults.hermes_root),
         )
 
     # ── Access policy ───────────────────────────────────────────────

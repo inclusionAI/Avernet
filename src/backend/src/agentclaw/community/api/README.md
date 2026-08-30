@@ -104,6 +104,7 @@ provides:
   - "One Protocol per public service / factory"
   - "Structural conformance gate via tests/architecture/test_service_api_conformance.py"
   - BotRuntimeProjectorProtocol
+  - SkillVersionMaterializerProtocol
   - SkillMetadataParserProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"

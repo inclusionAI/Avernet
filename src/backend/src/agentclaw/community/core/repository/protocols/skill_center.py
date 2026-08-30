@@ -9,9 +9,14 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.skill_center.materialization_contract import (
+        MaterializingSkillVersion,
+        PublishedMaterializedSkillVersion,
+    )
     from agentclaw.community.core.work_orders.models import (
         WorkOrderNotificationDraft,
         WorkOrderRecord,
@@ -210,6 +215,30 @@ class SkillVersionRepositoryProtocol(Protocol):
         self, *, env: str, skill_id: int, skill_version_id: int
     ) -> SkillVersionRecord | None:
         """Return the addressed PUBLISHED row, never MATERIALIZING."""
+        ...
+
+
+@runtime_checkable
+class SkillVersionMaterializationRepositoryProtocol(Protocol):
+    """Persistence boundary for exact-Version Ready-Gate publication."""
+
+    @abstractmethod
+    def get_materialization_target(
+        self, *, env: str, skill_id: int, skill_version_id: int
+    ) -> MaterializingSkillVersion | None:
+        ...
+
+    @abstractmethod
+    def publish_materialized(
+        self,
+        *,
+        env: str,
+        skill_id: int,
+        skill_version_id: int,
+        metadata_json: str,
+        description: str,
+        published_at: datetime,
+    ) -> PublishedMaterializedSkillVersion:
         ...
 
 @runtime_checkable

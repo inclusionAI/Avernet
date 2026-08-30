@@ -10,6 +10,7 @@ from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer
     ArcaSnapshotProducer,
 )
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ResolvedSharedCorpusDelivery,
     ServiceSkillsManifestBuilder,
     ServiceSkillsManifestError,
     service_skills_env_from_ext,
@@ -22,6 +23,160 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
+from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+
+
+_CENTER_STORE_PREFIX = "aidesktop/aidesktop_dev/bolt_shared/skills-center"
+_REPO_STORE_PREFIX = "skills-repo/b1"
+
+
+class _CenterStore:
+    def __init__(self, ready: bool = True) -> None:
+        self.ready = ready
+        self.refs = []
+
+    def verify_version(self, ref) -> bool:
+        self.refs.append(ref)
+        return self.ready
+
+
+def _resolved_layout(engine: str, pool_center: str) -> dict[str, str]:
+    pool_root = pool_center.rsplit("/", 1)[0]
+    active_root = {
+        "openclaw": "/home/admin/.openclaw/workspace/skills",
+        "claude_code": "/home/admin/.claude/skills",
+        "aicoding": "/home/admin/.claude/skills",
+        "hermes": "/home/admin/.hermes/skills",
+    }[engine]
+    return {
+        "engine": engine,
+        "layout_contract_version": "skills-pool-p3-v1",
+        "active_root": active_root,
+        "local_root": f"{pool_root}/skills-local",
+        "repo_root": f"{pool_root}/skills-repo",
+        "pool_center": pool_center,
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("bot", "runtime_engine", "runtime_path"),
+    [
+        (
+            {"active_engine": "claude_code", "template_type": "normalCC"},
+            "claude_code",
+            "/home/admin/.claude_code/workspace/skills-pool/skill-center",
+        ),
+        (
+            {
+                "active_engine": "claude_code",
+                "template_type": "applicationCoding",
+            },
+            "aicoding",
+            "/home/admin/.aicoding/workspace/skills-pool/skill-center",
+        ),
+        (
+            {"active_engine": "hermes"},
+            "hermes",
+            "/home/admin/.hermes/workspace/skills-pool/skill-center",
+        ),
+    ],
+)
+def test_shared_center_delivery_uses_engine_runtime_evidence(
+    bot, runtime_engine, runtime_path
+) -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    state = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(runtime_engine, runtime_path)
+        },
+    )
+
+    delivery = ResolvedSharedCorpusDelivery.center_from_state(
+        state=state,
+        bot=bot,
+        store_prefix=_CENTER_STORE_PREFIX,
+    )
+
+    assert delivery.runtime_path == runtime_path
+
+
+@pytest.mark.unit
+def test_shared_repo_delivery_uses_engine_runtime_evidence() -> None:
+    pool_center = "/home/admin/.openclaw/workspace/skills-pool/skill-center"
+    state = BotSkillLayoutState(
+        scope=BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout("openclaw", pool_center)
+        },
+    )
+
+    delivery = ResolvedSharedCorpusDelivery.repo_from_state(
+        state=state,
+        bot={"active_engine": "openclaw"},
+        store_prefix=_REPO_STORE_PREFIX,
+    )
+
+    assert delivery.runtime_path == (
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
+    )
+
+
+@pytest.mark.unit
+def test_shared_center_delivery_rejects_missing_or_mismatched_evidence() -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    state = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": {
+                "engine": "openclaw",
+                "layout_contract_version": "skills-pool-p3-v1",
+            }
+        },
+    )
+
+    with pytest.raises(ServiceSkillsManifestError, match="matching READY"):
+        ResolvedSharedCorpusDelivery.center_from_state(
+            state=state,
+            bot={"active_engine": "openclaw"},
+            store_prefix=_CENTER_STORE_PREFIX,
+        )
+    with pytest.raises(ServiceSkillsManifestError, match="matching READY"):
+        ResolvedSharedCorpusDelivery.center_from_state(
+            state=replace(
+                state,
+                last_probe_evidence={
+                    "resolved_layout": _resolved_layout(
+                        "hermes",
+                        "/home/admin/.hermes/workspace/skills-pool/skill-center",
+                    )
+                },
+            ),
+            bot={"active_engine": "openclaw"},
+            store_prefix=_CENTER_STORE_PREFIX,
+        )
 
 
 class _RecordingBuild:
@@ -30,13 +185,20 @@ class _RecordingBuild:
     def __init__(self, result: dict[str, Any]) -> None:
         self.result = result
         self.calls: list[tuple[dict[str, Any], int]] = []
+        self.shared_corpora: list[tuple[object, ...]] = []
+        self.active_runtime_paths: list[str | None] = []
 
     def build(
         self,
         bot: dict[str, Any],
         version: int = 1,
+        *,
+        shared_corpora=(),
+        active_runtime_path=None,
     ) -> dict[str, Any]:
         self.calls.append((bot, version))
+        self.shared_corpora.append(tuple(shared_corpora))
+        self.active_runtime_paths.append(active_runtime_path)
         return self.result
 
 
@@ -119,6 +281,13 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
         persisted=True,
         layout_contract_version="skills-pool-p3-v1",
         preparation_id="preparation-1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
     )
     layout_repository = _LayoutRepository(state)
     stub = _RecordingBuild(
@@ -126,12 +295,23 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
             "success": True,
             "migration_path": "/home/admin/nfs/bot-data/7/openclaw",
             "build_target_path": str(target),
+            "shared_corpus_snapshot_paths": [
+                "workspace/skills-pool/skills-repo",
+                "workspace/skills-pool/skill-center",
+            ],
+            "active_skill_snapshot_path": "workspace/skills",
         }
     )
 
     artifact = ArcaSnapshotProducer(
         stub,
-        ServiceSkillsManifestBuilder(layout_repository),
+        ServiceSkillsManifestBuilder(
+            layout_repository,
+            _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
     ).produce_artifact(
         {
             "bot_id": "b1",
@@ -147,6 +327,28 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
         "engine": "openclaw",
         "active_layout": "pool",
         "layout_contract_version": "skills-pool-p3-v1",
+        "shared_corpora": [
+            {
+                "corpus": "repo",
+                "runtime_path": (
+                    "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
+                ),
+                "store_prefix": _REPO_STORE_PREFIX,
+                "layout_contract_version": "skills-pool-p3-v1",
+                "permission": "read_only",
+                "snapshot_policy": "exclude",
+            },
+            {
+                "corpus": "center",
+                "runtime_path": (
+                    "/home/admin/.openclaw/workspace/skills-pool/skill-center"
+                ),
+                "store_prefix": _CENTER_STORE_PREFIX,
+                "layout_contract_version": "skills-pool-p3-v1",
+                "permission": "read_only",
+                "snapshot_policy": "exclude",
+            },
+        ],
     }
     assert layout_repository.scopes == [
         BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
@@ -162,6 +364,340 @@ class _LayoutRepository:
     def get(self, scope: BotSkillLayoutScope) -> BotSkillLayoutState:
         self.scopes.append(scope)
         return self.state
+
+
+class _CapabilityReader:
+    def __init__(self, assets):
+        self.assets = tuple(assets)
+        self.calls = []
+
+    def active_skill_assets(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.assets
+
+
+@pytest.mark.unit
+def test_pool_artifact_rejects_undeclared_center_link(tmp_path) -> None:
+    target = tmp_path / "openclaw"
+    active = target / "workspace" / "skills"
+    active.mkdir(parents=True)
+    (active / "undeclared").symlink_to(
+        "/home/admin/.openclaw/workspace/skills-pool/skill-center/"
+        "00000000-0000-4000-8000-000000000001/1.0.0"
+    )
+    state = BotSkillLayoutState(
+        scope=BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
+    )
+    producer = ArcaSnapshotProducer(
+        _RecordingBuild(
+            {
+                "success": True,
+                "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
+                ],
+                "active_skill_snapshot_path": "workspace/skills",
+            }
+        ),
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(state),
+            _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="Center links do not match the frozen exact manifest",
+    ):
+        producer.produce_artifact(
+            {
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            },
+            7,
+        )
+
+
+@pytest.mark.unit
+def test_center_link_outside_active_root_cannot_satisfy_manifest(tmp_path) -> None:
+    target = tmp_path / "openclaw"
+    outside = target / "other-workspace"
+    outside.mkdir(parents=True)
+    center_target = (
+        "/home/admin/.openclaw/workspace/skills-pool/skill-center/"
+        "00000000-0000-4000-8000-000000000001/1.0.0"
+    )
+    (outside / "pdf").symlink_to(center_target)
+    state = BotSkillLayoutState(
+        scope=BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
+    )
+    producer = ArcaSnapshotProducer(
+        _RecordingBuild(
+            {
+                "success": True,
+                "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
+                ],
+                "active_skill_snapshot_path": "workspace/skills",
+            }
+        ),
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(state),
+            _CapabilityReader(
+                (
+                    RegisteredSkillAsset(
+                        skill_id=1,
+                        name="pdf",
+                        git_path="center://pdf",
+                        skill_uuid="00000000-0000-4000-8000-000000000001",
+                        sc_version_number="1.0.0",
+                    ),
+                )
+            ),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="Center links do not match the frozen exact manifest",
+    ):
+        producer.produce_artifact(
+            {
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            },
+            7,
+        )
+
+
+@pytest.mark.unit
+def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    target = tmp_path / "openclaw"
+    active = target / "workspace" / "skills"
+    active.mkdir(parents=True)
+    (active / "alpha").symlink_to(
+        "/home/admin/.openclaw/workspace/skills-pool/skill-center/"
+        "00000000-0000-4000-8000-000000000001/1.0.0"
+    )
+    (active / "zeta").symlink_to(
+        "/home/admin/.openclaw/workspace/skills-pool/skill-center/"
+        "00000000-0000-4000-8000-000000000002/2.0.0"
+    )
+    state = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
+    )
+    reader = _CapabilityReader(
+        [
+            RegisteredSkillAsset(
+                skill_id=2,
+                name="zeta",
+                git_path="center://public-zeta",
+                skill_uuid="00000000-0000-4000-8000-000000000002",
+                sc_version_number="2.0.0",
+                mcp_dependencies=({"code": "mcp.z"},),
+            ),
+            RegisteredSkillAsset(
+                skill_id=1,
+                name="alpha",
+                git_path="center://public-alpha",
+                skill_uuid="00000000-0000-4000-8000-000000000001",
+                sc_version_number="1.0.0",
+                mcp_dependencies=(),
+            ),
+            RegisteredSkillAsset(
+                skill_id=3,
+                name="repo",
+                git_path="git://team/repo",
+            ),
+        ]
+    )
+    center_store = _CenterStore()
+    producer = ArcaSnapshotProducer(
+        _RecordingBuild(
+            {
+                "success": True,
+                "migration_path": "/snapshot/7/openclaw",
+                "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center"
+                ],
+                "active_skill_snapshot_path": "workspace/skills",
+            }
+        ),
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(state),
+            reader,
+            _CENTER_STORE_PREFIX,
+            center_store,
+            _REPO_STORE_PREFIX,
+        ),
+    )
+
+    artifact = producer.produce_artifact(
+        {
+            "bot_id": "b1",
+            "owner_id": "u1",
+            "entity_id": "u1",
+            "env": "dev",
+            "active_engine": "openclaw",
+        },
+        7,
+    )
+
+    assert artifact.ext["skills_manifest"]["schema_version"] == 1
+    assert artifact.ext["skills_manifest"]["center_skills"] == [
+        {
+            "runtime_name": "alpha",
+            "skill_uuid": "00000000-0000-4000-8000-000000000001",
+            "sc_version_number": "1.0.0",
+            "mcp_dependencies": [],
+        },
+        {
+            "runtime_name": "zeta",
+            "skill_uuid": "00000000-0000-4000-8000-000000000002",
+            "sc_version_number": "2.0.0",
+            "mcp_dependencies": [{"code": "mcp.z"}],
+        },
+    ]
+    assert artifact.ext["skills_manifest"]["shared_corpora"] == [
+        {
+            "corpus": "repo",
+            "runtime_path": "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+            "store_prefix": _REPO_STORE_PREFIX,
+            "layout_contract_version": "skills-pool-p3-v1",
+            "permission": "read_only",
+            "snapshot_policy": "exclude",
+        },
+        {
+            "corpus": "center",
+            "runtime_path": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            "store_prefix": _CENTER_STORE_PREFIX,
+            "layout_contract_version": "skills-pool-p3-v1",
+            "permission": "read_only",
+            "snapshot_policy": "exclude",
+        }
+    ]
+    assert [ref.identity.sc_version_number for ref in center_store.refs] == [
+        "1.0.0",
+        "2.0.0",
+        "1.0.0",
+        "2.0.0",
+    ]
+    assert reader.calls == [
+        {
+            "bot_id": "b1",
+            "owner_id": "u1",
+            "bot": {
+                "bot_id": "b1",
+                "owner_id": "u1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            },
+        }
+    ]
+
+
+@pytest.mark.unit
+def test_center_service_build_fails_when_exact_store_version_is_missing() -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    state = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
+    )
+    builder = ServiceSkillsManifestBuilder(
+        _LayoutRepository(state),
+        _CapabilityReader(
+            (
+                RegisteredSkillAsset(
+                    skill_id=1,
+                    name="pdf",
+                    git_path="center://pdf",
+                    skill_uuid="00000000-0000-4000-8000-000000000001",
+                    sc_version_number="1.0.0",
+                ),
+            )
+        ),
+        _CENTER_STORE_PREFIX,
+        _CenterStore(ready=False),
+        _REPO_STORE_PREFIX,
+    )
+
+    with pytest.raises(ServiceSkillsManifestError, match="exact Store Version"):
+        builder.capture(
+            bot={
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            }
+        )
 
 
 @pytest.mark.unit
@@ -182,9 +718,21 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
     )
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(self, bot, version=1):
+        def build(
+            self,
+            bot,
+            version=1,
+            *,
+            shared_corpora=(),
+            active_runtime_path=None,
+        ):
             repository.state = pool_state
-            return super().build(bot, version)
+            return super().build(
+                bot,
+                version,
+                shared_corpora=shared_corpora,
+                active_runtime_path=active_runtime_path,
+            )
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -192,9 +740,17 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
                 "success": True,
                 "migration_path": "/snapshot/8/openclaw",
                 "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
+                ],
+                "active_skill_snapshot_path": "workspace/skills",
             }
         ),
-        ServiceSkillsManifestBuilder(repository),
+        ServiceSkillsManifestBuilder(
+            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
     )
 
     with pytest.raises(
@@ -239,10 +795,16 @@ def test_build_rejects_non_terminal_layout_before_physical_snapshot(
         persisted=True,
         layout_contract_version="skills-pool-p3-v1",
     )
-    build = _RecordingBuild({"success": True})
+    build = _RecordingBuild(
+        {"success": True, "build_target_path": "/snapshot/1/aicoding"}
+    )
     producer = ArcaSnapshotProducer(
         build,
-        ServiceSkillsManifestBuilder(_LayoutRepository(state)),
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(state), _CapabilityReader(()), _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
     )
 
     with pytest.raises(
@@ -276,17 +838,36 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
         migration_generation="generation-1",
         persisted=True,
         layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
     )
     repository = _LayoutRepository(initial)
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(self, bot, version=1):
+        def build(
+            self,
+            bot,
+            version=1,
+            *,
+            shared_corpora=(),
+            active_runtime_path=None,
+        ):
             repository.state = replace(
                 initial,
                 phase=SkillLayoutPhase.NEEDS_MANUAL_REPAIR,
                 migration_generation="generation-2",
             )
-            return super().build(bot, version)
+            return super().build(
+                bot,
+                version,
+                shared_corpora=shared_corpora,
+                active_runtime_path=active_runtime_path,
+            )
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -294,9 +875,17 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
                 "success": True,
                 "migration_path": "/snapshot/8/openclaw",
                 "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
+                ],
+                "active_skill_snapshot_path": "workspace/skills",
             }
         ),
-        ServiceSkillsManifestBuilder(repository),
+        ServiceSkillsManifestBuilder(
+            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
     )
 
     with pytest.raises(
@@ -332,12 +921,24 @@ def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
     repository = _LayoutRepository(initial)
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(self, bot, version=1):
+        def build(
+            self,
+            bot,
+            version=1,
+            *,
+            shared_corpora=(),
+            active_runtime_path=None,
+        ):
             repository.state = replace(
                 initial,
                 layout_contract_version="skills-pool-p3-v1",
             )
-            return super().build(bot, version)
+            return super().build(
+                bot,
+                version,
+                shared_corpora=shared_corpora,
+                active_runtime_path=active_runtime_path,
+            )
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -347,7 +948,10 @@ def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsManifestBuilder(repository),
+        ServiceSkillsManifestBuilder(
+            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
     )
 
     with pytest.raises(
@@ -433,7 +1037,11 @@ def test_legacy_draft_builds_a_legacy_artifact_without_pool_contract(
     producer = ArcaSnapshotProducer(
         build,
         ServiceSkillsManifestBuilder(
-            _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
+            _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
+            _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -465,32 +1073,46 @@ def test_historical_publish_without_manifest_is_explicitly_legacy() -> None:
 
 
 @pytest.mark.unit
-def test_aicoding_service_engine_remains_closed() -> None:
+def test_aicoding_service_engine_uses_the_shared_manifest_contract() -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
-    build = _RecordingBuild({"success": True})
+    build = _RecordingBuild(
+        {
+            "success": True,
+            "build_target_path": "/snapshot/1/hermes",
+            "shared_corpus_snapshot_paths": [
+                "workspace/skills-pool/skills-repo",
+                "workspace/skills-pool/skill-center",
+            ],
+            "active_skill_snapshot_path": "workspace/skills",
+        }
+    )
     producer = ArcaSnapshotProducer(
         build,
         ServiceSkillsManifestBuilder(
-            _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
+            _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
+            _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
-    with pytest.raises(ServiceSkillsManifestError):
-        producer.produce_artifact(
-            {
-                "bot_id": "b1",
-                "entity_id": "u1",
-                "env": "dev",
-                "active_engine": "aicoding",
-            },
-            1,
-        )
+    artifact = producer.produce_artifact(
+        {
+            "bot_id": "b1",
+            "entity_id": "u1",
+            "env": "dev",
+            "active_engine": "aicoding",
+        },
+        1,
+    )
 
-    assert build.calls == []
+    assert artifact.ext["skills_manifest"]["engine"] == "aicoding"
+    assert build.calls
 
 
 @pytest.mark.unit
-def test_hermes_pool_service_manifest_is_closed_before_physical_build() -> None:
+def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
     pool_state = BotSkillLayoutState(
         scope=scope,
@@ -500,44 +1122,31 @@ def test_hermes_pool_service_manifest_is_closed_before_physical_build() -> None:
         migration_generation="generation-1",
         persisted=True,
         layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "hermes",
+                "/home/admin/.hermes/workspace/skills-pool/skill-center",
+            )
+        },
     )
-    build = _RecordingBuild({"success": True})
-    producer = ArcaSnapshotProducer(
-        build,
-        ServiceSkillsManifestBuilder(_LayoutRepository(pool_state)),
-    )
-
-    with pytest.raises(
-        ServiceSkillsManifestError,
-        match="Hermes Pool service manifest is disabled",
-    ):
-        producer.produce_artifact(
-            {
-                "bot_id": "b1",
-                "entity_id": "u1",
-                "env": "dev",
-                "active_engine": "hermes",
-            },
-            1,
-        )
-
-    assert build.calls == []
-
-
-@pytest.mark.unit
-def test_hermes_legacy_publish_keeps_pre_pool_compatibility() -> None:
-    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
     build = _RecordingBuild(
         {
             "success": True,
-            "migration_path": "/snapshot/1/openclaw",
-            "build_target_path": "/host/snapshot/1/openclaw",
+            "build_target_path": "/snapshot/1/hermes",
+            "shared_corpus_snapshot_paths": [
+                "workspace/skills-pool/skills-repo",
+                "workspace/skills-pool/skill-center",
+            ],
+            "active_skill_snapshot_path": "skills",
         }
     )
     producer = ArcaSnapshotProducer(
         build,
         ServiceSkillsManifestBuilder(
-            _LayoutRepository(BotSkillLayoutState.legacy_default(scope))
+            _LayoutRepository(pool_state), _CapabilityReader(()), _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
         ),
     )
 
@@ -551,6 +1160,63 @@ def test_hermes_legacy_publish_keeps_pre_pool_compatibility() -> None:
         1,
     )
 
-    assert artifact.success is True
-    assert "skills_manifest" not in artifact.ext
+    assert artifact.ext["skills_manifest"] == {
+        "schema_version": 1,
+        "engine": "hermes",
+        "active_layout": "pool",
+        "layout_contract_version": "skills-pool-p3-v1",
+        "shared_corpora": [
+            {
+                "corpus": "repo",
+                "runtime_path": "/home/admin/.hermes/workspace/skills-pool/skills-repo",
+                "store_prefix": _REPO_STORE_PREFIX,
+                "layout_contract_version": "skills-pool-p3-v1",
+                "permission": "read_only",
+                "snapshot_policy": "exclude",
+            },
+            {
+                "corpus": "center",
+                "runtime_path": "/home/admin/.hermes/workspace/skills-pool/skill-center",
+                "store_prefix": _CENTER_STORE_PREFIX,
+                "layout_contract_version": "skills-pool-p3-v1",
+                "permission": "read_only",
+                "snapshot_policy": "exclude",
+            },
+        ],
+    }
     assert build.calls
+
+
+@pytest.mark.unit
+def test_hermes_legacy_publish_fails_without_ready_engine_evidence() -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    build = _RecordingBuild(
+        {
+            "success": True,
+            "migration_path": "/snapshot/1/openclaw",
+            "build_target_path": "/host/snapshot/1/openclaw",
+        }
+    )
+    producer = ArcaSnapshotProducer(
+        build,
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
+            _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
+    )
+
+    with pytest.raises(ServiceSkillsManifestError, match="READY Pool runtime"):
+        producer.produce_artifact(
+            {
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "hermes",
+            },
+            1,
+        )
+
+    assert build.calls == []

@@ -5,6 +5,10 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+)
+
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishOperationKind,
@@ -117,7 +121,7 @@ def _pf(*args, **kw):
     kw.setdefault("teclaw_file_promotion", Mock())
     kw.setdefault("device_binding_repo", Mock())
     kw.setdefault("publish_operation_repo", _real_ledger())
-    kw.setdefault("capability_reader", Mock())
+    kw.setdefault("runtime_projector", AsyncMock())
     # The operation runner queries baas_service.list_bot_publishes for adopt-by-
     # query; a bare Mock returns a non-iterable Mock. Default it to "no prior
     # workflows" so upgrade/existing-bot flow tests issue normally.
@@ -917,6 +921,36 @@ async def test_execute_rollback_enqueues_progress_poll_for_target():
     target_ext = {
         'migration_path': '/tmp/m',
         'config_artifact': {'schema_version': 3},
+        'skills_manifest': {
+            'schema_version': 1,
+            'engine': 'openclaw',
+            'active_layout': 'pool',
+            'layout_contract_version': 'skills-pool-p3-v1',
+            'center_skills': [{
+                'runtime_name': 'pdf',
+                'skill_uuid': '00000000-0000-4000-8000-000000000001',
+                'sc_version_number': '1.0.0',
+                'mcp_dependencies': [],
+            }],
+            'shared_corpora': [
+                {
+                    'corpus': 'repo',
+                    'runtime_path': '/home/admin/.openclaw/workspace/skills-pool/skills-repo',
+                    'store_prefix': 'skills-repo/b1',
+                    'layout_contract_version': 'skills-pool-p3-v1',
+                    'permission': 'read_only',
+                    'snapshot_policy': 'exclude',
+                },
+                {
+                    'corpus': 'center',
+                    'runtime_path': '/home/admin/.openclaw/workspace/skills-pool/skill-center',
+                    'store_prefix': 'aidesktop/aidesktop_pre/bolt_shared/skills-center',
+                    'layout_contract_version': 'skills-pool-p3-v1',
+                    'permission': 'read_only',
+                    'snapshot_policy': 'exclude',
+                },
+            ],
+        },
         'binding': {PublishStage.ONLINE.value: online_binding_id},
         'publish': {},
     }
@@ -940,6 +974,9 @@ async def test_execute_rollback_enqueues_progress_poll_for_target():
     args = svc._task_queue_service.enqueue.call_args.args
     assert args[0] == PROGRESS_POLL_TASK
     assert args[1] == {'publish_id': target_id}
+    assert build_service.upgrade_async.await_args.kwargs['ext_info'] == {
+        'skills_manifest': target_ext['skills_manifest']
+    }
     # #197 all-auto: no client approve.
     assert not hasattr(svc, "approve_baas_publish") or not svc.approve_baas_publish.called
 
@@ -1054,12 +1091,12 @@ async def test_build_phase_routes_arca_and_merges_mount_ext():
 
 
 @pytest.mark.asyncio
-async def test_build_phase_flushes_installations_before_artifact_build():
+async def test_build_phase_projects_everything_before_artifact_build():
     arca = _StubProducer({"migration_path": "/m/3"})
     router = DeployArtifactProducerRouter(
         providers={"baas": arca}, default_provider_key="baas"
     )
-    capability_reader = Mock()
+    runtime_projector = AsyncMock()
     bot = {
         "bot_id": "b1",
         "owner_id": "owner-1",
@@ -1069,27 +1106,29 @@ async def test_build_phase_flushes_installations_before_artifact_build():
     svc, _ = _build_svc_with_router(
         router,
         bot,
-        capability_reader=capability_reader,
+        runtime_projector=runtime_projector,
     )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
     await svc.execute_build_phase(record, "op")
 
-    capability_reader.active_skill_assets.assert_called_once_with(
-        bot_id="b1", owner_id="owner-1", bot=bot
+    runtime_projector.project.assert_awaited_once_with(
+        bot_id="b1",
+        owner_id="owner-1",
+        scope=ProjectionScope.everything(),
     )
     assert arca.calls == [(bot, 3)]
 
 
 @pytest.mark.asyncio
-async def test_build_phase_fails_without_producing_artifact_when_flush_fails():
+async def test_build_phase_fails_without_artifact_when_full_projection_fails():
     arca = _StubProducer({"migration_path": "/m/3"})
     router = DeployArtifactProducerRouter(
         providers={"baas": arca}, default_provider_key="baas"
     )
-    capability_reader = Mock()
-    capability_reader.active_skill_assets.side_effect = RuntimeError(
-        "installation persistence unavailable"
+    runtime_projector = AsyncMock()
+    runtime_projector.project.side_effect = RuntimeError(
+        "runtime projection unavailable"
     )
     svc, _ = _build_svc_with_router(
         router,
@@ -1099,7 +1138,7 @@ async def test_build_phase_fails_without_producing_artifact_when_flush_fails():
             "active_engine": "openclaw",
             "env": "prod",
         },
-        capability_reader=capability_reader,
+        runtime_projector=runtime_projector,
     )
 
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)

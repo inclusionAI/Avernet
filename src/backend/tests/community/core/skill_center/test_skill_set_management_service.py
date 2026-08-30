@@ -528,6 +528,17 @@ class _RuntimeFactoryService:
         self.delivered_effective_mcps.append(effective_mcps)
         return True
 
+    async def project_whole_artifact(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
+        self.desired_skills = desired_skills
+        self.runtime_syncs.append(desired_skills)
+        self.delivered_effective_mcps.append(effective_mcps)
+        return True
+
     async def sync_mcp_delivery(
         self, *, claimed: frozenset[str], released: frozenset[str]
     ) -> bool:
@@ -733,8 +744,8 @@ class _CenterRuntimeSkills:
             RegisteredSkillAsset(
                 skill_id=7,
                 name="center-skill",
-                git_path="center://stable-skill-uuid",
-                skill_uuid="stable-skill-uuid",
+                git_path="center://public-skill",
+                skill_uuid="00000000-0000-4000-8000-000000000007",
                 sc_version_number="3.0.0",
             )
         ]
@@ -2482,7 +2493,7 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
     assert pool.publish_calls[0]["mappings"][0].to_dict() == {
         "corpus": "center",
         "link_name": "center-skill",
-        "skill_uuid": "stable-skill-uuid",
+            "skill_uuid": "00000000-0000-4000-8000-000000000007",
         "sc_version_number": "3.0.0",
     }
 
@@ -2547,7 +2558,7 @@ async def test_existing_coding_runtime_uses_its_resolved_layout(
 
 
 @pytest.mark.asyncio
-async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
+async def test_teclaw_v4_consumes_exact_center_through_whole_artifact():
     pool = _CenterRuntimePool()
     factory = _RuntimeFactory()
     runtime = BotRuntimeProjector(
@@ -2560,16 +2571,23 @@ async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    with pytest.raises(SkillSetRuntimeReconcileError):
-        await runtime.project(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            scope=ProjectionScope.everything(),
-        )
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert pool.probe_calls == []
     assert pool.publish_calls == []
-    assert factory.service.collect_calls == []
+    assert factory.service.desired_skills == [
+        {
+            "id": "7",
+            "name": "center-skill",
+            "git_path": "center://public-skill",
+            "skill_uuid": "00000000-0000-4000-8000-000000000007",
+            "sc_version_number": "3.0.0",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -2864,7 +2882,7 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
     async def _refuse(**_):
         return False
 
-    factory.service.project_skills = _refuse
+    factory.service.project_whole_artifact = _refuse
     runtime = _teclaw_runtime(factory, passport=passport)
 
     with pytest.raises(SkillSetRuntimeReconcileError):

@@ -18,6 +18,7 @@ import json
 import subprocess
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -45,6 +46,9 @@ from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage impor
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ResolvedSharedCorpusDelivery,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan, EngineSandboxProvider, EngineSandboxRegistry
@@ -54,6 +58,7 @@ from agentclaw.community.core.workspace.path_factory import (
     get_bot_dir,
     get_bot_nas_dir,
 )
+from agentclaw.community.core.workspace.skill_layout import FILESYSTEM_POOL_ENGINES
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -168,7 +173,7 @@ class BotBuildService:
 
         try:
             return self._sandbox_registry.resolve(engine_type)
-        except Exception:
+        except Exception as first_error:
             bot_id = bot.get("bot_id")
             owner_id = bot.get("owner_id") or bot.get("entity_id")
             if self._bot_repository is not None:
@@ -178,9 +183,16 @@ class BotBuildService:
                         owner_id,
                         bot_repo=self._bot_repository,
                     )
-                    return self._sandbox_registry.resolve(resolved_engine)
+                    try:
+                        return self._sandbox_registry.resolve(resolved_engine)
+                    except Exception:
+                        if resolved_engine in FILESYSTEM_POOL_ENGINES:
+                            raise
                 except Exception:
-                    pass
+                    if engine_type in FILESYSTEM_POOL_ENGINES:
+                        raise first_error
+            if engine_type in FILESYSTEM_POOL_ENGINES:
+                raise first_error
             return self._sandbox_registry.resolve(DEFAULT_ENGINE_TYPE)
 
     def generate_request_id(
@@ -210,6 +222,9 @@ class BotBuildService:
         self,
         bot: Dict[str, Any],
         version: int = 1,
+        *,
+        shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...] = (),
+        active_runtime_path: str | None = None,
     ) -> Dict[str, Any]:
         """执行 Bot 构建迁移。
 
@@ -249,6 +264,22 @@ class BotBuildService:
         build_plan = provider.get_build_plan(
             build_rsync_excludes_append=rsync_append,
             bot=bot,
+        )
+        shared_corpus_snapshot_paths = self._shared_corpus_snapshot_paths(
+            provider=provider,
+            build_plan=build_plan,
+            shared_corpora=shared_corpora,
+        )
+        active_skill_snapshot_path = self._active_skill_snapshot_path(
+            provider=provider,
+            build_plan=build_plan,
+            shared_corpora=shared_corpora,
+            active_runtime_path=active_runtime_path,
+        )
+        build_plan = self._apply_shared_corpus_excludes(
+            build_plan=build_plan,
+            provider=provider,
+            shared_corpora=shared_corpora,
         )
         engine_type = build_plan.engine_type
         logger.info(
@@ -349,6 +380,12 @@ class BotBuildService:
                 "build_target_path": str(target_dir),
                 "mcp_success": mcp_success,
                 "openclaw_configs_success": openclaw_configs_success,
+                "shared_corpus_snapshot_paths": list(
+                    shared_corpus_snapshot_paths
+                ),
+                "active_skill_snapshot_path": (
+                    active_skill_snapshot_path
+                ),
             }
 
             logger.info(
@@ -363,6 +400,143 @@ class BotBuildService:
         except Exception as e:
             logger.error(f"[BotBuildService.build] Unexpected error: {e}")
             raise BotBuildServiceError(f"Bot build failed: {e}")
+
+    @staticmethod
+    def _active_skill_snapshot_path(
+        *,
+        provider: EngineSandboxProvider,
+        build_plan: EngineBuildPlan,
+        shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...],
+        active_runtime_path: str | None,
+    ) -> str | None:
+        """Map frozen Engine active-root evidence into the artifact snapshot."""
+
+        if not shared_corpora:
+            return None
+        if not active_runtime_path:
+            raise BotBuildServiceError(
+                "shared corpus build requires Engine active-root evidence"
+            )
+        active = PurePosixPath(active_runtime_path)
+        base = PurePosixPath(provider.get_base_path())
+        if (
+            not active.is_absolute()
+            or active.as_posix() != active_runtime_path
+            or not base.is_absolute()
+        ):
+            raise BotBuildServiceError("invalid Engine active-root evidence")
+        return BotBuildService._runtime_path_in_snapshot(
+            runtime_path=active,
+            build_plan=build_plan,
+            error_context="Engine active-root evidence",
+        )
+
+    @staticmethod
+    def _runtime_path_in_snapshot(
+        *,
+        runtime_path: PurePosixPath,
+        build_plan: EngineBuildPlan,
+        error_context: str,
+    ) -> str:
+        """Translate Engine runtime evidence through existing snapshot sources."""
+
+        if (
+            not runtime_path.is_absolute()
+            or ".." in runtime_path.parts
+            or runtime_path.as_posix() in {"", ".", "/"}
+        ):
+            raise BotBuildServiceError(f"invalid {error_context}")
+
+        mappings: list[tuple[PurePosixPath, PurePosixPath]] = [
+            (PurePosixPath(build_plan.source_root_name), PurePosixPath())
+        ]
+        if (
+            build_plan.extra_sync_source_relpath
+            and build_plan.extra_sync_target_relpath
+        ):
+            mappings.append(
+                (
+                    PurePosixPath(build_plan.extra_sync_source_relpath),
+                    PurePosixPath(build_plan.extra_sync_target_relpath),
+                )
+            )
+
+        candidates: list[str] = []
+        runtime_parts = runtime_path.parts
+        for source_rel, snapshot_root in mappings:
+            if (
+                source_rel.is_absolute()
+                or snapshot_root.is_absolute()
+                or not source_rel.parts
+                or any(part in {"", ".", ".."} for part in source_rel.parts)
+                or any(part in {"", ".", ".."} for part in snapshot_root.parts)
+            ):
+                raise BotBuildServiceError("invalid engine snapshot source mapping")
+            width = len(source_rel.parts)
+            for start in range(1, len(runtime_parts) - width + 1):
+                if runtime_parts[start : start + width] != source_rel.parts:
+                    continue
+                relative_parts = runtime_parts[start + width :]
+                if not relative_parts:
+                    continue
+                snapshot = snapshot_root.joinpath(*relative_parts)
+                if snapshot.is_absolute() or ".." in snapshot.parts:
+                    raise BotBuildServiceError(f"invalid {error_context}")
+                candidates.append(snapshot.as_posix())
+
+        if len(candidates) != 1:
+            raise BotBuildServiceError(
+                f"{error_context} is outside or ambiguous across snapshot sources"
+            )
+        return candidates[0]
+
+    @staticmethod
+    def _apply_shared_corpus_excludes(
+        *,
+        build_plan: EngineBuildPlan,
+        provider: EngineSandboxProvider,
+        shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...],
+    ) -> EngineBuildPlan:
+        """Translate frozen Engine evidence into snapshot-relative excludes."""
+
+        excludes = list(build_plan.rsync_excludes)
+        for relative_path in BotBuildService._shared_corpus_snapshot_paths(
+            provider=provider,
+            build_plan=build_plan,
+            shared_corpora=shared_corpora,
+        ):
+            if relative_path not in excludes:
+                excludes.append(relative_path)
+        return replace(build_plan, rsync_excludes=excludes)
+
+    @staticmethod
+    def _shared_corpus_snapshot_paths(
+        *,
+        provider: EngineSandboxProvider,
+        build_plan: EngineBuildPlan,
+        shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...],
+    ) -> tuple[str, ...]:
+        if not shared_corpora:
+            return ()
+        snapshot_root = PurePosixPath(provider.get_base_path())
+        if not snapshot_root.is_absolute():
+            raise BotBuildServiceError("engine snapshot root must be absolute")
+        result: list[str] = []
+        for delivery in shared_corpora:
+            if delivery.snapshot_policy != "exclude":
+                raise BotBuildServiceError("shared corpus must be excluded from snapshot")
+            runtime_path = PurePosixPath(delivery.runtime_path)
+            if runtime_path.as_posix() != delivery.runtime_path:
+                raise BotBuildServiceError("invalid shared corpus path")
+            relative_path = BotBuildService._runtime_path_in_snapshot(
+                runtime_path=runtime_path,
+                build_plan=build_plan,
+                error_context="shared corpus path",
+            )
+            if relative_path in result:
+                raise BotBuildServiceError("duplicate shared corpus snapshot path")
+            result.append(relative_path)
+        return tuple(result)
 
     def _get_migration_path_base(self, *, owner_id: str, bot_id: str) -> str:
         """根据白名单选择容器内迁移路径根目录。
@@ -1217,6 +1391,7 @@ class BotBuildService:
             publish_stage: PublishStage = PublishStage.ONLINE,
             version: str = "1",
             delivery: DeliveryArtifact = DeliveryArtifact(None),
+            ext_info: Optional[Dict[str, Any]] = None,
             extra_envs: Optional[Dict[str, Any]] = None,
             docker_image: str | None = None,
             runtime_kind: str | None = None,
@@ -1289,6 +1464,7 @@ class BotBuildService:
                     "device_count": device_count,
                     "stage": publish_stage.value,
                     "version": version,
+                    "ext_info": ext_info,
                     "extra_envs": extra_envs,
                 }
                 template_uuid = self._resolve_baas_template_uuid(
@@ -1735,6 +1911,7 @@ class BotBuildService:
         publish_stage: PublishStage = PublishStage.ONLINE,
         version: str = "1",
         delivery: DeliveryArtifact = DeliveryArtifact(None),
+        ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
         runtime_kind: str | None = None,
@@ -1760,6 +1937,7 @@ class BotBuildService:
             publish_stage=publish_stage,
             version=version,
             delivery=delivery,
+            ext_info=ext_info,
             extra_envs=extra_envs,
             docker_image=docker_image,
             runtime_kind=runtime_kind,

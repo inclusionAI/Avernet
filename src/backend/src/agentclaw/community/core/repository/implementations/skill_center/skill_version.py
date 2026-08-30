@@ -2,20 +2,31 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from injector import inject
 from sqlalchemy import and_, func
 
+from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillVersion
 from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillVersionMaterializationRepositoryProtocol,
     SkillVersionRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center_types import (
     SkillVersionRecord,
 )
+from agentclaw.community.core.skill_center.materialization_contract import (
+    MaterializingSkillVersion,
+    PublishedMaterializedSkillVersion,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
-class SkillVersionRepository(SkillVersionRepositoryProtocol):
+class SkillVersionRepository(
+    SkillVersionRepositoryProtocol,
+    SkillVersionMaterializationRepositoryProtocol,
+):
     """Tenant-guarded, env-scoped reads from ``ac_skill_version``."""
 
     @inject
@@ -79,6 +90,130 @@ class SkillVersionRepository(SkillVersionRepositoryProtocol):
                 .one_or_none()
             )
             return self._record(row) if row is not None else None
+
+    def get_materialization_target(
+        self, *, env: str, skill_id: int, skill_version_id: int
+    ) -> MaterializingSkillVersion | None:
+        with self._db.orm_session() as session:
+            result = (
+                session.query(SkillVersion, Skill)
+                .join(Skill, Skill.id == SkillVersion.skill_id)
+                .filter(
+                    SkillVersion.id == skill_version_id,
+                    SkillVersion.skill_id == skill_id,
+                    SkillVersion.env == env,
+                    Skill.env == env,
+                    SkillVersion.status.in_(("MATERIALIZING", "PUBLISHED")),
+                )
+                .one_or_none()
+            )
+            if result is None:
+                return None
+            version, skill = result
+            skill_uuid = skill.skill_uuid
+            git_path = skill.git_path or ""
+            if (
+                not isinstance(skill_uuid, str)
+                or not skill_uuid
+                or not git_path.startswith("center://")
+                or not git_path[len("center://") :]
+            ):
+                raise RuntimeError(
+                    "Center Version has no stable Asset identity"
+                )
+            return self._materializing(
+                version,
+                skill_uuid=skill_uuid,
+                skill_code=git_path[len("center://") :],
+            )
+
+    def publish_materialized(
+        self,
+        *,
+        env: str,
+        skill_id: int,
+        skill_version_id: int,
+        metadata_json: str,
+        description: str,
+        published_at: datetime,
+    ) -> PublishedMaterializedSkillVersion:
+        with self._db.orm_session() as session:
+            result = (
+                session.query(SkillVersion, Skill)
+                .join(Skill, Skill.id == SkillVersion.skill_id)
+                .filter(
+                    SkillVersion.id == skill_version_id,
+                    SkillVersion.skill_id == skill_id,
+                    SkillVersion.env == env,
+                    Skill.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if result is None:
+                raise RuntimeError("materializing Skill Version not found")
+            version, skill = result
+            if version.status == "PUBLISHED":
+                if (
+                    version.metadata_json != metadata_json
+                    or version.description != description
+                    or version.published_at is None
+                ):
+                    raise RuntimeError(
+                        "PUBLISHED Skill Version conflicts with materialized facts"
+                    )
+            elif version.status == "MATERIALIZING":
+                version.metadata_json = metadata_json
+                version.description = description
+                version.published_at = published_at
+                version.status = "PUBLISHED"
+                skill.description = description
+                skill.status = "PUBLISHED"
+                session.flush()
+            else:
+                raise RuntimeError("Skill Version is not MATERIALIZING")
+            skill_uuid = skill.skill_uuid
+            if not isinstance(skill_uuid, str) or not skill_uuid:
+                raise RuntimeError("Center Version has no stable skill_uuid")
+            if version.sc_skill_id is None or version.sc_version_id is None:
+                raise RuntimeError("Center Version has incomplete exact SC identity")
+            assert version.published_at is not None
+            return PublishedMaterializedSkillVersion(
+                skill_version_id=int(version.id),
+                skill_id=int(version.skill_id),
+                version_ordinal=int(version.version_ordinal),
+                status="PUBLISHED",
+                skill_uuid=skill_uuid,
+                sc_version_number=version.sc_version_number,
+                sc_skill_id=int(version.sc_skill_id),
+                sc_version_id=int(version.sc_version_id),
+                name=version.name,
+                description=version.description,
+                metadata_json=version.metadata_json,
+                published_at=version.published_at,
+            )
+
+    @staticmethod
+    def _materializing(
+        row: SkillVersion, *, skill_uuid: str, skill_code: str
+    ) -> MaterializingSkillVersion:
+        if row.sc_skill_id is None or row.sc_version_id is None:
+            raise RuntimeError("Center Version has incomplete exact SC identity")
+        return MaterializingSkillVersion(
+            skill_version_id=int(row.id),
+            skill_id=int(row.skill_id),
+            version_ordinal=int(row.version_ordinal),
+            status=row.status,
+            skill_uuid=skill_uuid,
+            skill_code=skill_code,
+            sc_version_number=row.sc_version_number,
+            sc_skill_id=int(row.sc_skill_id),
+            sc_version_id=int(row.sc_version_id),
+            name=row.name,
+            description=row.description,
+            metadata_json=row.metadata_json,
+            published_at=row.published_at,
+        )
 
     @staticmethod
     def _record(row: SkillVersion) -> SkillVersionRecord:

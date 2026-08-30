@@ -2855,6 +2855,7 @@ class BaasService:  # pragma: no cover
         template_uuid: Optional[str] = None,
         auto_approve_publish: bool = True,
         mount_home_dir_storage: bool | None = None,
+        ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         template_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -2916,6 +2917,7 @@ class BaasService:  # pragma: no cover
             template_uuid=template_uuid,
             auto_approve_publish=auto_approve_publish,
             mount_home_dir_storage=mount_home_dir_storage,
+            ext_info=ext_info,
             extra_envs=extra_envs,
             template_config=template_config,
         )

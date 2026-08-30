@@ -202,6 +202,9 @@ class ReleaseStageRunner:
                 # provider to interpret config_artifact. Push that decision behind the
                 # provider seam in a follow-up; tracked separately.
                 delivery=delivery,
+                ext_info={
+                    "skills_manifest": publish_record.ext["skills_manifest"]
+                } if publish_record.ext.get("skills_manifest") is not None else None,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
                 template_config=service_publish_template_config(bot),
@@ -305,6 +308,9 @@ class ReleaseStageRunner:
                 publish_stage=spec.stage,
                 version=version,
                 delivery=delivery,
+                ext_info={
+                    "skills_manifest": publish_record.ext["skills_manifest"]
+                } if publish_record.ext.get("skills_manifest") is not None else None,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
                 template_config=service_publish_template_config(bot),

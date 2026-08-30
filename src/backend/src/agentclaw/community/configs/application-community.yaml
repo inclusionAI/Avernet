@@ -22,6 +22,7 @@ user_config:
     openclaw_root: "./data/workspace/openclaw"
     claude_code_root: "./data/workspace/claude_code"
     aicoding_root: "./data/workspace/aicoding"
+    hermes_root: "./data/workspace/hermes"
 
   # Operator whitelist gating admin endpoints. Empty = no privileged operators
   # by default; a community deployment lists its own admin subject ids.
