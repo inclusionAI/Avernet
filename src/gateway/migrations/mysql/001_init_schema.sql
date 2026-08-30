@@ -7,7 +7,10 @@
 --
 -- This file is CREATE TABLE IF NOT EXISTS, so it only provisions a NEW database.
 -- Changes to an already-deployed schema go in a numbered migration beside it
--- (see `002_application_api_key.sql`); editing this file alone migrates nobody.
+-- (see `002_application_api_key.sql` and
+-- `003_application_app_name_env_unique.sql`); editing this file alone migrates
+-- nobody. Every numbered migration is also folded back into the definitions
+-- below, so a fresh database and a migrated one end up with the same schema.
 --
 -- The gateway's bare/community edition creates these tables from ORM metadata
 -- via `DataSourcePlugin.create_all()` (in-memory SQLite; the bare plugin
@@ -54,7 +57,20 @@ CREATE TABLE IF NOT EXISTS `avernet_application` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_avernet_application_api_key_prefix` (`api_key_prefix`),
   UNIQUE KEY `uk_avernet_application_token_prefix` (`token`(700)),
-  KEY `idx_avernet_application_app_name` (`app_name`)
+  -- 应用名在同一环境内唯一。`app_name` 是人从列表里认出自己应用的方式，
+  -- 同一 `env` 下重名会让每一份列表都变得有歧义。
+  --
+  -- `env` 在键里而不是仅仅并排放着：一套库承载多个环境，同一个应用本就应当在
+  -- 每个环境各有一行；只按 `app_name` 建键，在 dev 注册 "billing" 就会把这个
+  -- 名字从 prod 里锁掉。
+  --
+  -- utf8mb4 下 1280 字节 (256x4 + 64x4)，远在 InnoDB 3072 字节上限之内。
+  --
+  -- 这个键取代了原先的 `idx_avernet_application_app_name`：`app_name` 是它的
+  -- 前导列，B-tree 前缀扫描能服务原索引服务的每一次查找，同时保留两者等于
+  -- 为同一条访问路径维护两棵树。`003_application_app_name_env_unique.sql`
+  -- 在已部署的库上做同样的替换。
+  UNIQUE KEY `uk_avernet_application_app_name_env` (`app_name`, `env`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT = '第三方应用注册表';
 
 -- Table: avernet_tenant
