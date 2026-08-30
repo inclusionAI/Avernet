@@ -32,6 +32,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
     is_set_managed,
 )
+from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -61,6 +62,7 @@ class DirectInstallationCommands:
                 and skill.bolt_id != bot_id
             ):
                 raise SkillSetControlPlaneNotFoundError()
+            require_skill_online(skill)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             self._require_not_set_managed(
                 session,

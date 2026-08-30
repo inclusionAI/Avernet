@@ -30,6 +30,8 @@ provides:
   - "SkillSetManagementService"
   - "SpaceSkillGrantService"
   - "SpaceSkillApplicationService"
+  - "SpaceSkillOfflineService"
+  - "PublishedVersionDraftBuilder"
   - "SpaceSkillApplicationServiceProtocol"
   - "SpaceSkillDraftRepository"
   - "SpaceSkillReadRepository"
@@ -104,6 +106,7 @@ consumes:
   - "SpaceSkillPublicationRepositoryProtocol"
   - "SkillVersionScannerProtocol"
   - "HttpClient"
+  - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
@@ -111,6 +114,9 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
   - agentclaw.community.core.repository.protocols.space_skill_publication # Publication aggregate persistence contract
   - agentclaw.community.core.repository.protocols.work_orders
+  - agentclaw.community.core.repository.protocols.space_skill_offline
+  - agentclaw.community.core.repository.space_skill_offline_types
+  - agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol
   - agentclaw.community.core.work_orders
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module

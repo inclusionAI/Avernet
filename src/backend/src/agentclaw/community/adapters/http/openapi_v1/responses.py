@@ -23,6 +23,7 @@ from json import JSONDecodeError
 from typing import Awaitable, Callable, Mapping, TypeVar
 
 from fastapi import Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.error_logging import (
@@ -220,6 +221,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillEngineNotSupportedError,
     SkillParameterValidationError,
     SkillRuntimeNameConflictError,
+    SkillOfflineBlockedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
@@ -892,6 +894,7 @@ def _error_response(
     *,
     headers: Mapping[str, str] | None = None,
     code: int | None = None,
+    data: object | None = None,
 ) -> JSONResponse:
     # ``ErrorEnvelope``, not ``Envelope``: it is the model every route documents
     # for failures (``ERROR_RESPONSES``), and since ``Envelope`` gained the
@@ -899,15 +902,17 @@ def _error_response(
     # the documented model keeps the wire and the published schema in step — an
     # error body has no partial payload to caveat, so ``warning`` has no meaning
     # here.
-    body = ErrorEnvelope(
+    content = ErrorEnvelope(
         code=code if code is not None else http_status * 1000,
         message=message,
         data=None,
         request_id=_trace_id(request),
-    )
+    ).model_dump()
+    if data is not None:
+        content["data"] = jsonable_encoder(data)
     return JSONResponse(
         status_code=http_status,
-        content=body.model_dump(),
+        content=content,
         headers=_error_headers(request, headers),
     )
 
@@ -989,5 +994,6 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
                 message,
                 request,
                 code=ENVELOPE_ERROR_CODES.get(error_type),
+                data=(exc.impact if isinstance(exc, SkillOfflineBlockedError) else None),
             )
     return None

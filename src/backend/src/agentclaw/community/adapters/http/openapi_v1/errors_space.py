@@ -34,6 +34,8 @@ class SpaceErrorCode(IntEnum):
     PUBLICATION_RECOVERY_NOT_AVAILABLE = 409311
     PUBLICATION_REQUIRES_NEW_ATTEMPT = 409315
     PUBLICATION_TASK_UNAVAILABLE = 503203
+    SKILL_OFFLINE = 409312
+    SKILL_OFFLINE_BLOCKED = 409313
 
 
 class SpacePublicErrorMessage(StrEnum):
@@ -67,3 +69,5 @@ class SpacePublicErrorMessage(StrEnum):
     PUBLICATION_RECOVERY_NOT_AVAILABLE = "Publication recovery is not available"
     PUBLICATION_REQUIRES_NEW_ATTEMPT = "Edit the Draft and create a new Publication"
     PUBLICATION_TASK_UNAVAILABLE = "Publication task is unavailable"
+    SKILL_OFFLINE = "Skill is offline"
+    SKILL_OFFLINE_BLOCKED = "Skill Offline is blocked"

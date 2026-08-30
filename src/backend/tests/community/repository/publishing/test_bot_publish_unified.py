@@ -7,11 +7,15 @@ optimistic-lock UPDATEs (wrong source-status → None, no row touched),
 and single hard DELETE.
 """
 from contextlib import contextmanager
+from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.core.base import Base
+from agentclaw.community.core.models.skill import Skill
+from agentclaw.community.core.skill_center.errors import SkillOfflineError
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishModel,
     PublishStatus,
@@ -22,7 +26,11 @@ from agentclaw.community.core.service_bot.repository.config_artifact_offload imp
     ARTIFACT_OSS_THRESHOLD_BYTES,
     ConfigArtifactOffloader,
 )
+from agentclaw.community.core.service_bot.services.service_artifact_lineage_reader import (
+    ServiceArtifactLineageReader,
+)
 from agentclaw.community.core.repository.implementations.publishing.bot_publish import BotPublishRepository
+from agentclaw.community.plugin_api.models import BotModel
 
 pytestmark = pytest.mark.integration
 
@@ -79,6 +87,45 @@ def _data(**overrides):
     )
     base.update(overrides)
     return base
+
+
+def _full_repo(tmp_path, oss=None):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'bp-full.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    return BotPublishRepository(
+        _FileSqliteDB(engine),
+        offload=ConfigArtifactOffloader(oss or _FakeOSS()),
+    )
+
+
+def _seed_service_bot_and_skill(repo, *, deleted=False, offline=False):
+    with repo._db.orm_session() as session:
+        bot = BotModel(
+            bot_id="src-bot",
+            bot_name="Service",
+            entity_id="emp001",
+            entity_type="staff",
+            creator_id="emp001",
+            owner_id="emp001",
+            active_engine="teclaw",
+            status="ACTIVE",
+            is_delete=1 if deleted else 0,
+            env="dev",
+            bot_type="service",
+        )
+        skill = Skill(
+            name="center",
+            git_path="center://center",
+            skill_uuid="11111111-1111-4111-8111-111111111111",
+            offline_at=(datetime(2026, 8, 30) if offline else None),
+            env="dev",
+        )
+        session.add_all((bot, skill))
+        session.flush()
+        return int(bot.id), str(skill.skill_uuid)
 
 
 # ── insert (plain INSERT — no upsert) ───────────────────────────────
@@ -598,6 +645,129 @@ def test_delete_tolerates_sweep_failure(tmp_path):
     # Sweep raises inside delete → swallowed → DB delete still reports success.
     assert repo.delete(rec.id) is True
     assert repo.get_by_id(rec.id) is None
+
+
+def test_built_artifact_commit_refuses_skill_that_offline_won_first(tmp_path):
+    repo = _full_repo(tmp_path)
+    bot_pk, skill_uuid = _seed_service_bot_and_skill(repo, offline=True)
+    record = repo.insert(
+        _data(
+            source_bot_pk=bot_pk,
+            status=PublishStatus.BUILDING.value,
+            ext={"building": True},
+        )
+    )
+
+    with pytest.raises(SkillOfflineError, match="SKILL_OFFLINE"):
+        repo.compare_and_set_built_with_ext(
+            publish_id=record.id,
+            source_status=PublishStatus.BUILDING.value,
+            target_status=PublishStatus.BUILT.value,
+            expected_ext={"building": True},
+            ext={"skills_manifest": {"schema_version": 1}},
+            center_skill_uuids=(skill_uuid,),
+            env="dev",
+        )
+
+    persisted = repo.get_by_id(record.id)
+    assert persisted.status == PublishStatus.BUILDING.value
+    assert persisted.ext == {"building": True}
+
+
+def test_lineage_page_is_stable_complete_reinlined_and_excludes_deleted_bot(tmp_path):
+    oss = _FakeOSS()
+    repo = _full_repo(tmp_path, oss)
+    live_pk, _ = _seed_service_bot_and_skill(repo)
+    with repo._db.orm_session() as session:
+        deleted = BotModel(
+            bot_id="deleted-bot",
+            bot_name="Deleted",
+            entity_id="emp002",
+            entity_type="staff",
+            creator_id="emp002",
+            owner_id="emp002",
+            active_engine="teclaw",
+            status="ACTIVE",
+            is_delete=1,
+            env="dev",
+            bot_type="service",
+        )
+        session.add(deleted)
+        session.flush()
+        deleted_pk = int(deleted.id)
+    live = repo.insert(
+        _data(
+            source_bot_pk=live_pk,
+            status=PublishStatus.SUCCESS.value,
+            ext={"config_artifact": _big_artifact()},
+        )
+    )
+    repo.insert(
+        _data(
+            source_bot_pk=deleted_pk,
+            source_bot_id="deleted-bot",
+            publish_bot_id="deleted-bot.pub.1",
+            status=PublishStatus.SUCCESS.value,
+            ext={"config_artifact": _big_artifact()},
+        )
+    )
+
+    page = repo.list_lineage_candidates_page(env="dev", after_id=None, limit=1)
+
+    assert page.complete is True
+    assert page.next_cursor is None
+    assert [record.id for record in page.records] == [live.id]
+    assert page.records[0].ext["config_artifact"] == _big_artifact()
+
+
+def test_lineage_reader_resolves_exact_ref_from_offloaded_artifact(tmp_path):
+    oss = _FakeOSS()
+    repo = _full_repo(tmp_path, oss)
+    bot_pk, skill_uuid = _seed_service_bot_and_skill(repo)
+    artifact = {
+        "schema_version": 4,
+        "engine_type": "teclaw",
+        "skills": [
+            {
+                "name": "center",
+                "scope": "shared",
+                "store": "skill-center",
+                "path": f"{skill_uuid}/3.2.1",
+            }
+        ],
+        "stores": {
+            "skill-center": {
+                "type": "oss",
+                "bucket": "skills",
+                "base": "skill-center",
+            }
+        },
+        "engine_ext": {
+            "padding": "x" * (ARTIFACT_OSS_THRESHOLD_BYTES + 2048)
+        },
+    }
+    record = repo.insert(
+        _data(
+            source_bot_pk=bot_pk,
+            status=PublishStatus.SUCCESS.value,
+            ext={"config_artifact": artifact},
+        )
+    )
+
+    raw = _raw_ext(repo, record.id)
+    assert ARTIFACT_KEY not in raw
+    assert ARTIFACT_OSS_MARKER in raw
+
+    lineage = ServiceArtifactLineageReader(repo).scan(
+        skill_uuid=skill_uuid,
+        env="dev",
+    )
+
+    assert lineage.unknown == ()
+    assert [
+        (item.publish_id, item.sc_version_number)
+        for item in lineage.references
+    ] == [(record.id, "3.2.1")]
 
 
 def _artifact_of_json_size(nbytes):

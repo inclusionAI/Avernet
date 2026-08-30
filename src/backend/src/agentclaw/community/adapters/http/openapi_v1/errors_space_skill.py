@@ -13,6 +13,8 @@ from agentclaw.community.core.skill_center.errors import (
     DraftRevisionConflictError,
     DraftSourceNotRefreshableError,
     SkillNameChangedError,
+    SkillOfflineBlockedError,
+    SkillOfflineError,
     SpaceSkillIdempotencyConflictError,
     DraftEditLeaseConflictError,
     DraftEditLeaseForbiddenError,
@@ -125,6 +127,11 @@ SPACE_SKILL_HTTP_ERRORS = {
         503,
         SpacePublicErrorMessage.PUBLICATION_TASK_UNAVAILABLE,
     ),
+    SkillOfflineError: (409, SpacePublicErrorMessage.SKILL_OFFLINE),
+    SkillOfflineBlockedError: (
+        409,
+        SpacePublicErrorMessage.SKILL_OFFLINE_BLOCKED,
+    ),
 }
 
 SPACE_SKILL_ERROR_CODES = {
@@ -162,4 +169,6 @@ SPACE_SKILL_ERROR_CODES = {
     PublicationRecoveryNotAvailableError: SpaceErrorCode.PUBLICATION_RECOVERY_NOT_AVAILABLE,
     PublicationRequiresNewAttemptError: SpaceErrorCode.PUBLICATION_REQUIRES_NEW_ATTEMPT,
     PublicationTaskUnavailableError: SpaceErrorCode.PUBLICATION_TASK_UNAVAILABLE,
+    SkillOfflineError: SpaceErrorCode.SKILL_OFFLINE,
+    SkillOfflineBlockedError: SpaceErrorCode.SKILL_OFFLINE_BLOCKED,
 }

@@ -14,6 +14,9 @@ from agentclaw.community.core.repository.implementations.skill_center.space_skil
 from agentclaw.community.core.repository.implementations.skill_center.space_skill_version_read import (
     SpaceSkillVersionReadRepository as UnifiedSpaceSkillVersionReadRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.space_skill_offline import (
+    SpaceSkillOfflineRepository as UnifiedSpaceSkillOfflineRepository,
+)
 from agentclaw.community.core.repository.implementations.skill_center.space_skill_publication import (
     SpaceSkillPublicationRepository as UnifiedSpaceSkillPublicationRepository,
 )
@@ -25,6 +28,9 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 )
 from agentclaw.community.core.repository.protocols.space_skill_version import (
     SpaceSkillVersionReadRepository,
+)
+from agentclaw.community.core.repository.protocols.space_skill_offline import (
+    SpaceSkillOfflineRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.space_skill_publication import (
     SpaceSkillPublicationRepositoryProtocol,
@@ -61,5 +67,10 @@ def bind_space_skill_repositories(binder: Binder) -> None:
     binder.bind(
         DraftEditLeaseRepository,
         to=UnifiedSpaceSkillRepository,
+        scope=singleton,
+    )
+    binder.bind(
+        SpaceSkillOfflineRepositoryProtocol,
+        to=UnifiedSpaceSkillOfflineRepository,
         scope=singleton,
     )

@@ -11,7 +11,8 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.models.skill import BotSkillInstallation, Skill
-from agentclaw.community.core.models.space_skill import SkillVersion
+from agentclaw.community.core.models.space_skill import SkillSpaceBinding, SkillVersion
+from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.core.repository.capability_desired_state_types import (
     InstallationFlushPlan,
 )
@@ -371,3 +372,117 @@ def test_materialization_publish_replay_requires_the_same_frozen_facts() -> None
             )
 
     assert replay.status == "PUBLISHED"
+
+
+def test_new_space_publication_clears_offline_but_published_replay_never_does() -> None:
+    db = _Database()
+    offline_at = datetime(2026, 8, 30, 10, 0)
+    with db.orm_session() as session:
+        space = SpaceModel(
+            space_code="space-publish",
+            space_type="TEAM",
+            name="Space",
+            created_by="owner",
+            updated_by="owner",
+            env="pre",
+        )
+        skill = Skill(
+            id=10,
+            name="weather",
+            git_path="center://space-weather",
+            skill_uuid="00000000-0000-4000-8000-000000000010",
+            offline_at=offline_at,
+            offline_by="owner",
+            env="pre",
+        )
+        session.add_all((space, skill))
+        session.flush()
+        session.add(
+            SkillSpaceBinding(
+                skill_id=10,
+                space_id=space.id,
+                created_by="owner",
+                env="pre",
+            )
+        )
+    _add_version(
+        db,
+        skill_id=10,
+        version_id=101,
+        ordinal=2,
+        status="MATERIALIZING",
+        number="2.0.0",
+    )
+    repo = SkillVersionRepository(db)
+
+    with avernet_tenant_scope("teamclaw"):
+        repo.publish_materialized(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            metadata_json='{"mcp_dependencies":[]}',
+            description="online again",
+            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
+        )
+    with db.orm_session() as session:
+        skill = session.get(Skill, 10)
+        assert skill is not None
+        assert skill.offline_at is None and skill.offline_by is None
+        skill.offline_at = offline_at
+        skill.offline_by = "owner"
+
+    with avernet_tenant_scope("teamclaw"):
+        repo.publish_materialized(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            metadata_json='{"mcp_dependencies":[]}',
+            description="online again",
+            published_at=datetime(2026, 8, 30, 13, 0, tzinfo=UTC),
+        )
+    with db.orm_session() as session:
+        skill = session.get(Skill, 10)
+        assert skill is not None
+        assert skill.offline_at == offline_at
+        assert skill.offline_by == "owner"
+
+
+def test_sc_public_materialization_never_clears_offline_without_space_binding() -> None:
+    db = _Database()
+    offline_at = datetime(2026, 8, 30, 10, 0)
+    with db.orm_session() as session:
+        session.add(
+            Skill(
+                id=10,
+                name="weather",
+                git_path="center://public-weather",
+                skill_uuid="00000000-0000-4000-8000-000000000010",
+                offline_at=offline_at,
+                offline_by="owner",
+                env="pre",
+            )
+        )
+    _add_version(
+        db,
+        skill_id=10,
+        version_id=101,
+        ordinal=2,
+        status="MATERIALIZING",
+        number="2.0.0",
+    )
+
+    with avernet_tenant_scope("teamclaw"):
+        SkillVersionRepository(db).publish_materialized(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            metadata_json='{"mcp_dependencies":[]}',
+            description="updated",
+            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
+        )
+
+    with db.orm_session() as session:
+        skill = session.get(Skill, 10)
+        assert skill is not None
+        assert skill.offline_at == offline_at
+        assert skill.offline_by == "owner"

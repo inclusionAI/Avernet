@@ -42,6 +42,8 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     SpaceSkillFolderUpload,
     SpaceSkillDetail,
     SpaceSkillSummary,
+    SkillOfflineImpact,
+    SkillOfflineResult,
 )
 from agentclaw.community.api.space_skill_application_service import (
     SpaceSkillApplicationServiceProtocol,
@@ -52,6 +54,9 @@ from agentclaw.community.api.space_skill_query_service import (
 )
 from agentclaw.community.api.space_skill_version_query_service import (
     SpaceSkillVersionQueryServiceProtocol,
+)
+from agentclaw.community.api.space_skill_offline_service import (
+    SpaceSkillOfflineServiceProtocol,
 )
 from agentclaw.community.core.skill_center.skill_package import (
     MAX_EXPANDED_BYTES,
@@ -409,4 +414,67 @@ async def read_space_skill_version_file(
     return envelope(
         PublishedVersionFileContent.model_validate(result),
         request,
+    )
+
+
+@router.get(
+    "/{space_id}/skills/{skill_id}/offline-impact",
+    response_model=Envelope[SkillOfflineImpact],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def get_space_skill_offline_impact(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    caller: ActingCallerDep,
+    page_number: Annotated[int, Query(alias="page", ge=1)] = 1,
+    page_size: PageSizeQuery = 20,
+    service: SpaceSkillOfflineServiceProtocol = Injected(
+        SpaceSkillOfflineServiceProtocol
+    ),
+) -> Envelope[SkillOfflineImpact]:
+    actor_id = _require_user_delegation(caller)
+    result = await run_in_threadpool(
+        service.impact,
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=actor_id,
+        page=page_number,
+        page_size=page_size,
+    )
+    return envelope(
+        SkillOfflineImpact.model_validate(result, from_attributes=True), request
+    )
+
+
+@router.post(
+    "/{space_id}/skills/{skill_id}/offline",
+    response_model=Envelope[SkillOfflineResult],
+    dependencies=_REFUSES_APP_ONLY,
+    responses={
+        409: {
+            "model": Envelope[SkillOfflineImpact],
+            "description": "Latest Offline blockers from the command transaction.",
+        }
+    },
+)
+@envelope_errors
+async def offline_space_skill(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceSkillOfflineServiceProtocol = Injected(
+        SpaceSkillOfflineServiceProtocol
+    ),
+) -> Envelope[SkillOfflineResult]:
+    result = await run_in_threadpool(
+        service.offline,
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id=user_id,
+    )
+    return envelope(
+        SkillOfflineResult.model_validate(result, from_attributes=True), request
     )

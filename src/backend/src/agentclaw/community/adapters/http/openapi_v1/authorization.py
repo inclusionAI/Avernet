@@ -495,6 +495,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Skill Grant, frozen Git source and revision CAS, adjudicated by the Skill service"),
     ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"):
         NoCheck("Skill Grant, revision CAS, Lease fencing and aggregate history, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact"):
+        NoCheck("Skill Owner or Manager Grant and fail-closed lineage, adjudicated by the Offline service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline"):
+        NoCheck("Skill Owner or Manager Grant and transactional blocker recheck, adjudicated by the Offline service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"):
         NoCheck("Space membership and Skill Grants, adjudicated by the Grant service"),
     ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"):

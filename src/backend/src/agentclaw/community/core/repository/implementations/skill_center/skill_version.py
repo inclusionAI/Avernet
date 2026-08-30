@@ -8,7 +8,7 @@ from injector import inject
 from sqlalchemy import and_, func
 
 from agentclaw.community.core.models.skill import Skill
-from agentclaw.community.core.models.space_skill import SkillVersion
+from agentclaw.community.core.models.space_skill import SkillSpaceBinding, SkillVersion
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillVersionMaterializationRepositoryProtocol,
     SkillVersionRepositoryProtocol,
@@ -169,6 +169,21 @@ class SkillVersionRepository(
                 version.status = "PUBLISHED"
                 skill.description = description
                 skill.status = "PUBLISHED"
+                # Only a real new publication of a Space-owned Skill restores
+                # TeamClaw visibility. An idempotent replay of an already
+                # PUBLISHED Version must never clear a later Offline fact, and
+                # SC Public Reference/Sync has no Space ownership to restore.
+                owns_space = (
+                    session.query(SkillSpaceBinding.id)
+                    .filter(
+                        SkillSpaceBinding.skill_id == skill_id,
+                        SkillSpaceBinding.env == env,
+                    )
+                    .one_or_none()
+                )
+                if owns_space is not None:
+                    skill.offline_at = None
+                    skill.offline_by = None
                 session.flush()
             else:
                 raise RuntimeError("Skill Version is not MATERIALIZING")

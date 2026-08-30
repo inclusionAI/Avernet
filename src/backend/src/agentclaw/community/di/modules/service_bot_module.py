@@ -43,6 +43,9 @@ from agentclaw.community.api.publish_approval import PublishApprovalServiceProto
 from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
 )
+from agentclaw.community.api.service_artifact_lineage import (
+    ServiceArtifactLineageReaderProtocol,
+)
 from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
@@ -91,6 +94,9 @@ from agentclaw.community.core.service_bot.services.bot_process import (
     ServiceBotProcess,
 )
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
+from agentclaw.community.core.service_bot.services.service_artifact_lineage_reader import (
+    ServiceArtifactLineageReader,
+)
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
     ArcaSnapshotProducer,
 )
@@ -175,6 +181,11 @@ class ServiceBotModule(Module):
         binder.bind(
             BotPublishRepositoryProtocol,
             to=UnifiedBotPublishRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            ServiceArtifactLineageReaderProtocol,
+            to=ServiceArtifactLineageReader,
             scope=singleton,
         )
         # Publish operation ledger repository — same unified-ORM pattern; the

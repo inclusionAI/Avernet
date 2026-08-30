@@ -551,6 +551,43 @@ class SpaceSkillDetail(SpaceSkillSummary):
     )
 
 
+class SkillOfflineBlockerKind(_DocumentedEnum):
+    DRAFT = "DRAFT"
+    PUBLICATION = "PUBLICATION"
+    MEMBERSHIP = "MEMBERSHIP"
+    INSTALLATION = "INSTALLATION"
+    SERVICE_ARTIFACT = "SERVICE_ARTIFACT"
+    UNKNOWN_ARTIFACT = "UNKNOWN_ARTIFACT"
+
+    __descriptions__ = {
+        "DRAFT": "A mutable or frozen Draft already exists.",
+        "PUBLICATION": "A publication Attempt is still in progress or unknown.",
+        "MEMBERSHIP": "An ordinary or Default SkillSet still contains the Skill.",
+        "INSTALLATION": "A Bot still has an effective Skill Installation.",
+        "SERVICE_ARTIFACT": "A live Service Bot can replay this exact Skill Version.",
+        "UNKNOWN_ARTIFACT": "Artifact lineage could not be proved complete and valid.",
+    }
+
+
+class SkillOfflineImpactItem(BaseModel):
+    kind: SkillOfflineBlockerKind
+    resource_id: str = Field(description="Stable blocker resource identifier.")
+    display_name: str = Field(description="Human-readable blocker label.")
+
+
+class SkillOfflineImpact(BaseModel):
+    blocked: bool
+    total: int = Field(ge=0)
+    counts: dict[str, int]
+    items: list[SkillOfflineImpactItem]
+
+
+class SkillOfflineResult(BaseModel):
+    changed: bool
+    lifecycle_status: Literal["OFFLINE"]
+    draft: SkillDraftSummary
+
+
 class ImportSpaceSkillFromGitRequest(BaseModel):
     """Credential-free Git snapshot coordinates for Space Skill creation."""
 

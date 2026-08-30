@@ -39,16 +39,20 @@ from typing import Any, Dict, List, Optional, Sequence
 from injector import inject
 from sqlalchemy import func
 
+from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
     ConfigArtifactOffloader,
 )
 from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishLineagePage,
     BotPublishModel,
     BotPublishRecord,
     PublishStatus,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 
@@ -271,6 +275,46 @@ class BotPublishRepository(
             records = [r.to_record() for r in rows]
         return [self._resolve_record(r) for r in records]
 
+    def list_lineage_candidates_page(
+        self,
+        *,
+        env: str,
+        after_id: int | None,
+        limit: int,
+    ) -> BotPublishLineagePage:
+        """Scan only records whose source Service Bot still exists.
+
+        ``id`` is immutable and monotonically increasing, so this cursor cannot
+        skip records when unrelated rows change status while a scan runs.
+        """
+        if limit < 1 or limit > 1000:
+            raise ValueError("lineage page limit is out of range")
+        with self._db.orm_session() as db:
+            query = (
+                db.query(self.Model)
+                .join(BotModel, BotModel.id == self.Model.source_bot_pk)
+                .filter(
+                    self.Model.env == env,
+                    BotModel.env == env,
+                    BotModel.is_delete == 0,
+                    BotModel.bot_type == "service",
+                )
+            )
+            if after_id is not None:
+                query = query.filter(self.Model.id > after_id)
+            rows = query.order_by(self.Model.id.asc()).limit(limit + 1).all()
+            has_more = len(rows) > limit
+            visible = rows[:limit]
+            records = tuple(row.to_record() for row in visible)
+        resolved = tuple(self._resolve_record(record) for record in records)
+        if any(record is None for record in resolved):  # pragma: no cover - invariant
+            raise RuntimeError("lineage page lost a publish record")
+        return BotPublishLineagePage(
+            records=resolved,
+            next_cursor=(int(visible[-1].id) if has_more and visible else None),
+            complete=not has_more,
+        )
+
     def get_latest_by_source_bot_id_and_owner_and_status(
         self,
         source_bot_id: str,
@@ -438,6 +482,65 @@ class BotPublishRepository(
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id,
                 self.Model.status == source_status,
+            )
+            if expected_json is None:
+                query = query.filter(self.Model.ext.is_(None))
+            else:
+                query = query.filter(self.Model.ext == expected_json)
+            affected = query.update(
+                {
+                    self.Model.status: target_status,
+                    self.Model.ext: ext_json,
+                    self.Model.gmt_modified: func.now(),
+                },
+                synchronize_session=False,
+            )
+            if affected > 0:
+                self._offload.upload(pending)
+        if affected == 0:
+            return None
+        return self.get_by_id(publish_id)
+
+    def compare_and_set_built_with_ext(
+        self,
+        *,
+        publish_id: int,
+        source_status: str,
+        target_status: str,
+        expected_ext: Optional[Dict[str, Any]],
+        ext: Dict[str, Any],
+        center_skill_uuids: Sequence[str],
+        env: str,
+    ) -> Optional[BotPublishRecord]:
+        """Fence Offline against the moment an Artifact becomes replayable."""
+        expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
+        ext_json, pending = self._offload.prepare(ext, publish_id, env)
+        uuids = tuple(sorted(set(center_skill_uuids)))
+        with self._db.orm_session() as db:
+            skill_ids = [
+                int(value[0])
+                for value in db.query(Skill.id)
+                .filter(Skill.env == env, Skill.skill_uuid.in_(uuids))
+                .order_by(Skill.id.asc())
+                .all()
+            ] if uuids else []
+            if len(skill_ids) != len(uuids):
+                raise RuntimeError("Artifact references an unknown Center Skill")
+            # Acquire one row lock at a time in immutable id order. Offline and
+            # every new consumption write take the same row lock.
+            for skill_id in skill_ids:
+                skill = (
+                    db.query(Skill)
+                    .filter(Skill.id == skill_id, Skill.env == env)
+                    .with_for_update()
+                    .one()
+                )
+                require_skill_online(skill)
+
+            query = db.query(self.Model).filter(
+                self.Model.id == publish_id,
+                self.Model.status == source_status,
+                self.Model.env == env,
             )
             if expected_json is None:
                 query = query.filter(self.Model.ext.is_(None))

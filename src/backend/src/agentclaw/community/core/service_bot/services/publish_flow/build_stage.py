@@ -30,6 +30,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.ext_state import
 from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
     ProviderBehaviorRouter,
 )
+from agentclaw.community.core.service_bot.services.service_artifact_refs import (
+    exact_center_refs_from_artifact_ext,
+)
 from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import (
     BotRuntimeProjectorProtocol,
 )
@@ -126,12 +129,22 @@ class BuildStageRunner:
             # content_hash/engine_ext).
             ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
             ext.update(artifact.ext)
-            self._ext_state.update_status(
+            center_skill_uuids = tuple(
+                sorted(
+                    {
+                        ref.skill_uuid
+                        for ref in exact_center_refs_from_artifact_ext(
+                            ext, validate_full_artifact=False
+                        )
+                    }
+                )
+            )
+            self._ext_state.commit_built_artifact(
                 publish_id=publish_id,
-                target_status=PublishStatus.BUILT,
-                source_status=PublishStatus.BUILDING,
                 ext=ext,
                 expected_ext=expected_ext,
+                center_skill_uuids=center_skill_uuids,
+                env=publish_record.env,
             )
 
             logger.info(

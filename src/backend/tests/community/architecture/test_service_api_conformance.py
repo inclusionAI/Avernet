@@ -106,6 +106,12 @@ from agentclaw.community.api.repository_catalog_service import (
 from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
 )
+from agentclaw.community.api.service_artifact_lineage import (
+    ServiceArtifactLineageReaderProtocol,
+)
+from agentclaw.community.api.space_skill_offline_service import (
+    SpaceSkillOfflineServiceProtocol,
+)
 from agentclaw.community.api.space_service import (
     SpaceAccessServiceProtocol,
     SpaceMemberServiceProtocol,
@@ -204,6 +210,12 @@ from agentclaw.community.core.market_favorites.services import MarketFavoriteSer
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
+from agentclaw.community.core.service_bot.services.service_artifact_lineage_reader import (
+    ServiceArtifactLineageReader,
+)
+from agentclaw.community.core.skill_center.services.space_skill_offline_service import (
+    SpaceSkillOfflineService,
+)
 from agentclaw.community.core.spaces.services import (
     SpaceAccessService,
     SpaceMemberService,
@@ -246,6 +258,8 @@ _PAIRS = [
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),
     (ServicePublicationFacadeProtocol, ServicePublicationFacade),
+    (ServiceArtifactLineageReaderProtocol, ServiceArtifactLineageReader),
+    (SpaceSkillOfflineServiceProtocol, SpaceSkillOfflineService),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]
