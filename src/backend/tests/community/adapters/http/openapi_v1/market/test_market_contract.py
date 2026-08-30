@@ -21,6 +21,7 @@ from agentclaw.community.api.skill_center_sync_service import (
 from agentclaw.community.core.skill_center.skill_center_sync_contract import (
     SkillCenterSyncFailure,
     SkillCenterSyncInProgressError,
+    SkillCenterSyncUnavailableError,
     SkillCenterSyncSummary,
 )
 from agentclaw.community.core.skill_center.services import (
@@ -431,6 +432,26 @@ def test_skill_center_manual_sync_returns_stable_conflict_envelope():
     assert response.json()["message"] == (
         "Skill Center synchronization is already in progress"
     )
+
+
+def test_skill_center_manual_sync_returns_stable_unavailable_envelope():
+    client, _, _, _, sync = _client()
+
+    def unavailable():
+        raise SkillCenterSyncUnavailableError("private cache endpoint")
+
+    sync.sync = unavailable
+    response = client.post(
+        "/openapi/v1/bots/market/skill-center/sync",
+        params={"user_id": "user-1"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == 503314
+    assert response.json()["message"] == (
+        "Skill Center synchronization is temporarily unavailable"
+    )
+    assert "private cache endpoint" not in response.text
 
 
 def test_skill_center_tags_normalizes_null_children_to_empty_lists():

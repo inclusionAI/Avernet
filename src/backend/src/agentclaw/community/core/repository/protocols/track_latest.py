@@ -1,4 +1,4 @@
-"""Persistence contract for Track Latest candidate and Version-delta reads."""
+"""Persistence contract for Track Latest candidate and Version fact reads."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.track_latest_types import (
+        PublishedTrackLatestVersion,
         TrackLatestCandidate,
-        TrackLatestDependencyDelta,
     )
 
 
@@ -20,9 +20,9 @@ class TrackLatestRepositoryProtocol(Protocol):
     ) -> tuple[TrackLatestCandidate, ...]: ...
 
     @abstractmethod
-    def latest_dependency_delta(
+    def list_published_versions(
         self, *, env: str, skill_id: int
-    ) -> TrackLatestDependencyDelta: ...
+    ) -> tuple[PublishedTrackLatestVersion, ...]: ...
 
 
 __all__ = [

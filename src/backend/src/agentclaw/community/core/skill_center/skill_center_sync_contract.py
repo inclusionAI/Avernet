@@ -9,6 +9,10 @@ class SkillCenterSyncInProgressError(RuntimeError):
     """Another manual or periodic exact sync currently owns the environment."""
 
 
+class SkillCenterSyncUnavailableError(RuntimeError):
+    """The distributed synchronization coordinator is unavailable."""
+
+
 @dataclass(frozen=True, slots=True)
 class SkillCenterSyncFailure:
     skill_id: str
@@ -28,5 +32,6 @@ class SkillCenterSyncSummary:
 __all__ = [
     "SkillCenterSyncFailure",
     "SkillCenterSyncInProgressError",
+    "SkillCenterSyncUnavailableError",
     "SkillCenterSyncSummary",
 ]

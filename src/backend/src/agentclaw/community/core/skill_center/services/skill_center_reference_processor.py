@@ -27,6 +27,9 @@ from agentclaw.community.core.skill_center.reference_contract import (
     SkillCenterReferenceStatus,
     TERMINAL_REFERENCE_STATUSES,
 )
+from agentclaw.community.core.skill_center.public_center_identity import (
+    PublicCenterSkillIdentity,
+)
 from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import (
     SkillCenterGatewayServiceProtocol,
 )
@@ -45,9 +48,23 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterVersionListRequest,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.log import get_logger
 
 
 _MAX_ITEM_ATTEMPTS = 3
+logger = get_logger()
+
+_PUBLIC_REFERENCE_ERRORS = {
+    "SC_SKILL_NOT_FOUND": "Skill Center Skill is not available",
+    "SC_MARKET_UNAVAILABLE": "Skill Center is temporarily unavailable",
+    "MATERIALIZATION_FAILED": "Exact Version materialization failed",
+    "SKILL_OFFLINE": "Skill is offline",
+    "SKILL_SET_NOT_FOUND": "SkillSet is not available",
+    "RUNTIME_PROJECTION_FAILED": "Runtime projection failed",
+    "SKILL_SET_FORBIDDEN": "Forbidden",
+    "SKILL_SET_UPDATE_FAILED": "SkillSet update failed",
+}
 
 
 class SkillCenterReferenceProcessor:
@@ -159,10 +176,17 @@ class SkillCenterReferenceProcessor:
                 raise _PermanentReferenceError(
                     "SC_SKILL_NOT_FOUND", "latest public Version has no exact identity"
                 )
+            identity = PublicCenterSkillIdentity.derive(
+                tenant=get_current_avernet_tenant(),
+                env=batch.env,
+                skill_code=item.skill_code,
+            )
             target = self._references.ensure_public_version(
                 env=batch.env,
                 actor_id=batch.actor_id,
                 skill_code=item.skill_code,
+                locator=identity.locator,
+                skill_uuid=identity.skill_uuid,
                 skill_name=detail.skill_name,
                 description=detail.description,
                 sc_skill_id=_positive_int(detail.skill_id, "skill_id"),
@@ -203,25 +227,39 @@ class SkillCenterReferenceProcessor:
             )
             return False
         except _PermanentReferenceError as exc:
-            self._fail(batch.env, item.reference_id, exc.code, str(exc))
+            logger.info(
+                "[SkillCenterReference] permanent resolution failure: reference_id=%s code=%s",
+                item.reference_id,
+                exc.code,
+            )
+            self._fail(batch.env, item.reference_id, exc.code)
             return False
         except SkillCenterGatewayError as exc:
+            logger.exception(
+                "[SkillCenterReference] gateway failure: reference_id=%s code=%s",
+                item.reference_id,
+                exc.code,
+            )
             if exc.code is SkillCenterGatewayErrorCode.BUSINESS:
-                self._fail(
-                    batch.env, item.reference_id, "SC_SKILL_NOT_FOUND", str(exc)
-                )
+                self._fail(batch.env, item.reference_id, "SC_SKILL_NOT_FOUND")
                 return False
             return self._retry_or_fail(
-                batch.env, current, "SC_MARKET_UNAVAILABLE", str(exc)
+                batch.env, current, "SC_MARKET_UNAVAILABLE"
             )
-        except SkillVersionMaterializationError as exc:
+        except SkillVersionMaterializationError:
+            logger.exception(
+                "[SkillCenterReference] materialization failure: reference_id=%s",
+                item.reference_id,
+            )
             return self._retry_or_fail(
-                batch.env, current, "MATERIALIZATION_FAILED", str(exc)
+                batch.env, current, "MATERIALIZATION_FAILED"
             )
-        except (TypeError, ValueError, RuntimeError) as exc:
-            self._fail(
-                batch.env, item.reference_id, "MATERIALIZATION_FAILED", str(exc)
+        except (TypeError, ValueError, RuntimeError):
+            logger.exception(
+                "[SkillCenterReference] invalid materialization facts: reference_id=%s",
+                item.reference_id,
             )
+            self._fail(batch.env, item.reference_id, "MATERIALIZATION_FAILED")
             return False
 
     async def _add_ready(
@@ -256,9 +294,13 @@ class SkillCenterReferenceProcessor:
             SkillSetControlPlaneNotFoundError,
             SkillSetRuntimeReconcileError,
         ) as exc:
+            logger.exception(
+                "[SkillCenterReference] final SkillSet add failed: request_id=%s",
+                batch.request_id,
+            )
             code = _final_add_error_code(exc)
             for item in ready:
-                self._fail(batch.env, item.reference_id, code, str(exc))
+                self._fail(batch.env, item.reference_id, code)
             return
 
         by_skill_id = {outcome.skill_id: outcome for outcome in outcomes}
@@ -267,11 +309,15 @@ class SkillCenterReferenceProcessor:
             outcome = by_skill_id.get(skill_id)
             if outcome is None or not outcome.succeeded:
                 error = outcome.error if outcome is not None else None
+                logger.warning(
+                    "[SkillCenterReference] SkillSet add omitted/failed item: reference_id=%s error=%r",
+                    item.reference_id,
+                    error,
+                )
                 self._fail(
                     batch.env,
                     item.reference_id,
                     _final_add_error_code(error),
-                    str(error or "SkillSet add omitted the requested Skill"),
                 )
                 continue
             self._references.update_item(
@@ -287,7 +333,6 @@ class SkillCenterReferenceProcessor:
         env: str,
         item: SkillCenterReferenceWorkItem,
         code: str,
-        message: str,
     ) -> bool:
         attempts = item.attempt_count + 1
         status = (
@@ -301,17 +346,17 @@ class SkillCenterReferenceProcessor:
             status=status,
             attempt_count=attempts,
             error_code=code,
-            error_message=message[:2000],
+            error_message=_public_error_message(code),
         )
         return status is not SkillCenterReferenceStatus.FAILED
 
-    def _fail(self, env: str, reference_id: str, code: str, message: str) -> None:
+    def _fail(self, env: str, reference_id: str, code: str) -> None:
         self._references.update_item(
             env=env,
             reference_id=reference_id,
             status=SkillCenterReferenceStatus.FAILED,
             error_code=code,
-            error_message=message[:2000],
+            error_message=_public_error_message(code),
         )
 
 
@@ -347,9 +392,11 @@ def _final_add_error_code(error: Exception | None) -> str:
         return "RUNTIME_PROJECTION_FAILED"
     if isinstance(error, SkillSetAccessDeniedError):
         return "SKILL_SET_FORBIDDEN"
-    if isinstance(error, SkillSetControlPlaneConflictError) and message:
-        return message
     return "SKILL_SET_UPDATE_FAILED"
+
+
+def _public_error_message(code: str) -> str:
+    return _PUBLIC_REFERENCE_ERRORS.get(code, "Reference operation failed")
 
 
 __all__ = ["SkillCenterReferenceProcessor"]

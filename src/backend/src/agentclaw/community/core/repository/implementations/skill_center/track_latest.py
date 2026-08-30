@@ -1,8 +1,6 @@
-"""ORM candidate discovery and execution-time dependency deltas for Track Latest."""
+"""ORM persistence reads for Track Latest candidates and published Versions."""
 
 from __future__ import annotations
-
-import json
 
 from injector import inject
 
@@ -14,11 +12,8 @@ from agentclaw.community.core.models.skill import (
 from agentclaw.community.core.models.space_skill import SkillVersion
 from agentclaw.community.core.repository.protocols.track_latest import TrackLatestRepositoryProtocol
 from agentclaw.community.core.repository.track_latest_types import (
+    PublishedTrackLatestVersion,
     TrackLatestCandidate,
-    TrackLatestDependencyDelta,
-)
-from agentclaw.community.core.skill_center.mcp_dependency_scope import (
-    mcp_dependency_codes,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
@@ -120,9 +115,9 @@ class TrackLatestRepository(TrackLatestRepositoryProtocol):
                 for owner_id, bot_id in sorted(candidates)
             )
 
-    def latest_dependency_delta(
+    def list_published_versions(
         self, *, env: str, skill_id: int
-    ) -> TrackLatestDependencyDelta:
+    ) -> tuple[PublishedTrackLatestVersion, ...]:
         tenant = get_current_avernet_tenant()
         with self._db.orm_session() as session:
             rows = (
@@ -136,37 +131,13 @@ class TrackLatestRepository(TrackLatestRepositoryProtocol):
                 .order_by(SkillVersion.version_ordinal.desc())
                 .all()
             )
-            if not rows:
-                raise RuntimeError("Track Latest Skill has no PUBLISHED Version")
-            current = _dependency_codes(rows[0])
-            immediate_previous = (
-                _dependency_codes(rows[1]) if len(rows) > 1 else frozenset()
+            return tuple(
+                PublishedTrackLatestVersion(
+                    skill_version_id=int(version.id),
+                    metadata_json=version.metadata_json,
+                )
+                for version in rows
             )
-            historical = frozenset().union(
-                *(_dependency_codes(version) for version in rows[1:])
-            )
-            return TrackLatestDependencyDelta(
-                skill_version_id=int(rows[0].id),
-                # Claim against the immediately preceding release so a
-                # dependency restored in V3 after disappearing in V2 is
-                # delivered. Release against all history so a Bot whose queued
-                # V2 task runs after V3 can still shed V1-only dependencies.
-                claimed_mcp=current - immediate_previous,
-                released_mcp=historical - current,
-            )
-
-
-def _dependency_codes(version: SkillVersion) -> frozenset[str]:
-    if not version.metadata_json:
-        raise RuntimeError("PUBLISHED Version has no dependency metadata")
-    try:
-        metadata = json.loads(version.metadata_json)
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("PUBLISHED Version metadata is invalid") from exc
-    dependencies = metadata.get("mcp_dependencies") if isinstance(metadata, dict) else None
-    if not isinstance(dependencies, list):
-        raise RuntimeError("PUBLISHED Version has incomplete dependency metadata")
-    return frozenset(mcp_dependency_codes(dependencies))
 
 
 __all__ = ["TrackLatestRepository"]

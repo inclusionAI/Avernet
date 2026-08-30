@@ -72,6 +72,8 @@ provides:
   - "SkillCenterReferenceProcessor"
   - "SkillCenterSyncService"
   - "TrackLatestService"
+  - "TrackLatestPublishedVersionListener"
+  - "PublicCenterSkillIdentity"
   - "CanonicalCenterVersionStore"
   - "CanonicalCenterVersion"
   - "CanonicalCenterVersionIdentity"
@@ -236,15 +238,12 @@ retry, Attempt, persistence, and materialization decisions remain above it.
 Public version/download reads use an explicit scope and verify public visibility
 before crossing the exact-version boundary.
 
-This change is the staged outbound seam only. A follow-up OCB change provides
-the Corp HTTP adapter, authentication/configuration binding, and wire mapping.
-A separate Avernet change migrates the `openapi_v1` public catalogue and
-publication consumers onto domain services backed by this seam. Until both are
-present, existing routers keep using the legacy client; this module is not a
-claim that production traffic has migrated.
-No Catalog, Publication, Public Reference, or Track Latest application module
-is introduced speculatively by this change; those modules remain owned by their
-later workflow PRs.
+The catalogue Gateway, Space Publication, SC Public Reference, materialized-only
+Sync, and Track Latest application modules now consume the typed seams above.
+`TrackLatestPublishedVersionListener` is the single required EventBus bridge
+from the unified at-least-once PUBLISHED event to durable fanout. Publication
+still owns no Track Latest policy or task type, and Reference/Sync still own no
+Publication Attempt state.
 
 ### One writer, one flush, one reader, one rule book
 

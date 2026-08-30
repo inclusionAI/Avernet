@@ -51,6 +51,9 @@ from agentclaw.community.core.skill_center.services.track_latest import (
     TrackLatestFanoutTaskHandler,
     TrackLatestService,
 )
+from agentclaw.community.core.skill_center.services.track_latest_event_listener import (
+    TrackLatestPublishedVersionListener,
+)
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.plugin_api.cache import CachePlugin
@@ -79,6 +82,14 @@ class SkillCenterGroup4Module(Module):
         self, tasks: TaskQueueService
     ) -> TrackLatestServiceProtocol:
         return TrackLatestService(tasks)
+
+    @singleton
+    @provider
+    @inject
+    def track_latest_published_version_listener(
+        self, track_latest: TrackLatestServiceProtocol
+    ) -> TrackLatestPublishedVersionListener:
+        return TrackLatestPublishedVersionListener(track_latest)
 
     @singleton
     @provider

@@ -23,6 +23,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 from agentclaw.community.core.skill_center.track_latest_service_protocol import (
     TrackLatestServiceProtocol,
 )
+from agentclaw.community.core.skill_center.track_latest_contract import (
+    latest_dependency_delta,
+)
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
@@ -144,8 +147,10 @@ class BotTrackLatestReconcileTaskHandler:
             return Complete()
         if not any(asset.skill_id == skill_id for asset in assets):
             return Complete()
-        delta = self._latest.latest_dependency_delta(
-            env=self._env_provider(), skill_id=skill_id
+        delta = latest_dependency_delta(
+            self._latest.list_published_versions(
+                env=self._env_provider(), skill_id=skill_id
+            )
         )
         before = await self._projector.snapshot_skill_mappings(
             bot_id=bot_id, owner_id=owner_id

@@ -20,9 +20,13 @@ from agentclaw.community.core.skill_center.materialization_contract import (
 from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import (
     SkillCenterGatewayServiceProtocol,
 )
+from agentclaw.community.core.skill_center.public_center_identity import (
+    PublicCenterSkillIdentity,
+)
 from agentclaw.community.core.skill_center.skill_center_sync_contract import (
     SkillCenterSyncFailure,
     SkillCenterSyncInProgressError,
+    SkillCenterSyncUnavailableError,
     SkillCenterSyncSummary,
 )
 from agentclaw.community.core.skill_center.skill_center_sync_service_protocol import (
@@ -33,7 +37,10 @@ from agentclaw.community.core.skill_center.track_latest_service_protocol import 
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.cache import CachePlugin
+from agentclaw.community.plugin_api.cache import (
+    CacheLockInfrastructureError,
+    CachePlugin,
+)
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterGatewayError,
     SkillCenterPublicSkillDetailRequest,
@@ -41,6 +48,7 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterVersionListRequest,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 
 logger = get_logger()
@@ -82,9 +90,12 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
     def sync(self) -> SkillCenterSyncSummary:
         env = self._env_provider()
         lock_key = f"skill-center-public-sync:{env}"
-        lock_value = self._cache.acquire_lock_strict(
-            lock_key, ttl=_SYNC_LOCK_TTL_SECONDS
-        )
+        try:
+            lock_value = self._cache.acquire_lock_strict(
+                lock_key, ttl=_SYNC_LOCK_TTL_SECONDS
+            )
+        except CacheLockInfrastructureError as exc:
+            raise SkillCenterSyncUnavailableError("SYNC_COORDINATOR_UNAVAILABLE") from exc
         if lock_value is None:
             raise SkillCenterSyncInProgressError("SYNC_IN_PROGRESS")
         stop_renewal = threading.Event()
@@ -143,7 +154,7 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
                         )
                     )
             if lease_error:
-                raise lease_error[0]
+                self._raise_lease_error(lease_error[0])
             return SkillCenterSyncSummary(
                 scanned=len(assets),
                 updated=updated,
@@ -164,18 +175,39 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
         lease_error: list[Exception],
     ) -> None:
         if lease_error:
-            raise lease_error[0]
-        if not self._cache.renew_lock_strict(
-            lock_key,
-            lock_value,
-            ttl=_SYNC_LOCK_TTL_SECONDS,
-        ):
+            self._raise_lease_error(lease_error[0])
+        try:
+            renewed = self._cache.renew_lock_strict(
+                lock_key,
+                lock_value,
+                ttl=_SYNC_LOCK_TTL_SECONDS,
+            )
+        except CacheLockInfrastructureError as exc:
+            raise SkillCenterSyncUnavailableError(
+                "SYNC_COORDINATOR_UNAVAILABLE"
+            ) from exc
+        if not renewed:
             raise SkillCenterSyncInProgressError("SYNC_LOCK_LOST")
+
+    @staticmethod
+    def _raise_lease_error(error: Exception) -> None:
+        if isinstance(error, SkillCenterSyncInProgressError):
+            raise error
+        raise SkillCenterSyncUnavailableError(
+            "SYNC_COORDINATOR_UNAVAILABLE"
+        ) from error
 
     async def sync_bootstrap(self) -> SkillCenterSyncSummary:
         try:
             return await asyncio.to_thread(self.sync)
         except SkillCenterSyncInProgressError:
+            return SkillCenterSyncSummary(0, 0, 0, 0, ())
+        except SkillCenterSyncUnavailableError:
+            # Startup/periodic reconciliation is best effort and level-triggered;
+            # cache recovery will be observed by the next scheduled pass.
+            logger.exception(
+                "[SkillCenterSync] startup reconciliation coordinator unavailable"
+            )
             return SkillCenterSyncSummary(0, 0, 0, 0, ())
 
     async def start_periodic_sync(self) -> None:
@@ -232,18 +264,23 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
             raise _SkillCenterSyncAssetError(
                 "SC latest public Version has no exact identity"
             )
+        identity = PublicCenterSkillIdentity.derive(
+            tenant=get_current_avernet_tenant(),
+            env=env,
+            skill_code=asset.skill_code,
+        )
         target = self._assets.ensure_public_version(
             env=env,
             actor_id="system:skill-center-sync",
             skill_code=asset.skill_code,
+            locator=identity.locator,
+            skill_uuid=identity.skill_uuid,
             skill_name=detail.skill_name,
             description=detail.description,
             sc_skill_id=_positive_int(detail.skill_id),
             sc_version_number=exact.version_number,
             sc_version_id=_positive_int(exact.version_id),
         )
-        if target.status == "PUBLISHED":
-            return False
         published = self._materializer.materialize(
             SkillVersionMaterializationRequest(
                 env=env,
@@ -252,8 +289,11 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
                 scope=SkillCenterReadScope.PUBLIC,
             )
         )
+        # Re-ensure even when the exact Version was already PUBLISHED. A crash
+        # may have committed materialization before durable Track Latest enqueue;
+        # periodic/manual sync is the level-triggered repair for that window.
         self._track_latest.version_published(published)
-        return True
+        return target.status != "PUBLISHED"
 
 
 def _positive_int(value: object) -> int:
@@ -275,5 +315,6 @@ def _sync_error_code(error: Exception) -> str:
 
 __all__ = [
     "SkillCenterSyncInProgressError",
+    "SkillCenterSyncUnavailableError",
     "SkillCenterSyncService",
 ]

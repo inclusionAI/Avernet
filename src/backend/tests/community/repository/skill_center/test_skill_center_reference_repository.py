@@ -20,6 +20,9 @@ from agentclaw.community.core.skill_center.reference_contract import (
     ReferenceIdempotencyConflictError,
     SkillCenterReferenceStatus,
 )
+from agentclaw.community.core.skill_center.public_center_identity import (
+    PublicCenterSkillIdentity,
+)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
@@ -40,6 +43,19 @@ class _Database:
             raise
         finally:
             session.close()
+
+
+def _ensure_public(repo, *, env: str, skill_code: str, **facts):
+    identity = PublicCenterSkillIdentity.derive(
+        tenant="teamclaw", env=env, skill_code=skill_code
+    )
+    return repo.ensure_public_version(
+        env=env,
+        skill_code=skill_code,
+        locator=identity.locator,
+        skill_uuid=identity.skill_uuid,
+        **facts,
+    )
 
 
 def test_create_replays_the_original_batch_and_rejects_key_reuse() -> None:
@@ -183,7 +199,8 @@ def test_public_code_reuses_its_center_locator_without_reusing_same_name_local()
         )
 
     with avernet_tenant_scope("teamclaw"):
-        first = repo.ensure_public_version(
+        first = _ensure_public(
+            repo,
             env="pre",
             actor_id="actor",
             skill_code="external-code",
@@ -193,7 +210,8 @@ def test_public_code_reuses_its_center_locator_without_reusing_same_name_local()
             sc_version_number="1.0.0",
             sc_version_id=10001,
         )
-        replay = repo.ensure_public_version(
+        replay = _ensure_public(
+            repo,
             env="pre",
             actor_id="actor",
             skill_code="external-code",
@@ -203,7 +221,8 @@ def test_public_code_reuses_its_center_locator_without_reusing_same_name_local()
             sc_version_number="1.0.0",
             sc_version_id=10001,
         )
-        renamed = repo.ensure_public_version(
+        renamed = _ensure_public(
+            repo,
             env="pre",
             actor_id="actor",
             skill_code="external-code",
@@ -213,7 +232,8 @@ def test_public_code_reuses_its_center_locator_without_reusing_same_name_local()
             sc_version_number="1.0.0",
             sc_version_id=10001,
         )
-        case_variant = repo.ensure_public_version(
+        case_variant = _ensure_public(
+            repo,
             env="pre",
             actor_id="actor",
             skill_code="External-Code",
@@ -233,7 +253,7 @@ def test_public_code_reuses_its_center_locator_without_reusing_same_name_local()
         version = session.get(SkillVersion, first.skill_version_id)
         assert public is not None
         assert public.git_path == "center://external-code"
-        assert UUID(public.skill_uuid).version == 5
+        assert UUID(public.skill_uuid).version == 4
         assert version is not None
         assert version.publication_attempt_id is None
 
@@ -266,7 +286,8 @@ def test_sync_inventory_excludes_unready_assets_and_space_published_skills() -> 
     db = _Database()
     repo = SkillCenterReferenceRepository(db)
     with avernet_tenant_scope("teamclaw"):
-        public = repo.ensure_public_version(
+        public = _ensure_public(
+            repo,
             env="pre",
             actor_id="actor",
             skill_code="public-ready",
@@ -276,7 +297,8 @@ def test_sync_inventory_excludes_unready_assets_and_space_published_skills() -> 
             sc_version_number="1.0.0",
             sc_version_id=10001,
         )
-        repo.ensure_public_version(
+        _ensure_public(
+            repo,
             env="pre",
             actor_id="actor",
             skill_code="public-unready",

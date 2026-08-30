@@ -1,4 +1,4 @@
-"""Persistence projections for Track Latest discovery and dependency deltas."""
+"""Persistence projections for Track Latest discovery and Version facts."""
 
 from __future__ import annotations
 
@@ -12,10 +12,9 @@ class TrackLatestCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class TrackLatestDependencyDelta:
+class PublishedTrackLatestVersion:
     skill_version_id: int
-    claimed_mcp: frozenset[str]
-    released_mcp: frozenset[str]
+    metadata_json: str | None
 
 
-__all__ = ["TrackLatestCandidate", "TrackLatestDependencyDelta"]
+__all__ = ["PublishedTrackLatestVersion", "TrackLatestCandidate"]

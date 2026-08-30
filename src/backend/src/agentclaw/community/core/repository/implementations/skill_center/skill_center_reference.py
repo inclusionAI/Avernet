@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from uuid import NAMESPACE_URL, uuid5
-
 from injector import inject
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -238,6 +236,8 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
         env: str,
         actor_id: str,
         skill_code: str,
+        locator: str,
+        skill_uuid: str,
         skill_name: str,
         description: str | None,
         sc_skill_id: int,
@@ -245,7 +245,6 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
         sc_version_id: int,
     ) -> PublicCenterVersionTarget:
         tenant = get_current_avernet_tenant()
-        locator = f"center://{skill_code}"
         with self._db.orm_session() as session:
             skill = self._find_public_skill(
                 session, tenant=tenant, env=env, locator=locator
@@ -262,19 +261,14 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
                     env=env,
                     status="DEVELOPING",
                     version=1,
-                    skill_uuid=str(
-                        uuid5(
-                            NAMESPACE_URL,
-                            f"avernet:{tenant}:{env}:center:{skill_code}",
-                        )
-                    ),
+                    skill_uuid=skill_uuid,
                     source_type="center",
                     avernet_tenant=tenant,
                 )
                 try:
-                    # ``uk_skill_uuid`` is the cross-process winner for this
-                    # deterministic external-code identity.  The locator remains
-                    # the readable SSOT and never aliases a Local/Repo/Space row.
+                    # ``uk_skill_uuid`` is the cross-process winner for the
+                    # caller-supplied domain identity. The locator remains the
+                    # readable SSOT and never aliases Local/Repo/Space rows.
                     with session.begin_nested():
                         session.add(skill)
                         session.flush()
@@ -284,6 +278,8 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
                     )
                     if skill is None:
                         raise
+            elif skill.skill_uuid != skill_uuid:
+                raise RuntimeError("SC Public locator has a conflicting identity")
 
             existing = (
                 session.query(SkillVersion)

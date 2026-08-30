@@ -327,6 +327,63 @@ def test_transient_sc_failure_retries_three_times_then_fails_each_item() -> None
     }
 
 
+def test_gateway_failure_persists_only_public_error_message() -> None:
+    class _LeakyGateway:
+        def get_public_skill(self, _request):
+            from agentclaw.community.plugin_api.skill_center_gateway import (
+                SkillCenterGatewayError,
+                SkillCenterGatewayErrorCode,
+            )
+
+            raise SkillCenterGatewayError(
+                SkillCenterGatewayErrorCode.UNAVAILABLE,
+                "https://signed.example/pkg?signature=private-token",
+            )
+
+    references = _References()
+    processor = _processor(
+        references=references,
+        skill_sets=_SkillSets(),
+        materializer=_Materializer(),
+        gateway=_LeakyGateway(),
+    )
+
+    for _ in range(3):
+        asyncio.run(processor.process("request-a"))
+
+    assert {item.error_message for item in references.batch.items} == {
+        "Skill Center is temporarily unavailable"
+    }
+    assert "signature" not in repr(references.batch.items)
+
+
+def test_materialization_failure_persists_only_public_error_message() -> None:
+    class _LeakyMaterializer(_Materializer):
+        def materialize(self, request):
+            from agentclaw.community.core.skill_center.materialization_contract import (
+                SkillVersionMaterializationError,
+            )
+
+            raise SkillVersionMaterializationError(
+                "download failed: https://signed.example/pkg?signature=private-token"
+            )
+
+    references = _References()
+    processor = _processor(
+        references=references,
+        skill_sets=_SkillSets(),
+        materializer=_LeakyMaterializer(),
+    )
+
+    for _ in range(3):
+        asyncio.run(processor.process("request-a"))
+
+    assert {item.error_message for item in references.batch.items} == {
+        "Exact Version materialization failed"
+    }
+    assert "signature" not in repr(references.batch.items)
+
+
 def test_final_membership_infrastructure_failure_propagates_for_task_retry() -> None:
     references = _References()
     processor = _processor(

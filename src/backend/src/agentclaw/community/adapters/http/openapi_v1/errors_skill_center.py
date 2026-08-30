@@ -9,6 +9,7 @@ from agentclaw.community.core.skill_center.reference_contract import (
 )
 from agentclaw.community.core.skill_center.skill_center_sync_contract import (
     SkillCenterSyncInProgressError,
+    SkillCenterSyncUnavailableError,
 )
 
 
@@ -31,6 +32,10 @@ SKILL_CENTER_ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         "Skill Center synchronization is already in progress",
     ),
+    SkillCenterSyncUnavailableError: (
+        503,
+        "Skill Center synchronization is temporarily unavailable",
+    ),
 }
 
 SKILL_CENTER_ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
@@ -38,6 +43,7 @@ SKILL_CENTER_ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     ReferenceIdempotencyConflictError: 409305,
     ReferenceTaskUnavailableError: 503000,
     SkillCenterSyncInProgressError: 409314,
+    SkillCenterSyncUnavailableError: 503314,
 }
 
 

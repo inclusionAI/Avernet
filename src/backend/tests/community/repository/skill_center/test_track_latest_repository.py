@@ -1,4 +1,4 @@
-"""Persistence rules for Track Latest candidate discovery and MCP delta."""
+"""Persistence rules for Track Latest candidate and published-Version reads."""
 
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ from agentclaw.community.core.models.skill import (
 from agentclaw.community.core.models.space_skill import SkillVersion
 from agentclaw.community.core.repository.implementations.skill_center.track_latest import (
     TrackLatestRepository,
+)
+from agentclaw.community.core.skill_center.track_latest_contract import (
+    latest_dependency_delta,
 )
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -226,12 +229,13 @@ def test_dependency_delta_uses_execution_time_latest_published_version() -> None
             )
 
     with avernet_tenant_scope("teamclaw"):
-        delta = TrackLatestRepository(db).latest_dependency_delta(
+        versions = TrackLatestRepository(db).list_published_versions(
             env="pre", skill_id=10
         )
+        delta = latest_dependency_delta(versions)
 
     assert delta.skill_version_id == 102
-    assert delta.claimed_mcp == frozenset({"mcp.new"})
+    assert delta.claimed_mcp == frozenset({"mcp.new", "mcp.keep"})
     assert delta.released_mcp == frozenset({"mcp.old", "mcp.very-old"})
 
 
@@ -267,9 +271,10 @@ def test_dependency_restored_after_one_version_is_claimed_again() -> None:
             )
 
     with avernet_tenant_scope("teamclaw"):
-        delta = TrackLatestRepository(db).latest_dependency_delta(
+        versions = TrackLatestRepository(db).list_published_versions(
             env="pre", skill_id=20
         )
+        delta = latest_dependency_delta(versions)
 
     assert delta.claimed_mcp == frozenset({"mcp.restored"})
     assert delta.released_mcp == frozenset()

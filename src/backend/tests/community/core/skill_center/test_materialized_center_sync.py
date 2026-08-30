@@ -18,7 +18,9 @@ from agentclaw.community.core.skill_center.materialization_contract import (
 from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
     SkillCenterSyncInProgressError,
     SkillCenterSyncService,
+    SkillCenterSyncUnavailableError,
 )
+from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterAccessLevel,
     SkillCenterGatewayError,
@@ -120,6 +122,16 @@ class _Cache:
         return self.renew_ok
 
 
+class _UnavailableCache(_Cache):
+    def acquire_lock_strict(self, key, ttl):
+        raise CacheLockInfrastructureError("redis endpoint details")
+
+
+class _RenewUnavailableCache(_Cache):
+    def renew_lock_strict(self, key, value, ttl):
+        raise CacheLockInfrastructureError("redis renew endpoint details")
+
+
 def test_sync_continues_after_one_failure_and_tracks_only_new_published_version() -> None:
     materializer = _Materializer()
     track_latest = _TrackLatest()
@@ -161,6 +173,51 @@ def test_manual_sync_returns_stable_conflict_when_distributed_lock_is_held() -> 
         service.sync()
 
 
+def test_manual_sync_maps_cache_outage_to_stable_unavailable_error() -> None:
+    service = SkillCenterSyncService(
+        assets=_Assets(),
+        gateway=_Gateway(),
+        materializer=_Materializer(),
+        track_latest=_TrackLatest(),
+        cache=_UnavailableCache(),
+        env_provider=lambda: "pre",
+    )
+
+    with pytest.raises(
+        SkillCenterSyncUnavailableError, match="SYNC_COORDINATOR_UNAVAILABLE"
+    ):
+        service.sync()
+
+
+def test_startup_cache_outage_is_deferred_to_periodic_retry() -> None:
+    service = SkillCenterSyncService(
+        assets=_Assets(),
+        gateway=_Gateway(),
+        materializer=_Materializer(),
+        track_latest=_TrackLatest(),
+        cache=_UnavailableCache(),
+        env_provider=lambda: "pre",
+    )
+
+    summary = asyncio.run(service.sync_bootstrap())
+
+    assert summary.scanned == summary.failed == 0
+
+
+def test_manual_sync_maps_cache_renewal_outage_to_stable_unavailable_error() -> None:
+    service = SkillCenterSyncService(
+        assets=_Assets(),
+        gateway=_Gateway(),
+        materializer=_Materializer(),
+        track_latest=_TrackLatest(),
+        cache=_RenewUnavailableCache(),
+        env_provider=lambda: "pre",
+    )
+
+    with pytest.raises(SkillCenterSyncUnavailableError):
+        service.sync()
+
+
 def test_sync_fails_closed_when_its_distributed_lease_is_lost() -> None:
     materializer = _Materializer()
     service = SkillCenterSyncService(
@@ -176,6 +233,38 @@ def test_sync_fails_closed_when_its_distributed_lease_is_lost() -> None:
         service.sync()
 
     assert materializer.calls == []
+
+
+def test_published_exact_version_reensures_track_latest_before_unchanged() -> None:
+    class _PublishedAssets(_Assets):
+        def list_materialized_public_assets(self, *, env):
+            return super().list_materialized_public_assets(env=env)[:1]
+
+        def ensure_public_version(self, **kwargs):
+            target = super().ensure_public_version(**kwargs)
+            return PublicCenterVersionTarget(
+                skill_id=target.skill_id,
+                skill_version_id=target.skill_version_id,
+                status="PUBLISHED",
+            )
+
+    materializer = _Materializer()
+    track_latest = _TrackLatest()
+    service = SkillCenterSyncService(
+        assets=_PublishedAssets(),
+        gateway=_Gateway(),
+        materializer=materializer,
+        track_latest=track_latest,
+        cache=_Cache(),
+        env_provider=lambda: "pre",
+    )
+
+    summary = service.sync()
+
+    assert summary.updated == 0
+    assert summary.unchanged == 1
+    assert len(materializer.calls) == 1
+    assert len(track_latest.calls) == 1
 
 
 def test_lifecycle_bootstrap_reconciles_once_then_starts_and_stops_periodic_task() -> None:

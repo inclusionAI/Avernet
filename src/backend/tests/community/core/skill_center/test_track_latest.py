@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from agentclaw.community.core.repository.track_latest_types import (
+    PublishedTrackLatestVersion,
     TrackLatestCandidate,
-    TrackLatestDependencyDelta,
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
@@ -18,6 +18,9 @@ from agentclaw.community.core.skill_center.services.track_latest import (
     BotTrackLatestReconcileTaskHandler,
     TrackLatestFanoutTaskHandler,
     TrackLatestService,
+)
+from agentclaw.community.core.skill_center.track_latest_contract import (
+    latest_dependency_delta,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
@@ -75,6 +78,28 @@ def test_version_published_enqueues_one_skill_level_fanout() -> None:
     ]
 
 
+def test_dependency_delta_claims_current_when_bot_skipped_intermediate_version() -> None:
+    delta = latest_dependency_delta(
+        (
+            PublishedTrackLatestVersion(
+                skill_version_id=103,
+                metadata_json='{"mcp_dependencies":[{"code":"mcp.b"}]}',
+            ),
+            PublishedTrackLatestVersion(
+                skill_version_id=102,
+                metadata_json='{"mcp_dependencies":[{"code":"mcp.b"}]}',
+            ),
+            PublishedTrackLatestVersion(
+                skill_version_id=101,
+                metadata_json='{"mcp_dependencies":[]}',
+            ),
+        )
+    )
+
+    assert delta.claimed_mcp == frozenset({"mcp.b"})
+    assert delta.released_mcp == frozenset()
+
+
 class _Candidates:
     def list_candidates(self, *, env, skill_id):
         assert (env, skill_id) == ("pre", 10)
@@ -125,12 +150,17 @@ class _Reader:
 
 
 class _Latest:
-    def latest_dependency_delta(self, *, env, skill_id):
+    def list_published_versions(self, *, env, skill_id):
         assert (env, skill_id) == ("pre", 10)
-        return TrackLatestDependencyDelta(
-            skill_version_id=102,
-            claimed_mcp=frozenset({"mcp.v3"}),
-            released_mcp=frozenset({"mcp.v1"}),
+        return (
+            PublishedTrackLatestVersion(
+                skill_version_id=102,
+                metadata_json='{"mcp_dependencies":[{"code":"mcp.v3"}]}',
+            ),
+            PublishedTrackLatestVersion(
+                skill_version_id=101,
+                metadata_json='{"mcp_dependencies":[{"code":"mcp.v1"}]}',
+            ),
         )
 
 
