@@ -11,6 +11,7 @@ from agentclaw.community.core.repository.track_latest_types import (
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
 )
+from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.core.skill_center.services.track_latest import (
     BOT_TRACK_LATEST_RECONCILE_TASK,
     TRACK_LATEST_FANOUT_TASK,
@@ -208,3 +209,24 @@ def test_bot_task_retries_when_complete_mapping_snapshot_drifts() -> None:
     )
 
     assert isinstance(outcome, Retry)
+
+
+def test_bot_task_completes_when_candidate_bot_was_deleted() -> None:
+    class _DeletedReader:
+        def active_skill_assets(self, **_kwargs):
+            raise LocalSkillNotFoundError()
+
+    projector = _Projector()
+    handler = BotTrackLatestReconcileTaskHandler(
+        reader=_DeletedReader(),
+        projector=projector,
+        latest=_Latest(),
+        env_provider=lambda: "pre",
+    )
+
+    outcome = handler.handle(
+        {"owner_id": "owner-a", "bot_id": "deleted", "skill_id": 10}
+    )
+
+    assert isinstance(outcome, Complete)
+    assert projector.project_calls == []

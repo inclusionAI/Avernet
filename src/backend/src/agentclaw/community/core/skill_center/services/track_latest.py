@@ -13,6 +13,7 @@ from agentclaw.community.core.skill_center.bot_capability_state_reader_protocol 
 from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import (
     BotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
 )
@@ -135,9 +136,12 @@ class BotTrackLatestReconcileTaskHandler:
     async def _reconcile(
         self, *, owner_id: str, bot_id: str, skill_id: int
     ) -> TaskOutcome:
-        assets = self._reader.active_skill_assets(
-            bot_id=bot_id, owner_id=owner_id
-        )
+        try:
+            assets = self._reader.active_skill_assets(
+                bot_id=bot_id, owner_id=owner_id
+            )
+        except LocalSkillNotFoundError:
+            return Complete()
         if not any(asset.skill_id == skill_id for asset in assets):
             return Complete()
         delta = self._latest.latest_dependency_delta(
