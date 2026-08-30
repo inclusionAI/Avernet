@@ -796,7 +796,10 @@ capability table is fully determined.
     or on a `content` entry;
   - `apply_once` in any position — a v1 reserved word;
   - an unknown `${...}` placeholder; only `OCB_BOT_ID`, `OCB_ENGINE_TYPE`,
-    `OCB_ENV`, `OCB_TENANT` are accepted;
+    `OCB_ENV`, `OCB_TENANT` and the reserved `OCB_ARCH` are accepted. `OCB_ARCH`
+    is reserved now because the whitelist is versioned with `schema_version`:
+    adding the name costs nothing today and avoids a version bump if `cli_tools`
+    later needs per-arch sources (§4, X3/O9);
   - a `resources.path` that is absolute or contains `../`;
   - a `resources` entry whose `path` lies under another directory entry's
     `path` (the nesting ban, schema §3.2);
@@ -924,6 +927,10 @@ binding W2's injection port.
       saying they are reserved, so the discriminator is real from day one.
 - [ ] The value appears in no log, no error message and no apply report; only
       the name does.
+- [ ] An authentication failure (401/403) is reported as *"credential `<name>` was
+      rejected"* — named, and distinct from a generic fetch error. Expiry is
+      owner-managed (§4, X1), so a rotation reminder that reads as a network
+      problem is a real operational failure.
 - [ ] Rotation is a re-`PUT` of the same name and does not trigger an apply.
 
 **Size.** Medium.
@@ -1100,10 +1107,9 @@ content hosted in the company's git service is a first-class source.
 **In scope.** `sources` + `from`; git ref resolution and content retrieval.
 
 **Depends on.** W5.
-**Blocked by.** — **X1 is now mostly answered** (§4): a dedicated machine account
-with a `read_repository` 访问令牌, injected as HTTP Basic, needing no change to the
-v1 credential model. Two questions remain (do Deploy *Tokens* exist; maximum token
-expiry), neither of which blocks starting.
+**Blocked by.** — **X1 is closed** (§4): a dedicated machine account with a
+`read_repository` 访问令牌, injected as HTTP Basic, needing no change to the v1
+credential model. Nothing external remains.
 
 **Scope change forced by X1:** `read_repository` cannot reach the API, so this
 item does a **shallow single-ref git fetch** rather than the archive-API pull
@@ -1240,8 +1246,9 @@ nothing is waiting on a decision to begin.
 
 **Gating.** **No design question blocks the work any more.** D1–D3 are resolved
 and D4 is deferred behind an interim policy (deliver after start, §3.4). What
-remains is external: X1 gates W7, X2 gates W8's teclaw arm, X3 gates W9 — and W9
-is deferred regardless.
+remains is external: X2 gates W8's teclaw arm through W12, and X3's single
+question (O9, fleet CPU architecture) is non-blocking for W9, which is deferred
+regardless. **X1 and X4 are closed**, so W7 has nothing external left.
 
 Two dependencies the resolutions *tightened*: **W11 is a hard dependency of W4**,
 because §3.2's diff needs version N's materialised file list both to tell "the
