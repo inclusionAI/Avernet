@@ -781,19 +781,22 @@ class TestManagerWorkerMerge:
 # ===== 羽雀/框架节点级回投(TaskCallbackRequest)=====
 
 class TestFrameworkCallback:
-    """``TaskCallbackRequest`` 富 schema → ``translate`` → ``report_result`` 推进编排核。"""
+    """common_task 回投(body 顶层 task_id+node_id+status+output)→ translate_common_task_callback
+    → report_result → _adapt_common_task → on_report 推进编排核。
+
+    latest 路由弃用 loop_task_id 回声/registry 解析:node_id 直取 body 顶层;verdict/gaps 经
+    body.acceptance_result dict(非 is_success/failed_info);invoker 落 translate 固定 workflow_source="task_loop"。"""
 
     @staticmethod
     def _req_body(**kw) -> dict:
-        d = dict(task_id="t1", workflow_source="bcn", workflow_id="w7",
-                 workflow_instance_id="i1", status="COMPLETED", is_success=True)
+        d = dict(task_id="t1", node_id="c1", status="DONE", output={"r": 1},
+                 acceptance_result={"verdict": "DONE", "gaps": []},
+                 workflow_instance_id="i1")
         d.update(kw)
         return d
 
     def test_node_level_report_result_advances_engine_with_pass(self):
-        # /callback/report 用 TaskCallbackRequest(无 node_id 字段),故框架节点级回投走
-        # loop_task_id 回声(node_id 直拼仅 /callback/node_result 的 TaskNodeCallbackRequest 用)。
-        body = self._req_body(loop_task_id="t1::c1", is_success=True, output={"r": 1})
+        body = self._req_body()
         svc, engine, repo, _ri = _make_svc()
         result = _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
                                      InMemoryCallbackCorrelationRegistry()))
@@ -801,46 +804,49 @@ class TestFrameworkCallback:
         assert engine.starts == []                      # /callback/report 固定 result,不 start_run
         assert len(engine.reports) == 1
         patch = engine.reports[0]
-        assert (patch.task_id, patch.node_id) == ("t1", "c1")  # node_id 直拼
+        assert (patch.task_id, patch.node_id) == ("t1", "c1")  # body 顶层 node_id 直取
+        assert patch.status == Status.DONE
         assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
         assert patch.output_patch == {"output": {"r": 1}}
-        # 同时落 task_callback 审计(invoker 来自 workflow_source)
-        assert repo.calls[0].invoker == "bcn"
+        # common_task 路由不经 auth.verify;invoker 落 translate 固定 workflow_source="task_loop"
+        assert repo.calls[0].invoker == "task_loop"
         assert repo.calls[0].run_id == "t1" and repo.calls[0].node_id == "c1"
 
     def test_failed_framework_result_routes_to_fail_acceptance_with_gaps(self):
-        body = self._req_body(loop_task_id="t1::c1", is_success=False, failed_info="证据不足")
+        body = self._req_body(status="FAILED", output=None,
+                              acceptance_result={"verdict": "FAILED", "gaps": ["证据不足"]})
         svc, engine, _repo, _ri = _make_svc()
         _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
         patch = engine.reports[0]
         assert patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
-        assert patch.acceptance_result.gaps == ["证据不足"]  # failed_info → 单 gap
+        assert patch.acceptance_result.gaps == ["证据不足"]  # acceptance_result.gaps 直传
 
-    def test_task_level_uses_echo_loop_task_id(self):
-        body = self._req_body(loop_task_id="t1::root1", is_success=True)
+    def test_task_level_uses_explicit_node_id(self):
+        # common_task 路由用 body 顶层 node_id 定位节点(无 loop_task_id 回声/registry 解析)
+        body = self._req_body(node_id="root1")
         svc, engine, _repo, _ri = _make_svc()
         _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
         assert (engine.reports[0].task_id, engine.reports[0].node_id) == ("t1", "root1")
 
-    def test_task_level_resolves_via_registry_when_no_echo(self):
-        reg = InMemoryCallbackCorrelationRegistry()
-        reg.register(source="bcn", workflow_id=7, instance_id=77, task_id="t1",
-                     node_id="root1", loop_task_id="t1::root1",
-                     workflow_id_str="w7", instance_id_str="i1")
-        body = self._req_body(is_success=True)  # 无 loop_task_id 回声
+    def test_task_level_routes_without_acceptance_dict(self):
+        # 无 acceptance_result dict 时仍按 common_task 路由(task_id+node_id+status+output 满足即可)
+        body = {"task_id": "t1", "node_id": "root1", "status": "DONE", "output": {}}
         svc, engine, _repo, _ri = _make_svc()
-        _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(), reg))
+        _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
+                            InMemoryCallbackCorrelationRegistry()))
         assert (engine.reports[0].task_id, engine.reports[0].node_id) == ("t1", "root1")
+        assert engine.reports[0].acceptance_result is None
 
 
-# ===== 兜底 TaskCallbackDataDTO / 非法 body =====
+# ===== common_task 推进 / 非 JSON 422 / 非法 JSON body =====
 
 class TestFallbackAndInvalid:
-    def test_legacy_dto_report_result_advances_engine(self):
-        body = {"loop_task_id": "t1::c1", "workflow_type": "single_bot",
-                "result": {"success": True, "data": "done"}}
+    def test_common_task_report_result_advances_engine(self):
+        # common_task 路由(task_id+node_id+status+output)→ report_result 推进编排核
+        body = {"task_id": "t1", "node_id": "c1", "status": "DONE", "output": "done",
+                "acceptance_result": {"verdict": "DONE", "gaps": []}}
         svc, engine, repo, _ri = _make_svc()
         result = _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
                                      InMemoryCallbackCorrelationRegistry()))
@@ -849,9 +855,8 @@ class TestFallbackAndInvalid:
         patch = engine.reports[0]
         assert (patch.task_id, patch.node_id) == ("t1", "c1")
         assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
-        # ``callback_from_dto`` 不写 workflow_source,故 invoker 落空串(auth 用 workflow_type
-        # 校验但未记录到 invoker 列 —— 轻微审计缺口);DTO 无 instance → main_session_id 空。
-        assert repo.calls[0].invoker == ""
+        # translate_common_task_callback 固定 workflow_source="task_loop" → invoker;无 instance → main_session_id 空
+        assert repo.calls[0].invoker == "task_loop"
         assert repo.calls[0].main_session_id == ""
 
     def test_non_json_body_raises_http_422(self):
@@ -863,42 +868,45 @@ class TestFallbackAndInvalid:
         assert excinfo.value.status_code == 422
         assert engine.reports == [] and engine.starts == []
 
-    def test_invalid_json_dict_raises_http_422(self):
-        from fastapi import HTTPException
-        svc, _engine, _repo, _ri = _make_svc()
-        # 合法 JSON 但不满足任何 schema(缺 loop_task_id、非 ClawMind/BCN)→ 兜底 DTO 校验失败
-        with pytest.raises(HTTPException) as excinfo:
-            _run(_dispatch_call(_req({"foo": "bar"}), svc, NoopCallbackAuthenticator(),
-                                InMemoryCallbackCorrelationRegistry()))
-        assert excinfo.value.status_code == 422
+    def test_invalid_json_dict_acks_without_advancing(self):
+        # 合法 JSON 但不满足 claw_mind/bcn/common_task 任一分流 → 200 ack,不推进编排核(仅非 JSON 才 422)
+        svc, engine, _repo, _ri = _make_svc()
+        result = _run(_dispatch_call(_req({"foo": "bar"}), svc, NoopCallbackAuthenticator(),
+                                     InMemoryCallbackCorrelationRegistry()))
+        _ok_envelope(result)
+        assert engine.reports == [] and engine.starts == []
 
 
 # ===== 幂等:result 重投到已终态节点 =====
 
 class TestIdempotency:
-    """``_dispatch`` 框架分支对 ``TaskStateError`` 的幂等吞错 vs 上抛分流。"""
+    """common_task 回投的幂等/上抛语义:report_result 不做 event_id 去重(重投再驱动 on_report);
+    on_report 抛 TaskStateError(非法翻态/非终态重投)→ _dispatch 上抛(envelope_errors→409)。"""
 
     @staticmethod
-    def _body(loop_task_id="t1::n1", success=True):
-        return {"task_id": "t1", "workflow_source": "bcn", "workflow_id": "w7",
-                "workflow_instance_id": "i1", "status": "COMPLETED",
-                "is_success": success, "loop_task_id": loop_task_id, "node_id": "n1",
-                "output": {"r": 1}}
+    def _body(node_id="n1", status="DONE"):
+        return {"task_id": "t1", "node_id": node_id, "status": status, "output": {"r": 1},
+                "acceptance_result": {"verdict": "DONE", "gaps": []}}
 
-    def test_result_replay_to_terminal_node_acks_idempotent(self):
-        # 引擎 on_report 抛 TaskStateError;节点当前 DONE(终态)→ 200 idempotent
-        engine = _TaskStateErrorEngine(terminal=True)
+    def test_result_replay_redrives_on_report(self):
+        # report_result 不做 event_id 幂等去重:同 body 二投 → on_report 被再次驱动(reports==2)
+        engine = _RecordingEngine()
         svc, _e, _repo, _ri = _make_svc(
             engine=engine,
             graph_nodes={"t1": [_node("t1", "n1", Status.DONE)]},
         )
-        result = _run(_dispatch_call(_req(self._body()), svc, NoopCallbackAuthenticator(),
-                                     InMemoryCallbackCorrelationRegistry()))
-        assert result.data == {"ok": True}
-        assert result.message == "idempotent"
+        body = self._body()
+        r1 = _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
+                                 InMemoryCallbackCorrelationRegistry()))
+        _ok_envelope(r1)
+        assert len(engine.reports) == 1
+        r2 = _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
+                                 InMemoryCallbackCorrelationRegistry()))
+        _ok_envelope(r2)
+        assert len(engine.reports) == 2  # 重投再驱动(无 event_id 幂等)
 
     def test_result_replay_to_non_terminal_re_raises_task_state_error(self):
-        # 节点当前 RUNNING(非终态)→ TaskStateError 上抛(envelope_errors→409,单测直接捕异常)
+        # on_report 抛 TaskStateError(非法翻态)→ _dispatch 上抛(envelope_errors→409,单测直接捕异常)
         engine = _TaskStateErrorEngine(terminal=False)
         svc, _e, _repo, _ri = _make_svc(
             engine=engine,
@@ -954,15 +962,16 @@ class TestDispatchSelectionAndAuth:
         assert auth.sources == ["bcn"]
         assert repo.calls[0].invoker == "bcn"  # state-machine 走 translate_bcn+ingest
 
-    def test_framework_routes_auth_source_from_request(self):
+    def test_common_task_route_does_not_invoke_auth(self):
+        # common_task 分流不经 auth.verify(仅 claw_mind/bcn 鉴权);body 缺 node_id → 不路由 → 200 ack
         body = {"task_id": "t1", "workflow_source": "claw_mind", "workflow_id": "w7",
-                "workflow_instance_id": "i1", "status": "COMPLETED", "is_success": True,
+                "workflow_instance_id": "i1", "status": "DONE", "is_success": True,
                 "loop_task_id": "t1::c1", "output": {"r": 1}}
         svc, engine, _repo, _ri = _make_svc()
         auth = _RecordingAuth()
         _run(_dispatch_call(_req(body), svc, auth, InMemoryCallbackCorrelationRegistry()))
-        assert auth.sources == ["claw_mind"]  # framework 取 req.workflow_source
-        assert len(engine.reports) == 1
+        assert auth.sources == []  # common_task/未路由 均不鉴权(非 claw_mind/bcn)
+        assert len(engine.reports) == 0
 
     def test_callback_report_never_calls_start_run(self, monkeypatch):
         # /callback/report 固定 disposition="result";所有形态均不应触发 start_run。

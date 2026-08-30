@@ -446,7 +446,7 @@ class TestOnReportFail:
     def test_acceptance_fail_folds_running_to_hung(self, svc, graph):
         """乙' a+R1:动态验收 FAIL 叶折叠 RUNNING→HUNG(纯语义归并,跳过 FAILED 瞬态)——
         on_report 一次写直驱(r 可见 new_status==HUNG,非 FAILED),hung_reason=acceptance_fail 落库,
-        loop_round++(节点级升 BBS 计次)与既有 _hung_and_escalate 等价。"""
+        根节点进入 BBS 时 loop_round++，节点级 HUNG 本身不计次。"""
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
@@ -458,7 +458,7 @@ class TestOnReportFail:
         assert n.run_info.extend_props.get("hung_reason") == "acceptance_fail"
         assert n.run_info.acceptance_result is not None
         assert n.run_info.acceptance_result.gaps == ["缺x"]  # 验收结论 + gaps 作 hung 上下文
-        assert graph.loop_round >= 1  # 升级传播计数(_bump_loop_round)
+        assert graph.loop_round >= 1  # 根节点进入 BBS 时计次
         assert planner.plan_calls == 0
 
     def test_pull_fail_status_folded_to_hung(self, svc, graph):
@@ -482,8 +482,25 @@ class TestOnReportFail:
         assert n.run_info.extend_props.get("hung_reason") == "acceptance_fail"
         assert n.run_info.acceptance_result is not None
         assert n.run_info.acceptance_result.gaps == ["缺x"]
-        assert graph.loop_round >= 1  # 升级传播计数(_bump_loop_round)
+        assert graph.loop_round >= 1  # 根节点进入 BBS 时计次
         assert planner.plan_calls == 0  # HUNG 冒泡/升 BBS 交既有逻辑,不 plan 补救
+
+    def test_non_root_hung_does_not_consume_loop_round(self, svc, graph):
+        """子节点 HUNG 只做向上阻塞传播;兄弟仍活跃时不进入根 BBS,不增加 loop_round。"""
+        svc.add_task_nodes([_child("c1"), _child("c2")], parent_node_id="t1")
+        for node_id in ("c1", "c2"):
+            svc.update_task_node_info(
+                _patch("t1", node_id, status=Status.RUNNING, run_mode="single_bot", assignee="b")
+            )
+        svc.update_task_node_info(_patch("t1", "c1", extend_props_patch={"harness_retries": 3}))
+        eng = _engine(svc, planner=StubPlanner(lambda g: []), runner=StubRunner())
+
+        _run(eng.on_harness(_patch("t1", "c1", exec_error="exec_failed_retry")))
+
+        assert svc._get_node(graph, "c1").status == Status.HUNG
+        assert svc._get_node(graph, "t1").status == Status.PLANNING
+        assert graph.loop_round == 0
+        assert graph.extend_props.get("bbs_mode") is None
 
     def test_exec_error_harness_retry_redispatch(self, svc, graph):
         """exec_error(执行报错/传输失败)→harness 重新派发执行(不拆):RUNNING→PENDING→dispatch→RUNNING。
@@ -497,7 +514,7 @@ class TestOnReportFail:
         assert len(runner.run_calls) == 1
 
     def test_fail_harness_max_hung_escalate(self, svc):
-        """v4:harness 重试达 MAX_HARNESS→节点 HUNG + 升 BBS(loop_round++,bbs_mode;节点保留不 remove)。"""
+        """v4:harness 重试达 MAX_HARNESS→节点 HUNG;传播到根后升 BBS(loop_round++,bbs_mode)。"""
         g = svc.initialize_graph(_task_info("t2", max_depth=1))
         svc.add_task_nodes([_child("c1", "t2")], parent_node_id="t2")
         svc.update_task_node_info(_patch("t2", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
@@ -598,7 +615,7 @@ class TestOnHarness:
 # ===== loop_round 仅升 BBS++ =====
 class TestLoopRound:
     def test_acceptance_fail_escalates_bumps_loop_round(self, svc, graph):
-        # 验收 FAIL→直接 HUNG→既有 _hung_and_escalate 逻辑 _bump_loop_round(loop_round++ = 升 BBS 计次)。
+        # 验收 FAIL→直接 HUNG;根确认进入 BBS 时才 _bump_loop_round(loop_round++)。
         # 旧"落 FAILED 交 harness 重派不 bump"前提已废弃(验收不过属内容 gap,直 HUNG 升级,非 normal remedy)。
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
@@ -767,11 +784,11 @@ class TestPlanRetryOnException:
         assert svc._get_node(graph, "c1").status == Status.RUNNING
 
     def test_planner_always_raises_exhausts_to_hung_escalate(self, svc, graph):
-        # plan() 恒抛→耗尽 MAX_HARNESS(默认 3)→pr=plan_call_fail(has_gap=T,无子)→HUNG 升 BBS,不 abort
+        # plan() 恒抛→耗尽 MAX_HARNESS(默认 2)→pr=plan_call_fail(has_gap=T,无子)→HUNG 升 BBS,不 abort
         planner = _RaisingThenOkPlanner(raise_times=99)
         eng = _engine(svc, planner=planner)
         _run(eng.on_execute("t1"))
-        assert planner.calls == 3  # MAX_HARNESS 次,全部 plan_call_fail
+        assert planner.calls == 2  # MAX_HARNESS 次,全部 plan_call_fail
         assert svc._get_node(graph, "t1").status == Status.HUNG
         assert graph.extend_props.get("bbs_mode") is True
         assert graph.loop_round == 1

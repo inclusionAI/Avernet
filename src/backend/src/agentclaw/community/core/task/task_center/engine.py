@@ -14,7 +14,7 @@ Step2 改造(状态机解耦 + PlanResult + 显式 target + harness 执行报错
   返 PlanResult(children, has_gap, gap_detail) 四象限:children→add+dispatch;空+has_gap=F→gap 闭 DONE;
   空+has_gap=T→深度闸门(升 BBS/HUNG)。
 - harness 执行报错(exec_error):bot 压根没跑通(run FAILED/SLA/poll 耗尽)≠ 验收不过(run COMPLETED+FAIL)。
-  执行报错→on_harness 复位 RUNNING→PENDING 重投;计 harness_retries,达 MAX_HARNESS(默认 3)→HUNG 不再流转。
+  执行报错→on_harness 复位 RUNNING→PENDING 重投;计 harness_retries,达 MAX_HARNESS(默认 2)→HUNG 不再流转。
   验收不过(acceptance FAIL+gaps)→on_fail 补救重规划(深度闸门)。
 
 协程化(CR 反馈:任务执行是耗时任务):全链路 ``async def``。锁内 await plan/dispatch(同 task 串行 IO,设计意图);
@@ -57,7 +57,7 @@ from agentclaw.community.core.task.task_runner.integration.ports import BotSendR
 
 logger = logging.getLogger("task.engine")
 
-_DEFAULT_MAX_HARNESS = 3  # 执行报错 harness 重投上限(达上限→HUNG)
+_DEFAULT_MAX_HARNESS = 2  # 执行报错 harness 重投上限(达上限→HUNG)
 
 # 陈旧飞行态阈值(dispatching=True 超此即视为崩溃遗留,redrive 可清理重派)。
 # 默认 60s:正常 start_run 在途远小于此;与默认 recovery lease(60s)对齐——崩溃任务经 recovery
@@ -1919,17 +1919,15 @@ class ExecutionEngine:
         )
 
     def _escalate_hung(self, task_id: str, node_id: str, hung_reason: str) -> None:
-        """HUNG 节点的升级传播(纯同步,锁内):置图级 bbs_mode + loop_round++(节点级升 BBS 计次)
-        + `_maybe_propagate_hung` 冒泡(根/图 HUNG 才真 dispatch run_bbs)。**不置节点态**——调用方须
-        保证节点已 HUNG。乙' a+R1:验收 FAIL 节点已由 on_report 折叠直驱 HUNG,故 _on_fail_collect 直
-        调本方法;其余 HUNG(miss/harness/plan_round/gap_no_progress)经 _hung_and_escalate 一次写 HUNG
-        后复用本方法。"""
-        self._graph.update_task_graph_info(
-            task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True})
-        )
-        self._bump_loop_round(task_id)
-        # 终态传播:查父,若兄弟全终态且含 HUNG→父 HUNG(冒泡,递归)
-        # 传 hung_reason:_maybe_propagate_hung 依据它判"可恢复 vs 硬死锁"(spec §10.5)
+        """传播节点 HUNG 的影响,但不在节点级消耗根 BBS 轮次。
+
+        ``_maybe_propagate_hung`` 负责判断阻塞是否已扩散到根;只有根节点确认进入
+        BBS 的分支才设置 ``bbs_mode``、递增 ``loop_round`` 并调度 ``run_bbs``。
+        **不置节点态**——调用方须保证节点已 HUNG。乙' a+R1:验收 FAIL 节点已由
+        on_report 折叠直驱 HUNG,故 _on_fail_collect 直接调用本方法;其余 HUNG
+        (miss/harness/plan_round/gap_no_progress)经 _hung_and_escalate 写 HUNG 后复用本方法。
+        """
+        # 节点级 HUNG 只做影响传播;根级 BBS 计数在 _maybe_propagate_hung 收口。
         self._maybe_propagate_hung(task_id, node_id, hung_reason)
 
     def _hung_and_escalate(self, task_id: str, node_id: str, hung_reason: str) -> None:
@@ -1961,7 +1959,7 @@ class ExecutionEngine:
             status_to=Status.HUNG,
         )
         logger.info(
-            "[task][hung] task=%s node=%s reason=%s → 升 BBS(loop_round++)",
+            "[task][hung] task=%s node=%s reason=%s → 向上评估根级 BBS",
             task_id,
             node_id,
             hung_reason,
@@ -2020,18 +2018,42 @@ class ExecutionEngine:
             "[task][engine] task=%s 升BBS可恢复态→主动通知 dream-mode bot", task_id
         )
 
+    def _enter_root_bbs(self, task_id: str, execution_graph) -> bool:
+        """Enter one root-level BBS round and schedule the relay if budget remains.
+
+        ``loop_round`` counts root-to-BBS escalations only. A node-level HUNG caller
+        reaches this helper only after ``_maybe_propagate_hung`` has confirmed that
+        the root is blocked (or the root-level MISS recovery gate is active).
+        """
+        if execution_graph.status == Status.HUNG:
+            return False
+        root = self._root(task_id)
+        if root is None or root.run_info.extend_props.get("bbs_owner"):
+            return False
+        self._graph.update_task_graph_info(
+            task_id, TaskGraphPatch(extend_props_patch={"bbs_mode": True})
+        )
+        self._bump_loop_round(task_id)
+        current = self._graph.query_task_dashboard(task_id)
+        if current.status == Status.HUNG:
+            return False
+        self._reset_root_plan_round(task_id)
+        self._schedule_bbs_notify(task_id, current)
+        return True
+
     def _maybe_propagate_hung(
         self, task_id: str, node_id: str, hung_reason: str = ""
     ) -> None:
         """自 node 往上:若父的子全终态且含 HUNG → 父 HUNG(不计额外 loop_round,纯冒泡)→ 继续上行。
         到根 → 图终态收口(HUNG)。若图已 HUNG(loop_exhausted 等已收口)→ 不覆盖 hung_reason。
 
-        **BBS 可恢复态(spec §10.5,调度优化)**:只要根节点进入 HUNG(任一 ``hung_reason``:
+        **BBS 可恢复态(spec §10.5,调度优化)**:只要阻塞已经传播到根节点(任一 ``hung_reason``:
         ``miss_depth_exhausted``/``root_gap_no_decompose``/``gap_no_progress``/
-        ``plan_round_exhausted``/``exec_stuck``/``child_hung`` 等)且图 ``bbs_mode`` 已置、根未被
-        claim 时,即升 BBS 可恢复态(派发 ``run_bbs``);``loop_exhausted`` 由 ``_bump_loop_round``
-        提前置图 HUNG,被上方 ``g.status==HUNG`` 短路拦截、不再调度,保留反失控兜底。在途 BBS
-        (``bbs_owner`` 非空)亦跳过,不重复派发。"""
+        ``plan_round_exhausted``/``exec_stuck``/``child_hung`` 等),且根未被 claim,即进入根级 BBS
+        可恢复态(派发 ``run_bbs``);``loop_exhausted`` 由 ``_bump_loop_round`` 置根/图 HUNG,
+        被上方 ``g.status==HUNG`` 短路拦截、不再调度,保留反失控兜底。在途 BBS(``bbs_owner``
+        非空)亦跳过,不重复派发。``loop_round`` 只在根确认进入 BBS 时递增。
+        """
         # recoverable 仅用于下方"子 HUNG 冒泡到根(分支2)"路径:miss_depth_exhausted 时根保持
         # PLANNING 待 BBS 接力(不翻 HUNG);其它 reason 走正常冒泡→根置 HUNG→分支1 升 BBS。
         recoverable = hung_reason == "miss_depth_exhausted"
@@ -2040,8 +2062,7 @@ class ExecutionEngine:
             parent = self._graph.get_parent_task(task_id, cur)
             if parent is None:
                 # cur 是根 → 图级收口(根 HUNG → 图 HUNG);不覆盖已设的图级 hung_reason。
-                # 但若图已 bbs_mode=true 且根未被 BBS 持有 → 维持根原态(冒泡到此不置图 HUNG),
-                # 留 BBS 接力可恢复(spec §10.5:升 BBS 落可恢复态,非图级硬 HUNG)。
+                # 根 HUNG 且图未进入硬终态时,由根级入口统一计数并调度 BBS。
                 root = self._root(task_id)
                 if (
                     root is not None
@@ -2051,20 +2072,14 @@ class ExecutionEngine:
                     g = self._graph.query_task_dashboard(task_id)
                     if g.status == Status.HUNG:
                         return
-                    if (
-                        g.extend_props.get("bbs_mode")
-                        and not g.extend_props.get("bbs_owner")
-                    ):
-                        # 优化:只要根进入 HUNG 即升 BBS 可恢复态(不限 miss_depth_exhausted)。
-                        # loop_exhausted(MAX_LOOP)已由上方 g.status==HUNG 短路 return 拦截,不会走到这里,
-                        # 故反失控兜底仍保留;在途 BBS(根已被 claim,bbs_owner 非空)也在此跳过,不重复派发。
+                    if not g.extend_props.get("bbs_owner"):
+                        # 根 HUNG 才进入 BBS;此处统一递增根级 loop_round。
                         logger.info(
                             "[task][hung-propagate] task=%s 根 HUNG(reason=%s)→升 BBS 可恢复态",
                             task_id,
                             hung_reason,
                         )
-                        self._reset_root_plan_round(task_id)
-                        self._schedule_bbs_notify(task_id, g)
+                        self._enter_root_bbs(task_id, g)
                         return
                     # 无 bbs_mode 或已被 BBS claim → 硬 HUNG 收口(不再调度,等在途 BBS 回投)
                     # 终态镜像:root 已 HUNG → graph 经单一同步点镜像 HUNG;保留 root_stuck 诊断
@@ -2089,15 +2104,13 @@ class ExecutionEngine:
                     root is not None
                     and parent.node_id == root.node_id
                     and recoverable
-                    and _g_now.extend_props.get("bbs_mode")
                     and not _g_now.extend_props.get("bbs_owner")
                 ):
                     logger.info(
                         "[task][hung-propagate] task=%s 根可恢复态拦截(miss_depth_exhausted),根保持 PLANNING",
                         task_id,
                     )
-                    self._reset_root_plan_round(task_id)
-                    self._schedule_bbs_notify(task_id, _g_now)
+                    self._enter_root_bbs(task_id, _g_now)
                     return
                 self._graph.update_task_node_info(
                     TaskNodePatch(

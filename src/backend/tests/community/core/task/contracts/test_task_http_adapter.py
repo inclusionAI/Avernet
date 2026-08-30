@@ -310,8 +310,9 @@ class TestTaskDashboard:
         r = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": task_id})
         assert r.status_code == 200, r.text
         body = r.json()["data"]
-        # stub 路径无 owner bot → 无法规划 → 根 gap 拆不出 → 图 HUNG(语义正确:无规划端口不假 done)
-        assert body["status"] == "REVIEWING"
+        # stub 路径无 owner bot → 根 gap 拆不出 → root HUNG(BBS 可恢复态);graph.status 不镜像 BBS 可恢复 HUNG,
+        # 保持非终态 EXECUTING(等 BBS 接力恢复);root 自身 HUNG → DTO 投影 REVIEWING。
+        assert body["status"] == "EXECUTING"
         assert any(n["node_id"] == task_id for n in body["tasks"])
         # 根节点 task_spec 字段透传(task_id 服务端回填进 metadata)
         root = next(n for n in body["tasks"] if n["node_id"] == task_id)
@@ -361,11 +362,13 @@ class TestTaskCallbackReport:
             node_run_graph=None,  # type: ignore[arg-type]
         )
         graph_svc.add_task_nodes([child], "t_http")  # 子节点以 RUNNING 入图(add 保留状态)
-        # 回投 PASS(acceptance 驱动 RUNNING→DONE)
+        # 回投 PASS:common_task 形态(task_id+node_id+status+output+acceptance_result)→ acceptance 驱动 RUNNING→DONE
         r = c.post("/api/v1/collaboration/tasks/callback/report", json={
-            "loop_task_id": "t_http::N_http",
-            "workflow_type": "single_bot",
-            "result": {"success": True, "data": "ok"},
+            "task_id": "t_http",
+            "node_id": "N_http",
+            "status": "DONE",
+            "output": "ok",
+            "acceptance_result": {"verdict": "DONE", "gaps": []},
         })
         assert r.status_code == 200, r.text
         assert r.json()["data"] == {"ok": True}

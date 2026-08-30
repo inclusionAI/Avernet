@@ -923,7 +923,6 @@ app.include_router(channel_router)
 app.include_router(quality_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
-app.include_router(task_router)
 app.include_router(work_orders_http_router)
 try:
     app.include_router(render_screen_router)
@@ -982,9 +981,6 @@ app.include_router(economy_governance_router)
 app.include_router(economy_governance_admin_router)
 app.include_router(economy_governance_workflow_router)
 app.include_router(enums_router)
-app.include_router(task_internal_router)
-app.include_router(task_callback_router)
-
 # Runtime-mode-conditional routers (bound by DI: empty in prod, populated
 # in local boots via ``TestingInfrastructureModule``). The app does not
 # branch on mode here — composition root decides what gets mounted.

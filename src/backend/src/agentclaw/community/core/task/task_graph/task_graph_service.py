@@ -63,6 +63,9 @@ _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
 # 可委托(add_task_nodes 时 parent 允许的态):PENDING(初始/根)/FAILED(补救)/PLANNING(前向重规划)
 _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNING, Status.HUNG}
 
+# 终态集(无出边):acceptance 回投到终态节点 → 幂等拒绝(DONE/FAILED/HUNG/CANCELLED)。
+_TERMINAL_STATUSES: set[Status] = {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}
+
 _DEFAULT_MAX_DEPTH = 3
 _DEFAULT_MAX_LOOP = 3  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
 _DEFAULT_MAX_PLAN_ROUND = 3  # 节点级重规划次数(父节点子全 DONE→gap 未闭→重 plan 产新子)
@@ -393,6 +396,12 @@ class TaskGraphService:
             new_status: Status | None = None
             if patch.acceptance_result is not None:
                 # 模式① acceptance 驱动
+                if node.status in _TERMINAL_STATUSES:
+                    # 验收回投到已终态节点(DONE/FAILED/HUNG/CANCELLED)→ 幂等拒绝抛 TaskStateError
+                    # (如 BBS 对已 DONE scoped 节点再报 PASS);合法验收仅在 RUNNING 叶上(RUNNING→DONE/FAILED/HUNG)。
+                    raise TaskStateError(
+                        f"验收回投到已终态节点: {node.status}(task={patch.task_id} node={patch.node_id})"
+                    )
                 verdict = patch.acceptance_result.verdict
                 if verdict == AcceptanceVerdict.DONE:
                     new_status = Status.DONE
@@ -418,7 +427,9 @@ class TaskGraphService:
                     prev_status=prev_status, new_status=node.status,
                 )
             elif patch.status is not None:
-                # 模式② status 直驱
+                # 模式② status 直驱(软状态机:非法直驱告警但放行落地——BBS 重新派发需把已 DONE scoped
+                # 叶复位 RUNNING、_maybe_propagate_hung 冒泡到已 HUNG 根等恢复语义依赖此软放行;
+                # 同态复置为幂等 no-op)。严格终态守卫由模式① acceptance 路径 enforce。
                 new_status = patch.status
                 allowed = _DIRECT_TRANSITIONS.get(node.status, set())
                 if new_status not in allowed:
@@ -828,13 +839,13 @@ class TaskGraphService:
             return depth
 
     def _execution_config(self, task_id: str) -> dict[str, Any]:
-        """读 MAX_DEPTH(结构深度闸门,默认 3)/ MAX_LOOP(图级总轮次,默认 3)/ MAX_HARNESS(默认 3),填默认。"""
+        """读 MAX_DEPTH(结构深度闸门,默认 3)/ MAX_LOOP(图级总轮次,默认 3)/ MAX_HARNESS(默认 2),填默认。"""
         with self._lock_for(task_id):
             graph = self._require_graph(task_id)
             cfg: dict[str, Any] = dict(graph.extend_props.get("execution_config", {}))
             cfg.setdefault("MAX_DEPTH", _DEFAULT_MAX_DEPTH)
             cfg.setdefault("MAX_LOOP", _DEFAULT_MAX_LOOP)
-            cfg.setdefault("MAX_HARNESS", 3)
+            cfg.setdefault("MAX_HARNESS", 2)
             cfg.setdefault("MAX_PLAN_ROUND", _DEFAULT_MAX_PLAN_ROUND)
             cfg.setdefault("BBS_MAX_DEPTH", _DEFAULT_BBS_MAX_DEPTH)
             return cfg

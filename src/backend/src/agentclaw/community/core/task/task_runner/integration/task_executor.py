@@ -556,7 +556,7 @@ class TaskExecutor:
                 "只有 reporter_bot_id 对应的 Bot（本群唯一 master/driver）可以调用 "
                 "task-loop 的任务验收(acceptance)逻辑。所有 worker 完成或明确失败后，"
                 "reporter 必须立即逐条检查当前节点 goal.acceptances，汇总完整执行输出，"
-                "生成 SUCCESS/FAIL，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
+                "生成 DONE/FAILED，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
                 "验收步骤不可跳过：执行→逐条校验→生成结论→HTTP上报→确认HTTP 200。\n"
                 "只有在上述完成条件满足后才触发 task-acceptance；建群初始上下文不触发验收。\n"
                 f"目标:{_task_objective}\n"
@@ -574,12 +574,12 @@ class TaskExecutor:
                     + json.dumps({
                         "task_id": _task_id,
                         "node_id": _node_id,
-                        "status": "SUCCESS",
+                        "status": "DONE",
                         "output": "完整协作群执行输出",
                         "acceptance_result": {},
                         "extend_props": {},
                     }, ensure_ascii=False)
-                    + "\nFAIL 时只将 status 改为 FAIL，并在 acceptance_result.gaps 填写具体差距。"
+                    + "\nFAILED 时只将 status 改为 FAILED，并在 acceptance_result.gaps 填写具体差距。"
                 )
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(

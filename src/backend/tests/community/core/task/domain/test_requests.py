@@ -45,4 +45,4 @@ def test_task_spec_to_dict_is_domain_shape():
 
 def test_enums_values():
     assert {e.value for e in TaskSourceType} == {"bot", "coop_group", "api"}
-    assert {e.value for e in TaskType} == {"yaml", "workflow", "dynamic"}
+    assert {e.value for e in TaskType} == {"yaml", "workflow", "dynamic", "static_plan", "bbs"}

@@ -914,6 +914,10 @@ async def _dispatch(
         _raw_obj = json.loads(raw)
     except Exception:
         _raw_obj = None
+    if _raw_obj is None and raw:
+        # raw-body 非 JSON → HTTPException(422)(对齐 _dispatch docstring:仅非 JSON 走 422;
+        # 合法 JSON 但不匹配任一分流 → 200 ack,不推进)。各端点共享本分流。
+        raise HTTPException(status_code=422, detail="callback raw body is not valid json")
     _sid = _session_id_of(_raw_obj)  # session_id(主回投键)→ 入口/链路各日志关联
     # ClawMind / BCN 是事件/工作流级回投(run_id/workflow_id 不对应框架节点):只落 task_callback 审计,
     # 不推进编排核(start_run/report_result 会 NodeNotFoundError),直接 ack。
@@ -1030,8 +1034,10 @@ async def _dispatch(
                 logger.info("[task_callback] report_callback_to_driver_engine, type=result")
                 await svc.callback.report_result(tc.data)
         except TaskStateError as e:
+            # 非终态节点重投 / 非法翻态 → TaskStateError 上抛(envelope_errors → 409);终态节点重投
+            # 经 report_result event_id 幂等去重提前 ack,不至此。原 ``raise(<str>)`` 会抛 TypeError,修正为再抛原异常。
             logger.error("[task_callback] report_callback_to_driver_engine, meet exception = %s", e)
-            raise (f"[task_callback] report_callback_to_driver_engine, meet exception = {str(e)}")
+            raise
         return envelope({"ok": True}, request)
 
     logger.info("[task_callback] report_callback_to_driver_engine, finish")

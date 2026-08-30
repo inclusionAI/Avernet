@@ -187,17 +187,15 @@ def test_get_group_session_reads_latest_running_session_id_not_create():
 
 
 def test_form_coop_group_does_not_attach_event_subscriptions():
-    """event_subscriptions 触发 BCS require_human(拒 Bot/HMAC-only → 401/403),故不再内联挂 BCN webhook;
-    建群走 no-sub 分支(HMAC/Bearer 匿名或 driver-bot caller),终结态收敛交 result poller。
-    即便 extend_props 带 api_base_url,也不得挂 event_subscriptions。"""
+    """BCN event_subscriptions 仅 manager_worker/state_machine 模态(and _sink_base)内联挂;chat 群不挂,
+    终结态收敛交 result poller。本测验 chat 群即便带 api_base_url 也不挂订阅。"""
     bcs = _Bcs()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
                        poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
     _run(exe.form_coop_group(GroupFormation(
-        bot_ids=["drv"], collab_mode="state_machine",
+        bot_ids=["drv"], collab_mode="chat",
         members_info=[{"bot_id": "drv", "role": "manager"}],
-        extend_props={"collaboration_definition_yaml": "kind: collab",
-                      "api_base_url": "https://cb.example.com/"},
+        extend_props={"api_base_url": "https://cb.example.com/"},
     )))
     assert not bcs.created_req.event_subscriptions
 
@@ -278,8 +276,8 @@ def test_form_coop_group_manager_worker_attaches_event_subscriptions():
     assert s["name"] == "avernet-manager-worker"
     assert s["payload"] == {"mode": "full"}
     assert set(s["event_filters"]) == {
-        "group.created", "session.created",
-        "task.assigned", "task.completed", "session.completed",   # §4
+        "session.created",
+        "task.assigned", "task.completed", "session.completed",   # §4(group.created 不再订阅)
     }
     assert s["sink"]["type"] == "webhook"
     assert s["sink"]["url"] == "https://api.example.com/api/v1/collaboration/tasks/callback/report"

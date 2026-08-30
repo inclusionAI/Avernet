@@ -149,7 +149,7 @@ class TestSingleBotPollReportE2E:
         svc = TaskGraphService()
         svc.initialize_graph(_task_info())
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub(),
-                              bcs_identity=_DoubleBcsBotIdentityResolver())
+                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True)
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         nodes = {n.node_id: n for n in g.tasks}
@@ -178,7 +178,7 @@ class TestCoopGroupManagerWorkerE2E:
                                    "success": True, "data": "group_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
-                              bcs_identity=_DoubleBcsBotIdentityResolver())
+                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True)
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         n_group = next(n for n in g.tasks if n.node_id == "N_group")
@@ -215,7 +215,7 @@ class TestManagerWorkerEventSubscriptionsE2E:
         bcs = _RecordingDoubleBcsClient(poll_once_then_terminal=False)   # 建群即可断言,不靠终态
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
                               bcs_identity=_DoubleBcsBotIdentityResolver(),
-                              api_base_url="https://api.example.com")
+                              api_base_url="https://api.example.com", task_search_skill_enabled=True)
         _run(eng.on_execute("t_phase"))
         _wait_for(lambda: any(r.group_strategy == "manager_worker" for r in bcs.created_reqs),
                   timeout=10.0)
@@ -226,15 +226,18 @@ class TestManagerWorkerEventSubscriptionsE2E:
         assert s["name"] == "avernet-manager-worker"
         assert s["payload"] == {"mode": "full"}
         assert set(s["event_filters"]) == {
-            "group.created", "session.created",
-            "task.assigned", "task.completed", "session.completed",   # §4
+            "session.created",
+            "task.assigned", "task.completed", "session.completed",   # §4(group.created 不再订阅)
         }
         assert s["sink"]["type"] == "webhook"
         assert s["sink"]["url"] == "https://api.example.com/api/v1/collaboration/tasks/callback/report"
         assert s["sink"]["request_timeout_ms"] == 10000
-        # 同批 state_machine 群不挂订阅(只有 manager_worker 挂)
+        # 同批 state_machine 群也内联挂 avernet-state_machine 订阅(5 个 state_machine.* 事件)
         sm_reqs = [r for r in bcs.created_reqs if r.group_strategy == "state_machine"]
-        assert sm_reqs and all(not r.event_subscriptions for r in sm_reqs)
+        assert sm_reqs and all(r.event_subscriptions for r in sm_reqs)
+        sm_sub = sm_reqs[0].event_subscriptions[0]
+        assert sm_sub["name"] == "avernet-state_machine"
+        assert "state_machine.run.completed" in sm_sub["event_filters"]
         _stop_poller(eng)
 
 
@@ -247,7 +250,7 @@ class TestCoopGroupStateMachineE2E:
                                    "success": True, "data": "sm_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
-                              bcs_identity=_DoubleBcsBotIdentityResolver())
+                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True)
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         n_sm = next(n for n in g.tasks if n.node_id == "N_sm")

@@ -306,7 +306,8 @@ def _build_bcn_execution_graph(
     data = data if isinstance(data, dict) else {}
     run_detail = run_detail if isinstance(run_detail, dict) else None
     graph_detail = graph_detail if isinstance(graph_detail, dict) else None
-    rid = run_id
+    # run_id 整数化:字符串 run_id(如 BCN "run-1")→0;真值保留在 extend_props/run_id 列(graph run_id 为 int)
+    rid = 0 if isinstance(run_id, str) else run_id
     status = _bcn_state_machine_status(event_type)
 
     if not run_detail and not graph_detail:
@@ -347,9 +348,13 @@ def _build_bcn_execution_graph(
     logger.info("[task_callback], edges = %s", str(graph_detail.get("edges")))
     relations: list[dict[str, Any]] = []
     for _e in graph_detail.get("edges") or []:
-        if isinstance(_e, dict) and _e.get("source") and _e.get("target"):
-            relations.append({"src_id": _e["source"], "dst_id": _e["target"],
-                              "type": "DEPENDENCY", "extend_props": {}})
+        if isinstance(_e, dict):
+            # 兼容 src/dst 与 source/target 两种边键命名(BCN DAG)
+            _src = _e.get("src") or _e.get("source")
+            _dst = _e.get("dst") or _e.get("target")
+            if _src and _dst:
+                relations.append({"src_id": _src, "dst_id": _dst,
+                                  "type": "DEPENDENCY", "extend_props": {}})
 
     graph_ep: dict[str, Any] = {}
     if run_obj.get("status") is not None:
@@ -362,10 +367,7 @@ def _build_bcn_execution_graph(
         "task_id": "",
         "loop_round": 0,
         "status": status.value,
-        "output": {
-            "artifact_text": run_output,
-            "input": run_obj.get("input")
-        },
+        "output": run_output if isinstance(run_output, dict) else {},
         "extend_props": graph_ep,
         "tasks": tasks,
         "relations": relations,
@@ -430,10 +432,13 @@ class CallbackDataEnricher:
             )
         else:
             logger.error(
-                "[task_callback] BCS run 明细非 200/未取到 run_id=%s session_id=%s",
+                "[task_callback] BCS run 明细非 200/未取到 run_id=%s session_id=%s → 用事件体兜底建图",
                 run_id,
                 _sid,
             )
+            # 用事件体兜底建极简图(_build_bcn_execution_graph 的 data-only 路径),保证 execution_graph 永不为原始事件体
+            _ev_data = raw.get("data") if isinstance(raw, dict) else None
+            eg = _build_bcn_execution_graph(event_type=event_type, run_id=run_id, data=_ev_data)
 
         if eg is not None:
             cd.data["execution_graph"] = eg

@@ -265,12 +265,14 @@ class TestUpdateTaskNodeInfo:
         assert svc._get_node(graph, "t1").status == Status.DONE
 
     def test_illegal_transition_raises(self, svc: TaskGraphService, graph):
-        # DONE 不可再翻(PASS 后)
+        # 已 DONE(终态)节点再回投验收 → 模式① 终态守卫抛 TaskStateError(幂等拒绝)。
+        # 注:模式② status 直驱为软状态机(BBS 重新派发需 DONE→RUNNING 复位 scoped 叶),非法仅告警不抛;
+        # 严格终态不可再验收由模式① enforce。
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE)))
         with pytest.raises(TaskStateError):
-            svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING))
+            svc.update_task_node_info(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE)))
 
     def test_fold_output_only(self, svc: TaskGraphService, graph):
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
@@ -478,7 +480,7 @@ class TestMisc:
         cfg = svc._execution_config("t1")
         assert cfg["MAX_DEPTH"] == 3  # 默认
         assert cfg["MAX_LOOP"] == 3
-        assert cfg["MAX_HARNESS"] == 3
+        assert cfg["MAX_HARNESS"] == 2
 
     def test_execution_config_custom(self, svc: TaskGraphService):
         ti = _task_info("tC")
@@ -486,7 +488,7 @@ class TestMisc:
         svc.initialize_graph(ti)
         assert svc._execution_config("tC")["MAX_DEPTH"] == 5
         assert svc._execution_config("tC")["MAX_LOOP"] == 3  # 默认
-        assert svc._execution_config("tC")["MAX_HARNESS"] == 3  # v4 默认
+        assert svc._execution_config("tC")["MAX_HARNESS"] == 2  # v4 默认
 
     def test_task_not_found(self, svc: TaskGraphService):
         with pytest.raises(TaskNotFoundError):
