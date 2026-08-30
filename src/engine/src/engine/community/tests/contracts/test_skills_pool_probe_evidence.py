@@ -102,6 +102,10 @@ def test_stable_repo_bridge_check_is_conditional_and_verified(
         repo_delivery=RepoDelivery.DOWNLOAD,
     )
     assert active.status is RuntimeLayoutInspectionStatus.READY
+    resolved = active.evidence["resolved_layout"]
+    assert resolved["engine"] == engine
+    assert resolved["layout_contract_version"] == LAYOUT_CONTRACT_VERSION
+    assert resolved["pool_center"] == str(layout.pool_center)
     checks = active.evidence["checks"]
     if engine in {"aicoding", "hermes"}:
         assert checks["stable_repo_bridge_valid"] is True
