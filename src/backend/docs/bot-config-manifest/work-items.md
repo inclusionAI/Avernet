@@ -515,6 +515,29 @@ overwritten** — nothing about it changes and the per-entry failures are record
 declaration was `{A, B}` removes B, so a transient fetch failure would delete a
 working entity. A category is only ever written from a complete desired state.
 
+**The guarantee is scoped to before delivery starts, and that scope is
+deliberate.** Every entry in a category is **materialised first** — fetched,
+verified, unpacked, stored (W11) — and only then is any delivery write issued
+for that category. So the all-or-nothing decision is made when the whole desired
+state is in hand, and the failure mode it removes is the common one: a network
+fetch failing.
+
+What it does **not** cover: a delivery write failing part-way through a category
+whose entries all materialised. The third identity file failing to write leaves
+the first two written and, under overwrite, some old entries already removed.
+v1 does **not** roll that back — there is no category-wide staging or
+transaction across the services apply writes through, and inventing one would
+mean a distributed transaction over `IdentityService`, `SkillSetService` and the
+resource service.
+
+Stated rather than hidden, because the two failure classes are very different in
+likelihood: fetching from a caller's server across the internet fails routinely;
+a local service write failing mid-category does not. The residual case is
+recorded per entry like any other, and the apply report is what shows a category
+in a mixed state. Closing it properly would need a staging-and-commit protocol
+across the materialisers — worth its own item if it ever proves necessary, not
+worth pre-building.
+
 This is also why **`on_fetch_failure` lost its `skip` value**. Under the
 withdrawn per-entry diff, `skip` meant "proceed without this one" and left the
 existing entity alone. Under overwrite it would mean "delete this one" — the
@@ -1278,8 +1301,12 @@ is applied.
 - Routes `GET`/`PUT`/`DELETE /openapi/v1/bots/{bot_id}/config-manifest` and
   `GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities`, each with its
   `ADMISSION` row, under `PublicAPIRoute`.
-- A feature flag gating the surface until W5 lands, since these routes are
-  public and apply does not exist yet.
+- A feature flag gating the surface. **It lifts when W8 lands, not W5.** These
+  routes are public, and until W8 wires `PUT` to immediate apply (§2.6) an
+  accepted manifest would sit unapplied; until W6 lands, a document declaring
+  `resources` would be accepted with no materialiser behind it. Either the flag
+  stays on through W6 and W8, or each incomplete category and trigger is gated
+  independently — one flag through W8 is the simpler of the two.
 
 **Out of scope.** Any apply. Any fetching. Credentials. Any change to the
 existing `/startup-script` endpoints. Any change to `BaasService`.
@@ -1305,6 +1332,12 @@ capability table is fully determined.
     reserving the name means a future mixed fleet changes only where the value
     comes from, with no schema change and nothing for users to rewrite;
   - a `resources.path` that is absolute or contains `../`;
+  - two `cli_tools` entrypoints whose **basenames collide**, anywhere across the
+    bot's whole `cli_tools` list (`bin/tool` and `helpers/tool`, or the same
+    `tool` from two different tools). The exposed command name is the basename,
+    so colliding ones cannot both be callable — one shadows the other and the
+    winner depends on installation order. v1 has no alias field: the collision
+    is refused instead;
   - a `cli_tools.entrypoints` value that is absolute, contains `..`, or — once
     the archive is unpacked — resolves outside its tool directory, does not
     exist, or is not a regular file. `entrypoints` decides what gets made
@@ -1314,6 +1347,12 @@ capability table is fully determined.
     `path` (the nesting ban, schema §3.2);
   - an `identity.type` outside the engine's legal set — `VALID_IDENTITY_FILES`
     generally, `CLAUDE.md` only for `claude_code`;
+  - an `identity.type` naming a **reserved** file (`MEMORY.md`, `IDENTITY.md`).
+    Both are in `VALID_IDENTITY_FILES`, so the check above accepts them, but
+    §3.2 guarantees apply never writes or removes them — a document declaring
+    one could be accepted and then never converge. Refusing at `PUT` (and so at
+    W13's phase-1 preflight) is what keeps "accepted" and "appliable" the same
+    set;
   - any limit in schema §5 checkable at write time (document size, per-category
     entry count, inline `content` size).
 - [ ] `PUT` is all-or-nothing: a document with one unsupported category is
