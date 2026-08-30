@@ -14,6 +14,10 @@ import pytest
 
 from agentclaw.community.core.service_bot.services.bot_build_service import (
     BotBuildService,
+    BotBuildServiceError,
+)
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ResolvedSharedCorpusDelivery,
 )
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
 
@@ -26,6 +30,72 @@ def _make_service() -> BotBuildService:
     service = BotBuildService.__new__(BotBuildService)
     service._device_service = MagicMock()
     return service
+
+
+def _center_delivery(runtime_path: str) -> ResolvedSharedCorpusDelivery:
+    return ResolvedSharedCorpusDelivery(
+        corpus="center",
+        runtime_path=runtime_path,
+        store_prefix="aidesktop/aidesktop_dev/bolt_shared/skills-center",
+        layout_contract_version="skills-pool-p3-v1",
+    )
+
+
+@pytest.mark.unit
+def test_engine_evidence_adds_center_corpus_to_snapshot_excludes() -> None:
+    provider = MagicMock()
+    provider.get_base_path.return_value = "/home/admin/.openclaw"
+    plan = EngineBuildPlan(
+        engine_type="openclaw",
+        source_root_name=".openclaw",
+        migration_subpath="openclaw",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=["logs/"],
+    )
+
+    updated = BotBuildService._apply_shared_corpus_excludes(
+        build_plan=plan,
+        provider=provider,
+        shared_corpora=(
+            _center_delivery(
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center"
+            ),
+        ),
+    )
+
+    assert updated.rsync_excludes == [
+        "logs/",
+        "workspace/skills-pool/skill-center",
+    ]
+    assert plan.rsync_excludes == ["logs/"]
+
+
+@pytest.mark.unit
+def test_center_corpus_outside_snapshot_root_fails_closed() -> None:
+    provider = MagicMock()
+    provider.get_base_path.return_value = "/home/admin/.openclaw"
+    plan = EngineBuildPlan(
+        engine_type="openclaw",
+        source_root_name=".openclaw",
+        migration_subpath="openclaw",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=[],
+    )
+
+    with pytest.raises(BotBuildServiceError, match="outside"):
+        BotBuildService._apply_shared_corpus_excludes(
+            build_plan=plan,
+            provider=provider,
+            shared_corpora=(
+                _center_delivery("/home/admin/.aicoding/workspace/skill-center"),
+            ),
+        )
 
 
 @pytest.mark.unit

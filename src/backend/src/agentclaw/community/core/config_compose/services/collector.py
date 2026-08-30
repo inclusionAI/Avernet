@@ -45,6 +45,11 @@ from agentclaw.community.core.mcp.services.config_service import MCPConfigServic
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionIdentity,
+    CanonicalCenterVersionRef,
+    CanonicalCenterVersionStore,
+)
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bolt_base_dir,
@@ -135,6 +140,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         path_factory: WorkspacePathFactory,
         identity_service: "IdentityService",
         overrides_reader: ChannelEngineOverridesReader,
+        center_store: CanonicalCenterVersionStore,
         local_mcp_registry: LocalMCPRegistry | None = None,
     ) -> None:
         self._skill_set_service_factory = skill_set_service_factory
@@ -144,6 +150,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         self._path_factory = path_factory
         self._identity_service = identity_service
         self._overrides_reader = overrides_reader
+        self._center_store = center_store
         # Defaulting to the bare registry (its own default config path) matches
         # what ``passport_scope`` already does for every caller, so "is this
         # server local?" has one answer across the codebase. A divergent source
@@ -193,10 +200,6 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     path=git_path[len("git://"):],
                 ))
             elif git_path.startswith("center://"):
-                from agentclaw.community.core.skill_center.canonical_center_store import (
-                    CanonicalCenterVersionIdentity,
-                )
-
                 try:
                     identity = CanonicalCenterVersionIdentity(
                         skill_uuid=r.get("skill_uuid"),
@@ -206,6 +209,18 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     raise ValueError(
                         "Center Skill requires exact canonical identity"
                     ) from exc
+                try:
+                    ready = self._center_store.verify_version(
+                        CanonicalCenterVersionRef(identity)
+                    )
+                except Exception as exc:
+                    raise ValueError(
+                        "Center Skill exact Store Version is unavailable"
+                    ) from exc
+                if not ready:
+                    raise ValueError(
+                        "Center Skill exact Store Version is unavailable"
+                    )
                 collected.append(
                     CollectedSkill(
                         name=name,

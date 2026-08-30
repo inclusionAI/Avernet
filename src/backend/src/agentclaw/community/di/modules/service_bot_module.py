@@ -138,6 +138,7 @@ from agentclaw.community.core.storage.path import (
 )
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterStoreConfig,
+    CanonicalCenterVersionStore,
 )
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.bot_config import StoreRef
@@ -396,11 +397,18 @@ class ServiceBotModule(Module):
         bot_build_service: BotBuildService,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         capability_reader: BotCapabilityStateReaderProtocol,
+        center_store: CanonicalCenterStoreConfig,
+        canonical_center_versions: CanonicalCenterVersionStore,
     ) -> ArcaSnapshotProducer:
         """ARCA snapshot plus the service draft's frozen Skills layout."""
         return ArcaSnapshotProducer(
             bot_build_service,
-            ServiceSkillsManifestBuilder(layout_repository, capability_reader),
+            ServiceSkillsManifestBuilder(
+                layout_repository,
+                capability_reader,
+                center_store.base_prefix,
+                canonical_center_versions,
+            ),
         )
 
     @singleton
@@ -430,6 +438,7 @@ class ServiceBotModule(Module):
             path_factory=injector.get(WorkspacePathFactory),
             identity_service=injector.get(IdentityService),
             overrides_reader=injector.get(ChannelEngineOverridesReader),
+            center_store=injector.get(CanonicalCenterVersionStore),
         )
 
     @singleton

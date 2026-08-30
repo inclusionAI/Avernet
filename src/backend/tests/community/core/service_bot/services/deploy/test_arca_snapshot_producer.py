@@ -10,6 +10,7 @@ from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer
     ArcaSnapshotProducer,
 )
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ResolvedSharedCorpusDelivery,
     ServiceSkillsManifestBuilder,
     ServiceSkillsManifestError,
     service_skills_env_from_ext,
@@ -25,19 +26,134 @@ from agentclaw.community.core.skills_pool.types import (
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 
 
+_CENTER_STORE_PREFIX = "aidesktop/aidesktop_dev/bolt_shared/skills-center"
+
+
+class _CenterStore:
+    def __init__(self, ready: bool = True) -> None:
+        self.ready = ready
+        self.refs = []
+
+    def verify_version(self, ref) -> bool:
+        self.refs.append(ref)
+        return self.ready
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("bot", "runtime_engine", "runtime_path"),
+    [
+        (
+            {"active_engine": "claude_code", "template_type": "normalCC"},
+            "claude_code",
+            "/home/admin/.claude_code/workspace/skills-pool/skill-center",
+        ),
+        (
+            {
+                "active_engine": "claude_code",
+                "template_type": "applicationCoding",
+            },
+            "aicoding",
+            "/home/admin/.aicoding/workspace/skills-pool/skill-center",
+        ),
+        (
+            {"active_engine": "hermes"},
+            "hermes",
+            "/home/admin/.hermes/workspace/skills-pool/skill-center",
+        ),
+    ],
+)
+def test_shared_center_delivery_uses_engine_runtime_evidence(
+    bot, runtime_engine, runtime_path
+) -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    state = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": {
+                "engine": runtime_engine,
+                "layout_contract_version": "skills-pool-p3-v1",
+                "pool_center": runtime_path,
+            }
+        },
+    )
+
+    delivery = ResolvedSharedCorpusDelivery.center_from_state(
+        state=state,
+        bot=bot,
+        store_prefix=_CENTER_STORE_PREFIX,
+    )
+
+    assert delivery.runtime_path == runtime_path
+
+
+@pytest.mark.unit
+def test_shared_center_delivery_rejects_missing_or_mismatched_evidence() -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    state = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": {
+                "engine": "openclaw",
+                "layout_contract_version": "skills-pool-p3-v1",
+            }
+        },
+    )
+
+    with pytest.raises(ServiceSkillsManifestError, match="missing pool_center"):
+        ResolvedSharedCorpusDelivery.center_from_state(
+            state=state,
+            bot={"active_engine": "openclaw"},
+            store_prefix=_CENTER_STORE_PREFIX,
+        )
+    with pytest.raises(ServiceSkillsManifestError, match="matching READY"):
+        ResolvedSharedCorpusDelivery.center_from_state(
+            state=replace(
+                state,
+                last_probe_evidence={
+                    "resolved_layout": {
+                        "engine": "hermes",
+                        "layout_contract_version": "skills-pool-p3-v1",
+                        "pool_center": "/home/admin/.hermes/workspace/skills-pool/skill-center",
+                    }
+                },
+            ),
+            bot={"active_engine": "openclaw"},
+            store_prefix=_CENTER_STORE_PREFIX,
+        )
+
+
 class _RecordingBuild:
     """Stub build service that records its args and returns a canned result."""
 
     def __init__(self, result: dict[str, Any]) -> None:
         self.result = result
         self.calls: list[tuple[dict[str, Any], int]] = []
+        self.shared_corpora: list[tuple[object, ...]] = []
 
     def build(
         self,
         bot: dict[str, Any],
         version: int = 1,
+        *,
+        shared_corpora=(),
     ) -> dict[str, Any]:
         self.calls.append((bot, version))
+        self.shared_corpora.append(tuple(shared_corpora))
         return self.result
 
 
@@ -132,7 +248,9 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
 
     artifact = ArcaSnapshotProducer(
         stub,
-        ServiceSkillsManifestBuilder(layout_repository, _CapabilityReader(())),
+        ServiceSkillsManifestBuilder(
+            layout_repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore()
+        ),
     ).produce_artifact(
         {
             "bot_id": "b1",
@@ -178,6 +296,34 @@ class _CapabilityReader:
 @pytest.mark.unit
 def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    target = tmp_path / "openclaw"
+    active = target / "workspace" / "skills"
+    active.mkdir(parents=True)
+    (active / "alpha").symlink_to(
+        "/home/admin/.openclaw/workspace/skills-pool/skill-center/"
+        "00000000-0000-4000-8000-000000000001/1.0.0"
+    )
+    (active / "zeta").symlink_to(
+        "/home/admin/.openclaw/workspace/skills-pool/skill-center/"
+        "00000000-0000-4000-8000-000000000002/2.0.0"
+    )
+    state = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": {
+                "engine": "openclaw",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "pool_center": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            }
+        },
+    )
     reader = _CapabilityReader(
         [
             RegisteredSkillAsset(
@@ -203,17 +349,23 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
             ),
         ]
     )
+    center_store = _CenterStore()
     producer = ArcaSnapshotProducer(
         _RecordingBuild(
             {
                 "success": True,
                 "migration_path": "/snapshot/7/openclaw",
-                "build_target_path": str(tmp_path / "openclaw"),
+                "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skill-center"
+                ],
             }
         ),
         ServiceSkillsManifestBuilder(
-            _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
+            _LayoutRepository(state),
             reader,
+            _CENTER_STORE_PREFIX,
+            center_store,
         ),
     )
 
@@ -243,6 +395,20 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
             "mcp_dependencies": [{"code": "mcp.z"}],
         },
     ]
+    assert artifact.ext["skills_manifest"]["shared_corpora"] == [
+        {
+            "corpus": "center",
+            "runtime_path": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            "store_prefix": _CENTER_STORE_PREFIX,
+            "layout_contract_version": "skills-pool-p3-v1",
+            "permission": "read_only",
+            "snapshot_policy": "exclude",
+        }
+    ]
+    assert [ref.identity.sc_version_number for ref in center_store.refs] == [
+        "1.0.0",
+        "2.0.0",
+    ]
     assert reader.calls == [
         {
             "bot_id": "b1",
@@ -256,6 +422,54 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
             },
         }
     ]
+
+
+@pytest.mark.unit
+def test_center_service_build_fails_when_exact_store_version_is_missing() -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    state = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": {
+                "engine": "openclaw",
+                "layout_contract_version": "skills-pool-p3-v1",
+                "pool_center": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            }
+        },
+    )
+    builder = ServiceSkillsManifestBuilder(
+        _LayoutRepository(state),
+        _CapabilityReader(
+            (
+                RegisteredSkillAsset(
+                    skill_id=1,
+                    name="pdf",
+                    git_path="center://pdf",
+                    skill_uuid="00000000-0000-4000-8000-000000000001",
+                    sc_version_number="1.0.0",
+                ),
+            )
+        ),
+        _CENTER_STORE_PREFIX,
+        _CenterStore(ready=False),
+    )
+
+    with pytest.raises(ServiceSkillsManifestError, match="exact Store Version"):
+        builder.capture(
+            bot={
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            }
+        )
 
 
 @pytest.mark.unit
@@ -276,9 +490,9 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
     )
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(self, bot, version=1):
+        def build(self, bot, version=1, *, shared_corpora=()):
             repository.state = pool_state
-            return super().build(bot, version)
+            return super().build(bot, version, shared_corpora=shared_corpora)
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -288,7 +502,9 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsManifestBuilder(repository, _CapabilityReader(())),
+        ServiceSkillsManifestBuilder(
+            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore()
+        ),
     )
 
     with pytest.raises(
@@ -339,7 +555,8 @@ def test_build_rejects_non_terminal_layout_before_physical_snapshot(
     producer = ArcaSnapshotProducer(
         build,
         ServiceSkillsManifestBuilder(
-            _LayoutRepository(state), _CapabilityReader(())
+            _LayoutRepository(state), _CapabilityReader(()), _CENTER_STORE_PREFIX,
+            _CenterStore(),
         ),
     )
 
@@ -378,13 +595,13 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
     repository = _LayoutRepository(initial)
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(self, bot, version=1):
+        def build(self, bot, version=1, *, shared_corpora=()):
             repository.state = replace(
                 initial,
                 phase=SkillLayoutPhase.NEEDS_MANUAL_REPAIR,
                 migration_generation="generation-2",
             )
-            return super().build(bot, version)
+            return super().build(bot, version, shared_corpora=shared_corpora)
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -394,7 +611,9 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsManifestBuilder(repository, _CapabilityReader(())),
+        ServiceSkillsManifestBuilder(
+            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore()
+        ),
     )
 
     with pytest.raises(
@@ -430,12 +649,12 @@ def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
     repository = _LayoutRepository(initial)
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(self, bot, version=1):
+        def build(self, bot, version=1, *, shared_corpora=()):
             repository.state = replace(
                 initial,
                 layout_contract_version="skills-pool-p3-v1",
             )
-            return super().build(bot, version)
+            return super().build(bot, version, shared_corpora=shared_corpora)
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -445,7 +664,9 @@ def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
                 "build_target_path": str(target),
             }
         ),
-        ServiceSkillsManifestBuilder(repository, _CapabilityReader(())),
+        ServiceSkillsManifestBuilder(
+            repository, _CapabilityReader(()), _CENTER_STORE_PREFIX, _CenterStore()
+        ),
     )
 
     with pytest.raises(
@@ -533,6 +754,8 @@ def test_legacy_draft_builds_a_legacy_artifact_without_pool_contract(
         ServiceSkillsManifestBuilder(
             _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
             _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
         ),
     )
 
@@ -574,6 +797,8 @@ def test_aicoding_service_engine_uses_the_shared_manifest_contract() -> None:
         ServiceSkillsManifestBuilder(
             _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
             _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
         ),
     )
 
@@ -609,7 +834,8 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
     producer = ArcaSnapshotProducer(
         build,
         ServiceSkillsManifestBuilder(
-            _LayoutRepository(pool_state), _CapabilityReader(())
+            _LayoutRepository(pool_state), _CapabilityReader(()), _CENTER_STORE_PREFIX,
+            _CenterStore(),
         ),
     )
 
@@ -647,6 +873,8 @@ def test_hermes_legacy_publish_keeps_pre_pool_compatibility() -> None:
         ServiceSkillsManifestBuilder(
             _LayoutRepository(BotSkillLayoutState.legacy_default(scope)),
             _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
         ),
     )
 

@@ -18,6 +18,7 @@ import json
 import subprocess
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -44,6 +45,9 @@ from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage impor
 )
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
+)
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ResolvedSharedCorpusDelivery,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -210,6 +214,8 @@ class BotBuildService:
         self,
         bot: Dict[str, Any],
         version: int = 1,
+        *,
+        shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...] = (),
     ) -> Dict[str, Any]:
         """执行 Bot 构建迁移。
 
@@ -249,6 +255,15 @@ class BotBuildService:
         build_plan = provider.get_build_plan(
             build_rsync_excludes_append=rsync_append,
             bot=bot,
+        )
+        shared_corpus_snapshot_paths = self._shared_corpus_snapshot_paths(
+            provider=provider,
+            shared_corpora=shared_corpora,
+        )
+        build_plan = self._apply_shared_corpus_excludes(
+            build_plan=build_plan,
+            provider=provider,
+            shared_corpora=shared_corpora,
         )
         engine_type = build_plan.engine_type
         logger.info(
@@ -349,6 +364,9 @@ class BotBuildService:
                 "build_target_path": str(target_dir),
                 "mcp_success": mcp_success,
                 "openclaw_configs_success": openclaw_configs_success,
+                "shared_corpus_snapshot_paths": list(
+                    shared_corpus_snapshot_paths
+                ),
             }
 
             logger.info(
@@ -363,6 +381,54 @@ class BotBuildService:
         except Exception as e:
             logger.error(f"[BotBuildService.build] Unexpected error: {e}")
             raise BotBuildServiceError(f"Bot build failed: {e}")
+
+    @staticmethod
+    def _apply_shared_corpus_excludes(
+        *,
+        build_plan: EngineBuildPlan,
+        provider: EngineSandboxProvider,
+        shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...],
+    ) -> EngineBuildPlan:
+        """Translate frozen Engine evidence into snapshot-relative excludes."""
+
+        excludes = list(build_plan.rsync_excludes)
+        for relative_path in BotBuildService._shared_corpus_snapshot_paths(
+            provider=provider,
+            shared_corpora=shared_corpora,
+        ):
+            if relative_path not in excludes:
+                excludes.append(relative_path)
+        return replace(build_plan, rsync_excludes=excludes)
+
+    @staticmethod
+    def _shared_corpus_snapshot_paths(
+        *,
+        provider: EngineSandboxProvider,
+        shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...],
+    ) -> tuple[str, ...]:
+        if not shared_corpora:
+            return ()
+        snapshot_root = PurePosixPath(provider.get_base_path())
+        if not snapshot_root.is_absolute():
+            raise BotBuildServiceError("engine snapshot root must be absolute")
+        result: list[str] = []
+        for delivery in shared_corpora:
+            if delivery.snapshot_policy != "exclude":
+                raise BotBuildServiceError("shared corpus must be excluded from snapshot")
+            runtime_path = PurePosixPath(delivery.runtime_path)
+            try:
+                relative = runtime_path.relative_to(snapshot_root)
+            except ValueError as exc:
+                raise BotBuildServiceError(
+                    "shared corpus path is outside the engine snapshot root"
+                ) from exc
+            relative_path = relative.as_posix()
+            if not relative_path or relative_path == "." or ".." in relative.parts:
+                raise BotBuildServiceError("invalid shared corpus snapshot path")
+            if relative_path in result:
+                raise BotBuildServiceError("duplicate shared corpus snapshot path")
+            result.append(relative_path)
+        return tuple(result)
 
     def _get_migration_path_base(self, *, owner_id: str, bot_id: str) -> str:
         """根据白名单选择容器内迁移路径根目录。
@@ -1217,6 +1283,7 @@ class BotBuildService:
             publish_stage: PublishStage = PublishStage.ONLINE,
             version: str = "1",
             delivery: DeliveryArtifact = DeliveryArtifact(None),
+            ext_info: Optional[Dict[str, Any]] = None,
             extra_envs: Optional[Dict[str, Any]] = None,
             docker_image: str | None = None,
             runtime_kind: str | None = None,
@@ -1289,6 +1356,7 @@ class BotBuildService:
                     "device_count": device_count,
                     "stage": publish_stage.value,
                     "version": version,
+                    "ext_info": ext_info,
                     "extra_envs": extra_envs,
                 }
                 template_uuid = self._resolve_baas_template_uuid(
@@ -1735,6 +1803,7 @@ class BotBuildService:
         publish_stage: PublishStage = PublishStage.ONLINE,
         version: str = "1",
         delivery: DeliveryArtifact = DeliveryArtifact(None),
+        ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
         runtime_kind: str | None = None,
@@ -1760,6 +1829,7 @@ class BotBuildService:
             publish_stage=publish_stage,
             version=version,
             delivery=delivery,
+            ext_info=ext_info,
             extra_envs=extra_envs,
             docker_image=docker_image,
             runtime_kind=runtime_kind,

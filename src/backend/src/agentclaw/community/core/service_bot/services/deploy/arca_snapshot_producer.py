@@ -12,6 +12,8 @@ Task 12; external bots take :class:`TeclawComposeProducer` instead.
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.service_bot.services.deploy.producer import (
@@ -19,7 +21,9 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducer,
 )
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    CapturedServiceSkillsLayout,
     ServiceSkillsManifestBuilder,
+    ServiceSkillsManifestError,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -50,10 +54,10 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         return type changes.
         """
         captured_layout = self._skills_manifest_builder.capture(bot=bot)
-        result = self._build_service.build(
-            bot=bot,
-            version=version,
-        )
+        build_kwargs: dict[str, Any] = {"bot": bot, "version": version}
+        if captured_layout is not None:
+            build_kwargs["shared_corpora"] = captured_layout.shared_corpora
+        result = self._build_service.build(**build_kwargs)
 
         success = bool(result.get("success"))
         ext: dict[str, Any] = {}
@@ -69,6 +73,11 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                 raise ValueError(
                     "successful service build is missing build_target_path"
                 )
+            self._validate_center_snapshot(
+                captured=captured_layout,
+                build_target_path=str(build_target_path),
+                snapshot_paths=result.get("shared_corpus_snapshot_paths"),
+            )
             # This manifest only describes the Skills slice frozen inside the
             # service version. It augments — never replaces — build_target_path.
             ext["skills_manifest"] = self._skills_manifest_builder.finalize(
@@ -80,3 +89,68 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
             ext=ext,
             message="" if success else "构建失败",
         )
+
+    @staticmethod
+    def _validate_center_snapshot(
+        *,
+        captured: CapturedServiceSkillsLayout,
+        build_target_path: str,
+        snapshot_paths: object,
+    ) -> None:
+        """Validate the frozen exact links without dereferencing shared corpus."""
+
+        if not captured.center_skills:
+            return
+        if (
+            not isinstance(snapshot_paths, list)
+            or len(snapshot_paths) != len(captured.shared_corpora)
+            or any(not isinstance(item, str) for item in snapshot_paths)
+        ):
+            raise ServiceSkillsManifestError(
+                "Center snapshot is missing resolved corpus exclusions"
+            )
+        root = Path(build_target_path)
+        for relative in snapshot_paths:
+            path = PurePosixPath(relative)
+            if (
+                path.is_absolute()
+                or path.as_posix() != relative
+                or any(part in {"", ".", ".."} for part in path.parts)
+            ):
+                raise ServiceSkillsManifestError(
+                    "Center snapshot contains an invalid corpus exclusion"
+                )
+            copied = root.joinpath(*path.parts)
+            if copied.exists() or copied.is_symlink():
+                raise ServiceSkillsManifestError(
+                    "Center snapshot must not copy the shared corpus"
+                )
+
+        center_root = PurePosixPath(captured.shared_corpora[0].runtime_path)
+        expected = {
+            (
+                item["runtime_name"],
+                str(
+                    center_root
+                    / item["skill_uuid"]
+                    / item["sc_version_number"]
+                ),
+            )
+            for item in captured.center_skills
+        }
+        actual: list[tuple[str, str]] = []
+        if root.exists():
+            for entry in root.rglob("*"):
+                if not entry.is_symlink():
+                    continue
+                target = os.readlink(entry)
+                target_path = PurePosixPath(target)
+                try:
+                    target_path.relative_to(center_root)
+                except ValueError:
+                    continue
+                actual.append((entry.name, target_path.as_posix()))
+        if len(actual) != len(set(actual)) or set(actual) != expected:
+            raise ServiceSkillsManifestError(
+                "Center links do not match the frozen exact manifest"
+            )

@@ -43,6 +43,9 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     Storage,
     StorageType,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    frozen_center_delivery_from_ext,
+)
 from agentclaw.community.core.service_bot.types import PublishStage, is_editable_bot
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.workspace.engine_sandbox import (
@@ -123,6 +126,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             engine_type=ctx.engine,
             mount_path=ctx.mount_path,
             mount_home_dir_storage=ctx.mount_home_dir_storage,
+            ext_info=ctx.ext_info,
         )
 
     def build_storage(self, ctx: BotDeployContext) -> Storage | None:
@@ -377,6 +381,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         engine_type: str = DEFAULT_ENGINE_TYPE,
         mount_path: Optional[str] = None,
         mount_home_dir_storage: bool = False,
+        ext_info: Optional[Dict[str, Any]] = None,
     ) -> list[MountPointEntry]:
         """使用 OSS 创建用户目录结构，返回 Arca MountPoint 配置。
 
@@ -437,6 +442,19 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
                         permission=MountPermission.READ_ONLY,
                     ),
                 ]
+            )
+
+        center_delivery = frozen_center_delivery_from_ext(
+            ext_info,
+            {"active_engine": engine_type or DEFAULT_ENGINE_TYPE},
+        )
+        if center_delivery is not None:
+            mount_points.append(
+                MountPointEntry(
+                    remote_dir=f"/{center_delivery.store_prefix}",
+                    local_dir=center_delivery.runtime_path,
+                    permission=MountPermission.READ_ONLY,
+                )
             )
 
         # 用户自定义挂载路径

@@ -14,6 +14,8 @@ provides:
   - "BotProcessRegistry"
   - "BotPublishService"
   - "BaasService"
+  - "ServiceSkillsManifestBuilder"
+  - "ResolvedSharedCorpusDelivery"
   - "ServiceBot SQLAlchemy models"
 consumes:
   - "BotManagement"
