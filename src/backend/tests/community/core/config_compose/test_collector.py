@@ -694,11 +694,19 @@ def test_mcps_bound_the_fan_out_across_concurrent_composes():
     per-call pool the two composes bring twice that many workers, the barrier
     fills, and ``breached`` is set.
 
+    The mix deliberately includes **single-entry composes**. Running a lone
+    lookup inline would be cheaper but would open a side door around the pool:
+    one saturating compose plus N one-MCP composes would put
+    ``_MCP_DETAIL_WORKERS + N`` lookups in flight while the constant still
+    claimed ``_MCP_DETAIL_WORKERS``. A test built only from fat composes cannot
+    see that, since every one of their entries goes through the pool.
+
     (Counting a peak instead would prove nothing here: whatever releases the
     workers has to fire at the very threshold the test is trying to exceed, so
     the count stops at the ceiling under both implementations.)
     """
-    start = threading.Barrier(2, timeout=10)
+    sizes = [_MCP_DETAIL_WORKERS, 1, 1, 1]
+    start = threading.Barrier(len(sizes), timeout=10)
     over_ceiling = threading.Barrier(_MCP_DETAIL_WORKERS + 1, timeout=2)
     breached = threading.Event()
     lock = threading.Lock()
@@ -720,26 +728,27 @@ def test_mcps_bound_the_fan_out_across_concurrent_composes():
             resident -= 1
         return _remote(server_code)
 
-    per_compose = _MCP_DETAIL_WORKERS
     results: list[list] = []
 
-    def compose(tag):
-        codes = [f"{tag}{i}" for i in range(per_compose)]
-        start.wait()  # both composes submit together, so they really do overlap
+    def compose(tag, size):
+        codes = [f"{tag}{i}" for i in range(size)]
+        start.wait()  # every compose submits together, so they really do overlap
         results.append(_mcps_over(codes, lookup))
 
-    threads = [threading.Thread(target=compose, args=(tag,)) for tag in ("a", "b")]
+    threads = [
+        threading.Thread(target=compose, args=(tag, size))
+        for tag, size in zip("abcd", sizes)
+    ]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=30)
 
     assert not any(t.is_alive() for t in threads), "a compose never finished"
-    assert len(results) == 2
-    assert all(len(r) == per_compose for r in results)
+    assert sorted(len(r) for r in results) == sorted(sizes)
     assert not breached.is_set(), (
         f"{_MCP_DETAIL_WORKERS + 1} lookups were in flight at once — the fan-out "
-        "ceiling is per-compose, not process-wide"
+        "ceiling is not process-wide (per-compose pool, or a path around it)"
     )
     assert peak <= _MCP_DETAIL_WORKERS
 

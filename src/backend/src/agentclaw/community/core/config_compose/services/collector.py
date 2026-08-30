@@ -409,12 +409,18 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         calling thread, one per task: a single ``Context`` cannot be entered by
         two threads at once.
 
-        Below two entries there is nothing to overlap, so the pool is skipped
-        entirely and the lookups run inline, exactly as before.
+        *Every* lookup goes through the pool, a lone one included. Running a
+        single entry inline would cost less — no hand-off, no future — but a
+        ceiling with a side door is not a ceiling: concurrent one-MCP composes
+        would each add a Center call on top of the pool's
+        ``_MCP_DETAIL_WORKERS``, so the process-wide total would be
+        ``_MCP_DETAIL_WORKERS + <one-MCP composes in flight>``. The hand-off is
+        microseconds against an ~90 ms call, and it buys a bound that actually
+        holds. Only the empty case short-circuits, having nothing to submit.
         """
         entries = list(raw)
-        if len(entries) < 2:
-            return [self._enrich_mcp_detail(svc, md) for md in entries]
+        if not entries:
+            return []
         futures = [
             _MCP_DETAIL_POOL.submit(
                 copy_context().run, self._enrich_mcp_detail, svc, md
