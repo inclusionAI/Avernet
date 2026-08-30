@@ -684,6 +684,10 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
 
             refresh_succeeded = True
             skill_set_service = None
+            logger.info(
+                "[aicoding.restart] begin restart resync: bot_id=%s, engine_type=%s, entity_id=%s, entity_type=%s",
+                ctx.bot_id, effective_engine, effective_entity_id, effective_entity_type,
+            )
             if skill_set_factory is not None:
                 try:
                     skill_set_service = skill_set_factory.create(
@@ -693,11 +697,15 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         entity_type=effective_entity_type,
                         engine_type=effective_engine,
                     )
+                    logger.info(
+                        "[aicoding.restart] skill set service created for restart resync: bot_id=%s, engine_type=%s",
+                        ctx.bot_id, effective_engine,
+                    )
                 except Exception as skill_error:
                     refresh_succeeded = False
                     logger.error(
                         "[aicoding.restart] skill set service create error: "
-                        "bot_id=%s, engine_type=%s, error=%s",
+                        "bot_id=%s, engine_type=%s, error=%s; continue with remaining restart resync steps",
                         ctx.bot_id, effective_engine, skill_error,
                         exc_info=True,
                     )
@@ -727,8 +735,10 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                                     effective_engine,
                                 )
                             )
-                            detail_synced = await skill_set_service.sync_mcp_desired_state(
-                                server_codes=declared_server_codes,
+                            detail_synced = await skill_set_service.project_mcps(
+                                claimed=frozenset(declared_server_codes),
+                                released=frozenset(),
+                                declared=declared_server_codes,
                             )
                         return scope_result, detail_synced
 
@@ -737,16 +747,16 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         refresh_succeeded = False
                         logger.error(
                             "[aicoding.restart] MCP scope resync failed: "
-                            "bot_id=%s, engine_type=%s, error=%s",
+                            "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
                             ctx.bot_id, effective_engine, scope_result.get("error"),
                         )
                     elif detail_synced is False:
                         refresh_succeeded = False
                         logger.error(
-                            "[aicoding.restart] MCP desired-state resync failed: "
-                            "bot_id=%s, engine_type=%s, error=%s",
+                            "[aicoding.restart] MCP projection resync failed: "
+                            "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
                             ctx.bot_id, effective_engine,
-                            "desired-state declaration returned false",
+                            "projection returned false",
                         )
                     else:
                         logger.info(
@@ -758,13 +768,17 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                     refresh_succeeded = False
                     logger.error(
                         "[aicoding.restart] MCP resync error: "
-                        "bot_id=%s, engine_type=%s, error=%s",
+                        "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
                         ctx.bot_id, effective_engine, mcp_error,
                         exc_info=True,
                     )
 
             if skill_set_service is not None:
                 try:
+                    logger.info(
+                        "[aicoding.restart] start skill symlink resync after MCP stage: bot_id=%s, engine_type=%s",
+                        ctx.bot_id, effective_engine,
+                    )
                     # ``project_skills`` is async so that both halves of the
                     # capability boundary are awaited the same way; this is a
                     # worker thread with no running loop, so it bridges the
@@ -781,14 +795,14 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         refresh_succeeded = False
                         logger.error(
                             "[aicoding.restart] skill symlink sync failed: "
-                            "bot_id=%s, engine_type=%s",
+                            "bot_id=%s, engine_type=%s; continue without clearing restart marker",
                             ctx.bot_id, effective_engine,
                         )
                 except Exception as skill_error:
                     refresh_succeeded = False
                     logger.error(
                         "[aicoding.restart] skill symlink sync error: "
-                        "bot_id=%s, engine_type=%s, error=%s",
+                        "bot_id=%s, engine_type=%s, error=%s; continue without clearing restart marker",
                         ctx.bot_id, effective_engine, skill_error,
                         exc_info=True,
                     )
