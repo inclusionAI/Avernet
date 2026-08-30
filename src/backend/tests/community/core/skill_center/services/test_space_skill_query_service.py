@@ -22,7 +22,7 @@ def _service():
         MagicMock(role="MEMBER"),
     )
     repository = MagicMock()
-    repository.list_space_skills.return_value = (0, [])
+    repository.list_skills.return_value = (0, [])
     return SpaceSkillQueryService(access, repository), access, repository
 
 
@@ -43,13 +43,13 @@ def test_list_space_skills_authorizes_normalizes_and_paginates(
         space_id=7,
         actor_id="member-1",
         keyword=keyword,
-        page_no=3,
+        page=3,
         page_size=20,
     )
 
     assert result == (0, [])
     access.require_space_member.assert_called_once_with(space_id=7, user_id="member-1")
-    repository.list_space_skills.assert_called_once_with(
+    repository.list_skills.assert_called_once_with(
         space_id=7,
         actor_id="member-1",
         env="test",
@@ -69,11 +69,11 @@ def test_list_space_skills_propagates_access_errors_without_querying_repository(
             space_id=7,
             actor_id="outsider",
             keyword=None,
-            page_no=1,
+                page=1,
             page_size=20,
         )
 
-    repository.list_space_skills.assert_not_called()
+    repository.list_skills.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -97,7 +97,7 @@ def test_list_space_skills_derives_actor_permissions_and_lease_summary(
         MagicMock(role="MEMBER"),
     )
     timestamp = datetime(2026, 8, 20, 3, 40)
-    repository.list_space_skills.return_value = (
+    repository.list_skills.return_value = (
         1,
         [
             {
@@ -106,11 +106,36 @@ def test_list_space_skills_derives_actor_permissions_and_lease_summary(
                 "name": "Example",
                 "description": None,
                 "status": "DEVELOPING",
+                "source_type": "FOLDER",
                 "draft_status": "EDITING",
+                "draft_target_version": 1,
+                "draft_description": "Draft example",
+                "draft_locator": (
+                    "draft://11111111-1111-4111-8111-111111111111/"
+                    "v1/22222222-2222-4222-8222-222222222222"
+                ),
+                "draft_source_kind": "FOLDER",
+                "source_repo_url": None,
+                "source_branch": None,
+                "source_subdir": None,
+                "source_commit_sha": None,
+                "offline_at": None,
+                "offline_by": None,
                 "space_type": space_type,
                 "current_user_skill_role": role,
+                "owner_user_id": "owner-1",
+                "owner_display_name": "Owner One",
                 "lease_holder_user_id": "manager-2" if space_type == "TEAM" else None,
                 "lease_holder_display_name": "Manager Two" if space_type == "TEAM" else None,
+                "latest_version_id": None,
+                "latest_version_ordinal": None,
+                "latest_sc_version_number": None,
+                "latest_published_at": None,
+                "active_attempt_id": None,
+                "active_attempt_target_version": None,
+                "active_attempt_status": None,
+                "pending_request_id": None,
+                "pending_request_no": None,
                 "gmt_created": timestamp,
                 "gmt_modified": timestamp,
             }
@@ -125,7 +150,7 @@ def test_list_space_skills_derives_actor_permissions_and_lease_summary(
         space_id=7,
         actor_id="member-1",
         keyword=None,
-        page_no=1,
+        page=1,
         page_size=20,
     )
 

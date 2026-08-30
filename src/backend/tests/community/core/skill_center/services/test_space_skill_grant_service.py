@@ -46,7 +46,7 @@ def test_list_grants_returns_acl_qualifications_not_state_predictions():
         "publish_draft": False,
         "delete_draft": False,
         "create_upgrade_draft": False,
-        "retire_skill": False,
+        "offline_skill": False,
         "manage_grants": False,
         "transfer_owner": True,
         "request_edit_access": True,

@@ -231,6 +231,7 @@ from .service_publications import (
     router as service_lifecycle_router,
 )
 from .spaces import router as spaces_router
+from .spaces.skill_routes import router as space_skill_router
 from .work_orders import router as work_orders_router
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     PublicAPIRoute,
@@ -455,6 +456,11 @@ def build_public_router() -> APIRouter:
     # bot grant gate.
     public.include_router(
         spaces_router,
+        responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        space_skill_router,
         responses=SPACE_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )

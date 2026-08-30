@@ -29,6 +29,12 @@ provides:
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
   - "SpaceSkillGrantService"
+  - "SpaceSkillApplicationService"
+  - "SpaceSkillApplicationServiceProtocol"
+  - "SpaceSkillDraftRepository"
+  - "SpaceSkillReadRepository"
+  - "SpaceSkillVersionQueryService"
+  - "SpaceSkillVersionReadRepository"
   - "SpaceSkillEditorRequestService"
   - "SkillCollaboratorApprovalHandler"
   - "DraftEditLeaseService"
@@ -77,6 +83,7 @@ consumes:
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillCenterGateway"
+  - "SpaceSkillSourcePlugin"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
@@ -85,6 +92,8 @@ consumes:
   - "SpaceSkillRepository"
   - "WorkOrderRepositoryProtocol"
   - "DraftEditLeaseRepository"
+  - "SpaceSkillDraftRepository"
+  - "SpaceSkillReadRepository"
   - "SkillVersionRepositoryProtocol"
   - "SkillVersionMaterializationRepositoryProtocol"
   - "SkillVersionScannerProtocol"
@@ -92,6 +101,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.space_skill_version # published Space Skill read contract consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
   - agentclaw.community.core.repository.protocols.work_orders
   - agentclaw.community.core.work_orders
@@ -138,6 +148,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.skill_center_gateway
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
+  - agentclaw.community.plugin_api.space_skill_source
   - agentclaw.community.utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils

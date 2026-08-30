@@ -151,6 +151,42 @@ class DraftEditLeaseTokenRejectedError(Exception):
     """The supplied fencing token is stale or belongs to another holder."""
 
 
+class SpaceSkillIdempotencyConflictError(Exception):
+    """An Idempotency-Key was already bound to a different creation intent."""
+
+
+class DraftNotFoundError(Exception):
+    """The addressed Space Skill has no current Draft."""
+
+
+class DraftFrozenError(Exception):
+    """A FROZEN Draft cannot be mutated or deleted."""
+
+
+class DraftRevisionConflictError(Exception):
+    """The expected Draft revision is no longer current."""
+
+
+class DraftAlreadyExistsError(Exception):
+    """The Skill already has a current Draft for another creation request."""
+
+
+class DraftFileNotFoundError(Exception):
+    """The addressed file does not exist in the current Draft."""
+
+
+class DraftFileNotTextError(Exception):
+    """The addressed Draft file is not UTF-8 text."""
+
+
+class DraftSourceNotRefreshableError(Exception):
+    """Only a Draft retaining a Git snapshot source can be refreshed."""
+
+
+class SkillNameChangedError(Exception):
+    """A Draft mutation attempted to change the stable SKILL.md name."""
+
+
 # ── SkillSet control plane ────────────────────────────────────────────────
 # These are ``DomainError`` subclasses so the SkillSet routers can raise the
 # situation and let the HTTP adapter decide the status: the mapping lives in
@@ -194,6 +230,7 @@ class SkillSetRuntimeReconcileError(DomainError):
 
     def __init__(self, detail: str = "Skill set runtime sync failed") -> None:
         super().__init__(detail)
+
 
 class SkillSetControlPlaneLockUnavailableError(DomainError):
     """The runtime layout edit boundary is unavailable; mutation failed closed."""
