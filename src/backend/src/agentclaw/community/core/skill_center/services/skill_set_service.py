@@ -29,7 +29,10 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillRepo
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
-from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
+    SkillSetRuntimeReconcileError,
+)
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
     DefaultSkillSetSelection,
@@ -578,7 +581,13 @@ class SkillSetService:
                 desired_skills=desired_skills,
                 effective_mcps=effective_mcps,
             )
-            return bool(result.get("success"))
+            if not result.get("success"):
+                raise SkillSetRuntimeReconcileError(
+                    str(result.get("message") or "Skill set runtime sync failed")
+                )
+            return True
+        except SkillSetRuntimeReconcileError:
+            raise
         except Exception as exc:
             logger.warning(
                 "[project_whole_artifact] delivery failed: %s", exc, exc_info=True
