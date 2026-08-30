@@ -38,6 +38,16 @@ Principal、输入、输出、状态码、幂等和稳定业务错误，不负�
 - `user_id`：当前调用者；从认证上下文验证。客户端 query 只承担已发布兼容 wire，不是授权事实。
 - Space Skill 创作命令要求明确 User Principal；纯 App/Bot Principal 不允许写 Draft、Grant 或 Publication。
 
+| Operation 范围 | Principal 与授权 |
+| --- | --- |
+| SC/Repo 市场读取 | 已认证 `UserOrDelegatedApp` |
+| Space/Skill 列表与只读详情 | `UserOrDelegatedApp`；必须解析明确 actor 并通过 Space ACL |
+| Space Skill 创建、Draft、Grant、Lease、Publication、Offline | 明确 User；按 Space ACL + Owner/Manager/Member 规则校验 |
+| SC Public Reference | `UserOrDelegatedApp`；受理与最终写入都校验 Bot ACL，最终阶段再校验 actor、Owner、SkillSet 最新状态 |
+
+P2-OFF-001/002 仅 Owner/Manager 可调用。P2-REF-002/003 即使目标 SkillSet 后来被删除，仍按
+Bot ACL 与 Operation 中冻结的 `skill_set_id` 查询历史，不要求当前 Set 存在。
+
 ### 2.2 Envelope 与分页
 
 所有成功和失败均使用 Gateway Envelope：
@@ -84,12 +94,14 @@ Principal、输入、输出、状态码、幂等和稳定业务错误，不负�
 | 401 | 未认证 | 重新登录或刷新凭据 |
 | 403 | ACL、Owner/Manager、Space Member 或 MCP 权限失败 | 禁止操作并刷新权限 |
 | 404 | Space、Skill、Draft、Version、Attempt、Reference 不存在或不可见 | 返回列表或空态 |
-| 409 | 状态机、Lease、幂等、Offline blocker、Membership 冲突 | 使用 `error_code` 显示业务提示并刷新详情 |
+| 409 | 状态机、Lease、幂等、Offline blocker、Membership 冲突 | 使用 Envelope `code` 显示业务提示并刷新详情 |
 | 422 | SKILL.md、文件、Git、路径或参数校验失败 | 展示字段/文件级错误 |
 | 502 | SC/Runtime 上游调用明确失败 | 可按接口 recovery 语义处理 |
 | 503 | SC、OSS、Task enqueue 或 Runtime 暂时不可用 | 保留页面状态，允许安全重试 |
 
-错误响应的 `data` 当前保持 `null`。Envelope 顶层 `code` 是稳定六位业务错误码；本文的
+普通错误响应的 `data` 保持 `null`。P2-OFF-002 的 `SKILL_OFFLINE_BLOCKED` 是明确例外：
+409 的 `data` 返回服务端在命令事务内重新计算的最新 `OfflineImpact`，供产品刷新 blocker。
+Envelope 顶层 `code` 是稳定六位业务错误码；本文的
 大写符号名用于评审和代码枚举命名，不是额外的顶层 JSON 字段。需要结构化 blocker、validation
 或 recovery 信息的接口，通过成功的 impact/detail DTO 返回。Publication Attempt 和 Reference
 Item 自己的 `error_code` 是持久资源字段，和 Envelope `code` 不混用。
@@ -253,28 +265,27 @@ Detail 包含 `SpaceSkillSummary` 的全部字段，并展开：
 
 ### 4.3 文件树与文件内容
 
-`SkillFileTreeItem`：
+文件树返回当前 Revision 与扁平文件清单，前端按 `/` 自行构造目录树：
 
 ```json
 {
-  "path": "references/example.md",
-  "kind": "FILE",
-  "size": 128,
-  "children": []
+  "revision_id": "rev-2",
+  "files": [
+    {"path": "SKILL.md", "size": 256},
+    {"path": "references/example.md", "size": 128}
+  ]
 }
 ```
 
-- `kind`：`FILE | DIRECTORY`。
 - `path` 使用规范化 POSIX 相对路径，不以 `/` 开头，不允许 `..`。
-- 文件内容 DTO 使用 `{path, media_type, encoding, content, revision_id}`。
-- `encoding` 为 `UTF8 | BASE64`；文本使用 UTF8，二进制预览使用 BASE64。
+- 单文件 GET 返回 `{path, content, revision_id}`；`content` 是 UTF-8 文本。
+- 当前产品编辑器不定义二进制文件预览/原地编辑 wire；二进制资产仍保留在 immutable package。
 
 保存文件请求：
 
 ```json
 {
   "content": "# Updated content",
-  "encoding": "UTF8",
   "expected_revision_id": "rev-2",
   "fencing_token": 7
 }
@@ -328,7 +339,7 @@ RESULT_UNKNOWN`。
 ```json
 {
   "reference_id": "ref-01",
-  "reference_request_id": "req-01",
+  "request_id": "req-01",
   "skill_set_id": "1115804",
   "skill_code": "my-skill",
   "sc_version_number": "1.0.0",
@@ -381,7 +392,11 @@ Ready 且非 Offline 的 Skill。响应为 `Page[ConsumableSpaceSkill]`：
   "skill_id": "1123211",
   "name": "risk-calculator",
   "description": "计算风险指标",
-  "latest_published_version": 2
+  "latest_published_version": {
+    "version": 2,
+    "sc_version_number": "2.0.0",
+    "published_at": "2026-08-30T08:00:00Z"
+  }
 }
 ```
 
@@ -397,7 +412,7 @@ Ready 且非 Offline 的 Skill。响应为 `Page[ConsumableSpaceSkill]`：
   "updated": 2,
   "unchanged": 9,
   "failed": 1,
-  "failures": [{"skill_id": "123", "skill_code": "x", "error_code": "SC_UNAVAILABLE"}]
+  "failures": [{"skill_id": "123", "skill_code": "x", "error_code": "SC_MARKET_UNAVAILABLE"}]
 }
 ```
 
@@ -491,6 +506,8 @@ Query：`page=1&page_size=20`。返回可能受 Track Latest 影响的当前 Bot
 
 无 body，Header `Idempotency-Key` 必填。Team 不传 fencing token：服务端读取最新 Revision，
 若 Lease 为 `HELD_BY_OTHER` 则拒绝；FREE/HELD_BY_ME 均可冻结。返回 202 PublicationAttempt。
+业务事务提交后 Task enqueue 失败时返回 503，但 Attempt 不丢失；前端以同一个 Key 重放，Backend
+必须返回原 Attempt 并重新确保 live Task，不能创建新 Attempt/Version，也不能再次调用 SC publish。
 
 #### P2-PUB-005 恢复 Attempt
 
@@ -536,12 +553,15 @@ UNKNOWN_ARTIFACT`。UNKNOWN 必须 fail closed。
 已有 Offline+Draft 时 `changed=false`。没有 force/管理员绕过；不调用 SC 下线。新 Version 发布成功
 后自动恢复 PUBLISHED。
 
+命令事务内重查发现 blocker 时返回 HTTP 409、`code=409313`，且 `data` 使用与 P2-OFF-001
+相同的最新 `OfflineImpact`；前端不得继续使用调用 POST 前缓存的 counts。
+
 ### 5.6 SC Public Reference
 
 #### P2-REF-001 创建批量引用
 
-Header `Idempotency-Key` 必填。为避免与 Gateway Envelope 顶层 trace `request_id` 冲突，
-批次资源在 public wire 上明确命名为 `reference_request_id`：
+Header `Idempotency-Key` 必填。响应同时有两个不同层级的 `request_id`：Envelope 顶层
+`request_id` 是调用 trace；`data.request_id` 是持久 Reference 批次身份，前端必须从 data 读取：
 
 ```json
 {"skill_codes": ["public-a", "public-b"]}
@@ -551,20 +571,22 @@ Header `Idempotency-Key` 必填。为避免与 Gateway Envelope 顶层 trace `re
 
 ```json
 {
-  "reference_request_id": "req-01",
-  "items": [
-    {"reference_id": "ref-a", "skill_code": "public-a", "status": "QUEUED"},
-    {"reference_id": "ref-b", "skill_code": "public-b", "status": "QUEUED"}
-  ]
+  "request_id": "req-01",
+  "reference_ids": ["ref-a", "ref-b"]
 }
 ```
 
-相同 Key 返回同一 request/items 并重新确保 live Task。物化完成前不创建 Membership；成功项在
-最终批量 add 时进入 SkillSet，失败项不影响其他项。
+相同 Key 返回同一 request/reference_ids 并重新确保 live Task。前端收到 202 后用 request_id
+调用 P2-REF-002 获取卡片详情。物化完成前不创建 Membership；成功项在最终批量 add 时进入
+SkillSet，失败项不影响其他项。
+
+`skill_code` 是唯一外部选择键。相同 code 已物化时按 `center://<skill_code>` 复用同一个 Center
+Asset；不得按 name 与 Local/Repo/其他 Space Skill 复用。搜索异常记录缺少 skill_code 时拒绝受理。
 
 #### P2-REF-002 Collection
 
-Query：`reference_request_id?、status?、page=1、page_size=20`；默认 `gmt_created DESC,
+Query：`request_id?、status?、page=1、page_size=20`；这里的 request_id 是批次身份。默认
+`gmt_created DESC,
 reference_id DESC`。目标 Set 已被删除时，历史 Operation 仍可按 Bot ACL 查询。
 
 #### P2-REF-003 Detail
@@ -579,6 +601,9 @@ reference_id DESC`。目标 Set 已被删除时，历史 Operation 仍可按 Bot
 | `IDEMPOTENCY_KEY_REUSED` | `409305` | 409 | 创建、升级、发布、Reference | 同一 Key 被用于不同请求 |
 | `SKILL_NAME_CHANGED` | `422203` | 422 | Draft save/refresh/publish | SKILL.md name 与 Identity 不一致 |
 | `SKILL_PACKAGE_INVALID` | `422202` | 422 | 创建、refresh、materialize | 包结构或 SKILL.md 非法 |
+| `SKILL_MANIFEST_MISSING` | `422205` | 422 | folder/Git 创建 | 缺少目标 SKILL.md |
+| `SKILL_MANIFEST_MULTIPLE` | `422206` | 422 | folder 创建 | 上传包包含多个候选 SKILL.md |
+| `SKILL_PATH_INVALID` | `422207` | 422 | folder/Draft file | 相对路径非法或越界 |
 | `DRAFT_NOT_FOUND` | `404204` | 404 | Draft | 没有当前 Draft |
 | `DRAFT_ALREADY_EXISTS` | `409306` | 409 | upgrade | 已存在 Draft |
 | `DRAFT_FROZEN` | `409307` | 409 | save/delete/refresh | 发布中的 Draft 不可修改 |
@@ -588,14 +613,24 @@ reference_id DESC`。目标 Set 已被删除时，历史 Operation 仍可按 Bot
 | `PUBLICATION_IN_PROGRESS` | `409309` | 409 | publish | 已有非终态 Attempt |
 | `PUBLICATION_RESULT_UNKNOWN` | `409310` | 409 | publish | SC 结果未确认，禁止重发 |
 | `PUBLICATION_RECOVERY_NOT_AVAILABLE` | `409311` | 409 | retry | 当前状态不允许恢复 |
-| `SC_MARKET_UNAVAILABLE` | `503201` | 503 | SC market/reference/sync | SC 暂时不可用 |
-| `SC_SKILL_NOT_FOUND` | `404205` | 404 | Reference | 外部 code 不存在或不可消费 |
-| `SKILL_SET_NOT_FOUND` | `404206` | 404 | Reference | 目标 Set 已删除 |
+| `PUBLICATION_REQUIRES_NEW_ATTEMPT` | `409315` | 409 | retry | FAILED Draft 修改后必须新建 Attempt |
+| `SC_MARKET_UNAVAILABLE` | `502000` | 502 | SC market/sync 请求级失败 | 沿用已发布 SC market 上游失败合同 |
+| `SKILL_SET_NOT_FOUND` | `404206` | 404 | Reference POST | 受理时目标 Set 不存在 |
 | `REFERENCE_BATCH_TOO_LARGE` | `422204` | 422 | Reference | 去重后超过 20 |
 | `SKILL_OFFLINE` | `409312` | 409 | 新增引用/Membership | Skill 当前 Offline |
 | `SKILL_OFFLINE_BLOCKED` | `409313` | 409 | Offline | 最新血缘检查存在 blocker |
 | `SYNC_IN_PROGRESS` | `409314` | 409 | SC sync | 已有同步运行 |
-| `RUNTIME_PROJECTION_FAILED` | `502202` | 502 | active Set Reference/Track Latest | Runtime 投影失败并已按命令语义补偿 |
+
+异步资源内部失败不再改变已经返回的 HTTP 202，而由 P2-PUB-004/P2-REF-002/003 的资源字段表达：
+
+| `data.error_code` | 资源 | 含义 |
+| --- | --- | --- |
+| `SC_SKILL_NOT_FOUND` | Reference | 外部 code 不存在或不可消费 |
+| `SC_MARKET_UNAVAILABLE` | Reference/Publication | Worker 调用 SC 暂时失败且重试耗尽 |
+| `SKILL_SET_NOT_FOUND` | Reference | 受理后目标 Set 被删除 |
+| `RUNTIME_PROJECTION_FAILED` | Reference | active Set 最终 Runtime 投影失败并已补偿 |
+| `SC_PUBLISH_REJECTED` | Publication | SC 明确拒绝，本次 Attempt FAILED |
+| `MATERIALIZATION_FAILED` | Publication/Reference | exact Version 物化重试耗尽 |
 
 实现时可增加更细的 additive error code，但不能把上表中的不同状态压成一个通用 500。
 

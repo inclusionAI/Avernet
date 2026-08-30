@@ -165,6 +165,9 @@ GET /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}
 
 ## 5. 创建 Space Skill
 
+本节发生在“能力工坊 → 新建 Skill”，创建的是 Space-owned 创作资产。它不同于能力集弹窗里的
+“添加本地文件夹”：后者创建 Bot-owned Local Skill，见 11.1。
+
 ### 5.1 本地文件夹
 
 产品入口：“新建 Skill → 添加本地文件夹”。
@@ -190,13 +193,14 @@ file_paths=["SKILL.md","references/example.md"]
 
 校验失败：
 
-| error_code | UI |
+| 合同符号名（映射到 Envelope code） | UI |
 | --- | --- |
 | `SKILL_PACKAGE_INVALID` | 展示包级错误 |
 | `SKILL_MANIFEST_MISSING` | 提示缺少 SKILL.md |
 | `SKILL_MANIFEST_MULTIPLE` | 提示只能存在一个目标 SKILL.md |
 | `SKILL_PATH_INVALID` | 展示非法相对路径 |
-| `SKILL_NAME_CONFLICT` | 提示当前 Space 存在名称/Identity 冲突 |
+
+Skill Identity 使用 UUID；不同 Space 或同一市场已有同名 Skill 不构成复用或冲突依据。
 
 ### 5.2 Git 导入
 
@@ -267,7 +271,6 @@ PUT .../draft/files/{path}
 ```json
 {
   "content": "# Updated content",
-  "encoding": "UTF8",
   "expected_revision_id": "rev-2",
   "fencing_token": 7
 }
@@ -385,6 +388,9 @@ Idempotency-Key: <uuid>
 不传 fencing token。Team 服务端检查 Lease：HELD_BY_OTHER 拒绝；FREE/HELD_BY_ME 冻结服务端
 最新 Revision。成功返回 202 Attempt，页面立即轮询。
 
+如果返回 503 或请求超时，前端必须复用同一个 Idempotency-Key 重放。Backend 返回原 Attempt 并
+重新确保后台任务；生成新 Key 会被解释为新的发布意图，不能用于网络层重试。
+
 ### 9.3 轮询策略
 
 ```http
@@ -444,13 +450,46 @@ Backend 会重新检查，所以仍可能返回 `SKILL_OFFLINE_BLOCKED`。成功
 - Owner/Manager 可继续编辑；
 - 发布 Vn+1 成功后恢复 PUBLISHED。
 
+409 `code=409313` 的 `data` 会带回最新 OfflineImpact/counts，前端直接用它刷新阻断弹窗；这是
+普通错误 `data=null` 的 route-specific 例外。
+
 产品文案不能写成“Vn 变回草稿”；准确语义是“Skill Offline，同时创建 Vn+1 Draft”。
 
-## 11. 添加 Skill 弹窗的三个来源
+## 11. 添加 Skill 弹窗的四个产品来源
 
-前端分别查询，不建设 Backend 混合分页。
+前端分别查询，不建设 Backend 混合分页；不同来源的确认命令也不同。
 
-### 11.1 TeamClaw 市场
+### 11.1 添加本地文件夹（Bot-owned Local）
+
+```http
+POST /openapi/v1/bots/{bot_id}/skills/upload-folder?user_id={actor_id}
+Content-Type: multipart/form-data
+
+files=<file1>
+files=<file2>
+file_paths=["SKILL.md","references/example.md"]
+```
+
+上传成功可能是“新建”或“同名替换”。新建项默认 inactive；替换必须保留原 active、Membership
+和 skill_id。上传后刷新 Bot Skill detail/list，再按最终控制来源处理：
+
+| 上传后状态 | 后续动作 |
+| --- | --- |
+| inactive 且无 Membership | 调用下面的 Membership PUT |
+| 已属于目标 SkillSet | 不重复改变控制来源；刷新目标 Set 即可 |
+| 已属于其他普通 SkillSet | 先由用户从原 Set 移除，再添加到目标 Set |
+| Direct active | 先调用 `POST /openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate`，再添加到 SkillSet |
+
+需要加入目标 Set 时调用：
+
+```http
+PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
+```
+
+目标 Set 默认 active 时，添加成功后立即写 Installation 并投影 Runtime。这里不能误调 Space Skill
+创建接口；Local 资产属于 Bot，Space Skill 属于 Space。
+
+### 11.2 TeamClaw 市场
 
 ```http
 GET /openapi/v1/bots/skills/repository?keyword=&page=1&page_size=20
@@ -459,7 +498,7 @@ PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
 
 返回 Repo Skill，已有 TeamClaw `skill_id`，直接调用普通 Membership。
 
-### 11.2 能力工坊
+### 11.3 能力工坊
 
 ```http
 GET /openapi/v1/bots/spaces/{space_id}/skills/consumable?keyword=&page=1&page_size=20
@@ -468,7 +507,7 @@ PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
 
 只展示 Published、物化完成、非 Offline 的 Space Skill；同样已有 `skill_id`。
 
-### 11.3 SkillCenter Public 市场
+### 11.4 SkillCenter Public 市场
 
 ```http
 POST /openapi/v1/bots/market/skill-center/skills
@@ -476,6 +515,9 @@ POST /openapi/v1/bots/market/skill-center/skills
 
 详情使用结果 `homepageUrl` iframe，不创建 TeamClaw Asset。确认引用时只有外部 `skillCode`，
 不能调用普通 Membership，必须发起异步 Reference。
+
+选择项和去重键必须使用 `skillCode`，不能使用名称。若异常上游记录没有 skillCode，该卡片只可
+查看、不可勾选；不能由前端生成临时代码。
 
 ## 12. SC Public 批量异步引用
 
@@ -491,6 +533,14 @@ Idempotency-Key: <uuid>
 ```
 
 202 只表示 Operation 已持久化，不表示已经加入 SkillSet。
+响应中 Envelope 顶层 `request_id` 是 trace；`data.request_id` 才是后续 collection 过滤使用的
+Reference 批次身份，前端不要混用。
+
+```json
+{"request_id":"req-01","reference_ids":["ref-a","ref-b"]}
+```
+
+202 不直接返回卡片详情；前端随后按 `data.request_id` 查询 collection。
 
 ### 12.2 卡片状态
 
@@ -508,7 +558,7 @@ COMPLETED 前不是 Membership，不能提前显示为已激活。
 ### 12.3 轮询与恢复
 
 ```http
-GET .../skill-center-references?reference_request_id=req-01&page=1&page_size=20
+GET .../skill-center-references?request_id=req-01&page=1&page_size=20
 GET .../skill-center-references/{reference_id}
 ```
 
@@ -532,6 +582,13 @@ GET .../skill-center-references/{reference_id}
 
 SkillSet 只有全部 active 或全部 inactive，不显示半选。Installation 是 Bot Effective Skill 的
 读取事实，前端不自行计算来源 Union。
+
+Skill 的 MCP dependency 权限沿用现有 SkillSet 添加流程，不因为来源是 Space/SC Public 增加一套
+前置规则。最终添加时权限不足就按既有 MCP 权限申请交互处理；已成功物化的共享 Skill Asset 不回滚。
+
+Center Skill 的技术合同支持所有实际存在的 Bot Type × Engine 组合。前端可以按 PRD 隐藏尚未开放
+的产品入口，但不能根据静态矩阵把 Backend 409 当成“技术不支持”，Backend 也不定义
+`SKILL_RUNTIME_NOT_SUPPORTED`。
 
 ## 14. Track Latest 的产品边界
 

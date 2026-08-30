@@ -165,6 +165,20 @@ Gap 不应按 Router、DTO、Repository 横切拆票，而应按可独立验收�
 | Offline | P2-OFF | Artifact consumers + lineage reader + upgrade |
 | Gateway Enable/E2E | 全部已实现路径 | 所有 Producer/Consumer + generated OpenAPI |
 
+必须保留以下 blocking edges，不能只按页面接口并行合入：
+
+```text
+SkillVersionResolver
+→ Runtime Center mapping + Engine/Pool consumer 验收
+→ 文件型 Artifact + Teclaw v4 历史重放验收
+→ Publication / SC Public Reference Producer
+→ Gateway OpenAPI Enable + 产品真实联调
+```
+
+Publication/Reference Router 可以先在隔离分支开发，但在 Consumer-first 门禁通过前不得作为
+可用生产合同发布。Offline 还额外依赖 Artifact lineage reader；否则无法证明历史 Service Bot
+引用不存在。
+
 旧 Phase 2 Tickets 必须逐条映射到上述闭环；不能继续按旧 ZIP、retirement、同步 Reference 或旧
 Installation 语义直接领取。
 
