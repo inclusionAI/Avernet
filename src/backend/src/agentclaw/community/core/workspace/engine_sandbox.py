@@ -42,6 +42,13 @@ class EngineBuildPlan:
     # Extra individual files to copy after the primary rsync. Useful for
     # preserving a small allowlist inside an otherwise excluded runtime dir.
     extra_include_files: list[str] = field(default_factory=list)
+    # Artifact-relative active Skills root. Empty means skill_target_relpath;
+    # engines whose logical active root is copied by extra_sync set it explicitly.
+    active_skill_target_relpath: str = ""
+
+    @property
+    def active_skill_snapshot_relpath(self) -> str:
+        return self.active_skill_target_relpath or self.skill_target_relpath
 
 
 @runtime_checkable

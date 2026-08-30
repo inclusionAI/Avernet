@@ -375,6 +375,9 @@ class BotBuildService:
                 "shared_corpus_snapshot_paths": list(
                     shared_corpus_snapshot_paths
                 ),
+                "active_skill_snapshot_path": (
+                    build_plan.active_skill_snapshot_relpath
+                ),
             }
 
             logger.info(

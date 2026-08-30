@@ -296,6 +296,7 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
                 "workspace/skills-pool/skills-repo",
                 "workspace/skills-pool/skill-center",
             ],
+            "active_skill_snapshot_path": "workspace/skills",
         }
     )
 
@@ -406,11 +407,84 @@ def test_pool_artifact_rejects_undeclared_center_link(tmp_path) -> None:
                     "workspace/skills-pool/skills-repo",
                     "workspace/skills-pool/skill-center",
                 ],
+                "active_skill_snapshot_path": "workspace/skills",
             }
         ),
         ServiceSkillsManifestBuilder(
             _LayoutRepository(state),
             _CapabilityReader(()),
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="Center links do not match the frozen exact manifest",
+    ):
+        producer.produce_artifact(
+            {
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            },
+            7,
+        )
+
+
+@pytest.mark.unit
+def test_center_link_outside_active_root_cannot_satisfy_manifest(tmp_path) -> None:
+    target = tmp_path / "openclaw"
+    outside = target / "other-workspace"
+    outside.mkdir(parents=True)
+    center_target = (
+        "/home/admin/.openclaw/workspace/skills-pool/skill-center/"
+        "00000000-0000-4000-8000-000000000001/1.0.0"
+    )
+    (outside / "pdf").symlink_to(center_target)
+    state = BotSkillLayoutState(
+        scope=BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
+    )
+    producer = ArcaSnapshotProducer(
+        _RecordingBuild(
+            {
+                "success": True,
+                "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
+                ],
+                "active_skill_snapshot_path": "workspace/skills",
+            }
+        ),
+        ServiceSkillsManifestBuilder(
+            _LayoutRepository(state),
+            _CapabilityReader(
+                (
+                    RegisteredSkillAsset(
+                        skill_id=1,
+                        name="pdf",
+                        git_path="center://pdf",
+                        skill_uuid="00000000-0000-4000-8000-000000000001",
+                        sc_version_number="1.0.0",
+                    ),
+                )
+            ),
             _CENTER_STORE_PREFIX,
             _CenterStore(),
             _REPO_STORE_PREFIX,
@@ -498,6 +572,7 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
                     "workspace/skills-pool/skills-repo",
                     "workspace/skills-pool/skill-center"
                 ],
+                "active_skill_snapshot_path": "workspace/skills",
             }
         ),
         ServiceSkillsManifestBuilder(
@@ -654,6 +729,7 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
                     "workspace/skills-pool/skills-repo",
                     "workspace/skills-pool/skill-center",
                 ],
+                "active_skill_snapshot_path": "workspace/skills",
             }
         ),
         ServiceSkillsManifestBuilder(
@@ -776,6 +852,7 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
                     "workspace/skills-pool/skills-repo",
                     "workspace/skills-pool/skill-center",
                 ],
+                "active_skill_snapshot_path": "workspace/skills",
             }
         ),
         ServiceSkillsManifestBuilder(
@@ -967,6 +1044,7 @@ def test_aicoding_service_engine_uses_the_shared_manifest_contract() -> None:
                 "workspace/skills-pool/skills-repo",
                 "workspace/skills-pool/skill-center",
             ],
+            "active_skill_snapshot_path": "workspace/skills",
         }
     )
     producer = ArcaSnapshotProducer(
@@ -1021,6 +1099,7 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
                 "workspace/skills-pool/skills-repo",
                 "workspace/skills-pool/skill-center",
             ],
+            "active_skill_snapshot_path": "skills",
         }
     )
     producer = ArcaSnapshotProducer(

@@ -77,6 +77,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                 captured=captured_layout,
                 build_target_path=str(build_target_path),
                 snapshot_paths=result.get("shared_corpus_snapshot_paths"),
+                active_snapshot_path=result.get("active_skill_snapshot_path"),
             )
             # This manifest only describes the Skills slice frozen inside the
             # service version. It augments — never replaces — build_target_path.
@@ -96,6 +97,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         captured: CapturedServiceSkillsLayout,
         build_target_path: str,
         snapshot_paths: object,
+        active_snapshot_path: object,
     ) -> None:
         """Validate exclusions and exact Center links without dereferencing corpora."""
 
@@ -110,6 +112,19 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                 "shared corpus snapshot is missing resolved exclusions"
             )
         root = Path(build_target_path)
+        if not isinstance(active_snapshot_path, str):
+            raise ServiceSkillsManifestError(
+                "shared corpus snapshot is missing the active Skills root"
+            )
+        active_path = PurePosixPath(active_snapshot_path)
+        if (
+            active_path.is_absolute()
+            or active_path.as_posix() != active_snapshot_path
+            or any(part in {"", ".", ".."} for part in active_path.parts)
+        ):
+            raise ServiceSkillsManifestError(
+                "shared corpus snapshot has an invalid active Skills root"
+            )
         for relative in snapshot_paths:
             path = PurePosixPath(relative)
             if (
@@ -134,7 +149,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         center_root = PurePosixPath(center_delivery.runtime_path)
         expected = {
             (
-                item["runtime_name"],
+                str(active_path / item["runtime_name"]),
                 str(
                     center_root
                     / item["skill_uuid"]
@@ -154,7 +169,9 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                     target_path.relative_to(center_root)
                 except ValueError:
                     continue
-                actual.append((entry.name, target_path.as_posix()))
+                actual.append(
+                    (entry.relative_to(root).as_posix(), target_path.as_posix())
+                )
         if len(actual) != len(set(actual)) or set(actual) != expected:
             raise ServiceSkillsManifestError(
                 "Center links do not match the frozen exact manifest"
