@@ -837,8 +837,8 @@ def test_folder_creation_caps_each_file_before_multipart_spooling(
     """The transport rejects a file before Starlette writes past its limit."""
     import starlette.formparsers
 
-    skill_routes_module = importlib.import_module(
-        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
     )
     real_spooled_file = starlette.formparsers.SpooledTemporaryFile
     file_limit = 8
@@ -855,7 +855,7 @@ def test_folder_creation_caps_each_file_before_multipart_spooling(
         def __getattr__(self, name):
             return getattr(self._file, name)
 
-    monkeypatch.setattr(skill_routes_module, "MAX_FILE_BYTES", file_limit)
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILE_BYTES", file_limit)
     monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", _DiskCap)
 
     response = client.post(
@@ -881,8 +881,8 @@ def test_folder_creation_caps_aggregate_files_before_multipart_spooling(
     """The transport stops aggregate writes even when each file is small."""
     import starlette.formparsers
 
-    skill_routes_module = importlib.import_module(
-        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
     )
     real_spooled_file = starlette.formparsers.SpooledTemporaryFile
     aggregate_limit = 8
@@ -902,8 +902,8 @@ def test_folder_creation_caps_aggregate_files_before_multipart_spooling(
         def __getattr__(self, name):
             return getattr(self._file, name)
 
-    monkeypatch.setattr(skill_routes_module, "MAX_FILE_BYTES", aggregate_limit)
-    monkeypatch.setattr(skill_routes_module, "MAX_EXPANDED_BYTES", aggregate_limit)
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILE_BYTES", aggregate_limit)
+    monkeypatch.setattr(multipart_limits_module, "MAX_EXPANDED_BYTES", aggregate_limit)
     monkeypatch.setattr(
         starlette.formparsers, "SpooledTemporaryFile", _AggregateDiskCap
     )
@@ -926,10 +926,10 @@ def test_folder_creation_caps_aggregate_files_before_multipart_spooling(
 def test_folder_creation_caps_file_count_during_multipart_parsing(
     client, skill_application_service, monkeypatch
 ):
-    skill_routes_module = importlib.import_module(
-        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
     )
-    monkeypatch.setattr(skill_routes_module, "MAX_FILES", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILES", 1)
 
     response = client.post(
         "/openapi/v1/bots/spaces/7/skills",
@@ -951,20 +951,18 @@ def test_folder_creation_rejects_oversized_multipart_body_before_spooling(
 ):
     import starlette.formparsers
 
-    skill_routes_module = importlib.import_module(
-        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
     )
 
     class _NoSpool:
         def __init__(self, *_args, **_kwargs):
             raise AssertionError("oversized multipart body reached temporary storage")
 
-    monkeypatch.setattr(skill_routes_module, "MAX_EXPANDED_BYTES", 1)
-    monkeypatch.setattr(skill_routes_module, "MAX_FILES", 1)
-    monkeypatch.setattr(skill_routes_module, "MAX_PATH_LENGTH", 1, raising=False)
-    monkeypatch.setattr(
-        skill_routes_module, "MAX_MULTIPART_OVERHEAD_BYTES", 0, raising=False
-    )
+    monkeypatch.setattr(multipart_limits_module, "MAX_EXPANDED_BYTES", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILES", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_PATH_LENGTH", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_MULTIPART_OVERHEAD_BYTES", 0)
     monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", _NoSpool)
 
     response = client.post(
@@ -984,18 +982,18 @@ def test_folder_creation_caps_streamed_body_without_content_length(
 ):
     import starlette.formparsers
 
-    skill_routes_module = importlib.import_module(
-        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes"
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
     )
 
     class _NoSpool:
         def __init__(self, *_args, **_kwargs):
             raise AssertionError("streamed oversized body reached temporary storage")
 
-    monkeypatch.setattr(skill_routes_module, "MAX_EXPANDED_BYTES", 1)
-    monkeypatch.setattr(skill_routes_module, "MAX_FILES", 1)
-    monkeypatch.setattr(skill_routes_module, "MAX_PATH_LENGTH", 1)
-    monkeypatch.setattr(skill_routes_module, "MAX_MULTIPART_OVERHEAD_BYTES", 0)
+    monkeypatch.setattr(multipart_limits_module, "MAX_EXPANDED_BYTES", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILES", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_PATH_LENGTH", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_MULTIPART_OVERHEAD_BYTES", 0)
     monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", _NoSpool)
     boundary = "space-skill-boundary"
     body = (

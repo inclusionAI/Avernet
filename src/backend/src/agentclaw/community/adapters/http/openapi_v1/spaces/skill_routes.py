@@ -3,25 +3,20 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
     Depends,
     Form,
     Header,
-    HTTPException,
     Path,
     Query,
     Request,
 )
 from starlette.concurrency import run_in_threadpool
-from starlette.formparsers import MultiPartException, MultiPartParser
-from starlette.responses import Response
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
-from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
 from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
 from agentclaw.community.adapters.http.openapi_v1.principal import (
@@ -33,8 +28,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
     envelope_errors,
-    mapped_error_response,
     page,
+)
+from agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits import (
+    SpaceSkillPublicAPIRoute,
 )
 from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     ConsumableSpaceSkill,
@@ -60,120 +57,10 @@ from agentclaw.community.core.skill_center.skill_package import (
     MAX_EXPANDED_BYTES,
     MAX_FILE_BYTES,
     MAX_FILES,
-    MAX_PATH_LENGTH,
     SkillPackageInvalidError,
     SkillPackageTooLargeError,
 )
 from agentclaw.community.di import Injected
-
-
-MAX_MULTIPART_OVERHEAD_BYTES = 2 * 1024 * 1024
-
-
-class _SkillUploadTooLarge(MultiPartException):
-    """Internal parser signal translated to the public package error."""
-
-
-class _BoundedSkillMultipartParser(MultiPartParser):
-    """Enforce file limits before Starlette writes multipart data to disk."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._total_file_bytes = 0
-
-    def on_part_begin(self) -> None:
-        super().on_part_begin()
-        self._current_file_bytes = 0
-
-    def on_part_data(self, data: bytes, start: int, end: int) -> None:
-        if self._current_part.file is not None:
-            received = end - start
-            self._current_file_bytes += received
-            self._total_file_bytes += received
-            if self._current_file_bytes > MAX_FILE_BYTES:
-                raise _SkillUploadTooLarge("Space Skill file exceeds its size limit")
-            if self._total_file_bytes > MAX_EXPANDED_BYTES:
-                raise _SkillUploadTooLarge(
-                    "Space Skill folder exceeds its aggregate size limit"
-                )
-        super().on_part_data(data, start, end)
-
-    def on_headers_finished(self) -> None:
-        try:
-            super().on_headers_finished()
-        except MultiPartException as exc:
-            if self._current_files > self.max_files:
-                raise _SkillUploadTooLarge(
-                    "Space Skill folder exceeds its file-count limit"
-                ) from exc
-            raise
-
-
-def _file_paths_field_limit() -> int:
-    # JSON may escape each Unicode code point as ``\uXXXX``. Delimiters and
-    # quotes add a small fixed amount per path.
-    return MAX_FILES * (MAX_PATH_LENGTH * 6 + 4) + 2
-
-
-def _multipart_body_limit() -> int:
-    return MAX_EXPANDED_BYTES + _file_paths_field_limit() + MAX_MULTIPART_OVERHEAD_BYTES
-
-
-async def _bounded_request_stream(
-    request: Request, *, limit: int
-) -> AsyncIterator[bytes]:
-    received = 0
-    async for chunk in request.stream():
-        received += len(chunk)
-        if received > limit:
-            raise _SkillUploadTooLarge(
-                "Space Skill multipart body exceeds its size limit"
-            )
-        yield chunk
-
-
-class SpaceSkillPublicAPIRoute(PublicAPIRoute):
-    """Public route with receive-time bounds for its sole multipart command."""
-
-    def get_route_handler(self) -> Any:
-        original = super().get_route_handler()
-
-        async def bounded_multipart_handler(request: Request) -> Response:
-            if request.headers.get("content-type", "").startswith(
-                "multipart/form-data"
-            ):
-                body_limit = _multipart_body_limit()
-                declared_length = request.headers.get("content-length")
-                if declared_length is not None:
-                    try:
-                        if int(declared_length) > body_limit:
-                            response = mapped_error_response(
-                                SkillPackageTooLargeError(), request
-                            )
-                            assert response is not None
-                            return response
-                    except ValueError:
-                        pass
-                parser = _BoundedSkillMultipartParser(
-                    request.headers,
-                    _bounded_request_stream(request, limit=body_limit),
-                    max_files=MAX_FILES,
-                    max_fields=1,
-                    max_part_size=_file_paths_field_limit(),
-                )
-                try:
-                    request._form = await parser.parse()
-                except _SkillUploadTooLarge:
-                    response = mapped_error_response(
-                        SkillPackageTooLargeError(), request
-                    )
-                    assert response is not None
-                    return response
-                except MultiPartException as exc:
-                    raise HTTPException(status_code=400, detail=exc.message) from exc
-            return await original(request)
-
-        return bounded_multipart_handler
 
 
 router = APIRouter(

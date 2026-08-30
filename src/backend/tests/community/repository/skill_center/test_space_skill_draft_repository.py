@@ -6,12 +6,14 @@ from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import (
     SkillDraftEditLease,
+    SkillDraftUpgradeRequest,
     SkillGrant,
     SkillSpaceBinding,
     SkillVersion,
@@ -23,6 +25,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseTokenRejectedError,
     DraftFrozenError,
     DraftRevisionConflictError,
+    SpaceSkillIdempotencyConflictError,
     SpaceSkillGrantForbiddenError,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
@@ -52,6 +55,20 @@ class _Database:
             session.close()
 
     transactional_orm_session = orm_session
+
+
+class _UniqueRaceDatabase:
+    """Expose a committed winner after the losing insert hits its unique key."""
+
+    def __init__(self, winner: _Database) -> None:
+        self._winner = winner
+
+    orm_session = property(lambda self: self._winner.orm_session)
+
+    @contextmanager
+    def transactional_orm_session(self):
+        raise IntegrityError("INSERT", {}, RuntimeError("duplicate request key"))
+        yield  # pragma: no cover - contextmanager shape only
 
 
 def _seed(db: _Database, *, space_type: str, frozen: bool = False):
@@ -315,3 +332,48 @@ def test_delete_upgrade_draft_preserves_spent_idempotency_request():
         "status": "SPENT",
         "draft": None,
     }
+
+
+def test_upgrade_unique_race_reloads_winner_and_rejects_cross_skill_reuse():
+    db = _Database()
+    space_id, skill_id = _seed(db, space_type="PERSONAL")
+    with db.orm_session() as session:
+        session.add(
+            SkillDraftUpgradeRequest(
+                skill_id=skill_id,
+                space_id=space_id,
+                request_id="upgrade-race",
+                target_version_ordinal=1,
+                status="ACTIVE",
+                created_by="owner-1",
+                env="test",
+            )
+        )
+
+    repo = SpaceSkillDraftRepository(_UniqueRaceDatabase(db))
+    replayed = repo.create_upgrade_draft(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        request_id="upgrade-race",
+        expected_version_id=1,
+        target_version=1,
+        new_locator="unused",
+        new_description="unused",
+        env="test",
+    )
+
+    assert replayed["created"] is False
+    assert replayed["draft"]["locator"].endswith(_OLD_REV)
+    with pytest.raises(SpaceSkillIdempotencyConflictError):
+        repo.create_upgrade_draft(
+            space_id=space_id,
+            skill_id=skill_id + 1,
+            actor_id="owner-1",
+            request_id="upgrade-race",
+            expected_version_id=1,
+            target_version=1,
+            new_locator="unused",
+            new_description="unused",
+            env="test",
+        )

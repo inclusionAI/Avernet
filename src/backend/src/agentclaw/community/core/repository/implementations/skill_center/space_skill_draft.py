@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from injector import inject
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
@@ -206,103 +207,152 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
         new_description: str,
         env: str,
     ) -> DraftUpgradeRecord:
-        with self._db.transactional_orm_session() as session:
-            row = (
-                session.query(Skill, SpaceModel)
-                .join(
-                    SkillSpaceBinding,
-                    (SkillSpaceBinding.skill_id == Skill.id)
-                    & (SkillSpaceBinding.env == Skill.env),
-                )
-                .join(
-                    SpaceModel,
-                    (SpaceModel.id == SkillSpaceBinding.space_id)
-                    & (SpaceModel.env == SkillSpaceBinding.env),
-                )
-                .filter(
-                    Skill.id == skill_id,
-                    Skill.env == env,
-                    SkillSpaceBinding.space_id == space_id,
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            if row is None:
-                raise DraftNotFoundError("space skill not found")
-            skill, space = row
-            grant = (
-                session.query(SkillGrant.id)
-                .filter(
-                    SkillGrant.skill_id == skill_id,
-                    SkillGrant.user_id == actor_id,
-                    SkillGrant.env == env,
-                    SkillGrant.status == "ACTIVE",
-                    SkillGrant.role.in_(("OWNER", "MANAGER")),
-                )
-                .one_or_none()
-            )
-            if grant is None:
-                raise SpaceSkillGrantForbiddenError("owner or manager required")
-            request = (
-                session.query(SkillDraftUpgradeRequest)
-                .filter(
-                    SkillDraftUpgradeRequest.request_id == request_id,
-                    SkillDraftUpgradeRequest.env == env,
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            if request is not None:
-                if (
-                    request.skill_id != skill_id
-                    or request.space_id != space_id
-                    or request.status != "ACTIVE"
-                ):
-                    raise SpaceSkillIdempotencyConflictError(
-                        "upgrade request already belongs to another intent"
-                    )
-                draft = self._live_upgrade_draft(session, request, env=env)
-                if draft is None:
-                    raise SpaceSkillIdempotencyConflictError(
-                        "upgrade request belongs to a Draft that no longer exists"
-                    )
-                return {"created": False, "draft": draft}
-            if skill.draft_status is not None:
-                raise DraftAlreadyExistsError("draft already exists")
-            latest = (
-                session.query(SkillVersion)
-                .filter(
-                    SkillVersion.skill_id == skill_id,
-                    SkillVersion.env == env,
-                    SkillVersion.status == "PUBLISHED",
-                )
-                .order_by(SkillVersion.version_ordinal.desc())
-                .with_for_update()
-                .first()
-            )
-            if latest is None or latest.id != expected_version_id:
-                raise DraftRevisionConflictError("latest Published Version changed")
-            skill.zip_url = new_locator
-            skill.draft_target_version = target_version
-            skill.draft_status = "EDITING"
-            skill.draft_description = new_description
-            skill.draft_source_kind = "PUBLISHED_VERSION"
-            session.add(
-                SkillDraftUpgradeRequest(
-                    skill_id=skill_id,
+        try:
+            with self._db.transactional_orm_session() as session:
+                return self._create_upgrade_draft_once(
+                    session=session,
                     space_id=space_id,
+                    skill_id=skill_id,
+                    actor_id=actor_id,
                     request_id=request_id,
-                    target_version_ordinal=target_version,
-                    status="ACTIVE",
-                    created_by=actor_id,
+                    expected_version_id=expected_version_id,
+                    target_version=target_version,
+                    new_locator=new_locator,
+                    new_description=new_description,
                     env=env,
                 )
+        except IntegrityError:
+            replay = self.get_upgrade_by_request_id(request_id=request_id, env=env)
+            if replay is None:
+                raise
+            return self._upgrade_replay_result(
+                replay, skill_id=skill_id, space_id=space_id
             )
-            session.flush()
-            return {
-                "created": True,
-                "draft": self._record(skill, space.space_type, space.sc_team_id),
-            }
+
+    def _create_upgrade_draft_once(
+        self,
+        *,
+        session,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        request_id: str,
+        expected_version_id: int,
+        target_version: int,
+        new_locator: str,
+        new_description: str,
+        env: str,
+    ) -> DraftUpgradeRecord:
+        row = (
+            session.query(Skill, SpaceModel)
+            .join(
+                SkillSpaceBinding,
+                (SkillSpaceBinding.skill_id == Skill.id)
+                & (SkillSpaceBinding.env == Skill.env),
+            )
+            .join(
+                SpaceModel,
+                (SpaceModel.id == SkillSpaceBinding.space_id)
+                & (SpaceModel.env == SkillSpaceBinding.env),
+            )
+            .filter(
+                Skill.id == skill_id,
+                Skill.env == env,
+                SkillSpaceBinding.space_id == space_id,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if row is None:
+            raise DraftNotFoundError("space skill not found")
+        skill, space = row
+        grant = (
+            session.query(SkillGrant.id)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == actor_id,
+                SkillGrant.env == env,
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.role.in_(("OWNER", "MANAGER")),
+            )
+            .one_or_none()
+        )
+        if grant is None:
+            raise SpaceSkillGrantForbiddenError("owner or manager required")
+        request = (
+            session.query(SkillDraftUpgradeRequest)
+            .filter(
+                SkillDraftUpgradeRequest.request_id == request_id,
+                SkillDraftUpgradeRequest.env == env,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if request is not None:
+            return self._upgrade_replay_result(
+                {
+                    "skill_id": request.skill_id,
+                    "space_id": request.space_id,
+                    "status": request.status,
+                    "draft": self._live_upgrade_draft(session, request, env=env),
+                },
+                skill_id=skill_id,
+                space_id=space_id,
+            )
+        if skill.draft_status is not None:
+            raise DraftAlreadyExistsError("draft already exists")
+        latest = (
+            session.query(SkillVersion)
+            .filter(
+                SkillVersion.skill_id == skill_id,
+                SkillVersion.env == env,
+                SkillVersion.status == "PUBLISHED",
+            )
+            .order_by(SkillVersion.version_ordinal.desc())
+            .with_for_update()
+            .first()
+        )
+        if latest is None or latest.id != expected_version_id:
+            raise DraftRevisionConflictError("latest Published Version changed")
+        skill.zip_url = new_locator
+        skill.draft_target_version = target_version
+        skill.draft_status = "EDITING"
+        skill.draft_description = new_description
+        skill.draft_source_kind = "PUBLISHED_VERSION"
+        session.add(
+            SkillDraftUpgradeRequest(
+                skill_id=skill_id,
+                space_id=space_id,
+                request_id=request_id,
+                target_version_ordinal=target_version,
+                status="ACTIVE",
+                created_by=actor_id,
+                env=env,
+            )
+        )
+        session.flush()
+        return {
+            "created": True,
+            "draft": self._record(skill, space.space_type, space.sc_team_id),
+        }
+
+    @staticmethod
+    def _upgrade_replay_result(
+        replay: SkillUpgradeRequestRecord, *, skill_id: int, space_id: int
+    ) -> DraftUpgradeRecord:
+        if (
+            replay["skill_id"] != skill_id
+            or replay["space_id"] != space_id
+            or replay["status"] != "ACTIVE"
+        ):
+            raise SpaceSkillIdempotencyConflictError(
+                "upgrade request already belongs to another intent"
+            )
+        if replay["draft"] is None:
+            raise SpaceSkillIdempotencyConflictError(
+                "upgrade request belongs to a Draft that no longer exists"
+            )
+        return {"created": False, "draft": replay["draft"]}
 
     def replace_draft_revision(
         self,
