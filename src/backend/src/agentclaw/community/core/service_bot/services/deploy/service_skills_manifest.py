@@ -298,19 +298,17 @@ class ServiceSkillsManifestBuilder:
                     bot=bot,
                     store_prefix=self._repo_store_prefix,
                 ),
-            )
-        if center_skills:
-            if state.active_layout is not SkillLayout.POOL:
-                raise ServiceSkillsManifestError(
-                    "Center service build requires the Pool runtime layout"
-                )
-            shared_corpora += (
                 ResolvedSharedCorpusDelivery.center_from_state(
                     state=state,
                     bot=bot,
                     store_prefix=self._center_store_prefix,
                 ),
             )
+        if center_skills:
+            if state.active_layout is not SkillLayout.POOL:
+                raise ServiceSkillsManifestError(
+                    "Center service build requires the Pool runtime layout"
+                )
             self._verify_exact_store(center_skills)
 
         return CapturedServiceSkillsLayout(
@@ -352,15 +350,12 @@ class ServiceSkillsManifestBuilder:
                     bot={"active_engine": captured.runtime_engine},
                     store_prefix=self._repo_store_prefix,
                 ),
+                ResolvedSharedCorpusDelivery.center_from_state(
+                    state=current,
+                    bot={"active_engine": captured.runtime_engine},
+                    store_prefix=self._center_store_prefix,
+                ),
             )
-            if captured.center_skills:
-                current_deliveries += (
-                    ResolvedSharedCorpusDelivery.center_from_state(
-                        state=current,
-                        bot={"active_engine": captured.runtime_engine},
-                        store_prefix=self._center_store_prefix,
-                    ),
-                )
             if current_deliveries != captured.shared_corpora:
                 raise ServiceSkillsManifestError(
                     "Engine shared corpus delivery changed during service build"
@@ -513,7 +508,7 @@ def validate_service_skills_manifest_for_release(
         # artifacts when they contain no Center Skill.  Replay them unchanged.
         if shared_corpora is None and not center_skills:
             return
-        expected_corpora = ["repo"] + (["center"] if center_skills else [])
+        expected_corpora = ["repo", "center"]
         if not isinstance(shared_corpora, list):
             raise ServiceSkillsManifestError(
                 "Pool Skill manifest requires frozen shared corpora"

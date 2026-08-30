@@ -12,6 +12,9 @@ import pytest
 from agentclaw.community.core.service_bot.services.bot_build_service import (
     BotBuildService,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ResolvedSharedCorpusDelivery,
+)
 from agentclaw.community.core.workspace.engine_sandbox import (
     EngineSandboxRegistry,
 )
@@ -183,6 +186,20 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
             "active_engine": engine,
         },
         version=7,
+        shared_corpora=(
+            ResolvedSharedCorpusDelivery(
+                corpus="repo",
+                runtime_path=str(runtime_pool_root / "skills-repo"),
+                store_prefix="aidesktop/aidesktop_dev/bolt_shared/skills-repo",
+                layout_contract_version="skills-pool-p3-v1",
+            ),
+            ResolvedSharedCorpusDelivery(
+                corpus="center",
+                runtime_path=str(runtime_pool_root / "skill-center"),
+                store_prefix="aidesktop/aidesktop_dev/bolt_shared/skills-center",
+                layout_contract_version="skills-pool-p3-v1",
+            ),
+        ),
     )
 
     assert result["success"] is True

@@ -407,6 +407,12 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         base_path = provider.get_base_path()
         build_plan = provider.get_build_plan()
         skills_local_dir = f"{base_path}/{build_plan.skill_target_relpath}/skills-repo"
+        shared_corpora = frozen_shared_corpus_deliveries_from_ext(
+            ext_info, {"active_engine": engine_type or DEFAULT_ENGINE_TYPE}
+        )
+        has_frozen_repo = any(
+            delivery.corpus == "repo" for delivery in shared_corpora
+        )
 
         # OSS 挂载点必须位于 /home/admin/nfs/ 下；引擎专用目录
         # （/home/admin/.{engine}、/home/admin/.config/{engine}）由
@@ -432,24 +438,22 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
                 ),
             )
         else:
-            mount_points.extend(
-                [
-                    MountPointEntry(
-                        remote_dir=f"/{bolt_data}",
-                        local_dir="/home/admin/nfs/bot-data",
-                        permission=MountPermission.READ_WRITE,
-                    ),
+            mount_points.append(
+                MountPointEntry(
+                    remote_dir=f"/{bolt_data}",
+                    local_dir="/home/admin/nfs/bot-data",
+                    permission=MountPermission.READ_WRITE,
+                )
+            )
+            if not has_frozen_repo:
+                mount_points.append(
                     MountPointEntry(
                         remote_dir=f"/{skill_repo}",
                         local_dir=skills_local_dir,
                         permission=MountPermission.READ_ONLY,
-                    ),
-                ]
-            )
+                    )
+                )
 
-        shared_corpora = frozen_shared_corpus_deliveries_from_ext(
-            ext_info, {"active_engine": engine_type or DEFAULT_ENGINE_TYPE}
-        )
         for delivery in shared_corpora:
             mount_points.append(
                 MountPointEntry(

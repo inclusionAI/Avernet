@@ -239,7 +239,6 @@ class TestSetupDirectoryEngineAware:
             entity_type="staff",
             bot_id="b1",
             engine_type="openclaw",
-            mount_home_dir_storage=True,
             ext_info={"skills_manifest": manifest},
         )
 
@@ -252,6 +251,11 @@ class TestSetupDirectoryEngineAware:
         )
         assert repo.remote_dir == "/skills-repo/b1"
         assert repo.permission == "READ_ONLY"
+        assert all(
+            entry.local_dir
+            != "/home/admin/.openclaw/workspace/skills/skills-repo"
+            for entry in entries
+        )
         assert center.remote_dir == (
             "/aidesktop/aidesktop_dev/bolt_shared/skills-center"
         )
@@ -277,6 +281,9 @@ class TestSetupDirectoryEngineAware:
         )
 
         assert all("skills-center" not in entry.remote_dir for entry in entries)
+        assert _skills_repo_mount(entries).local_dir == (
+            "/home/admin/.openclaw/workspace/skills/skills-repo"
+        )
 
 
 @pytest.mark.unit

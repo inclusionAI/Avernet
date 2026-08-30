@@ -293,7 +293,8 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
             "migration_path": "/home/admin/nfs/bot-data/7/openclaw",
             "build_target_path": str(target),
             "shared_corpus_snapshot_paths": [
-                "workspace/skills-pool/skills-repo"
+                "workspace/skills-pool/skills-repo",
+                "workspace/skills-pool/skill-center",
             ],
         }
     )
@@ -332,7 +333,17 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
                 "layout_contract_version": "skills-pool-p3-v1",
                 "permission": "read_only",
                 "snapshot_policy": "exclude",
-            }
+            },
+            {
+                "corpus": "center",
+                "runtime_path": (
+                    "/home/admin/.openclaw/workspace/skills-pool/skill-center"
+                ),
+                "store_prefix": _CENTER_STORE_PREFIX,
+                "layout_contract_version": "skills-pool-p3-v1",
+                "permission": "read_only",
+                "snapshot_policy": "exclude",
+            },
         ],
     }
     assert layout_repository.scopes == [
@@ -580,7 +591,8 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
                 "migration_path": "/snapshot/8/openclaw",
                 "build_target_path": str(target),
                 "shared_corpus_snapshot_paths": [
-                    "workspace/skills-pool/skills-repo"
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
                 ],
             }
         ),
@@ -701,7 +713,8 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
                 "migration_path": "/snapshot/8/openclaw",
                 "build_target_path": str(target),
                 "shared_corpus_snapshot_paths": [
-                    "workspace/skills-pool/skills-repo"
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
                 ],
             }
         ),
@@ -890,7 +903,10 @@ def test_aicoding_service_engine_uses_the_shared_manifest_contract() -> None:
         {
             "success": True,
             "build_target_path": "/snapshot/1/hermes",
-            "shared_corpus_snapshot_paths": ["workspace/skills-pool/skills-repo"],
+            "shared_corpus_snapshot_paths": [
+                "workspace/skills-pool/skills-repo",
+                "workspace/skills-pool/skill-center",
+            ],
         }
     )
     producer = ArcaSnapshotProducer(
@@ -941,7 +957,10 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
         {
             "success": True,
             "build_target_path": "/snapshot/1/hermes",
-            "shared_corpus_snapshot_paths": ["workspace/skills-pool/skills-repo"],
+            "shared_corpus_snapshot_paths": [
+                "workspace/skills-pool/skills-repo",
+                "workspace/skills-pool/skill-center",
+            ],
         }
     )
     producer = ArcaSnapshotProducer(
@@ -976,7 +995,15 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
                 "layout_contract_version": "skills-pool-p3-v1",
                 "permission": "read_only",
                 "snapshot_policy": "exclude",
-            }
+            },
+            {
+                "corpus": "center",
+                "runtime_path": "/home/admin/.hermes/workspace/skills-pool/skill-center",
+                "store_prefix": _CENTER_STORE_PREFIX,
+                "layout_contract_version": "skills-pool-p3-v1",
+                "permission": "read_only",
+                "snapshot_policy": "exclude",
+            },
         ],
     }
     assert build.calls
