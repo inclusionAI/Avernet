@@ -187,8 +187,10 @@ class SkillCenterReferenceProcessor:
                     scope=SkillCenterReadScope.PUBLIC,
                 )
             )
-            if target.status != "PUBLISHED":
-                self._track_latest.version_published(published)
+            # Re-ensure the level-triggered task even when another Reference
+            # already published this exact Version.  This closes the accepted
+            # post-commit enqueue window without creating a second event model.
+            self._track_latest.version_published(published)
             self._references.update_item(
                 env=batch.env,
                 reference_id=item.reference_id,

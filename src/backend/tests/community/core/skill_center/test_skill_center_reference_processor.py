@@ -268,7 +268,7 @@ def test_one_missing_public_skill_does_not_block_successful_item() -> None:
     ]
 
 
-def test_reused_published_asset_is_added_without_duplicate_track_latest_event() -> None:
+def test_reused_published_asset_reensures_level_triggered_track_latest() -> None:
     references = _References(target_status="PUBLISHED")
     track_latest = _TrackLatest()
 
@@ -282,7 +282,7 @@ def test_reused_published_asset_is_added_without_duplicate_track_latest_event() 
     )
 
     assert isinstance(outcome, Complete)
-    assert track_latest.published == []
+    assert len(track_latest.published) == 2
 
 
 def test_transient_sc_failure_retries_three_times_then_fails_each_item() -> None:
