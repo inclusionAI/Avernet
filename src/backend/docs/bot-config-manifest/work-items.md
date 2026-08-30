@@ -89,8 +89,29 @@ apply materialises it into the existing `ac_bot_startup_script` store through
   byte-identical-without-a-script invariant is preserved by construction rather
   than defended by a test (design §10.4 still gets its test).
 - The existing `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script`
-  endpoints keep working unchanged, because their table is still the
-  materialisation target.
+  endpoints keep working, because their table is still the materialisation
+  target — **but "unchanged" is only true for a bot that has no manifest, and
+  the difference matters.** On a bot whose manifest declares `script`, a legacy
+  `PUT` writes `ac_bot_startup_script` and nothing else: `GET .../config-manifest`
+  still returns the old `script`, the two disagree, and **the next apply silently
+  reverts the user's edit** — a change accepted with `200` and then undone by an
+  unrelated republish.
+
+  Design §6 already answers this and this plan had quietly dropped the answer:
+  the legacy endpoints are an **alias view (write-through)** onto the manifest's
+  `script`. Restored as a requirement rather than a divergence:
+
+  - **Bot with a manifest** — a legacy `PUT`/`DELETE` writes through to the
+    manifest document's `script` field and then materialises, so the declaration
+    stays the truth and there is nothing for a later apply to revert. A legacy
+    `GET` reads the manifest's `script`.
+  - **Bot without a manifest** — behaviour is byte-for-byte what it is today.
+    Nothing about #935's existing flow changes.
+
+  **W8 owns this**, since it owns the apply points where the divergence would
+  otherwise surface. W1's "no change to the `/startup-script` endpoints" is a
+  statement about *W1's* scope, not a promise that the feature never touches
+  them — they cannot both be an alias and be untouched.
 - Whether to later collapse `ac_bot_startup_script` into the manifest module is
   a reversible decision, deferred. This resolves design §8's open choice.
 - Apply's *only* action for this category is that one DB write; the platform
@@ -1321,12 +1342,23 @@ is applied.
   `resources` would be accepted with no materialiser behind it. Either the flag
   stays on through W6 and W8, or each incomplete category and trigger is gated
   independently — one flag through W8 is the simpler of the two.
-- **`cli_tools` is reported `unsupported` and refused at `PUT` until W9 lands.**
-  The flag lifting at W8 is not enough for this one category: W9 is deferred and
-  unscheduled, so after W8 the surface would accept a `cli_tools` declaration
-  with no materialiser, no PATH delivery and no artifact field behind it. The
-  capability resolver therefore answers **per category**, not just per bot —
-  `cli_tools` is the category that forces that shape.
+- **The rule, not the instance: a category with no materialiser in iteration 1 is
+  reported `unsupported` and refused at `PUT`.** The flag lifting at W8 is not
+  enough on its own, because W1 parses the whole vocabulary
+  (`manifest.{mcp,resources,skills,engine_config,identity,cli_tools}`) while
+  iteration 1 does not implement all of it. Without this rule the surface would
+  accept a declaration with nothing behind it. The capability resolver therefore
+  answers **per category**, not just per bot. As of iteration 1 the members are:
+
+  | Category | Why it has no materialiser | Refused until |
+  | --- | --- | --- |
+  | `cli_tools` | W9 is deferred and unscheduled — no materialiser, no PATH delivery, no artifact field | W9 lands |
+  | `engine_config` | Removed from iteration 1 by the X2/T3 decision (§4), so W4's no-fetch materialisers are `mcp` and `script` only | its materialiser returns |
+
+  Stated as a rule with a membership table rather than a bullet per category,
+  because the list is the thing that changes: an implementer adding a category
+  must add a row or a materialiser, and cannot leave the surface accepting
+  something no code applies.
 
 **Out of scope.** Any apply. Any fetching. Credentials. Any change to the
 existing `/startup-script` endpoints. Any change to `BaasService`.
@@ -1744,8 +1776,18 @@ directory-level ownership semantics; teclaw per-file expansion.
 - [ ] A file entry materialises through the existing resource service at a
       workspace-relative logical `path`; physical placement stays the engine's
       decision.
-- [ ] A directory entry's **convergence unit is the whole archive**: unchanged
-      content ⇒ `unchanged` with no per-file comparison and no writes.
+- [ ] A directory entry's **convergence unit is the whole archive**, but
+      "unchanged" is judged against **what was delivered, not against the source
+      alone**. An unchanged archive plus a drifted tree still needs the write:
+      if someone added or edited a file under `path` after the last apply,
+      reporting `unchanged` from source content alone would skip every write and
+      leave that drift in place — directly defeating the ownership rule below
+      and §3.2's guarantee that making a manifest effective overwrites the
+      declared area. So: skip only when the source is unchanged **and** the
+      deployed tree still matches what W11 recorded us materialising; otherwise
+      re-materialise. W11's record is what makes the cheap check possible — a
+      per-file comparison against the bot is not needed to detect drift, only a
+      comparison against our own record of it.
 - [ ] Directory-level ownership: on change, the tree under `path` is replaced
       wholesale — files present before and absent from the new archive are
       removed, including manually added ones. Nothing outside `path` is touched.
