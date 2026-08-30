@@ -61,11 +61,12 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol import ExpertChatInstanceServiceProtocol
 
 logger = get_logger()
 
 
-class ExpertChatInstanceService:
+class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
     """Provision + reuse a per-caller baas container for a service bot.
 
     Dependencies are injected (see ``di/modules/expert_chat_module.py``):

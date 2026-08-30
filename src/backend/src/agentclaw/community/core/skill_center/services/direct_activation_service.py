@@ -53,9 +53,10 @@ from agentclaw.community.core.skill_center.services._mutation_flow import (
     skill_release_scope,
 )
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
+from agentclaw.community.core.skill_center.direct_activation_service_protocol import DirectActivationServiceProtocol
 
 
-class DirectActivationService:
+class DirectActivationService(DirectActivationServiceProtocol):
     """Activate/deactivate ONE capability (skill or MCP) for a Bot, directly.
 
     Legal only when no Set governs it (Policy R1, enforced by the UoW under

@@ -1,17 +1,19 @@
-"""Service API Protocol for user (access-policy) CRUD."""
+"""Service API Protocol for user (access-policy) CRUD.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/access/user_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from agentclaw.community.core.access.user_service_protocol import (
+    UserInfoRecord,
+    UserServiceProtocol,
+)
 
-from agentclaw.community.core.access.models import UserInfoRecord
-
-
-@runtime_checkable
-class UserServiceProtocol(Protocol):
-    """Service API for user record management."""
-
-    def list_users(self, *, user_type: str | None = None) -> list[UserInfoRecord]: ...
-
-    def get_user(self, *, user_id: str, user_type: str) -> UserInfoRecord: ...
-
-    def upsert_user(self, *, user_id: str, user_type: str, status: str) -> None: ...
+__all__ = [
+    "UserInfoRecord",
+    "UserServiceProtocol",
+]

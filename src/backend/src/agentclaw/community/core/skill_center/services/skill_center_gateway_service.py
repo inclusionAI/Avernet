@@ -32,9 +32,10 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterVersionListRequest,
     SkillCenterVersion,
 )
+from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import SkillCenterGatewayServiceProtocol
 
 
-class SkillCenterGatewayService:
+class SkillCenterGatewayService(SkillCenterGatewayServiceProtocol):
     """Typed consumer that rejects identity drift at the SC trust boundary.
 
     Attempt/retry/materialization policy stays in its owning application

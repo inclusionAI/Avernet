@@ -1,44 +1,23 @@
-"""Public Service API for Bot runtime projection reconciliation."""
+"""Public Service API for Bot runtime projection reconciliation.
 
-from collections.abc import Sequence
-from typing import Protocol, runtime_checkable
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/bot_runtime_projector_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
-from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
+from __future__ import annotations
+
+from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import (
+    BotRuntimeProjectorProtocol,
+    CoreBotRuntimeProjectorProtocol,
+    PoolSkillMapping,
     ProjectionScope,
 )
-from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 
-
-@runtime_checkable
-class BotRuntimeProjectorProtocol(
-    CoreBotRuntimeProjectorProtocol, Protocol
-):
-    """Transport-facing contract; Core depends only on its sibling contract."""
-
-    async def snapshot_skill_mappings(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-    ) -> tuple[PoolSkillMapping, ...]: ...
-
-    async def project(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        retired_mappings: Sequence[PoolSkillMapping] = (),
-        scope: ProjectionScope,
-    ) -> None: ...
-
-    async def project_mcp_and_cli(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        scope: ProjectionScope,
-    ) -> None: ...
-
-
-__all__ = ["BotRuntimeProjectorProtocol"]
+__all__ = [
+    "BotRuntimeProjectorProtocol",
+    "CoreBotRuntimeProjectorProtocol",
+    "PoolSkillMapping",
+    "ProjectionScope",
+]

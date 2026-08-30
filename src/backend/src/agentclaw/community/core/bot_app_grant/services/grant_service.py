@@ -41,11 +41,12 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_app_grant.bot_app_grant_service_protocol import BotAppGrantServiceProtocol
 
 logger = get_logger()
 
 
-class BotAppGrantService:
+class BotAppGrantService(BotAppGrantServiceProtocol):
     """Grant, withdraw and read bot→app authorizations."""
 
     @inject

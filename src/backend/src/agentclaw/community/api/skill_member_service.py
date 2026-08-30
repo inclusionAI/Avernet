@@ -1,19 +1,17 @@
-"""Service API Protocol for skill membership management."""
+"""Service API Protocol for skill membership management.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_member_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.skill_member_service_protocol import (
+    SkillMemberServiceProtocol,
+)
 
-
-@runtime_checkable
-class SkillMemberServiceProtocol(Protocol):
-    """Service API for skill membership queries and mutations."""
-
-    def get_members_by_skill_uuid(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def add_member(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def remove_member(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def is_member(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def update_member_role(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "SkillMemberServiceProtocol",
+]

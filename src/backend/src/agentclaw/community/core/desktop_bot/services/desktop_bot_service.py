@@ -40,6 +40,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportPlugin, PassportError
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.desktop_bot.desktop_bot_service_protocol import DesktopBotServiceProtocol
 
 if TYPE_CHECKING:
     # Type-only: runtime ``from agentclaw.community.di import config`` triggers
@@ -84,7 +85,7 @@ def _format_datetime(value: object) -> str:
     return str(value)
 
 
-class DesktopBotService:
+class DesktopBotService(DesktopBotServiceProtocol):
     """桌面版 Bot 生命周期管理服务。
 
     负责桌面 Bot 的创建、重启、删除，通过 BAAS API 操作远端容器，

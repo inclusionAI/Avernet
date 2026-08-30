@@ -39,6 +39,7 @@ from agentclaw.community.core.economy.governance.services.service_protocols impo
     GovernanceLifecycleServiceProtocol,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.economy.governance_service_protocol import GovernanceDeliveryServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
@@ -67,7 +68,7 @@ class SendResult:
     actual_channel: str | None = None
 
 
-class GovernanceDeliveryService:
+class GovernanceDeliveryService(GovernanceDeliveryServiceProtocol):
     """投递编排服务 — deliver_pending / deliver_by_worker / create_and_send_reminder。
 
     承接自 GovernanceAdminService 的投递域(原 deliver_pending/deliver_by_worker/

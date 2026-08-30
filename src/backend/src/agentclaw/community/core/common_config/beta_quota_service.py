@@ -10,9 +10,10 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.core.access.policy_service_protocol import PolicyServiceProtocol
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.common_config.beta_quota_service_protocol import BetaQuotaServiceProtocol
 
 
 logger = get_logger()
@@ -23,7 +24,7 @@ PARAM_CODE = "beta_invite_quota"
 WHITELIST_ENTITY_TYPE = "staff"
 
 
-class BetaQuotaService:
+class BetaQuotaService(BetaQuotaServiceProtocol):
     """基于通用配置的内测名额管理服务。"""
 
     @inject

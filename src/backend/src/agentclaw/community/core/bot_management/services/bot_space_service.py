@@ -15,9 +15,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceType
+from agentclaw.community.core.bot_management.bot_space_service_protocol import BotSpaceServiceProtocol
 
 
-class BotSpaceService:
+class BotSpaceService(BotSpaceServiceProtocol):
     """Change a Bot's structured ``ac_bots.space_id`` assignment.
 
     Bot ownership and target-Space membership are both checked in core.  The

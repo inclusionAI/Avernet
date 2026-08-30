@@ -15,6 +15,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.devices.oss_to_nas_switch_service_protocol import OssToNasSwitchServiceProtocol
 
 
 if TYPE_CHECKING:
@@ -292,7 +293,7 @@ async def batch_switch_with_concurrency(
     }
 
 
-class OssToNasSwitchService:
+class OssToNasSwitchService(OssToNasSwitchServiceProtocol):
     """Stateful wrapper around the module-level switch functions.
 
     Holds the cross-cutting deps once at construction time so HTTP

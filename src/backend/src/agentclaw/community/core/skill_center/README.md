@@ -69,11 +69,6 @@ consumes:
   - "WorkOrderRepositoryProtocol"
   - "DraftEditLeaseRepository"
 internal_dependencies:
-  - agentclaw.community.api.skill_parameter_service_factory
-  - agentclaw.community.api.skill_market_service
-  - agentclaw.community.api.space_skill_query_service
-  - agentclaw.community.api.skill_query_service # Protocol SkillQueryService inherits
-  - agentclaw.community.api.bot_capability_state_reader # Protocol BotCapabilityStateReader implements
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module

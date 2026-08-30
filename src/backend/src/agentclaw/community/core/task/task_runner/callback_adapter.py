@@ -19,6 +19,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskCallbackData,
     TaskNodePatch,
 )
+from agentclaw.community.core.task.task_loop_callback_protocol import TaskLoopCallbackProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.protocols.task import (
@@ -205,7 +206,7 @@ class CallbackAdapter:
         )
 
 
-class TaskLoopCallback:
+class TaskLoopCallback(TaskLoopCallbackProtocol):
     """供执行实体(bot workflow / bcn 协作群)PUSH 回投,对接框架 update_task_node_info(经编排核 on_report)。
     实现 api/task/task_loop_callback.py 的 TaskLoopCallbackProtocol。
 

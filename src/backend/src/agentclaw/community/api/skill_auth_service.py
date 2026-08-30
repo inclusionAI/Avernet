@@ -1,21 +1,17 @@
-"""Service API Protocol for skill authorization."""
+"""Service API Protocol for skill authorization.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_auth_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.skill_auth_service_protocol import (
+    SkillAuthServiceProtocol,
+)
 
-
-@runtime_checkable
-class SkillAuthServiceProtocol(Protocol):
-    """Service API for skill access authorization checks."""
-
-    def check_skill_permission(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def apply_skill_permission(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def check_bot_permission(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def apply_bot_permission(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def check_skill_set_permission(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def apply_skill_set_permission(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "SkillAuthServiceProtocol",
+]

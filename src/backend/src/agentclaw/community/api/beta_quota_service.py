@@ -1,11 +1,17 @@
-"""Service API Protocol for beta invite quota."""
+"""Service API Protocol for beta invite quota.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/common_config/beta_quota_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from agentclaw.community.core.common_config.beta_quota_service_protocol import (
+    BetaQuotaServiceProtocol,
+)
 
-
-@runtime_checkable
-class BetaQuotaServiceProtocol(Protocol):
-    def get_quota(self, env: str) -> dict[str, int]: ...
-
-    def adjust_quota(self, env: str, delta: int, entity_id: str) -> dict[str, int]: ...
+__all__ = [
+    "BetaQuotaServiceProtocol",
+]

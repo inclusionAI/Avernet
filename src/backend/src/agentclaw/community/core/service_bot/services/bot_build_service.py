@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from injector import inject
 
-from agentclaw.community.api.channel_service import ChannelServiceProtocol
+from agentclaw.community.core.channel.channel_service_protocol import ChannelServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_bot_engine,

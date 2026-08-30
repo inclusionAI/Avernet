@@ -27,6 +27,7 @@ from agentclaw.community.core.workspace.path_factory import get_bolt_shared_dir
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.skill_center.skill_center_sync_service_protocol import SkillCenterSyncServiceProtocol
 
 logger = get_logger()
 
@@ -83,7 +84,7 @@ def download_and_extract_zip(url: str, dst_dir: Path, timeout: int = 60) -> bool
         return False
 
 
-class SkillCenterSyncService(LifecycleBase):
+class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
     """把 SC 上的 skill 产物同步到本地 NAS。"""
 
     async def startup(self) -> None:

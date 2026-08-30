@@ -10,11 +10,12 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
 
 logger = get_logger()
 
 
-class MCPConfigService:
+class MCPConfigService(MCPConfigServiceProtocol):
     """管理用户级 MCP 配置（CRUD + 负载构建）。
 
     **不**向设备发送 HTTP 请求 —— 该职责由 ``MCPSyncService`` /

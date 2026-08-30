@@ -29,6 +29,7 @@ from agentclaw.community.core.economy.governance.domain.enums import (
 from agentclaw.community.core.economy.governance.services.service_protocols import (
     GovernanceLifecycleServiceProtocol,
 )
+from agentclaw.community.core.economy.governance_service_protocol import GovernanceFeedbackServiceProtocol
 
 
 if TYPE_CHECKING:
@@ -348,7 +349,7 @@ def _result_from_ticket(
     )
 
 
-class GovernanceFeedbackService:
+class GovernanceFeedbackService(GovernanceFeedbackServiceProtocol):
     """Handle user feedback on governance tickets (§7.4)."""
 
     @inject

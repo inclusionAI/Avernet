@@ -28,9 +28,9 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     TaskClaimJoinGateProtocol,
 )
 from agentclaw.community.api.task.task_grant_service import (
-    TaskClaimGrantService,
     TaskClaimGrantServiceProtocol,
 )
+from agentclaw.community.core.task.services.task_grant_service import TaskClaimGrantService
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.repository.protocols.task import (

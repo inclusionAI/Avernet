@@ -32,6 +32,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+from agentclaw.community.core.skill_center.git_sync_service_protocol import GitSyncServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.factories import SkillServiceFactory
@@ -162,7 +163,7 @@ class GitSyncConfig:
         self.remote_name = "origin"
 
 
-class GitSyncService(LifecycleBase):
+class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
     """Unified Git synchronization service.
 
     Handles:

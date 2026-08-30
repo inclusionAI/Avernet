@@ -1,31 +1,17 @@
-"""Neutral API contract for frontend user-list eligibility checks."""
+"""Neutral API contract for frontend user-list eligibility checks.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/user_list/user_list_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from agentclaw.community.core.user_list.user_list_service_protocol import (
+    UserListServiceProtocol,
+)
 
-
-@runtime_checkable
-class UserListServiceProtocol(Protocol):
-    """Read current-environment membership without exposing list entries."""
-
-    def is_in_user_list(
-        self,
-        *,
-        entity_id: str,
-        user_list_type: str,
-        env: str | None = None,
-    ) -> bool: ...
-
-    def correct_membership(
-        self,
-        *,
-        actor_id: str,
-        entity_id: str,
-        user_list_type: str,
-        in_whitelist: bool,
-        env: str | None = None,
-    ) -> bool: ...
-
-
-__all__ = ["UserListServiceProtocol"]
+__all__ = [
+    "UserListServiceProtocol",
+]

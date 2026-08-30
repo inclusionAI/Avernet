@@ -1,21 +1,21 @@
-"""Service API Protocol for operator-triggered Skills Pool commands."""
+"""Service API Protocol for operator-triggered Skills Pool commands.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skills_pool/skills_pool_operator_commands_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from agentclaw.community.core.skills_pool.operator_commands import (
+from agentclaw.community.core.skills_pool.skills_pool_operator_commands_service_protocol import (
+    BotSkillLayoutScope,
     OperatorCommandResult,
+    SkillsPoolOperatorCommandsServiceProtocol,
 )
-from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 
-
-@runtime_checkable
-class SkillsPoolOperatorCommandsServiceProtocol(Protocol):
-    def wake(
-        self,
-        *,
-        scope: BotSkillLayoutScope,
-        operator: str,
-        retry_only: bool = False,
-    ) -> OperatorCommandResult: ...
+__all__ = [
+    "BotSkillLayoutScope",
+    "OperatorCommandResult",
+    "SkillsPoolOperatorCommandsServiceProtocol",
+]

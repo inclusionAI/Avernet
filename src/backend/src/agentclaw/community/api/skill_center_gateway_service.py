@@ -1,22 +1,23 @@
-"""Service API for validated public Skill Center catalogue reads."""
+"""Service API for validated public Skill Center catalogue reads.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_center_gateway_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from agentclaw.community.plugin_api.skill_center_gateway import (
+from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import (
+    SkillCenterGatewayServiceProtocol,
     SkillCenterPublicSkillSearchRequest,
     SkillCenterSkillPage,
     SkillCenterTag,
 )
 
-
-@runtime_checkable
-class SkillCenterGatewayServiceProtocol(Protocol):
-    """Public catalogue subset consumed by HTTP delivery adapters."""
-
-    def search_public_skills(
-        self, request: SkillCenterPublicSkillSearchRequest
-    ) -> SkillCenterSkillPage: ...
-
-    def list_public_tags(self) -> tuple[SkillCenterTag, ...]: ...
+__all__ = [
+    "SkillCenterGatewayServiceProtocol",
+    "SkillCenterPublicSkillSearchRequest",
+    "SkillCenterSkillPage",
+    "SkillCenterTag",
+]

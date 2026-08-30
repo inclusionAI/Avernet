@@ -22,7 +22,6 @@ internal_dependencies:
   - agentclaw.community.plugin_api.database
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.http_client
-  - agentclaw.community.api.human_bot_friendship_service
   - agentclaw.community.utils.env_utils
 ```
 

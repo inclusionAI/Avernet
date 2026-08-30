@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     # annotation is never resolved at runtime — same pattern as
     # ``SkillSetServiceFactory`` below.
     from agentclaw.community.di import config as cfg
-    from agentclaw.community.api.policy_service import PolicyServiceProtocol
+    from agentclaw.community.core.access.policy_service_protocol import PolicyServiceProtocol
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
 from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -114,6 +114,7 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_management.bot_service_protocol import BotServiceProtocol
 
 logger = get_logger()
 
@@ -300,7 +301,7 @@ def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
     return f"{date_part}_{random_part}"
 
 
-class BotService:
+class BotService(BotServiceProtocol):
     """Bot service for managing bot lifecycle."""
 
     def __init__(

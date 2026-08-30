@@ -1,73 +1,100 @@
 # `agentclaw.community.api`
 
-**Service API Protocols.** Post-R8 this layer is delivery-adapter
-agnostic: a flat collection of `@runtime_checkable Protocol` classes,
-one per public service, that any consumer (HTTP, CLI, in-process
-embedder) can call against. FastAPI routers live next door under
-[`adapters/http/`](../adapters/http/README.md); they Inject a Protocol
-from this layer rather than the concrete service class in `core/`.
+**The Service API surface.** A flat collection of modules, one per
+public service, that re-export the `@runtime_checkable Protocol` any
+consumer (HTTP, CLI, in-process embedder) calls against. FastAPI routers
+live next door under [`adapters/http/`](../adapters/http/README.md); they
+Inject a Protocol from this layer rather than the concrete service class
+in `core/`.
 
-Layout:
+## Where a Protocol is defined
+
+**In its owning core module**, and re-exported here:
+
+```
+core/skill_center/skill_query_service_protocol.py   # the Protocol
+core/skill_center/services/skill_query_service.py   # class SkillQueryService(SkillQueryServiceProtocol)
+api/skill_query_service.py                          # re-export only
+adapters/http/skill_center/router.py                # Injected(SkillQueryServiceProtocol)
+```
+
+The concrete service inherits its Protocol, and because both live in
+`core/` that inheritance is a `core -> core` import — no cross-layer
+waiver. Adapters are unaffected: they still import the name from `api/`.
+
+This is what the layer chain (`api/ -> core/ -> plugin_api/ -> plugins/`)
+already allows and what `arch.rules.md` Rule 3 actually asks for — a
+Service API defined separately from the *delivery* layer, which `core/`
+is. Defining Protocols *in* `api/` instead forced every implementing
+service to import across the boundary, and each one needed a hand-written
+exception in `test_architecture_compliance.py`. That list grew per
+service; it no longer does.
+
+## Why inherit rather than duck-type
+
+Conformance is checked structurally, so a service *can* satisfy its
+Protocol without naming it. Prefer inheritance anyway:
+
+- it makes the contract navigable in an IDE — jump from Protocol to
+  implementation and back — instead of forcing a reader to find the DI
+  binding first;
+- when every Protocol member is `@abstractmethod`, a missing member is a
+  construction-time `TypeError` naming it, rather than a silently
+  inherited `...` body that returns `None`.
+
+A Protocol whose members are still `*args: Any, **kwargs: Any` asserts
+nothing either way. Give it real signatures when you touch it.
+
+## Layout
 
 ```
 api/
 ├── README.md
 ├── __init__.py
-├── <service>_service.py   # one Protocol per file, no imports from fastapi
-├── <factory>_factory.py   # factory Protocols (SkillServiceFactoryProtocol, …)
-└── …
+└── <service>_service.py   # re-export of the owning core module's Protocol
 ```
 
-Conformance is checked **structurally**, and a concrete service *may*
-also inherit its Protocol. `core → api` is forbidden by default —
-`tests/architecture/test_architecture_compliance.py::test_core_layer_does_not_import_api`
-enforces it — but that gate carries a documented per-file allowlist for
-service implementations that bridge to their own Protocol, so a service
-under `core/<module>/services/` may declare
-`class XService(XServiceProtocol)` by adding itself there. Prefer that
-over structural-only: it makes the contract navigable in an IDE (jump
-from Protocol to implementation and back) and, when every Protocol member
-is `@abstractmethod`, turns a missing member into a construction-time
-`TypeError` naming it instead of a silently inherited `...` body that
-returns `None`.
+## Enforcement
 
-Two edits come with it: the allowlist entry in
-`test_architecture_compliance.py`, and the import declared in the
-module's `## Context Boundary`. `arch.rules.md` Rule 6 is an
-**Invariant**, so a cross-layer exception is a deliberate cost — keep
-them rare, and justify each one in the allowlist comment.
+Five gates under `tests/community/architecture/`:
 
-The cleaner long-term shape is to define the Protocol in `core/` and
-re-export it from `api/` — then `core` imports its own abstraction and
-there is no exception at all. `governance_service.py` documents that
-pattern. It needs `test_api_layer_is_protocols_only.py` taught about
-re-export-only modules first, which is why it is not used here.
-
-Services that predate this — and those whose Protocol still declares
-`*args: Any, **kwargs: Any`, against which inheritance would assert
-nothing — remain structural-only. Both forms are supported.
-
-Either way `tests/architecture/test_service_api_conformance.py`
-parametrizes over every `(Protocol, ConcreteService)` pair and asserts
-`issubclass(ConcreteService, Protocol)` against the `@runtime_checkable`
-Protocol — so a missing or renamed method on the concrete class fails
-CI rather than only showing up as a router-time `AttributeError`. That
-gate stays the backstop for the structural-only services, and its
-signature check still catches drift (a renamed keyword, `async`→`def`)
-that inheritance alone does not.
-
-Two enforcement gates live under `tests/architecture/`:
-
-- `test_api_layer_is_protocols_only.py` — every file under `api/`
-  defines a Protocol, no subdirectories, no router code.
+- `test_protocol_base_ordering.py` — a Protocol base never precedes a
+  non-Protocol base that defines the same members, so a service's `...`
+  stubs cannot silently shadow a real mixin implementation.
+- `test_api_layer_is_protocols_only.py` — every file under `api/` either
+  defines a Protocol or re-exports one from a core contract module via
+  `__all__`; no subdirectories, no router code.
 - `test_http_adapter_layer_is_http_only.py` — every router under
-  `adapters/http/` Injects an `<X>Protocol` from `api/`, never a
-  concrete service class from `core/<m>/services/`.
+  `adapters/http/` Injects an `<X>Protocol` from `api/`, never a concrete
+  service class from `core/<m>/services/`.
+- `test_architecture_compliance.py` — the layer chain, including
+  `core/` not importing `api/`.
+- `test_service_api_conformance.py` — parametrizes over every registered
+  `(Protocol, ConcreteService)` pair and asserts `issubclass` plus full
+  signature equality, catching drift (a renamed keyword, `async` -> `def`)
+  that inheritance alone does not.
 
-DI wires Protocol → concrete via a per-module `@singleton @provider
+DI wires Protocol -> concrete via a per-module `@singleton @provider
 @inject` alias in `di/modules/<m>_module.py`, so both
 `Injected(Protocol)` and `Injected(Concrete)` resolve to the same
 singleton.
+
+## Exceptions
+
+Two Protocols stay defined in `api/` because their only implementations
+live under `plugins/` (`NoopCodePlatformService`,
+`NoopWorkflowCatalogService`), so no core module owns them:
+`code_platform_service.py` and `workflow_catalog_service.py`.
+
+Six more stay defined in `api/` because `core/service_bot/__init__.py`
+pulls a heavy import chain that reaches `core -> di -> api`; moving their
+Protocols into that package closes the loop into a circular import. The
+underlying problem is the `core -> di` imports (see
+`core/task_queue/services/task_queue_service.py`,
+`core/channel/services/channel_service.py`), not this layer — they need
+untangling first: `baas_service.py`, `bot_build_service.py`,
+`bot_publish_service.py`, `publish_approval.py`,
+`publish_flow_service.py`, `service_publication_facade.py`.
 
 ## Context Boundary
 
@@ -123,6 +150,98 @@ internal_dependencies:
   - agentclaw.community.plugin_api.skill_center_gateway # Public catalogue request/result DTOs typed in skill_center_gateway_service.py
   - agentclaw.community.core.task.task_runner.integration.ports  # OpenApiBotPort — typed in task_grant_service.py (stateless secbaas grant/revoke relay)
   - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
+  - agentclaw.community.core.access.policy_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.access.user_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.aicoding.architect_rebind_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.aicoding.data_proxy_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.aicoding.workitem_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.aicoding.workspace_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_app_grant.bot_app_grant_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_chat.bot_chat_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_chat.human_bot_friendship_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_collaborator.collaborator_lock_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_collaborator.collaborator_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_collaborator.member_management_capability_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_dormant.bot_dormant_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_inventory.bot_inventory_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_inventory.local_bot_workflow_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_management.bot_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_management.bot_space_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_management.create_bot_for_others_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_management.data_init_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_management.default_bot_passport_repair_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_management.render_screen_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_public.bot_discover_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.caller_identity.caller_credential_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.caller_identity.caller_iam_token_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.caller_identity.caller_identity_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.channel.channel_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.common_config.beta_quota_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.common_config.common_config_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.cron.cron_relay_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.desktop_bot.desktop_bot_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.devices.device_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.devices.oss_to_nas_migration_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.devices.oss_to_nas_switch_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.economy.governance_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.engine_runtime.engine_connection_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.engine_runtime.engine_runtime_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.expert_chat.expert_chat_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.harness.content_scanner_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.harness.health_diagnosis_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.harness.patch_engine_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.harness.patch_library_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.harness.patch_planner_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.market_favorites.market_favorite_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.mcp.mcp_auth_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.mcp.mcp_config_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.mcp.mcp_market_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.mcp.mcp_sync_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.quality.quality_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.quality.task_processor_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.resources.resource_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.services.engine_config_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.session_resources.session_resource_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.bot_capability_state_reader_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.bot_runtime_projector_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.direct_activation_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.git_sync_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.local_skill_delete_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.repository_catalog_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_auth_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_batch_sync_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_center_gateway_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_center_sync_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_market_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_member_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_metadata_parser_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_parameter_service_factory_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_propagation_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_publish_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_query_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_scan_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_service_factory_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_set_management_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.skill_set_service_factory_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.space_skill_query_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skills_pool.skills_pool_operational_query_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skills_pool.skills_pool_operator_commands_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skills_pool.skills_pool_recovery_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skills_pool.skills_pool_rollback_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skills_pool.skills_pool_rollout_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.spaces.space_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.system_config.device_config_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.system_config.system_config_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.task.task_grant_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.task.task_loop_callback_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.task.task_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.user_list.user_list_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.work_orders.work_order_service_protocol  # Protocol defined in its owning core module, re-exported here
 ```
 
 ### Change impact

@@ -1,21 +1,17 @@
-"""Service API Protocol for bot data initialization."""
+"""Service API Protocol for bot data initialization.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_management/data_init_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from agentclaw.community.core.bot_management.data_init_service_protocol import (
+    DataInitServiceProtocol,
+)
 
-
-@runtime_checkable
-class DataInitServiceProtocol(Protocol):
-    """Service API for seeding initial bot data and reading its safe status."""
-
-    async def trigger_init(
-        self,
-        bot_id: str,
-        owner_id: str,
-        entity_id: str,
-        entity_type: str,
-        force: bool = False,
-        iam_token: str | None = None,
-    ) -> dict[str, str]: ...
-
-    def get_status(self, bot_id: str, owner_id: str) -> dict[str, str | None]: ...
+__all__ = [
+    "DataInitServiceProtocol",
+]

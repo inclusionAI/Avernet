@@ -7,9 +7,10 @@ from injector import inject
 
 from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
+from agentclaw.community.core.skill_center.repository_catalog_service_protocol import RepositoryCatalogServiceProtocol
 
 
-class RepositoryCatalogService:
+class RepositoryCatalogService(RepositoryCatalogServiceProtocol):
     """Preserve the legacy market's cache, filesystem tree, and sync semantics."""
 
     @inject

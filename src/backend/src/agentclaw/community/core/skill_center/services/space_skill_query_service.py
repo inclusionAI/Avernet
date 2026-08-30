@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.api.space_skill_query_service import (
+from agentclaw.community.core.skill_center.space_skill_query_service_protocol import (
     SpaceSkillQueryServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (

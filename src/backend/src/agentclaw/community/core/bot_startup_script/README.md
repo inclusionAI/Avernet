@@ -106,7 +106,6 @@ consumed_by:
   - "core/service_bot (BaasService) — reads the body while composing a container start command, through the read-only protocol"
   - "adapters/http/openapi_v1/bots — the public read/replace/clear surface"
 internal_dependencies:
-  - agentclaw.community.api.bot_startup_script_service
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
   - agentclaw.community.log

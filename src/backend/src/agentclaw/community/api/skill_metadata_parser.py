@@ -1,14 +1,19 @@
-"""Service API for canonical ``SKILL.md`` metadata parsing."""
+"""Service API for canonical ``SKILL.md`` metadata parsing.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_metadata_parser_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from agentclaw.community.core.skill_center.skill_metadata import (
-    SkillMetadataParserProtocol as CoreSkillMetadataParserProtocol,
+from agentclaw.community.core.skill_center.skill_metadata_parser_protocol import (
+    CoreSkillMetadataParserProtocol,
+    SkillMetadataParserProtocol,
 )
 
-
-@runtime_checkable
-class SkillMetadataParserProtocol(CoreSkillMetadataParserProtocol, Protocol):
-    """Adapter-facing alias of the core-owned parser contract."""
+__all__ = [
+    "CoreSkillMetadataParserProtocol",
+    "SkillMetadataParserProtocol",
+]

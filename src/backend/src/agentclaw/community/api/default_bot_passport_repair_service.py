@@ -1,19 +1,17 @@
-"""Service API for the default-bot Passport repair operation."""
+"""Service API for the default-bot Passport repair operation.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_management/default_bot_passport_repair_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.bot_management.default_bot_passport_repair_service_protocol import (
+    DefaultBotPassportRepairServiceProtocol,
+)
 
-
-@runtime_checkable
-class DefaultBotPassportRepairServiceProtocol(Protocol):
-    """Transport-independent repair service consumed by HTTP adapters."""
-
-    def repair(
-        self,
-        *,
-        target_user_id: str,
-        target_env: str,
-        operator_user_id: str,
-        operator_name: str,
-    ) -> dict[str, Any]: ...
+__all__ = [
+    "DefaultBotPassportRepairServiceProtocol",
+]

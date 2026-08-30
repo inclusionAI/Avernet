@@ -1,13 +1,17 @@
-"""Service API Protocol for skill propagation."""
+"""Service API Protocol for skill propagation.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_propagation_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.skill_propagation_service_protocol import (
+    SkillPropagationServiceProtocol,
+)
 
-
-@runtime_checkable
-class SkillPropagationServiceProtocol(Protocol):
-    """Service API for propagating skill changes downstream."""
-
-    def propagate_on_upgrade(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def propagate_on_removal(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "SkillPropagationServiceProtocol",
+]

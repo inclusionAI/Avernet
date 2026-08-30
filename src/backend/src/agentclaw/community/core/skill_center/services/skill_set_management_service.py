@@ -55,9 +55,10 @@ from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.core.skill_center.skill_set_management_service_protocol import SkillSetManagementServiceProtocol
 
 
-class SkillSetManagementService:
+class SkillSetManagementService(SkillSetManagementServiceProtocol):
     @inject
     def __init__(
         self,

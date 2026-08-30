@@ -1,12 +1,17 @@
-"""Service API Protocol for the SkillSetService factory."""
+"""Service API Protocol for the SkillSetService factory.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_set_service_factory_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import (
+    SkillSetServiceFactoryProtocol,
+)
 
-
-@runtime_checkable
-class SkillSetServiceFactoryProtocol(Protocol):
-    """Service API for minting per-request SkillSetService instances."""
-
-    def create(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "SkillSetServiceFactoryProtocol",
+]

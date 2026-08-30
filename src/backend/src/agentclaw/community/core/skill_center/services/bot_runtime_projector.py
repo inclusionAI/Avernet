@@ -44,12 +44,13 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import McpScopeItem, PassportPlugin
+from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import BotRuntimeProjectorProtocol
 
 
 logger = get_logger()
 
 
-class BotRuntimeProjector:
+class BotRuntimeProjector(BotRuntimeProjectorProtocol):
     """Resolve and apply Skill, MCP, and CLI state through one boundary.
 
     Callers own command compensation. This module owns desired-state loading,
