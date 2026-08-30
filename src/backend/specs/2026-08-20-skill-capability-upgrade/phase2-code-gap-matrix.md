@@ -3,7 +3,7 @@
 > 基线：`github/dev@b68ec64f1698a931585612801f2db6529c8ec4aa`（2026-08-30）。
 >
 > 目标合同：正式领域 Spec PR #1686 +
-> `src/gateway/specs/2026-08-20-skill-capability-upgrade/phase2-openapi-contract.md`。
+> `src/backend/specs/2026-08-20-skill-capability-upgrade/phase2-openapi-contract.md`。
 >
 > 用途：Backend 内部审计、旧 Ticket 治理和新 Ticket 拆分；不提供给前端，不代替生成 OpenAPI。
 
