@@ -9,7 +9,7 @@
 
 ## 1. How to use this document
 
-Each work item **W1–W11** is scoped to be picked up on its own, by one person or
+Each work item **W1–W12** is scoped to be picked up on its own, by one person or
 one session, with no need to re-derive the design from the Chinese docs. An item
 states what it delivers, what it deliberately leaves alone, what must land
 first, and criteria concrete enough to review against.
@@ -18,7 +18,7 @@ Three kinds of entry gate the work and are tracked separately from it:
 
 | Prefix | Meaning |
 | --- | --- |
-| `W1`–`W11` | Implementation work items — one PR each |
+| `W1`–`W12` | Implementation work items — one PR each. W12 is a written contract plus another team's sign-off rather than code |
 | `D1`–`D4` | **Design questions**, found while checking the design against the code. **All four are now settled** — D1–D3 resolved, D4 deferred with an interim policy (deliver after start) that unblocks the work |
 | `X1`–`X3` | **External confirmations** owed by other teams. None blocks W1–W6; they gate W7 and W9, and W8's teclaw arm |
 
@@ -44,6 +44,7 @@ together.
 | **W2** guarded fetcher | #1470 | **W9** `cli_tools` (deferred) | #1477 |
 | **W3** source credentials | #1471 | **W10** service-layer seam | #1509 |
 | | | **W11** platform-side materialisation | #1510 |
+| | | **W12** cross-engine semantics contract | *(to file)* |
 
 Planning PR: #1465.
 
@@ -1028,8 +1029,10 @@ composed; teclaw before the first artifact is assembled), at publish/republish,
 and at rebuild-style restart.
 
 **Depends on.** W4, W5, W6.
-**Blocked by.** **X2** gates the teclaw arm (T1–T3). D4 is deferred rather than
-blocking, but this item owns its two consequences: the ACTIVE-but-unconfigured
+**Blocked by.** **W12** for the teclaw arm — the semantics contract must be
+agreed before teclaw delivery can be relied on. X2's own questions are answered
+(§4). D4 is deferred rather than blocking, but this item owns its two
+consequences: the ACTIVE-but-unconfigured
 window, and where the §2.7 readiness gate lands when delivery happens after the
 bot has started (§3.4).
 
@@ -1069,15 +1072,23 @@ bot has started (§3.4).
 in the design itself. Not scheduled.
 
 **Depends on.** W8.
-**Blocked by.** **X3**, now narrowed (§4): teclaw needs only an artifact
-protocol from us, and the ARCA PATH proposal plus a default-skill-set skill are
-ours to design. The investigation recorded in §4 found **no production PATH
-mechanism to generalise**, so the prior question — binary on PATH vs. an HTTP API
-called through `exec` — should go to the business first.
+**Blocked by.** **X3**, now narrowed (§4): teclaw needs only an artifact protocol
+from us; the ARCA PATH proposal and the default-skill-set skill are ours to
+design. The §4 investigation confirmed there is **no existing CLI mechanism to
+duplicate** — every `bcs-cli` reference is singlebox orchestration, and no
+delivery path handles an executable bit.
 
 **Done when (sketch).** `digest` mandatory and enforced as the convergence key;
 static binary and archive forms only; a platform-defined logical tool directory
-on the agent process's PATH; teclaw refused at write if X3 comes back negative.
+on the agent process's PATH, with users never seeing a physical path; a
+tools-usage skill in the engine-aware **default skill set** (`SkillSetService`
+already has one) so the model knows the tools exist and how to call them; and an
+artifact representation for teclaw, whose in-container placement is theirs.
+
+**Explicit goal: `bcs-cli` becomes the first consumer**, replacing the singlebox
+script that hand-places it. Otherwise this ships alongside the one CLI mechanism
+that already exists and we maintain both — and folding it in gives the feature a
+real in-house test case before any customer uses it.
 
 **Size.** Medium, pending X3.
 
@@ -1093,10 +1104,13 @@ wave 2       └───────┴────────┴────�
                                                     └─► W5
                                                          │
 wave 3                                                   ├─► W6 ──┐
-                                                         │        ├─► W8
+                                                         │        ├─► W8  ◄── W12
                                                          └─► W7 ──┘
                                                                    │
 deferred                                                           └─► W9
+
+         W12 (semantics contract) runs in parallel from now. It gates only
+         W8's teclaw arm, and its calendar cost is the other team's review.
 ```
 
 **Critical path:** W1 → W4 → W5 → W6 → W8.
@@ -1111,9 +1125,15 @@ and D4 is deferred behind an interim policy (deliver after start, §3.4). What
 remains is external: X1 gates W7, X2 gates W8's teclaw arm, X3 gates W9 — and W9
 is deferred regardless.
 
-The one dependency the resolutions *tightened*: **W11 is now a hard dependency of
-W4**, because §3.2's three-way diff needs version N's materialised file list to
-tell "the declaration dropped it" apart from "the bot created it".
+Two dependencies the resolutions *tightened*: **W11 is a hard dependency of W4**,
+because §3.2's diff needs version N's materialised file list both to tell "the
+declaration dropped it" apart from "the bot created it", and to detect whether
+the bot modified a declared file at all. And **W12 gates W8's teclaw arm** —
+without an agreed semantics contract the same manifest can behave differently on
+the two engine families.
+
+**Start W12 now.** It is the only remaining item whose critical path runs through
+another team, and it costs us little to write.
 
 **Why lifecycle wiring is last.** Explicit `POST .../apply` exercises the whole
 engine from W4 onward, so W8 touches the create and publish flows only after the
@@ -1156,6 +1176,7 @@ product.
 | W9 | schema §3.7; engine-requirements T4, A2, O9 — narrowed by §4's investigation |
 | W10 | no design section — arises from §2.9, an implementation constraint the design does not cover |
 | W11 | no design section — arises from §2.8, a requirement added after #1031 |
+| W12 | design §3.3 (convergence) and engine-requirements T2, turned into a two-sided contract |
 
 Design decisions this document does **not** re-open: the manifest/script split
 (design §2.1), route B (design §2.3), the four rejected alternatives (design
