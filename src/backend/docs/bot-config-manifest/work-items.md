@@ -1307,6 +1307,12 @@ is applied.
   `resources` would be accepted with no materialiser behind it. Either the flag
   stays on through W6 and W8, or each incomplete category and trigger is gated
   independently — one flag through W8 is the simpler of the two.
+- **`cli_tools` is reported `unsupported` and refused at `PUT` until W9 lands.**
+  The flag lifting at W8 is not enough for this one category: W9 is deferred and
+  unscheduled, so after W8 the surface would accept a `cli_tools` declaration
+  with no materialiser, no PATH delivery and no artifact field behind it. The
+  capability resolver therefore answers **per category**, not just per bot —
+  `cli_tools` is the category that forces that shape.
 
 **Out of scope.** Any apply. Any fetching. Credentials. Any change to the
 existing `/startup-script` endpoints. Any change to `BaasService`.
@@ -1338,11 +1344,13 @@ capability table is fully determined.
     so colliding ones cannot both be callable — one shadows the other and the
     winner depends on installation order. v1 has no alias field: the collision
     is refused instead;
-  - a `cli_tools.entrypoints` value that is absolute, contains `..`, or — once
-    the archive is unpacked — resolves outside its tool directory, does not
-    exist, or is not a regular file. `entrypoints` decides what gets made
+  - a `cli_tools.entrypoints` value that is **syntactically** unsafe: absolute,
+    or containing a `..` segment. `entrypoints` decides what gets made
     **executable and put on PATH**, so an unconstrained value would have an
-    engine chmod a file outside the materialised tree;
+    engine chmod a file outside the materialised tree. **Only the syntactic half
+    belongs here** — this item does no fetching, so at `PUT` there is no unpacked
+    tree to inspect. Existence, regular-file and symlink-resolution checks need
+    materialised content and are W9's, listed there;
   - a `resources` entry whose `path` lies under another directory entry's
     `path` (the nesting ban, schema §3.2);
   - an `identity.type` outside the engine's legal set — `VALID_IDENTITY_FILES`
@@ -1373,6 +1381,14 @@ capability table is fully determined.
       overwrite each other's document; the tenant guard is registered.
 - [ ] The stored document round-trips byte-exact, including a `script` body
       containing quotes, `$(id)` and `{token}`.
+- [ ] **`manifest-schema.zh-CN.md` §4 is amended from `OCB_*` to `BOT_*` in this
+      item's PR.** §2.9 renamed the variables and this item implements the
+      whitelist that rejects the old names, so leaving the schema doc unamended
+      would tell a user to write `${OCB_BOT_ID}` and then refuse it. Unlike the
+      other divergences in §9 — internal planning decisions — this one is a
+      **user-facing contract**, and the two documents cannot disagree about it.
+      It lands here rather than earlier because the schema doc describes an
+      implemented contract, and until this item there is nothing to describe.
 
 **Notes.** A `PUT` carrying `script` stores it and does nothing else until W4
 materialises it. That is why the feature flag exists.
@@ -1476,6 +1492,14 @@ binding W2's injection port.
       prefix or begin with prefix + `/`. `…/team/content` must not authorise
       `…/team/content-secret`. Covering a whole origin requires writing
       `https://host/` explicitly.
+- [ ] **Both sides are canonicalised before that comparison, structurally.** A
+      raw `startswith` is not enough: `https://host/team/content/../admin` begins
+      with the prefix as a string but resolves outside it, and the client would
+      send the secret header to the resolved path. Parse the URL, compare scheme
+      and host case-insensitively, resolve percent-encoding (including encoded
+      separators such as `%2F` and `%2E`) and collapse dot segments — **then**
+      compare. Applied identically to the initial target and to every redirect
+      hop, since a redirect is where a hostile server would put it.
 - [ ] A target outside every prefix makes the entry **fail** — never
       "continue without the credential".
 - [ ] A redirect that leaves the authorised prefix **fails**; the credential is
@@ -1867,6 +1891,14 @@ in the design itself. Not scheduled.
 
 **Depends on.** W8.
 
+**The artifact contract genuinely changes, and `artifact.schema.json` is part of
+it.** `kernel/bot_config/artifact.py` and its language-neutral
+`artifact.schema.json` are the published contract; that schema sets top-level
+`"additionalProperties": false`, so a `cli_tools` field is **rejected** until the
+schema file is amended and `SCHEMA_VERSION` goes 4 → 5. This item owns both, plus
+reconciling the "artifact schema unchanged" statements in `README.zh-CN.md` and
+§9 — they are true for every other category and stop being true for this one.
+
 **The teclaw half is written and ready to hand over.**
 `teclaw-cli-contract.zh-CN.md` is the engine-facing specification: the delivery
 contract is unchanged, `cli_tools` is the only addition, and the platform does
@@ -1883,7 +1915,12 @@ every `bcs-cli` reference is singlebox orchestration, and no delivery path
 handles an executable bit. This item stays deferred by business priority, not by
 a missing answer.
 
-**Done when (sketch).** Targets `linux/amd64` with a single URL per tool (§4,
+**Done when (sketch).** **The content-dependent `entrypoints` checks live here,
+not in W1** — once the archive is unpacked, every entrypoint must exist, be a
+**regular file**, and still resolve inside its tool directory after symlink
+resolution. W1 rejects only the syntactic half (absolute paths, `..` segments,
+colliding basenames) because it does no fetching and has no tree to inspect at
+`PUT`. Then: targets `linux/amd64` with a single URL per tool (§4,
 X3), while `${BOT_ARCH}` resolves to `amd64` in W1's whitelist and a fetched binary's
 ELF header is validated — so a wrong-architecture binary fails in the apply report
 rather than as an `exec format error` the model meets mid-task. Then: `digest`

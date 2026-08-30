@@ -43,6 +43,12 @@ PATH 上，再配一个 SKILL.md 教模型怎么用。`cli_tools` 是把这套�
 `schema_version` 从 `4` 升到 `5`。旧 artifact（无 `cli_tools`）在新引擎上必须
 继续可用——见 §6 兼容性。
 
+> **平台侧要同步改的东西（我们负责，写在这里是为了让你们知道时间点）：**
+> 语言无关的 `kernel/bot_config/artifact.schema.json` 顶层是
+> `"additionalProperties": false`，所以在它被改掉之前，一份带 `cli_tools` 的
+> artifact 会被这份 schema **判为非法**。我们会连同 `SCHEMA_VERSION` 4 → 5 一起
+> 改，并同步更新兼容性测试。**在那之前我们不会下发带 `cli_tools` 的 artifact。**
+
 ---
 
 ## 3. 契约增补
