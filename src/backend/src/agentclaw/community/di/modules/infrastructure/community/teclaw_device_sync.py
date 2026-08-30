@@ -61,15 +61,19 @@ class TeclawDeviceSyncFactory:
         self._draft_recorder = draft_recorder
 
     def __call__(self, ctx: DeviceContext) -> DeviceSync:
-        # The bot row carries the identity fields the composer and the binding
-        # lookup need. ``entity_id`` (compose scope) and ``owner_id`` (binding
-        # lookup) are deliberately kept apart — see the TeclawDeviceSyncService
-        # module docstring.
+        # The bot row carries the identity fields the composer needs.
+        # ``entity_id`` (compose scope) and ``owner_id`` (the identity the
+        # binding was resolved under) are deliberately kept apart — see the
+        # TeclawDeviceSyncService module docstring.
         bot = self._lookup_bot(ctx.bot_id)
         return TeclawDeviceSyncService(
             conn_info=ctx.conn_info,
             bot_id=ctx.bot_id,
             bot_name=bot.get("bot_name", ""),
+            # The resolver already read this binding to build ``ctx``; passing
+            # it through is what keeps ``_deliver`` off a second lookup for a
+            # value it was handed. Declared non-optional on ``DeviceContext``.
+            binding_id=ctx.binding_id,
             user_id=ctx.user_id,
             owner_id=bot.get("owner_id") or ctx.user_id,
             entity_id=bot.get("entity_id") or None,

@@ -28,9 +28,10 @@ from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDisp
 from agentclaw.community.plugins.community.device_sync_dispatcher import CommunityDeviceSyncDispatcher
 
 
-def _ctx(provider="baas"):
+def _ctx(provider="baas", binding_id=1382508):
     return SimpleNamespace(
         provider=provider, bot_id="b", user_id="u1", bot_type="personal",
+        binding_id=binding_id,
         conn_info={"bind_id": 1, "engine_port": 20003, "tenant": "", "paas_device_id": "u"},
     )
 
@@ -104,6 +105,24 @@ def test_teclaw_factory_takes_identity_from_the_bot_row():
     assert service._bot_name == "助手"
     assert service._entity_type == "staff"
     assert service._engine_type == "teclaw"
+
+
+def test_teclaw_factory_threads_the_resolved_binding_id_onto_the_service():
+    """``ctx.binding_id`` is what the delivery addresses; the service must not
+    have to ask BaaS for it again."""
+    service = _teclaw_factory()(_ctx(provider="teclaw", binding_id=1382508))
+
+    assert service._binding_id == 1382508
+
+
+def test_threaded_binding_id_is_independent_of_the_bot_row():
+    """It comes off the context the resolver built, not off the ``ac_bots``
+    row the factory reads for the composer's identity fields."""
+    service = _teclaw_factory(bot_row=_bot_row(binding_id=1))(
+        _ctx(provider="teclaw", binding_id=2)
+    )
+
+    assert service._binding_id == 2
 
 
 def test_teclaw_factory_falls_back_to_ctx_identity_when_the_bot_row_is_missing():
