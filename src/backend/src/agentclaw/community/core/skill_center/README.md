@@ -16,6 +16,9 @@ provides:
   - "CurrentRuntimeLayoutProbeService"
   - "SkillQueryService"
   - "LocalSkillUploadService"
+  - "SkillPackageValidator"
+  - "SkillPackageManifestParserProtocol"
+  - "ValidatedSkillPackage"
   - "DirectActivationService"
   - "LocalSkillDeleteService"
   - "BotCapabilityAuthorizationHookProtocol"
@@ -122,6 +125,16 @@ internal_dependencies:
 ```
 
 ### Change impact
+
+`SkillPackageValidator` is the pure package boundary shared by Local upload and
+future Draft/materialization workflows. It owns safe relative paths, archive
+limits, wrapper normalization, the single `SKILL.md` rule, manifest validation,
+ignored platform metadata, and deterministic canonical ZIP generation. Its
+default ZIP/directory entry points require frontmatter; only the existing Local
+upload lifecycle calls the explicit legacy-compatible ZIP entry point. The
+`ValidatedSkillPackage` value does not authorize a Bot, write a content store,
+mutate desired state, or project Runtime; those lifecycle effects remain in
+their owning application services.
 
 Capability activation is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols. Changes to `SkillMetadataParserProtocol`, `SkillMetadata`, or stable manifest error codes affect Local folder upload immediately and the shared fixtures consumed by Git import, Draft validation and publication validation; coordinate those consumers before changing fields, limits or codes. List/detail/market readers must continue consuming parser-derived projections rather than inventing a second name or description source.
 

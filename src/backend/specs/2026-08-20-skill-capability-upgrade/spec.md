@@ -234,6 +234,13 @@ Phase 2 复用一条 `ac_skill` 作为跨版本稳定 Identity：
 - Draft 内容存储的 `DraftContentStore` Protocol、物理 OSS 根、临时区布局以及 OSS/DB
   失败补偿仍标记为 **TBD**，必须在 P2-01/P2-03 实现前另行冻结。本轮 Grant、Editor
   Request 与 Lease 只建立可被 Draft 命令复用的领域 seam，不实现或猜测 Draft 文件存储。
+- `SkillPackageValidator` 是 Local、Draft 和精确版本物化共用的纯 package 边界：负责
+  安全相对路径、压缩/展开大小与文件数、唯一 `SKILL.md`、frontmatter 的
+  name/description/config、wrapper、平台 metadata 忽略和 deterministic canonical ZIP，
+  返回稳定 `ValidatedSkillPackage`；默认入口严格要求 frontmatter。只有既有 Local 上传
+  生命周期可调用显式 legacy-compatible 入口兼容无 frontmatter 历史包，Draft、Git import
+  和精确版本物化不得继承该 fallback。Validator 不拥有 Bot 授权、容器/Pool 写入、数据库
+  或 Runtime。
 - `ac_skill_version` 保存不可变 version ordinal、SC version number/version id、
   冻结元信息和 MATERIALIZING/PUBLISHED 状态，不保存长期 Snapshot URI/Hash。
   `publication_attempt_id` 必须允许为空：TeamClaw 工坊发布产生的 Version 指向
@@ -323,7 +330,7 @@ deactivate
 
 对 Repo/Space，Direct activate 即 runtime install，deactivate 即 runtime uninstall。Local deactivate 只删除 Installation，Local 资产保留。
 
-旧 `/api/skills/upload` 的实现本期原样冻结，等待产品链路下线；不将其纳入新上传模块改造。新 OpenAPI 的 raw ZIP 与 multipart 文件夹入口必须在 HTTP 解码后汇入同一个 `LocalSkillUploadService.upload_local_skill()` 生命周期，共用包校验、同名替换、存储、DB 更新和失败补偿。
+旧 `/api/skills/upload` 的实现本期原样冻结，等待产品链路下线；不将其纳入新上传模块改造。新 OpenAPI 的 raw ZIP 与 multipart 文件夹入口必须在 HTTP 解码后汇入同一个 `LocalSkillUploadService.upload_local_skill()` 生命周期；两种输入先由共享 `SkillPackageValidator` 规范化为同一 package contract，再共用同名替换、存储、DB 更新和失败补偿。
 
 #### 5.3 Skill 添加来源与 Skill Center 懒物化
 

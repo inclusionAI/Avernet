@@ -6,10 +6,7 @@ the raw request body and maps the public response.
 
 from __future__ import annotations
 
-import io
 import json
-import re
-import zipfile
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Callable
 from uuid import uuid4
@@ -45,12 +42,11 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
     ProjectionScope,
 )
-from agentclaw.community.core.skill_center.services.skill_parser import (
-    SkillParser,
-)
-from agentclaw.community.core.skill_center.skill_metadata import (
-    SkillManifestError,
-    SkillMetadataParserProtocol,
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageInvalidError,
+    SkillPackageTooLargeError,
+    SkillPackageValidator,
+    ValidatedSkillPackage,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
@@ -68,12 +64,6 @@ if TYPE_CHECKING:
         DeviceContextResolver,
     )
 
-_MAX_COMPRESSED = 10 * 1024 * 1024
-_MAX_EXPANDED = 50 * 1024 * 1024
-_MAX_FILE = 10 * 1024 * 1024
-_MAX_FILES = 500
-_NAME = re.compile(r"^[A-Za-z0-9-]+$")
-
 
 class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
     """Authorize, validate, persist and associate an inactive Local Skill."""
@@ -89,7 +79,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         edit_guard: SkillsPoolEditGuard,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
         runtime_reconciler: BotRuntimeProjectorProtocol,
-        metadata_parser: SkillMetadataParserProtocol,
+        package_validator: SkillPackageValidator,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
@@ -99,7 +89,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         self._edit_guard = edit_guard
         self._device_context_resolver_provider = device_context_resolver_provider
         self._runtime_reconciler = runtime_reconciler
-        self._metadata_parser = metadata_parser
+        self._package_validator = package_validator
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
@@ -128,12 +118,12 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            name, description, files = self._unpack(package, self._metadata_parser)
+            validated = self._validate_zip(package)
             is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
             # Re-read same-name candidates, owner, readiness and default state
             # under the edit lock.  Uploader identity is intentionally absent.
             matches = self._same_name_matches(
-                bot_id=bot_id, owner_id=owner_id, name=name
+                bot_id=bot_id, owner_id=owner_id, name=validated.name
             )
             if len(matches) > 1:
                 raise LocalSkillDuplicateError()
@@ -144,9 +134,9 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     owner_id=owner_id,
                     bot_id=bot_id,
                     actor_id=actor_id,
-                    name=name,
-                    description=description,
-                    files=files,
+                    name=validated.name,
+                    description=validated.description,
+                    files=list(validated.files),
                     is_teclaw=is_teclaw,
                 )
             return await self._create(
@@ -154,9 +144,9 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 owner_id=owner_id,
                 bot_id=bot_id,
                 actor_id=actor_id,
-                name=name,
-                description=description,
-                files=files,
+                name=validated.name,
+                description=validated.description,
+                files=list(validated.files),
                 is_teclaw=is_teclaw,
             )
         finally:
@@ -176,11 +166,10 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         list plus relative paths.  Repackage it once here, then reuse the
         complete ZIP validation, same-name replacement and compensation flow.
         """
-        package = (
-            files[0][1]
-            if len(files) == 1 and files[0][0].endswith(".zip")
-            else self._pack_directory(files)
-        )
+        if len(files) == 1 and files[0][0].endswith(".zip"):
+            package = files[0][1]
+        else:
+            package = self._pack_directory(files)
         return await self.upload_local_skill(
             bot_id=bot_id,
             owner_id=owner_id,
@@ -577,156 +566,18 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 raise LocalSkillNotFoundError()
         return bot
 
-    @staticmethod
-    def _unpack(
-        package: bytes,
-        metadata_parser: SkillMetadataParserProtocol = SkillParser(),
-    ) -> tuple[str, str, list[tuple[str, bytes]]]:
-        if len(package) > _MAX_COMPRESSED:
-            raise LocalSkillTooLargeError()
+    def _validate_zip(self, package: bytes) -> ValidatedSkillPackage:
         try:
-            archive = zipfile.ZipFile(io.BytesIO(package))
-        except (zipfile.BadZipFile, UnicodeDecodeError) as exc:
-            raise LocalSkillInvalidPackageError("invalid_zip") from exc
-        files: list[tuple[str, bytes]] = []
-        total = 0
-        seen: set[str] = set()
-        for info in archive.infolist():
-            path = info.filename
-            if info.is_dir():
-                continue
-            file_kind = (info.external_attr >> 16) & 0o170000
-            if (
-                path.startswith(("/", "\\"))
-                or re.match(r"^[A-Za-z]:", path) is not None
-                or "\\" in path
-                or ".." in path.split("/")
-                or len(path) > 256
-                or file_kind not in (0, 0o100000)
-            ):
-                raise LocalSkillInvalidPackageError("unsafe_file_path")
-            normalized_path = "/".join(
-                part for part in path.split("/") if part not in ("", ".")
-            )
-            # Preserve the retiring BFF upload behavior for common platform
-            # metadata. These files are not Skill content and must not create
-            # a second wrapper root for a valid macOS ZIP archive.
-            if LocalSkillUploadService._is_legacy_ignored_upload_path(
-                normalized_path
-            ):
-                continue
-            if normalized_path in seen:
-                raise LocalSkillInvalidPackageError("duplicate_file_path")
-            if info.file_size > _MAX_FILE:
-                raise LocalSkillTooLargeError()
-            seen.add(normalized_path)
-            total += info.file_size
-            if len(seen) > _MAX_FILES or total > _MAX_EXPANDED:
-                raise LocalSkillTooLargeError()
-            try:
-                files.append((path, archive.read(info)))
-            except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
-                raise LocalSkillInvalidPackageError("unreadable_archive") from exc
-        skill_files = [item for item in files if item[0].split("/")[-1] == "SKILL.md"]
-        if not skill_files:
-            raise LocalSkillInvalidPackageError("missing_skill_file")
-        if len(skill_files) > 1:
-            raise LocalSkillInvalidPackageError("multiple_skill_files")
-        skill_path, markdown = skill_files[0]
-        roots = {path.split("/")[0] for path, _ in files}
-        wrapper = skill_path.split("/")[0] if "/" in skill_path else None
-        if wrapper is not None and len(roots) != 1:
-            raise LocalSkillInvalidPackageError("invalid_wrapper")
-        try:
-            try:
-                canonical = metadata_parser.parse_skill_markdown(markdown, path=skill_path)
-                metadata = canonical.to_dict()
-            except SkillManifestError as exc:
-                if exc.code.value != "MISSING_FRONTMATTER":
-                    raise
-                # Keep packages accepted by the historical upload endpoints
-                # working while new frontmatter manifests remain strict.
-                text = SkillParser.decode_content(markdown)
-                metadata = SkillParser.parse_legacy_upload_content(text) or {}
-        except SkillManifestError as exc:
-            raise LocalSkillInvalidPackageError() from exc
-        name = metadata.get("name")
-        description = metadata.get("description")
-        if not isinstance(name, str) or not isinstance(description, str):
-            raise LocalSkillInvalidPackageError("invalid_metadata")
-        name, description = name.strip(), description.strip()
-        if (
-            not name
-            or not description
-            or not _NAME.fullmatch(name)
-            or name.lower() in {"skills-center", "skills-local", "skills-repo"}
-        ):
-            raise LocalSkillInvalidPackageError("invalid_metadata")
-        if wrapper and wrapper != name:
-            raise LocalSkillInvalidPackageError("wrapper_name_mismatch")
-        if wrapper is not None and any(
-            not path.startswith(f"{wrapper}/") for path, _ in files
-        ):
-            raise LocalSkillInvalidPackageError("invalid_wrapper")
-        normalized = [(p[len(wrapper) + 1 :] if wrapper else p, c) for p, c in files]
-        return name, description, normalized
+            return self._package_validator.validate_legacy_local_zip(package)
+        except SkillPackageInvalidError as exc:
+            raise LocalSkillInvalidPackageError(exc.reason) from exc
+        except SkillPackageTooLargeError as exc:
+            raise LocalSkillTooLargeError() from exc
 
-    @staticmethod
-    def _is_legacy_ignored_upload_path(relative_path: str) -> bool:
-        """Match the retiring BFF parser's platform-metadata exclusions."""
-        parts = relative_path.split("/")
-        name = parts[-1]
-        return (
-            name == ".DS_Store"
-            or parts[0] == "__MACOSX"
-            or "__pycache__" in parts
-            or name.endswith((".pyc", ".pyo"))
-        )
-
-    @staticmethod
-    def _pack_directory(files: Sequence[tuple[str, bytes]]) -> bytes:
-        """Encode directory files without trusting browser-provided paths."""
-        if not files or len(files) > _MAX_FILES:
-            raise LocalSkillInvalidPackageError()
-        seen: set[str] = set()
-        total = 0
-        stream = io.BytesIO()
+    def _pack_directory(self, files: Sequence[tuple[str, bytes]]) -> bytes:
         try:
-            with zipfile.ZipFile(
-                stream, mode="w", compression=zipfile.ZIP_DEFLATED
-            ) as archive:
-                for path, content in files:
-                    if not isinstance(path, str) or not isinstance(content, bytes):
-                        raise LocalSkillInvalidPackageError()
-                    if (
-                        not path
-                        or path.startswith(("/", "\\"))
-                        or re.match(r"^[A-Za-z]:", path) is not None
-                        or "\\" in path
-                        or any(part == "" for part in path.split("/"))
-                        or ".." in path.split("/")
-                        or len(path) > 256
-                    ):
-                        raise LocalSkillInvalidPackageError()
-                    normalized = "/".join(
-                        part for part in path.split("/") if part not in ("", ".")
-                    )
-                    if not normalized or normalized in seen:
-                        raise LocalSkillInvalidPackageError()
-                    if len(content) > _MAX_FILE:
-                        raise LocalSkillTooLargeError()
-                    total += len(content)
-                    if total > _MAX_EXPANDED:
-                        raise LocalSkillTooLargeError()
-                    seen.add(normalized)
-                    archive.writestr(normalized, content)
-        except LocalSkillInvalidPackageError:
-            raise
-        except LocalSkillTooLargeError:
-            raise
-        except (OSError, RuntimeError, ValueError) as exc:
-            raise LocalSkillInvalidPackageError() from exc
-        package = stream.getvalue()
-        if len(package) > _MAX_COMPRESSED:
-            raise LocalSkillTooLargeError()
-        return package
+            return self._package_validator.pack_directory(files)
+        except SkillPackageInvalidError as exc:
+            raise LocalSkillInvalidPackageError(exc.reason) from exc
+        except SkillPackageTooLargeError as exc:
+            raise LocalSkillTooLargeError() from exc
