@@ -1,286 +1,588 @@
-# Skill 前端接口 Review Guide
+# Phase 2 Skill 前端开发与联调手册
 
-> 状态：设计阶段接口说明；与同目录正式 Spec 一起 Review。
+> 适用对象：TeamClaw Web 前端、产品、联调测试。
 >
-> 适用对象：TeamClaw Web 前端、产品联调、接口评审。
+> 本文按产品 User Story 说明接口组合、字段渲染、轮询、错误和恢复。精确单接口 wire 请查
+> `phase2-openapi-contract.md`；实现后字段类型以 Gateway Swagger/OpenAPI 为机器可读权威。
 
-## 1. 哪份文档是权威
+## 1. 使用边界
 
-实现前，以同目录正式 Spec 的路径、领域语义和兼容规则为权威；本文只把前端需要的
-调用流程集中展示。
+### 1.1 当前阶段
 
-实现后，以 Gateway 实际发布的 OpenAPI JSON 与 Swagger 为机器可读权威。它由
-Backend 真实路由自动生成并经过向前兼容检查，前端可据此查看完整 request/response、
-生成类型或 Client。不得为了提前展示而手工修改生产 OpenAPI artifact。
+本文包含目标合同，其中一部分尚未在 Gateway 正式发布。前端可以据此开发页面和 Mock；只有
+对应 Backend Router 合入、自动生成 OpenAPI 更新后，才能进行真实联调。
 
-## 2. 通用约定
+不得通过以下方式绕过：
 
-- Base prefix：`/openapi/v1`。
-- `skill_id` 是十进制字符串形式的 `ac_skill.id`。
-- 有 `skill_id` 的 Item API 由服务端判断 LOCAL/REPO/SPACE，前端不传 type。
-- Bot Skill 列表中，旧调用不传 type 仍只返回 LOCAL；新产品必须显式传
-  `type=ALL`。
-- 返回继续使用 Gateway Envelope：`code`、`message`、`data`、`request_id`。
-- 已发布接口中已有的 `user_id` query 参数继续保留；服务端必须验证调用身份，
-  不能把客户端传值直接当作授权事实。
-- 创建 Space Skill、升级 Draft、发布和物化重试要求 `Idempotency-Key`。
-- Membership PUT/DELETE、activate/deactivate 都是幂等操作。
+- 直连 Backend 私有 `/api/*`；
+- 调用未注册的候选路径并假设返回 501；
+- 从页面按钮反推权限，忽略服务端 403/409；
+- 使用 SC `skillCode` 调普通 Membership；
+- 把 Draft、Published Version、Publication Attempt 压成一个 status。
 
-统一错误：
+### 1.2 Base URL 与公共格式
 
-| HTTP | 前端处理 |
-| --- | --- |
-| 400 | 请求格式错误 |
-| 403 | 无权限；展示 ACL、Owner/Manager 或 MCP 权限提示 |
-| 404 | 对象不存在或当前用户不可见 |
-| 409 | 状态冲突；读取稳定 error_code 展示业务提示 |
-| 422 | ZIP、SKILL.md、Git 内容或参数校验失败 |
-| 502/503 | Skill Center 或 Runtime 暂时不可用 |
+所有本文路径均以 `/openapi/v1/bots` 开始。响应统一：
 
-重点 `409 error_code`：
-
-- `RESOURCE_DIRECT_ACTIVE`
-- `RESOURCE_MANAGED_BY_SKILL_SET`
-- `RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET`
-- `BOT_NOT_READY`
-- `SYNC_IN_PROGRESS`
-
-## 3. 前端所见 Skill 状态
-
-统一 Skill 列表的核心字段：
-
-| 字段 | 含义 |
-| --- | --- |
-| `skill_id` | 稳定公开身份 |
-| `name` / `description` | 当前投影；Space Skill 来自 SKILL.md |
-| `type` | LOCAL / REPO / SPACE；新增 optional 字段 |
-| `active` | 当前 Bot 是否存在有效 Installation |
-| `managed_by` | DIRECT / SKILL_SET；新增 optional 字段 |
-| `skill_set_id` | 由普通 SkillSet 管理时返回；否则为空 |
-| `tags` | 保持既有 wire |
-
-不要在前端推导 Direct active、Effective active 或 Runtime observed status。
-`active=true` 只表示当前 Desired State 应当生效。
-
-## 4. Phase 1：Bot Skill
-
-### 4.1 Product Bot Skill 列表
-
-`GET /openapi/v1/bots/{bot_id}/skills?type=ALL`
-
-产品默认展示以下集合的并集：
-
-1. Bot-owned Local Asset；
-2. 普通 SkillSet Membership；
-3. 当前有效 Installation。
-
-过滤、按 skill_id 去重后再分页。旧调用不传 type 的行为不能改变。
-
-### 4.2 Local 上传
-
-`POST /openapi/v1/bots/{bot_id}/skills`
-
-- Body 是 raw ZIP，Content-Type 为 `application/zip`。
-- 新建 Local Skill 返回 inactive。
-- 同 Bot 同名上传原地替换，保留 skill_id 和原 active。
-- 产品随后把它加入 SkillSet；若该 Set 当前 active，添加成功后立即生效。
-
-“添加本地文件夹”保持现有产品的 multipart 交互，不要求前端自行把文件夹压成 ZIP：
-
-`POST /openapi/v1/bots/{bot_id}/skills/upload-folder`
-
-- Content-Type：`multipart/form-data`。
-- `files`：重复字段，包含选中文件夹中的全部文件。
-- `file_paths`：可选 JSON 字符串数组，与 `files` 一一对应，保存相对目录结构；不传时退回每个文件名。
-- 与 raw ZIP 共用同一包校验、唯一 `SKILL.md`、同名替换、新建 inactive、大小/文件数限制和响应 Envelope。
-- 旧 `/api/skills/upload` 原样保留，本期不修改其实现；新接口沿用其 `files + file_paths` wire 语义。新 OpenAPI 的文件夹与 raw ZIP 入口在请求解码后共用同一个 `LocalSkillUploadService` 生命周期。
-
-### 4.3 Item 与内容
-
-| Method | Path | 前端用途 |
-| --- | --- | --- |
-| GET | `/bots/{bot_id}/skills/{skill_id}` | Skill 详情 |
-| DELETE | `/bots/{bot_id}/skills/{skill_id}` | 仅删除无引用的 inactive Local Asset |
-| GET | `/bots/{bot_id}/skills/{skill_id}/content` | 读取可展示 SKILL.md |
-| GET | `/bots/{bot_id}/skills/{skill_id}/parameters` | 读取 Bot 级参数 |
-| PUT | `/bots/{bot_id}/skills/{skill_id}/parameters` | 全量保存 Bot 级参数 |
-
-### 4.4 Direct API
-
-| Method | Path | 语义 |
-| --- | --- | --- |
-| POST | `/bots/{bot_id}/skills/{skill_id}/activate` | 直接生效 |
-| POST | `/bots/{bot_id}/skills/{skill_id}/deactivate` | 直接停用 |
-
-产品界面不直接使用 Direct；外部 OpenAPI 调用方可以使用。资源已属于普通 SkillSet
-时，Direct 操作返回 `RESOURCE_MANAGED_BY_SKILL_SET`。
-
-## 5. Phase 1：Repo Catalog
-
-| Method | Path | 说明 |
-| --- | --- | --- |
-| GET | `/openapi/v1/bots/skills/repository` | keyword/path/sort/page/page_size |
-| GET | `/openapi/v1/bots/skills/repository/tree` | aiworkbench 目录树 |
-| GET | `/openapi/v1/bots/skills/repository/{skill_id}` | Repo 详情；Phase 2 additive 支持 Space |
-| POST | `/openapi/v1/bots/skills/repository/sync` | 同步完成后返回 |
-
-Sync 是同步接口。前端 await 返回后刷新列表，不轮询新的 sync-status。并发同步返回
-`SYNC_IN_PROGRESS`。
-
-### 5.1 添加 Skill 弹窗的三个来源
-
-三个目录独立读取，不能把 Skill Center 团队搜索当作能力工坊搜索：
-
-| 产品入口 | 前端接口 | 结果来源 |
-| --- | --- | --- |
-| 引用市场 Skill / TeamClaw | `GET /openapi/v1/bots/skills/repository` | aiworkbench 扫描后的 `git://` Repo Skill |
-| 引用市场 Skill / Skill Center | `POST /openapi/v1/bots/market/skill-center/skills` | Skill Center PUBLIC 市场；服务端注入凭据，固定不传 `teamId` |
-| 引用工坊 Skill | `GET /openapi/v1/bots/spaces/{space_id}/skills/consumable` | 当前 Space 中已发布且运行时物化完成的 Skill |
-
-已发布兼容接口 `POST /openapi/v1/bots/market/skills` 同样读取 TeamClaw Git 市场；新产品页面优先使用 Repository Catalog。
-
-Skill Center Public Skill 不做全量扫描入 `ac_skill`。前端选中后，目标合同为：
-
-```text
-POST /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/market-skill-references
+```json
 {
-  "market_source": "SKILLCENTER",
-  "skill_code": "stable-skill-code"
+  "code": 200000,
+  "message": "OK",
+  "data": {},
+  "request_id": "trace-id"
 }
 ```
 
-该命令后续负责按需解析/物化为 TeamClaw `skill_id`，再写普通 SkillSet Membership。当前仅冻结该接口合同，未实现物化前不得将其加入 Gateway 正式 OpenAPI artifact，也不得返回“已引用成功”的假结果。
+前端必须同时记录 HTTP status、稳定六位 `code` 和 `request_id`；反馈问题时携带 request_id。
+合同文档里的大写错误符号是 `code` 的可读名称，不是 Envelope 顶层新增字段。只有 Publication
+Attempt/Reference 这种持久异步资源会在 `data` 内返回自己的 `error_code`。
 
-## 6. Phase 1：SkillSet
+### 1.3 身份、缓存与重复提交
 
-Prefix：`/openapi/v1/bots/{bot_id}/skill-sets`
+- `user_id` 表示当前调用者，不是 Bot owner；Gateway/Backend 会校验认证上下文。
+- Space Skill 写操作只允许明确用户身份；不要使用 App-only Principal。
+- 需要 `Idempotency-Key` 的请求，前端应为一次用户意图生成 UUID，并在网络重试、页面恢复时
+  复用同一个 Key；用户重新发起一次新动作时生成新 Key。
+- GET 可以按页面生命周期缓存；执行任意 mutation 后按本文指出的刷新范围重新读取。
 
-| Method | Path | 说明 |
+## 2. 前端状态模型
+
+### 2.1 三类事实必须分开
+
+| 事实 | 字段 | 用途 |
 | --- | --- | --- |
-| GET/POST | `/skill-sets` | 列表/创建 inactive Set |
-| GET/PUT/DELETE | `/skill-sets/{set_id}` | 详情/改名描述/删除 inactive 普通 Set |
-| GET | `/skill-sets/{set_id}/skills` | Skill Membership |
-| PUT/DELETE | `/skill-sets/{set_id}/skills/{skill_id}` | 添加/移除 Skill |
-| POST | `/skill-sets/{set_id}/activate` | 原子激活全部 Skill/MCP |
-| POST | `/skill-sets/{set_id}/deactivate` | 原子停用全部 Skill/MCP |
-| GET | `/skill-sets/resources` | 全部 Set 的 MCP/Default CLI 聚合 |
-| GET | `/skill-sets/{set_id}/mcps` | MCP Membership |
-| PUT/DELETE | `/skill-sets/{set_id}/mcps/{server_code}` | 添加/移除 MCP |
-| GET | `/skill-sets/{set_id}/mcp-permissions` | 权限聚合 |
-| POST | `/skill-sets/{set_id}/mcp-permission-requests` | 发起既有权限申请 |
-| DELETE | `/skill-sets/{set_id}/clis/{resource_code}` | Default CLI 排除 |
+| Skill 生命周期 | `lifecycle_status` | 卡片是仅草稿、在线还是本地下线 |
+| 当前 Draft | `draft.status` | 是否可编辑、目标版本、当前 Revision |
+| 当前发布任务 | `active_publication.status` | 发布中、物化中或结果确认中 |
 
-产品流程：
+示例：Published V1 正在编辑 V2：
 
-1. Local 先上传；Repo/Space 已存在于共享 Catalog。
-2. PUT Membership。
-3. 如果 Set inactive，只保存 Membership，Skill 不生效。
-4. 如果 Set active，Membership 与 Installation 同事务写入，Skill 立即生效。
-5. Activate/Deactivate 是整个 Set 的原子动作，不存在半选。
+```json
+{
+  "lifecycle_status": "PUBLISHED",
+  "latest_published_version": {"version": 1},
+  "draft": {"target_version": 2, "status": "EDITING"},
+  "active_publication": null
+}
+```
 
-System Default 在列表中以 `is_default` 表示，始终 active，不提供单独 default API。
+不能因为存在 Draft V2 就把 Published V1 从市场或 Bot Runtime 移除。
 
-## 7. Phase 1：MCP
+### 2.2 页面文案映射
 
-已发布 Catalog/Permission/Config 保持不变：
-
-- `GET /openapi/v1/bots/mcp/servers`
-- `GET /openapi/v1/bots/mcp/tenants`
-- `GET /openapi/v1/bots/mcp/servers/{server_code}`
-- `GET /openapi/v1/bots/mcp/servers/{server_code}/permissions`
-- `GET/PUT /openapi/v1/bots/mcp/servers/{server_code}/config`
-
-新增 Bot Direct：
-
-| Method | Path |
+| 领域事实 | 建议展示 |
 | --- | --- |
-| GET | `/openapi/v1/bots/{bot_id}/mcps` |
-| POST | `/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate` |
-| POST | `/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate` |
+| `DRAFT_ONLY + EDITING` | 草稿 |
+| `PUBLISHED + draft=null` | 已发布 |
+| `PUBLISHED + EDITING Draft` | 已发布 · 有待发布修改 |
+| Attempt `PREPARING/SC_SUBMITTING/WAITING_SC` | 发布中 |
+| Attempt `MATERIALIZING` | 物化中 |
+| Attempt `RESULT_UNKNOWN` | 发布结果确认中 |
+| `OFFLINE` | 已下线 · 可继续编辑 |
 
-产品仍通过 SkillSet 管理 MCP；权限不足时先展示/发起既有权限申请。
+`SUCCEEDED/FAILED` 是历史 Attempt 终态，详情页可展示；列表 `active_publication` 只内联非终态。
 
-## 8. 已冻结的 Space/Member/Favorite
+### 2.3 Permission 不是最终按钮状态
 
-七桃负责的已发布接口保持当前 OpenAPI，不在本次重新命名或改 wire。本期不提供
-Space 删除。
+`actor.permissions` 只表示当前用户基于 ACL/Grant 有资格发起命令。例如：
 
-## 9. Phase 2：Space Skill 创作
+```text
+permissions.publish_draft=true
++ Draft.status=EDITING
++ 没有进行中 Attempt
++ Team Lease 不是 HELD_BY_OTHER
+→ 发布按钮可用
+```
 
-Prefix：`/openapi/v1/spaces/{space_id}/skills`
+前端可以据此预判按钮，但点击后仍必须处理服务端对最新状态的 403/409。
 
-| Method | Path | 前端流程 |
+## 3. 页面—接口总览
+
+| 产品页面/动作 | Operation |
+| --- | --- |
+| 能力工坊卡片列表 | P2-SKL-001 |
+| 本地文件夹创建 | P2-SKL-002 |
+| Git 导入创建 | P2-SKL-003 |
+| Skill 创作详情 | P2-SKL-004 |
+| 创建升级 Draft | P2-DRF-001 |
+| 文件树、打开、保存、Git 更新 | P2-DRF-002..005 |
+| 删除草稿/未发布 Skill | P2-DRF-006 |
+| 历史版本 | P2-VER-001..004 |
+| 权限管理 | P2-GRT-001..005 |
+| 编辑锁 | P2-LSE-001..004 |
+| 发布影响、发布和轮询 | P2-PUB-001..005 |
+| 下线影响和下线 | P2-OFF-001..002 |
+| 市场搜索 | P2-MKT-001..003 |
+| 引用 SC Public Skill | P2-REF-001..003 |
+
+## 4. 能力工坊列表与详情
+
+### 4.1 打开能力工坊
+
+```http
+GET /openapi/v1/bots/spaces/{space_id}/skills?keyword=&page=1&page_size=20
+```
+
+产品行为：
+
+1. 首次进入请求第 1 页；搜索输入防抖后重新从第 1 页请求；
+2. Backend 对 name/description 做不区分大小写过滤后分页；
+3. Offline Skill 仍在工坊列表中，供 Owner/Manager 继续修改；
+4. 不在列表额外请求全部 Grants、Versions、文件树或影响面。
+
+卡片字段：
+
+| 字段 | UI |
+| --- | --- |
+| `name/description` | 标题与摘要，来自 SKILL.md |
+| `lifecycle_status` | 主状态标签 |
+| `latest_published_version.version` | `V1/V2` 标签 |
+| `draft.target_version/status` | 待发布版本与草稿状态 |
+| `active_publication` | 发布进度 |
+| `owner` | Owner 展示 |
+| `actor.skill_role` | 当前用户角色 |
+| `lease_summary` | 锁图标和 holder；不保存 token |
+
+列表返回 `pending_editor_request` 时，普通成员展示“申请中”，不能再次申请。
+
+### 4.2 打开 Skill 详情
+
+```http
+GET /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}
+```
+
+详情响应是页面初始化事实，包含当前 Draft、latest Published、Attempt、Actor 与 Lease 摘要。
+进入编辑器前仍要调用实时 Lease API；不要使用列表中的 lease_summary 直接保存。
+
+### 4.3 空态与失败
+
+| 情况 | 处理 |
+| --- | --- |
+| 200 total=0 | 展示空态或无搜索结果 |
+| 403 | 用户不再是 Space 成员，返回 Space 列表 |
+| 404 | Skill 被删除或不可见，刷新工坊列表 |
+| 409 | 详情已变化，重新 GET detail |
+
+## 5. 创建 Space Skill
+
+### 5.1 本地文件夹
+
+产品入口：“新建 Skill → 添加本地文件夹”。
+
+```http
+POST /openapi/v1/bots/spaces/{space_id}/skills
+Content-Type: multipart/form-data
+Idempotency-Key: <uuid>
+```
+
+Form：
+
+```text
+files=<file1>
+files=<file2>
+file_paths=["SKILL.md","references/example.md"]
+```
+
+- 浏览器直接提交 File 集合和 webkitRelativePath；不生成 ZIP。
+- `file_paths` 与 files 数量、顺序必须一致，并保留目录结构。
+- 单次网络重试复用同一 Idempotency-Key。
+- 201 后直接进入 V1 Draft 详情；这时还没有发布、Membership 或 Runtime 生效。
+
+校验失败：
+
+| error_code | UI |
+| --- | --- |
+| `SKILL_PACKAGE_INVALID` | 展示包级错误 |
+| `SKILL_MANIFEST_MISSING` | 提示缺少 SKILL.md |
+| `SKILL_MANIFEST_MULTIPLE` | 提示只能存在一个目标 SKILL.md |
+| `SKILL_PATH_INVALID` | 展示非法相对路径 |
+| `SKILL_NAME_CONFLICT` | 提示当前 Space 存在名称/Identity 冲突 |
+
+### 5.2 Git 导入
+
+```http
+POST /openapi/v1/bots/spaces/{space_id}/skills/import-from-git
+Idempotency-Key: <uuid>
+
+{
+  "git_url": "https://example.com/team/skills.git",
+  "branch": "main",
+  "subdir": null
+}
+```
+
+仓库中有多个 Skill：
+
+- 用户指定 subdir：只解析该目录；
+- 未指定：根 SKILL.md 优先，否则选择规范化父目录字节序第一项；
+- 选择必须确定性，不能随机，也不能第一个非法后继续碰运气；
+- 201 响应返回最终 `source_subdir/source_commit_sha`。
+
+Git 导入是 Snapshot，不会加入 aiworkbench Repo Catalog，也不会自动跟随 Git 更新。
+
+## 6. Draft 编辑与 Lease
+
+### 6.1 Personal Space
+
+Personal Draft 不需要 Lease：
+
+```json
+{"required": false, "state": "NOT_REQUIRED", "fencing_token": null}
+```
+
+仍必须使用 `expected_revision_id` 做并发 CAS。
+
+### 6.2 Team Space 打开编辑器
+
+```text
+GET detail
+→ GET draft/lease
+→ FREE：PUT draft/lease 获取锁
+→ HELD_BY_ME：直接使用返回 token
+→ HELD_BY_OTHER：只读展示，Owner/Manager 可选择 takeover
+→ GET draft/files
+```
+
+前端只在编辑页面内存保存 `fencing_token`，不得写入列表缓存或长期 localStorage。
+
+### 6.3 Takeover
+
+```http
+POST .../draft/lease/takeover
+```
+
+只有 Owner/Manager 且 `permissions.takeover_lease=true` 展示。成功生成新 token；旧页面保存收到
+`LEASE_FENCING_TOKEN_STALE`，必须退出编辑并重新读取。
+
+### 6.4 文件树和保存
+
+```http
+GET .../draft/files
+GET .../draft/files/{path}
+PUT .../draft/files/{path}
+```
+
+`{path}` 是 URL 编码后的完整 POSIX 相对路径，不允许 `..`。保存示例：
+
+```json
+{
+  "content": "# Updated content",
+  "encoding": "UTF8",
+  "expected_revision_id": "rev-2",
+  "fencing_token": 7
+}
+```
+
+成功后用新 revision_id 替换本地 revision。多个 Tab 编辑时，旧 revision 返回
+`DRAFT_REVISION_CONFLICT`；提供“刷新最新内容”，不要自动覆盖。
+
+SKILL.md 的 `name` 创建后不可修改；description 可在 Draft 中修改，发布成功后才更新展示。
+
+### 6.5 Git 手动刷新
+
+只对 Git Draft 展示：
+
+```http
+POST .../draft/refresh-from-git
+
+{"expected_revision_id":"rev-2","fencing_token":7}
+```
+
+刷新失败时 Draft 完全不变；成功后重新读取文件树。
+
+### 6.6 关闭编辑器
+
+Team holder 应调用：
+
+```http
+DELETE .../draft/lease?fencing_token=7
+```
+
+网络失败不会让锁自动过期；本期 Lease 无 TTL。遗留锁由 Owner/Manager takeover。
+
+## 7. 升级、删除 Draft 与历史版本
+
+### 7.1 点击“升级”
+
+```http
+POST .../draft/upgrade
+Idempotency-Key: <uuid>
+```
+
+升级只创建 Vn+1 EDITING Draft，不查询影响面、不发布、不推 Bot。内容从 TeamClaw Canonical
+exact Version 复制；必要时服务端从 SC exact version 修复。
+
+### 7.2 删除按钮
+
+```http
+DELETE .../draft?expected_revision_id=rev-2&fencing_token=7
+```
+
+- `deleted_scope=DRAFT`：仅放弃本次升级；Published Vn 仍在线；
+- `deleted_scope=SKILL`：首次从未发布且无外部事实，整个 Skill 被删除。
+
+FROZEN 时不显示删除按钮。Offline Skill 放弃 Vn+1 Draft 后仍保持 Offline，可再次点击升级。
+
+### 7.3 查看历史版本
+
+```http
+GET .../versions?page=1&page_size=20
+GET .../versions/{version}
+GET .../versions/{version}/files
+GET .../versions/{version}/files/{path}
+```
+
+不要提供编辑、删除、覆盖或单版本下线按钮。历史 Runtime/Artifact 可能仍引用精确版本。
+
+## 8. Owner、Manager 与编辑权申请
+
+### 8.1 权限管理页
+
+```http
+GET .../grants
+PUT .../managers/{user_id}
+DELETE .../managers/{user_id}
+POST .../owner-transfer
+```
+
+- 恰好一个 Owner；Manager 必须是当前 Active Space Member；
+- 只有 Owner 直接增删 Manager；
+- Space Admin 转移 Owner 时 `reason` 必填；
+- 移除 Lease holder 或转移 Owner 会使旧 fencing token 失效；
+- 原 Owner 是否保留 Manager 由 `retain_previous_owner_as_manager` 决定，默认 false。
+
+### 8.2 普通成员申请编辑
+
+```http
+POST .../editor-requests
+
+{"reason":"需要共同维护该 Skill"}
+```
+
+成功进入既有 Work Order。前端不得指定 reviewer；Backend 使用当前唯一 Skill Owner。Owner 转移后
+旧 Owner 不能继续审批。列表 `pending_editor_request` 用于显示“申请中”。
+
+## 9. 发布完整流程
+
+### 9.1 发布前影响提示
+
+用户点击“发布”时先调用：
+
+```http
+GET .../publication-impact?page=1&page_size=20
+```
+
+影响列表只是提示：有影响也允许发布；用户点击“已知悉并发布”后才 POST；不传 acknowledgement
+token；Backend 成功后重新计算实际 Track Latest 候选。
+
+### 9.2 创建 Publication
+
+```http
+POST .../publications
+Idempotency-Key: <uuid>
+```
+
+不传 fencing token。Team 服务端检查 Lease：HELD_BY_OTHER 拒绝；FREE/HELD_BY_ME 冻结服务端
+最新 Revision。成功返回 202 Attempt，页面立即轮询。
+
+### 9.3 轮询策略
+
+```http
+GET .../publications/{attempt_id}
+```
+
+建议：前 30 秒每 2 秒，之后每 5 秒；页面隐藏时 15 秒；SUCCEEDED/FAILED 终止；
+RESULT_UNKNOWN 低频查询但不重新 POST。页面刷新后从 detail 或 publications collection 恢复。
+
+### 9.4 状态与展示
+
+| status | 页面 | 继续轮询 |
 | --- | --- | --- |
-| GET/POST | `/skills` | 列表/raw ZIP 创建 |
-| POST | `/skills/import-from-git` | 从 Git 创建新 Identity |
-| GET | `/skills/{skill_id}` | 创作详情 |
-| POST | `/skills/{skill_id}/draft/upgrade` | 创建下一版本 Draft |
-| GET/DELETE | `/skills/{skill_id}/draft` | 查询/放弃 EDITING Draft |
-| GET | `/skills/{skill_id}/draft/files` | 文件树 |
-| GET/PUT | `/skills/{skill_id}/draft/files/{path}` | 读写文件 |
-| POST | `/skills/{skill_id}/draft/replace` | ZIP 原子替换 |
-| POST | `/skills/{skill_id}/draft/refresh-from-git` | 手动刷新 |
-| GET | `/skills/{skill_id}/versions` | Published Version 列表 |
-| GET | `/skills/{skill_id}/versions/{version}` | 精确业务版本详情 |
-| GET | `/skills/{skill_id}/versions/{version}/files` | 版本文件树 |
-| GET | `/skills/{skill_id}/versions/{version}/files/{path}` | 版本文件内容 |
+| PREPARING / SC_SUBMITTING / WAITING_SC | 发布中 | 是 |
+| MATERIALIZING | 物化中 | 是 |
+| SUCCEEDED | 发布成功 | 否，刷新 detail/list |
+| FAILED | 发布失败，Draft 恢复可编辑 | 否 |
+| RESULT_UNKNOWN | 发布结果确认中 | 低频；禁止重新发布 |
 
-创作详情必须分别展示：
+只有 SUCCEEDED 才表示 SC exact Version、Canonical Store、metadata/MCP dependency 全部 Ready。
+Track Latest 此后异步触发，不阻塞“发布成功”。
 
-- `latest_published_version`
-- `draft_target_version`
-- `draft_status`
-- `publication_status`
+### 9.5 重试按钮
 
-不能用一个 status 同时表达 Skill 可用性和 Draft 发布进度。
+只在 `attempt.recovery.state=AVAILABLE` 展示：
 
-## 10. Phase 2：Owner、Manager 与 Lease
+```http
+POST .../publications/{attempt_id}/retry
+```
 
-| Method | Path |
+前端不判断重试 publish、SC status 还是 materialization；Backend 根据 recovery.kind 恢复同一
+Attempt。普通 FAILED 需要修改 Draft 后新建 Attempt。RESULT_UNKNOWN 且 NOT_AVAILABLE 不显示按钮。
+
+## 10. 下线与重新发布
+
+先调用：
+
+```http
+GET .../offline-impact?page=1&page_size=20
+```
+
+与 publication-impact 不同，下线是硬门禁。存在 Membership、Installation、Draft/Attempt、
+可重放 Service Artifact 或 UNKNOWN_ARTIFACT 时不能继续。
+
+`blocked=false` 才启用：
+
+```http
+POST .../offline
+```
+
+Backend 会重新检查，所以仍可能返回 `SKILL_OFFLINE_BLOCKED`。成功后：
+
+- 历史 Published Vn 保持不可变；
+- TeamClaw 市场和 consumable 隐藏；
+- 创建 Vn+1 EDITING Draft；
+- 不调用 SC 外部下线；
+- Owner/Manager 可继续编辑；
+- 发布 Vn+1 成功后恢复 PUBLISHED。
+
+产品文案不能写成“Vn 变回草稿”；准确语义是“Skill Offline，同时创建 Vn+1 Draft”。
+
+## 11. 添加 Skill 弹窗的三个来源
+
+前端分别查询，不建设 Backend 混合分页。
+
+### 11.1 TeamClaw 市场
+
+```http
+GET /openapi/v1/bots/skills/repository?keyword=&page=1&page_size=20
+PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
+```
+
+返回 Repo Skill，已有 TeamClaw `skill_id`，直接调用普通 Membership。
+
+### 11.2 能力工坊
+
+```http
+GET /openapi/v1/bots/spaces/{space_id}/skills/consumable?keyword=&page=1&page_size=20
+PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
+```
+
+只展示 Published、物化完成、非 Offline 的 Space Skill；同样已有 `skill_id`。
+
+### 11.3 SkillCenter Public 市场
+
+```http
+POST /openapi/v1/bots/market/skill-center/skills
+```
+
+详情使用结果 `homepageUrl` iframe，不创建 TeamClaw Asset。确认引用时只有外部 `skillCode`，
+不能调用普通 Membership，必须发起异步 Reference。
+
+## 12. SC Public 批量异步引用
+
+### 12.1 提交
+
+用户可勾选多个 Skill，前端去重后最多 20 个：
+
+```http
+POST /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references
+Idempotency-Key: <uuid>
+
+{"skill_codes":["public-a","public-b"]}
+```
+
+202 只表示 Operation 已持久化，不表示已经加入 SkillSet。
+
+### 12.2 卡片状态
+
+| Backend status | 前端阶段 |
 | --- | --- |
-| GET | `/spaces/{space_id}/skills/{skill_id}/grants` |
-| PUT/DELETE | `/spaces/{space_id}/skills/{skill_id}/managers/{user_id}` |
-| POST | `/spaces/{space_id}/skills/{skill_id}/owner-transfer` |
-| GET/PUT/DELETE | `/spaces/{space_id}/skills/{skill_id}/draft/lease` |
-| POST | `/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover` |
+| QUEUED / RESOLVING_VERSION | 准备中 |
+| MATERIALIZING | 正在同步 Skill |
+| ADDING_TO_SKILL_SET | 正在添加到能力集 |
+| PROJECTING_RUNTIME | 正在使能力生效 |
+| COMPLETED | 添加成功 |
+| FAILED | 添加失败 |
 
-Team Skill 编辑需要 Lease；Personal 返回 `required=false`。本期没有 TTL/心跳续租。
-关闭编辑抽屉主动释放；Owner/Manager 可 Takeover。每次新获取/抢占都会生成新的
-fencing token，旧页面保存必须被拒绝。
+COMPLETED 前不是 Membership，不能提前显示为已激活。
 
-## 11. Phase 2：发布与退役
+### 12.3 轮询与恢复
 
-| Method | Path |
+```http
+GET .../skill-center-references?reference_request_id=req-01&page=1&page_size=20
+GET .../skill-center-references/{reference_id}
+```
+
+建议每 2 秒轮询，全部终态后停止。关闭弹窗不会取消任务；重新打开、页面刷新或目标 Set 删除后，
+仍可按 Bot ACL 查询历史结果。
+
+### 12.4 部分成功
+
+3 项中 2 成功、1 失败时：成功项保留，失败项展示 error；不回滚成功项；本期没有原地 retry，
+用户重新选择失败项并使用新 Key 提交。物化已完成但 Membership 失败时，共享资产继续保留。
+
+## 13. SkillSet 与生效语义
+
+新建普通 SkillSet 默认 `active=true`。空 Set 不触发 Runtime，之后添加成员立即生效。
+
+| 操作 | inactive Set | active Set |
+| --- | --- | --- |
+| 添加已物化 Skill | 只写 Membership | Membership + Installation + Runtime |
+| 删除 Skill | 删除 Membership | 删除 Membership + Installation + Runtime |
+| SC Public Reference 完成 | 只写 Membership | Membership + Installation + Runtime |
+
+SkillSet 只有全部 active 或全部 inactive，不显示半选。Installation 是 Bot Effective Skill 的
+读取事实，前端不自行计算来源 Union。
+
+## 14. Track Latest 的产品边界
+
+新 Version PUBLISHED 后，Personal/Desktop Bot 与 Service Draft 异步收敛 latest：
+
+- 发布页不等待全部 Bot 更新；
+- 本期不展示逐 Bot actual version；
+- Runtime 失败不回滚 Version；
+- Published Service Release 冻结 exact Version，restart/scale/rollback 不跟随 latest；
+- 下一次 Service 发布才使用最新版本。
+
+前端不能在发布成功弹窗中承诺“全部 Bot 已完成升级”。
+
+## 15. 全局异常与恢复
+
+| 场景 | 前端行为 |
 | --- | --- |
-| GET | `/spaces/{space_id}/skills/{skill_id}/upgrade-impact` |
-| POST/GET | `/spaces/{space_id}/skills/{skill_id}/publications` |
-| GET | `/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}` |
-| POST | `/spaces/{space_id}/skills/{skill_id}/versions/{version}/materialization-retry` |
-| GET | `/spaces/{space_id}/skills/{skill_id}/retirement-impact` |
-| POST | `/spaces/{space_id}/skills/{skill_id}/retirement` |
+| 重复点击创建/发布 | 禁用按钮；超时重放同一 Idempotency-Key |
+| 请求超时且结果未知 | 使用同一 Key 重放，禁止生成新 Key |
+| Draft revision 冲突 | 拉取最新 detail/file，提示重新编辑 |
+| Lease 被 Takeover | 退出编辑，丢弃旧 token，重新 GET lease |
+| SC 市场不可用 | 保留搜索条件，允许刷新；不创建假资产 |
+| Publication RESULT_UNKNOWN | 显示“确认中”；不重新发布 |
+| recovery AVAILABLE | 显示统一重试按钮，POST 同 Attempt retry |
+| Reference 部分失败 | 保留成功项；失败项新请求重试 |
+| Runtime projection 失败 | 展示失败并刷新最终 SkillSet/Reference 状态 |
+| Offline blocker 变化 | 重新 GET offline-impact |
+| 页面刷新 | 从 detail、Attempt collection 或 Reference collection 恢复 |
 
-Publish 返回 `202` 和 Attempt。前端轮询 Attempt；状态为：
+## 16. 联调清单
 
-- PREPARING
-- SC_SUBMITTING
-- WAITING_SC
-- MATERIALIZING
-- SUCCEEDED
-- FAILED
-- RESULT_UNKNOWN
+### 16.1 Mock/合同阶段
 
-FAILED 后 Draft 恢复 EDITING；RESULT_UNKNOWN 时 Draft 保持 FROZEN，普通用户没有
-重试/取消按钮。MATERIALIZING 失败只允许重试同一 Version，不再次发布 SC。
+- 按 Operation ID 建 API client，不自行改路径。
+- 覆盖未知 additive 字段、200/201/202、403、404、409、422、503。
+- 模拟 Published V1 + Draft V2、Offline + Draft、RESULT_UNKNOWN、Reference 部分成功。
+- 不把候选 API 当成已发布 Gateway 路由。
 
-## 12. 前端验收重点
+### 16.2 Backend 路由落地后
 
-1. 旧 Local 页面和外部调用不因 type 扩展改变。
-2. 产品 Bot Skill 列表显式 type=ALL。
-3. SkillSet 永远整组 active/inactive，不出现半选 UI。
-4. active Set 添加/移除成员后页面与运行时结果一致。
-5. Direct 与 SkillSet 冲突使用稳定 error_code 提示用户。
-6. Repo sync await 完成后刷新，不新增轮询。
-7. Space Skill 同时存在 Published V1 与 Draft V2 时，两类状态分开展示。
-8. Owner、Manager、Lease、Takeover 只使用产品确认的术语。
-9. Service Bot 已发布 Release 不因 Skill latest 变化而显示为自动升级。
-10. 所有 Loading、空态、无权限、校验失败、外部失败和重复点击均可恢复。
+- 以 Gateway `/openapi.json` 重新生成类型，所有请求经 Gateway。
+- 验证 Envelope、分页、Idempotency-Key 和 request_id。
+- 文件夹上传覆盖嵌套目录、中文路径、重复文件名和非法路径。
+- Team 编辑覆盖 acquire、takeover、旧 token 保存失败。
+- 发布覆盖影响提示、轮询、恢复和页面刷新。
+- Reference 覆盖 20 项、部分成功、Set 删除和 inactive/active Set。
+- Offline 覆盖每类 blocker 与重新发布恢复。
+
+### 16.3 正式切流前
+
+- Swagger 中每个标记已实现的 Operation 都真实可调用，无 501/stub。
+- Phase 1 Local/Repo/SkillSet/MCP 回归通过。
+- 前端不依赖旧 `status/draft_status/can_edit/retire_skill`。
+- 产品文案使用“发布前影响”“Offline 后创建下一版 Draft”“新建 SkillSet 默认 active”。
