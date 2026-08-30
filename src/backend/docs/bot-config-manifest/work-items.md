@@ -92,6 +92,9 @@ apply materialises it into the existing `ac_bot_startup_script` store through
   materialisation target.
 - Whether to later collapse `ac_bot_startup_script` into the manifest module is
   a reversible decision, deferred. This resolves design §8's open choice.
+- Apply's *only* action for this category is that one DB write; the platform
+  composes the script into the start command by itself. See §2.12 for what that
+  mechanism confirms and for the ordering restriction it forces on iteration 1.
 
 ### 2.3 A manifest-materialised entity is indistinguishable from a manual one
 
@@ -295,6 +298,52 @@ v1 depends on it; this is recorded so it is not proposed later.
 
 Tracked as **W13**.
 
+### 2.12 In iteration 1 the `script` may not depend on anything the manifest declares
+
+**The mechanism, confirmed against the code.** Apply materialises `script` by
+writing one row into `ac_bot_startup_script` and doing nothing else. That table
+*is* the script's meta configuration, in the same sense that `mcp` is a registry
+reference: a plain tenant-scoped DB write, needing no device binding. This is why
+`script` is the one category that can be materialised before a container exists.
+The platform composes it into the start command by itself:
+
+- `BaasService._build_create_bot_payload` resolves the stored script
+  (`_resolve_startup_script`) while building the payload, and `_get_start_cmd`
+  bakes it into `after_create_cmd_hook`. No production caller passes a script in
+  — resolving centrally is what makes every path deliver it.
+- So every path that rebuilds a payload re-reads the row: create, service-bot
+  release, `upgrade_bot`, and both device services. The user-facing "restart a
+  baas bot" goes through `upgrade_bot` (`bot_service.py`), so a rewritten row
+  takes effect on the next restart with no extra machinery — §2.6's restart is
+  already sufficient for `script`.
+
+**The consequence.** Because the script is baked into the start command at
+payload-build time, it executes at container start — while `identity`, `skills`,
+`resources` and `engine_config` can only be delivered *after* the container is up
+(§3.4). On a **first boot**, the script therefore runs before any of them exist.
+
+**Iteration 1 states this as a rule rather than engineering around it: a
+manifest's `script` may not depend on anything else that manifest declares.** It
+belongs in the API docs, in the manifest reference, and in a W8 test. No extra
+restart is inserted to close the window: suppressing the script on the first boot
+and restarting would add a full boot to every creation, and *not* suppressing it
+would run the script twice — which is exactly what design §2.4 rejected its
+alternative two for.
+
+**Iteration 2 lifts it.** Once every category can be delivered into the container
+*before* start (#1508 — D4's option (a) or (c)), the ordering inverts on its own:
+entities land first, the script runs after, and the restriction is deleted. It is
+temporary by construction, and every place it is written must say so, so that it
+can be removed rather than re-argued.
+
+**This corrects design §3.4.** Its fixed apply order
+(`engine_config → identity → resources → skills → mcp`, script last) and its
+promise that 「script 可以依赖 manifest 声明的实体已经就位」 hold only once
+iteration 2 lands. Until then, on the BaaS family's first boot, `script` is
+effectively **first**. teclaw is unaffected twice over: its artifact carries
+everything before start, and teclaw does not support `script` at all
+(`bot_startup_script/services/_support.py`).
+
 ## 3. Design questions
 
 ### 3.1 D1 — capability model · #1466 · **RESOLVED**
@@ -443,6 +492,12 @@ acceptance criteria rather than as a question:
 delivery API becomes available once the container is up, apply delivers *after*
 start rather than before it. Pre-boot delivery is a separate question to answer
 later, and W5/W6/W8 proceed without it.
+
+**#1508 is iteration 2's item, and it carries a second payload.** Closing it does
+not only move delivery earlier; it is also what lifts §2.12's rule that a
+manifest's `script` may not depend on anything the manifest declares. Whoever
+picks it up owns deleting that restriction from the docs, the manifest reference
+and W8's test — not just the delivery change.
 
 #### The problem, for the record
 
@@ -956,6 +1011,12 @@ APPLYING                 manifest apply running (fetch → materialise → deliv
 - [ ] The pre-existing `PUT` path is unchanged: a bot created any other way can
       still be given a manifest afterwards and have it take effect on restart
       (§2.6). The two paths coexist.
+- [ ] **`script` is written before the create payload is built**, not with the
+      rest of apply. It is the one category that needs no container (§2.12), and
+      `_build_create_bot_payload` reads the row while composing the start
+      command — so the row must exist by then for the first boot to carry the
+      script at all. Everything else is delivered post-start, which is why
+      iteration 1 forbids a script from depending on it.
 
 **Note — how tenant context reaches apply depends on how apply is scheduled.**
 Two mechanisms are available and they behave differently; only one is already
@@ -1417,8 +1478,15 @@ bot has started (§3.4).
       command's exit status (BaaS family) and publish-poll (teclaw).
 - [ ] Whatever D2 decides about moving refs is enforced here — this is where
       restarts nobody associated with a config change actually happen.
-- [ ] `script` runs **after** manifest entities are delivered, so a script may
-      assume its declared skills and identity are in place (design §3.4).
+- [ ] `script` is materialised by writing `ac_bot_startup_script` and nothing
+      else; the platform composes it into the start command as it already does
+      (§2.12). A rewritten row is picked up by the next payload build, which is
+      what §2.6's restart triggers.
+- [ ] **Iteration 1 asserts the opposite of design §3.4**: on a first boot the
+      script runs *before* the manifest's other categories, because it is baked
+      into the start command while they are delivered post-start. A test pins
+      this, and the docs state the rule — a manifest's `script` may not depend on
+      anything that manifest declares. Both are deleted by #1508 in iteration 2.
 - [ ] The no-script start command remains byte-identical to today (design §10.4),
       with #935's existing assertion retained.
 
