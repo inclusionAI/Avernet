@@ -234,10 +234,16 @@ stated as policy:
   / `FAILED` is a summary derived from the entries for a caller's convenience. It
   is never an input to a decision — nothing reads the aggregate and then acts on
   the bot.
-- **`on_fetch_failure` is per entry** (`skip` / `keep_last` / `fail`), which is
-  where "what happens when *this one* fails" belongs. `keep_last` means "reuse
-  what we materialised for this entry last time", and its storage is the same
-  store §2.8 requires.
+- **`on_fetch_failure` is per entry** (`keep_last` / `fail`), which is where
+  "what happens when *this one* fails" belongs. `keep_last` means "reuse what we
+  materialised for this entry last time", and its storage is the same store §2.8
+  requires. **`skip` was removed** when §3.2 became overwrite — see below.
+- **A category is overwritten all-or-nothing.** If any entry in a declared
+  category cannot be materialised, that category is **not overwritten at all**;
+  nothing about it changes, and every entry's outcome is still recorded. Under
+  overwrite a partial set is a *destructive* set: writing `{A}` when the
+  declaration was `{A, B}` deletes B. So a category is only ever written from a
+  complete desired state.
 - **Iteration 1 records; it does not push.** The per-entry records are the
   deliverable, and the user pulls them when they want to know. There is no
   notification, no alert, no proactive message.
@@ -466,10 +472,43 @@ all.
 
 | | Behaviour |
 | --- | --- |
-| Category declared | The area becomes **exactly** what the manifest says. Anything else in it is removed |
+| Category declared | Its area becomes **exactly** what the manifest says. Anything else in that area is removed |
 | Category not declared | **Untouched.** The manifest expresses no opinion, so nothing happens |
 | `skills: []` | The empty set *is* a declaration: **every skill is removed.** This reverses the earlier reading of `[]` as "stop managing without deleting" |
 | Reserved names (below) | Never written, never removed — outside every overwrite |
+
+#### "The area" is defined per category, not globally
+
+Overwrite needs a scope, and the scope is not the same shape for every category.
+Getting this wrong is how a rule meant to converge a skill list ends up deleting
+a bot's working directory:
+
+| Category | The area that is overwritten |
+| --- | --- |
+| `skills` | The **active skill set**. It equals the declaration; skills not listed are removed |
+| `identity` | The **identity file set**, minus the reserved names below |
+| `resources` | **Only the declared `path` subtrees.** Nothing outside a declared `path` is touched — the workspace is the bot's working area, not the manifest's |
+| `mcp` | The **set of enabled servers** |
+
+`resources` is the one that must not be read as "the category area is the
+workspace". W6 already states the narrower rule (a declared `path`'s tree is
+replaced wholesale, nothing outside it is touched); this table is that rule made
+general, not a new one.
+
+#### A category is written all-or-nothing
+
+If any entry in a declared category cannot be materialised, **the category is not
+overwritten** — nothing about it changes and the per-entry failures are recorded
+(§2.7). Overwrite makes a partial set destructive: writing `{A}` when the
+declaration was `{A, B}` removes B, so a transient fetch failure would delete a
+working entity. A category is only ever written from a complete desired state.
+
+This is also why **`on_fetch_failure` lost its `skip` value**. Under the
+withdrawn per-entry diff, `skip` meant "proceed without this one" and left the
+existing entity alone. Under overwrite it would mean "delete this one" — the
+opposite of what the name says. `keep_last` (complete the set from the stored
+copy) and `fail` (do not write the category) remain, and they cover the cases
+`skip` was reached for.
 
 #### Reserved names — the one exception, and it is a list, not a rule
 
@@ -1076,10 +1115,12 @@ APPLYING                 manifest apply running (fetch → materialise → deliv
         └──► FAILED      terminal — response names which entries failed
 ```
 
-- An apply result of `PARTIAL` (entries the author explicitly allowed to skip via
-  `on_fetch_failure: skip`) reports as **`READY`**, with the skips visible in the
-  report. It does not get a state of its own: that would add a branch every
-  caller must handle to express something the detail already carries.
+- **`PARTIAL` means some category was not overwritten** (§3.2 all-or-nothing), so
+  it reports as **`FAILED`**, not `READY`. An earlier revision mapped `PARTIAL` to
+  `READY` on the grounds that the skips were author-sanctioned; that rested on
+  `on_fetch_failure: skip`, which no longer exists. A category the manifest
+  declared and we did not write is not a success, and the per-entry records say
+  which.
 - `FAILED` is a **manifest-level** terminal state (§2.7). The bot record is not
   touched — a caller that polls to `FAILED` has a running bot whose manifest did
   not fully apply, and the per-entry records say exactly which entries were not
@@ -1356,8 +1397,9 @@ categories that need no fetching.
 - The apply orchestrator: bot-level serialisation, category ordering, per-entry
   outcome classification, `on_fetch_failure` policy handling.
 - The **apply record** — the manifest module's own note of what the last apply
-  materialised (§2.3), which exists for un-marking and for `keep_last`/audit and
-  stamps no marker on the entities themselves.
+  materialised (§2.3), which exists for `keep_last` and audit and stamps no
+  marker on the entities themselves. (It used to also serve "un-marking";
+  §3.2's move to overwrite removed that job.)
 - Apply report storage and `GET .../config-manifest/last-apply`, in the shape of
   design §7.
 - `POST .../config-manifest/apply`, including `dry_run=true` returning the plan
@@ -1386,7 +1428,9 @@ teclaw behaviour is no longer this item's problem.
       reports every entry `unchanged` and performs no writes.
 - [ ] Outcomes are classified per entry as `created` / `updated` / `unchanged` /
       `skipped` / `failed`, and the apply result is `SUCCEEDED` / `PARTIAL` /
-      `FAILED` accordingly.
+      `FAILED` accordingly. `skipped` now means "not written because its category
+      was aborted" (§3.2 all-or-nothing) — it no longer comes from an
+      `on_fetch_failure: skip` the author asked for, because that value is gone.
 - [ ] **Apply is two-phase, not one ordered pass.** The orchestrator's shape has
       to carry this or W13 is forced to bypass it:
       - **Phase A — no container required.** `script` only. It is a plain write
@@ -1470,6 +1514,16 @@ follows D4's interim policy: deliver after the bot starts (§3.4).
 - [ ] §3.2's overwrite is enforced per declared category: after apply the area
       equals the declaration, and `skills: []` removes every skill. A skill
       installed through the UI is removed too — accepted by decision.
+- [ ] **The area is scoped per category** (§3.2), not globally. In particular
+      `resources` overwrites only the declared `path` subtrees — a test must pin
+      that a file the bot created elsewhere in the workspace survives.
+- [ ] **A category is written all-or-nothing.** If any declared entry cannot be
+      materialised the category is not overwritten at all. The test that matters:
+      declaration `{A, B}` with B's fetch failing leaves B's existing content
+      intact — a transient failure must never delete a working entity.
+- [ ] `on_fetch_failure` accepts `keep_last` and `fail` only. **`skip` is
+      rejected at `PUT`** — under overwrite it would mean "delete this entry",
+      the opposite of its name.
 - [ ] `MEMORY.md` and `IDENTITY.md` are never written and never removed, whether
       or not the manifest declares them. This is the single exception to
       overwrite and it needs a test of its own.
@@ -1478,8 +1532,9 @@ follows D4's interim policy: deliver after the bot starts (§3.4).
       filesystem content into the pool without creating records (§3.3).
 - [ ] A test shows a manifest-installed skill is indistinguishable from the same
       skill uploaded by hand, and survives a skills-pool reconcile.
-- [ ] Fetch failure of one entry does not abort the others under the default
-      policy, and the bot still starts.
+- [ ] Fetch failure of one entry does **not** abort the other categories, but
+      does abort its own (§3.2 all-or-nothing): that category is left exactly as
+      it was, the failure is recorded per entry, and the bot still starts.
 
 **Size.** Medium-large.
 
