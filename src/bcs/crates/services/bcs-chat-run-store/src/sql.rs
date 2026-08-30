@@ -55,6 +55,9 @@ struct StreamingOverlay {
     state: String,
     accumulated_content: String,
     content_truncated: bool,
+    /// Run deadline carried in the overlay so the normal streaming path can
+    /// compute its TTL (and detect a missing run) without a per-delta DB read.
+    expires_at_ms: u64,
 }
 
 impl SqlChatRunRepo {
@@ -155,17 +158,13 @@ impl SqlChatRunRepo {
     /// as the sole delta record (`append_streaming_content`) can fail over to
     /// the DB. Best-effort callers (`create`, state CAS) ignore the result
     /// since the DB row is authoritative there.
-    async fn write_overlay(
-        &self,
-        run_id: &str,
-        overlay: &StreamingOverlay,
-        expires_at_ms: u64,
-    ) -> Result<(), CacheError> {
+    async fn write_overlay(&self, run_id: &str, overlay: &StreamingOverlay) -> Result<(), CacheError> {
         let now = now_ms();
         // Overlay must survive the run deadline by the retention grace so the
         // timeout sweep (which runs only once `expires_at_ms < now`) can still
         // merge the streamed content instead of reading a stale DB row.
-        let ttl_ms = expires_at_ms
+        let ttl_ms = overlay
+            .expires_at_ms
             .saturating_add(self.overlay_retention_ms)
             .saturating_sub(now)
             .max(1000);
@@ -222,6 +221,45 @@ impl SqlChatRunRepo {
         );
         let result = self.db.execute(stmt).await.map_err(backend)?;
         Ok(result.affected_rows > 0)
+    }
+
+    /// Resolve the base for a streaming append. Fast path: when the overlay is
+    /// present at exactly the caller's expected version it is the streaming
+    /// source of truth and is used directly **without a DB read** (issue spec:
+    /// per-token deltas never hit the DB on the normal path). An overlay newer
+    /// than the caller's expectation means the caller is stale → no base
+    /// (`Ok(None)` → append returns `Ok(false)`). A missing or behind-version
+    /// overlay (Redis outage / stale-after-fail-over) falls back to the
+    /// authoritative DB row — the recovery path that has to read MySQL anyway.
+    /// Returns `Ok(None)` when the run is missing or its version does not match.
+    async fn resolve_append_base(
+        &self,
+        run_id: &str,
+        expected_version: u64,
+    ) -> Result<Option<StreamingOverlay>, ChatRunRepoError> {
+        match self.read_overlay(run_id).await {
+            Some(existing) if existing.version == expected_version => return Ok(Some(existing)),
+            Some(existing) if existing.version > expected_version => return Ok(None),
+            _ => {}
+        }
+        let Some(db) = self.read_db(run_id).await? else {
+            return Ok(None);
+        };
+        if db.expires_at_ms == 0 {
+            return Ok(None);
+        }
+        let overlay = StreamingOverlay {
+            version: db.version,
+            state: state_str(db.state).to_string(),
+            accumulated_content: db.accumulated_content.clone(),
+            content_truncated: db.content_truncated,
+            expires_at_ms: db.expires_at_ms,
+        };
+        Ok(if overlay.version == expected_version {
+            Some(overlay)
+        } else {
+            None
+        })
     }
 
     async fn delete_overlay(&self, run_id: &str) {
@@ -457,8 +495,8 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                             state: state_str(record.state).to_string(),
                             accumulated_content: record.accumulated_content.clone(),
                             content_truncated: record.content_truncated,
+                            expires_at_ms: record.expires_at_ms,
                         },
-                        record.expires_at_ms,
                     )
                     .await;
                 Ok(())
@@ -512,8 +550,8 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                         state: state_str(updated.state).to_string(),
                         accumulated_content: updated.accumulated_content.clone(),
                         content_truncated: updated.content_truncated,
+                        expires_at_ms: updated.expires_at_ms,
                     },
-                    updated.expires_at_ms,
                 )
                 .await;
             Ok(CasOutcome::Applied(updated))
@@ -564,33 +602,13 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         accumulated: String,
         truncated: bool,
     ) -> Result<bool, ChatRunRepoError> {
-        // Read both the overlay (streaming hot cache) and the authoritative DB
-        // row, then base off whichever is newer. P1: a stale overlay left by a
-        // rejected write must never win over a DB row the fail-over advanced, so
-        // pick `max(overlay.version, db.version)` rather than trusting the overlay.
-        let overlay_opt = self.read_overlay(run_id).await;
-        let db_record = self.read_db(run_id).await?;
-        let expires_at_ms = db_record.as_ref().map(|r| r.expires_at_ms).unwrap_or(0);
-        if expires_at_ms == 0 {
+        // Resolve the base. On the normal streaming path this returns straight
+        // from the overlay without a DB read (see `resolve_append_base`); the DB
+        // is only touched when the overlay is missing or stale (fail-over /
+        // recovery), which is the path that has to read MySQL anyway.
+        let Some(mut overlay) = self.resolve_append_base(run_id, expected_version).await? else {
             return Ok(false);
-        }
-        let mut overlay = match (overlay_opt, db_record) {
-            // Overlay is ahead of the DB — normal streaming; base off the overlay.
-            (Some(existing), Some(db)) if existing.version > db.version => existing,
-            // DB is at or ahead (incl. the fail-over case), or the overlay is
-            // gone — base off the authoritative DB row.
-            (_, Some(db)) => StreamingOverlay {
-                version: db.version,
-                state: state_str(db.state).to_string(),
-                accumulated_content: db.accumulated_content.clone(),
-                content_truncated: db.content_truncated,
-            },
-            // Overlay present but the DB row is gone — treat the run as missing.
-            (Some(_), None) | (None, None) => return Ok(false),
         };
-        if overlay.version != expected_version {
-            return Ok(false);
-        }
         let flipped = overlay.state == "pending";
         overlay.version += 1;
         if flipped {
@@ -599,7 +617,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         overlay.accumulated_content = accumulated;
         overlay.content_truncated = truncated;
         let intended_version = overlay.version;
-        match self.write_overlay(run_id, &overlay, expires_at_ms).await {
+        match self.write_overlay(run_id, &overlay).await {
             // Overlay (the sole delta record) confirmed the write.
             Ok(()) => Ok(true),
             // C4/P1: overlay write rejected — fail the delta over to the DB at the

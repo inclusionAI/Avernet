@@ -365,6 +365,7 @@ async fn streaming_append_failover_ignores_stale_overlay_and_rebases_on_db() {
         "state": "running",
         "accumulated_content": "ABCDE",
         "content_truncated": false,
+        "expires_at_ms": 9_000_000_000_000u64,
     }))
     .unwrap();
     cache.seed("bcs:chat_run:a", stale).await;
