@@ -1327,6 +1327,7 @@ class ExecutionEngine:
                     await self._drain(patch.task_id, side)
                 elif patch.acceptance_result is not None:
                     await self._on_static_report(patch.task_id, patch.node_id)
+                self._reconcile_root_hung_if_blocked(patch.task_id)
                 return result
             # 动作历史:EXECUTE(执行产出)+ VERIFY(验收结论)——回投即一个执行动作闭环
             _out = dict(patch.output_patch) if patch.output_patch else {}
@@ -1376,8 +1377,10 @@ class ExecutionEngine:
                     patch.task_id, patch.node_id, patch.exec_error, side
                 )
                 await self._drain(patch.task_id, side)
+                self._reconcile_root_hung_if_blocked(patch.task_id)
                 return result
             if patch.acceptance_result is None:
+                self._reconcile_root_hung_if_blocked(patch.task_id)
                 return result  # 仅 fold,无翻态
             if self._is_graph_terminal(patch.task_id):
                 logger.info(
@@ -1394,6 +1397,7 @@ class ExecutionEngine:
                 logger.info("[task_callback][on_report] accept_fail,task=%s", patch.task_id)
                 await self._on_fail_collect(patch.task_id, patch.node_id, side)
             await self._drain(patch.task_id, side)
+            self._reconcile_root_hung_if_blocked(patch.task_id)
             return result
 
     # ===== on_bbs_report:BBS 接力步⑤回投 =====
@@ -1431,7 +1435,7 @@ class ExecutionEngine:
                     f"on_bbs_report: 非claim持有者 task={patch.task_id}"
                 )
             # FAIL:丢弃本次接力尝试——删 scoped 节点(不翻 FAILED、不 fold output_patch/gaps 作 checkpoint);
-            # 图回 root PLANNING+bbs_mode 可恢复态等下段重 claim/attach,不进 PASS/FAIL 传播。
+            # 根保持 HUNG+bbs_mode 可恢复态,等下段重 claim/attach,不进 PASS/FAIL 传播。
             # PASS / fold-only(无 acceptance):scoped 终态翻转(PASS→DONE)或 fold(output_patch/exec_error)走原路径。
             is_fail = (
                 patch.acceptance_result is not None
@@ -2004,8 +2008,8 @@ class ExecutionEngine:
     def _schedule_bbs_notify(self, task_id: str, execution_graph) -> None:
         """可恢复拦截点(spec §5):fire-and-forget ``runner.run_bbs(execution_graph)``。
 
-        命中根 BBS 可恢复态(miss_depth_exhausted + bbs_mode + 未 claim)时调用——主动 bid→select→claim→
-        dispatch 给 dream-mode bot。不持锁、不阻塞 ``on_*``/``_maybe_propagate_hung`` 汇报路径:``asyncio.create_task``
+        命中根 BBS 可恢复态(bbs_mode + 未 claim)时调用——主动 bid→select→claim→
+        dispatch 给 claim-enabled bot。不持锁、不阻塞 ``on_*``/``_maybe_propagate_hung`` 汇报路径:``asyncio.create_task``
         调度后台协程,异常经 ``_on_bg_done`` 记 log。端口不全(无 runner/bot/bcs,如单测 stub)→ 静默跳过。"""
         logger.info("[task][bbs_mode], begin schedule bbs notify, task_id=%s", task_id)
         if not self._runner:
@@ -2015,7 +2019,7 @@ class ExecutionEngine:
         self._bg_tasks.add(bg)
         bg.add_done_callback(self._on_bg_done)
         logger.info(
-            "[task][engine] task=%s 升BBS可恢复态→主动通知 dream-mode bot", task_id
+            "[task][engine] task=%s 升BBS可恢复态→主动通知 claim-enabled bot", task_id
         )
 
     def _enter_root_bbs(self, task_id: str, execution_graph) -> bool:
@@ -2023,7 +2027,7 @@ class ExecutionEngine:
 
         ``loop_round`` counts root-to-BBS escalations only. A node-level HUNG caller
         reaches this helper only after ``_maybe_propagate_hung`` has confirmed that
-        the root is blocked (or the root-level MISS recovery gate is active).
+        the root is blocked.
         """
         if execution_graph.status == Status.HUNG:
             return False
@@ -2054,9 +2058,8 @@ class ExecutionEngine:
         被上方 ``g.status==HUNG`` 短路拦截、不再调度,保留反失控兜底。在途 BBS(``bbs_owner``
         非空)亦跳过,不重复派发。``loop_round`` 只在根确认进入 BBS 时递增。
         """
-        # recoverable 仅用于下方"子 HUNG 冒泡到根(分支2)"路径:miss_depth_exhausted 时根保持
-        # PLANNING 待 BBS 接力(不翻 HUNG);其它 reason 走正常冒泡→根置 HUNG→分支1 升 BBS。
-        recoverable = hung_reason == "miss_depth_exhausted"
+        # 任意 HUNG 都必须沿依赖链冒泡到根。根 HUNG 后再由统一入口进入 BBS，
+        # 不允许 miss_depth_exhausted 之类的特殊分支把根留在 PLANNING/EXECUTING。
         cur = node_id
         while True:
             parent = self._graph.get_parent_task(task_id, cur)
@@ -2096,22 +2099,6 @@ class ExecutionEngine:
             ):
                 return  # 还有活子,等
             if any(st.status == Status.HUNG for st in siblings):
-                # BBS 可恢复态(spec §10.5):若父即根 + reason=miss_depth_exhausted + bbs_mode 已置且未 claim,
-                # 不把根置 HUNG(保持 PLANNING 待 BBS 中继接管);否则正常冒泡。
-                root = self._root(task_id)
-                _g_now = self._graph.query_task_dashboard(task_id)
-                if (
-                    root is not None
-                    and parent.node_id == root.node_id
-                    and recoverable
-                    and not _g_now.extend_props.get("bbs_owner")
-                ):
-                    logger.info(
-                        "[task][hung-propagate] task=%s 根可恢复态拦截(miss_depth_exhausted),根保持 PLANNING",
-                        task_id,
-                    )
-                    self._enter_root_bbs(task_id, _g_now)
-                    return
                 self._graph.update_task_node_info(
                     TaskNodePatch(
                         task_id=task_id,
@@ -2128,6 +2115,35 @@ class ExecutionEngine:
                 cur = parent.node_id
                 continue
             return
+
+    def _reconcile_root_hung_if_blocked(self, task_id: str) -> None:
+        """Close a missed root-HUNG transition after a late sibling completion.
+
+        HUNG propagation can observe an active sibling and return. A later
+        completion may arrive through a status-only or fold-only callback path
+        that does not call ``_on_pass_collect``. Re-scan the root boundary after
+        every callback so an all-terminal root with any HUNG child cannot remain
+        in PLANNING/RUNNING forever.
+        """
+        root = self._root(task_id)
+        if root is None or root.status in {Status.HUNG, Status.DONE, Status.FAILED, Status.CANCELLED}:
+            return
+        siblings = self._graph.get_child_tasks(task_id, root.node_id)
+        if not siblings or any(
+            node.status in {Status.PENDING, Status.PLANNING, Status.RUNNING}
+            for node in siblings
+        ):
+            return
+        hung = next((node for node in siblings if node.status == Status.HUNG), None)
+        if hung is None:
+            return
+        reason = str(hung.run_info.extend_props.get("hung_reason") or "child_hung")
+        logger.warning(
+            "[task][hung-reconcile] task=%s root=%s all children terminal with HUNG child=%s "
+            "-> force root propagation reason=%s",
+            task_id, root.node_id, hung.node_id, reason,
+        )
+        self._maybe_propagate_hung(task_id, hung.node_id, reason)
 
     def _propagate_terminal(
         self, task_id: str, parent: TaskNode, siblings: list, side: list[tuple]
