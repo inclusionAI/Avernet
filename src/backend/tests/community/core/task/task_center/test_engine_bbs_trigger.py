@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import threading
 from typing import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -142,6 +143,33 @@ def test_engine_schedule_bbs_notify_submits_to_durable_loop():
         durable_future.set_result(None)
 
     assert engine._bg_tasks == set()
+
+
+def test_engine_bbs_survives_caller_loop_shutdown():
+    """A caller driven by asyncio.run cannot cancel the durable BBS coroutine."""
+    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    started = threading.Event()
+    finished = threading.Event()
+
+    async def run_bbs(_execution_graph):
+        started.set()
+        await asyncio.sleep(0)
+        finished.set()
+
+    engine._runner = MagicMock()
+    engine._runner.run_bbs = run_bbs
+    engine._bot = MagicMock()
+    engine._bcs = MagicMock()
+    fake_g = MagicMock()
+    fake_g.task_id = "t-harness-loop"
+
+    async def schedule_from_short_lived_loop():
+        engine._schedule_bbs_notify(fake_g.task_id, fake_g)
+
+    asyncio.run(schedule_from_short_lived_loop())
+
+    assert started.wait(1.0)
+    assert finished.wait(1.0)
 
 
 def test_engine_schedule_bbs_notify_skips_when_no_runner():

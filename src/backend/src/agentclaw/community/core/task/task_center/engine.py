@@ -25,7 +25,6 @@ Step2 改造(状态机解耦 + PlanResult + 显式 target + harness 执行报错
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import logging
 import os
 import random
