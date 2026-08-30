@@ -1222,7 +1222,14 @@ ordinary creation parameters, so the bot's **first** container already carries i
 configuration (§2.11).
 
 **Depends on.** W1 (document storage, schema, capability resolver) and W4 (the
-apply engine it invokes) · **Blocked by.** —
+apply engine it invokes) — **plus a materialiser for every category this endpoint
+accepts**. W4 alone materialises only `mcp` and `script`, so with W5/W6 absent a
+creation request declaring `identity`, `skills` or `resources` would pass
+preflight, take the user through Passport authorization, provision a bot, and
+*then* fail apply — the worst place to discover it, because the bot now exists.
+Either W5 and W6 are dependencies too, or this endpoint's accepted vocabulary is
+gated to what has landed (W1's gating rule). Do not let it accept a category whose
+materialiser is not there · **Blocked by.** —
 
 **Why it is its own item rather than part of W1.** W1 is deliberately scoped to
 never touch `create_flow`; that coupling is the one this plan most wants to
@@ -1368,23 +1375,28 @@ is applied.
   `resources` would be accepted with no materialiser behind it. Either the flag
   stays on through W6 and W8, or each incomplete category and trigger is gated
   independently — one flag through W8 is the simpler of the two.
-- **The rule, not the instance: a category with no materialiser in iteration 1 is
-  reported `unsupported` and refused at `PUT`.** The flag lifting at W8 is not
-  enough on its own, because W1 parses the whole vocabulary
-  (`manifest.{mcp,resources,skills,engine_config,identity,cli_tools}`) while
-  iteration 1 does not implement all of it. Without this rule the surface would
-  accept a declaration with nothing behind it. The capability resolver therefore
-  answers **per category**, not just per bot. As of iteration 1 the members are:
+- **The rule: the surface accepts nothing it cannot apply.** Anything the
+  document can express and no landed code can act on is reported `unsupported`
+  and refused at `PUT`. The flag lifting at W8 is not enough on its own, because
+  W1 parses the **whole vocabulary** while iteration 1 implements only part of
+  it, and the gap is not confined to categories — a source *form* with no
+  resolver has exactly the same failure mode. The capability resolver therefore
+  answers **per accepted construct**, not per bot and not only per category.
 
-  | Category | Why it has no materialiser | Refused until |
+  This rule has now been arrived at three times, each time as a new instance
+  (`cli_tools`, then `engine_config`, then the source forms below). It is written
+  as one rule with one table so there is no fourth. As of iteration 1:
+
+  | Construct | Why nothing can apply it | Refused until |
   | --- | --- | --- |
-  | `cli_tools` | W9 is deferred and unscheduled — no materialiser, no PATH delivery, no artifact field | W9 lands |
-  | `engine_config` | Removed from iteration 1 by the X2/T3 decision (§4), so W4's no-fetch materialisers are `mcp` and `script` only | its materialiser returns |
+  | category `cli_tools` | W9 is deferred and unscheduled — no materialiser, no PATH delivery, no artifact field | W9 lands |
+  | category `engine_config` | Removed from iteration 1 by the X2/T3 decision (§4), so W4's no-fetch materialisers are `mcp` and `script` only | its materialiser returns |
+  | a `from` reference to a **named source** | Named sources are resolved by W7, which may be cut from v1; W5 excludes them explicitly | W7 lands |
+  | a **git** source | Same — the git resolver is W7's | W7 lands |
 
-  Stated as a rule with a membership table rather than a bullet per category,
-  because the list is the thing that changes: an implementer adding a category
-  must add a row or a materialiser, and cannot leave the surface accepting
-  something no code applies.
+  An implementer adding anything to the vocabulary must add a row or the code
+  that applies it. **Leaving the surface accepting something no code applies is
+  never the third option** — that is the shape of every entry in this table.
 
 **Out of scope.** Any apply. Any fetching. Credentials. Any change to the
 existing `/startup-script` endpoints. Any change to `BaasService`.
@@ -1840,8 +1852,34 @@ directory-level ownership semantics; teclaw per-file expansion.
 - [ ] Directory-level ownership: on change, the tree under `path` is replaced
       wholesale — files present before and absent from the new archive are
       removed, including manually added ones. Nothing outside `path` is touched.
-- [ ] Replacement is atomic: unpack to a temporary location, then rename. No
-      apply leaves a half-old, half-new tree, including when it fails mid-way.
+- [ ] **Replacement is as atomic as the transport allows, and the transport
+      cannot do rename.** `core/devices/services/device_filesystem.py` exposes
+      `read_file`, `write_file`, `delete_file`, `delete_tree`, `list_dir` and
+      `exists` — there is no rename, move or swap anywhere in `core/devices/`,
+      and neither the BaaS nor the teclaw transport offers one. So "unpack to a
+      temporary location, then rename" is **not implementable today**, and an
+      earlier revision of this bullet promised it anyway.
+
+      What is achievable through the existing contract is `delete_tree` followed
+      by per-file writes, which has a real window in which the tree under `path`
+      is missing or half-written, and leaves it that way if delivery fails
+      mid-way. Two options, and this item must pick one rather than inherit the
+      promise:
+
+      1. **Narrow the guarantee** (recommended for v1) — document the window and
+         report the entry `failed` when delivery stops mid-tree, so the apply
+         report says the tree is in an unknown state. This is already the level
+         §3.2 settled at: all-or-nothing is scoped to **materialisation**, and
+         v1 explicitly does not roll back a mid-category delivery failure. The
+         rename promise contradicted that decision as well as the transport.
+      2. **Add an atomic subtree swap to the device contract** — a new
+         `DeviceFileSystem` operation plus an implementation in each engine
+         transport. Real cross-team work, and it is what a genuine atomicity
+         guarantee costs.
+
+      Unpacking to a temporary location on the **platform** side stays either
+      way: it keeps a failed fetch or a bad archive from ever reaching the bot,
+      which is the half of the guarantee we can keep by ourselves.
 - [ ] The nesting ban is enforced at `PUT` (W1) and re-checked at apply.
 - [ ] On teclaw the materialised tree expands per-file into `ResourceRef`
       entries; `BotConfigArtifact` is unchanged, and the T5 subtree optimisation
