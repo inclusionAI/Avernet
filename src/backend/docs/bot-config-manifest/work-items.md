@@ -1371,7 +1371,7 @@ product.
 | W7 | design §4.2; schema §2.2, §2.3. **Design §10.5 superseded** — see §4, X1 |
 | W8 | design §3.1, §3.4, §4.3, §10.1, §10.4 |
 | W9 | schema §3.7; engine-requirements T4, A2, O9 — narrowed by §4's investigation |
-| W10 | no design section — arises from §2.9, an implementation constraint the design does not cover |
+| W10 | no design section — arises from §2.10, an implementation constraint the design does not cover |
 | W11 | no design section — arises from §2.8, a requirement added after #1031 |
 | W12 | design §3.3 (convergence) and engine-requirements T2, turned into a two-sided contract |
 
