@@ -96,7 +96,7 @@ class TeclawDeviceSyncService(DeviceSync):
         conn_info: dict[str, Any] | None,
         bot_id: str,
         bot_name: str,
-        binding_id: int | None,
+        binding_id: int,
         user_id: str,
         owner_id: str | None,
         engine_type: str,
@@ -112,7 +112,10 @@ class TeclawDeviceSyncService(DeviceSync):
         self._bot_name = bot_name
         # ``DeviceContext.binding_id`` — the binding the caller's context was
         # resolved against, threaded straight through to ``get_http_info``
-        # instead of being looked up again per delivery. See ``_deliver``.
+        # instead of being looked up again per delivery. Required, like the
+        # field it comes from: a bot with no binding raises
+        # ``DeviceNotBoundError`` in the resolver and never reaches this
+        # constructor. See ``_deliver``.
         self._binding_id = binding_id
         self._user_id = user_id
         # ``ac_bots.owner_id`` — the identity the binding was resolved under;
@@ -288,14 +291,8 @@ class TeclawDeviceSyncService(DeviceSync):
         lookup that could, in principle, answer for a different row.
         """
         conn = self._conn_info
-        bind_id = self._binding_id
-        if not bind_id:
-            raise ValueError(
-                f"TeclawDeviceSyncService: no bind_id for bot={self._bot_id}"
-            )
-
         info = self._baas_service.get_http_info(
-            bind_id=bind_id,
+            bind_id=self._binding_id,
             port=conn.get("engine_port", 20003),
             path=TECLAW_BOT_APPLY_PATH,
             tenant=conn.get("tenant"),

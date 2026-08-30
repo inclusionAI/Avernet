@@ -190,6 +190,11 @@ def test_http_info_is_resolved_per_delivery_with_the_apply_path():
 
 
 # ── bind_id threading ────────────────────────────────────────────────────
+# ``binding_id`` is required, mirroring the non-optional ``DeviceContext``
+# field it comes from, so there is no absent-binding case to pin here: a bot
+# with no active binding raises ``DeviceNotBoundError`` in the resolver and
+# never reaches this constructor (``test_device_context_resolver.py::
+# test_bot_no_active_binding_raises_device_not_bound``).
 
 
 def test_delivery_addresses_the_threaded_binding_id_without_a_lookup():
@@ -314,20 +319,6 @@ def test_request_error_maps_to_a_failure_dict():
 
     assert result["success"] is False
     assert result["message"].startswith("请求失败")
-
-
-@pytest.mark.parametrize("binding_id", [None, 0])
-def test_missing_bind_id_fails_without_posting(binding_id):
-    """An absent binding still fails as the same ``{"success": False}`` dict —
-    it must not reach ``get_http_info`` or the container."""
-    service, m = _make_service(binding_id=binding_id)
-
-    result = service.sync_symlinks([])
-
-    assert result["success"] is False
-    assert "no bind_id" in result["message"]
-    m["baas"].get_http_info.assert_not_called()
-    m["http_client"].post.assert_not_called()
 
 
 def test_compose_failure_is_contained_in_the_result_dict():
