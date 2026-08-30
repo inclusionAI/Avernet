@@ -135,7 +135,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                     session,
                     request_id=request_id,
                     env=env,
-                    lock=True,
+                    lock=False,
                 )
                 if replay is not None:
                     self._require_attempt_scope(

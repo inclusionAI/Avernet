@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 import io
 from pathlib import Path
-from threading import Event, Thread, current_thread
+from threading import Barrier, Event, Thread, current_thread
 from uuid import uuid4
 import zipfile
 
@@ -369,7 +369,7 @@ def test_complete_success_rechecks_attempt_after_canonical_locks(
         )
 
 
-def test_complete_success_and_offline_overlap_without_lock_inversion(
+def test_complete_success_and_offline_overlap_converges(
     tmp_path: Path, monkeypatch
 ) -> None:
     db = _ConcurrentDatabase(tmp_path / "publication-offline.db")
@@ -434,7 +434,7 @@ def test_complete_success_and_offline_overlap_without_lock_inversion(
         assert skill is not None and skill.offline_at is not None
 
 
-def test_mark_failed_and_begin_materialization_overlap_without_lock_inversion(
+def test_mark_failed_and_begin_materialization_overlap_serializes_to_failed(
     tmp_path: Path, monkeypatch
 ) -> None:
     db = _ConcurrentDatabase(tmp_path / "publication-failure-begin.db")
@@ -591,6 +591,132 @@ def test_same_publication_request_key_conflicts_across_skills() -> None:
         )
 
     assert first.created is True
+
+
+def test_create_miss_never_locks_the_global_request_gap(monkeypatch) -> None:
+    db = _Database()
+    space_id, skill_id = _seed_draft(db, lease_holder="owner")
+    lock_flags: list[bool] = []
+    original = SpaceSkillPublicationRepository._attempt_by_request
+
+    def _observe_request_lookup(session, *, request_id, env, lock):
+        lock_flags.append(lock)
+        return original(session, request_id=request_id, env=env, lock=lock)
+
+    monkeypatch.setattr(
+        SpaceSkillPublicationRepository,
+        "_attempt_by_request",
+        staticmethod(_observe_request_lookup),
+    )
+
+    created = SpaceSkillPublicationRepository(db).create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id="no-global-request-gap-lock",
+        env="test",
+    )
+
+    assert created.created is True
+    assert lock_flags == [False, False]
+
+
+def test_cross_skill_same_request_converges_to_one_global_identity(
+    tmp_path: Path,
+) -> None:
+    """SQLite serializes state convergence; it does not prove row-lock order."""
+    db = _ConcurrentDatabase(tmp_path / "publication-global-request.db")
+    first_space, first_skill = _seed_draft(db, lease_holder="owner")
+    second_space, second_skill = _seed_draft(
+        db,
+        lease_holder="owner",
+        sc_team_id="sc-team-8",
+    )
+    start = Barrier(2)
+    created_attempt_ids: list[int] = []
+    conflicts: list[SpaceSkillIdempotencyConflictError] = []
+    failures: list[BaseException] = []
+
+    def _create(space_id: int, skill_id: int) -> None:
+        try:
+            start.wait(timeout=2)
+            result = SpaceSkillPublicationRepository(db).create_or_replay_attempt(
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id="owner",
+                request_id="cross-skill-global-request",
+                env="test",
+            )
+            created_attempt_ids.append(result.attempt.attempt_id)
+        except SpaceSkillIdempotencyConflictError as exc:
+            conflicts.append(exc)
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    first = Thread(target=_create, args=(first_space, first_skill))
+    second = Thread(target=_create, args=(second_space, second_skill))
+    first.start()
+    second.start()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert failures == []
+    assert not first.is_alive() and not second.is_alive()
+    assert len(created_attempt_ids) == 1
+    assert len(conflicts) == 1
+    with db.orm_session() as session:
+        assert session.query(SkillPublicationAttempt).count() == 1
+
+
+def test_cross_skill_unique_insert_loser_reads_winner_after_rollback(
+    monkeypatch,
+) -> None:
+    db = _Database()
+    first_space, first_skill = _seed_draft(db, lease_holder="owner")
+    second_space, second_skill = _seed_draft(
+        db,
+        lease_holder="owner",
+        sc_team_id="sc-team-8",
+    )
+    repository = SpaceSkillPublicationRepository(db)
+    winner = repository.create_or_replay_attempt(
+        space_id=first_space,
+        skill_id=first_skill,
+        actor_id="owner",
+        request_id="integrity-race-global-request",
+        env="test",
+    )
+    original = SpaceSkillPublicationRepository._attempt_by_request
+    lookups = 0
+
+    def _hide_winner_until_integrity_rollback(session, *, request_id, env, lock):
+        nonlocal lookups
+        lookups += 1
+        if lookups <= 2:
+            return None
+        return original(session, request_id=request_id, env=env, lock=lock)
+
+    monkeypatch.setattr(
+        SpaceSkillPublicationRepository,
+        "_attempt_by_request",
+        staticmethod(_hide_winner_until_integrity_rollback),
+    )
+
+    with pytest.raises(SpaceSkillIdempotencyConflictError):
+        repository.create_or_replay_attempt(
+            space_id=second_space,
+            skill_id=second_skill,
+            actor_id="owner",
+            request_id="integrity-race-global-request",
+            env="test",
+        )
+
+    assert lookups == 3
+    with db.orm_session() as session:
+        attempts = session.query(SkillPublicationAttempt).all()
+        assert [int(attempt.id) for attempt in attempts] == [
+            winner.attempt.attempt_id
+        ]
 
 
 def test_create_attempt_rechecks_request_after_skill_lock(monkeypatch) -> None:
