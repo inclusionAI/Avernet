@@ -2,13 +2,14 @@
 
 验证 ``_maybe_propagate_hung`` 将根节点置为 HUNG 后进入 BBS 可恢复态(``miss_depth_exhausted`` + ``bbs_mode`` + 未 claim),
 并调用 ``_schedule_bbs_notify`` 主动通知 claim-enabled bot;以及 ``_schedule_bbs_notify`` 本身的
-fire-and-forget 语义(``asyncio.create_task(runner.run_bbs)`` + ``_bg_tasks`` tracking)与端口缺失静默跳过。
+durable-loop fire-and-forget 语义(``asyncio.run_coroutine_threadsafe`` + ``_bg_tasks`` tracking)与端口缺失静默跳过。
 
 BBS 调度仍由根 HUNG 后的统一入口负责;本文件覆盖 miss 与 harness 两类触发。
 """
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from typing import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -116,9 +117,8 @@ def svc() -> TaskGraphService:
 
 
 # ===== _schedule_bbs_notify 直测 =====
-def test_engine_schedule_bbs_notify_creates_task():
-    """_schedule_bbs_notify 经 asyncio.create_task 调度 runner.run_bbs 并登记 _bg_tasks。"""
-    # bot/bcs 留 None 构造(不启 poller 线程);再注入 mock 端口避免守卫跳过
+def test_engine_schedule_bbs_notify_submits_to_durable_loop():
+    """BBS submission is independent of the caller's short-lived Harness loop."""
     engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
     engine._runner = MagicMock()
     engine._runner.run_bbs = AsyncMock(return_value=None)
@@ -126,13 +126,22 @@ def test_engine_schedule_bbs_notify_creates_task():
     engine._bcs = MagicMock()
     fake_g = MagicMock()
     fake_g.task_id = "t1"
+    durable_loop = MagicMock()
+    durable_future = concurrent.futures.Future()
 
-    with patch("asyncio.create_task") as mock_create:
+    def submit(coro, loop):
+        assert loop is durable_loop
+        coro.close()
+        return durable_future
+
+    with patch.object(engine, "_ensure_bbs_loop", return_value=durable_loop), \
+         patch("asyncio.run_coroutine_threadsafe", side_effect=submit) as mock_submit:
         engine._schedule_bbs_notify("t1", fake_g)
-        mock_create.assert_called_once()
+        mock_submit.assert_called_once()
+        assert len(engine._bg_tasks) == 1
+        durable_future.set_result(None)
 
-    # bg 任务登记进 _bg_tasks(由 _on_bg_done 回收)
-    assert len(engine._bg_tasks) == 1
+    assert engine._bg_tasks == set()
 
 
 def test_engine_schedule_bbs_notify_skips_when_no_runner():

@@ -19,7 +19,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 
-_DEFAULT_SLA_TIMEOUT = 600.0   # RUNNING 卡死 backstop(>poller execute SLA 300s,poller 先判 FAIL 走正常重试;此仅兜底 poller 漏判)
+_DEFAULT_SLA_TIMEOUT = 1200.0  # RUNNING 卡死 backstop(>poller execute SLA 600s,poller 先判 FAIL 走正常重试;此仅兜底 poller 漏判)
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
 _DEFAULT_INTERVAL = 120.0        # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已折叠 HUNG 不在此,external FAILED 由 on_harness 入口跳过)
 

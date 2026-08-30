@@ -8,6 +8,7 @@ on_harness 复位重投、loop_round 仅升 BBS++、零 case grep。
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import time
 from typing import Callable
 
@@ -67,6 +68,15 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
 def _run(coro):
     """同步驱动 async 编排方法(on_* 协程化后,单测经此 helper 跑)。"""
     return asyncio.new_event_loop().run_until_complete(coro)
+
+
+async def _wait_bg_tasks(engine):
+    """Wait for engine tasks regardless of the task's owning event loop."""
+    for task in list(engine._bg_tasks):
+        if isinstance(task, concurrent.futures.Future):
+            await asyncio.to_thread(task.result, 5)
+        else:
+            await task
 
 
 # ===== stubs =====
@@ -522,7 +532,7 @@ class TestOnReportFail:
             # _on_pass_collect. The reconciliation hook must close the root.
             await eng.on_report(_patch("t1", "c2", status=Status.DONE))
             if eng._bg_tasks:
-                await asyncio.gather(*eng._bg_tasks, return_exceptions=True)
+                await _wait_bg_tasks(eng)
 
         _run(_go())
         assert svc._get_node(graph, "t1").status == Status.HUNG
@@ -611,7 +621,7 @@ class TestOnHarness:
         async def _go():
             await eng.on_harness(_patch("t_bbs", "c1", exec_error="exec_failed_retry"))
             if eng._bg_tasks:  # 排空 fire-and-forget bbs 任务,断言已调度
-                await asyncio.gather(*eng._bg_tasks, return_exceptions=True)
+                await _wait_bg_tasks(eng)
 
         _run(_go())
         assert svc._get_node(g, "t_bbs").status == Status.HUNG  # exec_stuck 冒泡到根→根 HUNG
@@ -632,7 +642,7 @@ class TestOnHarness:
         async def _go():
             await eng.on_harness(_patch("t_loop", "c1", exec_error="x"))
             if eng._bg_tasks:
-                await asyncio.gather(*eng._bg_tasks, return_exceptions=True)
+                await _wait_bg_tasks(eng)
 
         _run(_go())
         assert g.status == Status.HUNG
@@ -713,7 +723,7 @@ class TestMaxPlanRound:
             async def _go():
                 await eng.on_report(_patch("t1", node, acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE)))
                 if eng._bg_tasks:  # 排空 fire-and-forget run_bbs,使 bbs_calls 落定
-                    await asyncio.gather(*eng._bg_tasks, return_exceptions=True)
+                    await _wait_bg_tasks(eng)
             _run(_go())
 
         def _plan(nid):

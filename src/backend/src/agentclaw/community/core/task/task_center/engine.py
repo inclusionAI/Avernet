@@ -25,6 +25,7 @@ Step2 改造(状态机解耦 + PlanResult + 显式 target + harness 执行报错
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import random
@@ -137,7 +138,11 @@ class ExecutionEngine:
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
         self._notify_provider = notify_messages_provider
-        self._bg_tasks: set[asyncio.Task] = set()
+        self._bg_tasks: set[object] = set()
+        self._bbs_loop: asyncio.AbstractEventLoop | None = None
+        self._bbs_loop_thread: threading.Thread | None = None
+        self._bbs_loop_ready = threading.Event()
+        self._bbs_loop_guard = threading.RLock()
         self._locks: dict[str, threading.RLock] = {}
         self._locks_guard = threading.RLock()
         from agentclaw.community.core.task.task_runner.callback_adapter import (
@@ -1970,14 +1975,51 @@ class ExecutionEngine:
         )
         self._escalate_hung(task_id, node_id, hung_reason)
 
-    def _on_bg_done(self, bg: "asyncio.Task") -> None:
-        """后台 run_bbs 完成:脱离跟踪集 + 异常可见(记 log,不抛,不阻塞 on_*)。"""
+    def _on_bg_done(self, bg: object) -> None:
+        """后台任务完成:脱离跟踪集 + 异常/取消可见(不抛,不阻塞 on_*)。"""
         self._bg_tasks.discard(bg)
-        if bg.cancelled():
+        cancelled = getattr(bg, "cancelled", lambda: False)()
+        if cancelled:
+            logger.warning("[task][engine] background task cancelled task=%s", getattr(bg, "_bbs_task_id", ""))
             return
-        exc = bg.exception()
+        exc = getattr(bg, "exception", lambda: None)()
         if exc is not None:
-            logger.error("[task][engine] run_bbs bg task 异常: %s", exc, exc_info=exc)
+            logger.error("[task][engine] background task 异常: %s", exc, exc_info=exc)
+
+    def _ensure_bbs_loop(self) -> asyncio.AbstractEventLoop:
+        """Return an engine-owned loop that outlives Harness' temporary loop.
+
+        Harness invokes ``on_harness`` through ``asyncio.run``. BBS is a
+        minutes-long workflow, so scheduling it on that loop makes it a child of
+        a short-lived request and silently cancels it when Harness returns.
+        """
+        with self._bbs_loop_guard:
+            if self._bbs_loop is not None and self._bbs_loop.is_running():
+                return self._bbs_loop
+            self._bbs_loop_ready.clear()
+
+            def _run() -> None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                with self._bbs_loop_guard:
+                    self._bbs_loop = loop
+                    self._bbs_loop_thread = threading.current_thread()
+                    self._bbs_loop_ready.set()
+                loop.run_forever()
+
+            self._bbs_loop_thread = threading.Thread(
+                target=_run,
+                daemon=True,
+                name="task-bbs-loop",
+            )
+            self._bbs_loop_thread.start()
+
+        if not self._bbs_loop_ready.wait(timeout=5.0):
+            raise RuntimeError("BBS background event loop failed to start")
+        loop = self._bbs_loop
+        if loop is None or not loop.is_running():
+            raise RuntimeError("BBS background event loop is not running")
+        return loop
 
     def _on_auto_report_done(self, t: "asyncio.Task") -> None:
         """静态自驱 on_report 后台任务完成:脱离跟踪集 + 异常可见。"""
@@ -2015,11 +2057,22 @@ class ExecutionEngine:
         if not self._runner:
             logger.info("[task][bbs_mode], _runner is none, skip, task_id=%s", task_id)
             return
-        bg = asyncio.create_task(self._runner.run_bbs(execution_graph))
+        loop = self._ensure_bbs_loop()
+        coroutine = self._runner.run_bbs(execution_graph)
+        try:
+            bg = asyncio.run_coroutine_threadsafe(coroutine, loop)
+        except Exception:
+            coroutine.close()
+            raise
+        # concurrent.futures.Future is intentionally tracked here. It belongs
+        # to the durable BBS loop, not the caller's Harness asyncio loop.
+        bg._bbs_task_id = task_id  # type: ignore[attr-defined]
         self._bg_tasks.add(bg)
         bg.add_done_callback(self._on_bg_done)
         logger.info(
-            "[task][engine] task=%s 升BBS可恢复态→主动通知 claim-enabled bot", task_id
+            "[task][engine] task=%s 升BBS可恢复态→提交 durable BBS loop thread=%s",
+            task_id,
+            self._bbs_loop_thread.name if self._bbs_loop_thread else "unknown",
         )
 
     def _enter_root_bbs(self, task_id: str, execution_graph) -> bool:
