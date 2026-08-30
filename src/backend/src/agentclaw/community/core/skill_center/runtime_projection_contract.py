@@ -61,6 +61,20 @@ class CapabilityRuntimeBoundary(Protocol):
         """Apply one MCP projection: deliver, withdraw, and declare the set."""
         ...
 
+    async def project_whole_artifact(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
+        """Compose and apply one structure-only whole-artifact snapshot.
+
+        No filesystem mapping is built before this call. Exact Center identity
+        reaches the artifact composer as data, so a whole-artifact engine never
+        guesses a path or trips over the legacy symlink adapter.
+        """
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class ResolvedSkillPlan:

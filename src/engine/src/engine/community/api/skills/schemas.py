@@ -87,12 +87,36 @@ class RuntimeLayoutProbeRequest(BaseModel):
     layout_contract_version: str
 
 
+class ResolvedFilesystemLayoutEvidence(BaseModel):
+    """Versioned filesystem facts owned and emitted by Engine Runtime."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    engine: str
+    layout_contract_version: str
+    active_root: str
+    local_root: str
+    repo_root: str
+    pool_center: str
+
+
+class RuntimeLayoutProbeEvidence(BaseModel):
+    """Extensible probe evidence with a typed resolved-layout member."""
+
+    model_config = ConfigDict(extra="allow")
+
+    resolved_layout: ResolvedFilesystemLayoutEvidence | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+
+
 class RuntimeLayoutProbeResponse(BaseModel):
     status: Literal["READY", "NOT_CAPABLE", "TRANSIENT_ERROR", "INVALID"]
     engine: str
     layout_contract_version: str
     preparation_id: str | None
-    evidence: dict[str, Any]
+    evidence: RuntimeLayoutProbeEvidence
 
 
 class RuntimeLayoutProbeApiResponse(ApiResponse):

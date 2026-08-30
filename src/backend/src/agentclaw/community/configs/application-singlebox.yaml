@@ -90,6 +90,7 @@ user_config:
     openclaw_root: "~/.openclaw"
     claude_code_root: "~/.claude_code"
     aicoding_root: "~/.aicoding"
+    hermes_root: "~/.hermes"
 
   openclaw:
     skills_repo_url: "git@code.teamclaw.com:security_release/aiworkbench.git"

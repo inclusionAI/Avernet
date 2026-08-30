@@ -555,12 +555,14 @@ class WorkspaceConfig:
             block in ``application.yaml``.
         claude_code_root: Same shape, for Claude Code bots.
         aicoding_root: Same shape, for AICoding bots.
+        hermes_root: Same shape, for Hermes bots.
     """
 
     openclaw_root: str = "/home/admin/.openclaw"
     claude_code_root: str = "/home/admin/.claude_code"
     claude_code_session_root: str = "/home/admin/.claude"
     aicoding_root: str = "/home/admin/.aicoding"
+    hermes_root: str = "/home/admin/.hermes"
 
 
 # ── Dormant bot recycle ──────────────────────────────────────────────────

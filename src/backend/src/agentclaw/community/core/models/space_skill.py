@@ -8,6 +8,8 @@ source of domain policy.
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -43,6 +45,37 @@ UnsignedInteger = (
 TinyInteger = Integer().with_variant(mysql.TINYINT(), "mysql")
 MediumText = Text().with_variant(mysql.MEDIUMTEXT(), "mysql")
 AutoIncrementBigInteger = UnsignedBigInteger
+
+
+class DraftStatus(StrEnum):
+    EDITING = "EDITING"
+    FROZEN = "FROZEN"
+
+
+class DraftSourceKind(StrEnum):
+    FOLDER = "FOLDER"
+    GIT = "GIT"
+    PUBLISHED_VERSION = "PUBLISHED_VERSION"
+
+
+class SkillVersionStatus(StrEnum):
+    MATERIALIZING = "MATERIALIZING"
+    PUBLISHED = "PUBLISHED"
+
+
+class SkillPublicationAttemptStatus(StrEnum):
+    PREPARING = "PREPARING"
+    SC_SUBMITTING = "SC_SUBMITTING"
+    WAITING_SC = "WAITING_SC"
+    MATERIALIZING = "MATERIALIZING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    RESULT_UNKNOWN = "RESULT_UNKNOWN"
+
+
+class SkillDraftUpgradeRequestStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    SPENT = "SPENT"
 
 
 def _scoped_table_args(*constraints):
@@ -130,6 +163,40 @@ class SkillDraftEditLease(_ScopedDomainFact, Base):
     last_takeover_by = Column(String(128), nullable=True)
 
 
+class SkillDraftUpgradeRequest(_ScopedDomainFact, Base):
+    """Durable idempotency identity for one upgrade-Draft command."""
+
+    __tablename__ = "ac_skill_draft_upgrade_request"
+    __table_args__ = _scoped_table_args(
+        UniqueConstraint(
+            "avernet_tenant", "env", "request_id", name="uk_skill_upgrade_request"
+        ),
+        Index(
+            "idx_skill_upgrade_history",
+            "avernet_tenant",
+            "env",
+            "skill_id",
+            "gmt_created",
+        ),
+        CheckConstraint(
+            "status IN ('ACTIVE', 'SPENT')",
+            name="ck_skill_upgrade_request_status",
+        ),
+        CheckConstraint(
+            "target_version_ordinal >= 1",
+            name="ck_skill_upgrade_target_ordinal",
+        ),
+    )
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    skill_id = Column(UnsignedBigInteger, nullable=False)
+    space_id = Column(UnsignedBigInteger, nullable=False)
+    request_id = Column(String(128), nullable=False)
+    target_version_ordinal = Column(UnsignedInteger, nullable=False)
+    status = Column(String(16), nullable=False)
+    created_by = Column(String(128), nullable=False)
+
+
 class SkillVersion(_ScopedDomainFact, Base):
     __tablename__ = "ac_skill_version"
     __table_args__ = _scoped_table_args(
@@ -198,10 +265,19 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
             "gmt_created",
         ),
         CheckConstraint(
-            "status IN ('PREPARING', 'VALIDATING', 'SCANNING', 'SC_SUBMITTING', "
-            "'WAITING_SC', 'RESULT_UNKNOWN', 'MATERIALIZING', 'SUCCEEDED', "
-            "'FAILED', 'MANUAL_RECONCILIATION')",
+            "status IN ('PREPARING', 'SC_SUBMITTING', 'WAITING_SC', "
+            "'RESULT_UNKNOWN', 'MATERIALIZING', 'SUCCEEDED', 'FAILED')",
             name="ck_skill_publication_attempt_status",
+        ),
+        CheckConstraint(
+            "recovery_state IS NULL OR recovery_state IN "
+            "('AUTO_RETRYING', 'AVAILABLE', 'NOT_AVAILABLE')",
+            name="ck_skill_publication_recovery_state",
+        ),
+        CheckConstraint(
+            "recovery_kind IS NULL OR recovery_kind IN "
+            "('PREPARATION', 'SC_STATUS_CHECK', 'MATERIALIZATION')",
+            name="ck_skill_publication_recovery_kind",
         ),
         CheckConstraint(
             "target_version_ordinal >= 1", name="ck_attempt_target_ordinal"
@@ -213,10 +289,13 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
     request_id = Column(String(128), nullable=False)
     active_skill_key = Column(String(256), nullable=True)
     target_version_ordinal = Column(UnsignedInteger, nullable=False)
-    sc_version_number = Column(String(128), nullable=False)
+    sc_version_number = Column(String(128), nullable=True)
+    skill_version_id = Column(UnsignedBigInteger, nullable=True)
     status = Column(String(32), nullable=False)
-    failure_code = Column(String(128), nullable=True)
+    error_code = Column(String(128), nullable=True)
     error_message = Column(Text, nullable=True)
+    recovery_state = Column(String(24), nullable=True)
+    recovery_kind = Column(String(24), nullable=True)
     sc_post_started_at = Column(DateTime, nullable=True)
     sc_accepted_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
@@ -227,6 +306,7 @@ for _model in (
     SkillSpaceBinding,
     SkillGrant,
     SkillDraftEditLease,
+    SkillDraftUpgradeRequest,
     SkillVersion,
     SkillPublicationAttempt,
 ):
@@ -234,11 +314,17 @@ for _model in (
 
 
 __all__ = [
+    "DraftSourceKind",
+    "DraftStatus",
     "SkillDraftEditLease",
+    "SkillDraftUpgradeRequest",
+    "SkillDraftUpgradeRequestStatus",
     "SkillGrant",
     "SkillPublicationAttempt",
+    "SkillPublicationAttemptStatus",
     "SkillSpaceBinding",
     "SkillVersion",
+    "SkillVersionStatus",
     "Space",
     "SpaceMember",
 ]

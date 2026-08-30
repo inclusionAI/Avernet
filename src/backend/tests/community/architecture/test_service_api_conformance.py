@@ -94,6 +94,9 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
+from agentclaw.community.api.skill_version_materializer import (
+    SkillVersionMaterializerProtocol,
+)
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
@@ -110,6 +113,12 @@ from agentclaw.community.api.space_service import (
 )
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
+)
+from agentclaw.community.api.space_skill_application_service import (
+    SpaceSkillApplicationServiceProtocol,
+)
+from agentclaw.community.api.space_skill_version_query_service import (
+    SpaceSkillVersionQueryServiceProtocol,
 )
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
@@ -173,8 +182,17 @@ from agentclaw.community.core.skill_center.services.repository_catalog_service i
 from agentclaw.community.core.skill_center.services.skill_set_management_service import (
     SkillSetManagementService,
 )
+from agentclaw.community.core.skill_center.services.skill_version_materializer import (
+    SkillVersionMaterializer,
+)
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     SpaceSkillGrantService,
+)
+from agentclaw.community.core.skill_center.services.space_skill_application_service import (
+    SpaceSkillApplicationService,
+)
+from agentclaw.community.core.skill_center.services.space_skill_version_query_service import (
+    SpaceSkillVersionQueryService,
 )
 from agentclaw.community.core.skill_center.services.space_skill_editor_request_service import (
     SpaceSkillEditorRequestService,
@@ -212,6 +230,8 @@ _PAIRS = [
     (SkillQueryServiceProtocol, SkillQueryService),
     (SkillMetadataParserProtocol, SkillParser),
     (SpaceSkillGrantServiceProtocol, SpaceSkillGrantService),
+    (SpaceSkillApplicationServiceProtocol, SpaceSkillApplicationService),
+    (SpaceSkillVersionQueryServiceProtocol, SpaceSkillVersionQueryService),
     (SpaceSkillEditorRequestServiceProtocol, SpaceSkillEditorRequestService),
     (DraftEditLeaseServiceProtocol, DraftEditLeaseService),
     (SkillCenterGatewayServiceProtocol, SkillCenterGatewayService),
@@ -220,6 +240,7 @@ _PAIRS = [
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
     (RepositoryCatalogServiceProtocol, RepositoryCatalogService),
     (SkillSetManagementServiceProtocol, SkillSetManagementService),
+    (SkillVersionMaterializerProtocol, SkillVersionMaterializer),
     (SpaceServiceProtocol, SpaceService),
     (SpaceAccessServiceProtocol, SpaceAccessService),
     (SpaceMemberServiceProtocol, SpaceMemberService),

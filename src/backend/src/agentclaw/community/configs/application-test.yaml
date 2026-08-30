@@ -29,6 +29,7 @@ user_config:
     openclaw_root: "~/.openclaw"
     claude_code_root: "~/.claude_code"
     aicoding_root: "~/.aicoding"
+    hermes_root: "~/.hermes"
 
   # Yuque binding-verify endpoint — neutral stand-in; the suite mocks the HTTP call,
   # so only the config key's presence matters (the yuque verify endpoint reads it).

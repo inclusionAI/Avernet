@@ -28,6 +28,7 @@ class SingleboxDeviceSyncService(DeviceSync):
         symlinks: list[dict[str, Any]],
         *,
         effective_mcps: Optional[list[dict[str, Any]]] = None,
+        desired_skills: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         # ``effective_mcps`` is a whole-artifact hint; the BaaS transport
         # behind this wrapper consumes the symlinks directly, so it is

@@ -35,6 +35,14 @@ class SpaceRecord(TypedDict):
 class SpaceSkillCreateData(TypedDict):
     name: str
     env: str
+    skill_uuid: str
+    zip_url: str
+    draft_target_version: int
+    draft_status: Literal["EDITING", "FROZEN"]
+    draft_description: str | None
+    draft_source_kind: Literal["FOLDER", "GIT", "PUBLISHED_VERSION"]
+    creation_request_id: str
+    creation_request_hash: str
     description: NotRequired[str | None]
     source_type: NotRequired[str | None]
     source_repo_url: NotRequired[str | None]
@@ -100,7 +108,7 @@ class SpaceSkillActorPermissions(TypedDict):
     publish_draft: bool
     delete_draft: bool
     create_upgrade_draft: bool
-    retire_skill: bool
+    offline_skill: bool
     manage_grants: bool
     transfer_owner: bool
     request_edit_access: bool
@@ -119,9 +127,61 @@ class SpaceSkillGrantViewRecord(TypedDict):
 
 
 class SpaceSkillCreationRecord(TypedDict):
+    created: bool
     skill: SpaceSkillIdentityRecord
     ownership: SpaceSkillOwnershipRecord
     owner_grant: SpaceSkillGrantRecord
+
+
+class SpaceSkillCreationReplayRecord(TypedDict):
+    skill_id: int
+    space_id: int
+    request_hash: str
+
+
+class SpaceSkillDraftRecord(TypedDict):
+    skill_id: int
+    skill_uuid: str
+    name: str
+    draft_description: str
+    target_version: int
+    status: Literal["EDITING", "FROZEN"]
+    locator: str
+    source_kind: Literal["FOLDER", "GIT", "PUBLISHED_VERSION"]
+    source_repo_url: str | None
+    source_branch: str | None
+    source_subdir: str | None
+    source_commit_sha: str | None
+    space_type: Literal["PERSONAL", "TEAM"]
+    sc_team_id: int | None
+
+
+class DraftDeleteRecord(TypedDict):
+    changed: bool
+    deleted_scope: Literal["DRAFT", "SKILL"]
+    locator: str
+
+
+class SkillUpgradeIdentityRecord(TypedDict):
+    skill_id: int
+    skill_uuid: str
+    name: str
+    space_type: Literal["PERSONAL", "TEAM"]
+    sc_team_id: int | None
+
+
+class DraftUpgradeRecord(TypedDict):
+    created: bool
+    draft: SpaceSkillDraftRecord
+
+
+class SkillUpgradeRequestRecord(TypedDict):
+    """Durable upgrade-command identity and its optional live Draft."""
+
+    skill_id: int
+    space_id: int
+    status: Literal["ACTIVE", "SPENT"]
+    draft: SpaceSkillDraftRecord | None
 
 
 class SpaceSkillQueryRecord(TypedDict):
@@ -141,9 +201,7 @@ class SpaceSkillQueryRecord(TypedDict):
     gmt_modified: datetime
 
 
-class SpaceSkillSummaryRecord(TypedDict):
-    """Service projection containing actor qualifications and Lease state."""
-
+class SpaceSkillReadRecord(TypedDict):
     id: int
     skill_uuid: str
     name: str
@@ -151,10 +209,33 @@ class SpaceSkillSummaryRecord(TypedDict):
     status: str | None
     draft_status: str | None
     space_type: Literal["PERSONAL", "TEAM"]
-    actor: SpaceSkillGrantActorRecord
+    current_user_skill_role: Literal["OWNER", "MANAGER"] | None
+    lease_holder_user_id: str | None
+    lease_holder_display_name: str | None
     gmt_created: datetime
     gmt_modified: datetime
-    lease_summary: DraftEditLeaseSummaryRecord | None
+    source_type: Literal["FOLDER", "GIT"]
+    draft_target_version: int | None
+    draft_description: str | None
+    draft_locator: str | None
+    draft_source_kind: str | None
+    source_repo_url: str | None
+    source_branch: str | None
+    source_subdir: str | None
+    source_commit_sha: str | None
+    offline_at: datetime | None
+    offline_by: str | None
+    owner_user_id: str
+    owner_display_name: str | None
+    latest_version_id: int | None
+    latest_version_ordinal: int | None
+    latest_sc_version_number: str | None
+    latest_published_at: datetime | None
+    active_attempt_id: int | None
+    active_attempt_target_version: int | None
+    active_attempt_status: str | None
+    pending_request_id: int | None
+    pending_request_no: str | None
 
 
 class DraftEditLeaseRecord(TypedDict):
@@ -173,15 +254,6 @@ class DraftEditLeaseViewRecord(TypedDict):
     fencing_token: int | None
 
 
-class DraftEditLeaseSummaryRecord(TypedDict):
-    """List-card Lease projection that deliberately excludes fencing tokens."""
-
-    required: bool
-    state: Literal["NOT_REQUIRED", "FREE", "HELD_BY_ME", "HELD_BY_OTHER"]
-    holder_user_id: str | None
-    holder_display_name: str | None
-
-
 class SkillVersionRecord(TypedDict):
     """Persistence projection for one immutable Skill Version."""
 
@@ -196,3 +268,28 @@ class SkillVersionRecord(TypedDict):
     description: str | None
     metadata_json: str | None
     published_at: datetime | None
+
+
+class SpaceSkillVersionRecord(TypedDict):
+    id: int
+    skill_id: int
+    version_ordinal: int
+    status: Literal["MATERIALIZING", "PUBLISHED"]
+    sc_version_number: str
+    sc_skill_id: int | None
+    sc_version_id: int | None
+    name: str
+    description: str | None
+    metadata_json: str | None
+    published_at: datetime | None
+    skill_uuid: str
+
+
+class ConsumableSpaceSkillRecord(TypedDict):
+    skill_id: int
+    skill_uuid: str
+    name: str
+    description: str | None
+    version_ordinal: int
+    sc_version_number: str
+    published_at: datetime

@@ -24,10 +24,16 @@ from agentclaw.community.core.repository.protocols.skill_center import (
     DraftEditLeaseRepository,
 )
 from agentclaw.community.core.models.space_skill import (
+    DraftSourceKind,
+    DraftStatus,
     SkillDraftEditLease,
+    SkillDraftUpgradeRequest,
+    SkillDraftUpgradeRequestStatus,
     SkillGrant,
+    SkillPublicationAttemptStatus,
     SkillPublicationAttempt,
     SkillSpaceBinding,
+    SkillVersionStatus,
     SkillVersion,
     Space,
     SpaceMember,
@@ -36,6 +42,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseConflictError,
     DraftEditLeaseNotFoundError,
     DraftEditLeaseTokenRejectedError,
+    SpaceSkillIdempotencyConflictError,
 )
 from agentclaw.community.core.models.skill import Skill, SkillSetSkill
 from agentclaw.community.core.models.skill_center_sync_log import SkillCenterSyncLog
@@ -85,6 +92,7 @@ def test_additive_schema_registers_space_and_skill_fact_scope(db):
         "ac_skill_space_binding",
         "ac_skill_grant",
         "ac_skill_draft_edit_lease",
+        "ac_skill_draft_upgrade_request",
         "ac_skill_version",
         "ac_skill_publication_attempt",
     } <= tables
@@ -99,6 +107,7 @@ def test_additive_schema_registers_space_and_skill_fact_scope(db):
     for model in (
         SkillSpaceBinding,
         SkillGrant,
+        SkillDraftUpgradeRequest,
         SkillVersion,
         SkillPublicationAttempt,
     ):
@@ -123,13 +132,20 @@ def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
     assert {
         "draft_target_version",
         "draft_status",
-        "retired_at",
-        "retired_by",
+        "draft_description",
+        "draft_source_kind",
+        "creation_request_id",
+        "creation_request_hash",
+        "offline_at",
+        "offline_by",
         "source_repo_url",
         "source_branch",
         "source_subdir",
         "source_commit_sha",
     } <= {column.name for column in Skill.__table__.columns}
+    assert {"draft_request_id", "retired_at", "retired_by"}.isdisjoint(
+        column.name for column in Skill.__table__.columns
+    )
     assert {"avernet_tenant", "skill_version_id"} <= {
         column.name for column in SkillCenterSyncLog.__table__.columns
     }
@@ -141,6 +157,42 @@ def test_additive_orm_contract_extends_only_the_documented_legacy_tables(db):
         or constraint.__class__.__name__ == "UniqueConstraint"
     }
     assert "uk_skill_set_skill" in unique_names
+
+
+def test_space_skill_enums_match_the_final_phase2_contract():
+    assert {item.value for item in DraftStatus} == {"EDITING", "FROZEN"}
+    assert {item.value for item in DraftSourceKind} == {
+        "FOLDER",
+        "GIT",
+        "PUBLISHED_VERSION",
+    }
+    assert {item.value for item in SkillVersionStatus} == {
+        "MATERIALIZING",
+        "PUBLISHED",
+    }
+    assert {item.value for item in SkillPublicationAttemptStatus} == {
+        "PREPARING",
+        "SC_SUBMITTING",
+        "WAITING_SC",
+        "MATERIALIZING",
+        "SUCCEEDED",
+        "FAILED",
+        "RESULT_UNKNOWN",
+    }
+    assert {item.value for item in SkillDraftUpgradeRequestStatus} == {
+        "ACTIVE",
+        "SPENT",
+    }
+
+
+def test_publication_attempt_orm_uses_final_recovery_and_error_facts(db):
+    columns = SkillPublicationAttempt.__table__.columns
+
+    assert columns["sc_version_number"].nullable is True
+    assert {"skill_version_id", "error_code", "recovery_state", "recovery_kind"} <= {
+        column.name for column in columns
+    }
+    assert "failure_code" not in columns
 
 
 def test_space_repository_is_tenant_env_scoped_and_unique(db):
@@ -271,7 +323,19 @@ def test_repository_creates_stable_identity_ownership_and_owner_grant_atomically
     created = repo.create_space_skill(
         skill_data={
             "name": "risk-review",
+            "description": None,
             "env": "dev",
+            "skill_uuid": "11111111-1111-4111-8111-111111111111",
+            "zip_url": (
+                "draft://11111111-1111-4111-8111-111111111111/"
+                "v1/22222222-2222-4222-8222-222222222222"
+            ),
+            "draft_target_version": 1,
+            "draft_status": "EDITING",
+            "draft_description": "Risk review draft",
+            "draft_source_kind": "FOLDER",
+            "creation_request_id": "create-risk-review",
+            "creation_request_hash": "a" * 64,
         },
         ownership_data={"space_id": space["id"], "created_by": "owner-1", "env": "dev"},
         owner_grant_data={
@@ -289,6 +353,71 @@ def test_repository_creates_stable_identity_ownership_and_owner_grant_atomically
     assert created["ownership"]["skill_id"] == created["skill"]["id"]
     assert created["owner_grant"]["owner_slot"] == 1
 
+    replay = repo.create_space_skill(
+        skill_data={
+            "name": "ignored-on-replay",
+            "description": None,
+            "env": "dev",
+            "skill_uuid": "33333333-3333-4333-8333-333333333333",
+            "zip_url": (
+                "draft://33333333-3333-4333-8333-333333333333/"
+                "v1/44444444-4444-4444-8444-444444444444"
+            ),
+            "draft_target_version": 1,
+            "draft_status": "EDITING",
+            "draft_description": "ignored",
+            "draft_source_kind": "FOLDER",
+            "creation_request_id": "create-risk-review",
+            "creation_request_hash": "a" * 64,
+        },
+        ownership_data={"space_id": space["id"], "created_by": "owner-1", "env": "dev"},
+        owner_grant_data={
+            "user_id": "owner-1",
+            "granted_by": "owner-1",
+            "env": "dev",
+        },
+    )
+
+    assert replay["created"] is False
+    assert replay["skill"]["id"] == created["skill"]["id"]
+    assert repo.get_creation_by_request_id(
+        request_id="create-risk-review", env="dev"
+    ) == {
+        "skill_id": created["skill"]["id"],
+        "space_id": space["id"],
+        "request_hash": "a" * 64,
+    }
+
+    with pytest.raises(SpaceSkillIdempotencyConflictError):
+        repo.create_space_skill(
+            skill_data={
+                "name": "different-intent",
+                "description": None,
+                "env": "dev",
+                "skill_uuid": "55555555-5555-4555-8555-555555555555",
+                "zip_url": (
+                    "draft://55555555-5555-4555-8555-555555555555/"
+                    "v1/66666666-6666-4666-8666-666666666666"
+                ),
+                "draft_target_version": 1,
+                "draft_status": "EDITING",
+                "draft_description": "different",
+                "draft_source_kind": "FOLDER",
+                "creation_request_id": "create-risk-review",
+                "creation_request_hash": "b" * 64,
+            },
+            ownership_data={
+                "space_id": space["id"],
+                "created_by": "owner-1",
+                "env": "dev",
+            },
+            owner_grant_data={
+                "user_id": "owner-1",
+                "granted_by": "owner-1",
+                "env": "dev",
+            },
+        )
+
 
 def test_repository_rejects_space_skill_without_an_active_owner_membership(db):
     repo = _space_skills(db)
@@ -304,7 +433,22 @@ def test_repository_rejects_space_skill_without_an_active_owner_membership(db):
 
     with pytest.raises(ValueError, match="active Space Member"):
         repo.create_space_skill(
-            skill_data={"name": "unowned", "env": "dev"},
+            skill_data={
+                "name": "unowned",
+                "description": None,
+                "env": "dev",
+                "skill_uuid": "55555555-5555-4555-8555-555555555555",
+                "zip_url": (
+                    "draft://55555555-5555-4555-8555-555555555555/"
+                    "v1/66666666-6666-4666-8666-666666666666"
+                ),
+                "draft_target_version": 1,
+                "draft_status": "EDITING",
+                "draft_description": "Unowned",
+                "draft_source_kind": "FOLDER",
+                "creation_request_id": "create-unowned",
+                "creation_request_hash": "b" * 64,
+            },
             ownership_data={
                 "space_id": space["id"],
                 "created_by": "creator",
@@ -329,6 +473,9 @@ def test_additive_migration_is_repeat_safe_and_requires_reviewed_duplicate_clean
         / "sql"
     )
     ddl = (sql_dir / "2026_08_19_additive_space_skill_schema.sql").read_text()
+    convergence = (
+        sql_dir / "2026_08_30_finalize_space_skill_group1_schema.sql"
+    ).read_text()
     verify = (sql_dir / "2026_08_19_additive_space_skill_schema_verify.sql").read_text()
     spaces_sql = (
         Path(__file__).parents[4]
@@ -341,12 +488,30 @@ def test_additive_migration_is_repeat_safe_and_requires_reviewed_duplicate_clean
         / "2026_08_17_spaces.sql"
     ).read_text()
 
-    assert ddl.count("CREATE TABLE IF NOT EXISTS") == 5
+    assert ddl.count("CREATE TABLE IF NOT EXISTS") == 6
+    assert "CREATE TABLE IF NOT EXISTS ac_skill_draft_upgrade_request" in ddl
+    assert "UNIQUE KEY uk_skill_upgrade_request" in ddl
+    assert "draft_request_id" not in ddl
     assert "CREATE TABLE IF NOT EXISTS ac_space" not in ddl
     assert "ALTER TABLE ac_space" in spaces_sql
     assert "ALTER TABLE ac_space_member" in spaces_sql
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uk_skill_set_skill" in ddl
     assert "DELETE FROM" not in ddl
+    assert "retired_at" not in ddl
+    assert "failure_code" not in ddl
+    assert "ADD COLUMN IF NOT EXISTS offline_at" in convergence
+    assert "ADD COLUMN IF NOT EXISTS error_code" in convergence
+    assert "DROP COLUMN IF EXISTS retired_at" in convergence
+    assert "DROP COLUMN IF EXISTS retired_by" in convergence
+    assert "DROP COLUMN IF EXISTS failure_code" in convergence
+    assert "ALTER TABLE ac_skill DROP COLUMN draft_request_id" in convergence
+    assert "CREATE TABLE IF NOT EXISTS ac_skill_draft_upgrade_request" in convergence
+    assert (
+        "DROP CONSTRAINT IF EXISTS ck_skill_publication_attempt_status" in convergence
+    )
+    assert "VALIDATING" not in convergence
+    assert "SCANNING" not in convergence
+    assert "MANUAL_RECONCILIATION" not in convergence
     assert "ac_skill_set_skill duplicate" in verify
     assert "ac_skill_set_skill orphan skill" in verify
 
@@ -359,7 +524,7 @@ def _add_bound_skill(
     description=None,
     env="dev",
     modified_at=None,
-    retired=False,
+    offline=False,
     grant_user_id=None,
     grant_role="MANAGER",
     grant_status="ACTIVE",
@@ -375,7 +540,7 @@ def _add_bound_skill(
             skill_uuid=f"uuid-{space_id}-{name}-{env}",
             status="DEVELOPING",
             draft_status="EDITING",
-            retired_at=timestamp if retired else None,
+            offline_at=timestamp if offline else None,
             gmt_created=timestamp,
             gmt_modified=timestamp,
         )
@@ -408,7 +573,7 @@ def _add_bound_skill(
         return skill.id
 
 
-def test_list_space_skills_filters_scope_env_and_retired_rows(db):
+def test_list_space_skills_filters_scope_env_and_keeps_offline_rows(db):
     from datetime import datetime, timedelta
 
     repo = _space_skills(db)
@@ -447,7 +612,9 @@ def test_list_space_skills_filters_scope_env_and_retired_rows(db):
     )
     _add_bound_skill(db, space_id=other["id"], name="Other Space")
     _add_bound_skill(db, space_id=space["id"], name="Other Env", env="prod")
-    _add_bound_skill(db, space_id=space["id"], name="Retired", retired=True)
+    offline_id = _add_bound_skill(
+        db, space_id=space["id"], name="Offline", offline=True
+    )
 
     total, records = repo.list_space_skills(
         space_id=space["id"],
@@ -458,8 +625,12 @@ def test_list_space_skills_filters_scope_env_and_retired_rows(db):
         limit=20,
     )
 
-    assert total == 2
-    assert [record["id"] for record in records] == [newer_id, older_id]
+    assert total == 3
+    assert {record["id"] for record in records} == {
+        newer_id,
+        older_id,
+        offline_id,
+    }
 
 
 def test_list_space_skills_searches_name_and_description_case_insensitively(db):
@@ -712,13 +883,22 @@ def test_grant_repository_add_remove_manager_is_idempotent(db):
         env="dev",
     )
 
-    assert first == second == removed == removed_again == {
-        "user_id": "manager-1",
-        "role": "MANAGER",
-    }
-    assert repo.list_grants(
-        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
-    )["managers"] == []
+    assert (
+        first
+        == second
+        == removed
+        == removed_again
+        == {
+            "user_id": "manager-1",
+            "role": "MANAGER",
+        }
+    )
+    assert (
+        repo.list_grants(
+            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+        )["managers"]
+        == []
+    )
 
 
 def test_grant_repository_rejects_non_member_without_partial_write(db):
@@ -766,9 +946,11 @@ def test_owner_transfer_atomically_keeps_exactly_one_owner(db):
     assert result["owner"] == {"user_id": "member-2", "role": "OWNER"}
     assert result["managers"] == []
     with db.orm_session() as session:
-        active = session.query(SkillGrant).filter_by(
-            skill_id=skill_id, status="ACTIVE", env="dev"
-        ).all()
+        active = (
+            session.query(SkillGrant)
+            .filter_by(skill_id=skill_id, status="ACTIVE", env="dev")
+            .all()
+        )
         assert [(grant.user_id, grant.role, grant.owner_slot) for grant in active] == [
             ("member-2", "OWNER", 1)
         ]
@@ -787,9 +969,11 @@ def test_space_admin_owner_transfer_persists_the_audit_reason(db):
     )
 
     with db.orm_session() as session:
-        owner = session.query(SkillGrant).filter_by(
-            skill_id=skill_id, role="OWNER", status="ACTIVE", env="dev"
-        ).one()
+        owner = (
+            session.query(SkillGrant)
+            .filter_by(skill_id=skill_id, role="OWNER", status="ACTIVE", env="dev")
+            .one()
+        )
         assert owner.user_id == "member-2"
         assert owner.granted_by == "space-admin"
         assert owner.grant_reason == "handover approved by the space administrator"
@@ -802,9 +986,11 @@ def test_grant_write_rechecks_owner_membership_inside_the_transaction(db):
 
     repo, space_id, skill_id = _grant_fixture(db)
     with db.orm_session() as session:
-        owner_member = session.query(SpaceMember).filter_by(
-            space_id=space_id, user_id="owner-1", env="dev"
-        ).one()
+        owner_member = (
+            session.query(SpaceMember)
+            .filter_by(space_id=space_id, user_id="owner-1", env="dev")
+            .one()
+        )
         owner_member.status = "INACTIVE"
 
     with pytest.raises(SpaceSkillGrantForbiddenError):
@@ -816,9 +1002,12 @@ def test_grant_write_rechecks_owner_membership_inside_the_transaction(db):
             env="dev",
         )
 
-    assert repo.list_grants(
-        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
-    )["managers"] == []
+    assert (
+        repo.list_grants(
+            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+        )["managers"]
+        == []
+    )
 
 
 def test_owner_transfer_rechecks_admin_reason_inside_the_transaction(db):
@@ -838,9 +1027,12 @@ def test_owner_transfer_rechecks_admin_reason_inside_the_transaction(db):
             env="dev",
         )
 
-    assert repo.list_grants(
-        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
-    )["owner"]["user_id"] == "owner-1"
+    assert (
+        repo.list_grants(
+            space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
+        )["owner"]["user_id"]
+        == "owner-1"
+    )
 
 
 def test_concurrent_owner_transfers_leave_one_owner_and_surface_the_loser(tmp_path):
@@ -876,13 +1068,17 @@ def test_concurrent_owner_transfers_leave_one_owner_and_surface_the_loser(tmp_pa
     assert sum(not isinstance(outcome, Exception) for outcome in outcomes) == 1
     assert sum(isinstance(outcome, Exception) for outcome in outcomes) == 1
     with concurrent_db.orm_session() as session:
-        active_owners = session.query(SkillGrant).filter_by(
-            skill_id=skill_id,
-            role="OWNER",
-            status="ACTIVE",
-            owner_slot=1,
-            env="dev",
-        ).all()
+        active_owners = (
+            session.query(SkillGrant)
+            .filter_by(
+                skill_id=skill_id,
+                role="OWNER",
+                status="ACTIVE",
+                owner_slot=1,
+                env="dev",
+            )
+            .all()
+        )
         assert len(active_owners) == 1
 
 
@@ -984,9 +1180,10 @@ def test_removing_manager_invalidates_held_lease_in_the_same_transaction(db):
         env="dev",
     )
 
-    assert repo.get_lease(
-        space_id=space_id, skill_id=skill_id, env="dev"
-    ) == {"holder_user_id": None, "fencing_token": held["fencing_token"] + 1}
+    assert repo.get_lease(space_id=space_id, skill_id=skill_id, env="dev") == {
+        "holder_user_id": None,
+        "fencing_token": held["fencing_token"] + 1,
+    }
 
 
 def test_owner_transfer_invalidates_any_existing_lease_atomically(db):
@@ -1004,9 +1201,10 @@ def test_owner_transfer_invalidates_any_existing_lease_atomically(db):
         env="dev",
     )
 
-    assert repo.get_lease(
-        space_id=space_id, skill_id=skill_id, env="dev"
-    ) == {"holder_user_id": None, "fencing_token": held["fencing_token"] + 1}
+    assert repo.get_lease(space_id=space_id, skill_id=skill_id, env="dev") == {
+        "holder_user_id": None,
+        "fencing_token": held["fencing_token"] + 1,
+    }
 
 
 def test_lease_schema_contains_no_ttl_or_renewal_columns(db):
@@ -1133,12 +1331,7 @@ def test_database_failure_rolls_back_grant_revocation_and_lease_invalidation(db)
         space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
     )
     assert grants["managers"] == [{"user_id": "manager-1", "role": "MANAGER"}]
-    assert (
-        repo.get_lease(
-            space_id=space_id, skill_id=skill_id, env="dev"
-        )
-        == held
-    )
+    assert repo.get_lease(space_id=space_id, skill_id=skill_id, env="dev") == held
 
 
 def test_concurrent_takeovers_never_reuse_a_successful_fencing_token(tmp_path):
@@ -1160,9 +1353,7 @@ def test_concurrent_takeovers_never_reuse_a_successful_fencing_token(tmp_path):
             manager_user_id=manager_id,
             env="dev",
         )
-    repo.acquire(
-        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev"
-    )
+    repo.acquire(space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="dev")
     start = Barrier(2)
 
     def takeover(actor_id: str):
@@ -1187,7 +1378,5 @@ def test_concurrent_takeovers_never_reuse_a_successful_fencing_token(tmp_path):
     ]
     assert successful_tokens
     assert len(successful_tokens) == len(set(successful_tokens))
-    current = repo.get_lease(
-        space_id=space_id, skill_id=skill_id, env="dev"
-    )
+    current = repo.get_lease(space_id=space_id, skill_id=skill_id, env="dev")
     assert current["fencing_token"] == 1 + len(successful_tokens)

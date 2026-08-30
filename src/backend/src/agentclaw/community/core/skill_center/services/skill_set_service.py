@@ -29,7 +29,10 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillRepo
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
-from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
+    SkillSetRuntimeReconcileError,
+)
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
     DefaultSkillSetSelection,
@@ -515,6 +518,8 @@ class SkillSetService:
             sync_kwargs: dict[str, Any] = {}
             if effective_mcps is not None:
                 sync_kwargs["effective_mcps"] = effective_mcps
+            if desired_skills is not None:
+                sync_kwargs["desired_skills"] = desired_skills
             sync_result = device_sync.sync_symlinks(symlinks_dict, **sync_kwargs)
 
             if sync_result.get("success"):
@@ -557,6 +562,46 @@ class SkillSetService:
         return await asyncio.to_thread(
             self._sync_symlinks_to_device_if_needed,
             self.user_id or self.entity_id,
+            desired_skills,
+            effective_mcps,
+        )
+
+    def _project_whole_artifact_sync(
+        self,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None,
+    ) -> bool:
+        """Deliver structured desired state without invoking path mapping."""
+        try:
+            effective_user_id = self.user_id or self.entity_id or "default"
+            ctx = self._resolver.resolve_for_bot(self.bot_id, effective_user_id)
+            device_sync = self._device_sync_dispatcher.dispatch(ctx)
+            result = device_sync.sync_symlinks(
+                [],
+                desired_skills=desired_skills,
+                effective_mcps=effective_mcps,
+            )
+            if not result.get("success"):
+                raise SkillSetRuntimeReconcileError(
+                    str(result.get("message") or "Skill set runtime sync failed")
+                )
+            return True
+        except SkillSetRuntimeReconcileError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[project_whole_artifact] delivery failed: %s", exc, exc_info=True
+            )
+            return False
+
+    async def project_whole_artifact(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._project_whole_artifact_sync,
             desired_skills,
             effective_mcps,
         )

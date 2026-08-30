@@ -152,9 +152,13 @@ provides:
   - SkillPropagationLogRepository
   - SkillRepository
   - SpaceSkillRepository
+  - SpaceSkillDraftRepository
+  - SpaceSkillReadRepository
+  - SpaceSkillVersionReadRepository
   - SkillEditorRequestRepository
   - DraftEditLeaseRepository
   - SkillVersionRepositoryProtocol
+  - SkillVersionMaterializationRepositoryProtocol
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol

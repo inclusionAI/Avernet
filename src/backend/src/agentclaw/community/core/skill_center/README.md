@@ -29,6 +29,12 @@ provides:
   - "BotCapabilityAuthorizationHookProtocol"
   - "SkillSetManagementService"
   - "SpaceSkillGrantService"
+  - "SpaceSkillApplicationService"
+  - "SpaceSkillApplicationServiceProtocol"
+  - "SpaceSkillDraftRepository"
+  - "SpaceSkillReadRepository"
+  - "SpaceSkillVersionQueryService"
+  - "SpaceSkillVersionReadRepository"
   - "SpaceSkillEditorRequestService"
   - "SkillCollaboratorApprovalHandler"
   - "DraftEditLeaseService"
@@ -37,6 +43,9 @@ provides:
   - "BotCapabilityStateReader"
   - "SkillVersionResolver"
   - "SkillVersionResolverProtocol"
+  - "SkillVersionMaterializer"
+  - "SkillVersionMaterializerProtocol"
+  - "PublishedMaterializedSkillVersion"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
   - "LocalSkillCleanupWorkModel"
@@ -74,6 +83,7 @@ consumes:
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillCenterGateway"
+  - "SpaceSkillSourcePlugin"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
@@ -82,10 +92,16 @@ consumes:
   - "SpaceSkillRepository"
   - "WorkOrderRepositoryProtocol"
   - "DraftEditLeaseRepository"
+  - "SpaceSkillDraftRepository"
+  - "SpaceSkillReadRepository"
   - "SkillVersionRepositoryProtocol"
+  - "SkillVersionMaterializationRepositoryProtocol"
+  - "SkillVersionScannerProtocol"
+  - "HttpClient"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.space_skill_version # published Space Skill read contract consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
   - agentclaw.community.core.repository.protocols.work_orders
   - agentclaw.community.core.work_orders
@@ -117,6 +133,7 @@ internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.log
   - agentclaw.community.plugin_api.cache
+  - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.local_skill_cleanup
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.device_adapter_transport
@@ -131,6 +148,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.skill_center_gateway
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
+  - agentclaw.community.plugin_api.space_skill_source
   - agentclaw.community.utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
@@ -153,8 +171,12 @@ their owning application services.
 write intent and integrity manifest live under the derived sibling
 `skills-center-control/` prefix, which Engine Runtime must never mount or copy.
 Those objects protect immutable writes and validate completeness; they are not
-a publication state. Only `ac_skill_version.status=PUBLISHED`, owned by the
-later Materializer workflow, expresses domain readiness.
+a publication state. Only `ac_skill_version.status=PUBLISHED`, owned by
+`SkillVersionMaterializer` after exact download/hash, strict package validation,
+Scanner metadata, MCP dependency and Store verification all succeed, expresses
+domain readiness. Publication and SC Reference producers consume the public
+Materializer Service API; Runtime reads consume only PUBLISHED Versions through
+`SkillVersionResolver`.
 
 `DraftContentStore` persists one canonical ZIP per immutable Draft revision.
 Its business reference is `draft://<skill_uuid>/v<target>/<revision_id>`; only

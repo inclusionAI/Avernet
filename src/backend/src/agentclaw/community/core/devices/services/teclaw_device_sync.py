@@ -145,11 +145,14 @@ class TeclawDeviceSyncService(DeviceSync):
         symlinks: list[dict[str, str]],
         *,
         effective_mcps: Optional[list[dict[str, Any]]] = None,
+        desired_skills: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         # symlinks ignored: teclaw re-pulls the whole composed artifact.
         # ``effective_mcps`` is not ignored — see ``_compose_and_deliver``.
         return self._compose_and_deliver(
-            caller="sync_symlinks", effective_mcps=effective_mcps
+            caller="sync_symlinks",
+            effective_mcps=effective_mcps,
+            desired_skills=desired_skills,
         )
 
     def sync_bot_config(
@@ -196,6 +199,7 @@ class TeclawDeviceSyncService(DeviceSync):
         *,
         caller: str,
         effective_mcps: Optional[list[dict[str, Any]]] = None,
+        desired_skills: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         """Compose this bot's whole artifact and POST it to its container.
 
@@ -219,6 +223,9 @@ class TeclawDeviceSyncService(DeviceSync):
                     entity_type=self._entity_type,
                     effective_mcps=(
                         None if effective_mcps is None else tuple(effective_mcps)
+                    ),
+                    desired_skills=(
+                        None if desired_skills is None else tuple(desired_skills)
                     ),
                 )
             )

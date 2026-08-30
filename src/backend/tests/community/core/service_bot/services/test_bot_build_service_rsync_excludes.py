@@ -14,6 +14,10 @@ import pytest
 
 from agentclaw.community.core.service_bot.services.bot_build_service import (
     BotBuildService,
+    BotBuildServiceError,
+)
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ResolvedSharedCorpusDelivery,
 )
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
 
@@ -26,6 +30,188 @@ def _make_service() -> BotBuildService:
     service = BotBuildService.__new__(BotBuildService)
     service._device_service = MagicMock()
     return service
+
+
+def _center_delivery(runtime_path: str) -> ResolvedSharedCorpusDelivery:
+    return ResolvedSharedCorpusDelivery(
+        corpus="center",
+        runtime_path=runtime_path,
+        store_prefix="aidesktop/aidesktop_dev/bolt_shared/skills-center",
+        layout_contract_version="skills-pool-p3-v1",
+    )
+
+
+@pytest.mark.unit
+def test_engine_evidence_adds_center_corpus_to_snapshot_excludes() -> None:
+    provider = MagicMock()
+    provider.get_base_path.return_value = "/home/admin/.openclaw"
+    plan = EngineBuildPlan(
+        engine_type="openclaw",
+        source_root_name=".openclaw",
+        migration_subpath="openclaw",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=["logs/"],
+    )
+
+    updated = BotBuildService._apply_shared_corpus_excludes(
+        build_plan=plan,
+        provider=provider,
+        shared_corpora=(
+            _center_delivery(
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center"
+            ),
+        ),
+    )
+
+    assert updated.rsync_excludes == [
+        "logs/",
+        "workspace/skills-pool/skill-center",
+    ]
+    assert plan.rsync_excludes == ["logs/"]
+
+
+@pytest.mark.unit
+def test_center_corpus_outside_snapshot_root_fails_closed() -> None:
+    provider = MagicMock()
+    provider.get_base_path.return_value = "/home/admin/.openclaw"
+    plan = EngineBuildPlan(
+        engine_type="openclaw",
+        source_root_name=".openclaw",
+        migration_subpath="openclaw",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=[],
+    )
+
+    with pytest.raises(BotBuildServiceError, match="outside"):
+        BotBuildService._apply_shared_corpus_excludes(
+            build_plan=plan,
+            provider=provider,
+            shared_corpora=(
+                _center_delivery("/home/admin/.aicoding/workspace/skill-center"),
+            ),
+        )
+
+
+@pytest.mark.unit
+def test_community_host_root_maps_engine_runtime_evidence_into_snapshot() -> None:
+    provider = MagicMock()
+    provider.get_base_path.return_value = "/srv/avernet/data/workspace/openclaw"
+    plan = EngineBuildPlan(
+        engine_type="openclaw",
+        source_root_name=".openclaw",
+        migration_subpath="openclaw",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=[],
+    )
+    shared_corpora = (
+        _center_delivery(
+            "/home/admin/.openclaw/workspace/skills-pool/skill-center"
+        ),
+    )
+
+    updated = BotBuildService._apply_shared_corpus_excludes(
+        build_plan=plan,
+        provider=provider,
+        shared_corpora=shared_corpora,
+    )
+    active = BotBuildService._active_skill_snapshot_path(
+        provider=provider,
+        build_plan=plan,
+        shared_corpora=shared_corpora,
+        active_runtime_path="/home/admin/.openclaw/workspace/skills",
+    )
+
+    assert updated.rsync_excludes == ["workspace/skills-pool/skill-center"]
+    assert active == "workspace/skills"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    (
+        "base_path",
+        "source_root_name",
+        "extra_source",
+        "extra_target",
+        "active_runtime_path",
+        "expected",
+    ),
+    (
+        (
+            "/srv/avernet/data/workspace/openclaw",
+            ".openclaw",
+            "",
+            "",
+            "/home/admin/.openclaw/workspace/skills",
+            "workspace/skills",
+        ),
+        (
+            "/srv/avernet/data/workspace/claude_code",
+            ".claude_code",
+            ".claude",
+            "claude",
+            "/home/admin/.claude/skills",
+            "claude/skills",
+        ),
+        (
+            "/srv/avernet/data/workspace/aicoding",
+            ".aicoding",
+            ".claude",
+            "claude",
+            "/home/admin/.claude/skills",
+            "claude/skills",
+        ),
+        (
+            "/srv/avernet/data/workspace/hermes",
+            ".hermes",
+            "",
+            "",
+            "/home/admin/.hermes/skills",
+            "skills",
+        ),
+    ),
+)
+def test_engine_active_evidence_maps_through_existing_snapshot_sources(
+    base_path,
+    source_root_name,
+    extra_source,
+    extra_target,
+    active_runtime_path,
+    expected,
+) -> None:
+    provider = MagicMock()
+    provider.get_base_path.return_value = base_path
+    plan = EngineBuildPlan(
+        engine_type="engine",
+        source_root_name=source_root_name,
+        migration_subpath="engine",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=[],
+        extra_sync_source_relpath=extra_source,
+        extra_sync_target_relpath=extra_target,
+    )
+
+    assert BotBuildService._active_skill_snapshot_path(
+        provider=provider,
+        build_plan=plan,
+        shared_corpora=(
+            _center_delivery(
+                f"{base_path}/workspace/skills-pool/skill-center"
+            ),
+        ),
+        active_runtime_path=active_runtime_path,
+    ) == expected
 
 
 @pytest.mark.unit
@@ -304,6 +490,20 @@ def test_resolve_sandbox_provider_falls_back_to_default_when_retry_fails():
         (("unknown_engine",),),
         (("openclaw",),),
     ]
+
+
+def test_known_hermes_provider_never_falls_back_to_openclaw():
+    service = BotBuildService.__new__(BotBuildService)
+    service._bot_repository = None
+    service._sandbox_registry = MagicMock()
+    service._sandbox_registry.resolve.side_effect = RuntimeError("hermes missing")
+
+    with pytest.raises(RuntimeError, match="hermes missing"):
+        service._resolve_sandbox_provider(
+            {"active_engine": "hermes", "bot_id": "bot-1"}
+        )
+
+    service._sandbox_registry.resolve.assert_called_once_with("hermes")
 
 
 def test_build_uses_original_active_engine_for_nas_source_bucket_when_routed_to_aicoding():

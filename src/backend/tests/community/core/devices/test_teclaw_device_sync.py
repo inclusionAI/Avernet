@@ -171,6 +171,24 @@ def test_an_already_resolved_mcp_set_rides_on_the_compose_request():
     assert req.bot_id == "bot7"
 
 
+def test_resolved_exact_center_skills_ride_on_the_compose_request():
+    service, m = _make_service()
+    desired = [
+        {
+            "id": "10",
+            "name": "center-weather",
+            "git_path": "center://public-weather",
+            "skill_uuid": "00000000-0000-4000-8000-000000000010",
+            "sc_version_number": "1.0.0",
+        }
+    ]
+
+    service.sync_symlinks([], desired_skills=desired)
+
+    req = m["composer"].compose.call_args.args[0]
+    assert req.desired_skills == tuple(desired)
+
+
 def test_a_caller_with_no_resolved_mcp_set_leaves_the_collector_to_read_it():
     """``None``, not ``()``: the collector must still do its own read.
 

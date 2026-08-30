@@ -47,10 +47,17 @@ def _reader_over(channel_repo) -> ChannelEngineOverridesReader:
     return ChannelEngineOverridesReader(channel_repo=channel_repo)
 
 
+def _ready_center_store():
+    store = MagicMock()
+    store.verify_version.return_value = True
+    return store
+
+
 def _collector(*, skill_set_service=None, mcp_config_service=None,
                resource_repository=None,
                identity_service=None, channel_repo=None,
                local_mcp_registry=None):
+    center_store = _ready_center_store()
     return ConfigComposerInputCollector(
         skill_set_service_factory=_factory_returning(skill_set_service or MagicMock()),
         mcp_config_service=mcp_config_service or MagicMock(),
@@ -59,6 +66,7 @@ def _collector(*, skill_set_service=None, mcp_config_service=None,
         path_factory=MagicMock(),
         identity_service=identity_service or MagicMock(),
         overrides_reader=_reader_over(channel_repo),
+        center_store=center_store,
         # Default to an EMPTY registry rather than the production default, which
         # would read the repo's bundled local-mcp-servers.yaml off disk and make
         # every test here depend on that file's contents.
@@ -130,6 +138,67 @@ def test_skills_consume_the_delegated_get_active_skills_dict_contract():
 
 
 @pytest.mark.unit
+def test_center_skill_requires_and_emits_exact_store_identity():
+    svc = MagicMock()
+    svc.get_active_skills.return_value = [
+        {
+            "id": "10",
+            "name": "center-weather",
+            "git_path": "center://public-weather",
+            "skill_uuid": "00000000-0000-4000-8000-000000000010",
+            "sc_version_number": "1.0.0",
+        }
+    ]
+
+    skills = _collector(skill_set_service=svc).skills(_req("teclaw"))
+
+    assert [(s.name, s.scope, s.store, s.path) for s in skills] == [
+        (
+            "center-weather",
+            "shared",
+            "skill-center",
+            "00000000-0000-4000-8000-000000000010/1.0.0",
+        )
+    ]
+
+
+@pytest.mark.unit
+def test_center_skill_without_exact_version_fails_closed():
+    svc = MagicMock()
+    svc.get_active_skills.return_value = [
+        {
+            "id": "10",
+            "name": "center-weather",
+            "git_path": "center://public-weather",
+            "skill_uuid": "00000000-0000-4000-8000-000000000010",
+            "sc_version_number": None,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="exact"):
+        _collector(skill_set_service=svc).skills(_req("teclaw"))
+
+
+@pytest.mark.unit
+def test_center_skill_with_missing_exact_store_version_fails_closed():
+    svc = MagicMock()
+    svc.get_active_skills.return_value = [
+        {
+            "id": "10",
+            "name": "center-weather",
+            "git_path": "center://public-weather",
+            "skill_uuid": "00000000-0000-4000-8000-000000000010",
+            "sc_version_number": "1.0.0",
+        }
+    ]
+    collector = _collector(skill_set_service=svc)
+    collector._center_store.verify_version.return_value = False
+
+    with pytest.raises(ValueError, match="Store Version is unavailable"):
+        collector.skills(_req("teclaw"))
+
+
+@pytest.mark.unit
 def test_local_skill_not_emitted_engine_owned():
     """A user (skills-local) skill is engine-owned: the collector does NOT emit a
     ref for it (the running container auto-discovers it; the publish-time gather
@@ -150,6 +219,7 @@ def test_local_skill_not_emitted_engine_owned():
         path_factory=MagicMock(),
         identity_service=MagicMock(),
         overrides_reader=_reader_over(None),
+        center_store=_ready_center_store(),
     )
     skills = collector.skills(
         ComposeRequest(entity_id="staff_u1", bot_id="bot7", user_id="u1", engine_type="openclaw")
@@ -219,6 +289,7 @@ def test_one_compose_builds_one_skill_set_service():
         path_factory=MagicMock(),
         identity_service=MagicMock(),
         overrides_reader=_reader_over(None),
+        center_store=_ready_center_store(),
         local_mcp_registry=_registry_over({}),
     )
 
@@ -252,6 +323,7 @@ def test_a_memoized_service_never_crosses_from_one_bot_to_another():
         path_factory=MagicMock(),
         identity_service=MagicMock(),
         overrides_reader=_reader_over(None),
+        center_store=_ready_center_store(),
         local_mcp_registry=_registry_over({}),
     )
 

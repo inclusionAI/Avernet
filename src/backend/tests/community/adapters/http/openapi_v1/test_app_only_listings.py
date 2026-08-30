@@ -37,6 +37,9 @@ from agentclaw.community.adapters.http.openapi_v1.routines.owner_router import (
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.spaces import router as spaces_router
+from agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes import (
+    router as space_skill_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.work_orders import (
     router as work_orders_router,
 )
@@ -59,6 +62,12 @@ from agentclaw.community.api.space_service import (
 )
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.space_skill_application_service import (
+    SpaceSkillApplicationServiceProtocol,
+)
+from agentclaw.community.api.space_skill_version_query_service import (
+    SpaceSkillVersionQueryServiceProtocol,
 )
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
@@ -231,6 +240,8 @@ def make_client(bots):
                 binder.bind(SpaceServiceProtocol, to=unexpected)
                 binder.bind(SpaceMemberServiceProtocol, to=unexpected)
                 binder.bind(SpaceSkillQueryServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillApplicationServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillVersionQueryServiceProtocol, to=unexpected)
                 binder.bind(SpaceSkillGrantServiceProtocol, to=unexpected)
                 binder.bind(MarketFavoriteServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderServiceProtocol, to=unexpected)
@@ -258,6 +269,7 @@ def make_client(bots):
         app.include_router(local_router)
         app.include_router(bots_router)
         app.include_router(spaces_router)
+        app.include_router(space_skill_router)
         app.include_router(work_orders_router)
         app.dependency_overrides[require_principal] = lambda: _caller(
             with_user=with_user
@@ -675,9 +687,7 @@ _UNGRANTED_APP_CASES = {
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): {
-        "request": lambda client: client.get(
-            "/openapi/v1/bots/skills/1/readme"
-        ),
+        "request": lambda client: client.get("/openapi/v1/bots/skills/1/readme"),
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("POST", "/openapi/v1/bots/skills/repository/sync"): {
@@ -745,6 +755,64 @@ _UNGRANTED_APP_CASES = {
     },
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): {
         "request": lambda client: client.get("/openapi/v1/bots/spaces/1/skills"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/consumable"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/consumable"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"): {
+        "request": lambda client: client.get("/openapi/v1/bots/spaces/1/skills/1"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/draft/files"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}",
+    ): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/draft/files/SKILL.md"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/versions"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}",
+    ): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/versions/1"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files",
+    ): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/versions/1/files"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}",
+    ): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/versions/1/files/SKILL.md"
+        ),
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"): {

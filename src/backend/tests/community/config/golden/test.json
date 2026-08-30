@@ -88,6 +88,7 @@
     "workspace": {
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
+      "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     },
     "yuque": {
@@ -240,6 +241,7 @@
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
       "claude_code_session_root": "/home/admin/.claude",
+      "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     },
     "workspace_hosting": {

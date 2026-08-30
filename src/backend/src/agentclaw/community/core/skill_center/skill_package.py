@@ -35,6 +35,18 @@ class SkillPackageInvalidError(ValueError):
         super().__init__(reason)
 
 
+class SkillManifestMissingError(SkillPackageInvalidError):
+    """The selected package has no SKILL.md manifest."""
+
+
+class SkillManifestMultipleError(SkillPackageInvalidError):
+    """A folder upload ambiguously contains multiple Skill manifests."""
+
+
+class SkillPathInvalidError(SkillPackageInvalidError):
+    """A package or file-operation path is unsafe or escapes its root."""
+
+
 class SkillPackageTooLargeError(ValueError):
     """A package exceeds a documented compressed or expanded limit."""
 
@@ -47,6 +59,7 @@ class ValidatedSkillPackage:
     description: str
     files: tuple[tuple[str, bytes], ...]
     canonical_zip: bytes
+    config: tuple[dict[str, Any], ...] = ()
 
 
 @runtime_checkable
@@ -101,10 +114,10 @@ class SkillPackageValidator:
                 file_kind = (info.external_attr >> 16) & 0o170000
                 if info.is_dir():
                     if file_kind not in (0, 0o040000):
-                        raise SkillPackageInvalidError("unsafe_file_path")
+                        raise SkillPathInvalidError("unsafe_file_path")
                     continue
                 if file_kind not in (0, 0o100000):
-                    raise SkillPackageInvalidError("unsafe_file_path")
+                    raise SkillPathInvalidError("unsafe_file_path")
                 if self._is_ignored_path(normalized_path):
                     continue
                 if normalized_path in seen:
@@ -133,9 +146,11 @@ class SkillPackageValidator:
         """Validate browser directory input through the canonical ZIP seam."""
         return self.validate_zip(self.pack_directory(files))
 
-    def revalidate(
-        self, package: ValidatedSkillPackage
-    ) -> ValidatedSkillPackage:
+    def normalize_relative_path(self, path: str) -> str:
+        """Validate one public file path using the package boundary's rules."""
+        return self._normalize_path(path, reject_empty_parts=True)
+
+    def revalidate(self, package: ValidatedSkillPackage) -> ValidatedSkillPackage:
         """Rebuild a value at a persistence boundary and reject forged fields."""
         validated = self.validate_zip(package.canonical_zip)
         if validated != package:
@@ -151,7 +166,7 @@ class SkillPackageValidator:
         ordering without returning an unvalidated package value object.
         """
         if not files:
-            raise SkillPackageInvalidError()
+            raise SkillManifestMissingError("missing_skill_file")
         entries: list[tuple[str, bytes]] = []
         seen: set[str] = set()
         total = 0
@@ -187,9 +202,9 @@ class SkillPackageValidator:
             entry for entry in entries if entry[0].split("/")[-1] == "SKILL.md"
         ]
         if not skill_files:
-            raise SkillPackageInvalidError("missing_skill_file")
+            raise SkillManifestMissingError("missing_skill_file")
         if len(skill_files) > 1:
-            raise SkillPackageInvalidError("multiple_skill_files")
+            raise SkillManifestMultipleError("multiple_skill_files")
 
         skill_path, markdown = skill_files[0]
         roots = {path.split("/")[0] for path, _content in entries}
@@ -202,9 +217,12 @@ class SkillPackageValidator:
                 metadata = self._metadata_parser.parse_skill_markdown(
                     markdown, path=skill_path
                 ).to_dict()
+                config = ()
                 if not allow_legacy_local_manifest:
-                    self._metadata_parser.parse_config(
-                        self._metadata_parser.decode_content(markdown)
+                    config = tuple(
+                        self._metadata_parser.parse_config(
+                            self._metadata_parser.decode_content(markdown)
+                        )
                     )
             except SkillManifestError as exc:
                 if (
@@ -214,6 +232,7 @@ class SkillPackageValidator:
                     raise
                 text = self._metadata_parser.decode_content(markdown)
                 metadata = self._metadata_parser.parse_legacy_upload_content(text) or {}
+                config = ()
         except SkillManifestError as exc:
             raise SkillPackageInvalidError("invalid_metadata") from exc
 
@@ -253,6 +272,7 @@ class SkillPackageValidator:
             description=description,
             files=normalized,
             canonical_zip=canonical_zip,
+            config=config,
         )
 
     @staticmethod
@@ -266,10 +286,10 @@ class SkillPackageValidator:
             or len(path) > MAX_PATH_LENGTH
             or (reject_empty_parts and any(part == "" for part in path.split("/")))
         ):
-            raise SkillPackageInvalidError("unsafe_file_path")
+            raise SkillPathInvalidError("unsafe_file_path")
         normalized = "/".join(part for part in path.split("/") if part not in ("", "."))
         if not normalized:
-            raise SkillPackageInvalidError("unsafe_file_path")
+            raise SkillPathInvalidError("unsafe_file_path")
         return normalized
 
     @staticmethod
