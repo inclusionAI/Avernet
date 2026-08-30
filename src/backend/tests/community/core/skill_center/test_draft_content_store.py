@@ -296,6 +296,20 @@ def test_oss_adapter_maps_storage_failures_to_stable_errors(
     assert error.value.code is expected_code
 
 
+def test_oss_adapter_maps_found_without_content_to_storage_failures() -> None:
+    objects = _Objects()
+    store = _oss_store(objects)
+    objects.read_override = ObjectReadResult(ObjectReadStatus.FOUND)
+
+    with pytest.raises(DraftContentStoreError) as write_error:
+        store.write_revision(_identity(), _package())
+    assert write_error.value.code is DraftContentStoreErrorCode.WRITE_FAILED
+
+    with pytest.raises(DraftContentStoreError) as read_error:
+        store.read_revision(DraftRevisionRef.from_identity(_identity()))
+    assert read_error.value.code is DraftContentStoreErrorCode.READ_FAILED
+
+
 def test_oss_adapter_fails_closed_on_missing_or_noncanonical_content() -> None:
     objects = _Objects()
     store = _oss_store(objects)

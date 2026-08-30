@@ -13,6 +13,9 @@ the call. A consumer bypassing the plugin would never trigger them.
 
 from __future__ import annotations
 
+import pytest
+from injector import singleton
+
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterStoreConfig,
     CanonicalCenterVersion,
@@ -22,7 +25,10 @@ from agentclaw.community.core.skill_center.services.canonical_center_store impor
     OssCanonicalCenterVersionStore,
 )
 from agentclaw.community.core.skill_center.draft_content import (
+    DraftContentStore,
     DraftContentStoreConfig,
+    DraftContentStoreError,
+    DraftContentStoreErrorCode,
     DraftRevisionIdentity,
 )
 from agentclaw.community.core.skill_center.services.draft_content_store import (
@@ -113,7 +119,7 @@ def test_canonical_store_consumer_hits_immutable_object_capability(world) -> Non
     assert objects.read_object.call_count == 2
 
 
-def test_immutable_draft_consumer_uses_atomic_object_contract(world) -> None:
+def _draft_consumer(world):
     validator = SkillPackageValidator(SkillParser())
     package = validator.validate_directory(
         [
@@ -124,14 +130,23 @@ def test_immutable_draft_consumer_uses_atomic_object_contract(world) -> None:
         ]
     )
     objects = world.get(ObjectStoragePlugin)
+    world.injector.binder.bind(
+        DraftContentStore,
+        to=OssDraftContentStore(
+            object_storage=objects,
+            package_validator=validator,
+            config=DraftContentStoreConfig(),
+        ),
+        scope=singleton,
+    )
+    return world.get(DraftContentStore), objects, package
+
+
+def test_immutable_draft_consumer_uses_atomic_object_contract(world) -> None:
+    store, objects, package = _draft_consumer(world)
     objects.create_object_if_absent.return_value = ObjectCreateResult.CREATED
     objects.read_object.return_value = ObjectReadResult(
         ObjectReadStatus.FOUND, package.canonical_zip
-    )
-    store = OssDraftContentStore(
-        object_storage=objects,
-        package_validator=validator,
-        config=DraftContentStoreConfig(),
     )
 
     store.write_revision(
@@ -147,3 +162,24 @@ def test_immutable_draft_consumer_uses_atomic_object_contract(world) -> None:
 
     objects.create_object_if_absent.assert_called_once()
     objects.read_object.assert_called_once()
+
+
+def test_immutable_draft_consumer_propagates_atomic_create_failure(world) -> None:
+    store, objects, package = _draft_consumer(world)
+    objects.create_object_if_absent.return_value = ObjectCreateResult.FAILED
+
+    with pytest.raises(DraftContentStoreError) as error:
+        store.write_revision(
+            DraftRevisionIdentity(
+                tenant="tenant",
+                env="pre",
+                skill_uuid="11111111-1111-4111-8111-111111111111",
+                target_version=1,
+                revision_id="22222222-2222-4222-8222-222222222222",
+            ),
+            package,
+        )
+
+    assert error.value.code is DraftContentStoreErrorCode.WRITE_FAILED
+    objects.create_object_if_absent.assert_called_once()
+    objects.read_object.assert_not_called()

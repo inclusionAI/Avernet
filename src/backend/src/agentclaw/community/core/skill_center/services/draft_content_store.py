@@ -85,6 +85,15 @@ class OssDraftContentStore:
                 DraftContentStoreErrorCode.WRITE_FAILED,
                 "Draft revision disappeared after conditional create",
             )
+        if verified.content is None:
+            raise DraftContentStoreError(
+                (
+                    DraftContentStoreErrorCode.WRITE_FAILED
+                    if created is ObjectCreateResult.CREATED
+                    else DraftContentStoreErrorCode.READ_FAILED
+                ),
+                "Object storage returned FOUND without Draft content",
+            )
         if verified.content != package.canonical_zip:
             raise DraftContentStoreError(
                 DraftContentStoreErrorCode.CONTENT_CONFLICT,
@@ -107,8 +116,8 @@ class OssDraftContentStore:
         stored = result.content
         if stored is None:
             raise DraftContentStoreError(
-                DraftContentStoreErrorCode.CORRUPT_CONTENT,
-                "Object storage returned FOUND without content",
+                DraftContentStoreErrorCode.READ_FAILED,
+                "Object storage returned FOUND without Draft content",
             )
         try:
             package = self._validator.validate_zip(stored)
