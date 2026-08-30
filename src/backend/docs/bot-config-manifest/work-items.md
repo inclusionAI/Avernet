@@ -443,9 +443,9 @@ Owed by other teams. **None blocks W1–W6.**
 
 | # | What is being asked | Gates | Owner | State |
 | --- | --- | --- | --- | --- |
-| **X1** | Ant Code credentials — **largely answered from the published doc**, see below. Two questions remain: does Ant Code offer **Deploy Tokens** (not deploy *keys*), and what is the **maximum token expiry**? | **W7** | backend + git hosting | Mostly answered |
+| ~~**X1**~~ | ~~Ant Code credentials~~ | — | — | **Closed: dedicated machine account + `read_repository` 访问令牌**, HTTP Basic. No Deploy Tokens exist; expiry is owner-managed (§4, X1) |
 | **X2** | teclaw readiness/convergence — **answered**, see below | **W8** teclaw arm | teclaw + backend | **Answered**; superseded by W12 |
-| **X3** | `cli_tools` — only **one** question is outstanding for others: **O9, is the target container architecture uniform**, or do we need per-arch sources? It changes the schema, so it gates W9's schema. Everything else is our own work, see below | **W9** | business (O9) | One question open |
+| **X3** | `cli_tools` — one question remains: **O9, is every ARCA bot container the same CPU architecture** (x86_64), or is the fleet mixed? Not about paths or engines — about the machine code a shipped binary is compiled for. **W9 can proceed without it**, see below | **W9** | whoever operates the ARCA fleet | One question open, non-blocking |
 | ~~**X4**~~ | ~~desktop in the v1 surface~~ | — | — | **Closed: desktop is out of scope** (§2.5) |
 
 ### X1 — Ant Code credential choice
@@ -485,21 +485,26 @@ W7 would do a **shallow single-ref fetch** instead. Taking the API route means
 accepting the `api` scope — read/write to everything — which is a far worse thing
 to hold in our database than a clone is to run.
 
-**Two questions remain for the Ant Code team:**
+**Both follow-up questions are now answered — X1 is closed.** Ant Code offers no
+Deploy Tokens, and **token expiry is the credential owner's responsibility**
+rather than something the platform rotates.
 
-1. **Do Deploy *Tokens* exist?** GitLab-family systems usually offer them
-   alongside deploy *keys*: repo-scoped, read-only, HTTPS/Basic. That would be
-   strictly better than everything above and would fit v1 unchanged. The doc
-   covers 公钥 only and does not say either way.
-2. **What is the maximum token expiry?** The doc recommends one day. Unattended
-   fetching on a one-day token requires automated rotation, which is real work we
-   would rather scope deliberately than discover.
+Owner-managed expiry has one design consequence, and it belongs to W3 and W4: an
+expired token is indistinguishable from any other fetch failure unless we make it
+distinguishable. Under §2.7 a running bot is untouched by a failed fetch — correct,
+but it means **a token can silently expire and nothing visibly breaks until a bot
+is next created or restarted**, at which point a first boot stays inactive.
+
+So: an authentication failure (401/403) must be reported in the apply report as
+*"credential `<name>` was rejected"*, named and distinct from a generic fetch
+error, so the owner knows to rotate rather than hunting a network problem. Cheap
+to do, and the only thing that makes owner-managed expiry operable.
 
 Deploy *keys* stay the best security answer on paper — repo-scoped and read-only
 beats user-scoped and read-only — but they are SSH: a second transport in a
 fetcher built HTTPS-only around SSRF guards, host-key verification, and a
-credential model storing a private key rather than a header. A deliberate trade,
-not a default.
+credential model storing a private key rather than a header. Not worth it for v1
+now that the header route is settled.
 
 ### X2 — answered, and it raised a bigger one
 
@@ -562,13 +567,54 @@ Findings, checked against the code:
   「**禁止引用 bcs-cli 或任何子命令**」 (forbidden to reference bcs-cli or any
   subcommand). `bcs-coordination` itself declares `allowed-tools: [exec]`.
 
-**What is actually outstanding here.** Only **O9**: is the target container
-architecture uniform (x86_64), or do we need per-arch sources — per-arch URLs, or
-an `${OCB_ARCH}` variable? That changes the manifest *schema*, so it must be
-settled before W9's schema is final. Everything else below is our own work: the
-artifact protocol for teclaw (we design, they implement), the per-engine ARCA PATH
-proposal, and the tools-usage skill. teclaw implementing the protocol is a
-delivery dependency, not a question.
+**What is actually outstanding here.** Only **O9**, and it is narrower than its
+one-line summary suggests.
+
+#### O9 is about CPU architecture, not paths
+
+`cli_tools` ships a **compiled binary**. A binary built for `x86_64` does not run
+on `aarch64` — it fails with `exec format error` inside the container, at the
+moment the model tries to use the tool. A manifest entry names **one** URL:
+
+```yaml
+cli_tools:
+  - name: mycli
+    source: https://my-svc.example.com/tools/mycli-linux-amd64
+```
+
+If every ARCA bot container runs on x86_64, that single URL is always right. If
+the fleet is mixed, it is wrong for some fraction of bots and the schema needs
+per-arch sources — per-arch URLs, or an `${OCB_ARCH}` substitution.
+
+This is **not** the question of where the tool directory sits or whether the PATH
+reaches it. That is our design choice, engine-independent, and settled. Nor does
+it vary by engine: it varies by the **machine the container is scheduled on**, so
+it is a question for whoever operates the ARCA fleet.
+
+**It cannot be answered from the code.** The backend has no notion of container
+architecture: images are pinned by name (`arca_image_pin.py`, `sbot_docker_image`)
+and placement is ARCA's decision. There is no arch branching anywhere in
+`core/service_bot/` or `core/devices/`.
+
+#### W9 does not have to wait for it
+
+Two cheap choices make the answer non-blocking:
+
+- **Reserve `${OCB_ARCH}` in the variable whitelist now.** W1 defines that
+  whitelist and it is versioned with `schema_version`; adding the name costs
+  nothing today and avoids a schema-version bump if per-arch sources are needed
+  later.
+- **Validate the binary's architecture at materialisation.** Read the ELF header
+  of a fetched binary and refuse it when it does not match the target. A mismatch
+  then fails loudly in the apply report, rather than as an `exec format error` the
+  model hits mid-task with no explanation.
+
+With those, v1 ships a single URL and a mixed fleet becomes an additive change
+rather than a redesign.
+
+Everything else below is our own work: the artifact protocol for teclaw (we
+design, they implement), the per-engine ARCA PATH proposal, and the tools-usage
+skill. teclaw implementing the protocol is a delivery dependency, not a question.
 
 **Is there already a CLI mechanism we would be duplicating? No — and that is the
 answer that matters.** Every `bcs-cli` reference in the repository lives in
