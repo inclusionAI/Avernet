@@ -6,7 +6,7 @@ CREATE INDEX IF NOT EXISTS idx_skill_center_public_locator
 CREATE TABLE IF NOT EXISTS ac_skill_center_reference_batch (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   request_id VARCHAR(64) NOT NULL,
-  idempotency_key VARCHAR(190) NOT NULL,
+  idempotency_key VARCHAR(190) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   request_hash VARCHAR(64) NOT NULL,
   bot_id VARCHAR(100) NOT NULL,
   owner_id VARCHAR(128) NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS ac_skill_center_reference_item (
   owner_id VARCHAR(128) NOT NULL,
   skill_set_id VARCHAR(64) NOT NULL,
   actor_id VARCHAR(128) NOT NULL,
-  skill_code VARCHAR(512) NOT NULL,
+  skill_code VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   sc_version_number VARCHAR(128) NULL,
   skill_version_id BIGINT UNSIGNED NULL,
   resolved_skill_id BIGINT UNSIGNED NULL,

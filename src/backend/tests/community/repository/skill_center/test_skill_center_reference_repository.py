@@ -70,6 +70,18 @@ def test_create_replays_the_original_batch_and_rejects_key_reuse() -> None:
             request_id="ignored-request",
             reference_ids=("ignored-a", "ignored-b"),
         )
+        case_distinct = repo.create_or_get_batch(
+            env="pre",
+            bot_id="bot-a",
+            owner_id="owner-a",
+            skill_set_id="42",
+            actor_id="actor-a",
+            idempotency_key="Reference-Key",
+            request_hash="hash-case",
+            skill_codes=("public-c",),
+            request_id="request-case",
+            reference_ids=("reference-case",),
+        )
 
         with pytest.raises(ReferenceIdempotencyConflictError):
             repo.create_or_get_batch(
@@ -87,6 +99,7 @@ def test_create_replays_the_original_batch_and_rejects_key_reuse() -> None:
 
     assert first.created is True
     assert replay.created is False
+    assert case_distinct.created is True
     assert replay.batch.request_id == "request-a"
     assert tuple(item.reference_id for item in replay.batch.items) == (
         "reference-a",
@@ -200,9 +213,20 @@ def test_public_code_reuses_its_center_locator_without_reusing_same_name_local()
             sc_version_number="1.0.0",
             sc_version_id=10001,
         )
+        case_variant = repo.ensure_public_version(
+            env="pre",
+            actor_id="actor",
+            skill_code="External-Code",
+            skill_name="case-distinct",
+            description=None,
+            sc_skill_id=9002,
+            sc_version_number="1.0.0",
+            sc_version_id=10002,
+        )
 
     assert replay == first
     assert renamed == first
+    assert case_variant.skill_id != first.skill_id
     assert first.skill_id != 1
     with db.orm_session() as session:
         public = session.get(Skill, first.skill_id)
@@ -233,6 +257,7 @@ def test_group4_ddl_declares_durable_identity_and_collection_indexes() -> None:
     assert "uk_sc_reference_code" in ddl
     assert "idx_sc_reference_collection" in ddl
     assert "idx_skill_center_public_locator" in ddl
+    assert ddl.count("COLLATE utf8mb4_bin") == 2
     assert "ac_skill_center_reference_batch" in verify
     assert "ac_skill_center_reference_item" in verify
 

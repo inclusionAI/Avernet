@@ -25,6 +25,12 @@ UnsignedBigInteger = (
     .with_variant(mysql.BIGINT(unsigned=True), "mysql")
     .with_variant(Integer, "sqlite")
 )
+OpaqueCommandKey = String(190).with_variant(
+    mysql.VARCHAR(190, collation="utf8mb4_bin"), "mysql"
+)
+ExternalSkillCode = String(512).with_variant(
+    mysql.VARCHAR(512, collation="utf8mb4_bin"), "mysql"
+)
 
 
 class SkillCenterReferenceBatchModel(Base):
@@ -44,7 +50,7 @@ class SkillCenterReferenceBatchModel(Base):
 
     id = Column(UnsignedBigInteger, primary_key=True, autoincrement=True)
     request_id = Column(String(64), nullable=False)
-    idempotency_key = Column(String(190), nullable=False)
+    idempotency_key = Column(OpaqueCommandKey, nullable=False)
     request_hash = Column(String(64), nullable=False)
     bot_id = Column(String(100), nullable=False)
     owner_id = Column(String(128), nullable=False)
@@ -104,7 +110,7 @@ class SkillCenterReferenceItemModel(Base):
     owner_id = Column(String(128), nullable=False)
     skill_set_id = Column(String(64), nullable=False)
     actor_id = Column(String(128), nullable=False)
-    skill_code = Column(String(512), nullable=False)
+    skill_code = Column(ExternalSkillCode, nullable=False)
     sc_version_number = Column(String(128), nullable=True)
     skill_version_id = Column(UnsignedBigInteger, nullable=True)
     resolved_skill_id = Column(UnsignedBigInteger, nullable=True)

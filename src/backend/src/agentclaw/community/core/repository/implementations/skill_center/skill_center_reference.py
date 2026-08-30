@@ -258,22 +258,8 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
         tenant = get_current_avernet_tenant()
         locator = f"center://{skill_code}"
         with self._db.orm_session() as session:
-            skill = (
-                session.query(Skill)
-                .outerjoin(
-                    SkillSpaceBinding,
-                    (SkillSpaceBinding.skill_id == Skill.id)
-                    & (SkillSpaceBinding.env == env),
-                )
-                .filter(
-                    Skill.avernet_tenant == tenant,
-                    Skill.env == env,
-                    Skill.git_path == locator,
-                    Skill.is_public.is_(True),
-                    SkillSpaceBinding.id.is_(None),
-                )
-                .with_for_update()
-                .one_or_none()
+            skill = self._find_public_skill(
+                session, tenant=tenant, env=env, locator=locator
             )
             if skill is None:
                 skill = Skill(
@@ -304,22 +290,8 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
                         session.add(skill)
                         session.flush()
                 except IntegrityError:
-                    skill = (
-                        session.query(Skill)
-                        .outerjoin(
-                            SkillSpaceBinding,
-                            (SkillSpaceBinding.skill_id == Skill.id)
-                            & (SkillSpaceBinding.env == env),
-                        )
-                        .filter(
-                            Skill.avernet_tenant == tenant,
-                            Skill.env == env,
-                            Skill.git_path == locator,
-                            Skill.is_public.is_(True),
-                            SkillSpaceBinding.id.is_(None),
-                        )
-                        .with_for_update()
-                        .one_or_none()
+                    skill = self._find_public_skill(
+                        session, tenant=tenant, env=env, locator=locator
                     )
                     if skill is None:
                         raise
@@ -391,6 +363,30 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
                 skill_version_id=int(existing.id),
                 status=existing.status,
             )
+
+    @staticmethod
+    def _find_public_skill(session, *, tenant: str, env: str, locator: str):
+        # Production's legacy ``git_path`` collation may fold case.  Let the
+        # indexed predicate narrow candidates, then require exact Python string
+        # equality so two externally distinct skill_codes never alias.
+        candidates = (
+            session.query(Skill)
+            .outerjoin(
+                SkillSpaceBinding,
+                (SkillSpaceBinding.skill_id == Skill.id)
+                & (SkillSpaceBinding.env == env),
+            )
+            .filter(
+                Skill.avernet_tenant == tenant,
+                Skill.env == env,
+                Skill.git_path == locator,
+                Skill.is_public.is_(True),
+                SkillSpaceBinding.id.is_(None),
+            )
+            .with_for_update()
+            .all()
+        )
+        return next((row for row in candidates if row.git_path == locator), None)
 
     def list_items(
         self,
