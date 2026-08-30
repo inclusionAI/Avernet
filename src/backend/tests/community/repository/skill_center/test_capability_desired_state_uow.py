@@ -2600,6 +2600,31 @@ def test_restore_desired_state_compensates_exclusion_commands():
     ).changed
 
 
+def test_compensation_cannot_restore_reference_after_offline_wins():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, skill = _seed_default_with_member(db)
+    previous = repository.snapshot_desired_state(
+        bot_id="bot", owner_id="owner", engine_type="openclaw"
+    )
+    with db.transactional_orm_session() as session:
+        session.query(BotSkillInstallation).filter_by(skill_id=skill.id).delete()
+        persisted = session.query(Skill).filter_by(id=skill.id).one()
+        persisted.offline_at = datetime(2026, 8, 30, 12, 0)
+        persisted.offline_by = "owner"
+
+    with pytest.raises(SkillOfflineError, match="SKILL_OFFLINE"):
+        repository.restore_desired_state(
+            bot_id="bot",
+            owner_id="owner",
+            state=previous,
+            engine_type="openclaw",
+        )
+
+    with db.orm_session() as session:
+        assert session.query(BotSkillInstallation).count() == 0
+
+
 def test_excluding_a_stray_mcp_code_owns_neither_half():
     """The MCP twin of the skill never-member gate: no dangling row.
 

@@ -141,14 +141,18 @@ def test_reader_finds_file_and_teclaw_exact_refs_across_complete_pages():
     assert pages.calls == [None, 1]
 
 
-def test_reader_keeps_old_artifacts_compatible_and_ignores_draft_failed_audit_rows():
+def test_reader_keeps_old_artifacts_compatible_and_skips_non_replayable_rows():
     pages = _Pages(
         [
             BotPublishLineagePage(
                 records=(
                     _record(1, ext={"migration_path": "/legacy/v1"}),
                     _record(2, status="draft", ext={"skills_manifest": "broken"}),
-                    _record(3, status="failed", ext={"config_artifact": "broken"}),
+                    _record(
+                        3,
+                        status="failed",
+                        ext={"source_status": "building"},
+                    ),
                 ),
                 next_cursor=None,
                 complete=True,
@@ -160,6 +164,55 @@ def test_reader_keeps_old_artifacts_compatible_and_ignores_draft_failed_audit_ro
 
     assert result.references == ()
     assert result.unknown == ()
+
+
+def test_reader_blocks_failed_record_that_can_retry_frozen_artifact():
+    pages = _Pages(
+        [
+            BotPublishLineagePage(
+                records=(
+                    _record(
+                        4,
+                        status="failed",
+                        ext={
+                            "source_status": "success",
+                            "config_artifact": {
+                                "schema_version": 4,
+                                "engine_type": "teclaw",
+                                "skills": [
+                                    {
+                                        "name": "pdf",
+                                        "scope": "shared",
+                                        "store": "skill-center",
+                                        "path": f"{_UUID}/4.0.0",
+                                    }
+                                ],
+                                "stores": {
+                                    "skill-center": {
+                                        "type": "oss",
+                                        "bucket": "bucket",
+                                        "base": "skills-center",
+                                    }
+                                },
+                            },
+                        },
+                    ),
+                ),
+                next_cursor=None,
+                complete=True,
+            )
+        ]
+    )
+
+    result = ServiceArtifactLineageReader(pages).scan(
+        skill_uuid=_UUID,
+        env="test",
+    )
+
+    assert result.unknown == ()
+    assert [(item.publish_id, item.sc_version_number) for item in result.references] == [
+        (4, "4.0.0")
+    ]
 
 
 def test_reader_fails_closed_for_corrupt_artifact_and_incomplete_pagination():

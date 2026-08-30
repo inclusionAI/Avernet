@@ -897,19 +897,18 @@ def _error_response(
     data: object | None = None,
 ) -> JSONResponse:
     # ``ErrorEnvelope``, not ``Envelope``: it is the model every route documents
-    # for failures (``ERROR_RESPONSES``), and since ``Envelope`` gained the
-    # optional ``warning`` field the two shapes are no longer identical. Building
-    # the documented model keeps the wire and the published schema in step — an
-    # error body has no partial payload to caveat, so ``warning`` has no meaning
-    # here.
-    content = ErrorEnvelope(
-        code=code if code is not None else http_status * 1000,
-        message=message,
-        data=None,
-        request_id=_trace_id(request),
-    ).model_dump()
-    if data is not None:
-        content["data"] = jsonable_encoder(data)
+    resolved_code = code if code is not None else http_status * 1000
+    request_id = _trace_id(request)
+    if data is None:
+        content = ErrorEnvelope(
+            code=resolved_code, message=message, data=None, request_id=request_id
+        ).model_dump()
+    else:
+        # P2-OFF-002 documents Envelope[SkillOfflineImpact], not ErrorEnvelope.
+        content = dict(
+            code=resolved_code, message=message,
+            data=jsonable_encoder(data), request_id=request_id,
+        )
     return JSONResponse(
         status_code=http_status,
         content=content,

@@ -20,7 +20,7 @@ from agentclaw.community.core.service_bot.services.service_artifact_refs import 
 
 
 _PAGE_SIZE = 100
-_AUDIT_ONLY_STATUSES = {PublishStatus.DRAFT.value, PublishStatus.FAILED.value}
+_AUDIT_ONLY_STATUSES = {PublishStatus.DRAFT.value}
 
 
 class ServiceArtifactLineageReader(ServiceArtifactLineageReaderProtocol):
@@ -81,7 +81,14 @@ class ServiceArtifactLineageReader(ServiceArtifactLineageReaderProtocol):
                     )
                     if not has_artifact:
                         # BUILDING has not crossed the replayable commit seam yet.
-                        if status is PublishStatus.BUILDING:
+                        # A FAILED build is equally non-replayable only when its
+                        # retry source is BUILDING; every later FAILED state can
+                        # retry from the already-frozen Artifact and must block.
+                        failed_before_artifact = (
+                            status is PublishStatus.FAILED
+                            and ext.get("source_status") == PublishStatus.BUILDING.value
+                        )
+                        if status is PublishStatus.BUILDING or failed_before_artifact:
                             continue
                         raise ValueError("replayable record has no artifact")
                     refs = exact_center_refs_from_artifact_ext(ext)

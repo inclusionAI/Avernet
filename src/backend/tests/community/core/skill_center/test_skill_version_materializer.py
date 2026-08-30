@@ -6,10 +6,30 @@ import hashlib
 import io
 import json
 import zipfile
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.core.base import Base
+from agentclaw.community.core.models.skill import Skill
+from agentclaw.community.core.models.space_skill import (
+    SkillGrant,
+    SkillSpaceBinding,
+    SkillVersion,
+)
+from agentclaw.community.core.repository.implementations.skill_center.skill_version import (
+    SkillVersionRepository,
+)
+from agentclaw.community.core.repository.implementations.skill_center.space_skill_offline import (
+    SpaceSkillOfflineRepository,
+)
+from agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol import (
+    ServiceArtifactLineage,
+)
+from agentclaw.community.core.skill_center.draft_content import DraftRevisionRef
 from agentclaw.community.core.skill_center.materialization_contract import (
     MaterializingSkillVersion,
     PublishedMaterializedSkillVersion,
@@ -22,11 +42,18 @@ from agentclaw.community.core.skill_center.services.skill_version_materializer i
     SdkSkillVersionScanner,
     SkillVersionMaterializer,
 )
+from agentclaw.community.core.skill_center.services.published_version_draft import (
+    PreparedPublishedVersionDraft,
+)
+from agentclaw.community.core.skill_center.services.space_skill_offline_service import (
+    SpaceSkillOfflineService,
+)
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterExactDownload,
     SkillCenterReadScope,
 )
+from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.testing.canonical_center_store import (
     LocalCanonicalCenterVersionStore,
 )
@@ -257,3 +284,178 @@ def test_sdk_scanner_unavailable_fails_closed() -> None:
 
     with pytest.raises(SkillVersionMaterializationError, match="unavailable"):
         SdkSkillVersionScanner(_Plugin()).scan(package)
+
+
+class _RecoveryDatabase:
+    def __init__(self) -> None:
+        self.engine = create_engine("sqlite://")
+        Base.metadata.create_all(self.engine)
+        self._factory = sessionmaker(bind=self.engine)
+
+    @contextmanager
+    def orm_session(self):
+        session = self._factory()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    transactional_orm_session = orm_session
+
+
+class _RecoveryAccess:
+    def require_space_member(self, **_kwargs) -> None:
+        return None
+
+
+class _RecoveryLineage:
+    def scan(self, **_kwargs) -> ServiceArtifactLineage:
+        return ServiceArtifactLineage((), ())
+
+
+class _RecoveryDrafts:
+    def __init__(self, *, skill_uuid: str) -> None:
+        self.skill_uuid = skill_uuid
+
+    def prepare(self, *, identity, latest) -> PreparedPublishedVersionDraft:
+        assert identity["skill_uuid"] == self.skill_uuid
+        return PreparedPublishedVersionDraft(
+            expected_version_id=int(latest["id"]),
+            target_version=int(latest["version_ordinal"]) + 1,
+            description="old",
+            ref=DraftRevisionRef(
+                tenant="teamclaw",
+                env="pre",
+                skill_uuid=self.skill_uuid,
+                target_version=3,
+                revision_id="33333333-3333-4333-8333-333333333333",
+            ),
+        )
+
+    def discard(self, _prepared) -> None:
+        raise AssertionError("successful Offline must retain the Draft revision")
+
+
+def test_offline_vn_plus_one_recovers_through_unified_materializer() -> None:
+    db = _RecoveryDatabase()
+    skill_uuid = "00000000-0000-4000-8000-000000000010"
+    with db.orm_session() as session:
+        space = SpaceModel(
+            space_code="materializer-recovery",
+            space_type="TEAM",
+            name="Recovery",
+            created_by="owner",
+            updated_by="owner",
+            env="pre",
+        )
+        skill = Skill(
+            name="weather",
+            git_path=f"center://{skill_uuid}",
+            skill_uuid=skill_uuid,
+            status="PUBLISHED",
+            env="pre",
+        )
+        session.add_all((space, skill))
+        session.flush()
+        skill_id = int(skill.id)
+        session.add_all(
+            (
+                SkillSpaceBinding(
+                    skill_id=skill_id,
+                    space_id=int(space.id),
+                    created_by="owner",
+                    env="pre",
+                ),
+                SkillGrant(
+                    skill_id=skill_id,
+                    user_id="owner",
+                    role="OWNER",
+                    status="ACTIVE",
+                    owner_slot=1,
+                    granted_by="owner",
+                    env="pre",
+                ),
+                SkillVersion(
+                    id=101,
+                    skill_id=skill_id,
+                    version_ordinal=2,
+                    status="PUBLISHED",
+                    sc_version_number="2.0.0",
+                    sc_skill_id=1010,
+                    sc_version_id=2101,
+                    name="weather",
+                    description="old",
+                    metadata_json='{"mcp_dependencies": []}',
+                    published_at=datetime(2026, 8, 29, tzinfo=UTC),
+                    created_by="owner",
+                    env="pre",
+                ),
+            )
+        )
+        space_id = int(space.id)
+
+    offline = SpaceSkillOfflineService(
+        access=_RecoveryAccess(),
+        repository=SpaceSkillOfflineRepository(db),
+        lineage=_RecoveryLineage(),
+        drafts=_RecoveryDrafts(skill_uuid=skill_uuid),
+        env_provider=lambda: "pre",
+        tenant_provider=lambda: "teamclaw",
+    )
+    committed = offline.offline(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+    )
+    assert committed.draft.target_version == 3
+    with db.orm_session() as session:
+        persisted = session.query(Skill).filter_by(id=skill_id).one()
+        assert persisted.offline_at is not None
+        session.add(
+            SkillVersion(
+                id=102,
+                skill_id=skill_id,
+                version_ordinal=3,
+                status="MATERIALIZING",
+                sc_version_number="3.0.0",
+                sc_skill_id=1010,
+                sc_version_id=2102,
+                name="weather",
+                created_by="owner",
+                env="pre",
+            )
+        )
+
+    package = _package()
+    published = SkillVersionMaterializer(
+        versions=SkillVersionRepository(db),
+        gateway=_Gateway(package),
+        http=_Http(package),
+        validator=SkillPackageValidator(SkillParser()),
+        scanner=_Scanner(),
+        store=LocalCanonicalCenterVersionStore(),
+        clock=lambda: datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
+    ).materialize(
+        SkillVersionMaterializationRequest(
+            env="pre",
+            skill_id=skill_id,
+            skill_version_id=102,
+            scope=SkillCenterReadScope.TEAM,
+            team_id="91",
+        )
+    )
+
+    assert published.status == "PUBLISHED"
+    assert published.version_ordinal == 3
+    with db.orm_session() as session:
+        recovered = session.query(Skill).filter_by(id=skill_id).one()
+        assert recovered.offline_at is None
+        assert recovered.offline_by is None
+        assert (
+            session.query(SkillVersion).filter_by(id=101).one().status
+            == "PUBLISHED"
+        )

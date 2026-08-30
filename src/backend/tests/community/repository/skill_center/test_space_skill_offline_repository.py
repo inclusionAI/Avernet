@@ -8,12 +8,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.api.service_artifact_lineage import (
-    ServiceArtifactLineage,
-    ServiceArtifactReference,
-    UnknownServiceArtifact,
+from agentclaw.community.api.space_skill_offline_service import (
+    OfflineBlockerKind,
+    OfflineImpact,
+    OfflineImpactItem,
 )
-from agentclaw.community.api.space_skill_offline_service import OfflineBlockerKind
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
@@ -57,18 +56,6 @@ class _Database:
             session.close()
 
     transactional_orm_session = orm_session
-
-
-class _Lineage:
-    def __init__(self, *answers: ServiceArtifactLineage) -> None:
-        self.answers = list(answers) or [ServiceArtifactLineage((), ())]
-
-    def scan(self, *, skill_uuid, env):
-        assert skill_uuid == _UUID
-        assert env == "test"
-        if len(self.answers) > 1:
-            return self.answers.pop(0)
-        return self.answers[0]
 
 
 def _seed(db: _Database):
@@ -125,7 +112,7 @@ def _seed(db: _Database):
         return int(space.id), int(skill.id)
 
 
-def test_inspection_includes_inactive_membership_installation_attempt_and_unknown_artifact():
+def test_inspection_includes_inactive_membership_installation_and_attempt():
     db = _Database()
     space_id, skill_id = _seed(db)
     with db.orm_session() as session:
@@ -137,12 +124,25 @@ def test_inspection_includes_inactive_membership_installation_attempt_and_unknow
             is_default=False,
             env="test",
         )
-        session.add(skill_set)
+        default_set = SkillSet(
+            name="Default Set",
+            user_id="",
+            bolt_id="",
+            is_active=True,
+            is_default=True,
+            env="test",
+        )
+        session.add_all((skill_set, default_set))
         session.flush()
         session.add_all(
             [
                 SkillSetSkill(
                     skill_set_id=skill_set.id,
+                    skill_id=skill_id,
+                    env="test",
+                ),
+                SkillSetSkill(
+                    skill_set_id=default_set.id,
                     skill_id=skill_id,
                     env="test",
                 ),
@@ -163,19 +163,7 @@ def test_inspection_includes_inactive_membership_installation_attempt_and_unknow
                 ),
             ]
         )
-    lineage = _Lineage(
-        ServiceArtifactLineage(
-            (),
-            (
-                UnknownServiceArtifact(
-                    resource_id="artifact-scan",
-                    display_name="scan incomplete",
-                ),
-            ),
-        )
-    )
-
-    inspection = SpaceSkillOfflineRepository(db, lineage).inspect(
+    inspection = SpaceSkillOfflineRepository(db).inspect(
         space_id=space_id,
         skill_id=skill_id,
         actor_id="owner-1",
@@ -185,15 +173,15 @@ def test_inspection_includes_inactive_membership_installation_attempt_and_unknow
     assert [item.kind for item in inspection.blockers] == [
         OfflineBlockerKind.PUBLICATION,
         OfflineBlockerKind.MEMBERSHIP,
+        OfflineBlockerKind.MEMBERSHIP,
         OfflineBlockerKind.INSTALLATION,
-        OfflineBlockerKind.UNKNOWN_ARTIFACT,
     ]
 
 
 def test_offline_commit_preserves_published_version_and_creates_editing_vn_plus_one():
     db = _Database()
     space_id, skill_id = _seed(db)
-    repo = SpaceSkillOfflineRepository(db, _Lineage())
+    repo = SpaceSkillOfflineRepository(db)
     identity = repo.inspect(
         space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="test"
     ).identity
@@ -207,6 +195,7 @@ def test_offline_commit_preserves_published_version_and_creates_editing_vn_plus_
         new_locator=f"draft://{_UUID}/v3/{_REV}",
         new_description="published",
         env="test",
+        guard=lambda _inspection: None,
     )
 
     assert result.changed is True
@@ -220,26 +209,30 @@ def test_offline_commit_preserves_published_version_and_creates_editing_vn_plus_
         assert session.query(SkillVersion).filter_by(skill_id=skill_id).count() == 1
 
 
-def test_artifact_inserted_after_preview_blocks_transactional_recheck():
+def test_transaction_guard_runs_after_locked_db_recheck_and_can_abort():
     db = _Database()
     space_id, skill_id = _seed(db)
-    empty = ServiceArtifactLineage((), ())
-    new_artifact = ServiceArtifactLineage(
-        (
-            ServiceArtifactReference(
-                publish_id=88,
-                source_bot_id="service-a",
-                source_bot_name="Service A",
-                service_version=4,
-                sc_version_number="2.0.0",
-            ),
-        ),
-        (),
-    )
-    repo = SpaceSkillOfflineRepository(db, _Lineage(empty, new_artifact))
+    repo = SpaceSkillOfflineRepository(db)
     identity = repo.inspect(
         space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="test"
     ).identity
+
+    latest = OfflineImpactItem(
+        kind=OfflineBlockerKind.SERVICE_ARTIFACT,
+        resource_id="88",
+        display_name="Service A V4 (Skill 2.0.0)",
+    )
+
+    def _guard(locked):
+        assert locked.identity.skill_id == skill_id
+        raise SkillOfflineBlockedError(
+            OfflineImpact(
+                blocked=True,
+                total=1,
+                counts={"SERVICE_ARTIFACT": 1},
+                items=(latest,),
+            )
+        )
 
     with pytest.raises(SkillOfflineBlockedError) as blocked:
         repo.commit(
@@ -251,6 +244,7 @@ def test_artifact_inserted_after_preview_blocks_transactional_recheck():
             new_locator=f"draft://{_UUID}/v3/{_REV}",
             new_description="published",
             env="test",
+            guard=_guard,
         )
 
     assert blocked.value.impact.counts == {"SERVICE_ARTIFACT": 1}

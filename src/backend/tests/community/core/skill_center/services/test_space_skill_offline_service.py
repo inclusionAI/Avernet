@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pytest
 
 from agentclaw.community.api.space_skill_offline_service import (
     OfflineBlockerKind,
     OfflineImpactItem,
+)
+from agentclaw.community.api.service_artifact_lineage import (
+    ServiceArtifactLineage,
+    ServiceArtifactReference,
 )
 from agentclaw.community.core.repository.space_skill_offline_types import (
     OfflineCommit,
@@ -51,6 +55,8 @@ def _service(*, inspection):
     access = MagicMock()
     repository = MagicMock()
     repository.inspect.return_value = inspection
+    lineage = MagicMock()
+    lineage.scan.return_value = ServiceArtifactLineage((), ())
     drafts = MagicMock()
     prepared = PreparedPublishedVersionDraft(
         expected_version_id=61,
@@ -74,11 +80,12 @@ def _service(*, inspection):
     service = SpaceSkillOfflineService(
         access=access,
         repository=repository,
+        lineage=lineage,
         drafts=drafts,
         env_provider=lambda: "test",
         tenant_provider=lambda: "tenant-a",
     )
-    return service, access, repository, drafts, prepared
+    return service, access, repository, lineage, drafts, prepared
 
 
 def test_impact_counts_all_blocker_kinds_then_paginates_items():
@@ -117,7 +124,7 @@ def test_impact_counts_all_blocker_kinds_then_paginates_items():
 
 
 def test_offline_prepares_exact_revision_then_commits_and_returns_vn_plus_one():
-    service, _access, repository, drafts, prepared = _service(
+    service, _access, repository, _lineage, drafts, prepared = _service(
         inspection=OfflineInspection(identity=_identity(), blockers=())
     )
 
@@ -137,11 +144,12 @@ def test_offline_prepares_exact_revision_then_commits_and_returns_vn_plus_one():
         new_locator=prepared.ref.locator,
         new_description="published",
         env="test",
+        guard=ANY,
     )
 
 
 def test_offline_idempotent_replay_does_not_prepare_another_revision():
-    service, _access, repository, drafts, _prepared = _service(
+    service, _access, repository, _lineage, drafts, _prepared = _service(
         inspection=OfflineInspection(identity=_identity(offline=True, draft=True), blockers=())
     )
 
@@ -154,21 +162,34 @@ def test_offline_idempotent_replay_does_not_prepare_another_revision():
 
 
 def test_concurrent_blocker_from_transaction_recheck_discards_prepared_revision():
-    service, _access, repository, drafts, prepared = _service(
+    service, _access, repository, lineage, drafts, prepared = _service(
         inspection=OfflineInspection(identity=_identity(), blockers=())
     )
     latest = OfflineImpactItem(
         kind=OfflineBlockerKind.SERVICE_ARTIFACT,
         resource_id="88",
-        display_name="Service 88 V4",
+        display_name="Service 88 V4 (Skill 2.0.0)",
     )
-    repository.commit.side_effect = SkillOfflineBlockedError(
-        service._impact(
-            OfflineInspection(identity=_identity(), blockers=(latest,)),
-            page=1,
-            page_size=20,
+    lineage.scan.side_effect = [
+        ServiceArtifactLineage((), ()),
+        ServiceArtifactLineage(
+            (
+                ServiceArtifactReference(
+                    publish_id=88,
+                    source_bot_id="service-88",
+                    source_bot_name="Service 88",
+                    service_version=4,
+                    sc_version_number="2.0.0",
+                ),
+            ),
+            (),
         )
-    )
+    ]
+
+    def _commit(**kwargs):
+        kwargs["guard"](OfflineInspection(identity=_identity(), blockers=()))
+
+    repository.commit.side_effect = _commit
 
     with pytest.raises(SkillOfflineBlockedError) as blocked:
         service.offline(space_id=7, skill_id=51, actor_id="owner-1")

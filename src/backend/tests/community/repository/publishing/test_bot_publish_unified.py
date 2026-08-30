@@ -8,9 +8,10 @@ and single hard DELETE.
 """
 from contextlib import contextmanager
 from datetime import datetime
+from threading import Event, Thread, current_thread
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event as sqlalchemy_event
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
@@ -672,6 +673,82 @@ def test_built_artifact_commit_refuses_skill_that_offline_won_first(tmp_path):
     persisted = repo.get_by_id(record.id)
     assert persisted.status == PublishStatus.BUILDING.value
     assert persisted.ext == {"building": True}
+
+
+def test_artifact_commit_waits_for_concurrent_offline_and_then_fails(tmp_path):
+    offline_holds_transaction = Event()
+    artifact_entered_transaction = Event()
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'artifact-offline-race.db'}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+
+    @sqlalchemy_event.listens_for(engine, "connect")
+    def _manual_transactions(dbapi_connection, _connection_record):
+        dbapi_connection.isolation_level = None
+
+    @sqlalchemy_event.listens_for(engine, "begin")
+    def _begin_immediate(connection):
+        if current_thread().name == "artifact-commit":
+            artifact_entered_transaction.set()
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+    Base.metadata.create_all(engine)
+    db = _FileSqliteDB(engine)
+    repo = BotPublishRepository(
+        db,
+        offload=ConfigArtifactOffloader(_FakeOSS()),
+    )
+    bot_pk, skill_uuid = _seed_service_bot_and_skill(repo)
+    record = repo.insert(
+        _data(
+            source_bot_pk=bot_pk,
+            status=PublishStatus.BUILDING.value,
+            ext={"building": True},
+        )
+    )
+    errors: list[Exception] = []
+
+    def _offline_winner():
+        with db.orm_session() as session:
+            skill = (
+                session.query(Skill)
+                .filter(Skill.skill_uuid == skill_uuid)
+                .with_for_update()
+                .one()
+            )
+            skill.offline_at = datetime(2026, 8, 30, 12, 0)
+            skill.offline_by = "owner"
+            offline_holds_transaction.set()
+            assert artifact_entered_transaction.wait(timeout=2)
+
+    def _artifact_loser():
+        assert offline_holds_transaction.wait(timeout=2)
+        try:
+            repo.compare_and_set_built_with_ext(
+                publish_id=record.id,
+                source_status=PublishStatus.BUILDING.value,
+                target_status=PublishStatus.BUILT.value,
+                expected_ext={"building": True},
+                ext={"skills_manifest": {"schema_version": 1}},
+                center_skill_uuids=(skill_uuid,),
+                env="dev",
+            )
+        except Exception as exc:  # captured for the parent test thread
+            errors.append(exc)
+
+    offline_thread = Thread(target=_offline_winner, name="offline-command")
+    artifact_thread = Thread(target=_artifact_loser, name="artifact-commit")
+    offline_thread.start()
+    artifact_thread.start()
+    offline_thread.join(timeout=5)
+    artifact_thread.join(timeout=5)
+
+    assert not offline_thread.is_alive()
+    assert not artifact_thread.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], SkillOfflineError)
+    assert repo.get_by_id(record.id).status == PublishStatus.BUILDING.value
 
 
 def test_lineage_page_is_stable_complete_reinlined_and_excludes_deleted_bot(tmp_path):

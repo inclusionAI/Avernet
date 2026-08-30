@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from injector import inject
 from sqlalchemy import or_
 
-from agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol import (
-    ServiceArtifactLineageReaderProtocol,
-)
 from agentclaw.community.core.skill_center.space_skill_offline_service_protocol import (
     OfflineBlockerKind,
-    OfflineImpact,
     OfflineImpactItem,
 )
 from agentclaw.community.core.models.skill import (
@@ -38,7 +35,6 @@ from agentclaw.community.core.repository.protocols.space_skill_offline import (
 from agentclaw.community.core.skill_center.errors import (
     DraftNotFoundError,
     DraftRevisionConflictError,
-    SkillOfflineBlockedError,
     SpaceSkillGrantForbiddenError,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
@@ -60,10 +56,8 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
     def __init__(
         self,
         db: DatabasePlugin,
-        lineage: ServiceArtifactLineageReaderProtocol,
     ) -> None:
         self._db = db
-        self._lineage = lineage
 
     def inspect(
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
@@ -78,7 +72,6 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                 lock=False,
             )
             blockers = self._db_blockers(session, identity=identity, env=env)
-        blockers.extend(self._artifact_blockers(identity=identity, env=env))
         return OfflineInspection(identity=identity, blockers=self._ordered(blockers))
 
     def commit(
@@ -92,6 +85,7 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
         new_locator: str,
         new_description: str | None,
         env: str,
+        guard: Callable[[OfflineInspection], None],
     ) -> OfflineCommit:
         with self._db.transactional_orm_session() as session:
             identity = self._identity(
@@ -116,11 +110,14 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                     locator=str(skill.zip_url),
                 )
 
-            blockers = self._db_blockers(session, identity=identity, env=env)
-            blockers.extend(self._artifact_blockers(identity=identity, env=env))
-            blockers = list(self._ordered(blockers))
-            if blockers:
-                raise SkillOfflineBlockedError(self._impact(blockers, page_size=20))
+            guard(
+                OfflineInspection(
+                    identity=identity,
+                    blockers=self._ordered(
+                        self._db_blockers(session, identity=identity, env=env)
+                    ),
+                )
+            )
             if identity.latest_version_id != expected_version_id:
                 raise DraftRevisionConflictError("latest Published Version changed")
             if target_version != identity.latest_version_ordinal + 1:
@@ -280,29 +277,6 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
         )
         return blockers
 
-    def _artifact_blockers(self, *, identity: OfflineSkillIdentity, env: str):
-        lineage = self._lineage.scan(skill_uuid=identity.skill_uuid, env=env)
-        blockers = [
-            OfflineImpactItem(
-                kind=OfflineBlockerKind.SERVICE_ARTIFACT,
-                resource_id=str(reference.publish_id),
-                display_name=(
-                    f"{reference.source_bot_name} V{reference.service_version} "
-                    f"(Skill {reference.sc_version_number})"
-                ),
-            )
-            for reference in lineage.references
-        ]
-        blockers.extend(
-            OfflineImpactItem(
-                kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
-                resource_id=item.resource_id,
-                display_name=item.display_name,
-            )
-            for item in lineage.unknown
-        )
-        return blockers
-
     @staticmethod
     def _ordered(blockers):
         return tuple(
@@ -315,19 +289,5 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                 ),
             )
         )
-
-    @staticmethod
-    def _impact(blockers, *, page_size: int) -> OfflineImpact:
-        counts = {kind.value: 0 for kind in OfflineBlockerKind}
-        for item in blockers:
-            counts[item.kind.value] += 1
-        counts = {kind: count for kind, count in counts.items() if count}
-        return OfflineImpact(
-            blocked=bool(blockers),
-            total=len(blockers),
-            counts=counts,
-            items=tuple(blockers[:page_size]),
-        )
-
 
 __all__ = ["SpaceSkillOfflineRepository"]

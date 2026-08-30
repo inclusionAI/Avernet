@@ -66,6 +66,9 @@ from agentclaw.community.core.repository.protocols.work_orders import (
 from agentclaw.community.core.repository.protocols.space_skill_offline import (
     SpaceSkillOfflineRepositoryProtocol,
 )
+from agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol import (
+    ServiceArtifactLineageReaderProtocol,
+)
 from agentclaw.community.core.spaces.services import (
     SpaceAccessService,
     SpaceMemberService,
@@ -233,6 +236,7 @@ class SpacesModule(Module):
         sources: SpaceSkillSourcePlugin,
         canonical_store: CanonicalCenterVersionStore,
         skill_center: SkillCenterGateway,
+        lineage: ServiceArtifactLineageReaderProtocol,
     ) -> SpaceSkillOfflineServiceProtocol:
         validator = SkillPackageValidator(SkillParser())
         drafts = PublishedVersionDraftBuilder(
@@ -247,6 +251,7 @@ class SpacesModule(Module):
         return SpaceSkillOfflineService(
             access=access,
             repository=repository,
+            lineage=lineage,
             drafts=drafts,
             env_provider=get_current_env,
             tenant_provider=get_current_avernet_tenant,

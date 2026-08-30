@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol import (
+    ServiceArtifactLineageReaderProtocol,
+)
 from agentclaw.community.core.skill_center.space_skill_offline_service_protocol import (
     OfflineBlockerKind,
     OfflineDraft,
     OfflineImpact,
+    OfflineImpactItem,
     SpaceSkillOfflineResult,
     SpaceSkillOfflineServiceProtocol,
 )
@@ -25,18 +29,23 @@ from agentclaw.community.core.skill_center.services.published_version_draft impo
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 
 
+_BLOCKER_ORDER = {kind: index for index, kind in enumerate(OfflineBlockerKind)}
+
+
 class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
     def __init__(
         self,
         *,
         access: SpaceAccessServiceProtocol,
         repository: SpaceSkillOfflineRepositoryProtocol,
+        lineage: ServiceArtifactLineageReaderProtocol,
         drafts: PublishedVersionDraftBuilder,
         env_provider: Callable[[], str],
         tenant_provider: Callable[[], str],
     ) -> None:
         self._access = access
         self._repository = repository
+        self._lineage = lineage
         self._drafts = drafts
         self._env_provider = env_provider
         self._tenant_provider = tenant_provider
@@ -101,6 +110,7 @@ class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
                 new_locator=prepared.ref.locator,
                 new_description=prepared.description,
                 env=self._env_provider(),
+                guard=self._guard_locked_offline,
             )
         except Exception:
             self._drafts.discard(prepared)
@@ -118,12 +128,59 @@ class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
         self, *, space_id: int, skill_id: int, actor_id: str
     ) -> OfflineInspection:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
-        return self._repository.inspect(
+        inspection = self._repository.inspect(
             space_id=space_id,
             skill_id=skill_id,
             actor_id=actor_id,
             env=self._env_provider(),
         )
+        return self._with_artifact_blockers(inspection)
+
+    def _guard_locked_offline(self, inspection: OfflineInspection) -> None:
+        latest = self._with_artifact_blockers(inspection)
+        if latest.blockers:
+            raise SkillOfflineBlockedError(
+                self._impact(latest, page=1, page_size=20)
+            )
+
+    def _with_artifact_blockers(
+        self, inspection: OfflineInspection
+    ) -> OfflineInspection:
+        lineage = self._lineage.scan(
+            skill_uuid=inspection.identity.skill_uuid,
+            env=self._env_provider(),
+        )
+        blockers = list(inspection.blockers)
+        blockers.extend(
+            OfflineImpactItem(
+                kind=OfflineBlockerKind.SERVICE_ARTIFACT,
+                resource_id=str(reference.publish_id),
+                display_name=(
+                    f"{reference.source_bot_name} V{reference.service_version} "
+                    f"(Skill {reference.sc_version_number})"
+                ),
+            )
+            for reference in lineage.references
+        )
+        blockers.extend(
+            OfflineImpactItem(
+                kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
+                resource_id=item.resource_id,
+                display_name=item.display_name,
+            )
+            for item in lineage.unknown
+        )
+        ordered = tuple(
+            sorted(
+                blockers,
+                key=lambda item: (
+                    _BLOCKER_ORDER[item.kind],
+                    item.resource_id,
+                    item.display_name,
+                ),
+            )
+        )
+        return OfflineInspection(identity=inspection.identity, blockers=ordered)
 
     @staticmethod
     def _impact(

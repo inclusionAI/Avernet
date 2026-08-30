@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -31,6 +32,7 @@ class SpaceSkillOfflineRepositoryProtocol(Protocol):
         new_locator: str,
         new_description: str | None,
         env: str,
+        guard: Callable[[OfflineInspection], None],
     ) -> OfflineCommit: ...
 
 
