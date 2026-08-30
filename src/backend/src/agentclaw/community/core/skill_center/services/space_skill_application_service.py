@@ -207,8 +207,14 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         expected_revision_id: str,
         fencing_token: int | None,
     ) -> DraftMutationResult:
-        record = self._draft_record(
-            space_id=space_id, skill_id=skill_id, actor_id=actor_id
+        self._access.require_space_member(space_id=space_id, user_id=actor_id)
+        record = self._draft_repository.get_draft_for_mutation(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            expected_revision_id=expected_revision_id,
+            fencing_token=fencing_token,
+            env=self._env_provider(),
         )
         self._require_editing(record)
         package = self._read_draft_package(record)
@@ -236,8 +242,14 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         expected_revision_id: str,
         fencing_token: int | None,
     ) -> DraftMutationResult:
-        record = self._draft_record(
-            space_id=space_id, skill_id=skill_id, actor_id=actor_id
+        self._access.require_space_member(space_id=space_id, user_id=actor_id)
+        record = self._draft_repository.get_draft_for_mutation(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            expected_revision_id=expected_revision_id,
+            fencing_token=fencing_token,
+            env=self._env_provider(),
         )
         self._require_editing(record)
         if record["source_kind"] != "GIT" or not record["source_repo_url"]:
@@ -298,6 +310,12 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
     ) -> DraftMutationResult:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
         request_id = self._request_id(request_id)
+        identity = self._draft_repository.get_skill_for_upgrade(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            env=self._env_provider(),
+        )
         replay = self._draft_repository.get_upgrade_by_request_id(
             request_id=request_id, env=self._env_provider()
         )
@@ -307,12 +325,6 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
                     "upgrade request already belongs to another Skill"
                 )
             return self._draft_result(replay)
-        identity = self._draft_repository.get_skill_for_upgrade(
-            space_id=space_id,
-            skill_id=skill_id,
-            actor_id=actor_id,
-            env=self._env_provider(),
-        )
         rows = self._versions.list_latest_published(
             env=self._env_provider(), skill_ids=(skill_id,)
         )

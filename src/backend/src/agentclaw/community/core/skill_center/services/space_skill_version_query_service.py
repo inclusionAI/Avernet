@@ -109,13 +109,13 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
     ) -> tuple[int, list[ConsumableSpaceSkillSummaryRecord]]:
         self._access.require_space_member(space_id=space_id, user_id=actor_id)
         keyword = keyword.strip() if keyword and keyword.strip() else None
-        candidates = self._repository.list_consumable_candidates(
-            space_id=space_id, env=get_current_env(), keyword=keyword
+        total, candidates = self._repository.list_consumable_candidates(
+            space_id=space_id,
+            env=get_current_env(),
+            keyword=keyword,
+            offset=(page - 1) * page_size,
+            limit=page_size,
         )
-        ready = [
-            row for row in candidates if self._canonical.verify_version(self._ref(row))
-        ]
-        start = (page - 1) * page_size
         items = [
             {
                 "skill_id": str(row["skill_id"]),
@@ -127,9 +127,9 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
                     "published_at": row["published_at"],
                 },
             }
-            for row in ready[start : start + page_size]
+            for row in candidates
         ]
-        return len(ready), items
+        return total, items
 
     def _row(self, *, space_id: int, skill_id: int, version: int, actor_id: str):
         self._access.require_space_member(space_id=space_id, user_id=actor_id)

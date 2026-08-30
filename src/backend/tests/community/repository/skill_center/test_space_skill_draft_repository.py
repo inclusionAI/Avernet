@@ -23,6 +23,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseTokenRejectedError,
     DraftFrozenError,
     DraftRevisionConflictError,
+    SpaceSkillGrantForbiddenError,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
 
@@ -148,14 +149,38 @@ def test_team_draft_requires_current_holder_fencing_token():
     )
 
 
+def test_mutation_preflight_requires_editor_grant_before_external_io():
+    db = _Database()
+    space_id, skill_id = _seed(db, space_type="TEAM")
+    repo = SpaceSkillDraftRepository(db)
+
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        repo.get_draft_for_mutation(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="member-1",
+            expected_revision_id=_OLD_REV,
+            fencing_token=7,
+            env="test",
+        )
+
+    record = repo.get_draft_for_mutation(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner-1",
+        expected_revision_id=_OLD_REV,
+        fencing_token=7,
+        env="test",
+    )
+    assert record["skill_id"] == skill_id
+
+
 def test_frozen_draft_rejects_revision_mutation():
     db = _Database()
     space_id, skill_id = _seed(db, space_type="PERSONAL", frozen=True)
 
     with pytest.raises(DraftFrozenError):
-        _replace(
-            SpaceSkillDraftRepository(db), space_id=space_id, skill_id=skill_id
-        )
+        _replace(SpaceSkillDraftRepository(db), space_id=space_id, skill_id=skill_id)
 
 
 def test_delete_first_draft_removes_the_whole_unreferenced_skill_aggregate():
@@ -175,7 +200,9 @@ def test_delete_first_draft_removes_the_whole_unreferenced_skill_aggregate():
     with db.orm_session() as session:
         assert session.query(Skill).filter_by(id=skill_id).one_or_none() is None
         assert session.query(SkillGrant).filter_by(skill_id=skill_id).count() == 0
-        assert session.query(SkillSpaceBinding).filter_by(skill_id=skill_id).count() == 0
+        assert (
+            session.query(SkillSpaceBinding).filter_by(skill_id=skill_id).count() == 0
+        )
 
 
 def test_delete_upgrade_draft_preserves_published_skill_history():

@@ -21,6 +21,7 @@ from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterExact
 from agentclaw.community.core.skill_center.errors import (
     DraftFrozenError,
     DraftRevisionConflictError,
+    SpaceSkillGrantForbiddenError,
     SpaceSkillIdempotencyConflictError,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
@@ -54,6 +55,9 @@ def _service():
     gateway = MagicMock()
     sources = MagicMock()
     repository.get_creation_by_request_id.return_value = None
+    draft_repository.get_draft_for_mutation.side_effect = lambda **_kwargs: (
+        draft_repository.get_draft.return_value
+    )
     repository.create_space_skill.return_value = {
         "created": True,
         "skill": {
@@ -386,6 +390,34 @@ def test_git_refresh_failure_leaves_draft_and_store_untouched():
     drafts.replace_draft_revision.assert_not_called()
 
 
+def test_draft_mutations_reject_non_editor_before_store_or_git_io():
+    service, _access, _repository, drafts, store, sources, *_extra = _service()
+    drafts.get_draft_for_mutation.side_effect = SpaceSkillGrantForbiddenError()
+    store.read_revision = MagicMock(wraps=store.read_revision)
+
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        service.save_draft_file(
+            space_id=7,
+            skill_id=51,
+            actor_id="member-1",
+            path="SKILL.md",
+            content="unchanged",
+            expected_revision_id="old",
+            fencing_token=1,
+        )
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        service.refresh_draft_from_git(
+            space_id=7,
+            skill_id=51,
+            actor_id="member-1",
+            expected_revision_id="old",
+            fencing_token=1,
+        )
+
+    store.read_revision.assert_not_called()
+    sources.fetch_git_snapshot.assert_not_called()
+
+
 def test_frozen_save_and_refresh_reject_before_external_io():
     service, _access, _repository, drafts, store, sources, *_extra = _service()
     frozen = _seed_draft(store, source_kind="GIT")
@@ -496,6 +528,41 @@ def test_upgrade_creates_one_vn_plus_one_draft_from_exact_published_store():
         tenant="tenant-a", env="test", locator=call["new_locator"]
     )
     assert store.read_revision(ref).description == "Published description"
+
+
+def test_upgrade_replay_reauthorizes_space_and_editor_before_returning_metadata():
+    (
+        service,
+        _access,
+        _repository,
+        drafts,
+        store,
+        _sources,
+        versions,
+        canonical,
+        *_extra,
+    ) = _service()
+    drafts.get_upgrade_by_request_id.return_value = _seed_draft(
+        store, source_kind="GIT"
+    )
+    drafts.get_skill_for_upgrade.side_effect = SpaceSkillGrantForbiddenError()
+
+    with pytest.raises(SpaceSkillGrantForbiddenError):
+        service.create_upgrade_draft(
+            space_id=999,
+            skill_id=51,
+            actor_id="unrelated-member",
+            request_id="upgrade-2",
+        )
+
+    drafts.get_skill_for_upgrade.assert_called_once_with(
+        space_id=999,
+        skill_id=51,
+        actor_id="unrelated-member",
+        env="test",
+    )
+    versions.list_latest_published.assert_not_called()
+    canonical.read_version.assert_not_called()
 
 
 def test_upgrade_repairs_missing_canonical_store_from_exact_sc_download():

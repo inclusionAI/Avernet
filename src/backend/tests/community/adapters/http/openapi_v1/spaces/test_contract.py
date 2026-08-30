@@ -60,6 +60,7 @@ from agentclaw.community.core.market_favorites.models import (
     MarketSource,
 )
 from agentclaw.community.core.skill_center.skill_package import (
+    MAX_FILE_BYTES,
     SkillManifestMissingError,
     SkillManifestMultipleError,
     SkillPathInvalidError,
@@ -795,6 +796,25 @@ def test_folder_and_git_creation_publish_real_idempotent_routes(
         branch=None,
         subdir=None,
     )
+
+
+def test_folder_creation_rejects_oversized_upload_before_application_service(
+    client, skill_application_service
+):
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-too-large"},
+        files=[
+            (
+                "files",
+                ("SKILL.md", b"x" * (MAX_FILE_BYTES + 1), "application/octet-stream"),
+            )
+        ],
+        data={"file_paths": '["SKILL.md"]'},
+    )
+
+    assert response.status_code == 422
+    skill_application_service.create_from_folder.assert_not_called()
 
 
 @pytest.mark.parametrize(

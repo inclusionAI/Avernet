@@ -194,12 +194,14 @@ def test_read_model_projects_independent_draft_version_attempt_and_actor_facts()
     )
     assert version_total == 1
     assert [row["version_ordinal"] for row in published] == [1]
-    assert [row["skill_id"] for row in versions.list_consumable_candidates(
-        space_id=space_id, env="test", keyword=None
-    )] == [skill_id]
+    consumable_total, consumable = versions.list_consumable_candidates(
+        space_id=space_id, env="test", keyword=None, offset=0, limit=20
+    )
+    assert consumable_total == 1
+    assert [row["skill_id"] for row in consumable] == [skill_id]
 
     with db.orm_session() as session:
         session.query(Skill).filter(Skill.id == skill_id).one().offline_at = timestamp
     assert versions.list_consumable_candidates(
-        space_id=space_id, env="test", keyword=None
-    ) == []
+        space_id=space_id, env="test", keyword=None, offset=0, limit=20
+    ) == (0, [])

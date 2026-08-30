@@ -1,7 +1,11 @@
 """Tests for the production external Space Skill source adapter."""
 
 from pathlib import Path
+import subprocess
 
+import pytest
+
+from agentclaw.community.plugin_api.space_skill_source import GitSnapshotInvalidError
 from agentclaw.community.plugins.community.space_skill_source import (
     CommunitySpaceSkillSource,
 )
@@ -9,8 +13,9 @@ from agentclaw.community.plugins.community.space_skill_source import (
 
 def test_git_root_selection_excludes_nested_skill_packages(monkeypatch) -> None:
     source = CommunitySpaceSkillSource()
+    monkeypatch.setattr(source, "_resolved_addresses", lambda _host: ("8.8.8.8",))
 
-    def fake_run(command, *, cwd, environment):
+    def fake_run(command, *, cwd, environment, **limits):
         assert set(environment) == {
             "HOME",
             "PATH",
@@ -20,6 +25,9 @@ def test_git_root_selection_excludes_nested_skill_packages(monkeypatch) -> None:
             "GIT_ASKPASS",
         }
         if "clone" in command:
+            assert limits["max_bytes"] > 0
+            assert "http.followRedirects=false" in command
+            assert "http.curloptResolve=example.com:443:8.8.8.8" in command
             checkout = Path(command[-1])
             checkout.mkdir()
             (checkout / "SKILL.md").write_text(
@@ -44,3 +52,52 @@ def test_git_root_selection_excludes_nested_skill_packages(monkeypatch) -> None:
 
     assert snapshot.source_subdir == ""
     assert [path for path, _content in snapshot.files] == ["SKILL.md"]
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["127.0.0.1", "10.0.0.1", "169.254.169.254", "::1", "fc00::1"],
+)
+def test_git_snapshot_rejects_every_non_public_resolved_address(
+    monkeypatch, address: str
+) -> None:
+    source = CommunitySpaceSkillSource()
+    monkeypatch.setattr(source, "_resolved_addresses", lambda _host: (address,))
+    source._run = lambda *_args, **_kwargs: pytest.fail("git must not run")
+
+    with pytest.raises(GitSnapshotInvalidError):
+        source.fetch_git_snapshot(
+            git_url="https://git.example/repo.git", branch=None, subdir=None
+        )
+
+
+def test_git_clone_watchdog_kills_acquisition_that_exceeds_disk_budget(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = CommunitySpaceSkillSource()
+    (tmp_path / "oversized.pack").write_bytes(b"xx")
+
+    class RunningClone:
+        pid = 123
+        returncode = None
+
+        @staticmethod
+        def communicate(timeout=None):
+            if timeout is not None:
+                raise subprocess.TimeoutExpired(["git", "clone"], timeout)
+            return "", ""
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: RunningClone())
+    killed = []
+    monkeypatch.setattr("os.killpg", lambda pid, signal: killed.append((pid, signal)))
+
+    with pytest.raises(GitSnapshotInvalidError, match="acquisition limit"):
+        source._run(
+            ["git", "clone"],
+            cwd=None,
+            environment={},
+            resource_root=tmp_path,
+            max_bytes=1,
+        )
+
+    assert killed

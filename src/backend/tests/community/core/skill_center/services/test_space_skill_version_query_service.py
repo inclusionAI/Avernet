@@ -79,25 +79,26 @@ def test_version_file_reads_use_business_ordinal_and_exact_canonical_identity(
     access.require_space_member.assert_called_with(space_id=7, user_id="viewer")
 
 
-def test_consumable_filters_canonical_readiness_before_pagination(monkeypatch):
+def test_consumable_paginates_on_persisted_published_ready_fact(monkeypatch):
     service, _access, repository, canonical = _service()
     monkeypatch.setattr(
         "agentclaw.community.core.skill_center.services.space_skill_version_query_service.get_current_env",
         lambda: "test",
     )
-    repository.list_consumable_candidates.return_value = [
-        {
-            "skill_id": index,
-            "skill_uuid": f"{index:08d}-1111-4111-8111-111111111111",
-            "name": f"Skill {index}",
-            "description": None,
-            "version_ordinal": 1,
-            "sc_version_number": "1.0.0",
-            "published_at": datetime(2026, 8, 30, 8),
-        }
-        for index in (1, 2, 3)
-    ]
-    canonical.verify_version.side_effect = [False, True, True]
+    repository.list_consumable_candidates.return_value = (
+        2,
+        [
+            {
+                "skill_id": 3,
+                "skill_uuid": "00000003-1111-4111-8111-111111111111",
+                "name": "Skill 3",
+                "description": None,
+                "version_ordinal": 1,
+                "sc_version_number": "1.0.0",
+                "published_at": datetime(2026, 8, 30, 8),
+            }
+        ],
+    )
 
     total, items = service.list_consumable(
         space_id=7,
@@ -109,3 +110,11 @@ def test_consumable_filters_canonical_readiness_before_pagination(monkeypatch):
 
     assert total == 2
     assert [item["skill_id"] for item in items] == ["3"]
+    repository.list_consumable_candidates.assert_called_once_with(
+        space_id=7,
+        env="test",
+        keyword=None,
+        offset=1,
+        limit=1,
+    )
+    canonical.verify_version.assert_not_called()

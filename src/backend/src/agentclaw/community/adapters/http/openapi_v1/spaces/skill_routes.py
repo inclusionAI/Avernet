@@ -50,7 +50,13 @@ from agentclaw.community.api.space_skill_query_service import (
 from agentclaw.community.api.space_skill_version_query_service import (
     SpaceSkillVersionQueryServiceProtocol,
 )
-from agentclaw.community.core.skill_center.skill_package import SkillPackageInvalidError
+from agentclaw.community.core.skill_center.skill_package import (
+    MAX_EXPANDED_BYTES,
+    MAX_FILE_BYTES,
+    MAX_FILES,
+    SkillPackageInvalidError,
+    SkillPackageTooLargeError,
+)
 from agentclaw.community.di import Injected
 
 
@@ -158,10 +164,18 @@ async def create_space_skill_from_folder(
         or any(not isinstance(path, str) for path in paths)
     ):
         raise SkillPackageInvalidError("invalid_file_paths")
-    files = [
-        (path, await uploaded.read())
-        for path, uploaded in zip(paths, upload.files, strict=True)
-    ]
+    if len(upload.files) > MAX_FILES:
+        raise SkillPackageTooLargeError()
+    files: list[tuple[str, bytes]] = []
+    total = 0
+    for path, uploaded in zip(paths, upload.files, strict=True):
+        content = await uploaded.read(MAX_FILE_BYTES + 1)
+        if len(content) > MAX_FILE_BYTES:
+            raise SkillPackageTooLargeError()
+        total += len(content)
+        if total > MAX_EXPANDED_BYTES:
+            raise SkillPackageTooLargeError()
+        files.append((path, content))
     outcome = commands.create_from_folder(
         space_id=space_id,
         actor_id=user_id,

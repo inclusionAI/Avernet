@@ -37,22 +37,34 @@ class SpaceSkillVersionReadRepository(Protocol):
                 .limit(limit)
                 .all()
             )
-            return total, [self._version_record(skill, version) for skill, version in rows]
+            return total, [
+                self._version_record(skill, version) for skill, version in rows
+            ]
 
     def get_published_ordinal(
         self, *, space_id: int, skill_id: int, version: int, env: str
     ) -> SpaceSkillVersionRecord:
         with self._db.orm_session() as session:
-            row = self._published_query(
-                session, space_id=space_id, skill_id=skill_id, env=env
-            ).filter(SkillVersion.version_ordinal == version).one_or_none()
+            row = (
+                self._published_query(
+                    session, space_id=space_id, skill_id=skill_id, env=env
+                )
+                .filter(SkillVersion.version_ordinal == version)
+                .one_or_none()
+            )
             if row is None:
                 raise DraftNotFoundError("published version not found")
             return self._version_record(row[0], row[1])
 
     def list_consumable_candidates(
-        self, *, space_id: int, env: str, keyword: str | None
-    ) -> list[ConsumableSpaceSkillRecord]:
+        self,
+        *,
+        space_id: int,
+        env: str,
+        keyword: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[int, list[ConsumableSpaceSkillRecord]]:
         with self._db.orm_session() as session:
             latest = (
                 session.query(
@@ -97,8 +109,14 @@ class SpaceSkillVersionReadRepository(Protocol):
                         func.lower(Skill.description).like(pattern),
                     )
                 )
-            rows = query.order_by(Skill.gmt_modified.desc(), Skill.id.desc()).all()
-            return [
+            total = query.count()
+            rows = (
+                query.order_by(Skill.gmt_modified.desc(), Skill.id.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return total, [
                 {
                     "skill_id": skill.id,
                     "skill_uuid": skill.skill_uuid,

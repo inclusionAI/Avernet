@@ -17,7 +17,7 @@
 | Draft refresh never mutates on Git failure | `refresh_draft_from_git` | tests prove failed fetch/selection/validation leaves locator, revision and metadata unchanged | application test |
 | Draft deletion distinguishes DRAFT and SKILL | `delete_draft` | tests cover expected revision, Team fencing, FROZEN rejection, external-fact preservation, DB-first delete and best-effort Store cleanup | Router and repository tests |
 | Published Version reads address business ordinals | `SpaceSkillQueryServiceProtocol` Version methods | tests exclude MATERIALIZING and cover exact detail, tree and UTF-8 file read from Canonical Store | Router contract |
-| Consumable directory is Space/PUBLISHED/Ready/non-Offline only | `list_consumable_space_skills` | tests exclude Draft-only, MATERIALIZING, corrupt/missing Store, Offline and unrelated Space assets; no Bot Membership read | Router contract and Singlebox coverage |
+| Consumable directory is Space/PUBLISHED/Ready/non-Offline only | `list_consumable_space_skills` | tests use persisted `PUBLISHED` as the Canonical Ready SSOT, exclude Draft-only, MATERIALIZING, Offline and unrelated Space assets, and prove DB pagination performs no per-package Store reads or Bot Membership read | Router contract and Singlebox coverage |
 | Every route has public governance | `PublicAPIRoute` plus Authorization/Admission inventories | architecture tests enumerate every Group 1 method/path and reject missing inventory entries | OpenAPI dump, compatibility gate and pinned artifact drift test |
 
 ## Agreed seams

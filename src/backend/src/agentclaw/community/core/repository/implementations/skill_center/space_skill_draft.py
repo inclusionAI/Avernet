@@ -75,6 +75,58 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                 raise DraftNotFoundError("draft not found")
             return self._record(row[0], row[1])
 
+    def get_draft_for_mutation(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+        env: str,
+    ) -> SpaceSkillDraftRecord:
+        with self._db.orm_session() as session:
+            row = (
+                session.query(Skill, SpaceModel.space_type)
+                .join(
+                    SkillSpaceBinding,
+                    (SkillSpaceBinding.skill_id == Skill.id)
+                    & (SkillSpaceBinding.env == Skill.env),
+                )
+                .join(
+                    SpaceModel,
+                    (SpaceModel.id == SkillSpaceBinding.space_id)
+                    & (SpaceModel.env == SkillSpaceBinding.env),
+                )
+                .filter(
+                    Skill.id == skill_id,
+                    Skill.env == env,
+                    SkillSpaceBinding.space_id == space_id,
+                    SpaceModel.deleted_at.is_(None),
+                )
+                .one_or_none()
+            )
+            if row is None or row[0].draft_status is None:
+                raise DraftNotFoundError("draft not found")
+            skill, space_type = row
+            self._require_editor(
+                session=session, skill_id=skill_id, actor_id=actor_id, env=env
+            )
+            if skill.draft_status == "FROZEN":
+                raise DraftFrozenError("draft is frozen")
+            self._require_revision(
+                skill=skill, expected_revision_id=expected_revision_id, env=env
+            )
+            self._require_fencing(
+                session=session,
+                space_type=space_type,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                fencing_token=fencing_token,
+                env=env,
+            )
+            return self._record(skill, space_type)
+
     def get_skill_for_upgrade(
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
     ) -> SkillUpgradeIdentityRecord:
@@ -174,18 +226,27 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
             if row is None:
                 raise DraftNotFoundError("space skill not found")
             skill, space = row
-            grant = session.query(SkillGrant.id).filter(
-                SkillGrant.skill_id == skill_id,
-                SkillGrant.user_id == actor_id,
-                SkillGrant.env == env,
-                SkillGrant.status == "ACTIVE",
-                SkillGrant.role.in_(("OWNER", "MANAGER")),
-            ).one_or_none()
+            grant = (
+                session.query(SkillGrant.id)
+                .filter(
+                    SkillGrant.skill_id == skill_id,
+                    SkillGrant.user_id == actor_id,
+                    SkillGrant.env == env,
+                    SkillGrant.status == "ACTIVE",
+                    SkillGrant.role.in_(("OWNER", "MANAGER")),
+                )
+                .one_or_none()
+            )
             if grant is None:
                 raise SpaceSkillGrantForbiddenError("owner or manager required")
             if skill.draft_status is not None:
                 if skill.draft_request_id == request_id:
-                    return {"created": False, "draft": self._record(skill, space.space_type, space.sc_team_id)}
+                    return {
+                        "created": False,
+                        "draft": self._record(
+                            skill, space.space_type, space.sc_team_id
+                        ),
+                    }
                 raise DraftAlreadyExistsError("draft already exists")
             latest = (
                 session.query(SkillVersion)
@@ -207,7 +268,10 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
             skill.draft_source_kind = "PUBLISHED_VERSION"
             skill.draft_request_id = request_id
             session.flush()
-            return {"created": True, "draft": self._record(skill, space.space_type, space.sc_team_id)}
+            return {
+                "created": True,
+                "draft": self._record(skill, space.space_type, space.sc_team_id),
+            }
 
     def replace_draft_revision(
         self,
@@ -247,52 +311,79 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
             if row is None or row[0].draft_status is None:
                 raise DraftNotFoundError("draft not found")
             skill, space_type = row
+            self._require_editor(
+                session=session, skill_id=skill_id, actor_id=actor_id, env=env
+            )
             if skill.draft_status == "FROZEN":
                 raise DraftFrozenError("draft is frozen")
-            current = DraftRevisionRef.from_locator(
-                tenant=get_current_avernet_tenant(),
+            current = self._require_revision(
+                skill=skill, expected_revision_id=expected_revision_id, env=env
+            )
+            self._require_fencing(
+                session=session,
+                space_type=space_type,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                fencing_token=fencing_token,
                 env=env,
-                locator=skill.zip_url,
+                lock=True,
             )
-            if current.revision_id != expected_revision_id:
-                raise DraftRevisionConflictError("draft revision changed")
-            grant = (
-                session.query(SkillGrant.id)
-                .filter(
-                    SkillGrant.skill_id == skill_id,
-                    SkillGrant.user_id == actor_id,
-                    SkillGrant.env == env,
-                    SkillGrant.status == "ACTIVE",
-                    SkillGrant.role.in_(("OWNER", "MANAGER")),
-                )
-                .one_or_none()
-            )
-            if grant is None:
-                raise SpaceSkillGrantForbiddenError("owner or manager required")
-            if space_type == "TEAM":
-                lease = (
-                    session.query(SkillDraftEditLease)
-                    .filter(
-                        SkillDraftEditLease.skill_id == skill_id,
-                        SkillDraftEditLease.env == env,
-                    )
-                    .with_for_update()
-                    .one_or_none()
-                )
-                if (
-                    lease is None
-                    or lease.holder_user_id != actor_id
-                    or lease.fencing_token != fencing_token
-                ):
-                    raise DraftEditLeaseTokenRejectedError(
-                        "stale draft lease fencing token"
-                    )
             skill.zip_url = new_locator
             skill.draft_description = new_description
             if source_commit_sha is not None:
                 skill.source_commit_sha = source_commit_sha
             session.flush()
             return current.locator
+
+    @staticmethod
+    def _require_editor(*, session, skill_id: int, actor_id: str, env: str) -> None:
+        grant = (
+            session.query(SkillGrant.id)
+            .filter(
+                SkillGrant.skill_id == skill_id,
+                SkillGrant.user_id == actor_id,
+                SkillGrant.env == env,
+                SkillGrant.status == "ACTIVE",
+                SkillGrant.role.in_(("OWNER", "MANAGER")),
+            )
+            .one_or_none()
+        )
+        if grant is None:
+            raise SpaceSkillGrantForbiddenError("owner or manager required")
+
+    @staticmethod
+    def _require_revision(*, skill, expected_revision_id: str, env: str):
+        current = DraftRevisionRef.from_locator(
+            tenant=get_current_avernet_tenant(), env=env, locator=skill.zip_url
+        )
+        if current.revision_id != expected_revision_id:
+            raise DraftRevisionConflictError("draft revision changed")
+        return current
+
+    @staticmethod
+    def _require_fencing(
+        *,
+        session,
+        space_type: str,
+        skill_id: int,
+        actor_id: str,
+        fencing_token: int | None,
+        env: str,
+        lock: bool = False,
+    ) -> None:
+        if space_type != "TEAM":
+            return
+        query = session.query(SkillDraftEditLease).filter(
+            SkillDraftEditLease.skill_id == skill_id,
+            SkillDraftEditLease.env == env,
+        )
+        lease = query.with_for_update().one_or_none() if lock else query.one_or_none()
+        if (
+            lease is None
+            or lease.holder_user_id != actor_id
+            or lease.fencing_token != fencing_token
+        ):
+            raise DraftEditLeaseTokenRejectedError("stale draft lease fencing token")
 
     def delete_draft(
         self,
@@ -335,13 +426,17 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
             )
             if current.revision_id != expected_revision_id:
                 raise DraftRevisionConflictError("draft revision changed")
-            grant = session.query(SkillGrant.id).filter(
-                SkillGrant.skill_id == skill_id,
-                SkillGrant.user_id == actor_id,
-                SkillGrant.env == env,
-                SkillGrant.status == "ACTIVE",
-                SkillGrant.role.in_(("OWNER", "MANAGER")),
-            ).one_or_none()
+            grant = (
+                session.query(SkillGrant.id)
+                .filter(
+                    SkillGrant.skill_id == skill_id,
+                    SkillGrant.user_id == actor_id,
+                    SkillGrant.env == env,
+                    SkillGrant.status == "ACTIVE",
+                    SkillGrant.role.in_(("OWNER", "MANAGER")),
+                )
+                .one_or_none()
+            )
             if grant is None:
                 raise SpaceSkillGrantForbiddenError("owner or manager required")
             if space_type == "TEAM":
@@ -355,30 +450,40 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                     .one_or_none()
                 )
                 if lease is not None and lease.holder_user_id not in {None, actor_id}:
-                    raise DraftEditLeaseConflictError("draft lease is held by another actor")
+                    raise DraftEditLeaseConflictError(
+                        "draft lease is held by another actor"
+                    )
                 if (
                     lease is not None
                     and lease.holder_user_id == actor_id
                     and lease.fencing_token != fencing_token
                 ):
                     raise DraftEditLeaseTokenRejectedError("stale fencing token")
-            external = any(
-                session.query(model).filter(
-                    getattr(model, "skill_id", None) == skill_id,
-                    model.env == env,
-                ).first()
-                is not None
-                for model in (
-                    SkillVersion,
-                    SkillPublicationAttempt,
-                    SkillSetSkill,
-                    BotSkillInstallation,
+            external = (
+                any(
+                    session.query(model)
+                    .filter(
+                        getattr(model, "skill_id", None) == skill_id,
+                        model.env == env,
+                    )
+                    .first()
+                    is not None
+                    for model in (
+                        SkillVersion,
+                        SkillPublicationAttempt,
+                        SkillSetSkill,
+                        BotSkillInstallation,
+                    )
                 )
-            ) or session.query(WorkOrderModel.id).filter(
-                WorkOrderModel.biz_type == "SKILL_COLLABORATOR",
-                WorkOrderModel.biz_id == str(skill_id),
-                WorkOrderModel.env == env,
-            ).first() is not None
+                or session.query(WorkOrderModel.id)
+                .filter(
+                    WorkOrderModel.biz_type == "SKILL_COLLABORATOR",
+                    WorkOrderModel.biz_id == str(skill_id),
+                    WorkOrderModel.env == env,
+                )
+                .first()
+                is not None
+            )
             if external:
                 skill.zip_url = None
                 skill.draft_target_version = None
@@ -391,9 +496,9 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                 session.query(SkillDraftEditLease).filter_by(
                     skill_id=skill_id, env=env
                 ).delete(synchronize_session=False)
-                session.query(SkillGrant).filter_by(
-                    skill_id=skill_id, env=env
-                ).delete(synchronize_session=False)
+                session.query(SkillGrant).filter_by(skill_id=skill_id, env=env).delete(
+                    synchronize_session=False
+                )
                 session.query(SkillSpaceBinding).filter_by(
                     skill_id=skill_id, env=env
                 ).delete(synchronize_session=False)
