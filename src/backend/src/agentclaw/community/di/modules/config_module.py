@@ -283,13 +283,9 @@ class ConfigModule(Module):
     @singleton
     @provider
     def workspace(self) -> cfg.WorkspaceConfig:
-        """Bot workspace filesystem layout.
+        """Resolve workspace roots to absolute host paths at the DI boundary.
 
-        Sources all roots from the ``workspace`` user_config block;
-        falls back to the dataclass defaults (sandbox paths) when the
-        block is absent or a field is missing. Each path is expanded and
-        normalized once so Engine providers always receive the absolute-path
-        contract, including community's ``./data/workspace/...`` defaults.
+        Missing fields retain the dataclass sandbox defaults.
         """
         import os
 

@@ -282,11 +282,11 @@
       "operator_names": []
     },
     "workspace": {
-      "aicoding_root": "data/workspace/aicoding",
-      "claude_code_root": "data/workspace/claude_code",
+      "aicoding_root": "<CWD>/data/workspace/aicoding",
+      "claude_code_root": "<CWD>/data/workspace/claude_code",
       "claude_code_session_root": "/home/admin/.claude",
-      "hermes_root": "data/workspace/hermes",
-      "openclaw_root": "data/workspace/openclaw"
+      "hermes_root": "<CWD>/data/workspace/hermes",
+      "openclaw_root": "<CWD>/data/workspace/openclaw"
     },
     "workspace_hosting": {
       "access_key": "",
