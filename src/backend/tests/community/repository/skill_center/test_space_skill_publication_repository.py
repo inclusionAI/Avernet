@@ -32,7 +32,9 @@ from agentclaw.community.core.repository.implementations.skill_center.space_skil
 )
 from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseConflictError,
+    PublicationRequiresNewAttemptError,
     PublicationResultUnknownError,
+    SpaceSkillIdempotencyConflictError,
 )
 from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
 from agentclaw.community.core.skill_center.materialization_contract import (
@@ -176,6 +178,8 @@ def test_create_attempt_freezes_latest_draft_and_replays_same_request() -> None:
     db = _Database()
     space_id, skill_id = _seed_draft(db, lease_holder="owner")
     repository = SpaceSkillPublicationRepository(db)
+    with db.orm_session() as session:
+        frozen_locator = session.get(Skill, skill_id).zip_url
 
     created = repository.create_or_replay_attempt(
         space_id=space_id,
@@ -194,6 +198,7 @@ def test_create_attempt_freezes_latest_draft_and_replays_same_request() -> None:
 
     assert created.created is True
     assert created.attempt.status == "PREPARING"
+    assert created.attempt.frozen_draft_locator == frozen_locator
     assert created.attempt.target_version == 1
     assert created.attempt.sc_version_number == "1.0.0"
     assert created.attempt.recovery.state == "AUTO_RETRYING"
@@ -221,7 +226,7 @@ def test_create_attempt_rejects_team_draft_held_by_another_editor() -> None:
         )
 
 
-def test_publication_idempotency_key_is_unique_across_skills() -> None:
+def test_publication_idempotency_key_is_global_across_skills() -> None:
     columns = next(
         constraint.columns.keys()
         for constraint in SkillPublicationAttempt.__table__.constraints
@@ -231,7 +236,32 @@ def test_publication_idempotency_key_is_unique_across_skills() -> None:
     assert columns == ["avernet_tenant", "env", "request_id"]
 
 
-def test_group3_migration_enforces_global_publication_request_identity() -> None:
+def test_same_publication_request_key_conflicts_across_skills() -> None:
+    db = _Database()
+    first_space, first_skill = _seed_draft(db)
+    second_space, second_skill = _seed_draft(db, sc_team_id="sc-team-8")
+    repository = SpaceSkillPublicationRepository(db)
+
+    first = repository.create_or_replay_attempt(
+        space_id=first_space,
+        skill_id=first_skill,
+        actor_id="owner",
+        request_id="publish-same-key",
+        env="test",
+    )
+    with pytest.raises(SpaceSkillIdempotencyConflictError):
+        repository.create_or_replay_attempt(
+            space_id=second_space,
+            skill_id=second_skill,
+            actor_id="owner",
+            request_id="publish-same-key",
+            env="test",
+        )
+
+    assert first.created is True
+
+
+def test_group3_migration_adds_frozen_draft_locator_compatibly() -> None:
     sql_dir = (
         Path(__file__).resolve().parents[4]
         / "src"
@@ -248,8 +278,11 @@ def test_group3_migration_enforces_global_publication_request_identity() -> None
         sql_dir / "2026_08_30_finalize_space_skill_group3_publication_verify.sql"
     ).read_text(encoding="utf-8")
 
-    expected = "uk_publish_request (avernet_tenant, env, request_id)"
-    assert expected in migration
+    assert (
+        "ADD COLUMN IF NOT EXISTS frozen_draft_locator VARCHAR(1028) NULL" in migration
+    )
+    assert "COLUMN_NAME = 'frozen_draft_locator'" in verification
+    assert "uk_publish_request (avernet_tenant, env, request_id)" in migration
     assert "avernet_tenant,env,request_id" in verification
 
 
@@ -332,9 +365,11 @@ def _package():
 class _DraftStore:
     def __init__(self) -> None:
         self.package = _package()
+        self.read_refs = []
         self.deleted = []
 
-    def read_revision(self, _ref):
+    def read_revision(self, ref):
+        self.read_refs.append(ref)
         return self.package
 
     def delete_revision(self, ref):
@@ -355,9 +390,13 @@ class _Gateway:
         self,
         *,
         timeout_once: bool = False,
+        timeout_message: str = "outcome unknown",
+        exact_missing_once: bool = False,
         status_state: SkillCenterPublishState = SkillCenterPublishState.PUBLISHED,
     ) -> None:
         self.timeout_once = timeout_once
+        self.timeout_message = timeout_message
+        self.exact_missing_once = exact_missing_once
         self.status_state = status_state
         self.submit_calls = 0
         self.status_calls = 0
@@ -367,7 +406,7 @@ class _Gateway:
         if self.timeout_once:
             self.timeout_once = False
             raise SkillCenterGatewayError(
-                SkillCenterGatewayErrorCode.TIMEOUT, "outcome unknown"
+                SkillCenterGatewayErrorCode.TIMEOUT, self.timeout_message
             )
         return SkillCenterPublishSubmission(
             request.skill_code,
@@ -400,6 +439,9 @@ class _Gateway:
         )
 
     def list_versions(self, _request):
+        if self.exact_missing_once:
+            self.exact_missing_once = False
+            return ()
         return (
             SkillCenterVersion(
                 version_number="1.0.0", version_id="801", sha256="a" * 64
@@ -408,16 +450,23 @@ class _Gateway:
 
 
 class _Materializer:
-    def __init__(self, db: _Database, *, fail_once: bool = False) -> None:
+    def __init__(
+        self,
+        db: _Database,
+        *,
+        fail_once: bool = False,
+        fail_message: str = "canonical store unavailable",
+    ) -> None:
         self.db = db
         self.fail_once = fail_once
+        self.fail_message = fail_message
         self.version_ids: list[int] = []
 
     def materialize(self, request):
         self.version_ids.append(request.skill_version_id)
         if self.fail_once:
             self.fail_once = False
-            raise SkillVersionMaterializationError("canonical store unavailable")
+            raise SkillVersionMaterializationError(self.fail_message)
         published_at = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
         with self.db.orm_session() as session:
             version = (
@@ -452,12 +501,13 @@ def _handler(
     gateway: _Gateway,
     materializer: _Materializer,
     *,
+    draft_store: _DraftStore | None = None,
     auto_retry_seconds: int = 15 * 60,
 ) -> SpaceSkillPublicationTaskHandler:
     return SpaceSkillPublicationTaskHandler(
         repository=repository,
         gateway=gateway,
-        draft_store=_DraftStore(),
+        draft_store=draft_store or _DraftStore(),
         stager=_Stager(),
         materializer=materializer,
         tenant_provider=get_current_avernet_tenant,
@@ -506,8 +556,39 @@ def test_worker_submits_once_materializes_and_emits_published_seam() -> None:
         skill = session.query(Skill).filter(Skill.id == skill_id).one()
         assert skill.draft_status is None
         assert skill.zip_url is None
+        assert skill.package_url is None
         assert skill.git_path.endswith(skill.skill_uuid)
     reset_event_bus()
+
+
+def test_worker_reads_only_the_attempt_frozen_draft_locator() -> None:
+    db = _Database()
+    space_id, skill_id = _seed_draft(db, lease_holder="owner")
+    repository = SpaceSkillPublicationRepository(db)
+    attempt = repository.create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id="worker-frozen-revision",
+        env="test",
+    ).attempt
+    with db.orm_session() as session:
+        skill = session.get(Skill, skill_id)
+        assert skill is not None
+        skill.zip_url = f"draft://{skill.skill_uuid}/v1/{uuid4()}"
+    drafts = _DraftStore()
+    handler = _handler(
+        db,
+        repository,
+        _Gateway(),
+        _Materializer(db),
+        draft_store=drafts,
+    )
+
+    handler.handle(publication_task_payload(attempt.attempt_id))
+
+    assert len(drafts.read_refs) == 1
+    assert drafts.read_refs[0].locator == attempt.frozen_draft_locator
 
 
 def test_submit_timeout_enters_result_unknown_and_never_reposts() -> None:
@@ -521,7 +602,8 @@ def test_submit_timeout_enters_result_unknown_and_never_reposts() -> None:
         request_id="worker-timeout",
         env="test",
     ).attempt
-    gateway = _Gateway(timeout_once=True)
+    secret_url = "https://sc.invalid/download.zip?signature=do-not-leak"
+    gateway = _Gateway(timeout_once=True, timeout_message=secret_url)
     handler = _handler(db, repository, gateway, _Materializer(db))
 
     assert isinstance(
@@ -534,6 +616,10 @@ def test_submit_timeout_enters_result_unknown_and_never_reposts() -> None:
         env="test",
     )
     assert unknown.status == "RESULT_UNKNOWN"
+    assert unknown.error_message == (
+        "Skill Center publication status is temporarily unavailable"
+    )
+    assert "signature" not in unknown.error_message
     with pytest.raises(PublicationResultUnknownError):
         repository.create_or_replay_attempt(
             space_id=space_id,
@@ -581,10 +667,72 @@ def test_sc_explicit_failure_restores_the_same_draft_to_editing() -> None:
     assert failed.status == "FAILED"
     assert failed.error_code == "SC_PUBLISH_REJECTED"
     with db.orm_session() as session:
-        assert (
-            session.query(Skill).filter(Skill.id == skill_id).one().draft_status
-            == "EDITING"
+        skill = session.query(Skill).filter(Skill.id == skill_id).one()
+        assert skill.draft_status == "EDITING"
+        assert skill.package_url is None
+
+    with pytest.raises(PublicationRequiresNewAttemptError):
+        repository.create_or_replay_attempt(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id="owner",
+            request_id="worker-rejected-unchanged",
+            env="test",
         )
+
+    with db.orm_session() as session:
+        skill = session.get(Skill, skill_id)
+        assert skill is not None
+        skill.zip_url = f"draft://{skill.skill_uuid}/v1/{uuid4()}"
+    replay = repository.create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id="worker-rejected",
+        env="test",
+    )
+    assert replay.created is False
+    assert replay.attempt.attempt_id == attempt.attempt_id
+    changed = repository.create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id="worker-rejected-changed",
+        env="test",
+    )
+    assert changed.created is True
+
+
+def test_published_status_metadata_lag_stays_waiting_and_never_reposts() -> None:
+    db = _Database()
+    space_id, skill_id = _seed_draft(db, lease_holder="owner")
+    repository = SpaceSkillPublicationRepository(db)
+    attempt = repository.create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id="worker-version-list-lag",
+        env="test",
+    ).attempt
+    gateway = _Gateway(exact_missing_once=True)
+    handler = _handler(db, repository, gateway, _Materializer(db))
+
+    handler.handle(publication_task_payload(attempt.attempt_id))
+    delayed = handler.handle(publication_task_payload(attempt.attempt_id))
+    waiting = repository.get_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        attempt_id=attempt.attempt_id,
+        env="test",
+    )
+
+    assert isinstance(delayed, Retry)
+    assert waiting.status == "WAITING_SC"
+    assert waiting.error_code is None
+    assert isinstance(
+        handler.handle(publication_task_payload(attempt.attempt_id)), Complete
+    )
+    assert gateway.submit_calls == 1
 
 
 def test_exhausted_materialization_exposes_same_attempt_retry() -> None:
@@ -599,7 +747,11 @@ def test_exhausted_materialization_exposes_same_attempt_retry() -> None:
         env="test",
     ).attempt
     gateway = _Gateway()
-    materializer = _Materializer(db, fail_once=True)
+    materializer = _Materializer(
+        db,
+        fail_once=True,
+        fail_message="https://sc.invalid/exact.zip?signature=do-not-leak",
+    )
     handler = _handler(
         db,
         repository,
@@ -617,8 +769,10 @@ def test_exhausted_materialization_exposes_same_attempt_retry() -> None:
         env="test",
     )
 
-    assert terminal_task.error == "canonical store unavailable"
+    assert terminal_task.error == "Exact Version materialization failed"
     assert available.status == "MATERIALIZING"
+    assert available.error_message == "Exact Version materialization failed"
+    assert "signature" not in available.error_message
     assert available.recovery.state == "AVAILABLE"
     assert available.recovery.kind == "MATERIALIZATION"
 
@@ -707,3 +861,57 @@ def test_publication_task_reestablishes_the_persisted_avernet_tenant() -> None:
             ).status
             == "SUCCEEDED"
         )
+
+
+def test_auto_retrying_attempt_retry_idempotently_reensures_task() -> None:
+    db = _Database()
+    space_id, skill_id = _seed_draft(db, lease_holder="owner")
+    repository = SpaceSkillPublicationRepository(db)
+    attempt = repository.create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id="worker-retry-crash-window",
+        env="test",
+    ).attempt
+
+    first = repository.restart_recovery(
+        space_id=space_id,
+        skill_id=skill_id,
+        attempt_id=attempt.attempt_id,
+        actor_id="owner",
+        env="test",
+    )
+    second = repository.restart_recovery(
+        space_id=space_id,
+        skill_id=skill_id,
+        attempt_id=attempt.attempt_id,
+        actor_id="owner",
+        env="test",
+    )
+
+    assert first.task_required is True
+    assert second.task_required is True
+    assert second.attempt.attempt_id == attempt.attempt_id
+
+
+def test_active_legacy_attempt_without_frozen_revision_fails_closed() -> None:
+    db = _Database()
+    space_id, skill_id = _seed_draft(db, lease_holder="owner")
+    repository = SpaceSkillPublicationRepository(db)
+    attempt = repository.create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id="worker-missing-frozen-revision",
+        env="test",
+    ).attempt
+    with db.orm_session() as session:
+        stored = session.get(SkillPublicationAttempt, attempt.attempt_id)
+        assert stored is not None
+        stored.frozen_draft_locator = None
+
+    with pytest.raises(
+        RuntimeError, match="active Publication Attempt has no frozen Draft Revision"
+    ):
+        repository.get_work(attempt_id=attempt.attempt_id, env="test")

@@ -73,6 +73,7 @@ def _safe_segment(value: str, *, field: str) -> str:
     if (
         not isinstance(value, str)
         or not value
+        or value in {".", ".."}
         or value != value.strip()
         or _SAFE_STORAGE_SEGMENT.fullmatch(value) is None
     ):
@@ -213,7 +214,8 @@ class SpaceSkillPublicationTaskHandler:
     def _prepare(
         self, work: PublicationWork, *, env: str
     ) -> PublicationWork | TaskOutcome:
-        if not work.skill_uuid or not work.draft_locator or not work.sc_team_id:
+        frozen_locator = work.attempt.frozen_draft_locator
+        if not work.skill_uuid or not frozen_locator or not work.sc_team_id:
             return self._retry_or_available(
                 work,
                 kind=PublicationRecoveryKind.PREPARATION,
@@ -223,7 +225,7 @@ class SpaceSkillPublicationTaskHandler:
             )
         try:
             ref = DraftRevisionRef.from_locator(
-                tenant=self._tenant_provider(), env=env, locator=work.draft_locator
+                tenant=self._tenant_provider(), env=env, locator=frozen_locator
             )
             package = self._draft_store.read_revision(ref)
             if package.name != work.skill_name:
@@ -246,12 +248,12 @@ class SpaceSkillPublicationTaskHandler:
                 package_url=stage.package_url,
                 env=env,
             )
-        except Exception as exc:
+        except Exception:
             return self._retry_or_available(
                 work,
                 kind=PublicationRecoveryKind.PREPARATION,
                 error_code="PUBLICATION_PREPARATION_FAILED",
-                error_message=str(exc),
+                error_message="Publication preparation failed",
                 env=env,
             )
 
@@ -279,12 +281,12 @@ class SpaceSkillPublicationTaskHandler:
                 self._repository.mark_failed(
                     attempt_id=work.attempt.attempt_id,
                     error_code="SC_PUBLISH_REJECTED",
-                    error_message=str(exc),
+                    error_message="Skill Center rejected publication",
                     completed_at=self._clock(),
                     env=env,
                 )
                 return Complete()
-            return self._unknown_or_available(work, error=exc, env=env)
+            return self._unknown_or_available(work, env=env)
         self._repository.mark_waiting_sc(
             attempt_id=work.attempt.attempt_id,
             accepted_at=self._clock(),
@@ -302,28 +304,40 @@ class SpaceSkillPublicationTaskHandler:
                     SkillCenterGatewayErrorCode.UNKNOWN_RESPONSE,
                     "SC status refers to another version",
                 )
-            if status.status is SkillCenterPublishState.PENDING:
-                if self._expired(work):
-                    self._repository.mark_recovery_available(
-                        attempt_id=work.attempt.attempt_id,
-                        kind=PublicationRecoveryKind.SC_STATUS_CHECK,
-                        error_code="SC_MARKET_UNAVAILABLE",
-                        error_message="SC publication did not settle before the automatic retry horizon",
-                        env=env,
-                    )
-                    return Fail("SC publication requires explicit status recovery")
-                return Reschedule(self._poll_seconds)
-            if status.status is SkillCenterPublishState.FAILED:
-                self._repository.mark_failed(
+        except SkillCenterGatewayError:
+            return self._unknown_or_available(work, env=env)
+        if status.status is SkillCenterPublishState.PENDING:
+            if self._expired(work):
+                self._repository.mark_recovery_available(
                     attempt_id=work.attempt.attempt_id,
-                    error_code="SC_PUBLISH_REJECTED",
-                    error_message=status.error_message
-                    or status.message
-                    or "SC rejected publication",
-                    completed_at=self._clock(),
+                    kind=PublicationRecoveryKind.SC_STATUS_CHECK,
+                    error_code="SC_MARKET_UNAVAILABLE",
+                    error_message="Skill Center publication did not settle before the automatic retry horizon",
                     env=env,
                 )
-                return Complete()
+                return Fail("Skill Center publication requires explicit recovery")
+            return Reschedule(self._poll_seconds)
+        if status.status is SkillCenterPublishState.FAILED:
+            self._repository.mark_failed(
+                attempt_id=work.attempt.attempt_id,
+                error_code="SC_PUBLISH_REJECTED",
+                error_message="Skill Center rejected publication",
+                completed_at=self._clock(),
+                env=env,
+            )
+            return Complete()
+
+        # The publish result is now known even if SC's Team/version read models
+        # have not converged yet. Clear RESULT_UNKNOWN before exact discovery so
+        # eventual-consistency lag stays WAITING_SC rather than being presented
+        # as an uncertain external publish outcome.
+        self._repository.mark_waiting_sc(
+            attempt_id=work.attempt.attempt_id,
+            accepted_at=self._clock(),
+            env=env,
+        )
+        work = self._repository.get_work(attempt_id=work.attempt.attempt_id, env=env)
+        try:
             assert work.sc_team_id is not None
             team_skill = self._gateway.get_team_skill(
                 SkillCenterTeamSkillDetailRequest(
@@ -371,8 +385,14 @@ class SpaceSkillPublicationTaskHandler:
                 env=env,
             )
             return self._materialize(work, env=env)
-        except SkillCenterGatewayError as exc:
-            return self._unknown_or_available(work, error=exc, env=env)
+        except SkillCenterGatewayError:
+            return self._retry_or_available(
+                work,
+                kind=PublicationRecoveryKind.SC_STATUS_CHECK,
+                error_code="SC_MARKET_UNAVAILABLE",
+                error_message="Published Skill Center Version metadata is not ready",
+                env=env,
+            )
 
     def _materialize(
         self,
@@ -403,26 +423,27 @@ class SpaceSkillPublicationTaskHandler:
                 self._delete_frozen_draft_best_effort(work, env=env)
             get_event_bus().publish(published)
             return Complete()
-        except SkillVersionMaterializationError as exc:
+        except SkillVersionMaterializationError:
             return self._retry_or_available(
                 work,
                 kind=PublicationRecoveryKind.MATERIALIZATION,
                 error_code="MATERIALIZATION_FAILED",
-                error_message=str(exc),
+                error_message="Exact Version materialization failed",
                 env=env,
             )
 
     def _delete_frozen_draft_best_effort(
         self, work: PublicationWork, *, env: str
     ) -> None:
-        if not work.draft_locator:
+        frozen_locator = work.attempt.frozen_draft_locator
+        if not frozen_locator:
             return
         try:
             self._draft_store.delete_revision(
                 DraftRevisionRef.from_locator(
                     tenant=self._tenant_provider(),
                     env=env,
-                    locator=work.draft_locator,
+                    locator=frozen_locator,
                 )
             )
         except Exception:
@@ -431,18 +452,17 @@ class SpaceSkillPublicationTaskHandler:
                 extra={"attempt_id": work.attempt.attempt_id},
             )
 
-    def _unknown_or_available(
-        self, work: PublicationWork, *, error: Exception, env: str
-    ) -> TaskOutcome:
+    def _unknown_or_available(self, work: PublicationWork, *, env: str) -> TaskOutcome:
         available = self._expired(work)
         self._repository.mark_result_unknown(
             attempt_id=work.attempt.attempt_id,
             error_code="SC_MARKET_UNAVAILABLE",
-            error_message=str(error),
+            error_message="Skill Center publication status is temporarily unavailable",
             recovery_available=available,
             env=env,
         )
-        return Fail(str(error)) if available else Retry(str(error))
+        safe_error = "Skill Center publication status is temporarily unavailable"
+        return Fail(safe_error) if available else Retry(safe_error)
 
     def _retry_or_available(
         self,

@@ -186,7 +186,8 @@ Materializer Service API; Runtime reads consume only PUBLISHED Versions through
 `SkillVersionResolver`.
 
 `SpaceSkillPublicationService` freezes the current immutable Draft Revision and
-persists a durable Attempt before enqueueing. Its worker is the only owner of
+persists its `frozen_draft_locator` on the durable Attempt before enqueueing;
+the worker never re-reads mutable `Skill.zip_url` as its input. Its worker is the only owner of
 the one-shot SC submit/status state machine: it records `sc_post_started_at`
 before the external call, never submits the same Attempt twice, and moves an
 uncertain response to `RESULT_UNKNOWN`. Once SC identifies an exact Version it

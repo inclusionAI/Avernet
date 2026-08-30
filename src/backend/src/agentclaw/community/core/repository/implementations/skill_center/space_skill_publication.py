@@ -83,7 +83,10 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         try:
             with self._db.transactional_orm_session() as session:
                 replay = self._attempt_by_request(
-                    session, request_id=request_id, env=env, lock=True
+                    session,
+                    request_id=request_id,
+                    env=env,
+                    lock=True,
                 )
                 if replay is not None:
                     self._require_attempt_scope(
@@ -166,6 +169,22 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                     raise PublicationInProgressError(
                         "publication is already in progress"
                     )
+                latest_failed = (
+                    session.query(SkillPublicationAttempt)
+                    .filter(
+                        SkillPublicationAttempt.skill_id == skill_id,
+                        SkillPublicationAttempt.env == env,
+                        SkillPublicationAttempt.status == "FAILED",
+                    )
+                    .order_by(SkillPublicationAttempt.id.desc())
+                    .first()
+                )
+                if latest_failed is not None:
+                    frozen = latest_failed.frozen_draft_locator
+                    if not frozen or frozen == skill.zip_url:
+                        raise PublicationRequiresNewAttemptError(
+                            "failed publication Draft must be modified before a new Attempt"
+                        )
                 if space.space_type == "TEAM":
                     lease = (
                         session.query(SkillDraftEditLease)
@@ -189,6 +208,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                 attempt = SkillPublicationAttempt(
                     skill_id=skill_id,
                     request_id=request_id,
+                    frozen_draft_locator=skill.zip_url,
                     active_skill_key=self._active_key(env=env, skill_id=skill_id),
                     target_version_ordinal=target_version,
                     sc_version_number=f"{target_version}.0.0",
@@ -208,9 +228,29 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         except IntegrityError:
             with self._db.orm_session() as session:
                 replay = self._attempt_by_request(
-                    session, request_id=request_id, env=env, lock=False
+                    session,
+                    request_id=request_id,
+                    env=env,
+                    lock=False,
                 )
                 if replay is None:
+                    active = (
+                        session.query(SkillPublicationAttempt)
+                        .filter(
+                            SkillPublicationAttempt.skill_id == skill_id,
+                            SkillPublicationAttempt.env == env,
+                            SkillPublicationAttempt.status.in_(_ACTIVE_STATUSES),
+                        )
+                        .first()
+                    )
+                    if active is not None:
+                        if active.status == "RESULT_UNKNOWN":
+                            raise PublicationResultUnknownError(
+                                "publication result is unknown"
+                            )
+                        raise PublicationInProgressError(
+                            "publication is already in progress"
+                        )
                     raise
                 self._require_attempt_scope(
                     session,
@@ -405,9 +445,9 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
     ) -> PublicationAttemptRecord:
         with self._db.transactional_orm_session() as session:
             attempt = self._attempt(session, attempt_id=attempt_id, env=env, lock=True)
-            if attempt.status == "SC_SUBMITTING":
+            if attempt.status in ("SC_SUBMITTING", "RESULT_UNKNOWN"):
                 attempt.status = "WAITING_SC"
-                attempt.sc_accepted_at = accepted_at
+                attempt.sc_accepted_at = attempt.sc_accepted_at or accepted_at
                 attempt.recovery_state = "AUTO_RETRYING"
                 attempt.recovery_kind = "SC_STATUS_CHECK"
                 attempt.error_code = None
@@ -460,6 +500,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             )
             if skill.draft_status == "FROZEN":
                 skill.draft_status = "EDITING"
+            skill.package_url = None
             attempt.status = "FAILED"
             attempt.active_skill_key = None
             attempt.error_code = error_code
@@ -653,6 +694,10 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                 raise PublicationRequiresNewAttemptError(
                     "failed publication requires a new attempt"
                 )
+            if attempt.recovery_state == "AUTO_RETRYING":
+                return PublicationRetryResult(
+                    attempt=self._record(attempt), task_required=True
+                )
             if attempt.recovery_state != "AVAILABLE":
                 raise PublicationRecoveryNotAvailableError(
                     "publication recovery is not available"
@@ -698,6 +743,10 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         if row is None:
             raise PublicationAttemptNotFoundError("publication attempt not found")
         attempt, skill, binding, space = row
+        if attempt.status in _ACTIVE_STATUSES and not attempt.frozen_draft_locator:
+            raise RuntimeError(
+                "active Publication Attempt has no frozen Draft Revision"
+            )
         return PublicationWork(
             attempt=self._record(attempt),
             space_id=int(binding.space_id),
@@ -706,7 +755,6 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             skill_uuid=str(skill.skill_uuid or ""),
             skill_name=skill.name,
             draft_description=skill.draft_description or skill.description or "",
-            draft_locator=skill.zip_url,
             package_url=skill.package_url,
         )
 
@@ -827,6 +875,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         return PublicationAttemptRecord(
             attempt_id=int(attempt.id),
             skill_id=int(attempt.skill_id),
+            frozen_draft_locator=attempt.frozen_draft_locator,
             target_version=int(attempt.target_version_ordinal),
             status=PublicationAttemptStatus(attempt.status),
             sc_version_number=attempt.sc_version_number,

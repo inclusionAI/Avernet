@@ -1,5 +1,6 @@
--- Phase 2 Group 3: one Idempotency-Key identifies one Publication intent in
--- a tenant/environment, including cross-Skill misuse.
+ALTER TABLE ac_skill_publication_attempt
+  ADD COLUMN IF NOT EXISTS frozen_draft_locator VARCHAR(1028) NULL
+    COMMENT 'immutable Draft Revision locator frozen by this Publication Attempt';
 
 SET @drop_publish_request_index = IF(
   EXISTS(

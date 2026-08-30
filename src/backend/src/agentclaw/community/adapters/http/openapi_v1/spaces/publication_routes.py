@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response
+from pydantic import StringConstraints
 from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
@@ -42,7 +43,8 @@ AttemptIdPath = Annotated[int, Path(ge=1)]
 PageSizeQuery = Annotated[int, Query(ge=1, le=100)]
 IdempotencyKeyHeader = Annotated[
     str,
-    Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
+    Header(alias="Idempotency-Key"),
 ]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 

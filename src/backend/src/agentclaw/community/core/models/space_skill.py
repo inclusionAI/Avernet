@@ -287,6 +287,10 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     skill_id = Column(UnsignedBigInteger, nullable=False)
     request_id = Column(String(128), nullable=False)
+    # Immutable snapshot of the exact Draft Revision frozen by this Attempt.
+    # Nullable only so additive rollout can read pre-column rows; every new
+    # Publication Attempt must populate it and workers fail closed without it.
+    frozen_draft_locator = Column(String(1028), nullable=True)
     active_skill_key = Column(String(256), nullable=True)
     target_version_ordinal = Column(UnsignedInteger, nullable=False)
     sc_version_number = Column(String(128), nullable=True)

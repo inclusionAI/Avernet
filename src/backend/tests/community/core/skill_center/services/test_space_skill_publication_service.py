@@ -26,6 +26,7 @@ def _attempt() -> PublicationAttemptRecord:
     return PublicationAttemptRecord(
         attempt_id=71,
         skill_id=11,
+        frozen_draft_locator="draft://00000000-0000-4000-8000-000000000011/v2/00000000-0000-4000-8000-000000000012",
         target_version=2,
         status=PublicationAttemptStatus.PREPARING,
         sc_version_number="2.0.0",

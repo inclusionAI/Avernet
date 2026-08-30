@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS ac_skill_publication_attempt (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   skill_id BIGINT UNSIGNED NOT NULL,
   request_id VARCHAR(128) NOT NULL,
+  frozen_draft_locator VARCHAR(1028) NULL,
   active_skill_key VARCHAR(256) NULL,
   target_version_ordinal INT UNSIGNED NOT NULL,
   sc_version_number VARCHAR(128) NULL,

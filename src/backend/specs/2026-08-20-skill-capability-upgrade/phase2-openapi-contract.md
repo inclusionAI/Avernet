@@ -328,6 +328,11 @@ Personal Space 的 `fencing_token` 为 `null`；Team Space 必须传当前 holde
 状态：`PREPARING | SC_SUBMITTING | WAITING_SC | MATERIALIZING | SUCCEEDED | FAILED |
 RESULT_UNKNOWN`。
 
+服务端持久 Attempt 同时保存创建事务内冻结的 `frozen_draft_locator`，但该内部 immutable
+Revision locator 不进入公共 `PublicationAttempt` DTO。Worker 只消费该 snapshot；FAILED 后
+只有当前 Draft locator 已变化才允许用新 Key 创建 Attempt。`package_url` 只是 active Attempt
+调用 SC 的临时 signed URL，终态清理且不承担 Revision marker 语义。
+
 恢复：
 
 - `recovery.state`：`AUTO_RETRYING | AVAILABLE | NOT_AVAILABLE`。

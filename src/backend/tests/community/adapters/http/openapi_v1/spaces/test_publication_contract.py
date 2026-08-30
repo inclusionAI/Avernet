@@ -43,6 +43,7 @@ def _attempt(*, status=PublicationAttemptStatus.PREPARING):
     return PublicationAttemptRecord(
         attempt_id=71,
         skill_id=11,
+        frozen_draft_locator="draft://00000000-0000-4000-8000-000000000011/v2/00000000-0000-4000-8000-000000000012",
         target_version=2,
         status=status,
         sc_version_number="2.0.0",
@@ -140,6 +141,18 @@ def test_publication_retry_returns_202_or_idempotent_200(
     assert queued.json()["code"] == 202000
     assert succeeded.status_code == 200
     assert succeeded.json()["code"] == 200000
+
+
+def test_publication_rejects_blank_idempotency_key_at_http_boundary(
+    client, publication_service
+) -> None:
+    response = client.post(
+        "/openapi/v1/bots/spaces/3/skills/11/publications",
+        headers={"Idempotency-Key": "   "},
+    )
+
+    assert response.status_code == 422
+    publication_service.create_publication.assert_not_called()
 
 
 @pytest.mark.parametrize(

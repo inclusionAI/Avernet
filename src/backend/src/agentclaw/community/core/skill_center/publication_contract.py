@@ -42,6 +42,7 @@ class PublicationRecovery:
 class PublicationAttemptRecord:
     attempt_id: int
     skill_id: int
+    frozen_draft_locator: str | None
     target_version: int
     status: PublicationAttemptStatus
     sc_version_number: str | None
@@ -87,7 +88,6 @@ class PublicationWork:
     skill_uuid: str
     skill_name: str
     draft_description: str
-    draft_locator: str | None
     package_url: str | None
 
 
