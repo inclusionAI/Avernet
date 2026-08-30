@@ -5,6 +5,7 @@ container-view inputs: skill scope/name derivation, the MCP collect+merge loop,
 resource/identity mapping, and the engine_overrides default.
 """
 import tempfile
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,6 +17,7 @@ from agentclaw.community.core.channel.services.engine_overrides_reader import (
 )
 from agentclaw.community.core.config_compose.models import ComposeRequest, StdioLaunch
 from agentclaw.community.core.config_compose.services.collector import (
+    _MCP_DETAIL_WORKERS,
     ConfigComposerInputCollector,
     McpDetailUnavailableError,
 )
@@ -23,6 +25,10 @@ from agentclaw.community.core.config_compose.services.mcporter_composer import (
     McporterComposeError,
 )
 from agentclaw.community.core.mcp.services.local_mcp_registry import LocalMCPRegistry
+from agentclaw.community.utils.avernet_tenant import (
+    avernet_tenant_scope,
+    get_current_avernet_tenant,
+)
 
 
 def _req(engine_type: str = "openclaw") -> ComposeRequest:
@@ -672,6 +678,267 @@ def test_mcps_preserve_local_fields_when_center_lacks_them():
     inputs = _collector(skill_set_service=svc, mcp_config_service=mcp_cfg).mcps(_req())
     assert inputs[0].mcp_data["headers"] == {"x-ling-auth": "tok"}
     assert inputs[0].mcp_data["runMode"] == "REMOTE"
+
+
+# ── concurrent Center enrichment ────────────────────────────────────────────
+#
+# ``get_mcp_detail`` is one blocking round trip per server (~90 ms in the traced
+# request), so enriching in sequence made the whole compose scale linearly with
+# the bot's MCP count. These pin the fan-out and, more importantly, the four
+# properties the sequential loop gave the caller for free.
+
+
+def _remote(server_code: str) -> dict:
+    """A Center reply for a remote server — enough for compose to accept it."""
+    return {"serverCode": server_code, "runMode": "REMOTE", "endpoints": []}
+
+
+def _mcps_over(codes, lookup, *, registry_catalog=None):
+    """Run ``mcps()`` over ``codes``, answering Center with ``lookup(code)``."""
+    svc = MagicMock()
+    svc.collect_bot_active_mcps.return_value = [{"server_code": c} for c in codes]
+    svc.mcp_center.get_mcp_detail.side_effect = lookup
+    mcp_cfg = MagicMock()
+    mcp_cfg.build_mcp_sync_payload.return_value = (None, {}, "PROD", None)
+    return _collector(
+        skill_set_service=svc,
+        mcp_config_service=mcp_cfg,
+        local_mcp_registry=_registry_over(registry_catalog or {}),
+    ).mcps(_req())
+
+
+@pytest.mark.unit
+def test_mcps_fetch_center_detail_concurrently():
+    """The lookups overlap — a serial loop cannot get past this barrier.
+
+    Every lookup blocks until all five have arrived, so the call only completes
+    if the five are genuinely in flight at once. One-at-a-time enrichment leaves
+    the first waiter to time out, which surfaces as a failed compose rather than
+    as a quietly slower one.
+    """
+    codes = ["a", "b", "c", "d", "e"]
+    gate = threading.Barrier(len(codes), timeout=10)
+
+    def lookup(server_code):
+        gate.wait()
+        return _remote(server_code)
+
+    inputs = _mcps_over(codes, lookup)
+
+    assert [i.mcp_data["server_code"] for i in inputs] == codes
+
+
+@pytest.mark.unit
+def test_mcps_keep_raw_order_when_lookups_finish_out_of_order():
+    """Output follows ``raw``, not completion.
+
+    The composer writes ``McpComposeInput`` entries in list order, so reading
+    futures as they complete would reorder the artifact for no reason other than
+    which Center reply landed first. Here the replies land in exactly reverse
+    order.
+
+    Completion order is *forced* with a chain of events rather than staggered
+    sleeps: a thread descheduled longer than a sleep gap would otherwise invert
+    the inversion and fail the test for scheduler timing that has nothing to do
+    with the behaviour under test. Each lookup waits for its turn, so the
+    replies land in reverse order deterministically or the test times out
+    saying so. (The chain needs all entries in flight at once, which holds:
+    the pool is ``min(len(codes), _MCP_DETAIL_WORKERS)`` wide.)
+    """
+    codes = ["first", "second", "third", "fourth"]
+    completion_order = list(reversed(codes))
+    turns = {code: threading.Event() for code in codes}
+    turns[completion_order[0]].set()
+    finished: list[str] = []
+    lock = threading.Lock()
+
+    def lookup(server_code):
+        assert turns[server_code].wait(timeout=10), f"never got a turn: {server_code}"
+        with lock:
+            finished.append(server_code)
+            done = len(finished)
+        if done < len(completion_order):
+            turns[completion_order[done]].set()
+        return _remote(server_code)
+
+    inputs = _mcps_over(codes, lookup)
+
+    assert finished == completion_order  # completion order really did invert
+    assert [i.mcp_data["server_code"] for i in inputs] == codes
+
+
+@pytest.mark.unit
+def test_mcps_bound_the_fan_out_at_mcp_center():
+    """A bot with many MCPs must not open one request per server at once.
+
+    Removing the sequential cost is the point; replacing it with an unbounded
+    burst at MCP Center is not. More servers than workers, so the ceiling has to
+    actually hold some of them back.
+
+    Every worker is held until the pool is provably saturated, so the ceiling is
+    *observed* rather than raced for: peak lands on exactly
+    ``_MCP_DETAIL_WORKERS`` — never above it (that is the bound) and never
+    below (nothing may exit until that many are in flight at once). A
+    sleep-based version would only show "some overlap happened", and would say
+    it on the strength of CI scheduling.
+    """
+    codes = [f"s{i}" for i in range(_MCP_DETAIL_WORKERS * 2 + 3)]
+    lock = threading.Lock()
+    in_flight = 0
+    peak = 0
+    saturated = threading.Event()
+
+    def lookup(server_code):
+        nonlocal in_flight, peak
+        with lock:
+            in_flight += 1
+            peak = max(peak, in_flight)
+            if in_flight >= _MCP_DETAIL_WORKERS:
+                saturated.set()
+        assert saturated.wait(timeout=10), "pool never reached its worker ceiling"
+        with lock:
+            in_flight -= 1
+        return _remote(server_code)
+
+    inputs = _mcps_over(codes, lookup)
+
+    assert [i.mcp_data["server_code"] for i in inputs] == codes
+    assert peak == _MCP_DETAIL_WORKERS
+
+
+@pytest.mark.unit
+def test_mcps_bound_the_fan_out_across_concurrent_composes():
+    """The ceiling is process-wide, not per compose.
+
+    A pool built per call would cap each compose at ``_MCP_DETAIL_WORKERS`` and
+    cap nothing between them — and composes *do* run concurrently, since
+    ``project_skills`` dispatches each projection through ``asyncio.to_thread``.
+    Two at once would then reach ``2 x _MCP_DETAIL_WORKERS`` simultaneous Center
+    lookups while the constant still claimed eight.
+
+    The breach is detected directly rather than inferred from a peak count: the
+    lookups rendezvous on a barrier needing ``_MCP_DETAIL_WORKERS + 1`` parties,
+    one more than the ceiling allows. Under a shared pool that barrier can never
+    fill — at most ``_MCP_DETAIL_WORKERS`` lookups are ever resident — so it
+    times out and every waiter leaves by the broken-barrier path. Under a
+    per-call pool the two composes bring twice that many workers, the barrier
+    fills, and ``breached`` is set.
+
+    The mix deliberately includes **single-entry composes**. Running a lone
+    lookup inline would be cheaper but would open a side door around the pool:
+    one saturating compose plus N one-MCP composes would put
+    ``_MCP_DETAIL_WORKERS + N`` lookups in flight while the constant still
+    claimed ``_MCP_DETAIL_WORKERS``. A test built only from fat composes cannot
+    see that, since every one of their entries goes through the pool.
+
+    (Counting a peak instead would prove nothing here: whatever releases the
+    workers has to fire at the very threshold the test is trying to exceed, so
+    the count stops at the ceiling under both implementations.)
+    """
+    sizes = [_MCP_DETAIL_WORKERS, 1, 1, 1]
+    start = threading.Barrier(len(sizes), timeout=10)
+    over_ceiling = threading.Barrier(_MCP_DETAIL_WORKERS + 1, timeout=2)
+    breached = threading.Event()
+    lock = threading.Lock()
+    resident = 0
+    peak = 0
+
+    def lookup(server_code):
+        nonlocal resident, peak
+        with lock:
+            resident += 1
+            peak = max(peak, resident)
+        try:
+            over_ceiling.wait()
+        except threading.BrokenBarrierError:
+            pass  # never enough in flight to fill it — the ceiling held
+        else:
+            breached.set()  # one more than the ceiling was resident at once
+        with lock:
+            resident -= 1
+        return _remote(server_code)
+
+    results: list[list] = []
+
+    def compose(tag, size):
+        codes = [f"{tag}{i}" for i in range(size)]
+        start.wait()  # every compose submits together, so they really do overlap
+        results.append(_mcps_over(codes, lookup))
+
+    threads = [
+        threading.Thread(target=compose, args=(tag, size))
+        for tag, size in zip("abcd", sizes)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert not any(t.is_alive() for t in threads), "a compose never finished"
+    assert sorted(len(r) for r in results) == sorted(sizes)
+    assert not breached.is_set(), (
+        f"{_MCP_DETAIL_WORKERS + 1} lookups were in flight at once — the fan-out "
+        "ceiling is not process-wide (per-compose pool, or a path around it)"
+    )
+    assert peak <= _MCP_DETAIL_WORKERS
+
+
+@pytest.mark.unit
+def test_mcps_carry_each_entrys_own_failure_through_the_fan_out():
+    """One server's failure stays that server's, with its own cause chained.
+
+    ``_enrich_mcp_detail`` returns the cause instead of raising precisely so the
+    caller can judge each entry separately. Fanning out must not collapse the
+    per-entry causes into whichever one happened to surface first — the raise
+    still has to name the server that failed and chain *its* exception.
+    """
+    boom = RuntimeError("center down for c")
+
+    def lookup(server_code):
+        if server_code == "c":
+            raise boom
+        return _remote(server_code)
+
+    with pytest.raises(McporterComposeError, match="MCP c:") as excinfo:
+        _mcps_over(["a", "b", "c", "d"], lookup)
+
+    assert excinfo.value.__cause__ is boom
+
+
+@pytest.mark.unit
+def test_mcps_local_server_still_survives_an_empty_lookup_beside_remote_peers():
+    """The converse under concurrency: a local server with no Center record
+    composes, while its remote siblings resolve normally in the same fan-out."""
+    def lookup(server_code):
+        return None if server_code == "hitl" else _remote(server_code)
+
+    inputs = _mcps_over(
+        ["a", "hitl", "b"], lookup, registry_catalog=_HITL_CATALOG
+    )
+
+    assert [i.mcp_data["server_code"] for i in inputs] == ["a", "hitl", "b"]
+    assert inputs[1].stdio is not None
+    assert inputs[1].stdio.command == "python3"
+    assert inputs[0].stdio is None and inputs[2].stdio is None
+
+
+@pytest.mark.unit
+def test_mcps_lookups_run_under_the_requests_tenant():
+    """Pool workers inherit no context vars, so the tenant is copied onto each
+    task. Without that, a Center lookup for a registered external tenant would
+    run under the default one — reading another tenant's catalog."""
+    seen: list[str] = []
+    lock = threading.Lock()
+
+    def lookup(server_code):
+        with lock:
+            seen.append(get_current_avernet_tenant())
+        return _remote(server_code)
+
+    with avernet_tenant_scope("acme"):
+        _mcps_over(["a", "b", "c"], lookup)
+
+    assert seen == ["acme"] * 3
 
 
 @pytest.mark.unit

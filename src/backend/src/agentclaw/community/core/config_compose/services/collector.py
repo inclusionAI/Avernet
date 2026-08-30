@@ -21,7 +21,9 @@ secrets inlined) is the composer's job, not this collector's.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
+from typing import TYPE_CHECKING, Any, Sequence
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
@@ -57,6 +59,35 @@ if TYPE_CHECKING:
     from agentclaw.community.core.services.identity import IdentityService
 
 logger = get_logger()
+
+# Ceiling on simultaneous MCP Center detail lookups. The point of the fan-out is
+# to stop paying ``n`` round trips in sequence, not to hand MCP Center ``n``
+# simultaneous requests: a bot may hold dozens of MCPs, and several bots can
+# compose at once. Eight covers the observed shape (~13 servers, ~90 ms each) in
+# two waves while leaving Center's connection pool room to breathe.
+_MCP_DETAIL_WORKERS = 8
+
+# ONE pool for the process, deliberately not one per compose. A per-call executor
+# would cap each compose at ``_MCP_DETAIL_WORKERS`` and cap nothing across them:
+# ``project_skills`` dispatches every projection through ``asyncio.to_thread``, so
+# concurrent bot projections would multiply into ``8 x in-flight composes`` threads
+# and that many simultaneous Center lookups — the ceiling would describe one
+# compose while the service as a whole had none. Sharing the pool makes the number
+# mean what it says process-wide, and puts it *below* the sequential behaviour it
+# replaced, which already allowed one concurrent Center call per in-flight compose
+# with no ceiling at all.
+#
+# No deadlock risk from sharing: tasks only call ``get_mcp_detail`` and never
+# re-enter this pool, and ``mcps()`` itself runs on the default executor's threads,
+# not on these.
+#
+# Worker threads are spawned lazily on first submit, so importing this module costs
+# nothing. This deployment serves from a single ``uvicorn.run(app)`` process; a
+# pre-fork server would need to build the pool per worker instead, since threads do
+# not survive a fork.
+_MCP_DETAIL_POOL = ThreadPoolExecutor(
+    max_workers=_MCP_DETAIL_WORKERS, thread_name_prefix="mcp-detail"
+)
 
 
 class McpDetailUnavailableError(LookupError):
@@ -217,13 +248,14 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         # ``get_mcp_detail`` dict straight through); the whole-artifact compose
         # path re-collects from DB, so it must fetch the detail itself or the
         # composer would see ``endpoints=[]`` and raise "no usable endpoint".
+        # The lookups are issued together rather than one at a time — see
+        # :meth:`_enrich_mcp_details`; the list it returns still follows ``raw``.
         # Endpoint-selection policy is per-engine: teclaw selects deterministically
         # by network priority (OFFICE > INTERNET > INTRANET), other engines keep
         # the legacy filter + transport-preference selection (network_priority None).
         network_priority = mcp_network_priority_for(req.engine_type)
         inputs: list[McpComposeInput] = []
-        for md in raw:
-            md, detail_failure = self._enrich_mcp_detail(svc, md)
+        for md, detail_failure in self._enrich_mcp_details(svc, raw):
             server_code = md.get("server_code") or md.get("serverCode") or ""
             stdio = self._stdio_launch_for(server_code, md, req.engine_type)
             if stdio is None and detail_failure is not None:
@@ -346,6 +378,66 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             elif str(declared).strip().lower() == engine_type.strip().lower():
                 return cfg
         return default
+
+    def _enrich_mcp_details(
+        self, svc: Any, raw: Sequence[dict[str, Any]]
+    ) -> list[tuple[dict[str, Any], Exception | None]]:
+        """:meth:`_enrich_mcp_detail` over every entry — concurrently, **in order**.
+
+        ``get_mcp_detail`` is one blocking round trip per server with no batch
+        form and no cache, so enriching in sequence cost this compose ``n`` round
+        trips for a bot holding ``n`` MCPs — ~90 ms each, over *every* MCP the bot
+        holds rather than only the ones a mutation touched. Issuing them together
+        collapses that to roughly one round trip of wall clock.
+
+        Two properties the sequential loop had for free, and which the caller
+        reads as a contract:
+
+        * **Order.** Futures are read back in *submit* order, never completion
+          order, so the result still follows ``raw`` — which is the order the
+          ``McpComposeInput`` list carries into ``McporterComposer``.
+        * **Per-entry failure.** ``_enrich_mcp_detail`` returns its cause instead
+          of raising, so an unresolvable lookup stays attached to its own entry
+          and the caller keeps deciding per entry whether it is fatal (for a
+          local server it is not). Fanning out must not collapse ``n`` separate
+          causes into whichever one happened to surface first.
+
+        Threads rather than async: ``get_mcp_detail`` is a synchronous plugin
+        call and ``mcps`` is a sync method already reached from ``project_skills``'
+        worker thread, so a pool drops into the existing shape where converting
+        the call chain to async would not.
+
+        The pool is the process-wide :data:`_MCP_DETAIL_POOL`, not one built per
+        call, so the ceiling holds across concurrent composes rather than only
+        within one — see the constant for why that distinction matters.
+
+        Each task runs under its own *copy* of the calling context. Pool workers
+        do not inherit context vars — the reason ``bind_current_avernet_tenant``
+        exists — and a Center lookup reads the request's tenant and mints its log
+        lines under the request's trace id; copying the whole context carries both
+        without this having to enumerate them. The copy is taken here, on the
+        calling thread, one per task: a single ``Context`` cannot be entered by
+        two threads at once.
+
+        *Every* lookup goes through the pool, a lone one included. Running a
+        single entry inline would cost less — no hand-off, no future — but a
+        ceiling with a side door is not a ceiling: concurrent one-MCP composes
+        would each add a Center call on top of the pool's
+        ``_MCP_DETAIL_WORKERS``, so the process-wide total would be
+        ``_MCP_DETAIL_WORKERS + <one-MCP composes in flight>``. The hand-off is
+        microseconds against an ~90 ms call, and it buys a bound that actually
+        holds. Only the empty case short-circuits, having nothing to submit.
+        """
+        entries = list(raw)
+        if not entries:
+            return []
+        futures = [
+            _MCP_DETAIL_POOL.submit(
+                copy_context().run, self._enrich_mcp_detail, svc, md
+            )
+            for md in entries
+        ]
+        return [f.result() for f in futures]
 
     def _enrich_mcp_detail(
         self, svc: Any, md: dict[str, Any]
