@@ -353,6 +353,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills"): Check(PermissionLevel.MEMBER),
     ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.skill_query_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills"):
@@ -412,6 +415,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("tenant-identical marketplace"),
     ("POST", "/openapi/v1/bots/market/skill-center/skills"):
         NoCheck("tenant-identical marketplace"),
+    ("POST", "/openapi/v1/bots/market/skill-center/sync"):
+        NoCheck("tenant-identical materialized Skill Center synchronization"),
     ("GET", "/openapi/v1/bots/market/skill-center/tags"):
         NoCheck("tenant-identical marketplace"),
     ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),

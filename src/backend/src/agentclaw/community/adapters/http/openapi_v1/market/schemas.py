@@ -165,6 +165,20 @@ class SkillCenterTag(BaseModel):
         return [] if value is None else value
 
 
+class SkillCenterSyncFailure(BaseModel):
+    skill_id: str
+    skill_code: str
+    error_code: str
+
+
+class SkillCenterSyncSummary(BaseModel):
+    scanned: int
+    updated: int
+    unchanged: int
+    failed: int
+    failures: list[SkillCenterSyncFailure]
+
+
 class SkillMarketItem(BaseModel):
     """A Skill record from the built-in marketplace."""
 

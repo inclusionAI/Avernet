@@ -226,6 +226,7 @@ from .skills import (
 )
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
+from .skill_sets.skill_center_references import router as skill_center_references_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -348,6 +349,7 @@ _ADDRESSED_BOT_SUBGROUPS = [
     channels_router,
     caller_identity_router,
     skill_sets_router,
+    skill_center_references_router,
     bot_mcp_router,
 ]
 

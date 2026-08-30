@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
     Page,
+    USER_SCOPED_403,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.mcp.router import _to_server_detail
@@ -16,6 +17,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page,
 )
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.skill_market_service import (
     SkillMarketSearchQuery,
@@ -23,6 +25,9 @@ from agentclaw.community.api.skill_market_service import (
 )
 from agentclaw.community.api.skill_center_gateway_service import (
     SkillCenterGatewayServiceProtocol,
+)
+from agentclaw.community.api.skill_center_sync_service import (
+    SkillCenterSyncServiceProtocol,
 )
 from agentclaw.community.core.mcp.config_flow import list_marketplace_servers
 from agentclaw.community.core.mcp.presentation import ALLOWED_NETWORK_TYPES
@@ -43,6 +48,8 @@ from .schemas import (
     SkillCenterMarketItem,
     SkillCenterMarketSearchRequest,
     SkillCenterTag as SkillCenterTagResponse,
+    SkillCenterSyncFailure,
+    SkillCenterSyncSummary,
     SkillMarketItem,
     SkillMarketSearchRequest,
 )
@@ -217,6 +224,42 @@ async def search_skill_center_skills(
         raise SkillCenterMarketplaceUnavailableError from exc
     items = [_to_skill_center_market_item(item) for item in result.items]
     return page(result.total, items, request)
+
+
+@router.post(
+    "/skill-center/sync",
+    response_model=Envelope[SkillCenterSyncSummary],
+    responses=USER_SCOPED_403,
+    dependencies=_AUTH,
+)
+@envelope_errors
+async def sync_materialized_skill_center_skills(
+    request: Request,
+    user_id: UserIdDep,
+    service: SkillCenterSyncServiceProtocol = Injected(
+        SkillCenterSyncServiceProtocol
+    ),
+) -> Envelope[SkillCenterSyncSummary]:
+    """Synchronize only SC Public assets already materialized in TeamClaw."""
+    del user_id
+    result = service.sync()
+    return envelope(
+        SkillCenterSyncSummary(
+            scanned=result.scanned,
+            updated=result.updated,
+            unchanged=result.unchanged,
+            failed=result.failed,
+            failures=[
+                SkillCenterSyncFailure(
+                    skill_id=item.skill_id,
+                    skill_code=item.skill_code,
+                    error_code=item.error_code,
+                )
+                for item in result.failures
+            ],
+        ),
+        request,
+    )
 
 
 @router.get(

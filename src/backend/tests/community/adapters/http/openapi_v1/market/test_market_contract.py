@@ -15,6 +15,14 @@ from agentclaw.community.api.skill_market_service import (
 from agentclaw.community.api.skill_center_gateway_service import (
     SkillCenterGatewayServiceProtocol,
 )
+from agentclaw.community.api.skill_center_sync_service import (
+    SkillCenterSyncServiceProtocol,
+)
+from agentclaw.community.core.skill_center.skill_center_sync_contract import (
+    SkillCenterSyncFailure,
+    SkillCenterSyncInProgressError,
+    SkillCenterSyncSummary,
+)
 from agentclaw.community.core.skill_center.services import (
     skill_center_gateway_service as gateway_service,
 )
@@ -137,11 +145,33 @@ class _SkillCenter:
         )
 
 
+class _SkillCenterSync:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def sync(self) -> SkillCenterSyncSummary:
+        self.calls += 1
+        return SkillCenterSyncSummary(
+            scanned=3,
+            updated=1,
+            unchanged=1,
+            failed=1,
+            failures=(
+                SkillCenterSyncFailure(
+                    skill_id="7",
+                    skill_code="sc-calendar",
+                    error_code="SC_MARKET_UNAVAILABLE",
+                ),
+            ),
+        )
+
+
 class _Bindings(Module):
-    def __init__(self, skill, mcp, sc) -> None:
+    def __init__(self, skill, mcp, sc, sync) -> None:
         self.skill = skill
         self.mcp = mcp
         self.sc = sc
+        self.sync = sync
 
     def configure(self, binder) -> None:
         binder.bind(SkillMarketServiceProtocol, to=self.skill)
@@ -151,21 +181,23 @@ class _Bindings(Module):
             SkillCenterGatewayServiceProtocol,
             to=gateway_service.SkillCenterGatewayService(self.sc),
         )
+        binder.bind(SkillCenterSyncServiceProtocol, to=self.sync)
 
 
 def _client():
     skill = _SkillMarket()
     mcp = _McpMarket()
     sc = _SkillCenter()
+    sync = _SkillCenterSync()
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "user-1"}
-    attach_injector(app, Injector([_Bindings(skill, mcp, sc)]))
-    return TestClient(app), skill, mcp, sc
+    attach_injector(app, Injector([_Bindings(skill, mcp, sc, sync)]))
+    return TestClient(app), skill, mcp, sc, sync
 
 
 def test_builtin_skill_market_maps_body_and_envelopes_page():
-    client, skill, _, _ = _client()
+    client, skill, _, _, _ = _client()
 
     response = client.post(
         "/openapi/v1/bots/market/skills",
@@ -194,7 +226,7 @@ def test_builtin_skill_market_maps_body_and_envelopes_page():
 
 
 def test_mcp_market_reuses_market_service_mapping():
-    client, _, mcp, _ = _client()
+    client, _, mcp, _, _ = _client()
 
     response = client.post(
         "/openapi/v1/bots/market/mcp-servers",
@@ -218,7 +250,7 @@ def test_mcp_market_reuses_market_service_mapping():
 
 
 def test_mcp_market_forwards_legacy_filters_including_tags():
-    client, _, mcp, _ = _client()
+    client, _, mcp, _, _ = _client()
 
     response = client.post(
         "/openapi/v1/bots/market/mcp-servers",
@@ -278,7 +310,7 @@ def test_mcp_market_forwards_legacy_filters_including_tags():
 
 
 def test_mcp_market_returns_empty_page_when_requested_network_is_not_visible():
-    client, _, mcp, _ = _client()
+    client, _, mcp, _, _ = _client()
 
     response = client.post(
         "/openapi/v1/bots/market/mcp-servers",
@@ -292,7 +324,7 @@ def test_mcp_market_returns_empty_page_when_requested_network_is_not_visible():
 
 
 def test_skill_center_market_forces_public_scope_and_hides_team_id():
-    client, _, _, sc = _client()
+    client, _, _, sc, _ = _client()
 
     response = client.post(
         "/openapi/v1/bots/market/skill-center/skills",
@@ -345,7 +377,7 @@ def test_skill_center_market_forces_public_scope_and_hides_team_id():
 
 
 def test_skill_center_market_rejects_caller_supplied_team_id():
-    client, _, _, sc = _client()
+    client, _, _, sc, _ = _client()
 
     response = client.post(
         "/openapi/v1/bots/market/skill-center/skills",
@@ -357,10 +389,54 @@ def test_skill_center_market_rejects_caller_supplied_team_id():
     assert sc.request is None
 
 
+def test_skill_center_manual_sync_returns_partial_success_summary():
+    client, _, _, _, sync = _client()
+
+    response = client.post(
+        "/openapi/v1/bots/market/skill-center/sync",
+        params={"user_id": "user-1"},
+    )
+
+    assert response.status_code == 200
+    assert sync.calls == 1
+    assert response.json()["data"] == {
+        "scanned": 3,
+        "updated": 1,
+        "unchanged": 1,
+        "failed": 1,
+        "failures": [
+            {
+                "skill_id": "7",
+                "skill_code": "sc-calendar",
+                "error_code": "SC_MARKET_UNAVAILABLE",
+            }
+        ],
+    }
+
+
+def test_skill_center_manual_sync_returns_stable_conflict_envelope():
+    client, _, _, _, sync = _client()
+
+    def conflict():
+        raise SkillCenterSyncInProgressError("private lock token")
+
+    sync.sync = conflict
+    response = client.post(
+        "/openapi/v1/bots/market/skill-center/sync",
+        params={"user_id": "user-1"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409314
+    assert response.json()["message"] == (
+        "Skill Center synchronization is already in progress"
+    )
+
+
 def test_skill_center_tags_normalizes_null_children_to_empty_lists():
     tag = SkillCenterTag(tag_id="1", name="研发效能")
 
-    client, _, _, sc = _client()
+    client, _, _, sc, _ = _client()
     sc.list_public_tags = lambda: (tag,)
 
     response = client.get(
@@ -373,7 +449,7 @@ def test_skill_center_tags_normalizes_null_children_to_empty_lists():
 
 
 def test_skill_center_tags_returns_nested_tag_tree_without_changing_search_contract():
-    client, _, _, _ = _client()
+    client, _, _, _, _ = _client()
 
     response = client.get(
         "/openapi/v1/bots/market/skill-center/tags",
@@ -405,7 +481,7 @@ def test_skill_center_tags_returns_nested_tag_tree_without_changing_search_contr
 
 
 def test_skill_center_search_keeps_the_legacy_marketplace_502_envelope():
-    client, _, _, sc = _client()
+    client, _, _, sc, _ = _client()
 
     def unavailable(_request):
         raise SkillCenterGatewayError(
@@ -427,7 +503,7 @@ def test_skill_center_search_keeps_the_legacy_marketplace_502_envelope():
 
 
 def test_skill_center_tags_keeps_the_legacy_marketplace_502_envelope():
-    client, _, _, sc = _client()
+    client, _, _, sc, _ = _client()
 
     def unavailable():
         raise SkillCenterGatewayError(

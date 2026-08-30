@@ -8,7 +8,6 @@ from agentclaw.community.api.git_sync_service import GitSyncServiceProtocol
 from agentclaw.community.api.runtime_layout_probe_service import RuntimeLayoutProbeServiceProtocol
 from agentclaw.community.api.skill_auth_service import SkillAuthServiceProtocol
 from agentclaw.community.api.skill_batch_sync_service import SkillBatchSyncServiceProtocol
-from agentclaw.community.api.skill_center_sync_service import SkillCenterSyncServiceProtocol
 from agentclaw.community.api.skill_center_gateway_service import (
     SkillCenterGatewayServiceProtocol,
 )
@@ -31,7 +30,6 @@ from agentclaw.community.core.skill_center.services.git_sync import GitSyncServi
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import CurrentRuntimeLayoutProbeService
 from agentclaw.community.core.skill_center.services.skill_auth_service import SkillAuthService
 from agentclaw.community.core.skill_center.services.skill_batch_sync_service import SkillBatchSyncService
-from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
 from agentclaw.community.core.skill_center.services import (
     skill_center_gateway_service,
 )
@@ -60,12 +58,6 @@ class SkillCenterProtocolBindings:
     @provider
     @inject
     def _skill_batch_sync_service_protocol(self, svc: SkillBatchSyncService) -> SkillBatchSyncServiceProtocol:
-        return svc
-
-    @singleton
-    @provider
-    @inject
-    def _skill_center_sync_service_protocol(self, svc: SkillCenterSyncService) -> SkillCenterSyncServiceProtocol:
         return svc
 
     @singleton

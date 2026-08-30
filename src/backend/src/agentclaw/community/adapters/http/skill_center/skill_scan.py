@@ -122,9 +122,11 @@ async def scan_center(
     request: ScanCenterRequest,
     sync_svc: SkillCenterSyncServiceProtocol = Injected(SkillCenterSyncServiceProtocol),
 ) -> ScanResponse:
-    """手动触发 center:// skill 的 MCP 依赖扫描（运维接口）。
+    """Delegate the legacy scan request to canonical G4 synchronization.
 
-    传入 skill_uuid 列表，逐个扫描 NAS 目录并更新 DB。
+    The request shape remains for compatibility, but no NAS/current directory
+    is scanned and no caller-selected asset can bypass the materialized-public
+    filter.
     """
     if not request.skill_uuids:
         raise HTTPException(status_code=400, detail="skill_uuids must not be empty")
@@ -134,18 +136,17 @@ async def scan_center(
         request.skill_uuids, request.env,
     )
 
-    results = []
-    success_count = 0
-
-    for uuid in request.skill_uuids:
-        try:
-            sync_svc.scan_after_sync(uuid, request.env)
-            results.append(ScanResultItem(skill_path=uuid, success=True))
-            success_count += 1
-            logger.info("[skill_scan.scan_center] scanned: %s", uuid)
-        except Exception as e:
-            logger.warning("[skill_scan.scan_center] failed: %s — %s", uuid, e)
-            results.append(ScanResultItem(skill_path=uuid, success=False, error=str(e)))
+    summary = sync_svc.sync()
+    failures = {item.skill_id: item.error_code for item in summary.failures}
+    results = [
+        ScanResultItem(
+            skill_path=uuid,
+            success=uuid not in failures,
+            error=failures.get(uuid),
+        )
+        for uuid in request.skill_uuids
+    ]
+    success_count = sum(item.success for item in results)
 
     return ScanResponse(
         success=True,

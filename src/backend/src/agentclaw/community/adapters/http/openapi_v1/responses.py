@@ -230,6 +230,10 @@ from agentclaw.community.core.skill_center.errors import (
     McpPermissionDeniedError,
     LocalSkillTooLargeError,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors_skill_center import (
+    SKILL_CENTER_ENVELOPE_ERROR_CODES,
+    SKILL_CENTER_ENVELOPE_ERRORS,
+)
 from agentclaw.community.core.services.identity import (
     InvalidIdentityEntityTypeError,
     InvalidIdentityFileTypeError,
@@ -611,6 +615,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogNotFoundError: (404, "Not found"),
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
+    **SKILL_CENTER_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
     # caller learns the limit instead of hitting it inside a container. The
@@ -791,6 +796,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillEngineNotSupportedError: 409107,
     RepositoryCatalogSyncInProgressError: 409108,
     RepositoryCatalogSyncFailedError: 502103,
+    **SKILL_CENTER_ENVELOPE_ERROR_CODES,
     SkillSetControlPlaneLockUnavailableError: 409209,
     SkillSetAccessDeniedError: 403201,
     McpPermissionDeniedError: 403202,

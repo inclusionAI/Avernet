@@ -11,7 +11,15 @@ from __future__ import annotations
 from agentclaw.community.core.skill_center.skill_center_sync_service_protocol import (
     SkillCenterSyncServiceProtocol,
 )
+from agentclaw.community.core.skill_center.skill_center_sync_contract import (
+    SkillCenterSyncFailure,
+    SkillCenterSyncInProgressError,
+    SkillCenterSyncSummary,
+)
 
 __all__ = [
     "SkillCenterSyncServiceProtocol",
+    "SkillCenterSyncFailure",
+    "SkillCenterSyncInProgressError",
+    "SkillCenterSyncSummary",
 ]

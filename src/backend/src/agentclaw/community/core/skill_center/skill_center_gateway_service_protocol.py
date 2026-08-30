@@ -8,8 +8,12 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterExactDownload,
     SkillCenterExactDownloadRequest,
     SkillCenterPublicSkillSearchRequest,
+    SkillCenterPublicSkillDetailRequest,
+    SkillCenterSkill,
     SkillCenterSkillPage,
     SkillCenterTag,
+    SkillCenterVersion,
+    SkillCenterVersionListRequest,
 )
 
 
@@ -22,6 +26,14 @@ class SkillCenterGatewayServiceProtocol(Protocol):
     ) -> SkillCenterSkillPage: ...
 
     def list_public_tags(self) -> tuple[SkillCenterTag, ...]: ...
+
+    def get_public_skill(
+        self, request: SkillCenterPublicSkillDetailRequest
+    ) -> SkillCenterSkill | None: ...
+
+    def list_versions(
+        self, request: SkillCenterVersionListRequest
+    ) -> tuple[SkillCenterVersion, ...]: ...
 
     def get_exact_download(
         self, request: SkillCenterExactDownloadRequest

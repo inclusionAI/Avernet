@@ -1,11 +1,12 @@
-"""SkillCenter Sync 测试接口 — 仅用于 DEV 环境手动测试 T2。
+"""Legacy SkillCenter diagnostic routes.
 
 POST /api/v1/skill-center/sync
 Body: { "skill_id": "...", "env": "dev", "version": "..." (可选) }
 
 说明：
-  - skill_id: ac_skill.id（本地主键），通过 skill_id 查表拿到 skill_uuid（跨版本标识）再调 SC API
-  - 内部会根据 ac_skill.name 查询 SC 的 skillCode
+The actual synchronization boundary is the environment-wide G4
+``SkillCenterSyncService.sync`` operation.  These routes no longer own NAS,
+``current`` symlink, or per-row materialization behavior.
 
 响应: { "success": true, "skill_id": "...", "skill_uuid": "...", "skill_code": "...", "version": "...", "message": "..." }
 """
@@ -45,11 +46,12 @@ async def force_sync_skill(
     skill_repo: SkillRepository = Injected(SkillRepository),
     sync_svc: SkillCenterSyncServiceProtocol = Injected(SkillCenterSyncServiceProtocol),
 ):
-    """手动触发 force_sync — T2 测试用。
+    """Trigger canonical materialized-SC-Public synchronization.
 
     仅限 DEV 环境使用。
 
-    流程：skill_id → 查 ac_skill 表 → 拿到 skill_uuid（NAS 路径用）和 name（SC skillCode）→ 调 force_sync
+    ``skill_id`` remains only as a legacy diagnostic lookup field; the G4
+    service deliberately owns an environment-wide, filtered reconciliation.
     """
     logger.info("[SkillCenterSyncService] API /sync called: skill_id=%s env=%s version=%s",
                 request.skill_id, request.env, request.version)
@@ -69,18 +71,18 @@ async def force_sync_skill(
                 request.skill_id, skill_uuid, skill_code)
 
     try:
-        result = sync_svc.force_sync(
-            skill_uuid=skill_uuid,
-            env=request.env,
-            version=request.version,
-        )
+        result = sync_svc.sync()
         return SyncResponse(
             success=True,
             skill_id=request.skill_id,
             skill_uuid=skill_uuid,
             skill_code=skill_code,
             version=request.version,
-            message="sync completed" if result else "skipped (already synced)",
+            message=(
+                "sync completed: "
+                f"updated={result.updated} unchanged={result.unchanged} "
+                f"failed={result.failed}"
+            ),
         )
     except Exception as exc:
         logger.exception("[SkillCenterSyncService] API /sync failed: skill_id=%s error=%s",
@@ -155,7 +157,11 @@ async def trigger_bootstrap(
     logger.info("[SkillCenterSyncService] API /bootstrap called")
     try:
         result = await svc.sync_bootstrap()
-        return BootstrapResponse(**result)
+        return BootstrapResponse(
+            synced=result.updated,
+            failed=result.failed,
+            skipped=result.unchanged,
+        )
     except Exception as exc:
         logger.exception("[SkillCenterSyncService] API /bootstrap failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

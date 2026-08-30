@@ -68,6 +68,10 @@ provides:
   - "SkillManifestValidationIssue"
   - "SkillManifestValidationResult"
   - "SkillCenterGatewayService"
+  - "SkillCenterReferenceService"
+  - "SkillCenterReferenceProcessor"
+  - "SkillCenterSyncService"
+  - "TrackLatestService"
   - "CanonicalCenterVersionStore"
   - "CanonicalCenterVersion"
   - "CanonicalCenterVersionIdentity"
@@ -114,6 +118,10 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.space_skill_version # published Space Skill read contract consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
   - agentclaw.community.core.repository.protocols.space_skill_publication # Publication aggregate persistence contract
+  - agentclaw.community.core.repository.protocols.skill_center_reference
+  - agentclaw.community.core.repository.protocols.track_latest
+  - agentclaw.community.core.repository.skill_center_reference_types
+  - agentclaw.community.core.repository.track_latest_types
   - agentclaw.community.core.repository.protocols.work_orders
   - agentclaw.community.core.repository.protocols.space_skill_offline
   - agentclaw.community.core.repository.space_skill_offline_types
