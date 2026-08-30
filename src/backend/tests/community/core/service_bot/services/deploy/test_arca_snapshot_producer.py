@@ -39,6 +39,24 @@ class _CenterStore:
         return self.ready
 
 
+def _resolved_layout(engine: str, pool_center: str) -> dict[str, str]:
+    pool_root = pool_center.rsplit("/", 1)[0]
+    active_root = {
+        "openclaw": "/home/admin/.openclaw/workspace/skills",
+        "claude_code": "/home/admin/.claude/skills",
+        "aicoding": "/home/admin/.claude/skills",
+        "hermes": "/home/admin/.hermes/skills",
+    }[engine]
+    return {
+        "engine": engine,
+        "layout_contract_version": "skills-pool-p3-v1",
+        "active_root": active_root,
+        "local_root": f"{pool_root}/skills-local",
+        "repo_root": f"{pool_root}/skills-repo",
+        "pool_center": pool_center,
+    }
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("bot", "runtime_engine", "runtime_path"),
@@ -77,11 +95,7 @@ def test_shared_center_delivery_uses_engine_runtime_evidence(
         layout_contract_version="skills-pool-p3-v1",
         last_probe_result="READY",
         last_probe_evidence={
-            "resolved_layout": {
-                "engine": runtime_engine,
-                "layout_contract_version": "skills-pool-p3-v1",
-                "pool_center": runtime_path,
-            }
+            "resolved_layout": _resolved_layout(runtime_engine, runtime_path)
         },
     )
 
@@ -114,7 +128,7 @@ def test_shared_center_delivery_rejects_missing_or_mismatched_evidence() -> None
         },
     )
 
-    with pytest.raises(ServiceSkillsManifestError, match="missing pool_center"):
+    with pytest.raises(ServiceSkillsManifestError, match="matching READY"):
         ResolvedSharedCorpusDelivery.center_from_state(
             state=state,
             bot={"active_engine": "openclaw"},
@@ -125,11 +139,10 @@ def test_shared_center_delivery_rejects_missing_or_mismatched_evidence() -> None
             state=replace(
                 state,
                 last_probe_evidence={
-                    "resolved_layout": {
-                        "engine": "hermes",
-                        "layout_contract_version": "skills-pool-p3-v1",
-                        "pool_center": "/home/admin/.hermes/workspace/skills-pool/skill-center",
-                    }
+                    "resolved_layout": _resolved_layout(
+                        "hermes",
+                        "/home/admin/.hermes/workspace/skills-pool/skill-center",
+                    )
                 },
             ),
             bot={"active_engine": "openclaw"},
@@ -317,11 +330,10 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
         layout_contract_version="skills-pool-p3-v1",
         last_probe_result="READY",
         last_probe_evidence={
-            "resolved_layout": {
-                "engine": "openclaw",
-                "layout_contract_version": "skills-pool-p3-v1",
-                "pool_center": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
-            }
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
         },
     )
     reader = _CapabilityReader(
@@ -439,11 +451,10 @@ def test_center_service_build_fails_when_exact_store_version_is_missing() -> Non
         layout_contract_version="skills-pool-p3-v1",
         last_probe_result="READY",
         last_probe_evidence={
-            "resolved_layout": {
-                "engine": "openclaw",
-                "layout_contract_version": "skills-pool-p3-v1",
-                "pool_center": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
-            }
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
         },
     )
     builder = ServiceSkillsManifestBuilder(
@@ -829,6 +840,13 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
         migration_generation="generation-1",
         persisted=True,
         layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "hermes",
+                "/home/admin/.hermes/workspace/skills-pool/skill-center",
+            )
+        },
     )
     build = _RecordingBuild(
         {"success": True, "build_target_path": "/snapshot/1/hermes"}
@@ -861,7 +879,7 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
 
 
 @pytest.mark.unit
-def test_hermes_legacy_publish_keeps_pre_pool_compatibility() -> None:
+def test_hermes_legacy_publish_fails_without_ready_engine_evidence() -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
     build = _RecordingBuild(
         {
@@ -880,21 +898,15 @@ def test_hermes_legacy_publish_keeps_pre_pool_compatibility() -> None:
         ),
     )
 
-    artifact = producer.produce_artifact(
-        {
-            "bot_id": "b1",
-            "entity_id": "u1",
-            "env": "dev",
-            "active_engine": "hermes",
-        },
-        1,
-    )
+    with pytest.raises(ServiceSkillsManifestError, match="READY Pool runtime"):
+        producer.produce_artifact(
+            {
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "hermes",
+            },
+            1,
+        )
 
-    assert artifact.success is True
-    assert artifact.ext["skills_manifest"] == {
-        "schema_version": 1,
-        "engine": "hermes",
-        "active_layout": "legacy",
-        "layout_contract_version": None,
-    }
-    assert build.calls
+    assert build.calls == []

@@ -2882,7 +2882,7 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
     async def _refuse(**_):
         return False
 
-    factory.service.project_skills = _refuse
+    factory.service.project_whole_artifact = _refuse
     runtime = _teclaw_runtime(factory, passport=passport)
 
     with pytest.raises(SkillSetRuntimeReconcileError):

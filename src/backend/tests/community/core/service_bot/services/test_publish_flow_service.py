@@ -921,6 +921,26 @@ async def test_execute_rollback_enqueues_progress_poll_for_target():
     target_ext = {
         'migration_path': '/tmp/m',
         'config_artifact': {'schema_version': 3},
+        'skills_manifest': {
+            'schema_version': 1,
+            'engine': 'openclaw',
+            'active_layout': 'pool',
+            'layout_contract_version': 'skills-pool-p3-v1',
+            'center_skills': [{
+                'runtime_name': 'pdf',
+                'skill_uuid': '00000000-0000-4000-8000-000000000001',
+                'sc_version_number': '1.0.0',
+                'mcp_dependencies': [],
+            }],
+            'shared_corpora': [{
+                'corpus': 'center',
+                'runtime_path': '/home/admin/.openclaw/workspace/skills-pool/skill-center',
+                'store_prefix': 'aidesktop/aidesktop_pre/bolt_shared/skills-center',
+                'layout_contract_version': 'skills-pool-p3-v1',
+                'permission': 'read_only',
+                'snapshot_policy': 'exclude',
+            }],
+        },
         'binding': {PublishStage.ONLINE.value: online_binding_id},
         'publish': {},
     }
@@ -944,6 +964,9 @@ async def test_execute_rollback_enqueues_progress_poll_for_target():
     args = svc._task_queue_service.enqueue.call_args.args
     assert args[0] == PROGRESS_POLL_TASK
     assert args[1] == {'publish_id': target_id}
+    assert build_service.upgrade_async.await_args.kwargs['ext_info'] == {
+        'skills_manifest': target_ext['skills_manifest']
+    }
     # #197 all-auto: no client approve.
     assert not hasattr(svc, "approve_baas_publish") or not svc.approve_baas_publish.called
 

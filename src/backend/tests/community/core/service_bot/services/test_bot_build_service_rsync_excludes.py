@@ -376,6 +376,20 @@ def test_resolve_sandbox_provider_falls_back_to_default_when_retry_fails():
     ]
 
 
+def test_known_hermes_provider_never_falls_back_to_openclaw():
+    service = BotBuildService.__new__(BotBuildService)
+    service._bot_repository = None
+    service._sandbox_registry = MagicMock()
+    service._sandbox_registry.resolve.side_effect = RuntimeError("hermes missing")
+
+    with pytest.raises(RuntimeError, match="hermes missing"):
+        service._resolve_sandbox_provider(
+            {"active_engine": "hermes", "bot_id": "bot-1"}
+        )
+
+    service._sandbox_registry.resolve.assert_called_once_with("hermes")
+
+
 def test_build_uses_original_active_engine_for_nas_source_bucket_when_routed_to_aicoding():
     bot = {
         "bot_id": "20260811_lklnq6d0",

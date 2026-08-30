@@ -61,6 +61,45 @@ class ServiceSkillsManifestError(RuntimeError):
     """The draft cannot be represented as a supported Skills manifest."""
 
 
+def _resolved_ready_layout(
+    *,
+    state,
+    bot: dict[str, Any],
+) -> dict[str, str]:
+    evidence = state.last_probe_evidence
+    resolved = evidence.get("resolved_layout") if isinstance(evidence, dict) else None
+    expected_engine = runtime_layout_engine_for_bot(bot)
+    required = {
+        "engine",
+        "layout_contract_version",
+        "active_root",
+        "local_root",
+        "repo_root",
+        "pool_center",
+    }
+    if (
+        state.last_probe_result != "READY"
+        or state.layout_contract_version != SERVICE_SKILLS_POOL_CONTRACT_VERSION
+        or not isinstance(resolved, dict)
+        or set(resolved) != required
+        or resolved.get("engine") != expected_engine
+        or resolved.get("layout_contract_version")
+        != SERVICE_SKILLS_POOL_CONTRACT_VERSION
+    ):
+        raise ServiceSkillsManifestError(
+            "service build requires matching READY Engine layout evidence"
+        )
+    normalized: dict[str, str] = {}
+    for field in required:
+        value = resolved.get(field)
+        if not isinstance(value, str) or not value:
+            raise ServiceSkillsManifestError(
+                "service build has invalid READY Engine layout evidence"
+            )
+        normalized[field] = value
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedSharedCorpusDelivery:
     """Strict, frozen delivery facts resolved by the Engine Runtime probe."""
@@ -80,20 +119,7 @@ class ResolvedSharedCorpusDelivery:
         bot: dict[str, Any],
         store_prefix: str,
     ) -> ResolvedSharedCorpusDelivery:
-        evidence = state.last_probe_evidence
-        resolved = evidence.get("resolved_layout") if isinstance(evidence, dict) else None
-        expected_engine = runtime_layout_engine_for_bot(bot)
-        if (
-            state.last_probe_result != "READY"
-            or state.layout_contract_version != SERVICE_SKILLS_POOL_CONTRACT_VERSION
-            or not isinstance(resolved, dict)
-            or resolved.get("engine") != expected_engine
-            or resolved.get("layout_contract_version")
-            != SERVICE_SKILLS_POOL_CONTRACT_VERSION
-        ):
-            raise ServiceSkillsManifestError(
-                "Center service build requires matching READY Engine layout evidence"
-            )
+        resolved = _resolved_ready_layout(state=state, bot=bot)
         runtime_path = resolved.get("pool_center")
         if not isinstance(runtime_path, str):
             raise ServiceSkillsManifestError(
@@ -194,6 +220,12 @@ class ServiceSkillsManifestBuilder:
             raise ServiceSkillsManifestError(
                 "Pool service manifest requires a persisted POOL_ACTIVE draft"
             )
+        if engine == "hermes":
+            if not is_pool:
+                raise ServiceSkillsManifestError(
+                    "Hermes service build requires a READY Pool runtime"
+                )
+            _resolved_ready_layout(state=state, bot=bot)
 
         try:
             assets = self._capability_reader.active_skill_assets(

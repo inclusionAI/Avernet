@@ -58,6 +58,7 @@ from agentclaw.community.core.workspace.path_factory import (
     get_bot_dir,
     get_bot_nas_dir,
 )
+from agentclaw.community.core.workspace.skill_layout import FILESYSTEM_POOL_ENGINES
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -172,7 +173,7 @@ class BotBuildService:
 
         try:
             return self._sandbox_registry.resolve(engine_type)
-        except Exception:
+        except Exception as first_error:
             bot_id = bot.get("bot_id")
             owner_id = bot.get("owner_id") or bot.get("entity_id")
             if self._bot_repository is not None:
@@ -182,9 +183,16 @@ class BotBuildService:
                         owner_id,
                         bot_repo=self._bot_repository,
                     )
-                    return self._sandbox_registry.resolve(resolved_engine)
+                    try:
+                        return self._sandbox_registry.resolve(resolved_engine)
+                    except Exception:
+                        if resolved_engine in FILESYSTEM_POOL_ENGINES:
+                            raise
                 except Exception:
-                    pass
+                    if engine_type in FILESYSTEM_POOL_ENGINES:
+                        raise first_error
+            if engine_type in FILESYSTEM_POOL_ENGINES:
+                raise first_error
             return self._sandbox_registry.resolve(DEFAULT_ENGINE_TYPE)
 
     def generate_request_id(

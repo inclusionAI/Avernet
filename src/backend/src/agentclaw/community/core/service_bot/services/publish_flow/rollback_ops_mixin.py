@@ -140,6 +140,9 @@ class RollbackOpsMixin:
                 publish_stage=PublishStage.ONLINE,
                 version=version,
                 delivery=delivery,
+                ext_info={
+                    "skills_manifest": target_ext["skills_manifest"]
+                } if target_ext.get("skills_manifest") is not None else None,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
                 template_config=service_publish_template_config(bot),

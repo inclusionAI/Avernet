@@ -52,6 +52,7 @@ from agentclaw.community.core.workspace.engine_sandbox import (
     EngineSandboxProvider,
     EngineSandboxRegistry,
 )
+from agentclaw.community.core.workspace.skill_layout import FILESYSTEM_POOL_ENGINES
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.log import get_logger
 
@@ -241,6 +242,8 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         try:
             return self._sandbox_registry.resolve(engine_type)
         except Exception as e:
+            if engine_type in FILESYSTEM_POOL_ENGINES:
+                raise
             logger.warning(
                 "[_resolve_sandbox_provider] resolve failed for engine=%s, fallback to default: %s",
                 engine_type,

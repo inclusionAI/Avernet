@@ -7,6 +7,10 @@ extra_sync_* 是否正确装配。
 """
 from __future__ import annotations
 
+import inspect
+import json
+from pathlib import Path
+
 import pytest
 
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
@@ -34,6 +38,37 @@ def _device_fs(mapping: dict[str, list[dict]]):
             return mapping.get(target_path, [])
 
     return _FS()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "provider_type",
+    (
+        OpenClawSandboxProvider,
+        ClaudeCodeSandboxProvider,
+        AICodingSandboxProvider,
+        HermesSandboxProvider,
+    ),
+)
+def test_list_directory_provider_signature_matches_runtime_contract(
+    provider_type,
+) -> None:
+    assert list(inspect.signature(provider_type.list_directory).parameters) == [
+        "self",
+        "sub_path",
+        "recursive",
+        "device_fs",
+    ]
+
+
+def _hermes_cross_component_contract() -> dict:
+    repo_root = Path(__file__).resolve().parents[6]
+    path = (
+        repo_root
+        / "src/engine/src/engine/community/core/skills/contracts"
+        / "hermes_service_build_layout_v1.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @pytest.mark.unit
@@ -279,6 +314,32 @@ class TestHermesProvider:
         provider = create_engine_sandbox_registry(_workspace()).resolve("hermes")
 
         assert isinstance(provider, HermesSandboxProvider)
+
+    def test_provider_matches_engine_owned_service_build_contract(self):
+        contract = _hermes_cross_component_contract()
+        provider = HermesSandboxProvider(workspace=_workspace())
+        plan = provider.get_build_plan()
+
+        assert provider.get_base_path() == contract["engine_root"]
+        assert provider.get_sessions_dir() == contract["sessions_root"]
+        assert f"{provider.get_base_path()}/{plan.mcp_config_relpath}" == contract[
+            "mcp_config"
+        ]
+        assert f"{provider.get_base_path()}/{plan.skill_target_relpath}" == contract[
+            "active_skills"
+        ]
+        materialized_rules = [
+            (
+                rule.path
+                if rule.path.startswith("/")
+                else f"{provider.get_base_path()}/{rule.path}"
+            )
+            for rule in provider.get_default_read_only_rules()
+        ]
+        assert materialized_rules == contract["read_only_roots"]
+        assert contract["pool_repo"].removeprefix(
+            f"{provider.get_base_path()}/"
+        ) in plan.rsync_excludes
 
 _OPENCLAW_ROOT = cfg.WorkspaceConfig().openclaw_root
 _CLAUDE_CODE_ROOT = cfg.WorkspaceConfig().claude_code_root
