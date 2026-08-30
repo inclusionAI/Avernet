@@ -1051,10 +1051,19 @@ directory-level ownership semantics; teclaw per-file expansion.
 **Goal.** One `ref` change upgrades a whole configuration atomically, and
 content hosted in the company's git service is a first-class source.
 
-**In scope.** `sources` + `from`; git ref resolution and archive retrieval.
+**In scope.** `sources` + `from`; git ref resolution and content retrieval.
 
 **Depends on.** W5.
-**Blocked by.** **X1** — this item cannot start without the git hosting answers.
+**Blocked by.** — **X1 is now mostly answered** (§4): a dedicated machine account
+with a `read_repository` 访问令牌, injected as HTTP Basic, needing no change to the
+v1 credential model. Two questions remain (do Deploy *Tokens* exist; maximum token
+expiry), neither of which blocks starting.
+
+**Scope change forced by X1:** `read_repository` cannot reach the API, so this
+item does a **shallow single-ref git fetch** rather than the archive-API pull
+design §10.5 specifies. That section is superseded. Taking the API route would
+require the `api` scope — read/write across every group and repository — a far
+worse credential to hold in our database than a clone is to run.
 
 **Done when.**
 
@@ -1068,15 +1077,17 @@ content hosted in the company's git service is a first-class source.
       report records both the declared `ref` and the resolved SHA.
 - [ ] The same `{git, ref}` is fetched **once** per apply and reused across
       every entry referencing it.
-- [ ] Git sources are compiled to an HTTPS archive fetch through the hosting
-      service's API and reuse W2's fetcher and unpacker. **No `git clone` runs
-      inside the backend process.**
+- [ ] Git content is retrieved over HTTPS with a **shallow, single-ref** fetch
+      (superseding design §10.5's archive-API approach — see §4, X1), reusing
+      W2's guarded transport and its size, timeout and concurrency caps.
+- [ ] The fetch is read-only and never executes repository-supplied hooks or
+      filters.
 - [ ] A re-pointed tag converges to the new content at the next apply — moving a
       tag changes what the declaration means.
 - [ ] Directory entries from a git source need no `unpack` or
       `strip_components`.
 
-**Size.** Medium-large, and the estimate is soft until X1 lands.
+**Size.** Medium-large.
 
 ---
 
@@ -1232,7 +1243,7 @@ product.
 | W4 | design §3.2, §3.3, §3.4, §4.3, §6, §7, §10.2, §10.3; schema §1 empty-category semantics, §3.1, §3.4, §3.6 |
 | W5 | design §4.1, §4.2; schema §3.3, §3.5 |
 | W6 | schema §3.2; design §10.1 |
-| W7 | design §4.2, §10.5; schema §2.2, §2.3 |
+| W7 | design §4.2; schema §2.2, §2.3. **Design §10.5 superseded** — see §4, X1 |
 | W8 | design §3.1, §3.4, §4.3, §10.1, §10.4 |
 | W9 | schema §3.7; engine-requirements T4, A2, O9 — narrowed by §4's investigation |
 | W10 | no design section — arises from §2.9, an implementation constraint the design does not cover |
@@ -1251,6 +1262,8 @@ scope; desktop out), §2.6 (`PUT` triggers a restart rather than being lazy —
 design §3.1), §2.7 (a first-boot readiness gate, which design §4.3 defers to v2),
 §2.8 (platform-side materialisation, which the design does not have), §3.2 (an
 entity-level three-way diff that preserves bot-created files, superseding design
-§3.2's wholesale directory replace), and §3.4 (post-start delivery on the BaaS
-family, where design §3.1 requires configuration to precede readiness). Amending the
-Chinese docs to match is a separate change, deliberately not made here.
+§3.2's wholesale directory replace), §3.4 (post-start delivery on the BaaS
+family, where design §3.1 requires configuration to precede readiness), and §4's
+X1 (a shallow git fetch rather than design §10.5's archive-API pull, forced by
+Ant Code having no read-only API scope). Amending the Chinese docs to match is a
+separate change, deliberately not made here.
