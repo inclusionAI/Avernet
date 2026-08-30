@@ -655,8 +655,10 @@ class TestMaxPlanRound:
 
         # ---- 首轮:3 次重规划产子(plan_round 0→1→2→3),c4 PASS 撞顶→升 BBS1 ----
         for src, nxt in [("c1", "c2"), ("c2", "c3"), ("c3", "c4")]:
-            _plan(nxt); _pass(src)
-        _plan("c5"); _pass("c4")  # plan_round=3>=3 撞顶,c5 不产
+            _plan(nxt)
+            _pass(src)
+        _plan("c5")
+        _pass("c4")  # plan_round=3>=3 撞顶,c5 不产
         root = svc._get_node(graph, "t1")
         assert root.status == Status.HUNG
         assert root.run_info.extend_props.get("hung_reason") == "plan_round_exhausted"
@@ -666,23 +668,30 @@ class TestMaxPlanRound:
         assert svc._get_node(graph, "c5") is None  # 撞顶不产子
 
         # ---- BBS1(plan reset=1):re-dispatch c4 触发;产 c5(1→2)、c6(2→3);c6 PASS 撞→升 BBS2 ----
-        _redispatch("c4"); _plan("c5"); _pass("c4")
+        _redispatch("c4")
+        _plan("c5")
+        _pass("c4")
         assert svc._get_node(graph, "c5").status == Status.RUNNING
         assert svc._get_node(graph, "t1").run_info.extend_props.get("plan_round") == 2
-        _plan("c6"); _pass("c5")
+        _plan("c6")
+        _pass("c5")
         assert svc._get_node(graph, "c6").status == Status.RUNNING
         assert svc._get_node(graph, "t1").run_info.extend_props.get("plan_round") == 3
-        _plan("c7"); _pass("c6")  # 撞顶→升 BBS2
+        _plan("c7")
+        _pass("c6")  # 撞顶→升 BBS2
         assert svc._get_node(graph, "t1").run_info.extend_props.get("plan_round") == 2  # 重置=loop=2
         assert graph.loop_round == 2
         assert len(runner.bbs_calls) == 2
         assert svc._get_node(graph, "c7") is None
 
         # ---- BBS2(plan reset=2):re-dispatch c6 触发;产 c7(2→3);c7 PASS 撞→升 BBS3 ----
-        _redispatch("c6"); _plan("c7"); _pass("c6")
+        _redispatch("c6")
+        _plan("c7")
+        _pass("c6")
         assert svc._get_node(graph, "c7").status == Status.RUNNING
         assert svc._get_node(graph, "t1").run_info.extend_props.get("plan_round") == 3
-        _plan("c8"); _pass("c7")  # 撞顶→升 BBS3
+        _plan("c8")
+        _pass("c7")  # 撞顶→升 BBS3
         assert svc._get_node(graph, "t1").run_info.extend_props.get("plan_round") == 3  # 重置=loop=3
         assert graph.loop_round == 3
         assert len(runner.bbs_calls) == 3
@@ -690,7 +699,9 @@ class TestMaxPlanRound:
         assert graph.status != Status.HUNG  # loop=3 但先判 2<3 +1,图仍 RUNNING,schedule 了 BBS3
 
         # ---- BBS3(plan reset=3,loop=3):re-dispatch c7 触发;plan=3>=3 撞→_bump_loop 先判 loop=3>=3→图 HUNG 硬停 ----
-        _redispatch("c7"); _plan("c8"); _pass("c7")
+        _redispatch("c7")
+        _plan("c8")
+        _pass("c7")
         assert graph.status == Status.HUNG
         assert graph.extend_props.get("hung_reason") == "loop_exhausted"
         assert len(runner.bbs_calls) == 3  # loop 收尾硬停,不再调度 run_bbs
