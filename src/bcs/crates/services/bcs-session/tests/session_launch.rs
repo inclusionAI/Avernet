@@ -39,11 +39,14 @@ impl CollaborationRuntimeService for RecordingRuntime {
             view: StateMachineRunView {
                 run: StateMachineRun {
                     run_id: format!("run-{session_id}"),
+                    root_run_id: Some(format!("run-{session_id}")),
+                    rerun_of: None,
                     definition_id: "definition-1".into(),
                     definition_version: 1,
                     group_id: command.group_id,
                     group_version: 1,
                     session_id,
+                    session_activation_count: None,
                     created_by: command.caller_id,
                     status: StateMachineRunStatus::Running,
                     input: command.input,

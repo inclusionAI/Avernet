@@ -334,6 +334,10 @@ fn build_api_routes() -> Router<HttpAppState> {
             get(routes::collaboration_runs::get_state_machine_run_graph),
         )
         .route(
+            "/state-machine-runs/{run_id}/reruns",
+            post(routes::collaboration_runs::rerun_state_machine_run),
+        )
+        .route(
             "/state-machine-runs/{run_id}/nodes/{node_id}",
             get(routes::collaboration_runs::get_state_machine_node_run),
         )

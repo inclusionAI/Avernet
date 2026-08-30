@@ -779,6 +779,7 @@ story_user_has_direct_agent_conversation() {
 #   - Definition patches increment the version and preserve the revised instruction.
 #   - Missing upgrades fail with 404 and identify the definition and target version.
 #   - Run, graph, and node views refer to the same run, which remains aborted after cancel.
+#   - An aborted Run cannot be rerun because rerun currently accepts only Failed sources.
 story_user_runs_structured_collaboration() {
     info "Story: user chooses a template, evolves a workflow, starts it, and cancels it"
 
@@ -918,6 +919,11 @@ print(json.dumps({
     api_get "/state-machine-runs/${run_id}"
     require_status "user reads cancelled state-machine run" "200" || return
     assert_json_eq "cancelled state-machine run remains aborted" "$RESPONSE" "run.status" "aborted"
+
+    api_post "/state-machine-runs/${run_id}/reruns"
+    require_status "user cannot rerun an aborted state-machine run" "409" || return
+    assert_contains "rerun rejection explains the Failed-only source rule" \
+        "$RESPONSE" "must be failed before rerun"
 
     api_delete "/groups/${group_id}?bot_id=${BOT_CEO_UUID}"
     require_status "structured collaboration fixture is cleaned up" "200" || return

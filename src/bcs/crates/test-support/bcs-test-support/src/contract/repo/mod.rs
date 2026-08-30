@@ -14,8 +14,9 @@ pub use permission_request::run_permission_request_repo_contract;
 use bcs_domain::{MessageOwnerFilter, MessageQuery, NewMessage, SenderType};
 use bcs_service_api::ServiceError;
 use bcs_service_api::port::repo::{
-    AppendEventRecord, ClaimEventDeliveries, ClaimFanoutTargets, CompleteEventDeliveryAttempt,
-    CreateEventReplayTarget, CreateEventSubscriptionRecord, CreateOrganizationRecord,
+    AppendEventRecord, ClaimEventDeliveries, ClaimFanoutTargets, ClaimSessionCallback,
+    CompleteEventDeliveryAttempt, CompleteSessionCallback, CreateEventReplayTarget,
+    CreateEventSubscriptionRecord, CreateOrganizationRecord,
     EventDeliveryAttemptRecordResult, EventDeliveryRecord, EventRepoError, EventRepoPort,
     EventRetentionRequest, ListEventDeliveryRecords, ListOrganizationMembersPageQuery,
     ListOrganizationMembersQuery, MaterializeFanoutTarget, MessageRepoPort, OrganizationRepoPort,
@@ -1980,10 +1981,112 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
     let r = repo.reactivate(&svc.id, None).await;
     assert!(r.is_err(), "reactivate must reject when callback pending");
 
-    // write terminal callback status, then reactivate succeeds
-    repo.update_callback_status(&svc.id, "succeeded")
+    let recoverable = repo
+        .list_recoverable_callbacks(100, None, 10)
         .await
-        .expect("update_callback_status");
+        .expect("list idle callback recovery candidates");
+    assert_eq!(recoverable.len(), 1);
+    assert_eq!(recoverable[0].id, svc.id);
+    assert!(
+        repo.list_recoverable_callbacks(100, Some(&svc.id), 10)
+            .await
+            .expect("callback recovery keyset boundary")
+            .is_empty(),
+        "Session-id cursor must be exclusive"
+    );
+
+    // one activation can have only one live callback claim
+    let first_claim = repo
+        .claim_callback(ClaimSessionCallback {
+            session_id: svc.id.clone(),
+            expected_activation_count: 1,
+            lease_owner: "callback-owner-a".to_string(),
+            now_ms: 100,
+            lease_until_ms: 200,
+        })
+        .await
+        .expect("first callback claim")
+        .expect("first callback claim acquired");
+    assert_eq!(first_claim.lease_token, 1);
+    let concurrent_claim = repo
+        .claim_callback(ClaimSessionCallback {
+            session_id: svc.id.clone(),
+            expected_activation_count: 1,
+            lease_owner: "callback-owner-b".to_string(),
+            now_ms: 150,
+            lease_until_ms: 250,
+        })
+        .await
+        .expect("concurrent callback claim");
+    assert!(concurrent_claim.is_none(), "live lease must fence a second owner");
+    assert!(
+        repo.list_recoverable_callbacks(150, None, 10)
+            .await
+            .expect("list callbacks while lease is live")
+            .is_empty(),
+        "live callback lease must be excluded from recovery"
+    );
+
+    // expired takeover increments the fencing token
+    assert_eq!(
+        repo.list_recoverable_callbacks(200, None, 10)
+            .await
+            .expect("list expired callback lease")
+            .len(),
+        1,
+        "expired callback lease must become recoverable"
+    );
+    let takeover = repo
+        .claim_callback(ClaimSessionCallback {
+            session_id: svc.id.clone(),
+            expected_activation_count: 1,
+            lease_owner: "callback-owner-b".to_string(),
+            now_ms: 200,
+            lease_until_ms: 300,
+        })
+        .await
+        .expect("expired callback takeover")
+        .expect("expired callback lease is claimable");
+    assert_eq!(takeover.lease_token, 2);
+    let stale_completion = repo
+        .complete_callback(CompleteSessionCallback {
+            session_id: svc.id.clone(),
+            expected_activation_count: 1,
+            lease_owner: "callback-owner-a".to_string(),
+            lease_token: first_claim.lease_token,
+            terminal_status: "succeeded".to_string(),
+        })
+        .await
+        .expect("stale callback completion");
+    assert!(!stale_completion, "expired owner must not confirm callback");
+    let completed_callback = repo
+        .complete_callback(CompleteSessionCallback {
+            session_id: svc.id.clone(),
+            expected_activation_count: 1,
+            lease_owner: "callback-owner-b".to_string(),
+            lease_token: takeover.lease_token,
+            terminal_status: "not_applicable".to_string(),
+        })
+        .await
+        .expect("current callback completion");
+    assert!(completed_callback);
+    assert_eq!(
+        repo.get(&svc.id)
+            .await
+            .expect("service Session after callback")
+            .callback_status
+            .as_deref(),
+        Some("not_applicable")
+    );
+    assert!(
+        repo.list_recoverable_callbacks(300, None, 10)
+            .await
+            .expect("list terminal callbacks")
+            .is_empty(),
+        "terminal callback must leave the recovery set"
+    );
+
+    // terminal callback status allows reactivation
     let reacted = repo
         .reactivate(&svc.id, None)
         .await

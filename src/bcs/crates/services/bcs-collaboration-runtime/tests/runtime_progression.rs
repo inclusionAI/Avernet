@@ -34,6 +34,7 @@ use bcs_service_api::{
     HumanResponseSource, HumanRunAccessCommand, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
     ListPendingHumanNodesCommand,
     PatchGroupCollaborationDefinitionCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome,
+    CreateStateMachineRerun, CreateStateMachineRerunOutcome, RerunStateMachineCommand,
     ServiceError, ServiceResult, ServiceSpec, SessionChannelDeliveryOutcome,
     SessionChannelOutboundPort, SessionManagementService,
     SessionStateMachinePermissionCommand, StartSessionStateMachineRunCommand,
@@ -539,10 +540,24 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         .expect("read chat session")
         .expect("chat session exists");
     assert_eq!(preserved_session.status, SessionStatus::Running);
+
+    let error = runtime
+        .rerun_state_machine_run(RerunStateMachineCommand {
+            source_run_id: started.view.run.run_id.clone(),
+            authenticated_human: None,
+        })
+        .await
+        .expect_err("completed one-shot run must not be rerunnable");
+    assert!(matches!(
+        error,
+        CollaborationRuntimeError::Conflict(message)
+            if message.contains("must be failed before rerun")
+    ));
+    assert_eq!(delivery.commands.lock().await.len(), 1);
 }
 
 #[tokio::test]
-async fn one_shot_result_publication_failure_marks_run_failed_instead_of_completed() {
+async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun() {
     let group_store = Arc::new(GroupStore::new());
     let group = test_group();
     group_store
@@ -579,7 +594,7 @@ async fn one_shot_result_publication_failure_marks_run_failed_instead_of_complet
         store.clone(),
         store.clone(),
         store.clone(),
-        store,
+        store.clone(),
         group_store,
         sessions.clone(),
         delivery.clone(),
@@ -645,6 +660,172 @@ async fn one_shot_result_publication_failure_marks_run_failed_instead_of_complet
             .status,
         SessionStatus::Running
     );
+
+    // Simulate a pre-lineage Run. The migration deliberately leaves its
+    // root_run_id NULL, so rerun must treat the source Run itself as the root.
+    let mut legacy_source = view.run.clone();
+    legacy_source.root_run_id = None;
+    store
+        .create_run(legacy_source, view.nodes.clone())
+        .await
+        .expect("preserve legacy NULL root before rerun");
+
+    let rerun = runtime
+        .rerun_state_machine_run(RerunStateMachineCommand {
+            source_run_id: started.view.run.run_id.clone(),
+            authenticated_human: None,
+        })
+        .await
+        .expect("rerun failed one-shot run");
+    assert!(rerun.created);
+    assert_ne!(rerun.view.run.run_id, started.view.run.run_id);
+    assert_eq!(
+        rerun.view.run.root_run_id.as_deref(),
+        Some(started.view.run.run_id.as_str())
+    );
+    assert_eq!(
+        rerun.view.run.rerun_of.as_deref(),
+        Some(started.view.run.run_id.as_str())
+    );
+    assert_eq!(rerun.view.run.input, started.view.run.input);
+    assert_eq!(rerun.view.nodes.len(), 1);
+    assert_eq!(rerun.view.nodes[0].attempt, 0);
+    assert_eq!(rerun.view.nodes[0].status, StateMachineNodeStatus::Running);
+    assert_eq!(
+        delivery
+            .commands
+            .lock()
+            .await
+            .last()
+            .map(|command| command.target_bot_id()),
+        Some("worker-bot")
+    );
+    let history = runtime
+        .get_state_machine_session_history(&session.id, 20, None)
+        .await
+        .expect("history after rerun")
+        .expect("state-machine history after rerun");
+    let panel_run_ids = history
+        .messages
+        .iter()
+        .filter_map(|message| {
+            message
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.pointer("/state_machine/event"))
+                .and_then(Value::as_str)
+                .filter(|event| *event == "panel")
+                .and_then(|_| {
+                    message
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.pointer("/state_machine/run_id"))
+                        .and_then(Value::as_str)
+                })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(panel_run_ids.len(), 2);
+    assert!(panel_run_ids.contains(&started.view.run.run_id.as_str()));
+    assert!(panel_run_ids.contains(&rerun.view.run.run_id.as_str()));
+
+    let repeated = runtime
+        .rerun_state_machine_run(RerunStateMachineCommand {
+            source_run_id: started.view.run.run_id.clone(),
+            authenticated_human: None,
+        })
+        .await
+        .expect("repeat failed rerun request");
+    assert!(!repeated.created);
+    assert_eq!(repeated.view.run.run_id, rerun.view.run.run_id);
+    assert_eq!(delivery.commands.lock().await.len(), 2);
+
+    let rerun_delivery_run_id = delivery.commands.lock().await[1].run_id.clone();
+    let failed_rerun = runtime
+        .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
+            bot_id: "worker-bot".to_string(),
+            run_id: rerun_delivery_run_id.clone(),
+            event_type: "chat.event".to_string(),
+            event_payload: json!({
+                "run_id": rerun_delivery_run_id,
+                "bcs_group_id": "group-1",
+                "state": "final",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "rerun result"}]
+                }
+            }),
+            state: ChatEventState::Final,
+            bcs_session_id: Some(session.id.clone()),
+        })
+        .await
+        .expect("rerun terminal event returns failed run")
+        .view
+        .expect("failed rerun view");
+    assert_eq!(failed_rerun.run.status, StateMachineRunStatus::Failed);
+
+    let materialized_at = bcs_protocol::now_ms();
+    let mut materialized = failed_rerun.run.clone();
+    materialized.run_id = "sm-materialized-before-start".to_string();
+    materialized.rerun_of = Some(failed_rerun.run.run_id.clone());
+    materialized.status = StateMachineRunStatus::Pending;
+    materialized.output = None;
+    materialized.error = None;
+    materialized.created_at = materialized_at;
+    materialized.updated_at = materialized_at;
+    materialized.completed_at = None;
+    let mut materialized_nodes = failed_rerun.nodes.clone();
+    for node in &mut materialized_nodes {
+        node.run_id = materialized.run_id.clone();
+        node.status = StateMachineNodeStatus::Pending;
+        node.attempt = 0;
+        node.timeout_deadline_ms = None;
+        node.outcome = None;
+        node.responded_by = None;
+        node.delivery_request_id = None;
+        node.bot_delivery_run_id = None;
+        node.artifact_text = None;
+        node.error = None;
+        node.started_at = None;
+        node.completed_at = None;
+    }
+    assert!(matches!(
+        store
+            .create_rerun_if_session_idle(CreateStateMachineRerun {
+                source_run_id: failed_rerun.run.run_id.clone(),
+                run: materialized.clone(),
+                nodes: materialized_nodes,
+                reactivate_service_session: false,
+            })
+            .await
+            .expect("materialize rerun before simulated crash"),
+        CreateStateMachineRerunOutcome::Created
+    ));
+
+    let recovered = runtime
+        .rerun_state_machine_run(RerunStateMachineCommand {
+            source_run_id: failed_rerun.run.run_id,
+            authenticated_human: None,
+        })
+        .await
+        .expect("retry resumes materialized rerun");
+    assert!(!recovered.created);
+    assert_eq!(recovered.view.run.run_id, materialized.run_id);
+    assert_eq!(recovered.view.run.status, StateMachineRunStatus::Running);
+    assert_eq!(recovered.view.nodes[0].status, StateMachineNodeStatus::Running);
+    assert_eq!(delivery.commands.lock().await.len(), 3);
+    let recovered_history = runtime
+        .get_state_machine_session_history(&session.id, 20, None)
+        .await
+        .expect("history after recovering materialized rerun")
+        .expect("state-machine history after recovery");
+    assert!(recovered_history.messages.iter().any(|message| {
+        message
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.pointer("/state_machine/run_id"))
+            .and_then(Value::as_str)
+            == Some(materialized.run_id.as_str())
+    }));
 }
 
 #[tokio::test]

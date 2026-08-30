@@ -41,6 +41,9 @@ export type StateMachineNodeSubStatus =
 
 export interface StateMachineRun {
   run_id: string;
+  root_run_id?: string;
+  rerun_of?: string;
+  session_activation_count?: number;
   definition_id: string;
   definition_version: number;
   group_id?: string;
@@ -123,6 +126,11 @@ export interface StateMachineRunGraph {
   definition: StateMachineDefinition;
   nodes: StateMachineNode[];
   edges: StateMachineEdge[];
+}
+
+interface RerunStateMachineRunResponse {
+  run: StateMachineRun;
+  idempotent_replay: boolean;
 }
 
 export interface PendingHumanNodeArtifact {
@@ -215,6 +223,7 @@ const RUN_TERMINAL_STATUSES = new Set<string>([
   'failed',
   'aborted',
 ]);
+const RUN_RERUNNABLE_STATUSES = new Set<string>(['failed']);
 const NODE_ACTIVE_STATUSES = new Set<string>([
   'pending',
   'ready',
@@ -2598,10 +2607,13 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
   const [humanResponseError, setHumanResponseError] = useState<string | null>(
     null,
   );
+  const [rerunSubmitting, setRerunSubmitting] = useState(false);
+  const [rerunError, setRerunError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const nodeDetailAbortRef = useRef<AbortController | null>(null);
   const pendingHumanAbortRef = useRef<AbortController | null>(null);
   const humanResponseAbortRef = useRef<AbortController | null>(null);
+  const rerunAbortRef = useRef<AbortController | null>(null);
   const pendingHumanNodeIdRef = useRef('');
   const nodeDetailPollInFlightRef = useRef(false);
   const requestedNodeDetailIdRef = useRef<string | null>(null);
@@ -2930,6 +2942,65 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
     ],
   );
 
+  const handleRerun = useCallback(async () => {
+    if (
+      !runId ||
+      !graph ||
+      !RUN_RERUNNABLE_STATUSES.has(normalizeStatus(graph.run.status)) ||
+      rerunSubmitting
+    ) {
+      return;
+    }
+
+    rerunAbortRef.current?.abort();
+    const abortController = new AbortController();
+    rerunAbortRef.current = abortController;
+    setRerunSubmitting(true);
+    setRerunError(null);
+
+    try {
+      const response = await fetch(
+        joinUrl(
+          baseUrl,
+          `/state-machine-runs/${encodeURIComponent(runId)}/reruns`,
+        ),
+        {
+          method: 'POST',
+          credentials: 'include',
+          signal: abortController.signal,
+        },
+      );
+
+      if (!response.ok) {
+        throw await createRequestError(response);
+      }
+
+      const outcome = unwrapEnvelope<RerunStateMachineRunResponse>(
+        await response.json(),
+      );
+      if (rerunAbortRef.current !== abortController) {
+        return;
+      }
+      if (!outcome?.run?.run_id) {
+        throw new StateMachineRunRequestError('Rerun response is missing run id');
+      }
+
+      props.onInteraction?.({ type: 'rerun', run: outcome.run });
+    } catch (requestError) {
+      if (
+        (requestError as Error).name !== 'AbortError' &&
+        rerunAbortRef.current === abortController
+      ) {
+        const normalizedError = normalizeRequestError(requestError);
+        setRerunError(normalizedError.message || 'Failed to rerun');
+      }
+    } finally {
+      if (rerunAbortRef.current === abortController) {
+        setRerunSubmitting(false);
+      }
+    }
+  }, [baseUrl, graph, props.onInteraction, rerunSubmitting, runId]);
+
   useEffect(() => {
     setGraph(null);
     setSelectedNodeId(null);
@@ -2947,6 +3018,8 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
     setHumanResponseText('');
     setHumanResponseSubmitting(false);
     setHumanResponseError(null);
+    setRerunSubmitting(false);
+    setRerunError(null);
     nodeDetailAbortRef.current?.abort();
     nodeDetailAbortRef.current = null;
     pendingHumanAbortRef.current?.abort();
@@ -3008,6 +3081,8 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
       pendingHumanAbortRef.current = null;
       humanResponseAbortRef.current?.abort();
       humanResponseAbortRef.current = null;
+      rerunAbortRef.current?.abort();
+      rerunAbortRef.current = null;
       if (copyResetTimerRef.current) {
         window.clearTimeout(copyResetTimerRef.current);
         copyResetTimerRef.current = null;
@@ -3688,6 +3763,17 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                 {getStatusLabel(graph.run.status)}
               </StatusPill>
             ) : null}
+            {graph?.run.status &&
+            RUN_RERUNNABLE_STATUSES.has(normalizeStatus(graph.run.status)) ? (
+              <CopyButton
+                disabled={rerunSubmitting}
+                title="Create a rerun from this run"
+                type="button"
+                onClick={handleRerun}
+              >
+                {rerunSubmitting ? 'Rerunning…' : 'Rerun'}
+              </CopyButton>
+            ) : null}
             <IconButton
               aria-label="Refresh state machine run"
               disabled={loading || refreshing}
@@ -3749,6 +3835,8 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
         {loading && <LoadingBar />}
 
         {error ? <ErrorMessage>{error}</ErrorMessage> : null}
+
+        {rerunError ? <ErrorMessage>{rerunError}</ErrorMessage> : null}
 
         {!graph && loading ? <Message>Loading graph...</Message> : null}
 
