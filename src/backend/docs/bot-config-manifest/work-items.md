@@ -254,9 +254,9 @@ stated as policy:
   where "what happens when *this one* fails" belongs. `keep_last` means "reuse
   what we materialised for this entry last time", and its storage is the same
   store §2.8 requires.
-- **The user must be told** — the report, plus a surfaced notification. **The
-  notification has no channel yet, and W8 must name one rather than invent one**
-  (see below).
+- **Iteration 1 records; it does not push.** The per-entry records are the
+  deliverable, and the user pulls them when they want to know. There is no
+  notification, no alert, no proactive message.
 
 **Apply records delivery, not execution.** This is the boundary that keeps the
 responsibility as narrow as stated above, and it dissolves two cases an earlier
@@ -281,26 +281,18 @@ the engine answer "did it work".
   one, and W8 owns making the signal reachable — a failure recorded where nobody
   looks is the failure mode this trades for.
 
-**There is no push channel for it today**, and this is worth knowing before W8
-plans around one:
+**On notification, for the record.** An earlier revision of this section required
+"a surfaced notification". That was not a requirement of the merged design —
+none of the five design docs mentions notification at all — and it is withdrawn
+rather than carried as an unimplemented promise. Whether the platform should ever
+push a config failure at an owner is a product decision nobody has asked for.
 
-- `core/notify` is **not** it. Despite the name it lists bots eligible for
-  *engine* notification polling (`NotifyBotLister`, `NotifyTarget`) — bots
-  pushing messages to users, nothing to do with telling an operator that a
-  configuration failed.
-- The platform's only existing way to surface a bot-level problem to a user is
-  the `status` column on `ac_bots`, read by list and detail — which is precisely
-  what this section has declined to write to.
-- The one recipient-scoped notice mechanism is inside `core/work_orders`
-  (`WorkOrderNotificationService`, with `NotificationCategory.NOTICE` alongside
-  `APPROVAL`, so a pure notice with nothing to approve is already modelled). Its
-  `WorkOrderBizType` values are `SPACE_JOIN` and `BOT_COLLABORATOR` — both
-  approval-shaped — so reusing it means adding a biz type and an event→message
-  mapping.
-
-That is plausible reuse rather than new machinery, but nobody has decided it.
-**W8 picks the channel**; `last-apply` alone is pull-only and requires the caller
-to already suspect something is wrong.
+If it is ever wanted, the reuse point is named here so it is not re-investigated:
+`core/work_orders` already models a pure notice
+(`WorkOrderNotificationService`, `NotificationCategory.NOTICE` alongside
+`APPROVAL`), and would need a new `WorkOrderBizType` plus an event→message
+mapping. `core/notify` is **not** it, despite the name — it lists bots eligible
+for *engine* notification polling, which is bots pushing messages to users.
 
 ### 2.8 The platform materialises and persists manifest content itself
 
@@ -1628,19 +1620,10 @@ manifest level, so there is no de-activation for W8 to place.)
       delivery — the `ac_bot_startup_script` row written, the artifact handed
       over, the per-file write landed. What the container's start command or the
       engine then does with it is a different layer and is not apply's outcome.
-- [ ] **The manifest-level signal is actually reachable.** Since the bot record
-      no longer carries it, a bot showing `ACTIVE` with an undelivered manifest
-      entry must be visibly distinguishable somewhere the user looks —
-      `last-apply`, the creation poll, and whatever list or detail surface shows
-      bot health. A failure recorded where nobody looks is the failure mode this
-      decision trades for, and closing it is this item's job.
-- [ ] **A push channel is chosen, not invented.** §2.7 promises a surfaced
-      notification and there is none today: `core/notify` is engine notification
-      polling, not platform-to-operator alerts, and the platform's only existing
-      bot-problem surface is the `status` column this feature declines to write.
-      The plausible reuse is `core/work_orders`' notice lane
-      (`NotificationCategory.NOTICE` already exists), which needs a new
-      `WorkOrderBizType` and an event→message mapping. Decide it here.
+- [ ] **The per-entry records are readable on demand.** Iteration 1 is
+      pull-only by decision (§2.7) — no notification. `last-apply` and W13's
+      creation poll must return enough per-entry detail that someone asking "did
+      my manifest apply" gets a complete answer without further digging.
 - [ ] Whatever D2 decides about moving refs is enforced here — this is where
       restarts nobody associated with a config change actually happen.
 - [ ] `script` is materialised by writing `ac_bot_startup_script` and nothing
