@@ -254,7 +254,7 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
     __tablename__ = "ac_skill_publication_attempt"
     __table_args__ = _scoped_table_args(
         UniqueConstraint(
-            "avernet_tenant", "env", "skill_id", "request_id", name="uk_publish_request"
+            "avernet_tenant", "env", "request_id", name="uk_publish_request"
         ),
         UniqueConstraint("active_skill_key", name="uk_active_skill_publish"),
         Index(

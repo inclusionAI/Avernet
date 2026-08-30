@@ -817,3 +817,67 @@ class FavoriteStatusesResult(BaseModel):
     favorited_target_codes: list[str] = Field(
         description="Requested target codes currently favorited in this Space."
     )
+
+
+class PublicationAttemptState(_DocumentedEnum):
+    PREPARING = "PREPARING"
+    SC_SUBMITTING = "SC_SUBMITTING"
+    WAITING_SC = "WAITING_SC"
+    MATERIALIZING = "MATERIALIZING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    RESULT_UNKNOWN = "RESULT_UNKNOWN"
+
+
+class PublicationRecoveryState(_DocumentedEnum):
+    AUTO_RETRYING = "AUTO_RETRYING"
+    AVAILABLE = "AVAILABLE"
+    NOT_AVAILABLE = "NOT_AVAILABLE"
+
+
+class PublicationRecoveryKind(_DocumentedEnum):
+    PREPARATION = "PREPARATION"
+    SC_STATUS_CHECK = "SC_STATUS_CHECK"
+    MATERIALIZATION = "MATERIALIZATION"
+
+
+class PublicationRecovery(BaseModel):
+    state: PublicationRecoveryState = Field(
+        description="Whether automatic or actor-triggered recovery is available."
+    )
+    kind: PublicationRecoveryKind | None = Field(
+        default=None,
+        description="The safe recovery stage; clients never choose its implementation.",
+    )
+
+
+class PublicationAttempt(_UtcResponseModel):
+    attempt_id: str = Field(description="Stable Publication Attempt identifier.")
+    target_version: int = Field(
+        ge=1, description="Frozen TeamClaw business-version ordinal."
+    )
+    status: PublicationAttemptState = Field(
+        description="Current persisted Publication state."
+    )
+    sc_version_number: str | None = Field(
+        default=None, description="Frozen exact Skill Center version number."
+    )
+    recovery: PublicationRecovery = Field(
+        description="Backend-owned recovery availability and stage."
+    )
+    error_code: str | None = Field(
+        default=None, description="Stable persisted failure category, when present."
+    )
+    error_message: str | None = Field(
+        default=None, description="Auditable failure detail, when present."
+    )
+    gmt_created: datetime = Field(description="UTC creation time.")
+    gmt_modified: datetime = Field(description="UTC last-update time.")
+
+
+class PublicationImpactItem(BaseModel):
+    owner_id: str = Field(description="Owner of a potentially affected Bot.")
+    bot_id: str = Field(description="Potentially affected Bot identifier.")
+    bot_name: str | None = Field(
+        default=None, description="Current Bot display name, when available."
+    )

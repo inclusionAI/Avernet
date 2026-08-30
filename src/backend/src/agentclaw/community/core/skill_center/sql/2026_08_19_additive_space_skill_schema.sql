@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS ac_skill_publication_attempt (
   gmt_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uk_publish_request (avernet_tenant, env, skill_id, request_id),
+  UNIQUE KEY uk_publish_request (avernet_tenant, env, request_id),
   UNIQUE KEY uk_active_skill_publish (active_skill_key),
   KEY idx_publish_skill_history (avernet_tenant, env, skill_id, gmt_created),
   CONSTRAINT ck_skill_publication_attempt_status CHECK (status IN ('PREPARING', 'SC_SUBMITTING', 'WAITING_SC', 'RESULT_UNKNOWN', 'MATERIALIZING', 'SUCCEEDED', 'FAILED')),

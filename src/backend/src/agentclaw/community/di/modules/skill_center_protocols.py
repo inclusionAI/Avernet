@@ -12,6 +12,9 @@ from agentclaw.community.api.skill_center_sync_service import SkillCenterSyncSer
 from agentclaw.community.api.skill_center_gateway_service import (
     SkillCenterGatewayServiceProtocol,
 )
+from agentclaw.community.api.skill_center_publication_gateway import (
+    SkillCenterPublicationGatewayProtocol,
+)
 from agentclaw.community.api.skill_member_service import SkillMemberServiceProtocol
 from agentclaw.community.api.skill_parameter_service_factory import SkillParameterServiceFactoryProtocol
 from agentclaw.community.api.skill_propagation_service import SkillPropagationServiceProtocol
@@ -71,6 +74,14 @@ class SkillCenterProtocolBindings:
     def _skill_center_gateway_service_protocol(
         self, svc: skill_center_gateway_service.SkillCenterGatewayService
     ) -> SkillCenterGatewayServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _skill_center_publication_gateway_protocol(
+        self, svc: skill_center_gateway_service.SkillCenterGatewayService
+    ) -> SkillCenterPublicationGatewayProtocol:
         return svc
 
     @singleton

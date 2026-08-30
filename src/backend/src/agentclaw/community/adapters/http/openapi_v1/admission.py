@@ -25,6 +25,8 @@ from agentclaw.community.log import get_logger
 
 
 logger = get_logger()
+_SPACE_SKILL_BASE = "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"
+_SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 
 
 #: Every public operation, keyed by ``(method, path)`` exactly as FastAPI
@@ -630,6 +632,11 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover",
     ): AdmissionMode.REFUSED,
+    ("GET", f"{_SPACE_SKILL_BASE}/publication-impact"): AdmissionMode.REFUSED,
+    ("POST", _SPACE_SKILL_PUBLICATION): AdmissionMode.REFUSED,
+    ("GET", _SPACE_SKILL_PUBLICATION): AdmissionMode.REFUSED,
+    ("GET", f"{_SPACE_SKILL_PUBLICATION}/{{attempt_id}}"): AdmissionMode.REFUSED,
+    ("POST", f"{_SPACE_SKILL_PUBLICATION}/{{attempt_id}}/retry"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",

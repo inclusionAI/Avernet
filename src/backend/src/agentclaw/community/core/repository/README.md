@@ -159,6 +159,7 @@ provides:
   - DraftEditLeaseRepository
   - SkillVersionRepositoryProtocol
   - SkillVersionMaterializationRepositoryProtocol
+  - SpaceSkillPublicationRepositoryProtocol
   - SkillSetRepository
   # skills_pool
   - QuarantineRepositoryProtocol
@@ -205,6 +206,7 @@ provides:
   # skill_center
   - SpaceSkillRepository
   - SkillVersionRepository
+  - SpaceSkillPublicationRepository
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository

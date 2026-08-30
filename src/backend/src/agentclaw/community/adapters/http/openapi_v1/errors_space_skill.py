@@ -23,6 +23,12 @@ from agentclaw.community.core.skill_center.errors import (
     SpaceSkillGrantMemberRequiredError,
     SpaceSkillGrantNotFoundError,
     SpaceSkillGrantReasonRequiredError,
+    PublicationAttemptNotFoundError,
+    PublicationInProgressError,
+    PublicationRecoveryNotAvailableError,
+    PublicationRequiresNewAttemptError,
+    PublicationResultUnknownError,
+    PublicationTaskUnavailableError,
 )
 from agentclaw.community.core.skill_center.draft_content import DraftContentStoreError
 from agentclaw.community.plugin_api.space_skill_source import (
@@ -95,6 +101,30 @@ SPACE_SKILL_HTTP_ERRORS = {
         503,
         SpacePublicErrorMessage.SKILL_DRAFT_STORE_UNAVAILABLE,
     ),
+    PublicationAttemptNotFoundError: (
+        404,
+        SpacePublicErrorMessage.PUBLICATION_ATTEMPT_NOT_FOUND,
+    ),
+    PublicationInProgressError: (
+        409,
+        SpacePublicErrorMessage.PUBLICATION_IN_PROGRESS,
+    ),
+    PublicationResultUnknownError: (
+        409,
+        SpacePublicErrorMessage.PUBLICATION_RESULT_UNKNOWN,
+    ),
+    PublicationRecoveryNotAvailableError: (
+        409,
+        SpacePublicErrorMessage.PUBLICATION_RECOVERY_NOT_AVAILABLE,
+    ),
+    PublicationRequiresNewAttemptError: (
+        409,
+        SpacePublicErrorMessage.PUBLICATION_REQUIRES_NEW_ATTEMPT,
+    ),
+    PublicationTaskUnavailableError: (
+        503,
+        SpacePublicErrorMessage.PUBLICATION_TASK_UNAVAILABLE,
+    ),
 }
 
 SPACE_SKILL_ERROR_CODES = {
@@ -126,4 +156,10 @@ SPACE_SKILL_ERROR_CODES = {
     GitSnapshotInvalidError: SpaceErrorCode.SKILL_PACKAGE_INVALID,
     GitSnapshotError: SpaceErrorCode.SKILL_GIT_UNAVAILABLE,
     DraftContentStoreError: SpaceErrorCode.SKILL_DRAFT_STORE_UNAVAILABLE,
+    PublicationAttemptNotFoundError: SpaceErrorCode.PUBLICATION_ATTEMPT_NOT_FOUND,
+    PublicationInProgressError: SpaceErrorCode.PUBLICATION_IN_PROGRESS,
+    PublicationResultUnknownError: SpaceErrorCode.PUBLICATION_RESULT_UNKNOWN,
+    PublicationRecoveryNotAvailableError: SpaceErrorCode.PUBLICATION_RECOVERY_NOT_AVAILABLE,
+    PublicationRequiresNewAttemptError: SpaceErrorCode.PUBLICATION_REQUIRES_NEW_ATTEMPT,
+    PublicationTaskUnavailableError: SpaceErrorCode.PUBLICATION_TASK_UNAVAILABLE,
 }

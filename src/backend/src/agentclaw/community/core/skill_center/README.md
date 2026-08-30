@@ -46,6 +46,11 @@ provides:
   - "SkillVersionMaterializer"
   - "SkillVersionMaterializerProtocol"
   - "PublishedMaterializedSkillVersion"
+  - "SpaceSkillPublicationService"
+  - "SpaceSkillPublicationServiceProtocol"
+  - "SkillCenterPublicationGatewayProtocol"
+  - "SpaceSkillPublicationTaskHandler"
+  - "PublicationAttemptRecord"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
   - "LocalSkillCleanupWorkModel"
@@ -96,6 +101,7 @@ consumes:
   - "SpaceSkillReadRepository"
   - "SkillVersionRepositoryProtocol"
   - "SkillVersionMaterializationRepositoryProtocol"
+  - "SpaceSkillPublicationRepositoryProtocol"
   - "SkillVersionScannerProtocol"
   - "HttpClient"
 internal_dependencies:
@@ -103,6 +109,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.space_skill_version # published Space Skill read contract consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
+  - agentclaw.community.core.repository.protocols.space_skill_publication # Publication aggregate persistence contract
   - agentclaw.community.core.repository.protocols.work_orders
   - agentclaw.community.core.work_orders
   - agentclaw.community.core.repository.protocols.skill_installation
@@ -177,6 +184,16 @@ Scanner metadata, MCP dependency and Store verification all succeed, expresses
 domain readiness. Publication and SC Reference producers consume the public
 Materializer Service API; Runtime reads consume only PUBLISHED Versions through
 `SkillVersionResolver`.
+
+`SpaceSkillPublicationService` freezes the current immutable Draft Revision and
+persists a durable Attempt before enqueueing. Its worker is the only owner of
+the one-shot SC submit/status state machine: it records `sc_post_started_at`
+before the external call, never submits the same Attempt twice, and moves an
+uncertain response to `RESULT_UNKNOWN`. Once SC identifies an exact Version it
+delegates exclusively to `SkillVersionMaterializerProtocol`; retries keep the
+same `skill_version_id`. The returned `PublishedMaterializedSkillVersion` is
+also the unified at-least-once Published event seam. Track Latest, Offline,
+Reference and Artifact consumers remain outside the Publication transaction.
 
 `DraftContentStore` persists one canonical ZIP per immutable Draft revision.
 Its business reference is `draft://<skill_uuid>/v<target>/<revision_id>`; only

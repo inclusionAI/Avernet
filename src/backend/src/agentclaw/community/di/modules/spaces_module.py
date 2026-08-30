@@ -21,6 +21,12 @@ from agentclaw.community.api.space_skill_application_service import (
 from agentclaw.community.api.space_skill_version_query_service import (
     SpaceSkillVersionQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_publication_service import (
+    SpaceSkillPublicationServiceProtocol,
+)
+from agentclaw.community.api.skill_center_publication_gateway import (
+    SkillCenterPublicationGatewayProtocol,
+)
 from agentclaw.community.api.space_skill_grant_service import (
     SpaceSkillGrantServiceProtocol,
 )
@@ -48,6 +54,9 @@ from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillDraftRepository,
     DraftEditLeaseRepository,
 )
+from agentclaw.community.core.repository.protocols.space_skill_publication import (
+    SpaceSkillPublicationRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
 )
@@ -69,10 +78,32 @@ from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGatew
 from agentclaw.community.core.skill_center.services.space_skill_version_query_service import (
     SpaceSkillVersionQueryService,
 )
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.materialization_contract import (
+    SkillVersionMaterializerProtocol,
+)
+from agentclaw.community.core.skill_center.publication_contract import (
+    PublicationPackageStagerProtocol,
+)
+from agentclaw.community.core.skill_center.services.space_skill_publication_service import (
+    SpaceSkillPublicationService,
+)
+from agentclaw.community.core.skill_center.services.space_skill_publication_task import (
+    ObjectStoragePublicationPackageStager,
+    SpaceSkillPublicationTaskHandler,
+    SpaceSkillPublicationTaskLifecycle,
+)
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.skill_center.draft_content import DraftContentStore
 from agentclaw.community.plugin_api.space_skill_source import SpaceSkillSourcePlugin
+from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
+from agentclaw.community.core.task_queue.services.task_queue_service import (
+    TaskQueueService,
+)
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     SpaceSkillGrantService,
 )
@@ -190,3 +221,63 @@ class SpacesModule(Module):
     ) -> DraftEditLeaseServiceProtocol:
         """Assemble permanent Draft Lease policy at the composition root."""
         return DraftEditLeaseService(access, grants, repository, get_current_env)
+
+    @singleton
+    @provider
+    @inject
+    def publication_package_stager(
+        self, objects: ObjectStoragePlugin
+    ) -> PublicationPackageStagerProtocol:
+        return ObjectStoragePublicationPackageStager(objects)
+
+    @singleton
+    @provider
+    @inject
+    def space_skill_publication_service(
+        self,
+        access: CoreSpaceAccessServiceProtocol,
+        repository: SpaceSkillPublicationRepositoryProtocol,
+        capability_reader: BotCapabilityStateReaderProtocol,
+        task_queue: TaskQueueService,
+    ) -> SpaceSkillPublicationServiceProtocol:
+        return SpaceSkillPublicationService(
+            access=access,
+            repository=repository,
+            capability_reader=capability_reader,
+            task_queue=task_queue,
+            env_provider=get_current_env,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def space_skill_publication_task_handler(
+        self,
+        repository: SpaceSkillPublicationRepositoryProtocol,
+        gateway: SkillCenterPublicationGatewayProtocol,
+        draft_store: DraftContentStore,
+        stager: PublicationPackageStagerProtocol,
+        materializer: SkillVersionMaterializerProtocol,
+    ) -> SpaceSkillPublicationTaskHandler:
+        return SpaceSkillPublicationTaskHandler(
+            repository=repository,
+            gateway=gateway,
+            draft_store=draft_store,
+            stager=stager,
+            materializer=materializer,
+            tenant_provider=get_current_avernet_tenant,
+            env_provider=get_current_env,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def space_skill_publication_task_lifecycle(
+        self,
+        registry: HandlerRegistry,
+        handler: SpaceSkillPublicationTaskHandler,
+    ) -> SpaceSkillPublicationTaskLifecycle:
+        return SpaceSkillPublicationTaskLifecycle(
+            registry=registry,
+            handler=handler,
+        )
