@@ -129,6 +129,10 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
             unchanged = 0
             failures: list[SkillCenterSyncFailure] = []
             for asset in assets:
+                # This is a best-effort batch boundary, not transactional
+                # fencing. If renewal fails while _sync_asset is running, that
+                # exact/idempotent item may finish; the next boundary stops
+                # subsequent items and reports the coordinator failure.
                 self._renew_or_raise(
                     lock_key=lock_key,
                     lock_value=lock_value,
