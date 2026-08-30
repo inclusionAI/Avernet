@@ -481,7 +481,7 @@ Canonical 前缀：`/openapi/v1/bots/{bot_id}/skill-sets`。
 | Method | 相对路径 | 语义 |
 | --- | --- | --- |
 | GET | `/skill-sets` | 列出全部 SkillSet，含 Default |
-| POST | `/skill-sets` | 创建 inactive SkillSet；要求 `Idempotency-Key` |
+| POST | `/skill-sets` | 创建 active SkillSet；要求 `Idempotency-Key`；空集合不触发 Runtime |
 | GET | `/skill-sets/{set_id}` | 详情和父子范围校验 |
 | PUT | `/skill-sets/{set_id}` | 修改元信息；名称唯一范围 `tenant+env+bot_id` |
 | DELETE | `/skill-sets/{set_id}` | 删除 inactive 普通 Set；Default 禁止 |

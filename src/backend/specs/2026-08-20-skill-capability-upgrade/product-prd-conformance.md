@@ -84,7 +84,7 @@ presentation metadata，不能映射到 `ac_skill.name` 或绕过 Version。
 | 产品动作 | Mock 证据 | 正式 Spec | 结论 |
 | --- | --- | --- | --- |
 | 能力集列表、折叠、Skill/MCP 数量 | `BotEdit.tsx:39-57,213-294` | SkillSet list/resources/skills/mcps | 满足 |
-| 新建能力集 | `BotEdit.tsx:76-83,296-298` | POST 创建 inactive ordinary Set | **前端需对齐**：Mock 新建时 `enabled=true` |
+| 新建能力集 | `BotEdit.tsx:76-83,296-298` | POST 创建 active ordinary Set；空集合不触发 Runtime | 满足，与最新 dev 语义一致 |
 | 整体开关 | `BotEdit.tsx:224-245` | activate/deactivate 原子维护 Skill/MCP Installation | 满足 |
 | 删除能力集 | `BotEdit.tsx:85-94,240-245` | 只允许删除 inactive ordinary Set，Default 禁止 | Backend 满足；前端需先关闭或处理 409 |
 | 市场/工坊多选 Skill | `BotEdit.tsx:63-103,300-341` | TeamClaw/工坊普通 Membership；SC Public 批量 Reference 最多 20 | 满足 |
@@ -130,4 +130,4 @@ SkillSet 原子开关、MCP、Track Latest、Service 历史重放和退役。
 3. 未物化 SC 详情继续使用现有 `homepageUrl` iframe，不触发物化。
 4. 把升级影响弹窗移到发布确认，把“下线回草稿”替换为 Retirement，并支持完整 blocker。
 5. 实现 SC Reference Operation 的处理中、部分成功、刷新恢复；Mock 当前只有同步 toast。
-6. 新建 SkillSet 默认 inactive，与 Backend 原子控制语义一致。
+6. 新建 SkillSet 默认 active；空集合不触发 Runtime，后续新增成员立即生效。
