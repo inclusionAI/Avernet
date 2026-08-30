@@ -45,7 +45,7 @@ together.
 | **W3** source credentials | #1471 | **W10** service-layer seam | #1509 |
 | | | **W11** platform-side materialisation | #1510 |
 | | | **W12** cross-engine semantics contract | #1684 |
-| | | **W13** create a bot from a manifest | *(to file)* |
+| | | **W13** create a bot from a manifest | #1696 |
 
 Planning PR: #1465.
 
@@ -270,7 +270,7 @@ script, it is not acceptable.
 
 The cost is orphan rows when a user never clicks the link or Passport rejects.
 Accepted for v1 — an orphan manifest occupies no runtime resource — with cleanup
-deferred to a follow-up.
+deferred to #1698.
 
 Tracked as **W13**.
 
@@ -861,7 +861,7 @@ agreement. Record the outcome, including anything they decline.
 
 ---
 
-#### W13 — Create a bot from a manifest
+#### W13 — Create a bot from a manifest · #1696
 
 **Goal.** A public, asynchronous API that creates a bot from a manifest plus the
 ordinary creation parameters, so the bot's **first** container already carries its
@@ -881,9 +881,10 @@ and integration with the two-phase Passport flow.
 phase-1 manifest persistence keyed by the allocated `bot_id`; the poll/status
 endpoint and its states; invoking apply as part of creation.
 
-**Out of scope.** Orphan-manifest cleanup (deferred, tracked separately) and
-creation idempotency (a pre-existing gap in `generate_bot_id`, tracked
-separately).
+**Out of scope.** Orphan-manifest cleanup (#1698, deferred to a second phase by
+decision) and creation idempotency (#1697 — a pre-existing gap: `generate_bot_id`
+mints the id platform-side with no idempotency key, so a retried create makes a
+second bot regardless of manifests).
 
 **Poll states.** Three terminal states, so a caller's loop stays simple:
 
