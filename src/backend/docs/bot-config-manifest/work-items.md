@@ -918,7 +918,8 @@ and placement is ARCA's decision. There is no arch branching anywhere in
 
 #### W9 does not have to wait for it
 
-**Owner.** `lucas-xzp` · 0.25 d · day 4 · critical chain (§7)
+**Owner.** `totalfrank` · 0.25 d · day 4 · design (§7)
+
 
 Two cheap choices make the answer non-blocking:
 
@@ -985,7 +986,8 @@ shipping as binaries, but it does not change that `cli_tools` is wanted.
 
 #### W10 — A service-layer seam apply and the API can share · #1509
 
-**Owner.** `totalfrank` · 0.5 d · day 1 (§7)
+**Owner.** `totalfrank` · 0.25 d · day 1 · design (§7)
+
 
 
 **Goal.** The validation and authorisation the public API enforces becomes
@@ -1024,7 +1026,8 @@ Doing it after means writing the checks twice and deleting one copy later.
 
 #### W11 — Platform-side materialisation and persistence · #1510
 
-**Owner.** `totalfrank` · 0.5 d · day 2 (§7)
+**Owner.** `lucas-xzp` · 0.5 d · day 2 · build (§7)
+
 
 **Goal.** Fetched content is stored by the platform as its own durable copy, and
 later steps read from that copy rather than re-fetching.
@@ -1058,7 +1061,8 @@ which is why W4 depends on it rather than treating it as an add-on.
 
 #### W12 — Cross-engine convergence semantics contract · #1684
 
-**Owner.** `totalfrank` · 0.25 d · day 2 (§7)
+**Owner.** `totalfrank` · 0.25 d · day 2 · design (§7)
+
 
 
 **Goal.** One written statement of what applying a manifest does to what is
@@ -1127,7 +1131,8 @@ calendar time is the other team's review of the CLI addition.
 
 #### W13 — Create a bot from a manifest · #1696
 
-**Owner.** `totalfrank` · 0.5 d · day 4 (§7)
+**Owner.** `totalfrank` · 0.5 d · day 3 · design (§7)
+
 
 **Goal.** A public, asynchronous API that creates a bot from a manifest plus the
 ordinary creation parameters, so the bot's **first** container already carries its
@@ -1244,7 +1249,8 @@ tenant permanently. Every current call site wraps inline at the
 
 #### W1 — Manifest document: storage, schema v1, capability, API · #1469
 
-**Owner.** `lucas-xzp` · 1.0 d · day 1 · critical chain (§7)
+**Owner.** `totalfrank` · 0.75 d · day 1 · design (§7)
+
 
 
 **Goal.** A bot can carry a config-manifest document that is stored, validated
@@ -1331,7 +1337,8 @@ materialises it. That is why the feature flag exists.
 
 #### W2 — Guarded fetcher and archive pipeline · #1470
 
-**Owner.** `totalfrank` · 0.5 d · day 1 (§7)
+**Owner.** `lucas-xzp` · 0.75 d · day 1 · build (§7)
+
 
 
 **Goal.** One component that fetches a caller-supplied URL safely, and one that
@@ -1387,7 +1394,8 @@ it only if a second appears.
 
 #### W3 — Source credentials · #1471
 
-**Owner.** `totalfrank` · 0.5 d · day 2 (§7)
+**Owner.** `lucas-xzp` · 0.75 d · days 1–2 · build (§7)
+
 
 
 **Goal.** A tenant can register a named credential once and reference it from
@@ -1448,7 +1456,8 @@ binding W2's injection port.
 
 #### W4 — Apply engine, apply record, and the no-fetch materialisers · #1472
 
-**Owner.** `lucas-xzp` · 1.0 d · day 2 · critical chain (§7)
+**Owner.** `totalfrank` · 0.75 d · day 2 · design (§7)
+
 
 **Goal.** A manifest can be applied on demand, converging the bot's entities
 toward the document, with a report of what happened — proven on the three
@@ -1543,7 +1552,8 @@ involved.
 
 #### W5 — `skills` and `identity` from URL sources · #1473
 
-**Owner.** `lucas-xzp` · 0.75 d · day 3 · critical chain (§7)
+**Owner.** `lucas-xzp` · 1.0 d · day 3 · build (§7)
+
 
 **Goal.** The driving business scenario works: content on a caller's own
 service is fetched at apply time and installed as real skills and identity
@@ -1610,7 +1620,8 @@ follows D4's interim policy: deliver after the bot starts (§3.4).
 
 #### W6 — `resources`, files and directories · #1474
 
-**Owner.** `lucas-xzp` · 0.5 d · days 3–4 · critical chain (§7)
+**Owner.** `lucas-xzp` · 0.75 d · day 4 · build (§7)
+
 
 **Goal.** Workspace resources, including whole directories delivered as
 archives.
@@ -1646,7 +1657,8 @@ directory-level ownership semantics; teclaw per-file expansion.
 
 #### W7 — Named sources and git sources · #1475
 
-**Owner.** `totalfrank` · 0.25 d · day 4 (§7)
+**Owner.** `lucas-xzp` · 0.25 d · day 4 · build (§7)
+
 
 **Goal.** One `ref` change upgrades a whole configuration atomically, and
 content hosted in the company's git service is a first-class source.
@@ -1692,7 +1704,8 @@ worse credential to hold in our database than a clone is to run.
 
 #### W8 — Lifecycle apply points · #1476
 
-**Owner.** `lucas-xzp` · 0.5 d · day 4 · critical chain (§7)
+**Owner.** `totalfrank` · 0.25 d · day 4 · design (§7)
+
 
 **Goal.** The business ask, delivered: a bot configures itself when it comes up,
 with no user action.
@@ -1866,90 +1879,109 @@ thing it triggers is proven. The trade is stated plainly: **nothing before W8
 delivers the business ask.** W4's explicit apply is a validation vehicle, not the
 product.
 
-## 7. Assignment — all 13 items, two developers, 7 person-days
+## 7. Assignment — all 13 items, split by the nature of the work
 
 **Team:** `totalfrank` (3 days) · `lucas-xzp` (4 days). **All thirteen items are
 allocated and all must land inside the seven days.**
 
-### What the numbers below are
+### The split rule: `totalfrank` owns the design
 
-They are **budgets, not estimates.** An earlier revision of this section
-estimated the plan at roughly 24 person-days from each item's own **Size** line;
-the budget is 7, so every item is allocated a quarter to a full day against
-earlier figures of 1.5–3 days. That is a ~3.4× compression, and it is recorded
-once here rather than hidden inside the table: **what each item actually
-delivers will be narrower than its acceptance criteria describe.** The criteria
-stay as written because they define *done*, and knowing which of them a round
-did not reach is more useful than quietly deleting them.
+`totalfrank` is the author of this plan's design, so **every item whose
+deliverable is a contract belongs there** — a schema, a public API, an
+orchestrator's shape, an engine-facing agreement, a lifecycle hook point.
+`lucas-xzp` takes **every item whose deliverable is machinery built against a
+contract that is already settled.**
 
-### The binding constraint is the dependency chain, not the hours
+| | `totalfrank` — the design | `lucas-xzp` — the machinery |
+| --- | --- | --- |
+| | **W1** manifest schema v1, the public API surface, the capability model | **W2** the guarded fetcher and unpacker |
+| | **W4** the apply orchestrator's shape, the apply record, the report | **W3** credential storage, encryption, prefix authorisation |
+| | **W10** the seam pattern both entry points consume | **W11** the content store and its addressing |
+| | **W12** the engine-facing semantics contract | **W5** the `skills` + `identity` materialisers |
+| | **W13** the creation API and its poll states | **W6** the `resources` materialiser |
+| | **W8** where apply hooks into the lifecycle | **W7** named sources and the git fetch |
+| | **W9** the `cli_tools` artifact protocol and the ARCA PATH proposal | |
 
-**W1 → W4 → W5 → W6 → W8 → W9 is six links deep and strictly sequential.** No
-allocation of hours shortens it: W4 cannot start before W1 and W10 exist, W5
-cannot start before W4, and so on. Two people cannot compress a chain — they can
-only keep it fed.
+### What this costs, and why it is worth paying
 
-So the chain is given to **one person as a continuous thread** (`lucas-xzp`, all
-four days), and the other takes **everything off the chain** (`totalfrank`),
-scheduled so each of the chain's inputs is ready before the chain reaches it.
-This is the only shape in which thirteen items and a six-deep chain fit inside
-four calendar days.
+The previous revision put the whole critical chain
+(**W1 → W4 → W5 → W6 → W8 → W9**, six links, strictly sequential) inside one
+person's continuous thread, precisely to avoid handovers. Splitting by nature of
+work breaks that thread in two places:
 
-### `lucas-xzp` — 4 days · the critical chain
+- **W4 → W5** — `totalfrank` finishes the apply engine, `lucas-xzp` builds the
+  first materialisers on top of it (end of day 2);
+- **W6 → W8** — `lucas-xzp` finishes `resources`, `totalfrank` wires apply into
+  the lifecycle (day 4).
 
-| Day | Item | | Budget | Unblocked by |
+Two handovers on the critical chain is the price of keeping design with its
+author, and it is the right price: a contract designed by one person and
+implemented by another is the normal shape, whereas a contract *invented* by
+whoever happened to have hours free is not.
+
+The handover points are named here so they are prepared for rather than
+discovered — each is a moment where the receiving developer needs the interface,
+not the reasoning.
+
+### `totalfrank` — 3 person-days, spread across the four calendar days
+
+| Day | Item | | Budget | Deliverable is a contract for |
 | --- | --- | --- | --- | --- |
-| 1 | **W1** manifest document | #1469 | 1.0 | — |
-| 2 | **W4** apply engine | #1472 | 1.0 | W1 (d1), W10 (d1) |
-| 3 | **W5** skills + identity | #1473 | 0.75 | W2 (d1), W3 (d2), W4 (d2) |
-| 3–4 | **W6** resources | #1474 | 0.5 | W5 |
-| 4 | **W8** lifecycle apply points | #1476 | 0.5 | W4, W5, W6, W12 (d2) |
-| 4 | **W9** `cli_tools` | #1477 | 0.25 | W8 |
+| 1 | **W10** service-layer seam | #1509 | 0.25 | W4 — apply and the API share one verdict |
+| 1 | **W1** manifest document | #1469 | 0.75 | Everything — schema, API, capability |
+| 2 | **W4** apply engine | #1472 | 0.75 | W5, W6, W7, W13 — the orchestrator they plug into |
+| 2 | **W12** semantics contract | #1684 | 0.25 | teclaw — and W8's teclaw arm |
+| 3 | **W13** create a bot from a manifest | #1696 | 0.5 | The business ask |
+| 4 | **W8** lifecycle apply points | #1476 | 0.25 | The other apply points |
+| 4 | **W9** `cli_tools` | #1477 | 0.25 | teclaw's artifact protocol; ARCA PATH |
 
-**Total 4.0.** The chain never waits: every input lands on an earlier day than
-the item that needs it.
+**Total 3.0**, deliberately spread over four calendar days rather than three
+consecutive ones. The design is **front-loaded** — W1 and W4 must land on days 1
+and 2 or `lucas-xzp` has nothing to build against — and the late items (W8, W9)
+are gated behind work that only completes on day 4.
 
-### `totalfrank` — 3 days · everything off the chain
+### `lucas-xzp` — 4 person-days, days 1–4
 
-| Day | Item | | Budget | Feeds |
+| Day | Item | | Budget | Built against |
 | --- | --- | --- | --- | --- |
-| 1 | **W10** service-layer seam | #1509 | 0.5 | W4 (d2) |
-| 1 | **W2** guarded fetcher | #1470 | 0.5 | W5 (d3), W11 |
-| 2 | **W3** source credentials | #1471 | 0.5 | W5 (d3) |
-| 2 | **W11** platform-side materialisation | #1510 | 0.5 | audit, `keep_last` |
-| 2 | **W12** semantics contract | #1684 | 0.25 | W8's teclaw arm (d4) |
-| 4 | **W13** create a bot from a manifest | #1696 | 0.5 | — (needs W1, W4) |
-| 4 | **W7** named + git sources | #1475 | 0.25 | — (needs W5) |
+| 1 | **W2** guarded fetcher | #1470 | 0.75 | — settled security rules |
+| 1–2 | **W3** source credentials | #1471 | 0.75 | — settled credential model (§4, X1) |
+| 2 | **W11** platform-side materialisation | #1510 | 0.5 | W2's output shape |
+| 3 | **W5** `skills` + `identity` | #1473 | 1.0 | W4 (handover, end of day 2) |
+| 4 | **W6** `resources` | #1474 | 0.75 | W5 |
+| 4 | **W7** named + git sources | #1475 | 0.25 | W5 |
 
-**Total 3.0.** Note the working days are **1, 2 and 4** — not three consecutive
-days. Day 3 is idle by construction: W13 and W7 need W4 and W5, which land on
-days 2 and 3, so pulling them earlier is impossible. Spending day 3 on anything
-else would mean starting an item whose dependency is not ready.
+**Total 4.0.** Days 1–2 are entirely dependency-free, so the wait for W4 costs
+nothing.
 
 ### The four-day calendar
 
 ```text
-        │ day 1        │ day 2              │ day 3        │ day 4
-────────┼──────────────┼────────────────────┼──────────────┼──────────────────
-lucas   │ W1           │ W4                 │ W5 · W6──┐   │ └─W6 · W8 · W9
-        │              │                    │          │   │
-frank   │ W10 · W2     │ W3 · W11 · W12     │   (idle) │   │ W13 · W7
-────────┼──────────────┼────────────────────┼──────────┼───┼──────────────────
-unblocks│ W4's deps ✓  │ W5's deps ✓        │ W7's dep ✓   │ chain complete
+        │ day 1          │ day 2            │ day 3      │ day 4
+────────┼────────────────┼──────────────────┼────────────┼─────────────────────
+frank   │ W10 · W1       │ W4 ──────┐ · W12 │ W13        │ W8 · W9
+ design │                │          │       │            │  ▲
+        │                │          ▼       │            │  │
+lucas   │ W2 · W3────────┼──► W3 · W11      │ W5 ────────┼──┴ W6 · W7
+ build  │                │                  │            │
+────────┴────────────────┴──────────────────┴────────────┴─────────────────────
+ handover 1: W4 → W5, end of day 2      handover 2: W6 → W8, within day 4
 ```
 
-### Why this split and not another
+**Day 4 is the tightest point in the plan**: `lucas-xzp`'s W6 must land before
+`totalfrank` starts W8, and W9 follows W8 — three items serialised inside one
+day, across two people. If any day slips, this is the one that breaks.
 
-- **The chain belongs to one person.** Handing W4 → W5 → W6 → W8 between two
-  developers would add a context handover at every link, and the chain is where
-  the whole plan's schedule risk lives.
-- **`totalfrank`'s items are exactly the chain's inputs, scheduled one day
-  early.** W10 and W2 on day 1 feed W4 and W5; W3 on day 2 feeds W5 on day 3;
-  W12 on day 2 feeds W8's teclaw arm on day 4. Nothing on the chain ever waits.
-- **W13 and W7 are last because they are leaves.** Nothing depends on them, so
-  they absorb the schedule's remaining slack rather than creating any.
-- **W12 goes to the teclaw-facing developer**, who holds that relationship and
-  will share `teclaw-cli-contract.zh-CN.md` with them.
+### What the numbers are
+
+They are **budgets, not estimates.** An earlier revision estimated the plan at
+roughly 24 person-days from each item's own **Size** line; the budget is 7, so
+every item is allocated a quarter to a full day against earlier figures of 1.5–3
+days. That is a ~3.4× compression, recorded once here rather than hidden inside
+the tables: **what each item actually delivers will be narrower than its
+acceptance criteria describe.** The criteria stay as written because they define
+*done*, and knowing which of them a round did not reach is more useful than
+quietly deleting them.
 
 ### What to cut first if the seven days do not hold
 
@@ -1960,9 +1992,10 @@ Stated in advance so the decision is not made under pressure at the end:
 2. **W7** (named + git sources) — v1 works with URL sources alone.
 3. **W6** (`resources`) — `skills` + `identity` are the driving scenario (§2.4).
 
-**W1, W4, W5, W8 and W13 are the ones that must not be cut**: without them there
-is no manifest, no apply, no delivery, and no way to create a bot from a
-manifest — which is the business ask.
+**W1, W4, W5, W8 and W13 must not be cut**: without them there is no manifest, no
+apply, no delivery, and no way to create a bot from a manifest — which is the
+business ask. Note that cutting W6 also relieves day 4's handover, so it buys
+more schedule than its budget suggests.
 
 ## 8. Conventions for each work item
 
