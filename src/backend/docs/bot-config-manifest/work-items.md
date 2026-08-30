@@ -230,10 +230,14 @@ stated as policy:
   on `FAILED` and made "the container never came up" indistinguishable from "the
   container is fine, its manifest is not". **This restores design §4.3**, which
   put apply failure outside the readiness gate in the first place.
-- **The unit is the entry, not the apply.** The aggregate `SUCCEEDED` / `PARTIAL`
-  / `FAILED` is a summary derived from the entries for a caller's convenience. It
-  is never an input to a decision — nothing reads the aggregate and then acts on
-  the bot.
+- **Recording is per entry; the write decision is per category.** These are two
+  different levels and conflating them is how the previous revision of this
+  bullet became wrong. Every entry's outcome is recorded individually, always.
+  What gets *decided* from those outcomes is one thing only: whether that
+  entry's **category** is written at all (all-or-nothing, below).
+- **The apply-wide aggregate decides nothing.** `SUCCEEDED` / `PARTIAL` /
+  `FAILED` is a summary derived from the entries for a caller's convenience.
+  Nothing reads it and then acts — least of all on the bot record.
 - **`on_fetch_failure` is per entry** (`keep_last` / `fail`), which is where
   "what happens when *this one* fails" belongs. `keep_last` means "reuse what we
   materialised for this entry last time", and its storage is the same store §2.8
@@ -244,6 +248,14 @@ stated as policy:
   overwrite a partial set is a *destructive* set: writing `{A}` when the
   declaration was `{A, B}` deletes B. So a category is only ever written from a
   complete desired state.
+
+  This is the **only** aggregate that drives a decision, and its scope is
+  deliberately the category: one category's failure never withholds another's.
+  It also settles the `keep_last` edge case by construction — an entry whose
+  source fails on the **first** apply has no previously materialised copy to fall
+  back on, so the set cannot be completed and the category is not written. A
+  first boot with a flaky source therefore delivers nothing for that category
+  rather than something partial, which is the safe end of the trade.
 - **Iteration 1 records; it does not push.** The per-entry records are the
   deliverable, and the user pulls them when they want to know. There is no
   notification, no alert, no proactive message.
