@@ -786,6 +786,24 @@ impl DbConnectService {
         if recipient_user_ids.is_empty() {
             return Ok(());
         }
+        // Resolve human-readable display names so the notification body says
+        // "李四 申请添加你的 Bot「本地代码专家」…" instead of raw actor ids. Falls
+        // back to None (the adapter then renders the actor id) on any miss.
+        let applicant_name = self.resolve_actor_display_name(applicant_actor_id).await;
+        let target_bot_name = self.resolve_actor_display_name(target_bot_id).await;
+        // For a bot applicant the backend work-order API expects the applicant's
+        // HUMAN owner (the bot's `created_by`) as `applicant_user_id`, not the
+        // bot id (which the backend rejects as not matching the acting user).
+        // Human applicants leave this `None` — the adapter strips `human_` to a
+        // staff_no.
+        let applicant_user_id = if actor_kind_of(applicant_actor_id) == ActorKind::Bot {
+            self.bot_config
+                .get(applicant_actor_id, &self.env)
+                .await
+                .and_then(|cfg| cfg.created_by)
+        } else {
+            None
+        };
         self.friend_connect_notification
             .notify(FriendConnectNotificationCommand {
                 kind,
@@ -796,8 +814,40 @@ impl DbConnectService {
                 recipient_user_ids,
                 message: message.map(ToOwned::to_owned),
                 request_auth,
+                applicant_name,
+                target_bot_name,
+                applicant_user_id,
             })
             .await
+    }
+
+    /// Resolve a display name for an actor id: a human's nick name (via the user
+    /// directory) or a bot's `name` (from its control-plane config). Returns
+    /// `None` when no directory is wired, the staff_no is absent, the lookup
+    /// misses, or the bot/config is unknown — callers fall back to the raw id.
+    async fn resolve_actor_display_name(&self, actor_id: &str) -> Option<String> {
+        match actor_kind_of(actor_id) {
+            ActorKind::Human => {
+                let user_directory = self.user_directory.as_ref()?;
+                let staff_no = actor_id
+                    .strip_prefix("human_")
+                    .filter(|staff_no| !staff_no.is_empty())?;
+                let profile = user_directory
+                    .lookup_by_staff_no(staff_no)
+                    .await
+                    .ok()
+                    .flatten()?;
+                profile.nick_name.filter(|name| !name.is_empty())
+            }
+            ActorKind::Bot => {
+                let name = self.bot_config.get(actor_id, &self.env).await?.name;
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(name)
+                }
+            }
+        }
     }
 
     /// Find pending `Connect` requests from `from` → `to` in this env.
@@ -1396,6 +1446,7 @@ mod tests {
             "CREATE TABLE bcs_bots (\
                 bot_uuid TEXT NOT NULL, \
                 env TEXT NOT NULL, \
+                name TEXT NOT NULL DEFAULT '', \
                 visibility TEXT NOT NULL DEFAULT 'public', \
                 user_visibility TEXT NOT NULL DEFAULT 'protected', \
                 bot_info TEXT DEFAULT NULL, \
@@ -1458,6 +1509,32 @@ mod tests {
             staff_no: &str,
         ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
             Ok(self.departments.get(staff_no).cloned())
+        }
+    }
+
+    /// User-directory stub that returns a fixed nick name for any staff_no —
+    /// used to verify friend-connect notifications resolve the applicant's name.
+    struct FixedNickUserDirectoryPlugin {
+        nick: String,
+    }
+
+    #[async_trait]
+    impl UserDirectoryPlugin for FixedNickUserDirectoryPlugin {
+        async fn lookup_by_staff_no(
+            &self,
+            staff_no: &str,
+        ) -> Result<Option<bcs_user_directory_api::UserDirectoryProfile>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(Some(bcs_user_directory_api::UserDirectoryProfile {
+                staff_no: staff_no.to_string(),
+                nick_name: Some(self.nick.clone()),
+            }))
+        }
+
+        async fn lookup_department_by_staff_no(
+            &self,
+            _staff_no: &str,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(None)
         }
     }
 
@@ -1614,9 +1691,10 @@ mod tests {
         });
         db.execute(DbStatement::with_params(
             "INSERT INTO bcs_bots \
-             (bot_uuid, env, visibility, user_visibility, bot_info, status, created_by) \
-             VALUES (?, 'dev', ?, ?, ?, ?, ?)",
+             (bot_uuid, env, name, visibility, user_visibility, bot_info, status, created_by) \
+             VALUES (?, 'dev', ?, ?, ?, ?, ?, ?)",
             vec![
+                DbValue::from(bot_uuid),
                 DbValue::from(bot_uuid),
                 DbValue::from(visibility),
                 DbValue::from(user_visibility),
@@ -2178,6 +2256,90 @@ mod tests {
         assert_eq!(event.recipient_user_ids, vec!["85020".to_string()]);
         assert_eq!(event.message.as_deref(), Some("hi"));
         assert_eq!(event.request_auth, Some(request_auth));
+    }
+
+    #[tokio::test]
+    async fn friend_connect_notification_resolves_applicant_and_target_names() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        // Target bot: seed (default name = bot_uuid) then set a human-friendly name.
+        seed_bot(&db, "x:expert", "protected", "public", "APPROVAL", "online", Some("85020")).await;
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET name = ? WHERE bot_uuid = ?",
+            vec![DbValue::from("本地代码专家"), DbValue::from("x:expert")],
+        ))
+        .await
+        .expect("set target bot name");
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let user_directory: Arc<dyn UserDirectoryPlugin> =
+            Arc::new(FixedNickUserDirectoryPlugin { nick: "李四".to_string() });
+        let svc = DbConnectService::new(
+            eg.clone(),
+            pp.clone(),
+            rq.clone(),
+            bc.clone(),
+            Some(user_directory),
+            Arc::new(recorder),
+            "dev".to_string(),
+        );
+        // Human applicant (nick 李四) → bot "本地代码专家" (owner 85020); APPROVAL → pending.
+        svc.create_connect("human_12345", "x:expert", None, None)
+            .await
+            .expect("manual pending connect");
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, FriendConnectNotificationKind::ApprovalRequested);
+        // applicant nick resolved via the user directory; target name via bot config.
+        assert_eq!(events[0].applicant_name.as_deref(), Some("李四"));
+        assert_eq!(events[0].target_bot_name.as_deref(), Some("本地代码专家"));
+        assert_eq!(events[0].recipient_user_ids, vec!["85020".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn friend_connect_notification_falls_back_when_user_directory_absent() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        // No UPDATE → name stays the seed default (= bot_uuid).
+        seed_bot(&db, "x:noexp", "protected", "public", "APPROVAL", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        // service_with_notification wires user_directory = None.
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        svc.create_connect("human_12345", "x:noexp", None, None)
+            .await
+            .expect("manual pending connect");
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].applicant_name,
+            None,
+            "no user directory → applicant name unresolved (falls back to id)"
+        );
+        // Target name still resolves from the bot's config (seed default = bot_uuid).
+        assert_eq!(events[0].target_bot_name.as_deref(), Some("x:noexp"));
+    }
+
+    #[tokio::test]
+    async fn friend_connect_notification_uses_bot_applicant_owner_as_applicant_user_id() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        // Applicant bot owned by 152819; target bot owned by 85020.
+        seed_bot(&db, "x:applicant", "protected", "public", "APPROVAL", "online", Some("152819")).await;
+        seed_bot(&db, "x:target", "protected", "public", "APPROVAL", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        // Bot→Bot pending connect (APPROVAL strategy → needs approval → ApprovalRequested).
+        svc.create_connect("x:applicant", "x:target", None, None)
+            .await
+            .expect("bot→bot manual pending connect");
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, FriendConnectNotificationKind::ApprovalRequested);
+        // applicant_user_id = the applicant bot's OWNER (user id), not the bot id.
+        assert_eq!(events[0].applicant_user_id.as_deref(), Some("152819"));
+        assert_eq!(events[0].applicant_actor_id, "x:applicant");
+        assert_eq!(events[0].target_bot_id, "x:target");
+        // Approver/recipient = the target bot's owner.
+        assert_eq!(events[0].recipient_user_ids, vec!["85020".to_string()]);
     }
 
     #[tokio::test]
