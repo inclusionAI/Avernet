@@ -22,10 +22,13 @@ from agentclaw.community.core.skill_center.materialization_contract import (
     MaterializingSkillVersion,
     PublishedMaterializedSkillVersion,
     SkillVersionMaterializationError,
-    SkillVersionMaterializationRepositoryProtocol,
     SkillVersionMaterializationRequest,
+    SkillVersionMaterializerProtocol,
     SkillVersionScannerProtocol,
     SkillVersionScanResult,
+)
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillVersionMaterializationRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
@@ -148,7 +151,7 @@ class SdkSkillVersionScanner:
             raise SkillVersionMaterializationError(str(exc)) from exc
 
 
-class SkillVersionMaterializer:
+class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
     """Publish only after every immutable consumer input verifies successfully."""
 
     def __init__(

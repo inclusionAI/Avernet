@@ -203,11 +203,13 @@ class SkillPackageValidator:
                 metadata = self._metadata_parser.parse_skill_markdown(
                     markdown, path=skill_path
                 ).to_dict()
-                config = tuple(
-                    self._metadata_parser.parse_config(
-                        self._metadata_parser.decode_content(markdown)
+                config = ()
+                if not allow_legacy_local_manifest:
+                    config = tuple(
+                        self._metadata_parser.parse_config(
+                            self._metadata_parser.decode_content(markdown)
+                        )
                     )
-                )
             except SkillManifestError as exc:
                 if (
                     not allow_legacy_local_manifest

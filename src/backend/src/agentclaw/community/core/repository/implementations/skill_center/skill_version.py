@@ -10,6 +10,7 @@ from sqlalchemy import and_, func
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillVersion
 from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillVersionMaterializationRepositoryProtocol,
     SkillVersionRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center_types import (
@@ -18,7 +19,6 @@ from agentclaw.community.core.repository.protocols.skill_center_types import (
 from agentclaw.community.core.skill_center.materialization_contract import (
     MaterializingSkillVersion,
     PublishedMaterializedSkillVersion,
-    SkillVersionMaterializationRepositoryProtocol,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -82,28 +83,8 @@ class PublishedMaterializedSkillVersion:
 
 
 @runtime_checkable
-class SkillVersionMaterializationRepositoryProtocol(Protocol):
-    """Persistence boundary for Ready-Gate reads and the final CAS publish."""
-
-    def get_materialization_target(
-        self, *, env: str, skill_id: int, skill_version_id: int
-    ) -> MaterializingSkillVersion | None: ...
-
-    def publish_materialized(
-        self,
-        *,
-        env: str,
-        skill_id: int,
-        skill_version_id: int,
-        metadata_json: str,
-        description: str,
-        sc_sha256: str,
-        published_at: datetime,
-    ) -> PublishedMaterializedSkillVersion: ...
-
-
-@runtime_checkable
 class SkillVersionScannerProtocol(Protocol):
+    @abstractmethod
     def scan(self, package: ValidatedSkillPackage) -> SkillVersionScanResult: ...
 
 
@@ -111,6 +92,7 @@ class SkillVersionScannerProtocol(Protocol):
 class SkillVersionMaterializerProtocol(Protocol):
     """Consumer-first seam reused by future Publication and Reference flows."""
 
+    @abstractmethod
     def materialize(
         self, request: SkillVersionMaterializationRequest
     ) -> PublishedMaterializedSkillVersion: ...
@@ -120,7 +102,6 @@ __all__ = [
     "MaterializingSkillVersion",
     "PublishedMaterializedSkillVersion",
     "SkillVersionMaterializationError",
-    "SkillVersionMaterializationRepositoryProtocol",
     "SkillVersionMaterializationRequest",
     "SkillVersionMaterializerProtocol",
     "SkillVersionScannerProtocol",

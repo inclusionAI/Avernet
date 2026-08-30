@@ -8,6 +8,7 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_vers
     SkillVersionRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillVersionMaterializationRepositoryProtocol,
     SkillVersionRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.services.skill_version_resolver import (
@@ -17,7 +18,6 @@ from agentclaw.community.core.skill_center.version_resolution_contract import (
     SkillVersionResolverProtocol,
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
-    SkillVersionMaterializationRepositoryProtocol,
     SkillVersionMaterializerProtocol,
     SkillVersionScannerProtocol,
 )
