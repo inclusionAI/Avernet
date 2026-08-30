@@ -7,7 +7,7 @@ behavior without making the service profile-aware.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from agentclaw.community.core.devices.services.baas_invoke_transport import BaasTransport
 
@@ -48,8 +48,14 @@ class BaasDeviceSyncService(DeviceSync):
         self._headers: dict[str, str] = conn_info.get("headers", {})
 
     def sync_symlinks(
-        self, symlinks: list[dict[str, Any]]
+        self,
+        symlinks: list[dict[str, Any]],
+        *,
+        effective_mcps: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
+        # ``effective_mcps`` only means something to a device that recomposes
+        # its whole configuration; this one is told exactly what to link and
+        # ignores it.
         symlinks_count = len(symlinks)
         logger.info(
             "[BaasDeviceSyncService.sync_symlinks] bot_uuid=%s, count=%d",

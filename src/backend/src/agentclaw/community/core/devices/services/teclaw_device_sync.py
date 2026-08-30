@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from agentclaw.community.core.config_compose.models import ComposeRequest
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
@@ -125,9 +125,17 @@ class TeclawDeviceSyncService(DeviceSync):
         # for personal bots / non-draft rows inside ``record_draft_artifact``.
         self._draft_recorder = draft_recorder
 
-    def sync_symlinks(self, symlinks: list[dict[str, str]]) -> dict[str, Any]:
+    def sync_symlinks(
+        self,
+        symlinks: list[dict[str, str]],
+        *,
+        effective_mcps: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
         # symlinks ignored: teclaw re-pulls the whole composed artifact.
-        return self._compose_and_deliver(caller="sync_symlinks")
+        # ``effective_mcps`` is not ignored — see ``_compose_and_deliver``.
+        return self._compose_and_deliver(
+            caller="sync_symlinks", effective_mcps=effective_mcps
+        )
 
     def sync_bot_config(
         self,
@@ -168,7 +176,24 @@ class TeclawDeviceSyncService(DeviceSync):
         # arca/baas).
         return True
 
-    def _compose_and_deliver(self, *, caller: str) -> dict[str, Any]:
+    def _compose_and_deliver(
+        self,
+        *,
+        caller: str,
+        effective_mcps: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        """Compose this bot's whole artifact and POST it to its container.
+
+        ``effective_mcps`` is the bot's effective MCP set when the caller
+        already resolved it (capability projection does, before it decides
+        anything). It rides on the request rather than being re-read: the
+        composer's own read is the same ``collect_bot_active_mcps`` query
+        against the same database, so the only thing a second one adds is its
+        latency. The identifiers below scope the compose to this service's
+        bot, and the entries were resolved for that same bot by the projection
+        that called it, so the two cannot describe different bots. When it is
+        ``None`` the collector reads the set itself, exactly as before.
+        """
         try:
             artifact = self._composer_provider().compose(
                 ComposeRequest(
@@ -177,6 +202,9 @@ class TeclawDeviceSyncService(DeviceSync):
                     user_id=self._user_id,
                     engine_type=self._engine_type,
                     entity_type=self._entity_type,
+                    effective_mcps=(
+                        None if effective_mcps is None else tuple(effective_mcps)
+                    ),
                 )
             )
             # Enrich the composer's (empty) engine_ext with the backend identity/stage

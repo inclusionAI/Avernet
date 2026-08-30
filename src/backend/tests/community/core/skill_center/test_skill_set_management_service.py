@@ -511,10 +511,20 @@ class _RuntimeFactoryService:
         self.mcp_projections: list[
             tuple[frozenset[str], frozenset[str], set[str]]
         ] = []
+        # What each delivery was handed as the already-resolved MCP set. A
+        # whole-artifact delivery composes from the database, so this is what
+        # decides whether that compose re-reads what plan resolution read.
+        self.delivered_effective_mcps: list[list[dict] | None] = []
 
-    async def project_skills(self, *, desired_skills: list[dict]) -> bool:
+    async def project_skills(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
         self.desired_skills = desired_skills
         self.runtime_syncs.append(desired_skills)
+        self.delivered_effective_mcps.append(effective_mcps)
         return True
 
     async def sync_mcp_delivery(
@@ -2692,6 +2702,65 @@ async def test_teclaw_mcp_only_scope_still_delivers_the_skill_bearing_artifact()
 
 
 @pytest.mark.asyncio
+async def test_teclaw_delivery_carries_the_mcp_set_plan_resolution_read():
+    """One projection reads the effective MCP set once, then hands it over.
+
+    Plan resolution has to collect it — the projected codes and the Passport
+    scope are derived from it — and the whole-artifact delivery recomposes the
+    bot's document from the same database moments later. Without the handover
+    that compose repeats the identical ``collect_bot_active_mcps`` query for an
+    answer the projection is already holding; both sides ask with
+    ``strict_policy_context=True``, so it is the same answer by contract.
+
+    Asserted on the collect count and the delivered value rather than on
+    timing: what makes the second read unnecessary is that the first one's
+    result reaches the composer, and that is what would silently regress.
+    """
+    factory = _RuntimeFactory()
+    runtime = _teclaw_runtime(factory)
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner", scope=ProjectionScope.everything(),
+    )
+
+    assert len(factory.service.collect_calls) == 1
+    assert factory.service.delivered_effective_mcps == [
+        [
+            {"server_code": "mcp.template-preset"},
+            {"server_code": "hitl", "source": "local"},
+        ]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_per_domain_delivery_carries_no_mcp_set():
+    """The handover is for engines that compose; a per-domain one does not.
+
+    Its Skill call writes symlinks and its MCP half goes to a separate
+    endpoint, so there is no compose behind ``project_skills`` to spare a read
+    — passing the set would only imply a re-use that never happens.
+    """
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=_registry(
+            pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()
+        ),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner", scope=ProjectionScope.everything(),
+    )
+
+    assert factory.service.delivered_effective_mcps == [None]
+
+
+@pytest.mark.asyncio
 async def test_teclaw_still_updates_the_passport_with_identity_coloured_items():
     """The Passport is the platform's record, not the runtime's — it still runs.
 
@@ -2809,7 +2878,9 @@ async def test_runtime_delivery_never_runs_on_the_event_loop():
         user_id = "owner-1"
         entity_id = "owner-1"
 
-        def _sync_symlinks_to_device_if_needed(self, user_id, desired_skills):
+        def _sync_symlinks_to_device_if_needed(
+            self, user_id, desired_skills, effective_mcps
+        ):
             seen.append(threading.get_ident())
             return True
 

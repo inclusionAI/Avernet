@@ -189,16 +189,26 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         The plaintext stays here only as an intermediate — inlining it into the
         artifact entry (endpoint query / headers) is the ``McporterComposer``'s
         job downstream, not this collector's.
+
+        Step 1 is skipped when the request already carries the effective set
+        (``ComposeRequest.effective_mcps``): a whole-artifact delivery resolves
+        it during plan resolution and this would otherwise be the *second*
+        ``collect_bot_active_mcps`` of one request — the same query, against the
+        same database, for the same contractual answer. Step 2 runs either way;
+        the threaded value is the bare association set, exactly what step 1
+        returns, so nothing downstream can tell the two apart.
         """
         svc = self._skill_set_service(req)
-        raw = svc.collect_bot_active_mcps(
-            entity_id=req.entity_id,
-            bot_id=req.bot_id,
-            user_id=req.user_id,
-            entity_type=req.entity_type,
-            engine_type=req.engine_type,
-            strict_policy_context=True,
-        )
+        raw = req.effective_mcps
+        if raw is None:
+            raw = svc.collect_bot_active_mcps(
+                entity_id=req.entity_id,
+                bot_id=req.bot_id,
+                user_id=req.user_id,
+                entity_type=req.entity_type,
+                engine_type=req.engine_type,
+                strict_policy_context=True,
+            )
         # ``collect_bot_active_mcps`` returns only the skill-set association fields
         # (server_code/name/…) — it deliberately does NOT call MCP Center. The
         # composer needs the full detail (``endpoints``/``runMode``/
@@ -502,7 +512,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         return bot_data_relpath(host_path)
 
     def _skill_set_service(self, req: ComposeRequest):
-        """Build a per-bot ``SkillSetService`` bound to this compose request.
+        """The per-bot ``SkillSetService`` for this compose request — built once.
 
         Both :meth:`skills` and :meth:`mcps` go through the same per-bot service,
         so this centralizes the factory call (unpacking the request's identifiers).
@@ -510,11 +520,25 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         engine_type="openclaw", entity_type="staff")`` it returns the
         ``SkillSetService`` scoped to that staff/bot/engine, from which
         ``get_symlink_mappings`` / ``collect_bot_active_mcps`` read.
+
+        Building it is not cheap — the factory re-resolves the bot's workspace
+        paths, re-reads the bot row, and mints a ``SkillService`` whose
+        construction mkdirs against the shared ``/aidesktop`` mount — and the
+        request's identifiers fully determine the result, so the two call sites
+        of one compose share a single instance.
+
+        The memo lives on the *request*, not on ``self``: this collector is a
+        singleton and compose runs on a thread pool, so a memo held here would
+        eventually hand bot A's service to bot B's compose. See
+        ``ComposeRequest.memoized``.
         """
-        return self._skill_set_service_factory.create(
-            user_id=req.user_id,
-            entity_id=req.entity_id,
-            bot_id=req.bot_id,
-            engine_type=req.engine_type,
-            entity_type=req.entity_type,
+        return req.memoized(
+            "skill_set_service",
+            lambda: self._skill_set_service_factory.create(
+                user_id=req.user_id,
+                entity_id=req.entity_id,
+                bot_id=req.bot_id,
+                engine_type=req.engine_type,
+                entity_type=req.entity_type,
+            ),
         )

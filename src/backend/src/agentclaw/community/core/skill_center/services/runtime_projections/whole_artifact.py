@@ -121,8 +121,16 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         # falls back to ``get_active_skills`` when this is ``None``, which
         # re-runs the flush-and-read that ``_resolve_plan`` just did. Handing
         # over the resolved assets is what avoids that second pass.
+        #
+        # The MCP set rides along for exactly that reason. Plan resolution
+        # collected it — it had to, the projected codes and the Passport scope
+        # are derived from it — and the compose inside this call would
+        # otherwise ask the same database the same question again, with
+        # ``strict_policy_context=True`` on both sides making the two answers
+        # the same by contract.
         if not await plan.service.project_skills(
             desired_skills=self._desired_skills(plan.projection),
+            effective_mcps=plan.effective_mcp_entries,
         ):
             raise SkillSetRuntimeReconcileError()
 
