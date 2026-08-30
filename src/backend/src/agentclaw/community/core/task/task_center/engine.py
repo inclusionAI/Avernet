@@ -625,40 +625,60 @@ class ExecutionEngine:
         return os.environ.get("OCB_TASK_STATIC_AUTO_REPORT", "").lower() in {"1", "true", "yes", "on"}
 
     async def _prepare_static(self, task_id: str, runtime, side: list[tuple]) -> None:
-        graph = self._graph.query_task_dashboard(task_id)
-        readiness = runtime.ready(graph)
-        logger.info(
-            "[task][static-plan] prepare task=%s ready=%s skipped=%s",
-            task_id,
-            [node.node_id for node in readiness.ready],
-            [node.node_id for node in readiness.skipped],
-        )
-        for node in readiness.skipped:
+        # cascade loop:enabled_when 未满足的节点(skip)被翻 DONE 后,会解锁依赖它的后续节点
+        # (如 implementation skip 后 notify_done 的 depends_on={implementation} 满足),
+        # 必须立即 _static_next_wave 揭示该后续波并继续 dispatch,否则后续节点(如 notify_done)
+        # 永不入图,terminal 因 all_in_graph=False 永不翻 DONE,导致 graph 卡 EXECUTING、root 卡
+        # "尚未开始"。max_rounds 兜底防依赖环导致的无限揭示。
+        max_rounds = 8
+        for round_idx in range(max_rounds):
+            graph = self._graph.query_task_dashboard(task_id)
+            readiness = runtime.ready(graph)
             logger.info(
-                "[task][static-plan] skip node task=%s node=%s reason=enabled_when",
+                "[task][static-plan] prepare task=%s round=%s ready=%s skipped=%s",
                 task_id,
-                node.node_id,
-            )
-            self._graph.update_task_node_info(
-                TaskNodePatch(
-                    task_id=task_id,
-                    node_id=node.node_id,
-                    status=Status.DONE,
-                    output_patch={"skipped": True},
-                    extend_props_patch={"static_blocked": None},
-                )
-            )
-        if readiness.ready:
-            logger.info(
-                "[task][static-plan] dispatch ready nodes task=%s nodes=%s",
-                task_id,
+                round_idx,
                 [node.node_id for node in readiness.ready],
+                [node.node_id for node in readiness.skipped],
             )
-            # Static nodes use the YAML-bound bot directly; skip catalog search
-            # and claim-join so dependencies are never dispatched ahead of time
-            # and the bound bot_id (e.g. strategy_approval/implementation) is
-            # honored instead of being replaced by whatever catalog returns.
-            await self._prepare_static_into(task_id, runtime, readiness.ready, side)
+            for node in readiness.skipped:
+                logger.info(
+                    "[task][static-plan] skip node task=%s node=%s reason=enabled_when",
+                    task_id,
+                    node.node_id,
+                )
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        status=Status.DONE,
+                        output_patch={"skipped": True},
+                        extend_props_patch={"static_blocked": None},
+                    )
+                )
+            if readiness.ready:
+                logger.info(
+                    "[task][static-plan] dispatch ready nodes task=%s round=%s nodes=%s",
+                    task_id,
+                    round_idx,
+                    [node.node_id for node in readiness.ready],
+                )
+                # Static nodes use the YAML-bound bot directly; skip catalog search
+                # and claim-join so dependencies are never dispatched ahead of time
+                # and the bound bot_id (e.g. strategy_approval/implementation) is
+                # honored instead of being replaced by whatever catalog returns.
+                await self._prepare_static_into(task_id, runtime, readiness.ready, side)
+            # 本轮既无 skip 也无 ready:已达稳态,退出 cascade。
+            if not readiness.skipped and not readiness.ready:
+                break
+            # 本轮有 skip:已把节点翻 DONE,揭示依赖它的后续波(notify_done 等),下一轮 ready 它并 dispatch。
+            if readiness.skipped:
+                self._static_next_wave(task_id, runtime)
+        else:
+            logger.warning(
+                "[task][static-plan] prepare cascade hit max_rounds=%s task=%s,可能存在依赖环",
+                max_rounds, task_id,
+            )
 
     async def _prepare_static_into(
         self, task_id: str, runtime, ready_nodes, side: list[tuple]
