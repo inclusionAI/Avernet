@@ -552,6 +552,8 @@ class SpaceSkillDetail(SpaceSkillSummary):
 
 
 class SkillOfflineBlockerKind(_DocumentedEnum):
+    """Reason a Space Skill cannot safely enter recoverable Offline."""
+
     DRAFT = "DRAFT"
     PUBLICATION = "PUBLICATION"
     MEMBERSHIP = "MEMBERSHIP"
@@ -570,22 +572,40 @@ class SkillOfflineBlockerKind(_DocumentedEnum):
 
 
 class SkillOfflineImpactItem(BaseModel):
-    kind: SkillOfflineBlockerKind
+    """One live fact that prevents recoverable Offline."""
+
+    kind: SkillOfflineBlockerKind = Field(
+        description="Category of the blocking reference or lifecycle fact."
+    )
     resource_id: str = Field(description="Stable blocker resource identifier.")
     display_name: str = Field(description="Human-readable blocker label.")
 
 
 class SkillOfflineImpact(BaseModel):
-    blocked: bool
-    total: int = Field(ge=0)
-    counts: dict[str, int]
-    items: list[SkillOfflineImpactItem]
+    """Complete blocker counts plus one requested page of blocker details."""
+
+    blocked: bool = Field(description="Whether at least one blocker exists.")
+    total: int = Field(ge=0, description="Total blockers across all categories.")
+    counts: dict[str, int] = Field(
+        description="Non-zero blocker totals keyed by blocker category."
+    )
+    items: list[SkillOfflineImpactItem] = Field(
+        description="Requested page of blockers in deterministic order."
+    )
 
 
 class SkillOfflineResult(BaseModel):
-    changed: bool
-    lifecycle_status: Literal["OFFLINE"]
-    draft: SkillDraftSummary
+    """Recoverable Offline state and the editable next-version Draft."""
+
+    changed: bool = Field(
+        description="Whether this request newly moved the Skill Offline."
+    )
+    lifecycle_status: Literal["OFFLINE"] = Field(
+        description="Current recoverable lifecycle state."
+    )
+    draft: SkillDraftSummary = Field(
+        description="Editable Vn+1 Draft retained for recovery publication."
+    )
 
 
 class ImportSpaceSkillFromGitRequest(BaseModel):

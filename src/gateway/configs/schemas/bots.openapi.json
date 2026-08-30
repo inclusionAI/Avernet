@@ -19336,6 +19336,7 @@
         "type": "object"
       },
       "SkillOfflineBlockerKind": {
+        "description": "Reason a Space Skill cannot safely enter recoverable Offline.",
         "enum": [
           "DRAFT",
           "PUBLICATION",
@@ -19372,8 +19373,10 @@
         ]
       },
       "SkillOfflineImpact": {
+        "description": "Complete blocker counts plus one requested page of blocker details.",
         "properties": {
           "blocked": {
+            "description": "Whether at least one blocker exists.",
             "title": "Blocked",
             "type": "boolean"
           },
@@ -19381,10 +19384,12 @@
             "additionalProperties": {
               "type": "integer"
             },
+            "description": "Non-zero blocker totals keyed by blocker category.",
             "title": "Counts",
             "type": "object"
           },
           "items": {
+            "description": "Requested page of blockers in deterministic order.",
             "items": {
               "$ref": "#/components/schemas/SkillOfflineImpactItem"
             },
@@ -19392,6 +19397,7 @@
             "type": "array"
           },
           "total": {
+            "description": "Total blockers across all categories.",
             "minimum": 0.0,
             "title": "Total",
             "type": "integer"
@@ -19407,6 +19413,7 @@
         "type": "object"
       },
       "SkillOfflineImpactItem": {
+        "description": "One live fact that prevents recoverable Offline.",
         "properties": {
           "display_name": {
             "description": "Human-readable blocker label.",
@@ -19414,7 +19421,8 @@
             "type": "string"
           },
           "kind": {
-            "$ref": "#/components/schemas/SkillOfflineBlockerKind"
+            "$ref": "#/components/schemas/SkillOfflineBlockerKind",
+            "description": "Category of the blocking reference or lifecycle fact."
           },
           "resource_id": {
             "description": "Stable blocker resource identifier.",
@@ -19431,16 +19439,20 @@
         "type": "object"
       },
       "SkillOfflineResult": {
+        "description": "Recoverable Offline state and the editable next-version Draft.",
         "properties": {
           "changed": {
+            "description": "Whether this request newly moved the Skill Offline.",
             "title": "Changed",
             "type": "boolean"
           },
           "draft": {
-            "$ref": "#/components/schemas/SkillDraftSummary"
+            "$ref": "#/components/schemas/SkillDraftSummary",
+            "description": "Editable Vn+1 Draft retained for recovery publication."
           },
           "lifecycle_status": {
             "const": "OFFLINE",
+            "description": "Current recoverable lifecycle state.",
             "title": "Lifecycle Status",
             "type": "string"
           }
@@ -42910,11 +42922,13 @@
             }
           },
           {
+            "description": "One-based blocker page number.",
             "in": "query",
             "name": "page",
             "required": false,
             "schema": {
               "default": 1,
+              "description": "One-based blocker page number.",
               "minimum": 1,
               "title": "Page",
               "type": "integer"

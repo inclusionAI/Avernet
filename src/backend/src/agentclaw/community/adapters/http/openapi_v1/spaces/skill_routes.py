@@ -428,7 +428,10 @@ async def get_space_skill_offline_impact(
     skill_id: SkillIdPath,
     request: Request,
     caller: ActingCallerDep,
-    page_number: Annotated[int, Query(alias="page", ge=1)] = 1,
+    page_number: Annotated[
+        int,
+        Query(alias="page", ge=1, description="One-based blocker page number."),
+    ] = 1,
     page_size: PageSizeQuery = 20,
     service: SpaceSkillOfflineServiceProtocol = Injected(
         SpaceSkillOfflineServiceProtocol
