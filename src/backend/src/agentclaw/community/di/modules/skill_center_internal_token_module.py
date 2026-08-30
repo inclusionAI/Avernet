@@ -37,7 +37,8 @@ class SkillCenterInternalTokenBindings:
         ``BotDormantModule._resolved_dormant_token`` exactly:
 
           - name is empty (community / singlebox / test)
-              → the local fallback token, so本地联调 can call the endpoints
+              → the local fallback token, so local development can call
+                the endpoints
           - the resolver returns a secret with a non-empty ``secret_value``
               → that value (prod / pre normal path)
           - the resolver returns ``None`` or an empty ``secret_value``
