@@ -1216,6 +1216,59 @@ def test_repair_is_convergent_and_leaves_another_bots_rows_alone():
     assert after_second == after_first
 
 
+def test_repair_reports_whether_it_wrote():
+    """``changed`` is what a deliberate flush — the backfill — reports."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(
+            name="active",
+            bolt_id="bot",
+            user_id="owner",
+            engine_type="openclaw",
+            is_active=True,
+            env="dev",
+        )
+        session.add_all(
+            [skill_set, Skill(name="member", git_path="git://member", env="dev")]
+        )
+        session.flush()
+        session.add(
+            SkillSetSkill(skill_set_id=skill_set.id, skill_id=1, env="dev")
+        )
+
+    repository = CapabilityDesiredStateRepository(db)
+
+    inserting = repository.flush_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
+    )
+    converged = repository.flush_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
+    )
+
+    assert inserting.changed is True
+    # The read-only fast path: nothing left to write, so nothing was written.
+    assert converged.changed is False
+
+    # Deactivating the Set gives the next flush a row to remove.
+    repository.set_skill_set_active(
+        bot_id="bot", owner_id="owner", set_id="1", active=False
+    )
+    with db.transactional_orm_session() as session:
+        session.add(
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=1, env="dev"
+            )
+        )
+
+    removing = repository.flush_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
+    )
+
+    assert removing.changed is True
+    with db.orm_session() as session:
+        assert session.query(BotSkillInstallation).count() == 0
+
+
 def test_repair_takes_no_lock_and_opens_no_transaction_when_converged():
     """The common case is a Bot whose desired state already agrees.
 

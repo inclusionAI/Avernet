@@ -120,11 +120,20 @@ from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
 )
+from agentclaw.community.core.skill_center.installation_backfill_protocol import (
+    InstallationBackfillServiceProtocol,
+)
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
+)
+from agentclaw.community.core.skill_center.services.installation_backfill_service import (
+    InstallationBackfillService,
+)
+from agentclaw.community.di.modules.skill_center_internal_token_module import (
+    SkillCenterInternalTokenBindings,
 )
 from agentclaw.community.core.skill_center.services.git_sync import (
     GitSyncConfig,
@@ -251,6 +260,7 @@ class SkillCenterModule(
     CanonicalCenterStoreBindings,
     DraftContentStoreBindings,
     LocalSkillUploadBindings,
+    SkillCenterInternalTokenBindings,
     SkillCenterProtocolBindings,
     Module,
 ):
@@ -344,6 +354,11 @@ class SkillCenterModule(
         binder.bind(
             BotCapabilityStateReader,
             to=BotCapabilityStateReader,
+            scope=singleton,
+        )
+        binder.bind(
+            InstallationBackfillServiceProtocol,
+            to=InstallationBackfillService,
             scope=singleton,
         )
         binder.bind(

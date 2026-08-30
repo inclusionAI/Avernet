@@ -45,6 +45,10 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         that are not the inherited one. It is the same tuple the activation
         guards gate on, so the retirement can only reach Sets whose members
         those guards refuse direct control of.
+
+        The returned plan's ``changed`` reports whether this call actually
+        wrote rows, for the caller that runs the flush deliberately rather
+        than as the front half of a read.
         """
         ...
     @abstractmethod

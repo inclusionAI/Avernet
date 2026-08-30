@@ -54,6 +54,9 @@ from agentclaw.community.api.bot_runtime_projector import (
     BotRuntimeProjectorProtocol,
 )
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
+from agentclaw.community.api.installation_backfill_service import (
+    InstallationBackfillServiceProtocol,
+)
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
@@ -166,6 +169,9 @@ from agentclaw.community.core.skill_center.services.skill_center_gateway_service
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
+from agentclaw.community.core.skill_center.services.installation_backfill_service import (
+    InstallationBackfillService,
+)
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
@@ -227,6 +233,7 @@ _PAIRS = [
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
     (BotRuntimeProjectorProtocol, BotRuntimeProjector),
+    (InstallationBackfillServiceProtocol, InstallationBackfillService),
     (SkillQueryServiceProtocol, SkillQueryService),
     (SkillMetadataParserProtocol, SkillParser),
     (SpaceSkillGrantServiceProtocol, SpaceSkillGrantService),

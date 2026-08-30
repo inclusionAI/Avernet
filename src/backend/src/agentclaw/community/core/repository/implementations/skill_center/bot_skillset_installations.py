@@ -6,6 +6,8 @@ range over every Set a Bot has and answer what its Installation table should say
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from sqlalchemy import and_, func
 
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
@@ -106,7 +108,8 @@ class BotSkillSetInstallations:
         """Make Installation say what SkillSet membership implies — the flush.
 
         Skills and MCPs, one algorithm. Returns the plan it applied, so the
-        caller need not resolve twice.
+        caller need not resolve twice, with ``changed`` set only when rows
+        were actually written.
         """
         # Resolve unlocked first: a Bot that already agrees — the common case —
         # answers here without a row lock or a write transaction.
@@ -146,28 +149,39 @@ class BotSkillSetInstallations:
             installed = skill_installations.installed_ids(
                 session, bot_id=bot_id, owner_id=owner_id, env=env, locked=True
             )
-            for skill_id in sorted(plan.skills_to_install - installed):
+            skills_added = sorted(plan.skills_to_install - installed)
+            skills_dropped = plan.skills_to_uninstall & installed
+            for skill_id in skills_added:
                 skill_installations.install(
                     session, bot_id=bot_id, owner_id=owner_id, env=env,
                     skill_id=skill_id,
                 )
             skill_installations.uninstall(
                 session, bot_id=bot_id, owner_id=owner_id, env=env,
-                skill_ids=plan.skills_to_uninstall & installed,
+                skill_ids=skills_dropped,
             )
             installed_mcps = mcp_installations.installed_codes(
                 session, bot_id=bot_id, owner_id=owner_id, env=env, locked=True
             )
-            for server_code in sorted(plan.mcps_to_install - installed_mcps):
+            mcps_added = sorted(plan.mcps_to_install - installed_mcps)
+            mcps_dropped = plan.mcps_to_uninstall & installed_mcps
+            for server_code in mcps_added:
                 mcp_installations.install(
                     session, bot_id=bot_id, owner_id=owner_id, env=env,
                     server_code=server_code,
                 )
             mcp_installations.uninstall(
                 session, bot_id=bot_id, owner_id=owner_id, env=env,
-                server_codes=plan.mcps_to_uninstall & installed_mcps,
+                server_codes=mcps_dropped,
             )
-            return plan
+            # Resolved again under the lock, so a flush that raced another one
+            # to the same Bot can arrive here with nothing left to write.
+            return replace(
+                plan,
+                changed=bool(
+                    skills_added or skills_dropped or mcps_added or mcps_dropped
+                ),
+            )
 
     def _resolve_flush_plan(
         self,

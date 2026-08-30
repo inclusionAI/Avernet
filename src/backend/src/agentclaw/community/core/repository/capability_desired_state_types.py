@@ -70,6 +70,13 @@ class InstallationFlushPlan:
     same Sets' MCP members. ``member_skill_ids`` is the reachability union
     the public listing needs — Default-Set exclusions are already removed,
     and are the only thing removed.
+
+    ``changed`` says whether applying the plan actually wrote rows. The
+    read-only fast path leaves it ``False``; so does a write pass that finds
+    nothing left to do once it holds the lock. It exists for the caller that
+    runs the flush deliberately rather than as the front half of a read — the
+    backfill — which reports which Bots it converged and would otherwise have
+    to re-read Installation to find out.
     """
 
     member_skill_ids: frozenset[int]
@@ -77,3 +84,4 @@ class InstallationFlushPlan:
     skills_to_uninstall: frozenset[int]
     mcps_to_install: frozenset[str] = frozenset()
     mcps_to_uninstall: frozenset[str] = frozenset()
+    changed: bool = False

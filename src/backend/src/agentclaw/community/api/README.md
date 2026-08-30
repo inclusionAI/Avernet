@@ -212,6 +212,7 @@ internal_dependencies:
   - agentclaw.community.core.skill_center.bot_runtime_projector_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.skill_center.git_sync_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.skill_center.installation_backfill_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.skill_center.local_skill_delete_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.skill_center.repository_catalog_service_protocol  # Protocol defined in its owning core module, re-exported here

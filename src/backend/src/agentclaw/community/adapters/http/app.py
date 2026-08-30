@@ -161,7 +161,7 @@ from agentclaw.community.adapters.http.service_bot.router_publish import router 
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
 # skills / skillsets / skill_scan / skill_auth 全部切换到新架构 (core/skill_center + device plugin 抽象)
-from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync  # noqa: E402
+from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync, installations_internal  # noqa: E402
 
 from fastapi_injector import attach_injector  # noqa: E402
 
@@ -972,6 +972,7 @@ app.include_router(skill_category.router)
 app.include_router(verify.router)
 app.include_router(sync.router)
 app.include_router(batch_sync.router)
+app.include_router(installations_internal.internal_router)
 app.include_router(cron_router)
 app.include_router(cron_noauth_router)
 app.include_router(notify_router)
