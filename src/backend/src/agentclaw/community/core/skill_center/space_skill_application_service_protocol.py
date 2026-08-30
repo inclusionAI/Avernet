@@ -25,3 +25,15 @@ class SpaceSkillApplicationServiceProtocol(Protocol):
         request_id: str,
         files: Sequence[tuple[str, bytes]],
     ) -> SpaceSkillCreationOutcome: ...
+
+    @abstractmethod
+    def create_from_git(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        request_id: str,
+        git_url: str,
+        branch: str | None,
+        subdir: str | None,
+    ) -> SpaceSkillCreationOutcome: ...

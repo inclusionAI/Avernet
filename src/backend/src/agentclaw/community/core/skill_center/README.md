@@ -31,6 +31,8 @@ provides:
   - "SpaceSkillGrantService"
   - "SpaceSkillApplicationService"
   - "SpaceSkillApplicationServiceProtocol"
+  - "GitSnapshotService"
+  - "GitSnapshotServiceProtocol"
   - "SpaceSkillEditorRequestService"
   - "SkillCollaboratorApprovalHandler"
   - "DraftEditLeaseService"

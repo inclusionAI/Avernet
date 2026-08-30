@@ -18,6 +18,9 @@ from agentclaw.community.core.skill_center.draft_content import (
 from agentclaw.community.core.skill_center.errors import (
     SpaceSkillIdempotencyConflictError,
 )
+from agentclaw.community.core.skill_center.git_snapshot import (
+    GitSnapshotServiceProtocol,
+)
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.skill_center.space_skill_application_service_protocol import (
     SpaceSkillApplicationServiceProtocol,
@@ -37,6 +40,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         repository: SpaceSkillRepository,
         package_validator: SkillPackageValidator,
         draft_store: DraftContentStore,
+        git_snapshots: GitSnapshotServiceProtocol,
         env_provider: Callable[[], str],
         tenant_provider: Callable[[], str],
     ) -> None:
@@ -44,6 +48,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         self._repository = repository
         self._validator = package_validator
         self._draft_store = draft_store
+        self._git_snapshots = git_snapshots
         self._env_provider = env_provider
         self._tenant_provider = tenant_provider
 
@@ -64,21 +69,94 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
             + b"\0"
             + package.canonical_zip
         ).hexdigest()
+        replay = self._creation_replay(
+            space_id=space_id, request_id=request_id, request_hash=request_hash
+        )
+        if replay is not None:
+            return replay
+        return self._persist_creation(
+            space_id=space_id,
+            actor_id=actor_id,
+            request_id=request_id,
+            request_hash=request_hash,
+            package=package,
+            source_data={
+                "draft_source_kind": "FOLDER",
+                "source_type": "FOLDER",
+            },
+        )
+
+    def create_from_git(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        request_id: str,
+        git_url: str,
+        branch: str | None,
+        subdir: str | None,
+    ) -> SpaceSkillCreationOutcome:
+        self._access.require_space_member(space_id=space_id, user_id=actor_id)
+        request_id = self._request_id(request_id)
+        request_hash = hashlib.sha256(
+            "\0".join(
+                ("GIT", str(space_id), git_url.strip(), branch or "", subdir or "")
+            ).encode("utf-8")
+        ).hexdigest()
+        replay = self._creation_replay(
+            space_id=space_id, request_id=request_id, request_hash=request_hash
+        )
+        if replay is not None:
+            return replay
+        snapshot = self._git_snapshots.fetch(
+            git_url=git_url, branch=branch, subdir=subdir
+        )
+        package = self._validator.validate_directory(snapshot.files)
+        return self._persist_creation(
+            space_id=space_id,
+            actor_id=actor_id,
+            request_id=request_id,
+            request_hash=request_hash,
+            package=package,
+            source_data={
+                "draft_source_kind": "GIT",
+                "source_type": "GIT",
+                "source_repo_url": snapshot.repo_url,
+                "source_branch": snapshot.resolved_branch,
+                "source_commit_sha": snapshot.commit_sha,
+                "source_subdir": snapshot.source_subdir,
+            },
+        )
+
+    def _creation_replay(
+        self, *, space_id: int, request_id: str, request_hash: str
+    ) -> SpaceSkillCreationOutcome | None:
         env = self._env_provider()
         existing = self._repository.get_creation_by_request_id(
             request_id=request_id, env=env
         )
-        if existing is not None:
-            if (
-                existing["space_id"] != space_id
-                or existing["request_hash"] != request_hash
-            ):
-                raise SpaceSkillIdempotencyConflictError(
-                    "creation request already belongs to another intent"
-                )
-            return SpaceSkillCreationOutcome(
-                skill_id=existing["skill_id"], created=False
+        if existing is None:
+            return None
+        if (
+            existing["space_id"] != space_id
+            or existing["request_hash"] != request_hash
+        ):
+            raise SpaceSkillIdempotencyConflictError(
+                "creation request already belongs to another intent"
             )
+        return SpaceSkillCreationOutcome(skill_id=existing["skill_id"], created=False)
+
+    def _persist_creation(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        request_id: str,
+        request_hash: str,
+        package,
+        source_data: dict[str, str],
+    ) -> SpaceSkillCreationOutcome:
+        env = self._env_provider()
 
         skill_uuid = str(uuid4())
         revision = DraftRevisionIdentity(
@@ -103,7 +181,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
                     "draft_source_kind": "FOLDER",
                     "creation_request_id": request_id,
                     "creation_request_hash": request_hash,
-                    "source_type": "FOLDER",
+                    **source_data,
                 },
                 ownership_data={
                     "space_id": space_id,

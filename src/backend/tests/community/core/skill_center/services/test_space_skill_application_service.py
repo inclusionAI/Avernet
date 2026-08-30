@@ -18,6 +18,7 @@ from agentclaw.community.core.skill_center.services.skill_parser import SkillPar
 from agentclaw.community.core.skill_center.services.space_skill_application_service import (
     SpaceSkillApplicationService,
 )
+from agentclaw.community.core.skill_center.git_snapshot import GitSkillSnapshot
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.testing.draft_content_store import LocalDraftContentStore
 
@@ -65,19 +66,21 @@ def _service():
     }
     validator = SkillPackageValidator(SkillParser())
     store = LocalDraftContentStore(validator)
+    git_snapshots = MagicMock()
     service = SpaceSkillApplicationService(
         access=access,
         repository=repository,
         package_validator=validator,
         draft_store=store,
+        git_snapshots=git_snapshots,
         env_provider=lambda: "test",
         tenant_provider=lambda: "tenant-a",
     )
-    return service, access, repository, store
+    return service, access, repository, store, git_snapshots
 
 
 def test_folder_creation_writes_revision_then_commits_one_skill_aggregate():
-    service, access, repository, store = _service()
+    service, access, repository, store, _git = _service()
 
     result = service.create_from_folder(
         space_id=7,
@@ -112,7 +115,7 @@ def test_folder_creation_writes_revision_then_commits_one_skill_aggregate():
 
 
 def test_folder_creation_replays_original_without_writing_another_revision():
-    service, _access, repository, store = _service()
+    service, _access, repository, store, _git = _service()
     store.write_revision = MagicMock(wraps=store.write_revision)
     first = service.create_from_folder(
         space_id=7,
@@ -141,7 +144,7 @@ def test_folder_creation_replays_original_without_writing_another_revision():
 
 
 def test_folder_creation_rejects_key_reuse_for_different_content_or_space():
-    service, _access, repository, _store = _service()
+    service, _access, repository, _store, _git = _service()
     repository.get_creation_by_request_id.return_value = {
         "skill_id": 51,
         "space_id": 8,
@@ -160,7 +163,7 @@ def test_folder_creation_rejects_key_reuse_for_different_content_or_space():
 
 
 def test_folder_creation_cleans_new_revision_when_database_commit_fails():
-    service, _access, repository, store = _service()
+    service, _access, repository, store, _git = _service()
     repository.create_space_skill.side_effect = RuntimeError("database failed")
     store.delete_revision = MagicMock(wraps=store.delete_revision)
 
@@ -180,7 +183,7 @@ def test_folder_creation_cleans_new_revision_when_database_commit_fails():
 
 
 def test_folder_creation_does_not_hide_cleanup_failure():
-    service, _access, repository, store = _service()
+    service, _access, repository, store, _git = _service()
     repository.create_space_skill.side_effect = RuntimeError("database failed")
     store.delete_revision = MagicMock(
         side_effect=DraftContentStoreError(
@@ -197,3 +200,44 @@ def test_folder_creation_does_not_hide_cleanup_failure():
         )
 
     store.delete_revision.assert_called_once()
+
+
+def test_git_creation_uses_the_same_package_and_persistence_pipeline():
+    service, _access, repository, store, git_snapshots = _service()
+    git_snapshots.fetch.return_value = GitSkillSnapshot(
+        repo_url="https://example.com/team/skills.git",
+        resolved_branch="main",
+        commit_sha="a" * 40,
+        source_subdir="skills/draft-skill",
+        files=tuple(
+            (path.removeprefix("draft-skill/"), content)
+            for path, content in _folder()
+        ),
+    )
+
+    result = service.create_from_git(
+        space_id=7,
+        actor_id="owner-1",
+        request_id="git-create-1",
+        git_url="https://example.com/team/skills.git",
+        branch=None,
+        subdir=None,
+    )
+
+    assert result.skill_id == 51
+    git_snapshots.fetch.assert_called_once_with(
+        git_url="https://example.com/team/skills.git",
+        branch=None,
+        subdir=None,
+    )
+    skill_data = repository.create_space_skill.call_args.kwargs["skill_data"]
+    assert skill_data["source_type"] == "GIT"
+    assert skill_data["draft_source_kind"] == "GIT"
+    assert skill_data["source_repo_url"] == "https://example.com/team/skills.git"
+    assert skill_data["source_branch"] == "main"
+    assert skill_data["source_commit_sha"] == "a" * 40
+    assert skill_data["source_subdir"] == "skills/draft-skill"
+    ref = DraftRevisionRef.from_locator(
+        tenant="tenant-a", env="test", locator=skill_data["zip_url"]
+    )
+    assert store.read_revision(ref).name == "draft-skill"

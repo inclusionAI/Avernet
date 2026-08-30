@@ -60,6 +60,12 @@ from agentclaw.community.core.skill_center.services.space_skill_application_serv
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.skill_center.draft_content import DraftContentStore
+from agentclaw.community.core.skill_center.git_snapshot import (
+    GitSnapshotServiceProtocol,
+)
+from agentclaw.community.core.skill_center.services.git_snapshot import (
+    GitSnapshotService,
+)
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     SpaceSkillGrantService,
 )
@@ -102,6 +108,7 @@ class SpacesModule(Module):
         )
         binder.bind(SpaceServiceProtocol, to=SpaceService, scope=singleton)
         binder.bind(SpaceMemberServiceProtocol, to=SpaceMemberService, scope=singleton)
+        binder.bind(GitSnapshotServiceProtocol, to=GitSnapshotService, scope=singleton)
         binder.bind(
             SpaceSkillQueryServiceProtocol,
             to=SpaceSkillQueryService,
@@ -132,12 +139,14 @@ class SpacesModule(Module):
         access: CoreSpaceAccessServiceProtocol,
         repository: SpaceSkillRepository,
         draft_store: DraftContentStore,
+        git_snapshots: GitSnapshotServiceProtocol,
     ) -> SpaceSkillApplicationServiceProtocol:
         return SpaceSkillApplicationService(
             access=access,
             repository=repository,
             package_validator=SkillPackageValidator(SkillParser()),
             draft_store=draft_store,
+            git_snapshots=git_snapshots,
             env_provider=get_current_env,
             tenant_provider=get_current_avernet_tenant,
         )
