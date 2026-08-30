@@ -925,22 +925,37 @@ APPLYING                 manifest apply running (fetch → materialise → deliv
 - [ ] Storage needs **no schema change**: the existing
       `(avernet_tenant, sha256(env, entity_id, bot_id))` key works, all three
       parts being known in phase 1.
-- [ ] **Tenant context is bound explicitly wherever apply runs off the request
-      thread.** This codebase runs slow work as
-      `threading.Thread(target=bind_current_avernet_tenant(fn), daemon=True)` —
-      `bot_publish_service.py:1267` (`_do_restart`, itself an apply point),
-      `devices/services/baas_publish_poller.py:57` (`_poll`, the natural home of
-      the `CREATING → APPLYING` transition), `bot_service.py:1979`
-      (`do_allocate`). Omitting the wrapper makes
-      `get_current_avernet_tenant()` return the default `teamclaw`, which
-      silently substitutes the wrong `${BOT_TENANT}` **and reads and writes the
-      manifest table under the wrong tenant** — an isolation failure, not just a
-      correctness one. Tested, not left to memory.
+- [ ] **Tenant context survives to wherever apply actually runs**, by the right
+      mechanism for how it is scheduled (see the note below). Tested, not left to
+      memory: a wrong tenant here silently substitutes the wrong `${BOT_TENANT}`
+      **and reads and writes the manifest table under the wrong tenant** — an
+      isolation failure, not merely a correctness one.
 - [ ] Polling reports the states above, and both terminal states carry the apply
       report.
 - [ ] The pre-existing `PUT` path is unchanged: a bot created any other way can
       still be given a manifest afterwards and have it take effect on restart
       (§2.6). The two paths coexist.
+
+**Note — how tenant context reaches apply depends on how apply is scheduled.**
+Two mechanisms are available and they behave differently; only one is already
+solved:
+
+| Mechanism | Does tenant survive? |
+| --- | --- |
+| A thread spawned during the request | **Yes — already solved.** `threading.Thread(target=bind_current_avernet_tenant(fn), daemon=True)` is the established pattern: `bot_publish_service.py:1267` (`_do_restart`, itself an apply point), `baas_publish_poller.py:57` (`_poll`, the natural home of `CREATING → APPLYING`), `bot_service.py:1979`. The wrapper reads the tenant at **bind** time, inside the request thread, and re-establishes it inside the new thread. Follow the pattern and there is nothing to do |
+| The task queue | **No.** `core/task_queue`'s model carries `env` and `idempotency_key` but nothing tenant-shaped, and the module has no tenant handling at all. A task is enqueued now and run later by a worker, so no request context remains to capture and `bind_current_avernet_tenant` cannot help. The tenant must ride in the task `payload` and be re-scoped explicitly in the handler |
+
+This is worth writing down because the task queue is a natural choice for this
+work — `skills_pool` already uses it (`skills_pool.reconcile`,
+`skills_pool.quarantine.cleanup`) — so it is easy to reach for without noticing
+the difference.
+
+A smaller footgun worth knowing: `bind_current_avernet_tenant` *looks* like a
+decorator (it uses `functools.wraps`) but captures the tenant when the wrapping
+expression is evaluated. Used as a real `@decorator` on a module-level function
+it would capture at **import** time, when no request exists, and bind the default
+tenant permanently. Every current call site wraps inline at the
+`threading.Thread(...)` construction, which is correct.
 
 **Size.** Large.
 
