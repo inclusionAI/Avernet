@@ -461,6 +461,30 @@ class TestOnReportFail:
         assert graph.loop_round >= 1  # 升级传播计数(_bump_loop_round)
         assert planner.plan_calls == 0
 
+    def test_pull_fail_status_folded_to_hung(self, svc, graph):
+        """pull/poller 路径:_adapt_poller case③(success=false+gaps)产 status=FAILED+verdict FAILED+gaps。
+        on_report 折叠门须把 status=FAILED 也归并回 HUNG(与 push status=HUNG 对齐),否则节点落 FAILED
+        而 _on_fail_collect/_escalate_hung 假定已 HUNG → 链路断。本例固化 pull FAIL→HUNG 闭环。"""
+        svc.add_task_nodes([_child("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
+        planner = StubPlanner(lambda g: [_child("c1_remedy")])
+        eng = _engine(svc, planner=planner)
+        # 模拟 pull 路径:adapter 已置 status=FAILED(非 None)
+        r = _run(eng.on_report(_patch(
+            "t1", "c1",
+            status=Status.FAILED,
+            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]),
+        )))
+        assert r.new_status == Status.HUNG  # FAILED 被 on_report 折叠门归并为 HUNG,不停在 FAILED
+        n = svc._get_node(graph, "c1")
+        assert n.status == Status.HUNG
+        assert n.status != Status.FAILED  # 回归断言:pull FAIL 不再落 FAILED 瞬态
+        assert n.run_info.extend_props.get("hung_reason") == "acceptance_fail"
+        assert n.run_info.acceptance_result is not None
+        assert n.run_info.acceptance_result.gaps == ["缺x"]
+        assert graph.loop_round >= 1  # 升级传播计数(_bump_loop_round)
+        assert planner.plan_calls == 0  # HUNG 冒泡/升 BBS 交既有逻辑,不 plan 补救
+
     def test_exec_error_harness_retry_redispatch(self, svc, graph):
         """exec_error(执行报错/传输失败)→harness 重新派发执行(不拆):RUNNING→PENDING→dispatch→RUNNING。
         与验收 FAIL 不同:执行报错为临时性失败,重派有意义(验收不过属内容 gap,已直接 HUNG)。"""
@@ -479,7 +503,7 @@ class TestOnReportFail:
         svc.update_task_node_info(_patch("t2", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         svc.update_task_node_info(_patch("t2", "c1", extend_props_patch={"harness_retries": 3}))
         eng = _engine(svc, planner=StubPlanner(lambda g: []))
-        _run(eng.on_harness(_patch("t2", "c1", exec_error="acceptance_fail_retry")))
+        _run(eng.on_harness(_patch("t2", "c1", exec_error="exec_failed_retry")))
         assert svc._get_node(g, "c1").status == Status.HUNG
         assert any(n.node_id == "c1" for n in g.tasks)  # v4 保留(不 remove)
         assert g.loop_round == 1
@@ -540,7 +564,7 @@ class TestOnHarness:
         eng = _engine(svc, planner=StubPlanner(lambda g: []), runner=runner)
 
         async def _go():
-            await eng.on_harness(_patch("t_bbs", "c1", exec_error="acceptance_fail_retry"))
+            await eng.on_harness(_patch("t_bbs", "c1", exec_error="exec_failed_retry"))
             if eng._bg_tasks:  # 排空 fire-and-forget bbs 任务,断言已调度
                 await asyncio.gather(*eng._bg_tasks, return_exceptions=True)
 

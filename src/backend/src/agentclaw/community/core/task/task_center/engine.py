@@ -1139,9 +1139,7 @@ class ExecutionEngine:
             {n.node_id: n.status.value for n in current.tasks if n.node_id in all_def_ids},
         )
         if terminal:
-            self._graph.update_task_graph_info(task_id, TaskGraphPatch(status=Status.DONE))
-            # root 节点在静态 plan 全程保持 PLANNING/EXECUTING(只翻 graph_status),终态补翻 DONE,
-            # 让 dashboard 上 root 节点不再停在"尚未开始",与 graph_status=DONE 一致。
+            # 终态镜像:root 先翻 DONE(下方 if 块),再 _sync_graph_status_to_root 镜像 graph(不再 graph 独立先写 status)
             root_node = next((n for n in current.tasks if n.node_id == task_id), None)
             if root_node is not None and root_node.status not in {Status.DONE, Status.FAILED, Status.HUNG}:
                 try:
@@ -1153,6 +1151,7 @@ class ExecutionEngine:
                         "[task][static-plan] root flip-to-DONE skipped task=%s status=%s: %s",
                         task_id, root_node.status.value, ex,
                     )
+            self._sync_graph_status_to_root(task_id)
             logger.info("[task][static-plan] completed task=%s template=%s", task_id, runtime.definition.template_id)
             return
         await self._drain(task_id, side)
@@ -1300,12 +1299,16 @@ class ExecutionEngine:
         with self._lock_for(patch.task_id):
             logger.info("[task_callback][on_report] begin update task node info, task=%s,", patch.task_id)
             # 乙' a+R1 动态验收 FAIL 叶折叠 HUNG(纯语义归并):跳过 RUNNING→FAILED 瞬态,一次写直驱
-            # RUNNING→HUNG(acceptance_result+gaps+hung_reason 同时落库)。仅动态(非外部/非静态)且
-            # 调用方未显式置 status 时生效;外部/静态自洽仍按 verdict FAIL→FAILED(三方/静态终态语义)。
+            # RUNNING→HUNG(节点 status 翻 HUNG;acceptance_result+gaps+hung_reason 同时落库)。
+            # **verdict 不改**:acceptance_result.verdict 仍记 FAILED(验收结论留痕),仅节点 status→HUNG
+            # (解耦 status=DONE/HUNG 与 verdict=DONE/FAILED)。push/pull 两路 skill/adapter 协议均以
+            # status≡verdict=FAILED 上报,此处统一折叠 status→HUNG 交 BBS 升级兜底。仅动态(非外部/非静态)
+            # 生效;调用方未置 status 或置 FAILED 时均折叠。外部/静态仍按 verdict FAIL→FAILED(三方/静态终态);
+            # exec_error 路径无 acceptance_result,不入此门(走 _on_harness_collect 重派)。
             if (
                 patch.acceptance_result is not None
                 and patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
-                and patch.status is None
+                and patch.status in (None, Status.FAILED)
                 and not self._is_external_managed_task(patch.task_id)
                 and self._static_runtime(patch.task_id) is None
             ):
@@ -1359,22 +1362,9 @@ class ExecutionEngine:
                     status_to=result.new_status,
                 )
             if self._is_external_managed_task(patch.task_id):
-                # Third-party execution owns transitions. Mirror a terminal
-                # root status to the graph for dashboard visibility, but never
-                # enter Avernet planner/dispatcher/retry orchestration.
-                if (
-                    patch.node_id == patch.task_id
-                    and result.new_status in {
-                        Status.DONE,
-                        Status.FAILED,
-                        Status.HUNG,
-                        Status.CANCELLED,
-                    }
-                ):
-                    self._graph.update_task_graph_info(
-                        patch.task_id,
-                        TaskGraphPatch(status=result.new_status),
-                    )
+                # Third-party execution owns transitions. Graph status mirrors
+                # root via the single terminal-sync point(不再独立写 status)。
+                self._sync_graph_status_to_root(patch.task_id)
                 logger.info(
                     "[task][on_report] task=%s external-managed, graph update only",
                     patch.task_id,
@@ -1694,9 +1684,11 @@ class ExecutionEngine:
     async def _on_harness_collect(
         self, task_id: str, node_id: str, exec_error: str, side: list[tuple]
     ) -> None:
-        """harness 重试:统一处理 FAILED(验收不过)与 exec_error(执行报错)。
+        """harness 重试:执行报错(exec_error:bot 没跑通 run FAILED/SLA/poll 耗尽)的节点级重投。
+        验收不过(acceptance verdict FAILED+gaps,run 已 COMPLETED)不经此路——走 on_report FAIL
+        折叠/on_fail_collect 补救重规划,与执行报错重投语义不同。
         重试=重新派发执行(不拆):<MAX_HARNESS → 复位 FAILED/RUNNING→PENDING + re-prepare(重新 dispatch→start_run);
-        >=MAX_HARNESS → HUNG(再 升 BBS,loop_round++/图 HUNG)。"""
+        >=MAX_HARNESS → HUNG(exec_stuck,再 升 BBS,loop_round++/图 HUNG)。"""
         graph = self._graph.query_task_dashboard(task_id)
         node = next((n for n in graph.tasks if n.node_id == node_id), None)
         if node is None:
@@ -1876,21 +1868,50 @@ class ExecutionEngine:
         await self._drain(patch.task_id, side)
 
     # ===== HUNG + 升 BBS(loop_round++ / 图 HUNG) + 终态传播 =====
+    def _sync_graph_status_to_root(self, task_id: str) -> None:
+        """终态镜像:graph.status := root.status(仅终态 DONE/HUNG/FAILED/CANCELLED)。
+
+        不变量:graph.status 是 root.status 的同步镜像——root 是什么终态 graph 就什么终态,
+        graph 不脱离 root 独立翻终态。root 非终态(PENDING/PLANNING/RUNNING)时不动 graph 的
+        RUNNING 进行态(建图/中间态不镜像)。BBS 可恢复态(root HUNG 但等接力)由 _maybe_propagate_hung
+        自管,不走本方法。"""
+        root = self._root(task_id)
+        if root is None or root.status not in {Status.DONE, Status.HUNG, Status.FAILED, Status.CANCELLED}:
+            return
+        g = self._graph.query_task_dashboard(task_id)
+        if g.status == root.status:
+            return
+        self._graph.update_task_graph_info(task_id, TaskGraphPatch(status=root.status))
+
     def _bump_loop_round(self, task_id: str) -> None:
-        """图级 loop_round 升 BBS 计次(先判后+1):当前 loop_round>=MAX_LOOP → 图 HUNG(loop_exhausted)
-        硬停;否则 loop_round+1。MAX_LOOP=N 允许 N 次升 BBS 接力,第 N+1 次撞图 HUNG。"""
+        """图级 loop_round 升 BBS 计次(先判后+1):当前 loop_round>=MAX_LOOP → root HUNG(loop_exhausted)
+        + graph 终态镜像 HUNG(硬停);否则 loop_round+1。MAX_LOOP=N 允许 N 次升 BBS 接力,第 N+1 次撞顶。
+
+        终态镜像:不再 graph 独立写 HUNG——先置 root HUNG(loop_exhausted),再 _sync_graph_status_to_root
+        镜像 graph(保证 graph.status≡root.status)。"""
         graph = self._graph.query_task_dashboard(task_id)
         max_loop = self._graph._execution_config(task_id)["MAX_LOOP"]
         if graph.loop_round >= max_loop:
+            root = self._root(task_id)
+            if root is not None and root.status != Status.HUNG:
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=root.node_id,
+                        status=Status.HUNG,
+                        extend_props_patch={"hung_reason": "loop_exhausted"},
+                    )
+                )
+            # graph 终态镜像 root(HUNG)+ 保留图级 loop_exhausted 诊断标记
+            self._sync_graph_status_to_root(task_id)
             self._graph.update_task_graph_info(
                 task_id,
-                TaskGraphPatch(
-                    status=Status.HUNG,
-                    extend_props_patch={"hung_reason": "loop_exhausted"},
-                ),
+                TaskGraphPatch(extend_props_patch={"hung_reason": "loop_exhausted"}),
             )
             logger.warning(
-                "[task][loop_round] task=%s 达 MAX_LOOP(%d)→图 HUNG", task_id, max_loop
+                "[task][loop_round] task=%s 达 MAX_LOOP(%d)→root/graph HUNG(loop_exhausted)",
+                task_id,
+                max_loop,
             )
             return
         self._graph.update_task_graph_info(
@@ -2046,12 +2067,11 @@ class ExecutionEngine:
                         self._schedule_bbs_notify(task_id, g)
                         return
                     # 无 bbs_mode 或已被 BBS claim → 硬 HUNG 收口(不再调度,等在途 BBS 回投)
+                    # 终态镜像:root 已 HUNG → graph 经单一同步点镜像 HUNG;保留 root_stuck 诊断
+                    self._sync_graph_status_to_root(task_id)
                     self._graph.update_task_graph_info(
                         task_id,
-                        TaskGraphPatch(
-                            status=Status.HUNG,
-                            extend_props_patch={"hung_reason": "root_stuck"},
-                        ),
+                        TaskGraphPatch(extend_props_patch={"hung_reason": "root_stuck"}),
                     )
                 return
             siblings = self._graph.get_child_tasks(task_id, parent.node_id)
@@ -2436,13 +2456,11 @@ class ExecutionEngine:
             await self.on_miss(m)
 
     def _maybe_finish_graph(self, task_id: str, pr: PlanResult | None = None) -> None:
-        """根 gap 闭(终验通过)→ 全图 DONE。图级写收口 + 根节点翻 DONE(并补全 run_info:
-        验收执行者=owner 落 run_mode/assignee,根自身 acceptance_result(owner 逐条验收结论),
-        output 滚直接已 DONE 子交付物)。两写均经 SSOT 网关(锁内同步)。"""
-        self._graph.update_task_graph_info(
-            task_id,
-            TaskGraphPatch(status=Status.DONE, output_patch={"result": "all_done"}),
-        )
+        """根 gap 闭(终验通过)→ root 翻 DONE(并补全 run_info)→ graph 终态镜像 DONE。
+
+        终态镜像:root 先 DONE,再 _sync_graph_status_to_root 镜像 graph(保证 graph.status≡root.status,
+        不再 graph 独立先写 status)。验收执行者=owner 落 run_mode/assignee,根自身 acceptance_result
+        (owner 逐条验收结论),output 滚直接已 DONE 子交付物。两写均经 SSOT 网关(锁内同步)。"""
         root = self._root(task_id)
         if root is not None and root.status != Status.DONE:
             _rprev = root.status
@@ -2467,3 +2485,8 @@ class ExecutionEngine:
                 status_from=_rprev,
                 status_to=Status.DONE,
             )
+        # 终态镜像:root 已 DONE → graph 镜像 DONE(all_done 标记);不再 graph 独立先写 status
+        self._sync_graph_status_to_root(task_id)
+        self._graph.update_task_graph_info(
+            task_id, TaskGraphPatch(output_patch={"result": "all_done"})
+        )

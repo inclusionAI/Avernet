@@ -94,17 +94,17 @@ def test_get_config_raises_fail_open():
 
 
 
-def test_harness_poller_defaults_off_and_writable():
-    """harness_poller 开关默认关闭,且经 TaskSettingsService.set_enabled 写穿后 is_enabled 立即 True。
+def test_harness_poller_defaults_on_and_writable():
+    """harness_poller 开关默认开启,且经 TaskSettingsService.set_enabled 写穿后 is_enabled 立即反映。
 
-    锁定:tasks/settings 接口可直接开启/关闭 harness 旁路巡检,默认 False(facade 以事件驱动为主)。
+    锁定:tasks/settings 接口可直接开启/关闭 harness 旁路巡检,默认 True(常驻兜底)。
     """
     store = _FakeStore()
     svc = TaskSettingsService(config=store)
 
-    # 默认关闭(store 无值 → 返回 default=False)
-    assert svc.get_enabled(setting_type=HARNESS_POLLER, env="pre") is False
-    assert svc.is_enabled(HARNESS_POLLER) is False
+    # 默认开启(store 无值 → 返回 default=True)
+    assert svc.get_enabled(setting_type=HARNESS_POLLER, env="pre") is True
+    assert svc.is_enabled(HARNESS_POLLER) is True
 
     # 写穿:harness_poller_enabled KV 落库,is_enabled 立即 True(无需等 KV 读)
     assert svc.set_enabled(setting_type=HARNESS_POLLER, enabled=True, env="pre", operator="146836") is True

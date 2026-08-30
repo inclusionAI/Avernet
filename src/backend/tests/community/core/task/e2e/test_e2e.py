@@ -263,6 +263,10 @@ class _TestRunner:
         self._groups.append(gf)
         return gid
 
+    async def run_bbs(self, execution_graph) -> None:
+        # BBS relay is exercised explicitly through claim/attach/report in these tests.
+        return None
+
     def query_status(self, task_id): return self._graph.query_task_dashboard(task_id).status
     def query_detail(self, node): return node
     def query_result(self, node): return node
@@ -389,26 +393,19 @@ class TestThreeModesHappyToDone:
             assert parents[0] == "t_case"
 
 
-# ===== Test 2: FAIL→FAILED→harness 重新派发执行→PASS 治愈(v4:补救=重新派发,不拆子) =====
+# ===== Test 2: 执行报错(exec_error)→harness 重新派发→PASS 治愈(验收 FAIL 已改折叠 HUNG+升 BBS,不在此路) =====
 class TestFailRemedyCure:
     def test_fail_then_remedy_pass_cures_and_propagates(self):
         facade, svc, runner = _wire_facade(max_depth=3)
         _exec(facade, _task_info_request("t_case", max_depth=3))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         _run(facade.callback.report_result(_cb(True, "t_case::N_compete", data="compete")))
-        # 验收不过 → FAILED(v4:不立即补救拆子,交 harness 重新派发执行重试)
-        _run(facade.callback.report_result(
-            _cb(False, "t_case::N_market", fail_detail="市场深度不足", data=None)
-        ))
+        # 执行报错(exec_error:run/transport fail)→harness 重新派发执行重试(不拆子)。
+        # 注:验收 FAIL(verdict FAILED)现由 on_report 折叠为节点 HUNG+升 BBS(终态,不复位重投);
+        # harness 重投仅用于执行报错(RUNNING→PENDING→dispatch→RUNNING),与验收 gap 语义不同。
+        _run(facade._engine.on_harness(_patch("t_case", "N_market", exec_error="run_transport_fail")))
         g = svc.query_task_dashboard("t_case")
-        n_market = svc._get_node(g, "N_market")
-        assert n_market.status == Status.FAILED
-        assert n_market.run_info.acceptance_result is not None
-        assert n_market.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED
-        # v4:harness 重新派发执行(不拆):FAILED→PENDING→dispatch→RUNNING
-        _run(facade._engine.on_harness(_patch("t_case", "N_market", exec_error="acceptance_fail_retry")))
-        g = svc.query_task_dashboard("t_case")
-        assert svc._get_node(g, "N_market").status == Status.RUNNING  # 重新派发执行
+        assert svc._get_node(g, "N_market").status == Status.RUNNING  # harness 重新派发执行
         # 重新派发后回投 PASS → DONE
         _run(facade.callback.report_result(_cb(True, "t_case::N_market", data="市场深化")))
         g = svc.query_task_dashboard("t_case")

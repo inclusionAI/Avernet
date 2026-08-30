@@ -90,7 +90,8 @@ def _resolve_harness_enabled(
     task_settings: TaskSettingsServiceProtocol | None,
 ) -> bool:
     """harness 旁路巡检开关:优先读 tasks/settings(``harness_poller``,system-config KV,跨副本热改),
-    未绑/读异常时回退 env ``OCB_TASK_HARNESS_ENABLED``;默认**关闭**。
+    未绑/读异常时回退 env ``OCB_TASK_HARNESS_ENABLED``。tasks/settings(`harness_poller`)默认**开启**;
+    env 兜底(仅 task_settings 未绑时)默认关闭,保持轻量/测试无 daemon 巡检线程。
 
     Settings 走 KV 可运行时经 POST /tasks/settings 热改;env 仅本地/单进程兜底。
     当 TaskSettingsServiceProtocol 未绑(纯内核/轻量测试)时直接回退 env,不影响既有本地开关语义。
@@ -238,7 +239,8 @@ class TaskModule(Module):
             )
             task_settings = None
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
-        # 可配置开关,默认关闭:facades 始终以事件驱动为主推进,harness=None 时不启动 daemon 巡检线程。
+        # 可配置开关,默认开启(tasks/settings `harness_poller`):旁路巡检常驻兜底(SLA 超时复位/FAILED
+        # 重派/PENDING 派发超时重搜推);harness=None(未绑且 env 关)时不启动 daemon 巡检线程。
         # 优先读 tasks/settings(harness_poller,KV 跨副本热改),未绑/读异常回退 env OCB_TASK_HARNESS_ENABLED。
         if _resolve_harness_enabled(task_settings):
             harness = TaskHarness(graph)

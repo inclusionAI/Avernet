@@ -164,18 +164,21 @@ def test_engine_schedule_bbs_notify_fires_at_recoverable_intercept(svc):
     assert g.status != Status.HUNG  # 可恢复态不收口图 HUNG
 
 
-def test_engine_does_not_schedule_bbs_notify_for_non_recoverable_hung(svc):
-    """硬死锁 reason(exec_stuck 等)即便 bbs_mode 也不触发 _schedule_bbs_notify——
-    走正常 HUNG 冒泡收口(非 miss_depth_exhausted 不进可恢复拦截)。"""
+def test_engine_harness_exhausted_schedules_bbs_recoverable(svc):
+    """harness 耗尽(exec_stuck)→节点 HUNG 冒泡到根→根 HUNG 升 BBS 可恢复态。
+
+    exec_stuck 属可恢复 reason:_maybe_propagate_hung 在根处不限 reason(根 HUNG + bbs_mode +
+    未 claim → _schedule_bbs_notify),与"根/图 HUNG 升 BBS"设计一致(harness→bbs 回收默认开)。
+    """
     g = svc.initialize_graph(_task_info("t5", max_depth=1))
     svc.add_task_nodes([_child("c1", "t5")], parent_node_id="t5")
     svc.update_task_node_info(
         _patch("t5", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
-    svc.update_task_node_info(_patch("t5", "c1", extend_props_patch={"harness_retries": 2}))
+    svc.update_task_node_info(_patch("t5", "c1", extend_props_patch={"harness_retries": 3}))
     eng = _engine(svc, planner=StubPlanner(lambda g: []), dispatcher=StubDispatcher())
 
     with patch.object(eng, "_schedule_bbs_notify") as mock_sched:
-        _run(eng.on_harness(_patch("t5", "c1", exec_error="acceptance_fail_retry")))
-        mock_sched.assert_not_called()
-    # 硬死锁收口:节点 HUNG
+        _run(eng.on_harness(_patch("t5", "c1", exec_error="exec_failed_retry")))
+        mock_sched.assert_called_once()  # exec_stuck 可恢复 → 升 BBS
+    # 节点仍 HUNG(exec_stuck 收口)
     assert svc._get_node(g, "c1").status == Status.HUNG

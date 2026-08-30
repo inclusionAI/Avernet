@@ -90,8 +90,9 @@ class TaskSettingsService(TaskSettingsServiceProtocol):
             CLAIM_JOIN_FILTER: False,
             SEARCH_SKILL: False,
             SINGLE_BOT_SKILL_REPORT: False,
-            # TaskHarness 旁路巡检默认关闭:以事件驱动为主推进,需旁路兜底时显式开启。
-            HARNESS_POLLER: False,
+            # TaskHarness 旁路巡检默认开启:常驻兜底(SLA 超时复位/FAILED 重派/PENDING 派发超时重搜推);
+            # 事件驱动为主推进,此为旁路兜底。可经 tasks/settings harness_poller 跨副本热改关闭。
+            HARNESS_POLLER: True,
             **(defaults or {}),
         }
         self._lock = threading.Lock()
