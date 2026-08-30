@@ -382,8 +382,10 @@ def _positive_int(value: object, field: str) -> int:
 def _final_add_error_code(error: Exception | None) -> str:
     if error is None:
         return "SKILL_SET_UPDATE_FAILED"
-    message = str(error)
-    if "SKILL_OFFLINE" in message:
+    if (
+        isinstance(error, SkillSetControlPlaneConflictError)
+        and error.detail == "SKILL_OFFLINE"
+    ):
         return "SKILL_OFFLINE"
     if isinstance(error, SkillSetControlPlaneNotFoundError):
         return "SKILL_SET_NOT_FOUND"
