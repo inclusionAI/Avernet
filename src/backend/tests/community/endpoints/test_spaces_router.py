@@ -39,6 +39,12 @@ from agentclaw.community.api.space_skill_grant_service import (
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
 )
+from agentclaw.community.api.space_skill_offline_service import (
+    OfflineDraft,
+    OfflineImpact,
+    SpaceSkillOfflineResult,
+    SpaceSkillOfflineServiceProtocol,
+)
 from agentclaw.community.api.draft_edit_lease_service import (
     DraftEditLeaseServiceProtocol,
 )
@@ -364,6 +370,31 @@ def _seed_space_skill_version_reads(world) -> None:
     )
 
 
+def _seed_space_skill_offline(world) -> None:
+    _enable_public_auth(world)
+    bind_overrides(
+        world,
+        SpaceSkillOfflineServiceProtocol,
+        {
+            "impact": lambda _self, **_kwargs: OfflineImpact(
+                blocked=False,
+                total=0,
+                counts={},
+                items=(),
+            ),
+            "offline": lambda _self, **_kwargs: SpaceSkillOfflineResult(
+                changed=True,
+                lifecycle_status="OFFLINE",
+                draft=OfflineDraft(
+                    target_version=3,
+                    status="EDITING",
+                    revision_id="33333333-3333-4333-8333-333333333333",
+                ),
+            ),
+        },
+    )
+
+
 def _without_principal(case: CaseInput) -> CaseInput:
     return CaseInput(
         path_params=case.path_params,
@@ -381,6 +412,28 @@ def _without_principal(case: CaseInput) -> CaseInput:
 
 
 _SPACE_SKILL_LOOP_CASES = (
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact",
+        _seed_space_skill_offline,
+        CaseInput(
+            path_params={"space_id": 1, "skill_id": 51},
+            query_params={"user_id": _USER_ID},
+            headers=_principal_headers(),
+        ),
+        200,
+    ),
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline",
+        _seed_space_skill_offline,
+        CaseInput(
+            path_params={"space_id": 1, "skill_id": 51},
+            query_params={"user_id": _USER_ID},
+            headers=_principal_headers(),
+        ),
+        200,
+    ),
     (
         "DELETE",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft",

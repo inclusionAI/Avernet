@@ -473,10 +473,11 @@ async def offline_space_skill(
     ),
 ) -> Envelope[SkillOfflineResult]:
     result = await run_in_threadpool(
-        service.offline,
-        space_id=space_id,
-        skill_id=skill_id,
-        actor_id=user_id,
+        lambda: service.offline(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=user_id,
+        )
     )
     return envelope(
         SkillOfflineResult.model_validate(result, from_attributes=True), request
