@@ -139,6 +139,22 @@ class SpaceSkillCreationReplayRecord(TypedDict):
     request_hash: str
 
 
+class SpaceSkillDraftRecord(TypedDict):
+    skill_id: int
+    skill_uuid: str
+    name: str
+    draft_description: str
+    target_version: int
+    status: Literal["EDITING", "FROZEN"]
+    locator: str
+    source_kind: Literal["FOLDER", "GIT", "PUBLISHED_VERSION"]
+    source_repo_url: str | None
+    source_branch: str | None
+    source_subdir: str | None
+    source_commit_sha: str | None
+    space_type: Literal["PERSONAL", "TEAM"]
+
+
 class SpaceSkillQueryRecord(TypedDict):
     """Persistence projection for a Space-owned Skill and actor grant."""
 

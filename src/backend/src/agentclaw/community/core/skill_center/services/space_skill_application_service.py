@@ -8,7 +8,11 @@ from collections.abc import Callable, Sequence
 from uuid import uuid4
 
 from agentclaw.community.core.repository.protocols.skill_center import (
+    SpaceSkillDraftRepository,
     SpaceSkillRepository,
+)
+from agentclaw.community.core.repository.protocols.skill_center_types import (
+    SpaceSkillDraftRecord,
 )
 from agentclaw.community.core.skill_center.draft_content import (
     DraftContentStore,
@@ -16,13 +20,23 @@ from agentclaw.community.core.skill_center.draft_content import (
     DraftRevisionRef,
 )
 from agentclaw.community.core.skill_center.errors import (
+    DraftFileNotFoundError,
+    DraftFileNotTextError,
+    SkillNameChangedError,
     SpaceSkillIdempotencyConflictError,
 )
 from agentclaw.community.core.skill_center.git_snapshot import (
     GitSnapshotServiceProtocol,
 )
-from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageValidator,
+    ValidatedSkillPackage,
+)
 from agentclaw.community.core.skill_center.space_skill_application_service_protocol import (
+    DraftFileContent,
+    DraftFileItem,
+    DraftFileTree,
+    DraftMutationResult,
     SpaceSkillApplicationServiceProtocol,
     SpaceSkillCreationOutcome,
 )
@@ -38,6 +52,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         *,
         access: SpaceAccessServiceProtocol,
         repository: SpaceSkillRepository,
+        draft_repository: SpaceSkillDraftRepository,
         package_validator: SkillPackageValidator,
         draft_store: DraftContentStore,
         git_snapshots: GitSnapshotServiceProtocol,
@@ -46,6 +61,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
     ) -> None:
         self._access = access
         self._repository = repository
+        self._draft_repository = draft_repository
         self._validator = package_validator
         self._draft_store = draft_store
         self._git_snapshots = git_snapshots
@@ -126,6 +142,180 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
                 "source_commit_sha": snapshot.commit_sha,
                 "source_subdir": snapshot.source_subdir,
             },
+        )
+
+    def get_draft_file_tree(
+        self, *, space_id: int, skill_id: int, actor_id: str
+    ) -> DraftFileTree:
+        record, ref, package = self._read_draft(
+            space_id=space_id, skill_id=skill_id, actor_id=actor_id
+        )
+        del record
+        return DraftFileTree(
+            revision_id=ref.revision_id,
+            files=tuple(
+                DraftFileItem(path=path, size=len(content))
+                for path, content in package.files
+            ),
+        )
+
+    def read_draft_file(
+        self, *, space_id: int, skill_id: int, actor_id: str, path: str
+    ) -> DraftFileContent:
+        _record, ref, package = self._read_draft(
+            space_id=space_id, skill_id=skill_id, actor_id=actor_id
+        )
+        path = self._validator.normalize_relative_path(path)
+        files = dict(package.files)
+        if path not in files:
+            raise DraftFileNotFoundError("draft file not found")
+        try:
+            content = files[path].decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise DraftFileNotTextError("draft file is not UTF-8 text") from exc
+        return DraftFileContent(
+            path=path, content=content, revision_id=ref.revision_id
+        )
+
+    def save_draft_file(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        path: str,
+        content: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+    ) -> DraftMutationResult:
+        record, _ref, package = self._read_draft(
+            space_id=space_id, skill_id=skill_id, actor_id=actor_id
+        )
+        path = self._validator.normalize_relative_path(path)
+        files = dict(package.files)
+        files[path] = content.encode("utf-8")
+        updated = self._validator.validate_directory(tuple(files.items()))
+        self._require_stable_name(record, updated)
+        return self._commit_draft_mutation(
+            record=record,
+            package=updated,
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            expected_revision_id=expected_revision_id,
+            fencing_token=fencing_token,
+        )
+
+    def refresh_draft_from_git(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+    ) -> DraftMutationResult:
+        record = self._draft_record(
+            space_id=space_id, skill_id=skill_id, actor_id=actor_id
+        )
+        if record["source_kind"] != "GIT" or not record["source_repo_url"]:
+            raise ValueError("Draft is not backed by a Git snapshot")
+        snapshot = self._git_snapshots.fetch(
+            git_url=record["source_repo_url"],
+            branch=record["source_branch"],
+            subdir=record["source_subdir"],
+        )
+        package = self._validator.validate_directory(snapshot.files)
+        self._require_stable_name(record, package)
+        return self._commit_draft_mutation(
+            record=record,
+            package=package,
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            expected_revision_id=expected_revision_id,
+            fencing_token=fencing_token,
+            source_commit_sha=snapshot.commit_sha,
+        )
+
+    def _draft_record(
+        self, *, space_id: int, skill_id: int, actor_id: str
+    ) -> SpaceSkillDraftRecord:
+        self._access.require_space_member(space_id=space_id, user_id=actor_id)
+        return self._draft_repository.get_draft(
+            space_id=space_id, skill_id=skill_id, env=self._env_provider()
+        )
+
+    def _read_draft(self, *, space_id: int, skill_id: int, actor_id: str):
+        record = self._draft_record(
+            space_id=space_id, skill_id=skill_id, actor_id=actor_id
+        )
+        ref = DraftRevisionRef.from_locator(
+            tenant=self._tenant_provider(),
+            env=self._env_provider(),
+            locator=record["locator"],
+        )
+        return record, ref, self._draft_store.read_revision(ref)
+
+    @staticmethod
+    def _require_stable_name(
+        record: SpaceSkillDraftRecord, package: ValidatedSkillPackage
+    ) -> None:
+        if package.name != record["name"]:
+            raise SkillNameChangedError("SKILL.md name is immutable")
+
+    def _commit_draft_mutation(
+        self,
+        *,
+        record: SpaceSkillDraftRecord,
+        package: ValidatedSkillPackage,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+        source_commit_sha: str | None = None,
+    ) -> DraftMutationResult:
+        identity = DraftRevisionIdentity(
+            tenant=self._tenant_provider(),
+            env=self._env_provider(),
+            skill_uuid=record["skill_uuid"],
+            target_version=record["target_version"],
+            revision_id=str(uuid4()),
+        )
+        ref = self._draft_store.write_revision(identity, package)
+        try:
+            old_locator = self._draft_repository.replace_draft_revision(
+                space_id=space_id,
+                skill_id=skill_id,
+                actor_id=actor_id,
+                expected_revision_id=expected_revision_id,
+                fencing_token=fencing_token,
+                new_locator=ref.locator,
+                new_description=package.description,
+                source_commit_sha=source_commit_sha,
+                env=self._env_provider(),
+            )
+        except Exception:
+            self._best_effort_delete(ref)
+            raise
+        old_ref = DraftRevisionRef.from_locator(
+            tenant=self._tenant_provider(),
+            env=self._env_provider(),
+            locator=old_locator,
+        )
+        self._best_effort_delete(old_ref)
+        return DraftMutationResult(
+            target_version=record["target_version"],
+            status="EDITING",
+            revision_id=ref.revision_id,
+            name=package.name,
+            description=package.description,
+            source_kind=record["source_kind"],
+            source_repo_url=record["source_repo_url"],
+            source_branch=record["source_branch"],
+            source_commit_sha=source_commit_sha or record["source_commit_sha"],
+            source_subdir=record["source_subdir"],
         )
 
     def _creation_replay(

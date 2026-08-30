@@ -155,6 +155,30 @@ class SpaceSkillIdempotencyConflictError(Exception):
     """An Idempotency-Key was already bound to a different creation intent."""
 
 
+class DraftNotFoundError(Exception):
+    """The addressed Space Skill has no current Draft."""
+
+
+class DraftFrozenError(Exception):
+    """A FROZEN Draft cannot be mutated or deleted."""
+
+
+class DraftRevisionConflictError(Exception):
+    """The expected Draft revision is no longer current."""
+
+
+class DraftFileNotFoundError(Exception):
+    """The addressed file does not exist in the current Draft."""
+
+
+class DraftFileNotTextError(Exception):
+    """The addressed Draft file is not UTF-8 text."""
+
+
+class SkillNameChangedError(Exception):
+    """A Draft mutation attempted to change the stable SKILL.md name."""
+
+
 # ── SkillSet control plane ────────────────────────────────────────────────
 # These are ``DomainError`` subclasses so the SkillSet routers can raise the
 # situation and let the HTTP adapter decide the status: the mapping lives in

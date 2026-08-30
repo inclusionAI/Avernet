@@ -41,6 +41,7 @@ from agentclaw.community.core.repository.protocols.market_favorites import (
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillRepository,
+    SpaceSkillDraftRepository,
     DraftEditLeaseRepository,
 )
 from agentclaw.community.core.repository.protocols.work_orders import (
@@ -138,12 +139,14 @@ class SpacesModule(Module):
         self,
         access: CoreSpaceAccessServiceProtocol,
         repository: SpaceSkillRepository,
+        draft_repository: SpaceSkillDraftRepository,
         draft_store: DraftContentStore,
         git_snapshots: GitSnapshotServiceProtocol,
     ) -> SpaceSkillApplicationServiceProtocol:
         return SpaceSkillApplicationService(
             access=access,
             repository=repository,
+            draft_repository=draft_repository,
             package_validator=SkillPackageValidator(SkillParser()),
             draft_store=draft_store,
             git_snapshots=git_snapshots,

@@ -134,6 +134,10 @@ class SkillPackageValidator:
         """Validate browser directory input through the canonical ZIP seam."""
         return self.validate_zip(self.pack_directory(files))
 
+    def normalize_relative_path(self, path: str) -> str:
+        """Validate one public file path using the package boundary's rules."""
+        return self._normalize_path(path, reject_empty_parts=True)
+
     def revalidate(
         self, package: ValidatedSkillPackage
     ) -> ValidatedSkillPackage:

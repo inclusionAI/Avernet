@@ -14,6 +14,39 @@ class SpaceSkillCreationOutcome:
     created: bool
 
 
+@dataclass(frozen=True, slots=True)
+class DraftFileItem:
+    path: str
+    size: int
+
+
+@dataclass(frozen=True, slots=True)
+class DraftFileTree:
+    revision_id: str
+    files: tuple[DraftFileItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DraftFileContent:
+    path: str
+    content: str
+    revision_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class DraftMutationResult:
+    target_version: int
+    status: str
+    revision_id: str
+    name: str
+    description: str
+    source_kind: str
+    source_repo_url: str | None
+    source_branch: str | None
+    source_commit_sha: str | None
+    source_subdir: str | None
+
+
 @runtime_checkable
 class SpaceSkillApplicationServiceProtocol(Protocol):
     @abstractmethod
@@ -25,6 +58,40 @@ class SpaceSkillApplicationServiceProtocol(Protocol):
         request_id: str,
         files: Sequence[tuple[str, bytes]],
     ) -> SpaceSkillCreationOutcome: ...
+
+    @abstractmethod
+    def get_draft_file_tree(
+        self, *, space_id: int, skill_id: int, actor_id: str
+    ) -> DraftFileTree: ...
+
+    @abstractmethod
+    def read_draft_file(
+        self, *, space_id: int, skill_id: int, actor_id: str, path: str
+    ) -> DraftFileContent: ...
+
+    @abstractmethod
+    def save_draft_file(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        path: str,
+        content: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+    ) -> DraftMutationResult: ...
+
+    @abstractmethod
+    def refresh_draft_from_git(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+    ) -> DraftMutationResult: ...
 
     @abstractmethod
     def create_from_git(

@@ -37,6 +37,7 @@ from .skill_center_types import (
     SpaceSkillGrantSetRecord,
     DraftEditLeaseRecord,
     SkillVersionRecord,
+    SpaceSkillDraftRecord,
 )
 
 
@@ -205,6 +206,33 @@ class DraftEditLeaseRepository(Protocol):
     def takeover(
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
     ) -> DraftEditLeaseRecord: ...
+
+
+@runtime_checkable
+class SpaceSkillDraftRepository(Protocol):
+    """Atomic Draft revision and fencing persistence seam."""
+
+    @abstractmethod
+    def get_draft(
+        self, *, space_id: int, skill_id: int, env: str
+    ) -> SpaceSkillDraftRecord: ...
+
+    @abstractmethod
+    def replace_draft_revision(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+        new_locator: str,
+        new_description: str,
+        source_commit_sha: str | None = None,
+        env: str,
+    ) -> str:
+        """Commit one EDITING revision CAS and return the previous locator."""
+        ...
 
 
 @runtime_checkable
