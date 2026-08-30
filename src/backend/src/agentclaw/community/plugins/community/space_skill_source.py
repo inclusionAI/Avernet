@@ -191,4 +191,3 @@ class CommunitySpaceSkillSource(SpaceSkillSourcePlugin):
             if len(entries) > MAX_FILES:
                 raise GitSnapshotInvalidError("Git Skill tree exceeds package limits")
         return tuple(entries)
-
