@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -752,8 +752,15 @@ def _skill_detail_record():
 
 
 def test_folder_and_git_creation_publish_real_idempotent_routes(
-    client, skill_application_service, skill_query_service
+    client, skill_application_service, skill_query_service, monkeypatch
 ):
+    from starlette.concurrency import run_in_threadpool as actual_run_in_threadpool
+
+    offload = AsyncMock(side_effect=actual_run_in_threadpool)
+    monkeypatch.setattr(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes.run_in_threadpool",
+        offload,
+    )
     skill_application_service.create_from_folder.return_value = (
         SpaceSkillCreationOutcome(skill_id=51, created=True)
     )
@@ -795,6 +802,10 @@ def test_folder_and_git_creation_publish_real_idempotent_routes(
         git_url="https://example.com/team/skills.git",
         branch=None,
         subdir=None,
+    )
+    assert offload.await_count == 2
+    assert offload.await_args_list[0].args == (
+        skill_application_service.create_from_git,
     )
 
 

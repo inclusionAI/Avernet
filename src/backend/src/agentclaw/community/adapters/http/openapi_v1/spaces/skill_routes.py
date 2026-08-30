@@ -14,6 +14,7 @@ from fastapi import (
     Query,
     Request,
 )
+from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -206,7 +207,8 @@ async def import_space_skill_from_git(
     ),
     queries: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
 ) -> Envelope[SpaceSkillDetail]:
-    outcome = commands.create_from_git(
+    outcome = await run_in_threadpool(
+        commands.create_from_git,
         space_id=space_id,
         actor_id=user_id,
         request_id=idempotency_key,
@@ -214,8 +216,11 @@ async def import_space_skill_from_git(
         branch=body.branch,
         subdir=body.subdir,
     )
-    detail = queries.get_space_skill(
-        space_id=space_id, skill_id=outcome.skill_id, actor_id=user_id
+    detail = await run_in_threadpool(
+        queries.get_space_skill,
+        space_id=space_id,
+        skill_id=outcome.skill_id,
+        actor_id=user_id,
     )
     return created(_space_skill_detail(detail), request)
 

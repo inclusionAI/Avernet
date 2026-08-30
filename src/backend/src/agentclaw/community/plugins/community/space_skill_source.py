@@ -108,16 +108,34 @@ class CommunitySpaceSkillSource(SpaceSkillSourcePlugin):
 
     def fetch_exact_package(self, *, url: str, expected_sha256: str) -> bytes:
         try:
-            response = requests.get(url, timeout=60)
-            response.raise_for_status()
+            with requests.get(url, timeout=60, stream=True) as response:
+                response.raise_for_status()
+                declared = response.headers.get("Content-Length")
+                if declared is not None:
+                    try:
+                        if int(declared) > MAX_COMPRESSED_BYTES:
+                            raise ExactSkillPackageFetchError(
+                                "exact Skill package is too large"
+                            )
+                    except ValueError:
+                        pass
+                content = bytearray()
+                for chunk in response.iter_content(chunk_size=64 * 1024):
+                    if not chunk:
+                        continue
+                    if len(content) + len(chunk) > MAX_COMPRESSED_BYTES:
+                        raise ExactSkillPackageFetchError(
+                            "exact Skill package is too large"
+                        )
+                    content.extend(chunk)
         except requests.RequestException as exc:
             raise ExactSkillPackageFetchError(
                 "exact Skill package download failed"
             ) from exc
-        content = response.content
-        if hashlib.sha256(content).hexdigest().lower() != expected_sha256.lower():
+        package = bytes(content)
+        if hashlib.sha256(package).hexdigest().lower() != expected_sha256.lower():
             raise ExactSkillPackageFetchError("exact Skill package checksum mismatch")
-        return content
+        return package
 
     @staticmethod
     def _nested_skill_roots(

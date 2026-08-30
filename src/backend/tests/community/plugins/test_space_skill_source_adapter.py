@@ -5,7 +5,10 @@ import subprocess
 
 import pytest
 
-from agentclaw.community.plugin_api.space_skill_source import GitSnapshotInvalidError
+from agentclaw.community.plugin_api.space_skill_source import (
+    ExactSkillPackageFetchError,
+    GitSnapshotInvalidError,
+)
 from agentclaw.community.plugins.community.space_skill_source import (
     CommunitySpaceSkillSource,
 )
@@ -101,3 +104,51 @@ def test_git_clone_watchdog_kills_acquisition_that_exceeds_disk_budget(
         )
 
     assert killed
+
+
+def test_exact_package_download_stops_before_buffering_oversized_response(
+    monkeypatch,
+) -> None:
+    source = CommunitySpaceSkillSource()
+    exited = []
+
+    class StreamingResponse:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            exited.append(True)
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def iter_content(*, chunk_size):
+            assert chunk_size > 0
+            yield b"aa"
+            yield b"bb"
+
+    def fake_get(url, *, timeout, stream):
+        assert url == "https://download.example/exact.zip"
+        assert timeout == 60
+        assert stream is True
+        return StreamingResponse()
+
+    monkeypatch.setattr(
+        "agentclaw.community.plugins.community.space_skill_source.MAX_COMPRESSED_BYTES",
+        3,
+    )
+    monkeypatch.setattr(
+        "agentclaw.community.plugins.community.space_skill_source.requests.get",
+        fake_get,
+    )
+
+    with pytest.raises(ExactSkillPackageFetchError, match="too large"):
+        source.fetch_exact_package(
+            url="https://download.example/exact.zip", expected_sha256="a" * 64
+        )
+
+    assert exited == [True]
