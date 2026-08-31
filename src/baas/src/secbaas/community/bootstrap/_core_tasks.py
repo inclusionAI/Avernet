@@ -164,7 +164,7 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         # reach the watermark comparison — otherwise the operator believes
         # the tolerance tightened while it silently stays 5 (WR-01).
         post_extend_consistency_tol_minutes=providers.Callable(
-            lambda v: int(v) if v else 5,
+            lambda v: int(v) if v is not None else 5,
             config.renewal_scheduler.post_extend_consistency_tol_minutes,
         ),
         retry_delay_minutes=config.renewal_scheduler.retry_delay_minutes,
