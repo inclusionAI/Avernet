@@ -201,10 +201,23 @@ Settled here rather than left open:
    declared once, in `authorization.py`, and enforced by `PublicAPIRoute` for
    every operation including apply's. A per-category re-check inside the seam
    would be a second adjudication of a question that already has one home — the
-   precise defect this whole line of work exists to remove. What moves into the
-   seam is the *ownership and addressing* guard the category handlers perform on
-   top of it (`bot_service.get_bot(bot_id, owner_id)` and the entity-coordinate
-   resolution), which the collaborator seam does not perform and never has.
+   precise defect this whole line of work exists to remove.
+
+   What moves is narrower, and worth stating exactly, because "authorization"
+   makes it sound larger than it is. The declared dependencies stay where they
+   are: `ADMISSION` rows keep their `require_granted_*` dependency, and
+   `AUTHORIZATION` rows keep being enforced by `PublicAPIRoute`. Neither is
+   extracted, and apply hand-calls neither — it is an HTTP operation, so its own
+   rows are enforced at its own door before its handler runs. The criterion this
+   feature answers is about a check reachable **only from inside a router
+   function body**, and a dependency declared on the route is not in a body.
+
+   What moves is the domain policy those bodies own: mostly validation (path
+   safety, the read-only policy, file types, package shape) and the
+   entity-coordinate resolution, plus two authorization-flavoured strays —
+   `bot_service.get_bot(bot_id, owner_id)` in `engine_config`, the only in-body
+   ownership guard among the five, and `_require_addressed_bot` in `skills`.
+   None of it is something the collaborator seam performs, or ever has.
 
    This is sound only given *Apply Declares Its Own Bars* below. `Check(OWNER)`
    means every caller who reaches apply could have performed each of its writes
