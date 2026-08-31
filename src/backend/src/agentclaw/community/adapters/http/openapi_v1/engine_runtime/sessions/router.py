@@ -48,6 +48,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     _require_within_depth,
     _window,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.creation_reconciliation import reconcile_created_session
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
@@ -84,9 +85,6 @@ from agentclaw.community.core.bot_chat.bcn_friendship import (
 )
 from agentclaw.community.core.session_resources.types import SessionResourceRecord
 from agentclaw.community.di import Injected
-from agentclaw.community.log import get_logger
-
-logger = get_logger()
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/sessions",
     tags=["sessions"],
@@ -118,12 +116,6 @@ _LOOKAHEAD = 1
 #: Generous for a conversation; bounded enough that a page number cannot be
 #: turned into device load.
 _MAX_HISTORY_DEPTH = 5000
-
-# Reconcile only the public OpenAPI response. Direct Engine consumers keep the
-# historical relative session id returned by OpenClaw create.
-_CREATE_RECONCILE_LIMIT = 20
-_CREATE_RECONCILE_DELAYS = (0.0, 0.05, 0.15)
-
 
 def _friend_auth_headers(request: Request) -> dict[str, str]:
     """Forward only identity/trace headers needed by BCN's trusted boundary."""
@@ -192,62 +184,6 @@ def _raise_expert_error(error: Exception) -> None:
     raise error
 
 
-def _created_session_match(candidate_id: str, created_id: str) -> bool:
-    """Match one canonical OpenClaw key to the relative key create returned."""
-    return candidate_id == created_id or candidate_id.endswith(f":{created_id}")
-
-
-async def _reconcile_openclaw_created_session(
-    *, relay: EngineRuntimeRelayProtocol, facts: Any, bot_id: str,
-    owner_id: str, user_id: str, stage: RuntimeStage,
-    created_item: dict[str, Any], requested_title: str | None,
-) -> dict[str, Any]:
-    """Recover OpenClaw's canonical list row after a successful create."""
-    created_id = str(created_item.get("id") or "")
-    if not created_id:
-        return created_item
-
-    for delay in _CREATE_RECONCILE_DELAYS:
-        if delay:
-            await asyncio.sleep(delay)
-        try:
-            listed = await relay.call(
-                bot_id=bot_id, owner_id=owner_id, facts=facts,
-                stage=stage.value, method="GET", path="/api/sessions",
-                params={
-                    "offset": 0, "limit": _CREATE_RECONCILE_LIMIT,
-                    "user_id": user_id,
-                },
-            )
-        except Exception as error:
-            # The write already succeeded. Do not invite a retry that creates
-            # another empty session just because this best-effort read failed.
-            logger.warning(
-                "[openapi.sessions.create] canonical reconciliation failed: %s",
-                type(error).__name__,
-            )
-            return created_item
-        match = next((
-            item for item in _as_list(listed.data)
-            if _created_session_match(str(item.get("id") or ""), created_id)
-        ), None)
-        if match is None:
-            continue
-
-        reconciled = {**created_item, **match}
-        if not match.get("model") and created_item.get("model"):
-            reconciled["model"] = created_item["model"]
-        # The create row describes this operation's timestamps. Older
-        # OpenClaw list adapters generated timestamps at read time.
-        for field in ("gmt_created", "gmt_modified"):
-            if created_item.get(field):
-                reconciled[field] = created_item[field]
-        if requested_title is not None:
-            reconciled["title"] = requested_title
-        return reconciled
-    return created_item
-
-
 @router.get("", response_model=Envelope[SessionPage])
 @envelope_errors
 async def list_sessions(
@@ -306,10 +242,7 @@ async def list_sessions(
         path="/api/sessions",
         params=params,
     )
-    mapped = [
-        _map_session(d, engine_type=facts.active_engine)
-        for d in _as_list(result.data)
-    ]
+    mapped = [_map_session(d, engine_type=facts.active_engine) for d in _as_list(result.data)]
     # The session list reports no total; derive it from the window.
     total, items = _page(mapped, page, reported=result.total)
     return page_envelope(total, items, request)
@@ -377,13 +310,7 @@ async def create_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError("engine returned no session")
-    item = result.data
-    if facts.active_engine.lower() == "openclaw":
-        item = await _reconcile_openclaw_created_session(
-            relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id,
-            user_id=user_id, stage=stage, created_item=item,
-            requested_title=body.title,
-        )
+    item = await reconcile_created_session(relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id, user_id=user_id, stage=stage, created_item=result.data, requested_title=body.title)
     return created(_map_session(item, engine_type=facts.active_engine), request)
 
 
@@ -433,10 +360,7 @@ async def list_session_favorites(
         path="/api/session-favorites",
         params=params,
     )
-    mapped = [
-        _map_session(d, engine_type=facts.active_engine)
-        for d in _as_list(result.data)
-    ]
+    mapped = [_map_session(d, engine_type=facts.active_engine) for d in _as_list(result.data)]
     total, items = _page(mapped, page, reported=result.total)
     return page_envelope(total, items, request)
 
@@ -484,9 +408,7 @@ async def get_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError(f"no session {session_id}")
-    return envelope(
-        _map_session(result.data, engine_type=facts.active_engine), request
-    )
+    return envelope(_map_session(result.data, engine_type=facts.active_engine), request)
 
 
 async def _set_session_favorite(
@@ -633,9 +555,7 @@ async def update_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError(f"no session {session_id}")
-    return envelope(
-        _map_session(result.data, engine_type=facts.active_engine), request
-    )
+    return envelope(_map_session(result.data, engine_type=facts.active_engine), request)
 
 
 @router.delete("/{session_id}", response_model=Envelope[Deleted])

@@ -15,7 +15,12 @@ from typing import Any
 
 import pytest
 
-from engine.community.core.adapters.openclaw.session import OpenClawSessionAdapter, _session_label_suffix
+from engine.community.core.adapters.openclaw.session import (
+    OpenClawSessionAdapter,
+    _parse_datetime,
+    _raw_message_time,
+    _session_label_suffix,
+)
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.session.models import (
     Message,
@@ -346,6 +351,39 @@ def test_session_label_suffix_string_conversion_error_falls_back_to_uuid_hex():
 
     assert isinstance(suffix, str)
     assert len(suffix) == 32
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (datetime(2024, 1, 2, 3, 4, 5), datetime(2024, 1, 2, 3, 4, 5, tzinfo=UTC)),
+        (datetime(2024, 1, 2, 3, 4, 5, tzinfo=UTC), datetime(2024, 1, 2, 3, 4, 5, tzinfo=UTC)),
+        ("1700000000", datetime.fromtimestamp(1_700_000_000, tz=UTC)),
+        ("2024-01-02T03:04:05", datetime(2024, 1, 2, 3, 4, 5, tzinfo=UTC)),
+        ("", None),
+        ("not-a-time", None),
+        (object(), None),
+        (float("inf"), None),
+    ],
+)
+def test_parse_datetime_variants(value, expected):
+    assert _parse_datetime(value) == expected
+
+
+def test_raw_message_time_rejects_non_dict_and_missing_time():
+    assert _raw_message_time("not-a-message") is None
+    assert _raw_message_time({"content": "no timestamp"}) is None
+
+
+@pytest.mark.asyncio
+async def test_list_tolerates_non_list_raw_messages():
+    raw = _make_raw_session(preview=None)
+    raw["_messages"] = "not-a-list"
+    adapter = OpenClawSessionAdapter(_FakeSessionPort(sessions_list_result=[raw]))
+
+    session = (await adapter.list(SessionListRequest()))[0]
+
+    assert session.last_message_at is None
 
 
 # ── create ────────────────────────────────────────────────────────────────────
