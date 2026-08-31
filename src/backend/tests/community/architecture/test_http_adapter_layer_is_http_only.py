@@ -98,6 +98,12 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
                      # depend on the HTTP stack.
     "translator",    # inbound edge schema → SSOT domain translation (task/translator.py):
                      # pure data shaping, no FastAPI, exercised without a client.
+    "zip_build",     # the resources group's archive builder for download-dir:
+                     # writes the fetched walk into a temp zip so the router can
+                     # answer with a FileResponse. Deliberately no FastAPI —
+                     # which is what lets test_zip_build.py drive it without a
+                     # client. Named in full rather than as a short pattern so
+                     # this entry cannot exempt anything else.
 )
 
 

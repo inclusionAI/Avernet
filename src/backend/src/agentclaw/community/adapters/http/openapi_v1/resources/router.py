@@ -680,13 +680,13 @@ async def download_directory(
 ) -> Response:
     """Download a whole directory as a zip archive, addressed by path.
 
-    ``path`` may name any directory; omit it to download the entire
+    The path may name any directory; omit it to download the entire
     workspace. Raw bytes, not an envelope — the body is the archive.
 
     The archive is built on disk before the response starts, so a walk
     failure mid-way is still a clean error envelope, never a 200 with a
-    partial zip. The service yields one file at a time and enforces the
-    directory caps (``DirectoryTooLargeError`` → 413).
+    partial zip. Exceeding the directory download caps is answered with
+    a 413.
     """
     safe = _safe_path(path)
     entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
