@@ -705,10 +705,14 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 session.add(lease)
             else:
                 lease.holder_user_id = actor_id
-                lease.fencing_token += 1
+                # ``FOR UPDATE`` serializes supported production databases, but SQLite
+                # ignores it. Keep the fencing increment in SQL so concurrent local
+                # takeovers cannot both write the same value from a stale ORM object.
+                lease.fencing_token = SkillDraftEditLease.fencing_token + 1
                 lease.acquired_at = datetime.now(UTC).replace(tzinfo=None)
                 lease.last_takeover_by = actor_id
             session.flush()
+            session.refresh(lease)
             return self._lease_to_dict(lease)
 
     def _require_editable_draft(
