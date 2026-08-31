@@ -964,11 +964,30 @@ impl GroupManagementService for GroupManagement {
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
             if bot.actor_kind == ActorKind::Bot {
                 if self.v1_openapi_create_policy {
-                    if bot_id != cmd.driver_bot_id {
-                        self.ensure_v1_reachable(&cmd.driver_bot_id, &bot).await?;
-                    }
-                    if bot_id != cmd.driver_bot_id && bot.capabilities.visibility == "public" {
-                        subscription_targets.push(bot.clone());
+                    // Originator-anchored (aligned with legacy): every Bot
+                    // participant except the originator itself — including the
+                    // driver when it differs from the originator — must be
+                    // reachable from the originator. A Human originator reaches
+                    // a bot via public visibility or ownership (`created_by`);
+                    // a Bot originator reaches it via public visibility or
+                    // friendship.
+                    if bot_id != originator {
+                        if is_human_originator {
+                            let staff_no = originator.trim_start_matches("human_");
+                            if bot.capabilities.visibility != "public"
+                                && bot.created_by.as_deref() != Some(staff_no)
+                            {
+                                return Err(GroupUseCaseError::Forbidden(format!(
+                                    "Bot '{}' is neither public nor owned by human '{}'",
+                                    bot_id, staff_no
+                                )));
+                            }
+                        } else {
+                            self.ensure_v1_reachable(&originator, &bot).await?;
+                        }
+                        if bot.capabilities.visibility == "public" {
+                            subscription_targets.push(bot.clone());
+                        }
                     }
                 } else if bot_id != originator {
                     if is_human_originator {

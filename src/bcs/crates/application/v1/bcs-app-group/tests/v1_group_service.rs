@@ -2063,15 +2063,13 @@ async fn provisioning_reconciler_cancels_only_stale_orphaned_pending_sets() {
 }
 
 #[tokio::test]
-async fn human_participant_can_create_with_driver_reachable_protected_participants() {
+async fn human_originator_can_create_with_owned_protected_participant() {
+    // Originator-anchored: a Human originator reaches a protected participant
+    // via ownership (`created_by` matches the caller). The driver is public, so
+    // the participant ownership gate is the binding check.
     let fixture = Fixture::new().await;
     fixture.add_public_bot("driver").await;
-    fixture.add_protected_bot("helper").await;
-    fixture
-        .friends
-        .add_friendship("driver", "helper")
-        .await
-        .expect("driver/helper friendship");
+    fixture.add_bot_owned_by("helper", "staff-1", "protected").await;
 
     let detail = fixture
         .service
@@ -2104,7 +2102,7 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
             }),
         })
         .await
-        .expect("V1 uses driver collaboration reachability");
+        .expect("human originator reaches owned protected participant");
 
     let GroupDetail::Collaboration(detail) = detail else {
         panic!("expected collaboration detail");
@@ -2116,6 +2114,43 @@ async fn human_participant_can_create_with_driver_reachable_protected_participan
         .await
         .expect("V1 normal Group creation must materialize the Human participant");
     assert_eq!(human.capabilities.name.as_deref(), Some("Alice"));
+}
+
+#[tokio::test]
+async fn human_originator_rejects_non_owned_protected_participant() {
+    // A protected participant the human originator does not own is not
+    // reachable (human↔bot friendship is not consulted), so creation is
+    // rejected. The driver is public, isolating the participant gate.
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("driver").await;
+    fixture.add_bot_owned_by("helper", "someone-else", "protected").await;
+
+    let err = fixture
+        .service
+        .create(CreateGroup {
+            caller: human_principal_with_profile("staff-1", "alice-login", Some("Alice"), None),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
+                name: None,
+                context: None,
+                opening_message: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "helper".into(),
+                    role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
+                }],
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+            }),
+        })
+        .await
+        .expect_err("protected participant not owned by human originator");
+    assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
 }
 
 #[tokio::test]
@@ -3448,20 +3483,19 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
 }
 
 #[tokio::test]
-async fn create_does_not_friendship_check_driver_against_caller() {
-    // caller↔driver was dropped: a protected driver the caller neither owns nor
-    // is friends with is no longer friendship-checked (there are no protected
-    // participants that would consult the friend store either), so even a
-    // failing friend store must not block creation of the group.
-    let friends = Arc::new(FriendCore::with_repo(Arc::new(FailingFriendRepo)));
-    let fixture = Fixture::new_with_friends(friends).await;
+async fn create_gates_driver_against_bot_originator_by_friendship() {
+    // Originator-anchored: a Bot originator may drive only a public bot or a
+    // bot it is friends with. Here the protected driver is neither, so the
+    // driver↔originator gate rejects creation (the driver is no longer exempt
+    // from the originator reachability check).
+    let fixture = Fixture::new().await;
     fixture.add_public_bot("requester").await;
     fixture.add_protected_bot("driver").await;
 
-    let result = fixture
+    let err = fixture
         .service
         .create(CreateGroup {
-            caller: bot_principal("requester"),
+            caller: authenticated_bot_principal("requester", "requester"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 originator: None,
                 name: None,
@@ -3477,12 +3511,46 @@ async fn create_does_not_friendship_check_driver_against_caller() {
                 }),
             }),
         })
-        .await;
+        .await
+        .expect_err("protected driver not reachable from bot originator");
+    assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
+}
 
-    assert!(
-        result.is_ok(),
-        "driver must be ungated vs caller; got {result:?}"
-    );
+#[tokio::test]
+async fn bot_originator_rejects_non_friend_protected_participant() {
+    // A Bot originator reaches a protected participant only via friendship.
+    // The public driver is reachable, isolating the participant gate.
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("requester").await;
+    fixture.add_public_bot("driver").await;
+    fixture.add_protected_bot("helper").await;
+
+    let err = fixture
+        .service
+        .create(CreateGroup {
+            caller: authenticated_bot_principal("requester", "requester"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                originator: None,
+                name: None,
+                context: None,
+                opening_message: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "helper".into(),
+                    role: ParticipantRole::Consultant,
+                    tags: Vec::new(),
+                }],
+                collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
+                    delivery_policy: GroupDeliveryPolicy {
+                        bot_final_delivery: BotFinalDelivery::SendToDriver,
+                    },
+                }),
+            }),
+        })
+        .await
+        .expect_err("protected participant not reachable from bot originator");
+    assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
 }
 
 #[tokio::test]
@@ -3495,7 +3563,7 @@ async fn create_propagates_protected_participant_friendship_lookup_failure() {
     let result = fixture
         .service
         .create(CreateGroup {
-            caller: bot_principal("driver"),
+            caller: authenticated_bot_principal("driver", "driver"),
             group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
                 originator: None,
                 name: None,
@@ -3976,12 +4044,7 @@ async fn dm_create_outcome_reports_when_the_existing_pair_is_reused() {
 async fn client_caused_group_errors_map_to_documented_4xx_classes() {
     let fixture = Fixture::new().await;
     fixture.add_public_bot("driver").await;
-    fixture.add_protected_bot("protected").await;
-    fixture
-        .friends
-        .add_friendship("driver", "protected")
-        .await
-        .expect("driver/protected friendship");
+    fixture.add_bot_owned_by("protected", "driver", "protected").await;
 
     let public_with_protected = fixture
         .service
@@ -4265,18 +4328,19 @@ mod originator_v1_policy {
     }
 
     #[tokio::test]
-    async fn driver_not_gated_against_caller_when_originator_is_human() {
-        // caller staff-1 does NOT own the driver and is not its friend; with
-        // caller↔driver dropped and originator=caller (default), the group
-        // must still be created (driver ungated vs caller).
+    async fn driver_gated_against_human_originator_unless_owned_or_public() {
+        // Originator-anchored: a Human originator may drive only a public bot
+        // or a bot it owns. Here the protected driver is owned by someone else,
+        // so the driver↔originator gate rejects creation (the driver is no
+        // longer exempt from the originator reachability check).
         let fixture = Fixture::new().await;
         fixture.add_bot_owned_by("driver", "someone-else", "protected").await;
-        let detail = fixture
+        let err = fixture
             .service
             .create(chat_group_with_driver("driver", None, vec![]))
             .await
-            .expect("driver ungated vs caller");
-        assert_eq!(collaboration_originator(detail), "human_staff-1");
+            .expect_err("protected driver not owned by human originator");
+        assert!(matches!(err, ApplicationError::Forbidden { .. }), "got {err:?}");
     }
 
     #[tokio::test]
