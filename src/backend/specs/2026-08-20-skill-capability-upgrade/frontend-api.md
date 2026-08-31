@@ -44,8 +44,9 @@ Attempt/Reference 这种持久异步资源会在 `data` 内返回自己的 `erro
 
 ### 1.3 身份、缓存与重复提交
 
-- 除明确标注为 App-only 的市场读取外，本文 Space、Repo 和 Bot 接口都要求
-  `?user_id={actor_id}`；后续示例为突出业务路径会省略该公共 query。
+- 无需 `user_id` query 的 SC/Repo 市场读取仍要求已认证的 `UserOrDelegatedApp` Principal；其余
+  本文 Space、Repo 和 Bot 接口按生成 OpenAPI 要求传 `?user_id={actor_id}`。后续示例为突出业务路径
+  会省略该公共 query。
 - `user_id` 表示当前调用者，不是 Bot owner；Gateway/Backend 会校验认证上下文。
 - Bot-scoped 接口还接受可选 `owner_id`。操作自己的 Bot 时省略即可；操作协作 Bot 时必须传
   `owner_id={bot_owner_id}`，不能用当前调用者代替 Owner。建议在统一 API client 层注入这两个参数。
