@@ -189,7 +189,8 @@ impl EventDispatcher {
         &self,
         delivery_record: EventDeliveryRecord,
     ) -> Result<(), EventDispatcherError> {
-        let revision = self
+        let preflight_started_at_ms = (self.now_ms)();
+        let revision = match self
             .repo
             .get_subscription_revision(
                 &delivery_record.subscription_id,
@@ -197,17 +198,9 @@ impl EventDispatcher {
                 &self.env,
             )
             .await
-            .map_err(|error| {
-                warn!(
-                    delivery_id = %delivery_record.delivery_id,
-                    attempt_no = delivery_record.attempt_count,
-                    subscription_id = %delivery_record.subscription_id,
-                    error = %error,
-                    "failed to load webhook subscription revision"
-                );
-                EventDispatcherError::Repository
-            })?
-            .ok_or_else(|| {
+        {
+            Ok(Some(revision)) => revision,
+            Ok(None) => {
                 warn!(
                     delivery_id = %delivery_record.delivery_id,
                     attempt_no = delivery_record.attempt_count,
@@ -215,18 +208,56 @@ impl EventDispatcher {
                     revision = delivery_record.subscription_revision,
                     "webhook subscription revision is missing"
                 );
-                EventDispatcherError::MissingState
-            })?;
-        let host_key = endpoint_host_key(&revision.endpoint_url).map_err(|error| {
-            warn!(
-                delivery_id = %delivery_record.delivery_id,
-                attempt_no = delivery_record.attempt_count,
-                subscription_id = %delivery_record.subscription_id,
-                error = %error,
-                "webhook endpoint is invalid"
-            );
-            error
-        })?;
+                return self
+                    .complete_preflight_failure(
+                        &delivery_record,
+                        preflight_started_at_ms,
+                        EventDeliveryDisposition::Terminal,
+                        "subscription_revision_missing",
+                        "Webhook subscription revision is missing",
+                    )
+                    .await;
+            }
+            Err(error) => {
+                warn!(
+                    delivery_id = %delivery_record.delivery_id,
+                    attempt_no = delivery_record.attempt_count,
+                    subscription_id = %delivery_record.subscription_id,
+                    error = %error,
+                    "failed to load webhook subscription revision"
+                );
+                return self
+                    .complete_preflight_failure(
+                        &delivery_record,
+                        preflight_started_at_ms,
+                        EventDeliveryDisposition::Retryable,
+                        "subscription_revision_lookup",
+                        "Failed to load webhook subscription revision",
+                    )
+                    .await;
+            }
+        };
+        let host_key = match endpoint_host_key(&revision.endpoint_url) {
+            Ok(host_key) => host_key,
+            Err(error) => {
+                warn!(
+                    delivery_id = %delivery_record.delivery_id,
+                    attempt_no = delivery_record.attempt_count,
+                    subscription_id = %delivery_record.subscription_id,
+                    error = %error,
+                    "webhook endpoint is invalid"
+                );
+                return self
+                    .complete_preflight_failure(
+                        &delivery_record,
+                        preflight_started_at_ms,
+                        EventDeliveryDisposition::Terminal,
+                        "invalid_endpoint",
+                        "Webhook endpoint configuration is invalid",
+                    )
+                    .await;
+            }
+        };
         let semaphore = {
             let mut semaphores = self.host_semaphores.lock().await;
             semaphores
@@ -234,18 +265,26 @@ impl EventDispatcher {
                 .or_insert_with(|| Arc::new(Semaphore::new(self.per_host_concurrency)))
                 .clone()
         };
-        let _permit = semaphore
-            .acquire_owned()
-            .await
-            .map_err(|error| {
+        let _permit = match semaphore.acquire_owned().await {
+            Ok(permit) => permit,
+            Err(error) => {
                 warn!(
                     delivery_id = %delivery_record.delivery_id,
                     attempt_no = delivery_record.attempt_count,
                     error = %error,
                     "webhook host concurrency semaphore closed"
                 );
-                EventDispatcherError::InvalidEndpoint
-            })?;
+                return self
+                    .complete_preflight_failure(
+                        &delivery_record,
+                        preflight_started_at_ms,
+                        EventDeliveryDisposition::Retryable,
+                        "dispatcher_concurrency",
+                        "Webhook dispatcher concurrency control is unavailable",
+                    )
+                    .await;
+            }
+        };
         let started_at_ms = (self.now_ms)();
         let attempt_no = delivery_record.attempt_count;
         let mut response = match self
@@ -306,6 +345,36 @@ impl EventDispatcher {
             attempt_no,
             started_at_ms,
             completed_at_ms,
+            &response,
+        )
+        .await?;
+        self.metrics
+            .delivery_attempted(attempt_metric(&delivery_record.event_type, &response))
+            .await;
+        Ok(())
+    }
+
+    async fn complete_preflight_failure(
+        &self,
+        delivery_record: &EventDeliveryRecord,
+        started_at_ms: u64,
+        disposition: EventDeliveryDisposition,
+        error_category: &str,
+        error_summary: &str,
+    ) -> Result<(), EventDispatcherError> {
+        let response = EventDeliveryResponse {
+            disposition,
+            http_status: None,
+            retry_after_ms: None,
+            response_bytes_observed: 0,
+            error_category: Some(error_category.to_string()),
+            error_summary: Some(error_summary.to_string()),
+        };
+        self.complete_attempt(
+            delivery_record,
+            delivery_record.attempt_count,
+            started_at_ms,
+            (self.now_ms)(),
             &response,
         )
         .await?;
