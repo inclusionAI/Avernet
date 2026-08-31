@@ -49,17 +49,33 @@ spec:
           limits:
             cpu: "${CPU_LIMIT}"
             memory: "${MEMORY_LIMIT}"
+        # Startup probe: gates both probes below — they do not run until it
+        # succeeds, so a slow start can no longer trip liveness. Budget is
+        # periodSeconds × failureThreshold = 10s × 30 = up to 300s (5 min);
+        # the slowest cold start today (baas) reaches /health in ~90s, while
+        # the old liveness-only budget (30s delay + 3 failures × 10s ≈ 60s)
+        # could kill it mid-start. Image pull time is not part of this budget:
+        # probes begin only once the container has started. If the app is not
+        # healthy within the budget the container is killed and restarted.
+        startupProbe:
+          httpGet:
+            path: ${PROBE_PATH}
+            port: ${PORT}
+          periodSeconds: 10
+          failureThreshold: 30
+        # liveness/readiness run only after startupProbe succeeds, so their
+        # delays no longer need to cover a slow start.
         livenessProbe:
           httpGet:
             path: ${PROBE_PATH}
             port: ${PORT}
-          initialDelaySeconds: 30
+          initialDelaySeconds: 10
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: ${PROBE_PATH}
             port: ${PORT}
-          initialDelaySeconds: 10
+          initialDelaySeconds: 5
           periodSeconds: 5
 ---
 apiVersion: v1
