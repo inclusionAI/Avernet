@@ -46,7 +46,7 @@ than something to work around:
         `bot_config_surface/__init__.py` records.
 - **Depends on:** —
 
-## [ ] Task 2: The two tables
+## [x] Task 2: The two tables
 - **Goal:** Persistence for the apply record and for the serialization lock.
 - **Files:** `.../core/bot_config_manifest/repository/apply_models.py`,
   `.../core/bot_config_manifest/sql/2026_08_31_bot_config_manifest_apply.sql`,
@@ -54,29 +54,29 @@ than something to work around:
   `.../core/repository/implementations/bot/config_manifest_apply.py`,
   `.../core/repository/protocols/bot/__init__.py`, `.../core/schema.py`
 - **Done when:**
-  - [ ] `ac_bot_config_manifest_apply` carries the columns the plan lists, keyed
+  - [x] `ac_bot_config_manifest_apply` carries the columns the plan lists, keyed
         `(avernet_tenant, env, entity_id, bot_id)` with the same 256-char widths
         and the same index-budget reasoning `ac_bot_config_manifest` records.
-  - [ ] Two indexes, one per read, each with a comment naming its read:
+  - [x] Two indexes, one per read, each with a comment naming its read:
         `(…, id DESC)` for `last-apply`, and `(…, apply_id)` for the poll by id.
         The second carries the bot key rather than being a bare `apply_id`
         lookup — the id is not the authorization.
-  - [ ] `status` and `finished_at` support the two-write lifecycle: `RUNNING`
+  - [x] `status` and `finished_at` support the two-write lifecycle: `RUNNING`
         with a null `finished_at` on insert, terminal values on completion.
-  - [ ] **No `dry_run` column.** A dry run mints no id and writes no row, so
+  - [x] **No `dry_run` column.** A dry run mints no id and writes no row, so
         there is nothing to mark.
-  - [ ] `report` is `Text().with_variant(mysql.MEDIUMTEXT(), "mysql")`, for the
+  - [x] `report` is `Text().with_variant(mysql.MEDIUMTEXT(), "mysql")`, for the
         reason the manifest's `document` column records.
-  - [ ] `ac_bot_config_manifest_apply_lock` mirrors `ac_bot_restart_lock`:
+  - [x] `ac_bot_config_manifest_apply_lock` mirrors `ac_bot_restart_lock`:
         `UNIQUE(avernet_tenant, env, entity_id, bot_id)` **is** the lock,
         `acquire` inserts and treats `IntegrityError` as held, `release`
         compares `lock_token` before deleting, `get_if_stale` reads both
         timestamps from the **database clock**.
-  - [ ] Both models call `register_avernet_tenant_guard`.
-  - [ ] Both protocols are `@abstractmethod` throughout and the implementations
+  - [x] Both models call `register_avernet_tenant_guard`.
+  - [x] Both protocols are `@abstractmethod` throughout and the implementations
         inherit them, matching `BotConfigManifestRepositoryProtocol`.
-  - [ ] `core/schema.py` imports the models so `create_all` emits both tables.
-  - [ ] The DDL file carries the tenancy and index-budget reasoning in comments,
+  - [x] `core/schema.py` imports the models so `create_all` emits both tables.
+  - [x] The DDL file carries the tenancy and index-budget reasoning in comments,
         as its sibling does — a reader must not have to rediscover why
         `entity_id` is 256.
 - **Depends on:** —

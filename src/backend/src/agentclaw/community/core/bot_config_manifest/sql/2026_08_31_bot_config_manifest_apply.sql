@@ -1,0 +1,111 @@
+-- The manifest apply record and its serialization lock (issue #1472, W4 of the
+-- bot-config-manifest plan in ``docs/bot-config-manifest/``).
+--
+-- Two tables, one mechanism: an apply takes the lock, writes its RUNNING row,
+-- does the work, and stamps the terminal row. Both carry the same logical key
+-- as ac_bot_config_manifest and the same column widths, for the same reasons.
+--
+-- WHAT THE APPLY RECORD IS FOR. work-items §2.3: manifest-materialised entities
+-- are stored identically to hand-created ones — same service, same table, same
+-- shape — so nothing downstream can tell them apart, and nothing needs to. The
+-- manifest module therefore keeps its OWN account of what it materialised,
+-- rather than marking entities. That record serves audit and keep_last (§2.8),
+-- and per §2.7 the per-entry details ARE the report: apply has no other output,
+-- and it writes nothing at all to ac_bots.
+--
+-- WHY THE LOCK IS ITS OWN TABLE AND NOT A ROW IN ac_bot_restart_lock. Applying
+-- a manifest and restarting a bot are different operations. Sharing a row would
+-- make a restart block an apply (and vice versa) as an accident of storage
+-- rather than as a decision anybody made. The *pattern* is reused verbatim —
+-- the UNIQUE constraint is the lock, the DB arbitrates concurrent inserts, the
+-- fencing token is compared on release, staleness is judged on the DB clock —
+-- which is what work-items §5 asks for.
+--
+-- INDEX BUDGET, same as the manifest table's. InnoDB caps an index key at 3072
+-- bytes and utf8mb4 counts 4 bytes per character, so entity_id is varchar(256)
+-- and NOT ac_bots' 1024 — at 1024 that one column would be 4096 bytes and
+-- CREATE TABLE would be refused outright. Real entity_ids are short user ids
+-- (u_165137); 256 matches what the newer tables here give one.
+--
+-- TENANT ISOLATION, same as the manifest table's. ac_bots is itself
+-- tenant-scoped, so a bot_id is unique only *within* a tenant, and legacy
+-- "default" bots carry documented residual cross-tenant collision on that
+-- identifier. Without the tenant in these keys, two such bots would share one
+-- apply lock — so one tenant's apply could block or unblock another's — and
+-- read each other's apply reports.
+
+CREATE TABLE `ac_bot_config_manifest_apply` (
+  `id`             bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  -- The report's public identity: returned by the 202 from POST .../apply and
+  -- polled on by GET .../applies/{apply_id}.
+  --
+  -- NOT a lookup key on its own. Both reads below filter on the bot key as
+  -- well, so an apply_id guessed or leaked from another bot resolves to
+  -- nothing. The id is a handle the caller polls with; it never authorizes the
+  -- read. That is why there is no UNIQUE KEY on apply_id alone.
+  `apply_id`       varchar(64)   NOT NULL COMMENT '本次 apply 的公开标识',
+  `env`            varchar(20)   NOT NULL COMMENT '环境标识: prod/pre/dev',
+  -- 256, not ac_bots' 1024 — see the index-budget note above.
+  `entity_id`      varchar(256)  NOT NULL COMMENT '实体ID（bot 的 entity_id）',
+  `bot_id`         varchar(256)  NOT NULL COMMENT 'Bot ID',
+  -- 'explicit' is the only value this wave writes: W4's single entry point is
+  -- the explicit POST. W8 adds 'republish'/'restart' and W13 adds 'create',
+  -- neither of which needs a migration.
+  `trigger`        varchar(32)   NOT NULL COMMENT '触发来源：explicit/create/republish/restart',
+  -- RUNNING on insert, terminal on completion — the two-write lifecycle apply's
+  -- async shape requires, since the route answers 202 and the work continues on
+  -- a background thread.
+  --
+  -- Denormalised out of `report` so "show me failed applies" is a query rather
+  -- than a scan of JSON, and so a poll is one indexed read.
+  `status`         varchar(16)   NOT NULL COMMENT 'RUNNING 或 SUCCEEDED/PARTIAL/FAILED',
+  -- mediumtext, not text: a report over a large manifest has no small cap to
+  -- lean on, and text's 65,535 bytes is close enough to matter. Same divergence
+  -- ac_bot_config_manifest.document records.
+  `report`         mediumtext    NOT NULL COMMENT '逐条明细（JSON）',
+  -- Bounded the way the manifest's `modifier` is, and for the same reason: an
+  -- application actor composes a prefix onto a 1024-character user id
+  -- ("app:7:on-behalf-of:<...>"), so the composed value can legitimately be
+  -- long without anything being malformed.
+  `actor`          varchar(1024) NOT NULL COMMENT '审计：发起者',
+  `started_at`     datetime      NOT NULL COMMENT '开始时间',
+  -- NULL exactly while status is RUNNING. The two move together.
+  `finished_at`    datetime      NULL     COMMENT '结束时间；RUNNING 期间为空',
+  `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
+  `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  PRIMARY KEY (`id`),
+  -- Two indexes, one per read. There are exactly two reads on this table.
+  --
+  -- GET .../last-apply — the newest row for this bot.
+  KEY `idx_manifest_apply_latest` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `id`),
+  -- GET .../applies/{apply_id} — the poll by id, scoped to the bot.
+  KEY `idx_manifest_apply_by_id` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `apply_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot 配置清单 apply 记录';
+
+-- NO dry_run COLUMN, deliberately. A dry run mints no apply_id and writes no
+-- row at all, so there is nothing here to mark. A flag would invite a future
+-- change to record plans by setting it, which is the write dry_run promises not
+-- to make; the test asserts this table is untouched by a dry run instead.
+
+CREATE TABLE `ac_bot_config_manifest_apply_lock` (
+  `id`             bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `env`            varchar(20)   NOT NULL COMMENT '环境标识: prod/pre/dev',
+  `entity_id`      varchar(256)  NOT NULL COMMENT '实体ID（bot 的 entity_id）',
+  `bot_id`         varchar(256)  NOT NULL COMMENT 'Bot ID',
+  `holder_user_id` varchar(1024) NOT NULL COMMENT '持锁者（发起 apply 的人）',
+  -- Fencing token, compared on release. Without it, an apply whose lock was
+  -- reaped as stale could delete the lock a *later* apply legitimately took.
+  `lock_token`     varchar(256)  NOT NULL COMMENT '持锁令牌（释放时比对）',
+  `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
+  `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  PRIMARY KEY (`id`),
+  -- THE UNIQUE CONSTRAINT IS THE LOCK. One row per bot; concurrent INSERTs are
+  -- arbitrated by the database, exactly one wins, and the losers see the
+  -- integrity violation as "held". No application-side mutual exclusion.
+  --
+  -- gmt_create is what get_if_stale measures against, on the DB clock, so a
+  -- process killed mid-apply cannot hold this forever.
+  UNIQUE KEY `uk_manifest_apply_lock` (`avernet_tenant`, `env`, `entity_id`, `bot_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot 配置清单 apply 串行锁';
