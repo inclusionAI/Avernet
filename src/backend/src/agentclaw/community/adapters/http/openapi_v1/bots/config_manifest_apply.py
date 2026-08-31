@@ -46,7 +46,10 @@ from .config_manifest_support import (
     empty_apply_payload,
     manifest_target,
 )
-from .schemas import ConfigManifestApply, ConfigManifestApplyAccepted
+from .config_manifest_apply_schemas import (
+    ConfigManifestApply,
+    ConfigManifestApplyAccepted,
+)
 
 
 router = APIRouter(
