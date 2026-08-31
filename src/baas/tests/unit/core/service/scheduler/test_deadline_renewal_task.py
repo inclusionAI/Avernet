@@ -849,9 +849,7 @@ class TestStep3RenewalDecision:
         mock_repo.update_after_failure.assert_called_once()
         assert result == "failed"
 
-        failure_lines = [
-            r for r in caplog.records if "extend_ttl failed" in r.message
-        ]
+        failure_lines = [r for r in caplog.records if "extend_ttl failed" in r.message]
         assert len(failure_lines) == 1
         assert failure_lines[0].levelno == logging.WARNING
         assert "Arca API error" in failure_lines[0].message
@@ -1689,9 +1687,7 @@ class TestStoppedTransitionMetric:
         assert len(transition_records) == 1
         assert transition_records[0].levelno == logging.INFO
 
-        stopped_lines = [
-            r for r in caplog.records if "marked STOPPED" in r.message
-        ]
+        stopped_lines = [r for r in caplog.records if "marked STOPPED" in r.message]
         assert len(stopped_lines) == 1
         assert stopped_lines[0].levelno == logging.WARNING
 
@@ -1794,7 +1790,9 @@ class TestRenewalDigestLogging:
         assert fields[8] == "-"
 
     @pytest.mark.asyncio
-    async def test_pathological_ttl_digest_format_failure_uses_placeholder(self, caplog):
+    async def test_pathological_ttl_digest_format_failure_uses_placeholder(
+        self, caplog
+    ):
         """ME-01: a numeric-but-pathological ttl_timestamp (huge negative
         epoch overflowing the datetime range) flows through failure
         accounting exactly once; the digest TTL formatter's failure
