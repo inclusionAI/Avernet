@@ -22,6 +22,26 @@ pub(crate) fn timestamp_value_from_ms(
     timestamp_value(flavor, timestamp_ms)
 }
 
+pub(crate) fn lease_timestamp_value_from_ms(
+    flavor: DbSqlFlavor,
+    timestamp_ms: u64,
+) -> Result<DbValue, EventRepoError> {
+    let timestamp_ms = match flavor {
+        // MySQL-compatible deployments may expose TIMESTAMP without
+        // fractional-second precision. Round lease deadlines up so storage
+        // precision can extend a lease by less than one second but never
+        // shorten a valid lease to nearly zero at a second boundary.
+        DbSqlFlavor::Mysql => timestamp_ms
+            .checked_add(999)
+            .map(|timestamp_ms| timestamp_ms / 1_000 * 1_000)
+            .ok_or_else(|| {
+                EventRepoError::InvalidInput("timestamp is outside supported range".to_string())
+            })?,
+        DbSqlFlavor::Sqlite => timestamp_ms,
+    };
+    timestamp_value_from_ms(flavor, timestamp_ms)
+}
+
 pub(crate) fn optional_timestamp_value_from_ms(
     flavor: DbSqlFlavor,
     timestamp_ms: Option<u64>,
@@ -78,6 +98,25 @@ mod tests {
         assert_eq!(
             timestamp_value_from_ms(DbSqlFlavor::Mysql, TIMESTAMP_MS).expect("timestamp"),
             DbValue::from(i64::try_from(TIMESTAMP_MS).expect("signed timestamp"))
+        );
+    }
+
+    #[test]
+    fn mysql_lease_deadlines_round_up_to_second_precision() {
+        assert_eq!(
+            lease_timestamp_value_from_ms(DbSqlFlavor::Mysql, TIMESTAMP_MS)
+                .expect("MySQL lease timestamp"),
+            DbValue::from(1_756_367_458_000_i64)
+        );
+        assert_eq!(
+            lease_timestamp_value_from_ms(DbSqlFlavor::Mysql, 1_756_367_458_000)
+                .expect("aligned MySQL lease timestamp"),
+            DbValue::from(1_756_367_458_000_i64)
+        );
+        assert_eq!(
+            lease_timestamp_value_from_ms(DbSqlFlavor::Sqlite, TIMESTAMP_MS)
+                .expect("SQLite lease timestamp"),
+            DbValue::from("2025-08-28 07:50:57.123")
         );
     }
 

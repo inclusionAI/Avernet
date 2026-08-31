@@ -21,7 +21,7 @@ use rand::RngCore;
 use sha2::Digest;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{MissedTickBehavior, interval};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use url::Url;
 
 use crate::retry::EventRetryPolicy;
@@ -127,6 +127,18 @@ impl EventDispatcher {
             count,
             "claimed webhook deliveries"
         );
+        for delivery in &deliveries {
+            info!(
+                target: "bcs_event_webhook",
+                component = "delivery",
+                worker_id,
+                env = %self.env,
+                delivery_id = %delivery.delivery_id,
+                attempt_no = delivery.attempt_count,
+                lease_until_ms = ?delivery.lease_until_ms,
+                "claimed webhook delivery attempt"
+            );
+        }
         stream::iter(deliveries)
             .for_each_concurrent(self.worker_concurrency, |delivery| async move {
                 let delivery_id = delivery.delivery_id.clone();
@@ -483,7 +495,7 @@ impl EventDispatcher {
                 EventDispatcherError::Repository
             })?;
         if next_status == EventDeliveryStatus::Succeeded {
-            debug!(
+            info!(
                 target: "bcs_event_webhook",
                 component = "delivery",
                 delivery_id = %delivery.delivery_id,
