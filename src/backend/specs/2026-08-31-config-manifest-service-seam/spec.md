@@ -197,7 +197,7 @@ Settled here rather than left open:
    rest.
 
 2. **The collaborator level check is not re-implemented here, and must not be —
-   because the manifest rows are set at the maximum bar.** It is already
+   because apply declares an owner-level bar of its own.** It is already
    declared once, in `authorization.py`, and enforced by `PublicAPIRoute` for
    every operation including apply's. A per-category re-check inside the seam
    would be a second adjudication of a question that already has one home — the
@@ -206,11 +206,13 @@ Settled here rather than left open:
    top of it (`bot_service.get_bot(bot_id, owner_id)` and the entity-coordinate
    resolution), which the collaborator seam does not perform and never has.
 
-   This is only sound given the constraint in *The Maximum-Bar Constraint*
-   below. If a manifest row were ever set below the maximum, per-category level
-   adjudication would become a real requirement of this seam, and this decision
-   would have to be reopened. Stated so that the dependency is visible rather
-   than implicit.
+   This is sound only given *Apply Declares Its Own Bars* below. `Check(OWNER)`
+   means every caller who reaches apply could have performed each of its writes
+   directly, so there is nothing left for a per-category level check to refuse.
+   Lower that bar and the reasoning collapses: per-category adjudication becomes
+   a real requirement of this seam and this decision reopens. That is what the
+   dominance test in that section exists to catch, and why it is named as W4's
+   work rather than left to whoever notices.
 
 3. **The four divergent target resolutions are preserved, not unified.** They
    really do differ — `resources` performs no ownership guard, `engine_config`
@@ -257,54 +259,80 @@ Settled here rather than left open:
    thing). What is shared is the *table* that names them and the guarantee that
    the router and apply hold the same object, which is where the value is.
 
-## The Maximum-Bar Constraint
+## Apply Declares Its Own Bars
 
 Not implemented here — this feature writes no `AUTHORIZATION` or `ADMISSION`
-row. It is recorded here because it was found while specifying this seam, it is
-what makes *Decisions* 2 sound, and the rows that must honour it are written in
-three **other** sessions. Losing it between them is the failure this section
-exists to prevent.
+row. It is recorded because it was settled while specifying this seam, it is
+what makes *Decisions* 2 sound, and the rows are written in three **other**
+sessions. Losing it between them is what this section prevents.
 
-**A manifest operation is one door onto operations whose bars are not uniform.**
-Measured, not assumed:
+**The rule is the one `admission.py` already states:** *"an operation's mode
+follows from its shape — which identities it takes, and how it resolves the bot
+it acts on — not from taste."* So a manifest operation declares what applying a
+manifest requires, decided on its own shape. It is **not** derived as a maximum
+over the categories it happens to touch — that rule would need recomputing every
+time a category moved, and a bar nobody recomputes is a bar that silently rots.
 
-| Category | Admission | Authorization |
-| --- | --- | --- |
-| `identity` | `GRANT_CHECKED_OWN_BOT` | `OWNER_SCOPED` |
-| `resources` | `GRANT_CHECKED_OWN_BOT` | `OWNER_SCOPED` |
-| `engine_config` | `GRANT_CHECKED_OWN_BOT` | `OWNER_SCOPED` |
-| `script` (`/startup-script`) | `GRANT_CHECKED_OWN_BOT` | `OWNER_SCOPED` |
-| `mcp` | `GRANT_CHECKED_ADDRESSED_BOT` | `Check(MEMBER)`; `…/call-type` is `Check(OWNER, EDIT_LOCK)` |
-| `skills` | `GRANT_CHECKED_ADDRESSED_BOT` | `Check(MEMBER)`, several with `EDIT_LOCK` |
+### The declaration
 
-Two admission modes, three authorization bars. **So a manifest row picked by
-analogy with `mcp` or `skills` — the two categories whose endpoints are most
-obviously "the same kind of thing" — is a privilege escalation.** A caller at
-`MEMBER` would apply a manifest declaring `identity` and overwrite a bot's
-`SOUL.md`, which `PUT /openapi/v1/bots/{bot_id}/identity/{file_type}` refuses
-them because it is `OWNER_SCOPED`. Three of the six categories are owner-only
-today, and the manifest must not be a way around that.
+| | Value |
+| --- | --- |
+| `ADMISSION` | `AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT` |
+| `AUTHORIZATION` | `Check(PermissionLevel.OWNER, EDIT_LOCK)` |
 
-**The rule: every manifest operation carries the maximum of the bars it can
-reach** — `GRANT_CHECKED_OWN_BOT` and `Check(PermissionLevel.OWNER, EDIT_LOCK)`.
+**`Check(OWNER)`** — applying a manifest rewrites a bot's whole configuration:
+its skills, identity files, resources, MCP servers and startup script. That is
+an owner-level act on its own terms, independent of what any one category's
+endpoint requires. `OWNER_SCOPED` was rejected: it is explicitly scaffolding
+(*"no collaborator dimension has been decided … → becomes `Check(level)` when
+\#906 / \#907 decide the bar"*), and a new operation should not be born into a
+mode the table is migrating away from.
 
-**Why maximum rather than per-category adjudication.** `AUTHORIZATION` is keyed
-on `(method, path)`; a manifest's categories are in the request **body**. A bar
-that varied with the declared categories is therefore not merely harder — it is
-inexpressible in the table, and a bar that cannot be read off the table is one
-no reviewer can audit. Static maximum is the only shape the seam admits, and it
-errs in the safe direction.
+**`EDIT_LOCK`** — apply is a broad mutation, and every comparable one on this
+surface carries the lock (channel writes, `lifecycle/advance`, skill-set
+activate). Applying a manifest over another collaborator's in-flight edits is
+the exact collision the lock exists to stop. Bots with no collaborators pass
+without one, so the personal-bot path is unaffected.
 
-**Three rows, three sessions:**
+**`GRANT_CHECKED_ADDRESSED_BOT` is not a free choice — it follows from
+`Check`.** `require_check`'s gate declares `OwnerIdDep` → `resolve_owner_id` →
+`AddressedBotGrantDep`, so any row carrying `Check(...)` pulls in
+`require_granted_addressed_bot`, and `test_admission_inventory.py` holds each
+route to the dependency its mode calls for. The surface has exactly two coherent
+pairings — `Check(...)` with `GRANT_CHECKED_ADDRESSED_BOT`, and `OWNER_SCOPED`
+with `GRANT_CHECKED_OWN_BOT` — and mixing one from each is what
+`principal.py`'s own docstring calls the surface's oldest defect. Naming this
+because the pairing looks like two decisions and is one.
+
+### The safety net that makes an independent bar safe
+
+A bar decided on its own terms is more durable than a derived one, but it gives
+up the property the derived rule had for free: that apply can never exceed the
+categories it materializes. Recover it with a test rather than a rule anyone has
+to remember:
+
+- [ ] **(W4)** For every category apply can materialize, apply's declared bar is
+      at least the bar of that category's own write operations, and its
+      admission mode is no wider. Adding a category whose endpoints require more
+      than apply does fails this test.
+
+Without it, a later well-meant "let collaborators use manifests, drop apply to
+`MEMBER`" silently grants `MEMBER` the ability to overwrite a bot's `SOUL.md`
+through a manifest — which `PUT /openapi/v1/bots/{bot_id}/identity/{file_type}`
+refuses them, because that operation is owner-only. Three of the six categories
+are owner-only today; the manifest must not become the way around them.
+
+### The rows, and whose session writes each
 
 | Row | Whose | Note |
 | --- | --- | --- |
-| `PUT /openapi/v1/bots/{bot_id}/config-manifest` | W1 | §2.6 makes `PUT` take effect immediately, so `PUT` **is** an apply trigger and needs apply's bar. Easy to miss, because it reads like an ordinary document write |
-| `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` | W4 | The obvious row to get wrong, per above |
-| W13's create endpoint | W13 | Inherently owner — the caller is creating their own bot — so the constraint is satisfied by construction rather than by a bar |
+| `PUT /openapi/v1/bots/{bot_id}/config-manifest` | W1 | §2.6 makes `PUT` take effect immediately, so it **is** an apply trigger and takes apply's bars. Easy to miss: it reads like an ordinary document write |
+| `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` | W4 | Plus the dominance test above |
+| W13's create endpoint | W13 | The caller creates their own bot, so ownership holds by construction; the manifest rides the create request's own admission |
 
 `DELETE` of the manifest materializes nothing (W4: *删除 manifest 什么都不删*), so
-it is the one manifest operation with no lower bound from this constraint.
+it carries no lower bound from this section and is decided on its own shape like
+any other operation.
 
 ## In Scope
 
@@ -335,8 +363,8 @@ it is the one manifest operation with no lower bound from this constraint.
   is not touched here.
 - **The collaborator authorization seam**, `AUTHORIZATION`, `ADMISSION`, and the
   app-grant dependencies. Untouched, per *Decisions* 2. In particular this
-  feature writes **no** manifest rows — *The Maximum-Bar Constraint* records what
-  they must be, for W1, W4 and W13 to honour; it does not implement them.
+  feature writes **no** manifest rows — *Apply Declares Its Own Bars* records
+  what they must be, for W1, W4 and W13 to honour; it does not implement them.
 - **The other router groups.** Only the five categories apply touches.
 - **The internal API and the console routers.** Nothing on those surfaces
   changes, including `adapters/http/resources/file_router.py`, whose
