@@ -30,6 +30,7 @@ task_loop inbound PUSH callback(前缀 ``/api/v1/collaboration/tasks/callback``)
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -868,6 +869,29 @@ def _session_id_of(raw_obj: Any) -> str:
 
 
 async def _dispatch(
+    request: Request,
+    disposition: str,
+    schema_cls: type[TaskCallbackRequest],
+    svc: TaskServiceProtocol,
+    auth: CallbackAuthenticator,
+    registry: CallbackCorrelationRegistry,
+    enricher: CallbackDataEnricher,
+) -> Envelope[dict[str, Any]]:
+    """回调数据处理总入口(计时包装):实际分流/落库委派 ``_dispatch_impl``;全程计时到毫秒,
+    ``finally`` 打 ``elapsed_ms``(覆盖正常 + 异常路径,便于定位慢回投)。"""
+    _t0 = time.perf_counter()
+    try:
+        return await _dispatch_impl(
+            request, disposition, schema_cls, svc, auth, registry, enricher,
+        )
+    finally:
+        logger.info(
+            "[task_callback] _dispatch 总耗时 elapsed_ms=%.0f disposition=%s",
+            (time.perf_counter() - _t0) * 1000, disposition,
+        )
+
+
+async def _dispatch_impl(
     request: Request,
     disposition: str,
     schema_cls: type[TaskCallbackRequest],
