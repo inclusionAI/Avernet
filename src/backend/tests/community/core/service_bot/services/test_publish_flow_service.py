@@ -283,6 +283,7 @@ async def test_verify_first_release_injects_engine_extra_envs_without_bot_type_f
     assert build_service.release_async.await_args.kwargs["extra_envs"] == {
         "AGENTCLAW_SKILLS_LAYOUT": "legacy",
         "AIX_DEVFLOW_INFO": "devflow/app.yaml",
+        "AIX_DEVFLOW_INFO_LIST": '["devflow/app.yaml"]',
         "GIT_ADDRESSES": '["git@x/y.git"]',
         "RELAY_DEFAULT_MODEL": "antchat/Ling-2.6-1T",
         "RELAY_DEFAULT_RUNTIME": "python",

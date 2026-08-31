@@ -358,15 +358,16 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         if template_type and ctx.bot_type != "service":
             envs["BOT_TYPE"] = LEGACY_BOT_TYPE_ENV_MAP.get(template_type, template_type)
 
-        devflow_workflow = template_config.get("devflow_workflow", "")
-        if isinstance(devflow_workflow, dict):
-            aix_devflow_info = devflow_workflow.get("path", "")
-        elif isinstance(devflow_workflow, str):
-            aix_devflow_info = devflow_workflow
-        else:
-            aix_devflow_info = ""
-        if aix_devflow_info:
-            envs["AIX_DEVFLOW_INFO"] = aix_devflow_info
+        devflow_paths = self._resolve_devflow_paths(template_config)
+        if devflow_paths:
+            # ``AIX_DEVFLOW_INFO`` keeps the single-valued contract old engine
+            # versions read (first selected workflow). ``AIX_DEVFLOW_INFO_LIST``
+            # carries the full ordered selection as a JSON array so a new
+            # engine materializes every bound workflow (RFC 220 UQ-16a).
+            envs["AIX_DEVFLOW_INFO"] = devflow_paths[0]
+            envs["AIX_DEVFLOW_INFO_LIST"] = json.dumps(
+                devflow_paths, ensure_ascii=False
+            )
 
         legacy_repo_keys = ("backend_repo", "frontend_repo", "lib_repo")
         repo_keys = list(legacy_repo_keys)
@@ -417,6 +418,43 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 return None
             value = value.get(key)
         return value
+
+    @staticmethod
+    def _resolve_devflow_paths(template_config: dict[str, Any] | None) -> list[str]:
+        """Selected workflow yaml paths — ordered, de-duplicated.
+
+        Reads the plural ``devflow_workflows`` (full selection) when present,
+        otherwise falls back to the legacy singular ``devflow_workflow``
+        (which the frontend双写s as the first item). Each item may be a
+        ``{"path": "..."}`` dict (the persisted shape) or a bare string —
+        the same two shapes the singular reader historically accepted. The
+        plural key wins outright when set; it is never mixed with the
+        singular (the singular is always its first item, so mixing would
+        only duplicate what de-dup already handles — taking the plural
+        keeps the contract clean).
+        """
+        cfg = template_config or {}
+        paths: list[str] = []
+
+        def _extract(value: Any) -> None:
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                if isinstance(item, dict):
+                    path = item.get("path")
+                elif isinstance(item, str):
+                    path = item
+                else:
+                    path = None
+                if isinstance(path, str):
+                    path = path.strip()
+                    if path and path not in paths:
+                        paths.append(path)
+
+        if cfg.get("devflow_workflows") is not None:
+            _extract(cfg.get("devflow_workflows"))
+        else:
+            _extract(cfg.get("devflow_workflow"))
+        return paths
 
     def build_extra_properties(
         self,
