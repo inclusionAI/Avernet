@@ -397,6 +397,33 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         其 run_id/workflow_id 不对应框架节点,``start_run``/``report_result`` 推进会 NodeNotFoundError。"""
         self._persist(data, disposition="ingest")
 
+    async def ingest_parse_error(self, raw: dict, error: str) -> None:
+        """回调解析失败兜底:按 ``(run_id=flow_id, node_id="")`` 经 ``upsert_error`` 仅落
+        ``exec_error``(错误信息)+ ``extend_props``(原始上报数据),其它已有字段不动;不推进编排核。
+        无 callback_repo → 跳过(仅日志)。"""
+        if self._callback_repo is None:
+            logger.warning("[task][task_callback] 解析失败兜底落库跳过(无 callback_repo): %s", error)
+            return
+        ext = raw.get("ext_info") if isinstance(raw, dict) else None
+        flow_runs = (ext.get("flow_runs") if isinstance(ext, dict) else None) or {}
+        flow_runs = flow_runs if isinstance(flow_runs, dict) else {}
+        rec = TaskCallbackRecord(
+            id=0,
+            invoker="claw_mind",
+            run_id=(raw.get("flow_id") or "") if isinstance(raw, dict) else "",
+            node_id="",
+            main_session_id=(flow_runs.get("origin_session_key") or flow_runs.get("origin_session_id") or ""),
+            status=None,
+            orig_callback_data=(json.dumps(raw, ensure_ascii=False, default=str) if isinstance(raw, dict) else ""),
+            execution_graph=None,
+            result=None,
+            result_success=None,
+            exec_error=error,
+            extend_props=raw if isinstance(raw, dict) else None,
+        )
+        self._callback_repo.upsert_error(rec)
+        logger.info("[task][task_callback] 解析失败兜底已落库 run_id=%s exec_error=%s", rec.run_id, error[:120])
+
     def _fallback_persist_audit(self) -> None:
         """After a callback-driven graph mutation, if the graph service did not
         consume the pending audit (no shared repository, or an idempotent

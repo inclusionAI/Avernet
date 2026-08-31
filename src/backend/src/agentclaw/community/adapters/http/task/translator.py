@@ -6,12 +6,11 @@ SSOT TaskCallbackData 不扩;ext_info/goal/未登记 str id 塞进 result["_ext_
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from agentclaw.community.core.errors import NotFound
-from agentclaw.community.core.task.domain.models import Status, TaskCallbackData
+from agentclaw.community.core.task.domain.models import TaskCallbackData
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
 )
@@ -152,7 +151,7 @@ def translate_claw_mind(raw: dict, disposition: Literal["start", "result"]) -> T
             "workflow_id": 0,
             "instance_id": 0,
             "workflow_source": "claw_mind",
-            "workflow_instance_id": (flow_runs.get("origin_session_id") or ""),
+            "workflow_instance_id": (flow_runs.get("origin_session_key") or flow_runs.get("origin_session_id") or ""),
             "status": _claw_mind_status_to_task(low_status).value,
             "_raw_callback_body": raw,
             "result": result,

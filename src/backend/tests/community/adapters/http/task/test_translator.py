@@ -198,6 +198,35 @@ class TestClawMind:
                 "ext_info": {"flow_runs": {"status": "succeeded"}}}
         assert translate_claw_mind(body, "result").data.data["workflow_instance_id"] == ""
 
+    def test_session_id_prefers_origin_session_key(self):
+        # main_session_id 应来自 flow_runs.origin_session_key(完整 session key),优先于 origin_session_id
+        body = {"workflow_id": "w", "flow_id": "f", "status": "succeeded",
+                "ext_info": {"flow_runs": {"status": "succeeded",
+                             "origin_session_id": "S-9",
+                             "origin_session_key": "agent:main:session:S-9:user:35983"}}}
+        assert translate_claw_mind(body, "result").data.data["workflow_instance_id"] \
+            == "agent:main:session:S-9:user:35983"
+
+    def test_execution_graph_final_output_in_output_and_extend_props(self):
+        # 最终输出(result_json)在 execution_graph 顶层 output 与 extend_props.output 两处都以 output 可取
+        body = {"workflow_id": "w", "flow_id": "f", "status": "succeeded",
+                "ext_info": {"flow_runs": {"status": "succeeded",
+                             "result_json": '{"phase":"P3","nodeSummary":"succeeded=3"}',
+                             "origin_session_key": "agent:main:session:S-x:user:1"},
+                             "node_executions": []}}
+        eg = _claw_mind_graph(body, "result")
+        assert eg["output"] == {"phase": "P3", "nodeSummary": "succeeded=3"}
+        assert eg["extend_props"]["output"] == {"phase": "P3", "nodeSummary": "succeeded=3"}
+
+    def test_malformed_embedded_json_raises_to_skip_persist(self):
+        # 内嵌 JSON 非法 → 构图抛错(供 router 捕获后打日志、不落库,避免污染已有记录)
+        body = {"workflow_id": "w", "flow_id": "f", "status": "succeeded",
+                "ext_info": {"flow_runs": {"status": "succeeded",
+                             "result_json": "not-a-valid-json{"},
+                             "node_executions": []}}
+        with pytest.raises(ValueError):
+            _claw_mind_graph(body, "result")
+
     # 真实 ClawMind 回投 shape:flow_runs/node_executions 在 ext_info 下,*_json 为 JSON 字符串,
     # 节点 DAG 由各节点 input_json.params.nodeOutputKeys 表达(report 多父)。
     _REAL_BODY = {

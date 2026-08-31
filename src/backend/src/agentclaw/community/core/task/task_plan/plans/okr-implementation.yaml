@@ -60,14 +60,12 @@ nodes:
       product_result: $.product_selection.output.product_result
     output:
       approval_result: $.result
-      approved: $.result.approved
   - id: implementation
     name: 实施
     type: bot
     bot_id: 20260828_k9c2slro
     depends_on: [strategy_approval]
-    enabled_when:
-      expression: $.strategy_approval.output.approved == true
+    # 审核成功(strategy_approval 终态 DONE)即推进实施,不做通过/拒绝拦截: 真实上报为自然语言、无结构化 approved,审核失败由 80s 兜底收敛不致实现节点长挂。
     input:
       approval_result: $.strategy_approval.output.approval_result
     output:
