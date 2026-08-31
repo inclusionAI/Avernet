@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -22,6 +22,12 @@ use tracing::{info, warn};
 
 use bcs_auth_api::{extract_session_cookie, OAuthConfig, OAuthProvider, UserIdentityPort, BCS_SESSION_COOKIE};
 use bcs_jwt::{Claims, JwtService};
+use bcs_service_api::application::v1::{
+    ApplicationError, AuthProviderUrl as V1AuthProviderUrl, AuthProviderUrlList, AuthRedirect,
+    AuthService, AuthUserInfo, BuildLoginUrls, CompleteOAuthLogin, LogoutResult, LogoutSession,
+    ReadCurrentUser, RefreshSession, SessionRenewal,
+};
+use bcs_service_api::application::RequestAuthHeaders;
 
 use crate::oauth::state::OAuthStateStore;
 
@@ -38,6 +44,33 @@ pub struct OAuthRouteState {
     /// local mock plugin. `None` only in contract-test state that never serves
     /// real traffic.
     pub auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
+}
+
+
+fn headers_from_request_auth(input: &RequestAuthHeaders) -> Result<HeaderMap, ApplicationError> {
+    let mut headers = HeaderMap::new();
+    if let Some(value) = input.authorization.as_ref() {
+        let header_value = HeaderValue::from_str(value).map_err(|_| {
+            ApplicationError::invalid("invalid_authorization_header", "authorization header is invalid")
+        })?;
+        headers.insert(axum::http::header::AUTHORIZATION, header_value);
+    }
+    if let Some(value) = input.cookie.as_ref() {
+        let header_value = HeaderValue::from_str(value).map_err(|_| {
+            ApplicationError::invalid("invalid_cookie_header", "cookie header is invalid")
+        })?;
+        headers.insert(axum::http::header::COOKIE, header_value);
+    }
+    for (name, value) in &input.forwarded_headers {
+        let header_name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
+            ApplicationError::invalid("invalid_forwarded_header", "forwarded header name is invalid")
+        })?;
+        let header_value = HeaderValue::from_str(value).map_err(|_| {
+            ApplicationError::invalid("invalid_forwarded_header", "forwarded header value is invalid")
+        })?;
+        headers.insert(header_name, header_value);
+    }
+    Ok(headers)
 }
 
 impl OAuthRouteState {
@@ -74,6 +107,209 @@ impl OAuthRouteState {
             config: OAuthConfig::default(),
             auth_chain: Some(auth_chain),
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl AuthService for OAuthRouteState {
+    async fn login_urls(
+        &self,
+        request: BuildLoginUrls,
+    ) -> Result<AuthProviderUrlList, ApplicationError> {
+        let callback_base_url = request.callback_base_url.trim_end_matches('/');
+        if callback_base_url.is_empty() {
+            return Err(ApplicationError::invalid(
+                "invalid_callback_base_url",
+                "callback_base_url must not be empty",
+            ));
+        }
+        let mut providers = Vec::new();
+        let mut names: Vec<&str> = self.providers.keys().map(|s| s.as_str()).collect();
+        names.sort();
+        for name in names {
+            if let Some(provider) = self.providers.get(name) {
+                let csrf_state = self.state_store.generate(name).await;
+                let redirect_uri = format!("{callback_base_url}/{name}");
+                let url = provider.auth_url(&csrf_state, &redirect_uri);
+                providers.push(V1AuthProviderUrl {
+                    name: name.to_string(),
+                    url,
+                });
+            }
+        }
+        Ok(AuthProviderUrlList { providers })
+    }
+
+    async fn complete_login(
+        &self,
+        request: CompleteOAuthLogin,
+    ) -> Result<AuthRedirect, ApplicationError> {
+        let callback_base_url = request.callback_base_url.trim_end_matches('/');
+        if callback_base_url.is_empty() {
+            return Err(ApplicationError::invalid(
+                "invalid_callback_base_url",
+                "callback_base_url must not be empty",
+            ));
+        }
+
+        let provider_key = self
+            .state_store
+            .consume(&request.state)
+            .await
+            .map_err(|_| ApplicationError::invalid("invalid_state", "invalid state"))?;
+
+        if provider_key != request.provider {
+            return Err(ApplicationError::invalid("provider_mismatch", "provider mismatch"));
+        }
+
+        let provider = self.providers.get(&request.provider).cloned().ok_or_else(|| {
+            ApplicationError::not_found("provider_not_found", "provider not found")
+        })?;
+
+        let code = request.code.or(request.auth_code).ok_or_else(|| {
+            ApplicationError::invalid("missing_code", "missing code or auth_code")
+        })?;
+        let redirect_uri = format!("{callback_base_url}/{}", request.provider);
+        let token = provider.exchange_code(&code, &redirect_uri).await.map_err(|e| {
+            warn!(error = %e, provider = %request.provider, "OAuth token exchange failed");
+            ApplicationError::bad_gateway("token_exchange_failed", "token exchange failed")
+        })?;
+
+        let user_info = provider.get_user_info(&token).await.map_err(|e| {
+            warn!(error = %e, provider = %request.provider, "OAuth userinfo failed");
+            ApplicationError::bad_gateway("userinfo_request_failed", "userinfo request failed")
+        })?;
+
+        let user_id = self
+            .user_port
+            .ensure_identity(
+                &request.provider,
+                &user_info.id,
+                user_info.name.as_deref(),
+                user_info.avatar.as_deref(),
+                &self.config.env,
+            )
+            .await
+            .map_err(|e| {
+                warn!(error = %e, "ensure_identity failed");
+                ApplicationError::internal("identity creation failed")
+            })?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let claims = Claims {
+            sub: user_id,
+            src: request.provider.clone(),
+            iat: now,
+            exp: now + self.config.idle_timeout_secs(),
+        };
+        let jwt = self.jwt_service.sign(&claims).map_err(|e| {
+            warn!(error = %e, "JWT signing failed");
+            ApplicationError::internal("session creation failed")
+        })?;
+
+        self.user_port
+            .update_token(&claims.sub, &bcs_jwt::token_hash(&jwt), claims.exp)
+            .await
+            .map_err(|e| {
+                warn!(error = %e, "update_token failed; aborting login");
+                ApplicationError::internal("session creation failed")
+            })?;
+
+        info!(provider = %request.provider, user_id = %claims.sub, "OAuth login successful");
+        Ok(AuthRedirect {
+            location: "/?login=success".to_string(),
+            set_cookie: session_cookie(&jwt, self.config.cookie_secure),
+        })
+    }
+
+    async fn current_user(&self, request: ReadCurrentUser) -> Result<AuthUserInfo, ApplicationError> {
+        let Some(chain) = self.auth_chain.as_ref() else {
+            return Err(ApplicationError::Unauthenticated);
+        };
+        let headers = headers_from_request_auth(&request.headers)?;
+        match chain.authenticate(&headers).await {
+            Ok(result) => match result.principal {
+                Some(principal)
+                    if principal
+                        .user_id
+                        .as_deref()
+                        .is_some_and(|id| !id.is_empty()) =>
+                {
+                    Ok(AuthUserInfo {
+                        user_id: principal.user_id.unwrap(),
+                        name: principal.user_name,
+                        provider: principal.source_name.unwrap_or_else(|| "chain".to_string()),
+                        avatar: principal.avatar,
+                    })
+                }
+                _ => Err(ApplicationError::Unauthenticated),
+            },
+            Err(e) => {
+                warn!(error = %e, "auth chain failed in OpenAPI auth user");
+                Err(ApplicationError::internal("auth chain failed"))
+            }
+        }
+    }
+
+    async fn refresh_session(&self, request: RefreshSession) -> Result<SessionRenewal, ApplicationError> {
+        let headers = headers_from_request_auth(&request.headers)?;
+        let jwt = extract_session_cookie(&headers).ok_or(ApplicationError::Unauthenticated)?;
+        let claims = self
+            .jwt_service
+            .verify_no_exp(&jwt)
+            .map_err(|_| ApplicationError::Unauthenticated)?;
+
+        match self.user_port.get_identity_by_token(&bcs_jwt::token_hash(&jwt)).await {
+            Ok(Some(info)) if info.user_id == claims.sub => {}
+            Ok(_) => return Err(ApplicationError::Unauthenticated),
+            Err(e) => {
+                warn!(error = %e, "refresh: identity lookup failed");
+                return Err(ApplicationError::internal("identity lookup failed"));
+            }
+        };
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let new_claims = Claims {
+            sub: claims.sub.clone(),
+            src: claims.src.clone(),
+            iat: now,
+            exp: now + self.config.idle_timeout_secs(),
+        };
+        let new_jwt = self.jwt_service.sign(&new_claims).map_err(|e| {
+            warn!(error = %e, "refresh: JWT signing failed");
+            ApplicationError::internal("session renewal failed")
+        })?;
+        self.user_port
+            .update_token(&new_claims.sub, &bcs_jwt::token_hash(&new_jwt), new_claims.exp)
+            .await
+            .map_err(|e| {
+                warn!(error = %e, "refresh: update_token failed");
+                ApplicationError::internal("session renewal failed")
+            })?;
+
+        Ok(SessionRenewal {
+            set_cookie: session_cookie(&new_jwt, self.config.cookie_secure),
+        })
+    }
+
+    async fn logout(&self, request: LogoutSession) -> Result<LogoutResult, ApplicationError> {
+        let headers = headers_from_request_auth(&request.headers)?;
+        if let Some(jwt) = extract_session_cookie(&headers) {
+            if let Ok(claims) = self.jwt_service.verify(&jwt) {
+                if let Err(e) = self.user_port.update_token(&claims.sub, "", 0).await {
+                    warn!(error = %e, user_id = %claims.sub, "logout: token revocation failed");
+                }
+            }
+        }
+        Ok(LogoutResult {
+            set_cookie: clear_session_cookie(self.config.cookie_secure),
+        })
     }
 }
 
@@ -482,7 +718,7 @@ mod tests {
     use async_trait::async_trait;
     use axum::body::to_bytes;
     use bcs_auth_api::{AuthError, AuthPlugin, AuthPluginChain, AuthPrincipal, AuthSource};
-    use bcs_test_support::{NoopAuthPlugin, NoopUserIdentityPort};
+    use bcs_test_support::{MockOAuthProvider, NoopAuthPlugin, NoopUserIdentityPort};
 
     /// A chain plugin that always yields a principal with the given `user_id`
     /// (which may be `None`), so the empty/missing-user_id branch of
@@ -532,6 +768,57 @@ mod tests {
         let bytes = to_bytes(resp.into_body(), usize::MAX).await.expect("body");
         let body = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
         (status, body)
+    }
+
+    #[tokio::test]
+    async fn auth_service_complete_login_issues_redirect_cookie_without_network() {
+        let mut providers: HashMap<String, Arc<dyn OAuthProvider>> = HashMap::new();
+        providers.insert(
+            "google".to_string(),
+            Arc::new(MockOAuthProvider::new("google", "external-123")),
+        );
+        let state = OAuthRouteState::new(
+            "test-secret-key-at-least-32-bytes!!",
+            Arc::new(NoopUserIdentityPort),
+            providers,
+            OAuthConfig {
+                jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
+                idle_timeout_minutes: 30,
+                base_url: "https://bcs.example.com".to_string(),
+                cookie_secure: false,
+                env: "test".to_string(),
+            },
+            None,
+        );
+
+        let urls = state
+            .login_urls(BuildLoginUrls {
+                callback_base_url: "https://bcs.example.com/openapi/v1/auth/callback".to_string(),
+            })
+            .await
+            .expect("login urls");
+        let provider_url = &urls.providers[0].url;
+        let state_param = provider_url
+            .split('&')
+            .find_map(|part| part.strip_prefix("state="))
+            .expect("state query param")
+            .to_string();
+
+        let result = state
+            .complete_login(CompleteOAuthLogin {
+                provider: "google".to_string(),
+                code: Some("auth-code".to_string()),
+                auth_code: None,
+                state: state_param,
+                callback_base_url: "https://bcs.example.com/openapi/v1/auth/callback".to_string(),
+            })
+            .await
+            .expect("complete login");
+
+        assert_eq!(result.location, "/?login=success");
+        assert!(result.set_cookie.starts_with("bcs_session="));
+        assert!(result.set_cookie.contains("HttpOnly"));
+        assert!(result.set_cookie.contains("SameSite=Lax"));
     }
 
     /// A principal whose `user_id` is `None` is not a human login — `/auth/user`

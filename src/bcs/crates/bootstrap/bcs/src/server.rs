@@ -4724,24 +4724,8 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
         Ok(Self { config, state })
     }
 
-    /// Build the `/auth/*` router.
-    ///
-    /// Two mounting paths:
-    /// 1. **Full OAuth** — when `[auth.oauth]` is configured with a non-empty
-    ///    `jwt_secret`, an `http(s)` `base_url`, and at least one provider:
-    ///    mounts the complete OAuth protocol routes with the auth chain
-    ///    injected as the `/auth/user` fallback.
-    /// 2. **Identity-only** — when no usable OAuth config exists but an auth
-    ///    chain (e.g. the `local` mock plugin) is present: mounts just
-    ///    `GET /auth/user`, resolved solely via the chain. This lets deployments
-    ///    use `/auth/user` without configuring any OAuth provider.
-    ///
-    /// `jwt_secret` comes from the resolved `auth_config` (see
-    /// `auth_wiring::resolve_auth_config`). Currently only `google` is wired.
-    fn build_auth_router(&self) -> Option<Router> {
+    fn build_full_oauth_route_state(&self) -> Option<Arc<bcs_http::oauth::OAuthRouteState>> {
         let auth_chain = Arc::clone(&self.state.auth_chain);
-
-        // --- Case 1: full OAuth configuration ------------------------------
         // `auth_config.oauth` is the resolved form: present only when a
         // non-empty jwt_secret was configured (I6 gate lives in resolve).
         if let (Some(resolved), Some(raw)) = (
@@ -4786,9 +4770,9 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
                                 providers = ?route_state.providers.keys().collect::<Vec<_>>(),
                                 cookie_secure = resolved.cookie_secure,
                                 env = %resolved.env,
-                                "Mounting OAuth /auth/* routes"
+                                "Mounting OAuth routes"
                             );
-                            return Some(bcs_http::oauth::routes(route_state));
+                            return Some(route_state);
                         }
                     } else {
                         warn!(
@@ -4807,10 +4791,43 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             }
         }
 
-        // --- Case 2: identity-only (chain-backed, no OAuth) -----------------
+        None
+    }
+
+    fn openapi_auth_public_base_url(&self) -> Option<String> {
+        self.state.auth_config.oauth.as_ref().map(|oauth| {
+            format!("{}/openapi/v1/auth", oauth.base_url.trim_end_matches('/'))
+        })
+    }
+
+    /// Build the `/auth/*` router.
+    ///
+    /// Two mounting paths:
+    /// 1. **Full OAuth** — when `[auth.oauth]` is configured with a non-empty
+    ///    `jwt_secret`, an `http(s)` `base_url`, and at least one provider:
+    ///    mounts the complete OAuth protocol routes with the auth chain
+    ///    injected as the `/auth/user` fallback.
+    /// 2. **Identity-only** — when no usable OAuth config exists but an auth
+    ///    chain (e.g. the `local` mock plugin) is present: mounts just
+    ///    `GET /auth/user`, resolved solely via the chain. This lets deployments
+    ///    use `/auth/user` without configuring any OAuth provider.
+    ///
+    /// `jwt_secret` comes from the resolved `auth_config` (see
+    /// `auth_wiring::resolve_auth_config`).
+    fn build_auth_router(
+        &self,
+        oauth_state: Option<Arc<bcs_http::oauth::OAuthRouteState>>,
+    ) -> Option<Router> {
+        if let Some(route_state) = oauth_state {
+            info!("Mounting OAuth /auth/* routes");
+            return Some(bcs_http::oauth::routes(route_state));
+        }
+
+        // Identity-only (chain-backed, no OAuth).
         if let Some(user_port) = self.state.user_identity_port.clone() {
             let route_state = Arc::new(bcs_http::oauth::OAuthRouteState::new_chain_only(
-                user_port, auth_chain,
+                user_port,
+                Arc::clone(&self.state.auth_chain),
             ));
             info!("Mounting identity-only /auth/user (no OAuth providers configured)");
             return Some(bcs_http::oauth::identity_routes(route_state));
@@ -4835,6 +4852,14 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             web_ws_dispatch_state(&self.state, Some(group_session_connections.clone())),
             ws_lifecycle_hook(&self.state),
         );
+        let oauth_state = self.build_full_oauth_route_state();
+        let mut openapi_v1 = self.state.openapi_v1.clone();
+        if let (Some(auth_service), Some(public_base_url)) = (
+            oauth_state.clone(),
+            self.openapi_auth_public_base_url(),
+        ) {
+            openapi_v1 = openapi_v1.with_auth_service(auth_service, public_base_url);
+        }
 
         let mut router = Router::new()
             // WebSocket endpoint for frontend clients (via gateway)
@@ -4849,14 +4874,14 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
         let mut router = router
             .with_state(Arc::clone(&self.state))
             .merge(api_router)
-            .merge(bcs_api_http::router(self.state.openapi_v1.clone()))
+            .merge(bcs_api_http::router(openapi_v1))
             .merge(bcs_api_http::group_session_connection_router(
                 group_session_connections,
                 self.state.gateway_principal_verifier.clone(),
             ))
             .merge(group_session_websocket_router);
 
-        if let Some(oauth_router) = self.build_auth_router() {
+        if let Some(oauth_router) = self.build_auth_router(oauth_state) {
             router = router.merge(oauth_router);
         }
 

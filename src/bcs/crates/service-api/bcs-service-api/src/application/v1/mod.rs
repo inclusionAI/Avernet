@@ -4,6 +4,7 @@
 //! HTTP requests into these commands and never pass credentials or
 //! request-supplied caller identities into domain services.
 
+pub mod auth;
 pub mod authorization;
 pub mod bot;
 pub mod collaboration_definition;
@@ -23,6 +24,7 @@ pub mod register;
 pub mod session;
 pub mod session_file;
 
+pub use auth::*;
 pub use authorization::{
     Action, AuthorizationService, IdentityPolicy, ResourceRef, require_authenticated_user,
     require_human, select_principal,
