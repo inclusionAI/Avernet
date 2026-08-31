@@ -18,9 +18,9 @@ not the schema, and not anybody's document.
 
 Substitution itself belongs to apply (W4/W5), which is why :func:`resolve` takes
 its inputs as arguments rather than reading a request context: this module is a
-pure function of a document and a bot's identity, callable from the write path
-(to validate) and from the apply path (to substitute) without either importing
-the other's world.
+pure function of a document and the bot's deployment context, callable from the
+write path (to validate) and from the apply path (to substitute) without either
+importing the other's world.
 """
 from __future__ import annotations
 
@@ -34,9 +34,18 @@ BOT_ARCH_VALUE = "amd64"
 #: time — an unknown ``${...}`` that survived to apply would either substitute
 #: nothing (fetching a URL with a literal ``${TYPO}`` in it) or be silently
 #: dropped, and both are worse than a refusal the author can read.
+#:
+#: **There is deliberately no ``BOT_ID``.** Every name here is a property of the
+#: *fleet* — the environment, the tenant, the engine, the architecture — which is
+#: what makes one document reusable across bots. A bot id is not: it is minted at
+#: creation time (``generate_bot_id`` — a date plus eight random characters) and
+#: is not something the caller chooses, so an author preparing content in a git
+#: repository cannot know it. A document that interpolated one would have to be
+#: written *after* the bot existed and could then only ever describe that bot,
+#: which is the opposite of what substitution is for. Anything genuinely
+#: per-bot belongs in that bot's own manifest, written literally.
 ALLOWED_PLACEHOLDERS: frozenset[str] = frozenset(
     {
-        "BOT_ID",
         "BOT_ENGINE_TYPE",
         "BOT_ENV",
         "BOT_TENANT",
@@ -74,7 +83,6 @@ def unknown_placeholders(text: str) -> list[str]:
 def resolve(
     text: str,
     *,
-    bot_id: str,
     engine_type: str,
     env: str,
     tenant: str,
@@ -88,7 +96,6 @@ def resolve(
     instead of turning it into a plausible-looking empty string.
     """
     values = {
-        "BOT_ID": bot_id,
         "BOT_ENGINE_TYPE": engine_type,
         "BOT_ENV": env,
         "BOT_TENANT": tenant,

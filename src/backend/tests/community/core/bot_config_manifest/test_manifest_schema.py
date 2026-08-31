@@ -74,7 +74,7 @@ manifest:
         # Who I am
         Reads ${{HOME}} literally — inline content is not scanned.
     - type: RULES.md
-      source: https://cdn.example.com/bots/${{BOT_ID}}/rules.md
+      source: https://cdn.example.com/bots/${{BOT_ENV}}/rules.md
   skills:
     - name: quality-check
       source: https://cdn.example.com/skills/qc.zip
@@ -417,7 +417,7 @@ manifest:
 
 
 @pytest.mark.parametrize(
-    "name", ["BOT_ID", "BOT_ENGINE_TYPE", "BOT_ENV", "BOT_TENANT", "BOT_ARCH"]
+    "name", ["BOT_ENGINE_TYPE", "BOT_ENV", "BOT_TENANT", "BOT_ARCH"]
 )
 def test_every_whitelisted_placeholder_is_accepted(name):
     _accept(
@@ -450,13 +450,27 @@ def test_bot_arch_resolves_rather_than_being_merely_reserved():
     )
 
     resolved = resolve_placeholders(
-        "https://x/${BOT_ARCH}/${BOT_ID}",
-        bot_id="b1",
+        "https://x/${BOT_ARCH}/${BOT_ENV}",
         engine_type="openclaw",
         env="dev",
         tenant="t1",
     )
-    assert resolved == "https://x/amd64/b1"
+    assert resolved == "https://x/amd64/dev"
+
+
+def test_bot_id_is_not_a_placeholder():
+    """A bot id is minted at creation (a date plus eight random characters), so
+    an author preparing content in a git repository cannot know it. Interpolating
+    one would mean writing the document after the bot existed and only ever for
+    that bot — so ``${BOT_ID}`` is refused like any other unknown name, rather
+    than being quietly accepted and substituted."""
+    document = """schema_version: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      source: https://cdn.example.com/bots/${BOT_ID}/soul.md
+"""
+    assert "unknown_placeholder" in _codes(document)
 
 
 # ── resources ───────────────────────────────────────────────────────────────

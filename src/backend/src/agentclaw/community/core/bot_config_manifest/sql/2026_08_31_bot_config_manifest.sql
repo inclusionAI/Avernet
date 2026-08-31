@@ -16,23 +16,22 @@
 -- container that runs it. The parse is for validation only; what is stored and
 -- what is read back is the submission.
 --
--- Key is (avernet_tenant, manifest_key), where manifest_key is a sha256 of the
--- logical key (env, entity_id, bot_id) — the same shape, for the same two
--- reasons, as ``ac_bot_startup_script``:
+-- Key is (avernet_tenant, env, entity_id, bot_id) — the logical key itself, no
+-- surrogate. Two things make that work and matter:
 --
---   * INDEX BUDGET. entity_id is 1024 utf8mb4 characters = 4096 bytes, past
---     InnoDB's 3072-byte index-key cap on its own, so the constraint is carried
---     on a fixed-width digest instead of on the three columns directly. The
---     columns keep the widths of their sources rather than being narrowed to
---     fit an index.
+--   * INDEX BUDGET. InnoDB caps an index key at 3072 bytes and utf8mb4 counts 4
+--     bytes per character, so the widths here are part of the constraint rather
+--     than free choices. entity_id is varchar(256) — NOT ac_bots' 1024, which
+--     would be 4096 bytes on its own and would have CREATE TABLE refused. The
+--     four columns come to 2384 bytes (64+20+256+256 chars), leaving headroom.
+--     ac_bot_startup_script hashes the same logical key into a surrogate
+--     instead; it did not have to, and this table does not repeat it.
 --   * TENANT ISOLATION. ac_bots is itself tenant-scoped, so a bot_id is unique
 --     only *within* a tenant, and legacy "default" bots carry documented
 --     residual cross-tenant collision on that identifier. Without the tenant
 --     here two such bots share one manifest row, and either tenant could
 --     overwrite the other's manifest — which, once apply lands (W4), decides
---     what is installed into the other tenant's container. The tenant is
---     carried alongside the digest rather than hashed into it so the isolation
---     boundary stays visible in the key itself.
+--     what is installed into the other tenant's container.
 --
 -- WHY EVERY READ IS A PLAIN LOOKUP WITH NO OWNERSHIP CHECK ON TOP: ac_bots
 -- carries UNIQUE KEY uk_bot_id_entity_id_env (bot_id, entity_id, env) with
@@ -47,9 +46,11 @@
 CREATE TABLE `ac_bot_config_manifest` (
   `id`             bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `env`            varchar(20)   NOT NULL COMMENT '环境标识: prod/pre/dev',
-  -- 1024, matching ac_bots.entity_id exactly. It is NOT in the uniqueness key
-  -- (see manifest_key below), so it is free to match its source.
-  `entity_id`      varchar(1024) NOT NULL COMMENT '实体ID（bot 的 entity_id）',
+  -- 256, not ac_bots' 1024: this column IS in the uniqueness key, so its width
+  -- is spent against the 3072-byte index budget. Real entity_ids are short user
+  -- ids (u_165137) and 256 is what the newer tables here give one, while still
+  -- leaving the key well inside the cap.
+  `entity_id`      varchar(256)  NOT NULL COMMENT '实体ID（bot 的 entity_id）',
   `bot_id`         varchar(256)  NOT NULL COMMENT 'Bot ID',
   -- mediumtext, not text: the document cap is 64 KiB (schema §5), which fits
   -- either, but a manifest is caller-authored content whose limit is a product
@@ -64,12 +65,11 @@ CREATE TABLE `ac_bot_config_manifest` (
   `schema_version` int(11)       NOT NULL COMMENT 'schema 版本（当前仅 1）',
   `modifier`       varchar(1024) NOT NULL COMMENT '审计：最后写入者',
   `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
-  `manifest_key`   char(64)      NOT NULL COMMENT '唯一键代理：sha256(env|entity_id|bot_id)',
   `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   PRIMARY KEY (`id`),
-  -- The only index, and every read uses it: the repository filters on
-  -- manifest_key rather than on the three columns it hashes, so there is no
-  -- second lookup key here to drift out of step with the ORM model.
-  UNIQUE KEY `uk_tenant_manifest_key` (`avernet_tenant`, `manifest_key`)
+  -- The only index, and every read uses it: the repository filters on env,
+  -- entity_id and bot_id, which are exactly this key's columns after the tenant
+  -- the guard supplies. No second lookup key to drift out of step with it.
+  UNIQUE KEY `uk_tenant_env_entity_bot` (`avernet_tenant`, `env`, `entity_id`, `bot_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot 配置清单';

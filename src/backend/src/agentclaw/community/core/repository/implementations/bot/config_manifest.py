@@ -8,7 +8,7 @@ single body runs unchanged on OceanBase (prod) and SQLite (local).
 Behavior:
 - ``upsert`` replaces an existing row's document rather than inserting a second
   one — a bot has at most one manifest, enforced by the UNIQUE constraint on
-  ``(avernet_tenant, manifest_key)``.
+  ``(avernet_tenant, env, entity_id, bot_id)``.
 - ``delete`` hard-deletes (no soft delete): "no row" and "no manifest" are the
   same state, so clearing must not leave a tombstone a later read could find.
 - Nothing here parses, normalises or trims the document. It is stored as the
@@ -25,9 +25,6 @@ from sqlalchemy.sql import func
 from agentclaw.community.core.bot_config_manifest.repository.models import (
     BotConfigManifestModel,
     BotConfigManifestRecord,
-)
-from agentclaw.community.core.repository.implementations.bot.config_manifest._key import (
-    manifest_key,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
@@ -51,6 +48,25 @@ class BotConfigManifestRepository(BotConfigManifestRepositoryProtocol):
         self._db = db
         self._Manifest = BotConfigManifestModel
 
+    def _match(self, *, env: str, entity_id: str, bot_id: str) -> list:
+        """The filter naming one bot's row.
+
+        The uniqueness key is ``(avernet_tenant, env, entity_id, bot_id)`` and
+        the tenant half is supplied by the guard registered on the model, so
+        every read here filters on the other three — which is exactly the
+        index's leading columns after the tenant.
+
+        One helper rather than the same three clauses written out at each call
+        site: get/upsert/delete must address rows *identically*, and a filter
+        that drifted in one of them would mean a write landing somewhere a read
+        cannot see it.
+        """
+        return [
+            self._Manifest.env == env,
+            self._Manifest.entity_id == entity_id,
+            self._Manifest.bot_id == bot_id,
+        ]
+
     def get(
         self, *, env: str, entity_id: str, bot_id: str
     ) -> Optional[BotConfigManifestRecord]:
@@ -58,10 +74,7 @@ class BotConfigManifestRepository(BotConfigManifestRepositoryProtocol):
         with self._db.orm_session() as db:
             row = (
                 db.query(self._Manifest)
-                .filter(
-                    self._Manifest.manifest_key
-                    == manifest_key(env=env, entity_id=entity_id, bot_id=bot_id)
-                )
+                .filter(*self._match(env=env, entity_id=entity_id, bot_id=bot_id))
                 .one_or_none()
             )
             return row.to_record() if row is not None else None
@@ -129,11 +142,10 @@ class BotConfigManifestRepository(BotConfigManifestRepositoryProtocol):
         modifier: str,
     ) -> BotConfigManifestRecord:
         """One read-then-write attempt. Raises ``IntegrityError`` if it races."""
-        key = manifest_key(env=env, entity_id=entity_id, bot_id=bot_id)
         with self._db.orm_session() as db:
             row = (
                 db.query(self._Manifest)
-                .filter(self._Manifest.manifest_key == key)
+                .filter(*self._match(env=env, entity_id=entity_id, bot_id=bot_id))
                 .one_or_none()
             )
             if row is None:
@@ -145,7 +157,6 @@ class BotConfigManifestRepository(BotConfigManifestRepositoryProtocol):
                     size_bytes=size_bytes,
                     schema_version=schema_version,
                     modifier=modifier,
-                    manifest_key=key,
                 )
                 db.add(row)
             else:
@@ -185,10 +196,7 @@ class BotConfigManifestRepository(BotConfigManifestRepositoryProtocol):
         with self._db.orm_session() as db:
             deleted = (
                 db.query(self._Manifest)
-                .filter(
-                    self._Manifest.manifest_key
-                    == manifest_key(env=env, entity_id=entity_id, bot_id=bot_id)
-                )
+                .filter(*self._match(env=env, entity_id=entity_id, bot_id=bot_id))
                 .delete(synchronize_session=False)
             )
             logger.info(

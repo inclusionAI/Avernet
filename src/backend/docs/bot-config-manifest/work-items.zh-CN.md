@@ -285,10 +285,16 @@ apply 回答「我们有没有下发」，容器和引擎回答「有没有生�
 `__OCB_RC`（启动命令包装器里的私有 shell 变量）和 `OCB_AGENT_LOG_PRICE_*`
 （后端配置）。它从来就不是一个面向用户的命名空间。
 
-改名为 **`BOT_ID`、`BOT_ENGINE_TYPE`、`BOT_ENV`、`BOT_TENANT`、`BOT_ARCH`**：
+改名为 **`BOT_ENGINE_TYPE`、`BOT_ENV`、`BOT_TENANT`、`BOT_ARCH`**：
 自解释（用户配置的就是一个 bot）、与容器环境里已有的 `BOT_DATA_DIR` 一致、而且
 仍然带前缀——这点重要，因为它们会作为环境变量注入 `script`，不带前缀的
 `${ENV}` 会跟脚本作者自己的变量撞车。
+
+`OCB_BOT_ID` 没有对应的 `BOT_ID`，是**去掉**而不是改名（W1 评审结论）。留下的
+四个都是**机群**属性，这正是一份文档能被多个 bot 复用的原因；bot 标识不是——
+它由 `generate_bot_id()` 在创建时生成（日期 + 8 位随机字符），调用方指定不了，
+在 git 仓库里准备内容的作者也无从得知。真按 bot 区分的内容，写在那个 bot 自己
+的 manifest 里、直接写字面量。
 
 ### 2.10 校验与鉴权迁到一个可复用的缝上
 
@@ -1108,12 +1114,14 @@ APPLYING                 manifest apply 进行中（fetch → 物化 → 下发�
 
 - 新模块 `core/bot_config_manifest/`，带一份含 Context Boundary 块的 `README.md`
   （`docs/arch/context-boundary-format.md` 要求）。
-- DDL 放在 `core/bot_config_manifest/sql/`。每个 bot 一行；唯一性在
-  `(avernet_tenant, manifest_key)`，其中
-  `manifest_key = sha256(env, entity_id, bot_id)`——与 `ac_bot_startup_script`
-  同样的 InnoDB 3072 字节索引预算、同样的租户隔离推理，那张表已经把两者都写明了。
+- DDL 放在 `core/bot_config_manifest/sql/`。每个 bot 一行；唯一性直接落在逻辑键
+  `(avernet_tenant, env, entity_id, bot_id)` 上，不用代理列。InnoDB 的 3072 字节
+  索引预算因此变成对列宽的约束：`entity_id` 取 `varchar(256)` 而不是 `ac_bots`
+  的 1024（后者单列就 4096 字节，直接超限），四列合计 2384 字节。
+  `ac_bot_startup_script` 把同样的逻辑键哈希成了代理列——它其实不必，这张表也
+  不照抄。租户隔离的推理与那张表相同。
 - 仓储契约 `core/repository/protocols/bot/config_manifest.py` 与实现
-  `core/repository/implementations/bot/config_manifest/`，协议声明为基类，缺成员
+  `core/repository/implementations/bot/config_manifest.py`，协议声明为基类，缺成员
   在构造时就失败。
 - 服务 API 契约 `api/bot_config_manifest_service.py`，注册进一致性 `_PAIRS`。
 - schema v1 解析 + 校验，覆盖：`schema_version`（未知 ⇒ 拒绝）；顶层 `sources`；
@@ -1170,8 +1178,8 @@ APPLYING                 manifest apply 进行中（fetch → 物化 → 下发�
   - 源上出现未知的 `mode` 取值：只接受 `strict` 与 `non_strict`，缺省
     `non_strict`（§3.2 的移动 ref 规则）。形状与 `on_fetch_failure` 的枚举检查
     一样，拒绝的理由也一样——拼错的 mode 否则会静默地落到缺省值，什么都没钉住；
-  - 未知的 `${...}` 占位符；只接受 `BOT_ID`、`BOT_ENGINE_TYPE`、`BOT_ENV`、
-    `BOT_TENANT`、`BOT_ARCH`。`BOT_ARCH` 今天解析为常量 `amd64`（§4, X3）：现在
+  - 未知的 `${...}` 占位符；只接受 `BOT_ENGINE_TYPE`、`BOT_ENV`、
+    `BOT_TENANT`、`BOT_ARCH`（没有 `BOT_ID`，见 §2.9）。`BOT_ARCH` 今天解析为常量 `amd64`（§4, X3）：现在
     就实现它而不是仅仅保留名字，意味着将来若机群变成混合的，改的只是值从哪来，
     不改 schema、用户什么都不用重写；
   - 绝对路径或含 `../` 的 `resources.path`；

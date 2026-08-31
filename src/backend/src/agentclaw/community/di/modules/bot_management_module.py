@@ -273,8 +273,8 @@ class BotManagementModule(Module):
             scope=singleton,
         )
         # BotConfigManifestRepository: single unified ORM impl, same shape as
-        # the startup script above — UNIQUE(avernet_tenant, manifest_key) on
-        # ac_bot_config_manifest, one manifest per bot at most.
+        # the startup script above — UNIQUE(avernet_tenant, env, entity_id,
+        # bot_id) on ac_bot_config_manifest, one manifest per bot at most.
         binder.bind(
             BotConfigManifestRepositoryProtocol,
             to=BotConfigManifestRepository,

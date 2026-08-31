@@ -3,10 +3,16 @@
 Registered on ``agentclaw.community.core.base.Base`` so the ``create_all``
 bootstrap emits the table — the side-effect import lives in ``core/schema.py``.
 
-Shaped after ``ac_bot_startup_script`` deliberately, down to the surrogate key:
-the two tables answer the same storage question (one optional caller-authored
-document per bot, tenant-scoped, keyed on a logical triple too wide to index).
-Where they differ the difference is in the SQL comments, not here.
+Shaped after ``ac_bot_startup_script`` deliberately: the two tables answer the
+same storage question — one optional caller-authored document per bot,
+tenant-scoped, keyed on ``(env, entity_id, bot_id)``.
+
+They differ on how that key is carried. ``ac_bot_startup_script`` hashes it into
+a surrogate column because it kept ``entity_id`` at ``ac_bots``' 1024 characters,
+which is 4096 utf8mb4 bytes and over InnoDB's 3072-byte index cap on its own.
+Here the key is the columns themselves and ``entity_id`` is narrowed to 256 to
+pay for it — see the column comments below for why 256, and the DDL for the
+tenancy reasoning both tables share.
 """
 from __future__ import annotations
 
@@ -67,11 +73,23 @@ class BotConfigManifestModel(Base):
         default=get_current_env,
         comment="环境标识: prod/pre/dev",
     )
-    # 1024, matching ``ac_bots.entity_id`` exactly. The uniqueness key is
-    # carried by ``manifest_key`` below, so this column is free to match its
-    # source instead of being narrowed to fit an index.
+    # 256, not ``ac_bots.entity_id``'s 1024. This column is *in* the uniqueness
+    # key, so its width is part of an index budget: InnoDB caps a key at 3072
+    # bytes and utf8mb4 counts 4 bytes per character. At 256 the four key columns
+    # come to 2384 bytes (tenant 256 + env 80 + entity_id 1024 + bot_id 1024),
+    # which fits with room to spare; at 1024 ``entity_id`` alone would be 4096
+    # and ``CREATE TABLE`` would be refused outright.
+    #
+    # 256 rather than the 64 that would also fit: an ``entity_id`` is a user id
+    # copied from the bot record, and the platform's own validation admits up to
+    # 1024 (``adapters/http/access/schemas.py``), so nothing enforces a short
+    # one. Real values are short (``u_165137``), and 256 matches what the newer
+    # tables here give a user id (``bot_collaborator.user_id``,
+    # ``access.user_id``, ``task.owner_user_id``). The headroom costs 688 bytes
+    # of a budget with 688 to spare and buys the guarantee that a legacy long
+    # entity_id cannot fail a manifest write.
     entity_id = Column(
-        String(1024), nullable=False, comment="实体ID（bot 的 entity_id）"
+        String(256), nullable=False, comment="实体ID（bot 的 entity_id）"
     )
     bot_id = Column(String(256), nullable=False, comment="Bot ID")
     # The caller's bytes, not a re-serialisation: ``script.body`` is a shell
@@ -112,13 +130,6 @@ class BotConfigManifestModel(Base):
     # value on ORM inserts comes from the before_insert guard registered below.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
-    #: Bounded surrogate for the uniqueness key: sha256 of (env, entity_id,
-    #: bot_id). ``entity_id`` alone is 4096 utf8mb4 bytes, past InnoDB's
-    #: 3072-byte index-key cap. Written by the repository, never by a caller.
-    manifest_key = Column(
-        String(64), nullable=False, comment="唯一键代理：sha256(env|entity_id|bot_id)"
-    )
-
     gmt_create = Column(
         DateTime, default=func.now(), nullable=False, comment="创建时间"
     )
@@ -130,11 +141,16 @@ class BotConfigManifestModel(Base):
         comment="修改时间",
     )
 
+    # The logical key, carried directly rather than through a digest. Every read
+    # filters on exactly these columns, so the table has one index and it is the
+    # one the lookups use.
     __table_args__ = (
         UniqueConstraint(
             "avernet_tenant",
-            "manifest_key",
-            name="uk_tenant_manifest_key",
+            "env",
+            "entity_id",
+            "bot_id",
+            name="uk_tenant_env_entity_bot",
         ),
     )
 

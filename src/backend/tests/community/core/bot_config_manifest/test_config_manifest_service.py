@@ -247,12 +247,15 @@ def test_the_uniqueness_key_fits_innodbs_index_limit():
     """A utf8mb4 index key is capped at 3072 bytes; over it MySQL refuses the
     CREATE TABLE outright and the table simply would not exist in production.
 
-    This is the whole reason the key is a sha256 surrogate rather than
-    ``(env, entity_id, bot_id)``: ``entity_id`` alone is 1024 characters, 4096
-    bytes, past the cap on its own. SQLite enforces neither the index limit nor
-    ``VARCHAR`` widths, so the entire local suite would pass against a table
-    that can never be created — hence an arithmetic check rather than a boot
-    test.
+    The key is the logical one — ``(avernet_tenant, env, entity_id, bot_id)`` —
+    so these widths are a budget rather than free choices. It fits because
+    ``entity_id`` is 256 characters here and not the 1024 it has on ``ac_bots``,
+    which alone would be 4096 bytes and over the cap.
+
+    SQLite enforces neither the index limit nor ``VARCHAR`` widths, so the
+    entire local suite would pass against a table that can never be created —
+    hence an arithmetic check rather than a boot test. It is what would catch
+    someone widening ``entity_id`` back to match its source.
     """
     from agentclaw.community.core.bot_config_manifest.repository.models import (
         BotConfigManifestModel,
@@ -271,6 +274,17 @@ def test_the_uniqueness_key_fits_innodbs_index_limit():
             f"{constraint.name} is {chars} chars = {chars * 4} utf8mb4 bytes, "
             f"over InnoDB's 3072-byte index-key limit"
         )
+
+    # The key names the logical identity directly. If a surrogate is ever
+    # reintroduced, the injectivity argument comes back with it (see the
+    # colliding-boundaries test in the repository suite), so the change should
+    # be deliberate rather than incidental.
+    assert {col.name for col in unique[0].columns} == {
+        "avernet_tenant",
+        "env",
+        "entity_id",
+        "bot_id",
+    }
 
 
 def test_the_document_column_can_hold_a_document_the_api_accepts():

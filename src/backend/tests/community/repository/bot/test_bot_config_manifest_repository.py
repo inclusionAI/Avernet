@@ -12,9 +12,6 @@ from sqlalchemy.orm import sessionmaker
 from agentclaw.community.core.repository.implementations.bot.config_manifest import (
     BotConfigManifestRepository,
 )
-from agentclaw.community.core.repository.implementations.bot.config_manifest._key import (
-    manifest_key,
-)
 # Imported for side effect: registers BotConfigManifestModel on Base.metadata
 # so create_all() builds the ac_bot_config_manifest table.
 from agentclaw.community.core.bot_config_manifest.repository.models import (  # noqa: F401
@@ -138,20 +135,16 @@ def test_upsert_round_trips_a_script_body_byte_for_byte(repo):
 
 # --- key --------------------------------------------------------------------
 
-def test_the_key_is_injective_across_component_boundaries():
-    """Length prefixing, not delimiter joining.
-
-    Under a separator-joined key these two logical keys collide, and one bot's
-    manifest lands on another bot's row. Nothing validates ``bot_id`` or
-    ``entity_id`` against control characters, so the separator's precondition is
-    not one anybody upholds.
-    """
-    a = manifest_key(env="dev", entity_id="a\x00b", bot_id="c")
-    b = manifest_key(env="dev", entity_id="a", bot_id="b\x00c")
-    assert a != b
-
-
 def test_rows_for_colliding_component_boundaries_stay_separate(repo):
+    """Two logical keys that a *joined* key would conflate must stay apart.
+
+    ``(entity_id="a\\0b", bot_id="c")`` and ``(entity_id="a", bot_id="b\\0c")``
+    collide under any single-separator encoding, and nothing validates
+    ``bot_id`` or ``entity_id`` against control characters. The key here is the
+    columns themselves, so the question cannot arise — which is the argument for
+    carrying the logical key directly instead of encoding it into one value.
+    This test is what keeps that true if the key is ever encoded again.
+    """
     _write(repo, entity_id="a\x00b", bot_id="c", document="schema_version: 1\n")
     _write(repo, entity_id="a", bot_id="b\x00c", document=_DOC)
     assert repo.get(env="dev", entity_id="a\x00b", bot_id="c").document == (
@@ -194,8 +187,8 @@ def test_upsert_retries_as_an_update_when_the_insert_loses_a_race(monkeypatch):
     """
     from sqlalchemy.exc import IntegrityError
 
-    from agentclaw.community.core.repository.implementations.bot.config_manifest import (
-        repository as mod,
+    from agentclaw.community.core.repository.implementations.bot import (
+        config_manifest as mod,
     )
 
     repo = mod.BotConfigManifestRepository.__new__(mod.BotConfigManifestRepository)
@@ -229,8 +222,8 @@ def test_upsert_does_not_retry_forever(monkeypatch):
     """A second conflict is not a race — it propagates rather than looping."""
     from sqlalchemy.exc import IntegrityError
 
-    from agentclaw.community.core.repository.implementations.bot.config_manifest import (
-        repository as mod,
+    from agentclaw.community.core.repository.implementations.bot import (
+        config_manifest as mod,
     )
 
     repo = mod.BotConfigManifestRepository.__new__(mod.BotConfigManifestRepository)

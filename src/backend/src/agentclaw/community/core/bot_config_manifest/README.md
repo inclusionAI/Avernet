@@ -71,14 +71,14 @@ once apply lands decides what is installed in the other tenant's container. The
 column, the guard registration and the tenant's place in the uniqueness key are
 one mechanism; none of the three works alone.
 
-The uniqueness key is budgeted against InnoDB's 3072-byte index limit, which is
-why it is keyed on `(avernet_tenant, manifest_key)` — a sha256 of
-`(env, entity_id, bot_id)` — rather than on those columns directly. `entity_id`
-alone is 1024 utf8mb4 characters, 4096 bytes, past the cap on its own. The
-digest is **length-prefixed, not delimiter-joined**: a separator only
-disambiguates while it cannot occur inside a component, and nothing validates
-`bot_id` or `entity_id` against control characters. See
-`core/repository/implementations/bot/config_manifest/_key.py`.
+The uniqueness key is `(avernet_tenant, env, entity_id, bot_id)` — the logical
+key itself, carried directly. It is budgeted against InnoDB's 3072-byte index
+limit, which is what fixes `entity_id` at `varchar(256)` rather than the
+`varchar(1024)` it has on `ac_bots`: at 1024 that one column would be 4096
+utf8mb4 bytes and past the cap on its own, while at 256 the four columns come to
+2384 bytes. So the width here is a constraint, not a copied default — see the
+column comment in `repository/models.py` for why 256 and not the 64 that would
+also fit.
 
 ## Where the HTTP seam is
 
