@@ -137,6 +137,19 @@ class TestDeadlineEngineAssembly:
         task = container.tasks().deadline_renewal_task()
         assert task._config.post_extend_consistency_tol_minutes == 5
 
+    def test_post_extend_tol_zero_preserved(self):
+        """An explicit zero tolerance is a legal operator choice (strict
+        watermark) and must not be coerced back to the 5-minute default by
+        a falsy check (silent-knob guard)."""
+        container = _container_with("deadline")
+        container.config.from_dict(
+            {"renewal_scheduler": {"post_extend_consistency_tol_minutes": 0}}
+        )
+        set_container(container)
+
+        task = container.tasks().deadline_renewal_task()
+        assert task._config.post_extend_consistency_tol_minutes == 0
+
     def test_device_service_overridden_with_schedule_aware_wrapper(self):
         """services.device_service resolves to the schedule-aware wrapper."""
         container = _container_with("deadline")
