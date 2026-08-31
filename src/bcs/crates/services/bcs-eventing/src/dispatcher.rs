@@ -109,6 +109,8 @@ impl EventDispatcher {
             .await
             .map_err(|error| {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     worker_id,
                     env = %self.env,
                     error = %error,
@@ -117,13 +119,22 @@ impl EventDispatcher {
                 EventDispatcherError::Repository
             })?;
         let count = deliveries.len();
-        debug!(worker_id, env = %self.env, count, "claimed webhook deliveries");
+        debug!(
+            target: "bcs_event_webhook",
+            component = "delivery",
+            worker_id,
+            env = %self.env,
+            count,
+            "claimed webhook deliveries"
+        );
         stream::iter(deliveries)
             .for_each_concurrent(self.worker_concurrency, |delivery| async move {
                 let delivery_id = delivery.delivery_id.clone();
                 let attempt_no = delivery.attempt_count;
                 if let Err(error) = self.dispatch(delivery).await {
                     warn!(
+                        target: "bcs_event_webhook",
+                        component = "delivery",
                         delivery_id,
                         attempt_no,
                         error = %error,
@@ -173,6 +184,8 @@ impl EventDispatcher {
                         .await
                         .map_err(|error| {
                             warn!(
+                                target: "bcs_event_webhook",
+                                component = "delivery",
                                 delivery_id,
                                 attempt_no,
                                 error = %error,
@@ -202,6 +215,8 @@ impl EventDispatcher {
             Ok(Some(revision)) => revision,
             Ok(None) => {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     delivery_id = %delivery_record.delivery_id,
                     attempt_no = delivery_record.attempt_count,
                     subscription_id = %delivery_record.subscription_id,
@@ -220,6 +235,8 @@ impl EventDispatcher {
             }
             Err(error) => {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     delivery_id = %delivery_record.delivery_id,
                     attempt_no = delivery_record.attempt_count,
                     subscription_id = %delivery_record.subscription_id,
@@ -241,6 +258,8 @@ impl EventDispatcher {
             Ok(host_key) => host_key,
             Err(error) => {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     delivery_id = %delivery_record.delivery_id,
                     attempt_no = delivery_record.attempt_count,
                     subscription_id = %delivery_record.subscription_id,
@@ -269,6 +288,8 @@ impl EventDispatcher {
             Ok(permit) => permit,
             Err(error) => {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     delivery_id = %delivery_record.delivery_id,
                     attempt_no = delivery_record.attempt_count,
                     error = %error,
@@ -299,6 +320,8 @@ impl EventDispatcher {
             Ok(response) => response,
             Err(error) => {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     delivery_id = %delivery_record.delivery_id,
                     attempt_no,
                     subscription_id = %delivery_record.subscription_id,
@@ -321,6 +344,8 @@ impl EventDispatcher {
                 .await
             {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     delivery_id = %delivery_record.delivery_id,
                     attempt_no,
                     subscription_id = %delivery_record.subscription_id,
@@ -444,6 +469,8 @@ impl EventDispatcher {
             .await
             .map_err(|error| {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     delivery_id = %delivery.delivery_id,
                     attempt_no,
                     next_status = ?next_status,
@@ -457,6 +484,8 @@ impl EventDispatcher {
             })?;
         if next_status == EventDeliveryStatus::Succeeded {
             debug!(
+                target: "bcs_event_webhook",
+                component = "delivery",
                 delivery_id = %delivery.delivery_id,
                 attempt_no,
                 http_status = ?response.http_status,
@@ -464,6 +493,8 @@ impl EventDispatcher {
             );
         } else {
             warn!(
+                target: "bcs_event_webhook",
+                component = "delivery",
                 delivery_id = %delivery.delivery_id,
                 attempt_no,
                 next_status = ?next_status,
@@ -486,6 +517,8 @@ impl EventDispatcher {
             .await
             .map_err(|error| {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     subscription_id,
                     error = %error,
                     "failed to load webhook subscription for disable"
@@ -539,6 +572,8 @@ impl EventDispatcher {
             .await
             .map_err(|error| {
                 warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
                     subscription_id,
                     error = %error,
                     "failed to persist disabled webhook subscription"
