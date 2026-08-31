@@ -235,15 +235,25 @@ Recorded because a plan that quietly absorbs its own surprises teaches nothing.
    homes, so re-exporting either from `__init__` turns importing the leaf into a
    cycle.
 
-5. **One test file was edited**, against Task 9's "zero test files edited":
-   `tests/community/architecture/test_module_boundaries.py` gained
-   `agentclaw.community.core.bot_config_surface` in its
-   `BOUNDARY_SIGNIFICANT_MODULES` inventory. That criterion is about behaviour
-   tests being the inertness proof — registering a new module for architectural
-   governance is the opposite of weakening a test, and leaving it out would have
-   made the new `README.md` decorative. `core/mcp/README.md` and
-   `core/skill_center/README.md` gained the new dependency for the same reason.
-   No behaviour test was touched.
+5. **Three test files were edited, not zero** as Task 9 assumed, and the
+   assumption was simply wrong: this repository governs its architecture through
+   test-resident inventories, so adding a core module *requires* registering it
+   in each. All three are registrations; none weakens a check.
+
+   | File | Why |
+   | --- | --- |
+   | `architecture/test_module_boundaries.py` | `BOUNDARY_SIGNIFICANT_MODULES` — without it the new `README.md` would be decorative, governed by nothing |
+   | `framework/flow_coverage.py` | `_STRUCTURAL_NON_BUSINESS` — every core module must be flow-covered or exempt, and an index is neither; see note 8 |
+   | `architecture/test_http_adapter_layer_is_http_only.py` | `_CORE_SERVICE_NAMES_OK` — the guard's own failure message directs you here for a pure helper, and `is_readonly` sits there already for the same reason |
+
+   Only the first was found before the first push. The other two surfaced in the
+   full suite afterwards, which is the cost of pushing on partial validation.
+   **No behaviour test was modified**, which is what the criterion was really
+   protecting: the endpoint suites are the inertness proof and they are
+   untouched.
+
+   `core/mcp/README.md` and `core/skill_center/README.md` gained the new
+   dependency too — source files, not tests.
 
 6. **Two now-unused imports were removed** from the resources and skills
    routers (`InvalidResourcePathError`, `LocalSkillNotFoundError`) — the moved
@@ -255,3 +265,26 @@ Recorded because a plan that quietly absorbs its own surprises teaches nothing.
    `devices → service_bot → task_queue`. Verified identical on an unmodified
    tree before touching anything; the suite imports in an order that avoids it.
    Not this feature's to fix.
+
+
+8. **`bot_config_surface` is structural, not exempt.** `flow_coverage.py` draws
+   a distinction worth respecting: `SINGLEBOX_E2E_EXEMPT` means "not covered
+   yet", and every entry names what would unblock a flow, while
+   `_STRUCTURAL_NON_BUSINESS` means "IS covered, just not nameable as a `covers`
+   entry". An index whose every object is defined elsewhere and exercised by the
+   resources, mcp and skill-centre flows is the second. Filing it as exempt
+   would have claimed it uncovered and required a "drain when…" reason nothing
+   could ever satisfy — no flow can cover an index directly.
+
+9. **The full suite's two remaining failures are pre-existing.** Verified rather
+   than assumed: `test_bot_build_service_skill_artifact.py` fails those same two
+   parametrisations on a worktree at the merge base `b8754443`, with none of
+   this change present. Final local result: **15813 passed**, 2 pre-existing
+   failures, 60 skipped.
+
+10. **A "green" report was wrong once, and the cause is worth keeping.** The
+    first full run was reported as passing off a task notification's `exit code
+    0` — which was the `tail` pipeline's status, not pytest's. The run had
+    actually failed, and because it used `-x` it had stopped at the first of two
+    failures and hidden the second. Read the `N passed, M failed` line; never a
+    piped exit code.
