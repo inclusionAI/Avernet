@@ -45,7 +45,6 @@ from agentclaw.community.adapters.http.task.schemas import (
     BbsAttachDTO,
     BbsClaimDTO,
     BbsResultDTO,
-    TaskCallbackDataDTO,
     TaskCallbackRequest,
     TaskExecutionGraphDTO,
     TaskInfoRecordDTO,
@@ -54,7 +53,6 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
     acceptance_result_from_dto,
-    callback_from_dto,
     graph_to_dto,
     op_result_to_dto,
     TaskSettingRequestDTO,
@@ -74,7 +72,6 @@ from agentclaw.community.adapters.http.task.translator import (
     is_claw_mind_payload,
     is_common_task_payload,
     parse_manager_worker_bcn,
-    translate,
     translate_bcn,
     translate_claw_mind,
     translate_common_task_callback
@@ -901,9 +898,17 @@ async def _dispatch(
             method=request.method,
             path=request.url.path,
         )
-        _tc = translate_claw_mind(_raw_obj, disposition)
-        enricher.enrich_claw_mind(_tc.data, _raw_obj)
-        await svc.callback.ingest(_tc.data)
+        # 解析(translate+构图)+落库任一步出错(如内嵌 JSON 非法)→ 打 error 日志后 ack 返回,
+        # 不落库(ingest 在 enrich 之后;enrich 抛错即未达 ingest),避免脏 upsert 覆盖已有 task_callback。
+        try:
+            _tc = translate_claw_mind(_raw_obj, disposition)
+            enricher.enrich_claw_mind(_tc.data, _raw_obj)
+            await svc.callback.ingest(_tc.data)
+        except Exception as exc:  # noqa: BLE001 解析失败不阻断回投应答,但绝不污染已有记录
+            logger.error(
+                "[task_callback] claw_mind 回调解析失败,跳过落库避免污染 session_id=%s: %s",
+                _sid, exc, exc_info=True,
+            )
         return envelope({"ok": True}, request)
     if is_bcn_event_payload(_raw_obj):
         logger.info("[task_callback] bcn event received session_id=%s", _sid)
