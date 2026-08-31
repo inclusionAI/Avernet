@@ -16,4 +16,5 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GATEWAY_AUTH_MOCK", raising=False)
     monkeypatch.delenv("SOFAPY_CONFIG_PATH", raising=False)
     monkeypatch.delenv("SERVER_ENV", raising=False)
+    monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
     monkeypatch.delenv("OTEL_TRACES_EXPORTER", raising=False)

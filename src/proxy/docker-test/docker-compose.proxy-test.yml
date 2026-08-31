@@ -3,6 +3,8 @@ services:
     image: proxy:local
     environment:
       SERVER_ENV: prod
+      # COMMUNITY_DEPLOY selects the application-community.yaml overlay.
+      COMMUNITY_DEPLOY: community
       SANDBOXPROXY_PORT: "${SANDBOXPROXY_PORT:-8888}"
       # Test-only JWT secret (community reads it from config/env overlay).
       SANDBOXPROXY_JWT_SECRET: "${SANDBOXPROXY_JWT_SECRET:-proxy-test-secret-not-for-prod}"

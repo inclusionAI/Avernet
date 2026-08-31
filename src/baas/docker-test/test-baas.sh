@@ -3,9 +3,11 @@
 #
 # Flow:
 #   1. Build baas:local from docker/services/baas.dockerfile
-#   2. Start MariaDB + Redis (healthchecked) and baas (SERVER_ENV=prod)
+#   2. Start MariaDB + Redis (healthchecked) and baas (COMMUNITY_DEPLOY=community,
+#      which loads the application-community.yaml overlay; SERVER_ENV=prod stays
+#      set for env detection)
 #      with custom DATABASE_URL / REDIS_URL plus the ACK placeholders that the
-#      prod overlay declares under strict env expansion
+#      community overlay declares under strict env expansion
 #   3. Wait for the baas /health endpoint and report success / failure
 #
 # Usage:
@@ -31,9 +33,10 @@ PROJECT="baastest"
 export DATABASE_URL="${DATABASE_URL:-mysql+aiomysql://baas:baaspass@mariadb:3306/baas_test?charset=utf8mb4}"
 export REDIS_URL="${REDIS_URL:-redis://redis:6379/0}"
 export BAAS_PORT="${BAAS_PORT:-8888}"
-# prod overlay declares these under strict env expansion; inject harmless
-# test values so config loading succeeds. The aliyun_ack sandbox is a lazy
-# factory and is not contacted during boot, after /health this is enough.
+# community overlay declares these under strict env expansion; inject
+# harmless test values so config loading succeeds. The aliyun_ack sandbox is
+# a lazy factory and is not contacted during boot, after /health this is
+# enough.
 export ACK_SERVER="${ACK_SERVER:-https://ack-test.example.com}"
 export ACK_TOKEN="${ACK_TOKEN:-ack-test-token}"
 export DEFAULT_IMAGE="${DEFAULT_IMAGE:-openclaw:latest}"

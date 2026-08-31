@@ -1,12 +1,15 @@
-# Gateway production config — MariaDB storage + Redis cache via env placeholders.
-# Loaded as an overlay on application.yaml when SERVER_ENV=prod.
+# Gateway community-deployment config — MariaDB storage + Redis cache via env
+# placeholders.
+# Loaded as an overlay on application.yaml when COMMUNITY_DEPLOY=community
+# (COMMUNITY_DEPLOY wins over SERVER_ENV for overlay selection; SERVER_ENV may
+# still be set for env-dependent behaviour, e.g. principal signing).
 #
 # Env placeholders (${NAME}) are expanded by the config loader from the process
 # environment (see gateway.community.config._config_loader.ConfigLoader). The
 # values must be supplied by the deployment (the docker entrypoint / scheduler):
-#   DATABASE_URL  — MariaDB connection URL (mysql+aiomysql://...)
-#   REDIS_URL     — Redis cache URL (redis://...)
-#   SERVER_ENV    — must be "prod" to select this overlay
+#   DATABASE_URL     — MariaDB connection URL (mysql+aiomysql://...)
+#   REDIS_URL        — Redis cache URL (redis://...)
+#   COMMUNITY_DEPLOY — must be "community" to select this overlay
 #
 # Upstream endpoints keep a scheme-full fallback (:-...), so an unset env var
 # still yields a valid URL: the gateway refuses to boot when a server base_url

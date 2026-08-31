@@ -1,3 +1,10 @@
+# BaaS 社区部署配置 — 通过 env 占位符注入 MariaDB / Redis / 沙箱镜像等外部依赖。
+# 当 COMMUNITY_DEPLOY=community 时作为 application.yaml 的 overlay 加载
+# （COMMUNITY_DEPLOY 优先于 SERVER_ENV 决定 overlay 文件名；SERVER_ENV 可继续
+# 用于环境判定，如分布式锁后缀、get_current_env 等）。占位符 ${NAME} 由
+# config loader 在加载阶段从进程环境展开，须由部署方（docker entrypoint /
+# 调度器）提供。
+
 # 基础配置
 app_name: "secbaas"
 workers: 1

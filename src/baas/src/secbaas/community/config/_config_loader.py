@@ -18,6 +18,11 @@ class ConfigLoader:
     DEFAULT_CONFIG_DIR = "configs"
     OVERLAY_DIR = "overlays"
     ENV_SERVER_ENV = "SERVER_ENV"
+    # Community (open-source) deployments set COMMUNITY_DEPLOY; its value
+    # names the application-<value>.yaml overlay and takes precedence over
+    # SERVER_ENV, so a community stack and an internal SERVER_ENV deployment
+    # can coexist without fighting over one overlay naming scheme.
+    ENV_COMMUNITY_DEPLOY = "COMMUNITY_DEPLOY"
 
     # Placeholder syntax: ${NAME} or ${NAME:-default} (shell / k8s / envsubst
     # style). ${NAME:-} yields an empty string; a placeholder that references an
@@ -42,12 +47,26 @@ class ConfigLoader:
             return yaml.safe_load(f) or {}
 
     @classmethod
+    def _resolve_env_overlay_name(cls) -> str:
+        """Return the suffix of the ``application-<suffix>.yaml`` env overlay.
+
+        ``COMMUNITY_DEPLOY`` wins when set: its value names the overlay for a
+        community deployment (e.g. ``COMMUNITY_DEPLOY=community`` loads
+        ``application-community.yaml``) regardless of ``SERVER_ENV``. Otherwise
+        the legacy ``SERVER_ENV`` behaviour applies.
+        """
+        community_deploy = os.getenv(cls.ENV_COMMUNITY_DEPLOY, "")
+        if community_deploy:
+            return community_deploy
+        return os.getenv(cls.ENV_SERVER_ENV, "")
+
+    @classmethod
     def _load_base_from_yaml(cls, config_dir: str) -> dict:
         base_path = os.path.join(config_dir, "application.yaml")
         base = cls._load_yaml_file(base_path)
-        server_env = os.getenv(cls.ENV_SERVER_ENV, "")
-        if server_env:
-            env_path = os.path.join(config_dir, f"application-{server_env}.yaml")
+        env_name = cls._resolve_env_overlay_name()
+        if env_name:
+            env_path = os.path.join(config_dir, f"application-{env_name}.yaml")
             env_data = cls._load_yaml_file(env_path)
             if env_data:
                 base = Config.merge_configs(base, env_data)

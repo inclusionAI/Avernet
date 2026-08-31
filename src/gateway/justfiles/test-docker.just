@@ -1,9 +1,10 @@
-# ── Docker image build + prod-mode integration test ─────────────────────
+# ── Docker image build + community-overlay integration test ─────────────
 #
 # Builds the gateway image (via docker/build-image.sh) and brings up a
 # MariaDB + Redis + gateway stack (docker-compose.gateway-test.yml) to verify
-# the image boots under SERVER_ENV=prod and answers /health. The compose file
-# and its orchestration script live under src/gateway/docker-test/.
+# the image boots with the application-community.yaml overlay
+# (COMMUNITY_DEPLOY=community, SERVER_ENV=prod) and answers /health. The
+# compose file and its orchestration script live under src/gateway/docker-test/.
 
 docker-test-script := 'docker-test/test-gateway.sh'
 
