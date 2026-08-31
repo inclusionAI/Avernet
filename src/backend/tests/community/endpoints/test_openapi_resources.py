@@ -141,6 +141,10 @@ def _seed_happy_services(world) -> None:
     async def read_file(_self, **_kwargs):
         return b"hello world"
 
+    async def iter_directory_files(_self, **_kwargs):
+        # The download-dir walk: one file, exactly the service's contract.
+        yield ("a.txt", b"hello world")
+
     async def exists(_self, *, path, **_kwargs) -> bool:
         # ``upload`` must find its target free (fresh branch, no 409) while
         # ``delete`` must find its target present (or it 404s).
@@ -166,6 +170,7 @@ def _seed_happy_services(world) -> None:
         {
             "list_dir": list_dir,
             "read_file": read_file,
+            "iter_directory_files": iter_directory_files,
             "exists": exists,
             "upload_file": upload_file,
             "create_directory": create_directory,
@@ -217,6 +222,19 @@ _HAPPY_CASES = (
             headers=_HEADERS,
         ),
         200,
+        None,
+    ),
+    (
+        "GET",
+        f"{_BASE_PATH}/download-dir",
+        CaseInput(
+            path_params=_PATH_PARAMS,
+            query_params=_query(path="docs"),
+            headers=_HEADERS,
+        ),
+        200,
+        # Raw zip bytes, not an envelope — same ``None`` projection as
+        # ``download``.
         None,
     ),
     (

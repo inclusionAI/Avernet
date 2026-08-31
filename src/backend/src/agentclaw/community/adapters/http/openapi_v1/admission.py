@@ -219,6 +219,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (
         "GET",
+        "/openapi/v1/bots/{bot_id}/resources/download-dir",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "GET",
         "/openapi/v1/bots/{bot_id}/resources/preview",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (

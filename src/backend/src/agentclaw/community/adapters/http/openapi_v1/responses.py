@@ -197,6 +197,7 @@ from agentclaw.community.core.mcp.errors import (
     McpSyncFailedError,
 )
 from agentclaw.community.core.resources.service import (
+    DirectoryTooLargeError,
     DuplicateResourceError,
     FileTooLargeError,
     InvalidResourcePathError,
@@ -614,6 +615,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
+    # Directory download (download-dir): one message for all three caps
+    # (per-file / file-count / total bytes) — the numbers live with the
+    # service that enforces them, and a fixed string keeps them from drifting
+    # into the public contract twice.
+    DirectoryTooLargeError: (413, "Directory too large to download"),
     # Startup script (issue #926): the body is refused at write time so a
     # caller learns the limit instead of hitting it inside a container. The
     # limit is interpolated from the constant rather than typed as a literal so
