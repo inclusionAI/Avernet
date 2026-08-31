@@ -116,6 +116,8 @@ def test_manager_worker_cloud_events_merge_into_single_session_row(harness):
     assert r.status_code == 200, r.text
     rec = fake.get_latest_by_session(sid)
     assert rec is not None
+    # 回调行 status 映射到 Status 枚举:最后一条事件 session.completed(终态)→ DONE。
+    assert rec.status == "DONE"
     g = rec.execution_graph
     assert g["group_status"] == "active"
     assert g["session_status"] == "completed"
@@ -136,6 +138,38 @@ def test_manager_worker_state_machine_event_not_diverted(harness):
                json=_ce("state_machine.run.created", {"group_id": "g1", "session_id": "s-sm", "run_id": "r1"},
                         {"run_id": "r1"}))
     assert r.status_code == 200, r.text
-    # state_machine 事件经现有 translate_bcn → ingest 落 fake(workflow_source=bcn),未被分流到 manager_worker
-    assert any(rec.status == "state_machine.run.created" for rec in fake.upserts)
+    # state_machine 事件经现有 translate_bcn → ingest 落 fake(workflow_source=bcn),未被分流到 manager_worker;
+    # req2:run.created 映射为 Status.RUNNING(非 run.completed)
+    assert any(rec.status == "RUNNING" for rec in fake.upserts)
     assert all(not getattr(rec, "invoker", "") == "bcn_manager_worker" for rec in fake.upserts)
+
+
+@pytest.mark.parametrize(
+    ("event_type", "expected_status"),
+    [
+        ("group.created", "RUNNING"),
+        ("session.created", "RUNNING"),
+        ("task.assigned", "RUNNING"),
+        ("task.completed", "DONE"),
+        ("session.completed", "DONE"),
+    ],
+)
+def test_manager_worker_callback_status_maps_to_status_enum(harness, event_type, expected_status):
+    """回调行 ``task_callback.status`` 按 manager_worker 事件映射到 Status 枚举(对齐 state_machine
+    ``_bcn_state_machine_status`` 的粗粒度审计投影):终态事件 ``task.completed`` / ``session.completed``
+    → ``DONE``,其余 ``group.created`` / ``session.created`` / ``task.assigned`` → ``RUNNING``。
+    单事件独占一个 session,取该 session 最新回调行断言其 status。"""
+    c, _inj, fake = harness
+    sid = f"sess-mw-status-{event_type}"
+    scope = {"group_id": "g1", "session_id": sid}
+    if event_type.startswith("task."):
+        scope["task_id"] = "t1"
+    data = {"reason": "completed"} if event_type == "session.completed" else {}
+    r = c.post(
+        "/api/v1/collaboration/tasks/callback/report",
+        json=_ce(event_type, scope, data),
+    )
+    assert r.status_code == 200, r.text
+    rec = fake.get_latest_by_session(sid)
+    assert rec is not None
+    assert rec.status == expected_status

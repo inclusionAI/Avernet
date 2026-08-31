@@ -131,6 +131,13 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         sig = hmac.new(self._t.secret.encode(), f"{ts}{method}{path}".encode(), hashlib.sha256).hexdigest()
         return {"X-ECB-Token": self._t.token, "X-ECB-Timestamp": ts, "X-ECB-Signature": sig}
 
+    def task_callback_url(self) -> str:
+        """任务回投目标 origin(scheme://netloc):BCS 把 state_machine.* 等事件 POST 回此 origin +
+        ``_BCN_EVENT_CALLBACK_PATH``。值由 token provider 经 corp 注入(``CorpBcsTokenProvider.task_callback_url``,
+        env-aware ``bcs_client.task_callback_url[_pre]``);社区/singlebox 默认空 → TaskExecutor 兜底
+        ``api_base_url``(economy_governance 派生)。"""
+        return str(getattr(self._t, "task_callback_url", "") or "")
+
     async def _req(self, method: str, path: str, *, json: dict | None = None,
                    idempotency_key: str | None = None, extra_headers: dict | None = None) -> httpx.Response:
         ts = str(int(time.time()))
@@ -192,11 +199,26 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         extra_headers: dict[str, str] | None = None
         if req.caller_bot_token:
             extra_headers = {"Authorization": f"Bearer {req.caller_bot_token}"}
+            if len(req.caller_bot_token) > 4:
+                logger.info(f"create_group extra_headers with bot_token {req.driver_bot}={req.caller_bot_token[0:4]}")
+            else:
+                logger.error(f"create_group extra_headers with wrong bot_token {req.driver_bot}={req.caller_bot_token}")
+
+        logger.info("[task][bcs_http_adapter] create_group body=%s", body)
+        logger.info("[task][bcs_http_adapter] create_group event_subscriptions=%s", body.get("event_subscriptions"))
         r = await self._req("POST", "/groups", json=body, idempotency_key=uuid.uuid4().hex,
                            extra_headers=extra_headers)
         data = r.json()
+        # 实 BCS 创建群响应键名为 ``id``(``group_detail_to_create_json`` groups.rs:2093 与 v1 legacy
+        # v1_group_detail_to_legacy_create_json groups.rs:782 均 ``"id": result.group_id``),
+        # 非早期假设的 ``group_id``。与 ``singlebox_bcs_adapter.create_group`` 对齐取 ``(group_id or id)``,
+        # 缺则带 body 抛 KeyError 便于定位(此前 ``data["group_id"]`` 对预发 BCS 直接 KeyError)。
+        group_id = data.get("group_id") or data.get("id")
+        if not group_id:
+            logger.error(f"create_group 响应缺群 id(group_id/id 均无): {data}")
+            raise KeyError(f"create_group 响应缺群 id(group_id/id 均无): {data}")
         return BcsCreateGroupResult(
-            group_id=data["group_id"], session_id=data.get("session_id"),
+            group_id=group_id, session_id=data.get("session_id"),
             run_id=data.get("run_id"),
             definition_ref=data.get("definition_ref"),
         )

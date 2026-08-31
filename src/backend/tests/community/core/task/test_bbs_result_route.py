@@ -121,7 +121,7 @@ def _result_body(task_id: str, node_id: str, bot_id: str) -> dict:
         "task_id": task_id,
         "node_id": node_id,
         "bot_id": bot_id,
-        "acceptance_result": {"verdict": "PASS", "acceptances_metric": [], "gaps": []},
+        "acceptance_result": {"verdict": "DONE", "acceptances_metric": [], "gaps": []},
     }
 
 

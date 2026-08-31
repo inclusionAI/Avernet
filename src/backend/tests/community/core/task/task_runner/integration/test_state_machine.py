@@ -187,17 +187,15 @@ def test_get_group_session_reads_latest_running_session_id_not_create():
 
 
 def test_form_coop_group_does_not_attach_event_subscriptions():
-    """event_subscriptions 触发 BCS require_human(拒 Bot/HMAC-only → 401/403),故不再内联挂 BCN webhook;
-    建群走 no-sub 分支(HMAC/Bearer 匿名或 driver-bot caller),终结态收敛交 result poller。
-    即便 extend_props 带 api_base_url,也不得挂 event_subscriptions。"""
+    """BCN event_subscriptions 仅 manager_worker/state_machine 模态(and _sink_base)内联挂;chat 群不挂,
+    终结态收敛交 result poller。本测验 chat 群即便带 api_base_url 也不挂订阅。"""
     bcs = _Bcs()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
                        poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
     _run(exe.form_coop_group(GroupFormation(
-        bot_ids=["drv"], collab_mode="state_machine",
+        bot_ids=["drv"], collab_mode="chat",
         members_info=[{"bot_id": "drv", "role": "manager"}],
-        extend_props={"collaboration_definition_yaml": "kind: collab",
-                      "api_base_url": "https://cb.example.com/"},
+        extend_props={"api_base_url": "https://cb.example.com/"},
     )))
     assert not bcs.created_req.event_subscriptions
 
@@ -223,6 +221,42 @@ def test_form_coop_group_compares_referenced_bots_by_pure_bot_id():
     assert req.participant_bindings["editor"]["bot_ids"] == ["e1:35983:double-owner"]
 
 
+def test_form_coop_group_adds_binding_targets_to_participants():
+    """Every participant_binding target must also be listed in participants."""
+    bcs = _Bcs()
+    exe = TaskExecutor(
+        bot=None,
+        bcs=bcs,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=_Poller(),
+        identity_resolver=_DoubleBcsBotIdentityResolver(),
+    )
+
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["default:146836", "default:153364"],
+        collab_mode="state_machine",
+        extend_props={
+            "collaboration_definition_yaml": "kind: collab",
+            "participant_bindings": {
+                "writer": ["default:153364"],
+                "editor": ["default:146836"],
+            },
+        },
+    )))
+
+    req = bcs.created_req
+    assert req is not None
+    participant_ids = {p["bot_uuid"] for p in req.participants}
+    assert participant_ids == {
+        "default:146836:double-owner",
+        "default:153364:double-owner",
+    }
+    assert req.participant_bindings["editor"]["bot_ids"] == ["default:146836:double-owner"]
+    assert req.participant_bindings["writer"]["bot_ids"] == ["default:153364:double-owner"]
+
+
 def test_form_coop_group_manager_worker_attaches_event_subscriptions():
     """manager_worker 群内联挂 §4 event_subscriptions(BCS 主动推回 /callback/report,激活既有
     apply_manager_worker_event → execution_graph audit 快照 + converge_by_session)。鉴权用既有
@@ -242,8 +276,8 @@ def test_form_coop_group_manager_worker_attaches_event_subscriptions():
     assert s["name"] == "avernet-manager-worker"
     assert s["payload"] == {"mode": "full"}
     assert set(s["event_filters"]) == {
-        "group.created", "session.created",
-        "task.assigned", "task.completed", "session.completed",   # §4
+        "session.created",
+        "task.assigned", "task.completed", "session.completed",   # §4(group.created 不再订阅)
     }
     assert s["sink"]["type"] == "webhook"
     assert s["sink"]["url"] == "https://api.example.com/api/v1/collaboration/tasks/callback/report"
@@ -328,12 +362,13 @@ def test_form_coop_group_opening_message_params_is_object():
         members_info=[{"bot_id": "drv", "role": "manager"}],
         extend_props={"collaboration_definition_yaml": "kind: collab",
                       "task_id": "sm_task_1",
-                      "api_base_url": "https://cb.example.com/"},
+                      "api_base_url": "https://cb.example.com/",
+                      "panel_component_name": "customPanel.CustomRunView"},
     )))
     om = bcs.created_req.opening_message
     assert om is not None, "state_machine + task_id 应构造 opening_message"
     assert om["type"] == "panel"
-    assert om["component"] == "partnerPanel.CollaborationRunView"
+    assert om["component"] == "customPanel.CustomRunView"
     # 契约核心:params 必须是 JSON object(dict),不是字符串(否则真实 BCS 422)
     assert isinstance(om["params"], dict), f"opening_message.params 必须是 object,实际 {type(om['params'])!r}"
     assert om["params"]["taskId"] == "sm_task_1"

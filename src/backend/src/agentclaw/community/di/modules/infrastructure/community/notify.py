@@ -6,11 +6,18 @@ community/singlebox profile. 当钉钉凭证就绪（``TASK_DISCOVERY_DINGTALK_*
 绑定 ``DingTalkNotifySender``（装饰 ``CommunityNotifySender``：先日志再投递
 钉钉交互卡片，两者同时进行）。Corp deployments bind ``DingTalkNotifySender``
 via ``CorpNotifyModule`` instead.
+
+同时 alias ``NotifyMessagesProvider`` → 同一实例，供 task_discovery 域注入
+(``DiscoveryService`` / ``TaskDiscoveryLifecycle``)。
+``NotifySenderPlugin`` 保持绑定，供 governance 域注入。
 """
 from __future__ import annotations
 
 from injector import Module, provider, singleton
 
+from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
+    NotifyMessagesProvider,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 
@@ -26,6 +33,7 @@ class CommunityNotifyModule(Module):
     @singleton
     @provider
     def _notify_sender(self) -> NotifySenderPlugin:
+        logger.debug("[task_discovery] → CommunityNotifyModule._notify_sender()")
         from agentclaw.community.di.modules.config_module import _block
         from agentclaw.community.plugins.community.notify_sender import (
             CommunityNotifySender,
@@ -34,29 +42,19 @@ class CommunityNotifyModule(Module):
         )
 
         # 从 YAML ``user_config.task_discovery_dingtalk`` 块加载凭证到 holder，
-        # 让 notify_sender._resolve 在 env 变量之前优先检查 YAML。
+        # 让 notify_sender._resolve 在 env变量之前优先检查 YAML。
         cfg = _block("task_discovery_dingtalk")
         if cfg:
             DingTalkYamlHolder.set(cfg)
-            # 按 env 选择 session_url 前缀（frontend_url / frontend_url_pre /
-            # frontend_url_prod），注入 FrontendUrlHolder 供 session_initiator 使用。
-            from agentclaw.community.utils.env_utils import get_current_env
-
-            env = get_current_env()
-            if env == "pre":
-                frontend_url = cfg.get("frontend_url_pre", "") or cfg.get("frontend_url", "")
-            elif env == "prod":
-                frontend_url = cfg.get("frontend_url_prod", "") or cfg.get("frontend_url", "")
-            else:
-                frontend_url = cfg.get("frontend_url", "")
             logger.info(
-                "[community.notify] env=%s → frontend_url=%s", env, frontend_url,
+                "[community.notify] dingtalk YAML keys loaded: %s",
+                sorted(k for k, v in cfg.items() if v),
             )
-            if frontend_url:
-                from agentclaw.community.core.task.task_discovery.session_initiator import (
-                    FrontendUrlHolder,
-                )
-                FrontendUrlHolder.set(frontend_url)
+        else:
+            logger.warning(
+                "[community.notify] task_discovery_dingtalk YAML block NOT found — "
+                "dingtalk credentials will rely on env vars or API holder only",
+            )
 
         inner = CommunityNotifySender()
         logger.info(
@@ -64,3 +62,17 @@ class CommunityNotifyModule(Module):
             "(log + dingtalk interactive card if creds available)",
         )
         return DingTalkNotifySender(inner)
+
+    @singleton
+    @provider
+    def _notify_messages_provider(
+        self, sender: NotifySenderPlugin,
+    ) -> NotifyMessagesProvider:
+        logger.debug("[task_discovery] → CommunityNotifyModule._notify_messages_provider(sender=%s)", type(sender).__name__)
+        """Alias ``NotifyMessagesProvider`` → 同一 ``NotifySenderPlugin`` 实例。
+
+        task_discovery 域 (``DiscoveryService`` / ``TaskDiscoveryLifecycle``) 注入
+        ``NotifyMessagesProvider`` 端口;governance 域继续注入 ``NotifySenderPlugin``。
+        两者共享同一 sender 实例。
+        """
+        return sender  # type: ignore[return-value]

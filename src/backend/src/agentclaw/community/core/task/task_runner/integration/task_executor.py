@@ -12,6 +12,7 @@ import logging
 import time
 from typing import Any
 
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import TaskNode, TaskNodePatch
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
@@ -57,13 +58,17 @@ class TaskExecutor:
         api_base_url: str = "",
         bcn: BcnService | None = None,
         bot_token_provider=None,
+        task_settings=None,
+        on_bbs_report=None,
     ) -> None:
         """bot: OpenApiBotPort|None; bcs: BcsClientPort|None; formatter: PromptFormatter|None;
         context: TaskContextBuilder|None; sink: ResultSink|None; poller: TaskExecutorResultPoller|None。
         graph: TaskGraphService|None,动态派发后把 group_id/session_id/run_id 落节点 run_info.extend_props
         (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None。
         bbs_runner 通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询任务模式候选。
-        api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。"""
+        api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。
+        task_settings: TaskSettingsServiceProtocol|None,读取 single_bot_skill_report 开关决定
+        single_bot 回收链路(默认 poller 拉消息;开启后走 skill HTTP 上报,与 poller 互斥不并存)。"""
         self._bot = bot
         self._bcs = bcs
         self._bcn = bcn
@@ -75,6 +80,8 @@ class TaskExecutor:
         self._graph = graph
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
+        self._task_settings = task_settings
+        self._on_bbs_report = on_bbs_report  # 引擎 on_bbs_report 收口回调(供 run_bbs→notify 走引擎收敛)
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
@@ -121,6 +128,25 @@ class TaskExecutor:
 
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
 
+    def _single_bot_skill_report_enabled(self) -> bool:
+        """single_bot 回收链路开关(默认 False=poller 拉消息回收)。
+
+        开启(True)时 single_bot 改走 skill HTTP 上报链路(predict：bot POST /callback/report),
+        与 poller 互斥:本方法返回 True 时 ``_dispatch_single_bot`` **不注册 poller**,避免双链路并存
+        导致双重收敛或 sla_timeout 噪声。开关未注入(non-prod/单测缺 task_settings)时回退 False(默认 poller)。
+        """
+        ts = self._task_settings
+        if ts is None:
+            return False
+        try:
+            return ts.is_enabled("single_bot_skill_report")
+        except Exception as exc:  # noqa: BLE001 未知 setting_type / 读取失败 → fail-open 回退 poller
+            logger.warning(
+                "[task][task-executor] single_bot_skill_report 读取失败 → 回退 poller: %s",
+                exc,
+            )
+            return False
+
     async def _dispatch_single_bot(
         self, node: TaskNode, sem: asyncio.Semaphore
     ) -> bool:
@@ -130,14 +156,27 @@ class TaskExecutor:
         完成,执行器不再做表级授权 JOIN:直接按 ``node.run_info.assignee`` 投递。被 JOIN 丢掉的候选
         已由 dispatcher 写入 ``run_info.extend_props.unauthorized_bots``(dashboard 暴露)。"""
         assignee = node.run_info.assignee
+        assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
+        openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
+        skill_report = self._single_bot_skill_report_enabled()
         session_id: str | None = None
         async with sem:
             try:
-                ctx = self._context.build(node.task_id, node.node_id)
+                ctx = dict(self._context.build(node.task_id, node.node_id) or {})
+                ctx.update({
+                    "task_id": node.task_id,
+                    "node_id": node.node_id,
+                    "execution_mode": "single_bot",
+                    # single_bot 走哪条回收链路由开关决定(默认 poller):
+                    #   False → bot 在终态消息内产出 {success,data,gaps} JSON,poller 拉消息回收(formatter 不下发 HTTP POST);
+                    #   True  → bot 主动 HTTP POST /callback/report 上报,下不注册 poller(与上报互斥不并存)。
+                    "single_bot_skill_report": skill_report,
+                    "backend": self._api_base_url,
+                })
                 message = self._formatter.format_execute(ctx, node)
                 sent = await self._bot.send_message(
-                    bot_id=assignee,
+                    bot_id=openapi_bot_id,
                     message=message,
                     metadata={"biz_task_id": node.task_id},
                 )
@@ -154,15 +193,22 @@ class TaskExecutor:
                     exc,
                 )
                 return False
-            self._poller.register(
-                SingleBotHandle(
-                    loop_task_id=loop_task_id,
-                    run_id=run_id,
-                    bot_id=assignee,
-                    registered_at=time.monotonic(),
-                    session_id=session_id,
+            if skill_report:
+                logger.info(
+                    "[task][task-executor] single_bot skill-report 开关已开 task=%s node=%s bot=%s "
+                    "→ 不注册 poller(走 skill HTTP 上报链路,与 poller 互斥)",
+                    node.task_id, node.node_id, assignee,
                 )
-            )
+            else:
+                self._poller.register(
+                    SingleBotHandle(
+                        loop_task_id=loop_task_id,
+                        run_id=run_id,
+                        bot_id=openapi_bot_id,
+                        registered_at=time.monotonic(),
+                        session_id=session_id,
+                    )
+                )
             self._persist_dispatch_ids(node, session_id=session_id, run_id=run_id)
             return True
 
@@ -267,6 +313,14 @@ class TaskExecutor:
         raw_bindings = (
             self._state_machine_bindings(gf) if mode == "state_machine" else {}
         )
+        # A state-machine binding names the actual runtime Bot(s). BCS requires
+        # every binding target to also be present in participants, so merge
+        # binding targets into the participant roster before resolving UUIDs.
+        # Keep the original order and deduplicate exact product/composite IDs.
+        for spec in raw_bindings.values():
+            for binding_bot_id in spec["bot_ids"]:
+                if binding_bot_id not in bot_ids:
+                    bot_ids.append(binding_bot_id)
         manager_bot_id = (
             gf.extend_props.get("manager_bot_id") if mode == "manager_worker" else None
         )
@@ -340,6 +394,16 @@ class TaskExecutor:
             "driver_bot": bcs_uuid(bot_ids[0]),
             "participants": participants,
         }
+
+        _api_base = gf.extend_props.get("api_base_url")
+        _corp_cb = ""
+        if self._bcs is not None:
+            _cb_fn = getattr(self._bcs, "task_callback_url", None)
+            if callable(_cb_fn):
+                _corp_cb = (_cb_fn() or "").strip()
+        _sink_base = _corp_cb or _api_base or self._api_base_url
+        logger.info("[task][task_executor] form_coop_group sink_base_url=%s, api_base=%s", _sink_base, _api_base)
+
         if mode == "manager_worker":
             mgr = str(manager_bot_id or bot_ids[0])
             req_kwargs["group_strategy"] = "manager_worker"
@@ -372,14 +436,15 @@ class TaskExecutor:
             )
             # state_machine 群需 opening_message(task-loop panel),taskId = 任务ID
             _task_id = gf.extend_props.get("task_id")
-            if _task_id:
+            panel_component_name = gf.extend_props.get("panel_component_name")
+            if _task_id and panel_component_name:
                 # BCS 契约:opening_message.params 必须是 JSON object,不能字符串化
                 # (见 ocb-public/src/bcs/docs/custom-collaboration-opening-message-integration-guide.md §4:
                 # params = 传给业务组件的 JSON object)。字符串化会被真实 BCS 判
                 # "data did not match any variant of untagged enum OpeningMessage" 422。
                 req_kwargs["opening_message"] = {
                     "type": "panel",
-                    "component": "partnerPanel.CollaborationRunView",
+                    "component": str(panel_component_name),
                     "params": {
                         "groupId": "{{bcs.group_id}}",
                         "sessionId": "{{bcs.session_id}}",
@@ -400,20 +465,14 @@ class TaskExecutor:
             req_kwargs["caller_bot_token"] = self._bot_token_provider.get_token(
                 req_kwargs.get("driver_bot") or ""
             )
-        # BCN 事件回调订阅(创建协作群入参 event_subscriptions):仅 manager_worker 群内联挂 §4 订阅
-        # (BCS 把协作事件 CloudEvent 推到本后端 task 模块 /callback/report,激活既有
-        # apply_manager_worker_event → execution_graph audit 快照 + converge_by_session)。
-        # 鉴权用既有 caller_bot_token(Bearer)+HMAC,无 cookie(见 spec §4.3)。
-        # state_machine/chat 群不内联订阅:event_subscriptions 触发 BCS require_human,拒 Bot/HMAC-only
-        # 令牌 → 401/403;终结态收敛交 result poller。即便 extend_props 带 api_base_url 也不挂。
-        # sink.url 取本 TaskExecutor 构造注入的 api_base_url(不读 extend_props,不写死)。
-        if mode == "manager_worker" and self._api_base_url:
-            _api_base = str(self._api_base_url).rstrip("/")
+        # BCN 事件回调订阅仅对 manager_worker 生效。state_machine/chat 使用 poller
+        # 兜底收敛，避免 BCS require_human 拒绝 Bot/HMAC-only 建群请求。
+        if mode == "manager_worker" and _sink_base:
+            _sink_base = str(_sink_base).rstrip("/")
             req_kwargs["event_subscriptions"] = [
                 {
                     "name": "avernet-manager-worker",
                     "event_filters": [
-                        "group.created",
                         "session.created",
                         "task.assigned",
                         "task.completed",
@@ -422,7 +481,28 @@ class TaskExecutor:
                     "payload": {"mode": "full"},
                     "sink": {
                         "type": "webhook",
-                        "url": _api_base + _BCN_EVENT_CALLBACK_PATH,
+                        "url": _sink_base + _BCN_EVENT_CALLBACK_PATH,
+                        "request_timeout_ms": 10000,
+                    },
+                }
+            ]
+
+        if mode == "state_machine" and _sink_base:
+            _sink_base = str(_sink_base).rstrip("/")
+            req_kwargs["event_subscriptions"] = [
+                {
+                    "name": "avernet-state_machine",
+                    "event_filters": [
+                        'state_machine.run.created',
+                        'state_machine.run.started',
+                        'state_machine.node.started',
+                        'state_machine.node.completed',
+                        'state_machine.run.completed'
+                    ],
+                    "payload": {"mode": "full"},
+                    "sink": {
+                        "type": "webhook",
+                        "url": _sink_base + _BCN_EVENT_CALLBACK_PATH,
                         "request_timeout_ms": 10000,
                     },
                 }
@@ -474,13 +554,33 @@ class TaskExecutor:
                 f"reporter_bot_id={_reporter_bot_id}\n"
                 f"reporter_role={_reporter_role}\n"
                 "只有 reporter_bot_id 对应的 Bot（本群唯一 master/driver）可以调用 "
-                "task-loop 的任务验收(acceptance)逻辑，逐条检查当前节点 goal.acceptances，"
-                "汇总完整执行输出，并主动回投验收结果；其它 Bot 只提供产出，不得重复回调。\n"
+                "task-loop 的任务验收(acceptance)逻辑。所有 worker 完成或明确失败后，"
+                "reporter 必须立即逐条检查当前节点 goal.acceptances，汇总完整执行输出，"
+                "生成 DONE/FAILED，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
+                "验收步骤不可跳过：执行→逐条校验→生成结论→HTTP上报→确认HTTP 200。\n"
+                "只有在上述完成条件满足后才触发 task-acceptance；建群初始上下文不触发验收。\n"
                 f"目标:{_task_objective}\n"
                 f"指令:{_task_instruction}\n"
                 f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}\n"
                 f"任务上下文:{_task_context or ''}"
             )
+            if _loop_task_id:
+                try:
+                    _task_id, _node_id = _loop_task_id.split("::", 1)
+                except ValueError:
+                    _task_id, _node_id = "<task_id>", "<node_id>"
+                req_kwargs["context"] += (
+                    "\n回投请求体只能包含以下节点级字段；callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段："
+                    + json.dumps({
+                        "task_id": _task_id,
+                        "node_id": _node_id,
+                        "status": "DONE",
+                        "output": "完整协作群执行输出",
+                        "acceptance_result": {},
+                        "extend_props": {},
+                    }, ensure_ascii=False)
+                    + "\nFAILED 时只将 status 改为 FAILED，并在 acceptance_result.gaps 填写具体差距。"
+                )
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(
             "[task][task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",
@@ -492,6 +592,7 @@ class TaskExecutor:
             bool(req.participant_bindings),
         )
         try:
+            logger.info("[task][task_executor] form_coop_group create_group request=%s", req)
             res = await self._bcs.create_group(req)
         except Exception:
             logger.exception(
@@ -559,6 +660,7 @@ class TaskExecutor:
             graph=self._graph,
             backend_url=self._api_base_url,
             skill_name=bbs_runner._BBS_SKILL_NAME,
+            on_bbs_report=self._on_bbs_report,
         )
 
     @staticmethod

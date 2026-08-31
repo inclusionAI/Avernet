@@ -49,7 +49,7 @@ def _task_info(task_id: str = "t_case", *, max_depth: int = 3) -> TaskInfo:
         ),
         source_type="bot",
         owner_bot_id="owner_bot",
-        execution_config={"MAX_DEPTH": max_depth},
+        execution_config={"MAX_DEPTH": max_depth, "MAX_PLAN_ROUND": 10, "MAX_LOOP": 10},
     )
 
 
@@ -72,7 +72,7 @@ def _task_info_request(task_id: str = "t_case", *, max_depth: int = 3):
         source_type=TaskSourceType.BOT,
         owner_user_id="owner_user",
         owner_bot_id="owner_bot",
-        execution_config={"MAX_DEPTH": max_depth},
+        execution_config={"MAX_DEPTH": max_depth, "MAX_PLAN_ROUND": 10, "MAX_LOOP": 10},
     )
 
 
@@ -263,6 +263,10 @@ class _TestRunner:
         self._groups.append(gf)
         return gid
 
+    async def run_bbs(self, execution_graph) -> None:
+        # BBS relay is exercised explicitly through claim/attach/report in these tests.
+        return None
+
     def query_status(self, task_id): return self._graph.query_task_dashboard(task_id).status
     def query_detail(self, node): return node
     def query_result(self, node): return node
@@ -389,26 +393,19 @@ class TestThreeModesHappyToDone:
             assert parents[0] == "t_case"
 
 
-# ===== Test 2: FAIL→FAILED→harness 重新派发执行→PASS 治愈(v4:补救=重新派发,不拆子) =====
+# ===== Test 2: 执行报错(exec_error)→harness 重新派发→PASS 治愈(验收 FAIL 已改折叠 HUNG+升 BBS,不在此路) =====
 class TestFailRemedyCure:
     def test_fail_then_remedy_pass_cures_and_propagates(self):
         facade, svc, runner = _wire_facade(max_depth=3)
         _exec(facade, _task_info_request("t_case", max_depth=3))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
         _run(facade.callback.report_result(_cb(True, "t_case::N_compete", data="compete")))
-        # 验收不过 → FAILED(v4:不立即补救拆子,交 harness 重新派发执行重试)
-        _run(facade.callback.report_result(
-            _cb(False, "t_case::N_market", fail_detail="市场深度不足", data=None)
-        ))
+        # 执行报错(exec_error:run/transport fail)→harness 重新派发执行重试(不拆子)。
+        # 注:验收 FAIL(verdict FAILED)现由 on_report 折叠为节点 HUNG+升 BBS(终态,不复位重投);
+        # harness 重投仅用于执行报错(RUNNING→PENDING→dispatch→RUNNING),与验收 gap 语义不同。
+        _run(facade._engine.on_harness(_patch("t_case", "N_market", exec_error="run_transport_fail")))
         g = svc.query_task_dashboard("t_case")
-        n_market = svc._get_node(g, "N_market")
-        assert n_market.status == Status.FAILED
-        assert n_market.run_info.acceptance_result is not None
-        assert n_market.run_info.acceptance_result.verdict == AcceptanceVerdict.FAIL
-        # v4:harness 重新派发执行(不拆):FAILED→PENDING→dispatch→RUNNING
-        _run(facade._engine.on_harness(_patch("t_case", "N_market", exec_error="acceptance_fail_retry")))
-        g = svc.query_task_dashboard("t_case")
-        assert svc._get_node(g, "N_market").status == Status.RUNNING  # 重新派发执行
+        assert svc._get_node(g, "N_market").status == Status.RUNNING  # harness 重新派发执行
         # 重新派发后回投 PASS → DONE
         _run(facade.callback.report_result(_cb(True, "t_case::N_market", data="市场深化")))
         g = svc.query_task_dashboard("t_case")
@@ -437,7 +434,7 @@ class TestMissEscalateBbs:
 
     def test_bbs_bot_claims_and_relays_to_done(self):
         """v5 真实 BBS 接力经 facade API(claim→attach→report PASS 收口;根收口由框架经 owner 复核自判),
-        不需直写复位:MISS at max→HUNG→升 BBS(miss_depth_exhausted 可恢复态)→ 根保 PLANNING 待接力 →
+        不需直写复位:MISS at max→HUNG→升 BBS(miss_depth_exhausted 可恢复态)→ 根先置 HUNG 待接力 →
         BBS bot 经 facade.claim_bbs_task 占根 → facade.attach_bbs_node 挂 run_mode=bbs scoped 节点
         (已 RUNNING)→ facade.report_bbs_result(PASS)→ scoped DONE + claim 释放;框架 _on_pass_collect 复核
         根 gap(case planner 返 has_gap=False)→ 根 DONE + 图 DONE。"""
@@ -447,11 +444,11 @@ class TestMissEscalateBbs:
         for nid in ("N_market", "N_tech", "N_compete", "N_customer"):
             _run(facade.callback.report_result(_cb(True, f"t_case::{nid}", data=nid)))
         g = svc.query_task_dashboard("t_case")
-        # miss_depth_exhausted → MISS 节点 HUNG + bbs_mode=true,但 v5 根保持 PLANNING(可恢复态)
+        # miss_depth_exhausted → MISS 节点 HUNG + 根节点 HUNG + bbs_mode=true
         hung_node = next((n for n in g.tasks if n.node_id == "N_practice_bbs"), None)
         assert hung_node is not None and hung_node.status == Status.HUNG
         assert g.extend_props.get("bbs_mode") is True
-        assert svc._get_node(g, "t_case").status == Status.PLANNING
+        assert svc._get_node(g, "t_case").status == Status.HUNG
 
         # BBS 中继接管:claim → attach(run_mode=bbs 自动 PENDING→RUNNING) → report PASS(根收口框架自判)
         bbs_bot_id = "bot_bbs_7"
@@ -467,7 +464,7 @@ class TestMissEscalateBbs:
         assert scoped.run_info.run_mode == "bbs"
         _run(facade.report_bbs_result(
             task_id="t_case", node_id=scoped.node_id, bot_id=bbs_bot_id,
-            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.PASS, gaps=[]),
+            acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE, gaps=[]),
             output_patch={"result": "bbs 一手实践"},
         ))
         g = svc.query_task_dashboard("t_case")
@@ -486,5 +483,5 @@ class TestDashboardTerminal:
         from agentclaw.community.core.task.task_runner.runner import TaskRunner
         r = TaskRunner(svc)
         detail = r.query_detail(_node("N_overview", "t_case"))
-        assert detail.run_info.output.get("data") == "行业全貌"
-        assert r.query_result(_node("N_overview", "t_case")).run_info.output.get("data") == "行业全貌"
+        assert detail.run_info.output.get("output") == "行业全貌"
+        assert r.query_result(_node("N_overview", "t_case")).run_info.output.get("output") == "行业全貌"

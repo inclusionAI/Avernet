@@ -28,10 +28,19 @@ class _FakeBotService:
     def __init__(self, by_id: dict[str, dict]) -> None:
         self._by_id = by_id
         self.calls: list[str] = []
+        self.pair_calls: list[tuple[tuple[str, str], ...]] = []
 
     def get_bot_by_id(self, bot_id: str):  # noqa: ANN001 stub
         self.calls.append(bot_id)
         return self._by_id.get(bot_id)
+
+    def list_bots_by_owner_bot_pairs(self, *, pairs, page=1, page_size=20):  # noqa: ANN001 stub
+        self.pair_calls.append(tuple(pairs))
+        items = [
+            info for info in self._by_id.values()
+            if (str(info.get("bot_id")), str(info.get("owner_id"))) in pairs
+        ]
+        return {"total": len(items), "items": items}
 
 
 class _FakeCallbackRepo:
@@ -142,3 +151,25 @@ def test_dashboard_no_bot_record_leaves_no_attach(harness):
     ep = root["run_info"]["extend_props"]
     assert "assignee_owner_id" not in ep
     assert "assignee_name" not in ep
+
+
+def test_dashboard_resolves_duplicate_bot_id_by_assignee_owner(harness):
+    c, inj, fake_bot = harness
+    fake_bot._by_id.update({
+        "default-o1": {"bot_id": "default", "owner_id": "o1", "bot_name": "OwnerOneDefault"},
+        "default-o2": {"bot_id": "default", "owner_id": "o2", "bot_name": "OwnerTwoDefault"},
+    })
+    tid = f"aw-{uuid.uuid4().hex[:6]}"
+    _seed_node(inj, tid, "single_bot", "default")
+    gs = inj.get(TaskGraphService)
+    gs.update_task_node_info(TaskNodePatch(
+        task_id=tid, node_id=tid,
+        extend_props_patch={"assignee_owner_id": "o1"},
+    ))
+    d = c.get("/api/v1/collaboration/tasks/dashboard", params={"task_id": tid}).json()["data"]
+    root = {t["node_id"]: t for t in d["tasks"]}[tid]
+    ep = root["run_info"]["extend_props"]
+    assert ep["assignee_owner_id"] == "o1"
+    assert ep["assignee_name"] == "OwnerOneDefault"
+    assert fake_bot.pair_calls == [(("default", "o1"),)], fake_bot.pair_calls
+    assert fake_bot.calls == []

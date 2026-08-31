@@ -1,5 +1,6 @@
-"""Task 公开 HTTP adapter routes —— 前端公开面(仅 execute/dashboard/list;Rule 22:只转协议,不持领域策略)。
+"""Task 公开 HTTP adapter routes —— 前端公开面(run-template/execute/dashboard/list;Rule 22:只转协议,不持领域策略)。
 
+POST /openapi/v1/collaboration/tasks/run-template
 POST /openapi/v1/collaboration/tasks/execute   — 提交任务(delegate TaskServiceProtocol.execute)
 GET  /openapi/v1/collaboration/tasks/dashboard  — 查任务图(delegate TaskServiceProtocol.get_task_dashboard)
 GET  /openapi/v1/collaboration/tasks/list       — 列持久化任务记录(delegate TaskServiceProtocol.list_tasks)
@@ -18,7 +19,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page, USER_SCOPED_ERROR_RESPONSES
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep, caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
@@ -34,6 +36,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskGrantResultDTO,
     TaskInfoRecordDTO,
     TaskInfoRequestDTO,
+    TemplateRunRequestDTO,
     TaskOpResultDTO,
     TaskRevokeRequestDTO,
     TaskRevokeResultDTO,
@@ -50,6 +53,16 @@ from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
+def _validate_status_filter(status: str | None) -> None:
+    """校验 status query(逗号分隔的运行时态枚举),任一 token 非法 → 400。"""
+    if status is None:
+        return
+    valid = {s.value for s in Status}
+    for tok in (t.strip().upper() for t in status.split(",") if t.strip()):
+        if tok not in valid:
+            raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
+
+
 router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
 
 # Handler-level principal dependency: ``test_public_routes_require_principal`` walks each
@@ -58,6 +71,29 @@ router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], rout
 # mount. Operations with no bot to gate (execute/dashboard) declare this so the route
 # is visibly gated, then ``del principal`` since the identity is not used.
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
+
+
+@router.post(
+    "/run-template",
+    response_model=Envelope[TaskOpResultDTO],
+    responses=USER_SCOPED_ERROR_RESPONSES,
+)
+@envelope_errors
+async def run_template(
+    body: TemplateRunRequestDTO,
+    request: Request,
+    user_id: UserIdDep,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
+) -> Envelope[TaskOpResultDTO]:
+    """运行预置静态模板;owner 由公开面鉴权 + user_id 自确认决定。
+
+    user_id 经 require_user_id 自确认(与签名 principal 不符→403);owner_user_id=user_id。
+    触发执行 bot 由请求体提供并交由任务服务处理。
+    """
+    result = await service.run_template(body.template_id, body.input,
+                                        owner_user_id=user_id, owner_bot_id="",
+                                        auto_advance=body.auto_advance)
+    return envelope(op_result_to_dto(result), request)
 
 
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])
@@ -114,7 +150,8 @@ async def list_tasks(
     principal: PrincipalDep,
     user_id: str = Query(..., description="按归属 user_id 过滤任务记录"),
     status: Annotated[
-        str | None, Query(description="可选 status 过滤记录状态;非法值 → 400")
+        str | None,
+        Query(description="可选 status 过滤:运行时态枚举,逗号分隔多值(如 PLANNING,RUNNING);非法值 → 400"),
     ] = None,
     page: Annotated[
         int | None,
@@ -139,8 +176,7 @@ async def list_tasks(
     等同历史契约(供接力 skill 全量枚举等场景);两者同时传入时 data 为
     Page(total, items)(1-based,page_size 最大 100)。仅传其一视为入参错误(400)。"""
     del principal  # Authentication remains mandatory; user_id is only a query filter.
-    if status is not None and status not in {s.value for s in Status}:
-        raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
+    _validate_status_filter(status)
     if (page is None) != (page_size is None):
         raise HTTPException(
             status_code=400,

@@ -12,6 +12,7 @@ from typing import Callable
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
+    AcceptanceVerdict,
     Context,
     Goal,
     Metadata,
@@ -112,6 +113,7 @@ class _StubDispatchStrategy:
 class StubRunner:
     def __init__(self):
         self.run_calls: list[list[TaskNode]] = []
+        self.bbs_calls: list = []   # engine 升 BBS 可恢复态时 run_bbs 调用的 task_id
 
     async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         self.run_calls.append(list(toDoTaskList))
@@ -119,6 +121,10 @@ class StubRunner:
 
     async def form_coop_group(self, gf):
         return "grp_stub"
+
+    async def run_bbs(self, execution_graph) -> None:
+        """记录 BBS 升级调度(根 HUNG 升 BBS 可恢复态时 fire-and-forget 调用;对齐真实 TaskExecutor.run_bbs)。"""
+        self.bbs_calls.append(getattr(execution_graph, "task_id", None))
 
     def query_status(self, task_id): return Status.PENDING
     def query_detail(self, node): return node
@@ -315,8 +321,11 @@ class TestBbsEscalationNoMarket:
             "result": {"success": False, "fail_detail": "缺x"},
         })))
         graph = svc.query_task_dashboard("t3")
-        # v4:验收 FAIL→FAILED(补救治移 harness 重新派发;无 harness → 停 FAILED,不立即升 BBS)
-        assert svc._get_node(graph, "c1").status == Status.FAILED
+        # 验收 FAIL→节点 status 折叠 HUNG(on_report 解耦:status=HUNG,verdict 仍 FAILED);升 BBS 标 bbs_mode
+        _c1 = svc._get_node(graph, "c1")
+        assert _c1.status == Status.HUNG  # status 折叠 HUNG(不再 v4 的 FAILED 瞬态)
+        assert _c1.run_info.acceptance_result is not None
+        assert _c1.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED  # verdict 不改
 
 
 class TestZeroCase:

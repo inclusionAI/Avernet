@@ -92,6 +92,11 @@ def set_config_provider(provider: ConfigProvider) -> None:
     _cached = None
 
 
+def has_config_provider() -> bool:
+    """Whether a configuration source has been registered."""
+    return _provider is not None or _cached is not None
+
+
 def load_config() -> AppConfig:
     """Return the active provider's :class:`AppConfig`, cached after first load.
 

@@ -558,6 +558,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # ── the gateway spanner + `_PUBLIC_AUTH`; `list` uses caller-selected
     # ── user_id only as a task-record filter. `NoCheck` is the settled mode here, not a
     # ── placeholder — see `admission.py` for the machine-caller decision.
+    ("POST", "/openapi/v1/collaboration/tasks/run-template"):
+        NoCheck("a task template, not a bot; the submitter is the task owner"),
     ("POST", "/openapi/v1/collaboration/tasks/execute"):
         NoCheck("a task, not a bot; the submitter is the task owner"),
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"):

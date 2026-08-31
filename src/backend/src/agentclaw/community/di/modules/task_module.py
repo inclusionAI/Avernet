@@ -24,13 +24,18 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+    HARNESS_POLLER,
+    SEARCH_SKILL,
+    SINGLE_BOT_SKILL_REPORT,
     TaskClaimJoinGate,
     TaskClaimJoinGateProtocol,
+    TaskSettingsService,
+    TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.task_grant_service import (
+    TaskClaimGrantService,
     TaskClaimGrantServiceProtocol,
 )
-from agentclaw.community.core.task.services.task_grant_service import TaskClaimGrantService
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.repository.protocols.task import (
@@ -46,6 +51,13 @@ from agentclaw.community.core.task.task_center.recovery_lifecycle import (
 )
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+    BcsTokenProvider,
+    LocalBcsTokenProvider,
+)
+from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+    CallbackDataEnricher,
+)
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
     InMemoryCallbackCorrelationRegistry,
@@ -56,10 +68,43 @@ from agentclaw.community.core.task.task_runner.integration.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
-from agentclaw.community.di.config import EconomyGovernanceConfig
+from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.di.profile import DeployProfile
 
 logger = logging.getLogger("task.module")
+
+
+def _harness_enabled() -> bool:
+    """TaskHarness 旁路巡检开关(env ``OCB_TASK_HARNESS_ENABLED``,默认**关闭**)。
+
+    harness poller(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推)为旁路常驻线程;
+    默认关闭,facade 以事件驱动(on_execute/on_report/on_pass/on_miss)为主推进。需要旁路兜底
+    (bot 崩溃/SLA 超时/派发卡住)时显式置 ``OCB_TASK_HARNESS_ENABLED=1`` 启用。harness=None 时
+    TaskService 不启动 daemon 巡检线程(见 task_service 装配处 ``if self._harness is not None``)。"""
+    return os.environ.get("OCB_TASK_HARNESS_ENABLED", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _resolve_harness_enabled(
+    task_settings: TaskSettingsServiceProtocol | None,
+) -> bool:
+    """harness 旁路巡检开关:优先读 tasks/settings(``harness_poller``,system-config KV,跨副本热改),
+    未绑/读异常时回退 env ``OCB_TASK_HARNESS_ENABLED``。tasks/settings(`harness_poller`)默认**开启**;
+    env 兜底(仅 task_settings 未绑时)默认关闭,保持轻量/测试无 daemon 巡检线程。
+
+    Settings 走 KV 可运行时经 POST /tasks/settings 热改;env 仅本地/单进程兜底。
+    当 TaskSettingsServiceProtocol 未绑(纯内核/轻量测试)时直接回退 env,不影响既有本地开关语义。
+    """
+    if task_settings is not None:
+        try:
+            return task_settings.is_enabled(HARNESS_POLLER)
+        except Exception as exc:  # noqa: BLE001 设置读取失败 → 回退 env
+            logger.warning(
+                "[task][task-module] harness_poller 设置读取失败,回退 env:%s",
+                exc,
+            )
+    return _harness_enabled()
 
 
 class TaskModule(Module):
@@ -84,10 +129,26 @@ class TaskModule(Module):
     @singleton
     @provider
     @inject
+    def callback_data_enricher(self, injector: Injector) -> CallbackDataEnricher:
+        """回投数据 enricher(BCN 查 BCS run 详情 + ClawMind 构图);base_url 取自 BcsTokenProvider。
+
+        corp overlay 经 DI 绑定 BcsTokenProvider(``_RealToken``);community/singlebox 未绑 →
+        ``LocalBcsTokenProvider.from_env()``(``SINGLEBOX_BCS_URL``)。与 BcsClientPort 同款注入。
+        """
+        try:
+            token = injector.get(BcsTokenProvider)
+        except Exception:  # noqa: BLE001 community/singlebox 未绑 BcsTokenProvider → singlebox fallback
+            token = LocalBcsTokenProvider.from_env()
+        return CallbackDataEnricher(token)
+
+    @singleton
+    @provider
+    @inject
     def task_service(
         self,
         graph: TaskGraphService,
         bot_public: BotPublicServiceProtocol,
+        task_dispatch: TaskDispatchConfig,
         injector: Injector,
     ) -> TaskService:
         """构造 TaskService facade(引擎自当 ResultSink/TaskContextBuilder;构造期收端口)。
@@ -167,9 +228,26 @@ class TaskModule(Module):
             bcs_identity = BotServiceBcsBotIdentityResolver(
                 injector.get(BotServiceProtocol)
             )
+        # 任务开关服务(tasks/settings):system-config KV,跨副本共享;harness 旁路巡检开关经此热改。
+        # 未绑(纯内核/轻量测试)→ None → harness 回退 env 决策。任务派发链路也消费同一实例。
+        try:
+            task_settings = injector.get(TaskSettingsServiceProtocol)
+        except Exception as exc:  # noqa: BLE001 未绑定 → 使用静态默认值
+            logger.info(
+                "[task][task-module] TaskSettingsServiceProtocol 未绑定 → 使用静态默认值:%s",
+                exc,
+            )
+            task_settings = None
         # harness 旁路常驻巡检(SLA 超时复位 / FAILED 重派重试 / PENDING 派发超时重搜推);
-        # facade 内部 set_on_harness 回填编排核入口并启动 daemon 巡检线程。
-        harness = TaskHarness(graph)
+        # 可配置开关,默认开启(tasks/settings `harness_poller`):旁路巡检常驻兜底(SLA 超时复位/FAILED
+        # 重派/PENDING 派发超时重搜推);harness=None(未绑且 env 关)时不启动 daemon 巡检线程。
+        # 优先读 tasks/settings(harness_poller,KV 跨副本热改),未绑/读异常回退 env OCB_TASK_HARNESS_ENABLED。
+        if _resolve_harness_enabled(task_settings):
+            harness = TaskHarness(graph)
+            logger.info("[task][task-module] TaskHarness 旁路巡检已启用")
+        else:
+            harness = None
+            logger.info("[task][task-module] TaskHarness 旁路巡检已关闭(默认)")
         # TaskPersistenceModule is optional for the pure-core and lightweight DI
         # test paths. Resolve every persistence port lazily so Injector never
         # attempts to instantiate an abstract repository protocol.
@@ -216,16 +294,14 @@ class TaskModule(Module):
                 exc,
             )
             task_auth_gate = None
-        # 回投 origin 复用 economy_governance.iframe_callback_url[_pre]:已在 ocb 按环境配成卡片回投
-        # 完整 URL(形如 <backend-host>/api/economy/governance/card-callback),由 EconomyGovernanceConfig
-        # 构造期按 env 选好 _pre/base(_is_pre)。取其 scheme://netloc 作 backend 自身访问 URL——既不内联
-        # 企业域名(满足架构门 test_shipped_config_no_corp_identifiers),又复用现成 env-aware 注入通道,
-        # 无需新增 config/yaml block。EconomyGovernanceModule 未装(纯内核/轻量测试列)→ 取不到 → 传空 → 兜底
-        # localhost。agent 回投结果往此 origin POST(自行拼 /api/v1/... 内部路径,不走 gateway 鉴权)。
-        try:
-            gov = injector.get(EconomyGovernanceConfig)
-        except Exception:  # noqa: BLE101 EconomyGovernanceModule 未装(纯内核/轻量测试列) → 取不到
-            gov = None
+        # 任务回投 origin 使用 bcs_client.task_callback_url[_pre]，由 BCS client
+        # 按当前环境选出对应地址。它是 BCS → Avernet 的真实回投通道，不能复用
+        # economy_governance 的卡片回调地址。
+        bcs_callback_url = ""
+        if bcs is not None:
+            _callback_fn = getattr(bcs, "task_callback_url", None)
+            if callable(_callback_fn):
+                bcs_callback_url = str(_callback_fn() or "").strip()
         from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
             BcsBotTokenProvider, NullBcsBotTokenProvider,
         )
@@ -233,6 +309,13 @@ class TaskModule(Module):
             bot_token_provider = injector.get(BcsBotTokenProvider)
         except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
             bot_token_provider = NullBcsBotTokenProvider()
+        from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
+            NotifyMessagesProvider, NullNotifyMessagesProvider,
+        )
+        try:
+            notify_messages_provider = injector.get(NotifyMessagesProvider)
+        except Exception:  # noqa: BLE101 未绑定时降级 noop(不阻断)
+            notify_messages_provider = NullNotifyMessagesProvider()
         return TaskService(
             graph,
             harness=harness,
@@ -248,10 +331,11 @@ class TaskModule(Module):
             bot_service=bot_service,
             staff_dept=staff_dept,
             task_auth_gate=task_auth_gate,
-            api_base_url=self._resolve_api_base_url(
-                gov.iframe_callback_url if gov else ""
-            ),
+            api_base_url=self._resolve_api_base_url(bcs_callback_url),
             bot_token_provider=bot_token_provider,
+            notify_messages_provider=notify_messages_provider,
+            task_search_skill_enabled=task_dispatch.task_search_skill_enabled,
+            task_settings=task_settings,
         )
 
     @singleton
@@ -287,23 +371,37 @@ class TaskModule(Module):
 
     @singleton
     @provider
-    def task_claim_join_gate(
-        self, injector: Injector
-    ) -> TaskClaimJoinGateProtocol:
-        """claim_on JOIN 灰度开关(默认关闭,HTTP 显式开启):复用 SystemConfigServiceProtocol KV(category=task)。
-
-        线上现有 OOB 预授权 bot 不依赖本开关(直按 assignee 派发);人工确认 claim_on 名单后再经 HTTP 开启。
-        SystemConfigServiceProtocol 经 system_config_module 全 profile 绑定;未绑(纯内核/轻量测试)→
-        config=None → gate.is_enabled() 恒 False(fail-open,不回归现有派发)。"""
+    @inject
+    def task_settings_service(
+        self,
+        injector: Injector,
+        task_dispatch: TaskDispatchConfig,
+    ) -> TaskSettingsServiceProtocol:
+        """Generic runtime task switches backed by SystemConfigService KV."""
         try:
             config = injector.get(SystemConfigServiceProtocol)
-        except Exception as exc:  # noqa: BLE101 system_config_module 未装 → config=None → gate 恒关
+        except Exception as exc:  # noqa: BLE001 lightweight/community path
             logger.info(
-                "[task][task-module] claim_on JOIN 开关 SystemConfigServiceProtocol 未绑定 → gate 恒关闭:%s",
+                "[task][task-module] SystemConfigServiceProtocol 未绑定 → task settings 使用默认值:%s",
                 exc,
             )
             config = None
-        return TaskClaimJoinGate(config=config)
+        return TaskSettingsService(
+            config=config,
+            defaults={
+                SEARCH_SKILL: task_dispatch.task_search_skill_enabled,
+                SINGLE_BOT_SKILL_REPORT: task_dispatch.single_bot_skill_report_enabled,
+            },
+        )
+
+    @singleton
+    @provider
+    @inject
+    def task_claim_join_gate(
+        self, settings: TaskSettingsServiceProtocol
+    ) -> TaskClaimJoinGateProtocol:
+        """Compatibility adapter for the claim_on JOIN dispatch filter."""
+        return TaskClaimJoinGate(settings=settings)
 
     @singleton
     @provider
@@ -342,26 +440,24 @@ class TaskModule(Module):
         return auth
 
     @staticmethod
-    def _resolve_api_base_url(iframe_callback_url: str = "") -> str:
+    def _resolve_api_base_url(task_callback_url: str = "") -> str:
         """返回本 backend 自身访问 URL(agent 回投结果往此 origin POST,自行拼 /api/v1/... 内部路径)。
 
-        复用 economy_governance 提供的环境感知 ``iframe_callback_url[_pre]``:已在 ocb 按环境配成卡片
-        回投完整 URL(形如 ``<backend-host>/api/economy/governance/card-callback``),并由
-        ``EconomyGovernanceConfig`` 构造期按 env 选好 _pre/base。去掉其路径取 ``scheme://netloc`` 即为
-        backend 自身访问 URL——既不内联企业域名(满足架构门 test_shipped_config_no_corp_identifiers),
-        又复用现成 env-aware 注入通道,无需新增 config/yaml block。
+        解析 ``bcs_client.task_callback_url[_pre]`` 提供的任务回投 origin。BCS client
+        已按当前环境选择 ``task_callback_url_pre`` 或 ``task_callback_url``；这里仅取
+        ``scheme://netloc``，避免把路径误拼到任务 callback endpoint。
 
         - singlebox(``DEPLOY_PROFILE``) → ``SINGLEBOX_BACKEND_URL``/localhost(本地直连);
-        - 其余 → 解析 ``iframe_callback_url`` 的 origin;
-        - 空值/非法(社区/dev/未配 economy_governance 或 EconomyGovernanceModule 未装)→ 回退 localhost:8888。"""
+        - 其余 → 解析 ``bcs_client.task_callback_url[_pre]`` 的 origin;
+        - 空值/非法(社区/dev/未配置 BCS 回投地址)→ 回退 localhost:8888。"""
         if (
             os.environ.get("DEPLOY_PROFILE", "").strip().lower()
             == DeployProfile.SINGLEBOX.value
         ):
             return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
-        if not iframe_callback_url:
+        if not task_callback_url:
             return "http://localhost:8888"
-        parsed = urlparse(iframe_callback_url)
+        parsed = urlparse(task_callback_url)
         if not parsed.scheme or not parsed.netloc:
             return "http://localhost:8888"
         return f"{parsed.scheme}://{parsed.netloc}"

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Optional, Protocol, Sequence, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
@@ -52,23 +52,25 @@ class TaskInfoRepositoryProtocol(Protocol):
     @abstractmethod
     def list_records(
         self,
-        status: Optional["Status"] = None,
+        status: Optional[Sequence["Status"]] = None,
         *,
         owner_user_id: Optional[str] = None,
     ) -> list["TaskInfoRecord"]:
-        """Return newest-first records, optionally filtered by status and owner."""
+        """Return newest-first records, optionally filtered by a set of statuses and owner."""
         ...
 
     @abstractmethod
     def list_records_page(
         self,
-        status: Optional["Status"] = None,
+        status: Optional[Sequence["Status"]] = None,
         *,
         owner_user_id: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list["TaskInfoRecord"], int]:
-        """Return one newest-first page (1-based, ``page_size`` items) plus total count."""
+        """Return one newest-first page (1-based, ``page_size`` items) plus total count.
+
+        ``status`` 接受一组运行时态(Status 枚举)：空/None 不过滤，非空按 SQL IN 过滤。"""
         ...
 
     @abstractmethod

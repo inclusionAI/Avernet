@@ -82,7 +82,7 @@ async def test_report_pass_marks_scoped_done_and_releases_claim(task_service_wit
     svc, task_id, node_id, bot = task_service_with_bbs_node
     r = await svc.report_bbs_result(
         task_id, node_id, bot,
-        acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS),
+        acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
     )
     assert r.success is True
     scoped = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == node_id)
@@ -98,7 +98,7 @@ async def test_report_fail_deletes_node_and_releases_claim(task_service_with_bbs
     svc, task_id, node_id, bot = task_service_with_bbs_node
     await svc.report_bbs_result(
         task_id, node_id, bot,
-        acceptance_result=AcceptanceResult(AcceptanceVerdict.FAIL, gaps=["partial"]),
+        acceptance_result=AcceptanceResult(AcceptanceVerdict.FAILED, gaps=["partial"]),
         output_patch={"progress": 30},
     )
     tasks = svc.get_task_dashboard(task_id).tasks
@@ -114,7 +114,7 @@ async def test_report_rejects_non_owner(task_service_with_bbs_node):
     with pytest.raises(TaskStateError):
         await svc.report_bbs_result(
             task_id, node_id, "botOTHER",
-            acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS),
+            acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
         )
 
 
@@ -126,7 +126,7 @@ async def test_report_clears_owner_even_if_scoped_flip_raises(task_service_with_
     # 先正常回投 PASS 一次 → scoped DONE + claim 释放
     await svc.report_bbs_result(
         task_id, node_id, bot,
-        acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS),
+        acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
     )
     # 重新 claim(模拟同 bot 再报已 DONE 节点)
     svc.claim_bbs_task(task_id, bot)
@@ -134,7 +134,7 @@ async def test_report_clears_owner_even_if_scoped_flip_raises(task_service_with_
     with pytest.raises(TaskStateError):
         await svc.report_bbs_result(
             task_id, node_id, bot,
-            acceptance_result=AcceptanceResult(AcceptanceVerdict.PASS),
+            acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),
         )
     # 持卡者即使翻态抛错也已被释放,不再死锁
     root_after = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == task_id)

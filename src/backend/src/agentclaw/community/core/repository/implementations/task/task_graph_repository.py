@@ -9,6 +9,7 @@ from typing import Any
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.task import TaskGraphRepositoryProtocol
+from agentclaw.community.core.task.domain.errors import GraphVersionConflictError
 from agentclaw.community.core.task.domain.models import (
     NodeActionEvent,
     Relation,
@@ -32,10 +33,6 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 
 _GRAPH_STATUS_KEY = "__graph_status"
 _TERMINAL = {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}
-
-
-class GraphVersionConflictError(RuntimeError):
-    """Raised when a graph update was based on a stale version."""
 
 
 class TaskGraphRepository(TaskGraphRepositoryProtocol):

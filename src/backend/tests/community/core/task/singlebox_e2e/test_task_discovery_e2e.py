@@ -210,7 +210,7 @@ class _HttpCronRelay:
 
 
 class _MockNotifySender:
-    """测试用 noop 通知发送器 — 满足 NotifySenderPlugin Protocol。"""
+    """测试用 noop 通知发送器 — 满足 NotifyMessagesProvider Protocol。"""
 
     @property
     def channels(self) -> frozenset[str]:

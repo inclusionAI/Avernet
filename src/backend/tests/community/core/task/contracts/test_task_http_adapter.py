@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
 
@@ -57,13 +58,13 @@ class _MemoryTaskInfoRepository:
 
     def list_records(
         self,
-        status: Status | None = None,
+        status: Sequence[Status] | None = None,
         *,
         owner_user_id: str | None = None,
     ) -> list[TaskInfoRecord]:
         records = list(self._records.values())
-        if status is not None:
-            records = [record for record in records if record.status is status]
+        if status:
+            records = [record for record in records if record.status in status]
         if owner_user_id is not None:
             records = [
                 record for record in records
@@ -73,7 +74,7 @@ class _MemoryTaskInfoRepository:
 
     def list_records_page(
         self,
-        status: Status | None = None,
+        status: Sequence[Status] | None = None,
         *,
         owner_user_id: str | None = None,
         page: int = 1,
@@ -85,7 +86,7 @@ class _MemoryTaskInfoRepository:
         return records[start : start + page_size], total
 
     def list_by_status(self, status: Status, **_kwargs) -> list[TaskInfoRecord]:
-        return self.list_records(status)
+        return self.list_records([status])
 
 
 class _StubDiscoverModule(Module):
@@ -154,6 +155,17 @@ def _execute_and_get_id(c) -> str:
 
 
 class TestTaskExecute:
+    def test_internal_router_exposes_static_template_run_endpoint(self):
+        routes = {
+            (route.path, method)
+            for route in task_internal_router.routes
+            for method in getattr(route, "methods", set())
+        }
+        assert (
+            "/api/v1/collaboration/tasks/run-template",
+            "POST",
+        ) in routes
+
     def test_execute_returns_op_result(self, client):
         c, _ = client
         r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
@@ -227,6 +239,36 @@ class TestTaskList:
         assert all(item["task_id"] != task_id for item in pending.json()["data"])
         assert all(item["task_id"] != task_id for item in done.json()["data"])
 
+    def test_list_filters_by_multiple_statuses(self, client):
+        c, inj = client
+        repo = inj.get(TaskInfoRepositoryProtocol)
+        for tid, st in (("multi-pending", Status.PENDING), ("multi-running", Status.RUNNING)):
+            repo.insert(TaskInfoRecord(
+                id=0,
+                task_id=tid,
+                source_type="bot",
+                owner_user_id="owner_user",
+                owner_bot_id="bot-x",
+                execution_config={"task_type": "dynamic"},
+                task_spec={"metadata": {"task_id": tid}},
+                status=st,
+            ))
+
+        r = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={"status": f"{Status.PENDING.value},{Status.RUNNING.value}", "user_id": "owner_user"},
+        )
+        assert r.status_code == 200, r.text
+        ids = {record["task_id"] for record in r.json()["data"]}
+        assert ids == {"multi-pending", "multi-running"}
+
+        # 无效 token(逗号分隔中任一非法)-> 400
+        bad = c.get(
+            "/openapi/v1/collaboration/tasks/list",
+            params={"status": f"{Status.PENDING.value},NOT_A_STATUS", "user_id": "owner_user"},
+        )
+        assert bad.status_code == 400, bad.text
+
     def test_list_without_page_params_returns_bare_list(self, client):
         # 历史契约:不传 page/page_size → data 为列表(非 Page)
         c, _ = client
@@ -268,8 +310,9 @@ class TestTaskDashboard:
         r = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": task_id})
         assert r.status_code == 200, r.text
         body = r.json()["data"]
-        # stub 路径无 owner bot → 无法规划 → 根 gap 拆不出 → 图 HUNG(语义正确:无规划端口不假 done)
-        assert body["status"] == "REVIEWING"
+        # stub 路径无 owner bot → 根 gap 拆不出 → root HUNG(BBS 可恢复态);graph.status 不镜像 BBS 可恢复 HUNG,
+        # 保持非终态 EXECUTING(等 BBS 接力恢复);root 自身 HUNG → DTO 投影 REVIEWING。
+        assert body["status"] == "EXECUTING"
         assert any(n["node_id"] == task_id for n in body["tasks"])
         # 根节点 task_spec 字段透传(task_id 服务端回填进 metadata)
         root = next(n for n in body["tasks"] if n["node_id"] == task_id)
@@ -319,11 +362,13 @@ class TestTaskCallbackReport:
             node_run_graph=None,  # type: ignore[arg-type]
         )
         graph_svc.add_task_nodes([child], "t_http")  # 子节点以 RUNNING 入图(add 保留状态)
-        # 回投 PASS(acceptance 驱动 RUNNING→DONE)
+        # 回投 PASS:common_task 形态(task_id+node_id+status+output+acceptance_result)→ acceptance 驱动 RUNNING→DONE
         r = c.post("/api/v1/collaboration/tasks/callback/report", json={
-            "loop_task_id": "t_http::N_http",
-            "workflow_type": "single_bot",
-            "result": {"success": True, "data": "ok"},
+            "task_id": "t_http",
+            "node_id": "N_http",
+            "status": "DONE",
+            "output": "ok",
+            "acceptance_result": {"verdict": "DONE", "gaps": []},
         })
         assert r.status_code == 200, r.text
         assert r.json()["data"] == {"ok": True}
