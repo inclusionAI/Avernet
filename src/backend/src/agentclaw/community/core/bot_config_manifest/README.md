@@ -25,7 +25,7 @@ As of the first wave the unsupported constructs are:
 
 | Construct | Why nothing can apply it | Unblocked by |
 | --- | --- | --- |
-| category `cli_tools` | deferred and unscheduled — no materializer, no PATH delivery, no artifact field | W9 |
+| category `cli_tools` | delivery deferred by business priority — no materializer, and nothing puts a tool on PATH | its work item |
 | category `engine_config` | moved out of the first wave, so the fetch-free materializer covers only `mcp` and `script` | its materializer returning |
 | `from` naming a **named source** | named sources are resolved by W7 | W7 |
 | a **git** source | same resolver, same work item | W7 |
@@ -104,9 +104,12 @@ honest.
   unpacked sizes, archive file counts and timeouts cannot be known by a surface
   that never fetches; they belong to the fetcher (W2) and to apply (W4/W5).
   Declaring them here beside enforced limits would make them read as enforced.
-- **`cli_tools.entrypoints` is checked syntactically only.** Existence, regular
-  file, symlink resolution all need materialized content, which this work item
-  never produces. Those are W9's, and are listed there.
+- **`cli_tools` is validated against the flattened shape** — one entry is one
+  command is one file, selected inside an archive with `subpath` (schema §3.7).
+  The earlier "directory plus an `entrypoints` list" draft is gone, and with it
+  the rule set that existed only to constrain it (in-package traversal, symlink
+  escape, basename collisions). A document still using `entrypoints` is refused
+  by name rather than silently ignored.
 
 ## Context Boundary
 

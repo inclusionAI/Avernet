@@ -147,7 +147,7 @@ def _attach_body(task_id: str, parent_node_id: str, bot_id: str) -> dict:
 
 def _result_body(
     task_id: str, node_id: str, bot_id: str, *,
-    verdict: str = "PASS", gaps: list[str] | None = None,
+    verdict: str = "DONE", gaps: list[str] | None = None,
     output_patch: dict | None = None,
 ) -> dict:
     """对齐 BbsResultDTO 的请求体。FAIL 强制要求 gaps 非空(验收 skill 契约)。收口由框架自判,无 root_verified。"""
@@ -216,7 +216,7 @@ def test_b_fail_deletes_scoped_then_next_bot_relays_fresh(client):
     node_a = r_attach_a.json()["data"]["node_id"]
     assert node_a.startswith("bbs-")
     r_fail = c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(
-        task_id, node_a, "botA", verdict="FAIL", gaps=["need_data"], output_patch={"progress": 30}))
+        task_id, node_a, "botA", verdict="FAILED", gaps=["need_data"], output_patch={"progress": 30}))
     assert r_fail.status_code == 200, r_fail.text
 
     # botA 已释放 claim + scoped 节点被删(FAIL→丢弃本次尝试,不翻 FAILED、不 fold checkpoint)
@@ -234,7 +234,7 @@ def test_b_fail_deletes_scoped_then_next_bot_relays_fresh(client):
     # botB 续做:PASS → 本 scoped DONE + claim 释放(根收口由框架经 owner 复核自判,非 bot 声明;单测无 owner
     # bot→不收图 DONE,见 natual live 测)。这里验接力机制:接力不重做 + checkpoint 留存 + claim 释放。
     r_pass = c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(
-        task_id, node_b, "botB", verdict="PASS"))
+        task_id, node_b, "botB", verdict="DONE"))
     assert r_pass.status_code == 200, r_pass.text
 
     # 终局:botA scoped 已删(FAIL 丢弃,不重做);botB scoped DONE;claim 已释放。
@@ -292,7 +292,7 @@ def test_d_crash_lease_relay(client):
     assert r_attach_b.status_code == 200, r_attach_b.text
     node_b = r_attach_b.json()["data"]["node_id"]
     assert c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(
-        task_id, node_b, "botB", verdict="PASS")).status_code == 200
+        task_id, node_b, "botB", verdict="DONE")).status_code == 200
     _, nodes_done = _dashboard_tasks(c, task_id)
     assert nodes_done[node_b]["status"] == "DONE"
     assert _root_owner(nodes_done, task_id) is None

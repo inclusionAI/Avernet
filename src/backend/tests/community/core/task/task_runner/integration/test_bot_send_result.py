@@ -61,6 +61,14 @@ def test_dispatch_single_bot_reads_bot_send_result_and_carries_session_id():
     ex._context = _FakeContext()
     ex._poller = poller
     ex._graph = None  # __new__ 跳过 __init__;补 __init__ 默认(无图→_persist_dispatch_ids 跳过落库)
+    ex._task_settings = None  # __init__ 默认:未注入 task_settings → _single_bot_skill_report_enabled 回退 False(poller)
+    ex._api_base_url = ""  # __init__ 默认:_dispatch_single_bot ctx 携带 backend
+    ex._identity_resolver = None
+    ex._bot_token_provider = None
+    ex._bcs = None
+    ex._bcn = None
+    ex._on_bbs_report = None
+    ex._group_meta = {}
 
     ok = asyncio.new_event_loop().run_until_complete(
         ex._dispatch_single_bot(_root_node(), asyncio.Semaphore(1))

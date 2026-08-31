@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Sequence
 
 from injector import inject
 
@@ -74,14 +74,15 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
 
     def list_records(
         self,
-        status: Optional[Status] = None,
+        status: Optional[Sequence[Status]] = None,
         *,
         owner_user_id: Optional[str] = None,
     ) -> list[TaskInfoRecord]:
         with self._db.orm_session() as db:
             q = db.query(self._model)
-            if status is not None:
-                q = q.filter(self._model.status == status.value)
+            # status 是运行时态集合:空/None 不过滤,非空按 SQL IN 过滤。
+            if status:
+                q = q.filter(self._model.status.in_([s.value for s in status]))
             if owner_user_id is not None:
                 q = q.filter(self._model.owner_user_id == owner_user_id)
             rows = q.order_by(
@@ -92,7 +93,7 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
 
     def list_records_page(
         self,
-        status: Optional[Status] = None,
+        status: Optional[Sequence[Status]] = None,
         *,
         owner_user_id: Optional[str] = None,
         page: int = 1,
@@ -100,8 +101,9 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
     ) -> tuple[list[TaskInfoRecord], int]:
         with self._db.orm_session() as db:
             q = db.query(self._model)
-            if status is not None:
-                q = q.filter(self._model.status == status.value)
+            # status 是运行时态集合:空/None 不过滤,非空按 SQL IN 过滤。
+            if status:
+                q = q.filter(self._model.status.in_([s.value for s in status]))
             if owner_user_id is not None:
                 q = q.filter(self._model.owner_user_id == owner_user_id)
             total = q.count()

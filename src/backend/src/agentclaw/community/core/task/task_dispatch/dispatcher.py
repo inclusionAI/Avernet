@@ -79,9 +79,19 @@ class TaskDispatcher:
                 # JOIN 丢掉的候选透出到节点 unauthorized_bots(dashboard 暴露,引导 owner grant)
                 if getattr(result, "unauthorized_bots", None):
                     node.run_info.extend_props["unauthorized_bots"] = result.unauthorized_bots
-                logger.info("[task][dispatch] node=%s outcome=%s run_mode=%s assignee=%s",
-                            node.node_id, result.outcome, node.run_info.run_mode,
-                            node.run_info.assignee or "<group pending/miss>")
+                group = getattr(result, "group_formation", None)
+                logger.info(
+                    "[task][dispatch] task=%s node=%s outcome=%s run_mode=%s assignee=%s "
+                    "group_mode=%s group_bot_ids=%s unauthorized=%s",
+                    node.task_id,
+                    node.node_id,
+                    result.outcome,
+                    node.run_info.run_mode,
+                    node.run_info.assignee or "<group pending/miss>",
+                    group.collab_mode if group is not None else None,
+                    list(group.bot_ids) if group is not None else None,
+                    len(getattr(result, "unauthorized_bots", None) or []),
+                )
                 return node
             except Exception as ex:  # noqa: BLE001  搜推异常→吞掉,留 PENDING 交 harness 按超时重试
                 logger.warning("[task][dispatch] node=%s 搜推异常→留 PENDING 交 harness: %s", node.node_id, ex)

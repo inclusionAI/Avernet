@@ -40,6 +40,9 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
 )
+from agentclaw.community.api.service_edit_lock_service import (
+    ServiceEditLockServiceProtocol,
+)
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -200,18 +203,6 @@ def _seed_happy_services(world) -> None:
     def delete_initial_draft(_self, _bot_id, **_kwargs) -> bool:
         return True
 
-    def get_lock(_self, _bot_id, *, actor_id, **_kwargs):
-        return _lock_info(actor_id)
-
-    def acquire_lock(_self, _bot_id, *, actor_id, **_kwargs):
-        return _lock_info(actor_id).lock
-
-    def release_lock(_self, _bot_id, **_kwargs) -> bool:
-        return True
-
-    def steal_lock(_self, _bot_id, *, actor_id, **_kwargs):
-        return _lock_info(actor_id).lock
-
     bind_overrides(
         world,
         ServicePublicationFacadeProtocol,
@@ -227,6 +218,31 @@ def _seed_happy_services(world) -> None:
             "offline": offline,
             "retry": retry,
             "delete_initial_draft": delete_initial_draft,
+        },
+    )
+
+
+def _seed_happy_edit_locks(world) -> None:
+    """Wire edit-locks alone; resolving the publication facade is a failure."""
+    _seed_verifier(world)
+    make_bot(world, bot_id=_BOT_ID, owner_id=_OWNER)
+
+    def get_lock(_self, _bot_id, *, actor_id, **_kwargs):
+        return _lock_info(actor_id)
+
+    def acquire_lock(_self, _bot_id, *, actor_id, **_kwargs):
+        return _lock_info(actor_id).lock
+
+    def release_lock(_self, _bot_id, **_kwargs) -> bool:
+        return True
+
+    def steal_lock(_self, _bot_id, *, actor_id, **_kwargs):
+        return _lock_info(actor_id).lock
+
+    bind_overrides(
+        world,
+        ServiceEditLockServiceProtocol,
+        {
             "get_lock": get_lock,
             "acquire_lock": acquire_lock,
             "release_lock": release_lock,
@@ -366,12 +382,17 @@ _HAPPY_CASES = (
 
 
 for _method, _path, _input, _status, _contains in _HAPPY_CASES:
+    _seed = (
+        _seed_happy_edit_locks
+        if _path.startswith(_EDIT_LOCK)
+        else _seed_happy_services
+    )
     endpoint_test(
         method=_method,
         path=_path,
         scenario="happy",
         input=_input,
-        seed=_seed_happy_services,
+        seed=_seed,
         expect=ExpectSuccess(status=_status, json_contains=_contains),
     )(lambda: None)
 

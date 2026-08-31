@@ -43,6 +43,9 @@ from agentclaw.community.api.publish_approval import PublishApprovalServiceProto
 from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
 )
+from agentclaw.community.api.service_edit_lock_service import (
+    ServiceEditLockServiceProtocol,
+)
 from agentclaw.community.api.service_artifact_lineage import (
     ServiceArtifactLineageReaderProtocol,
 )
@@ -131,6 +134,9 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
 from agentclaw.community.core.service_bot.services.publish_approval_service import PublishApprovalService
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
+)
+from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
+    ServiceEditLockService,
 )
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
@@ -719,3 +725,28 @@ class ServiceBotModule(Module):
         self, facade: ServicePublicationFacade
     ) -> ServicePublicationFacadeProtocol:
         return facade
+
+    @singleton
+    @provider
+    @inject
+    def service_edit_lock_service(
+        self,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+        lock_service: CollaboratorLockServiceProtocol,
+    ) -> ServiceEditLockService:
+        """Construct edit locks without resolving the publication pipeline."""
+        return ServiceEditLockService(
+            bot_repo=bot_repo,
+            collaborator_service=collaborator_service,
+            lock_service=lock_service,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def _service_edit_lock_service_protocol(
+        self,
+        service: ServiceEditLockService,
+    ) -> ServiceEditLockServiceProtocol:
+        return service

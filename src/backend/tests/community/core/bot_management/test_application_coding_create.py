@@ -524,3 +524,92 @@ def test_is_workspace_hosting_available() -> None:
     assert svc.is_workspace_hosting_available() is False
     svc._workspace_hosting_service = MagicMock()
     assert svc.is_workspace_hosting_available() is True
+
+
+# ── legacy engine alias folding (engine/form vocabulary split) ─────────────
+
+
+def test_legacy_aicoding_engine_folds_into_claude_code_with_form_marker() -> None:
+    """Old-link compat: engine_type="aicoding" + applicationCoding creates.
+
+    Before the vocabulary split this combination was rejected by the strategy's
+    claude_code-only gate; folding the alias first both restores the old link's
+    behavior and records the server-managed form marker the runtime bucket
+    routing reads.
+    """
+    prepared = _prepare_spec(
+        _application_coding_spec(
+            engine_type="aicoding", template_config={"devflow_workflow": "x"}
+        )
+    )
+    assert prepared.engine_type == "claude_code"
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config == {
+        "devflow_workflow": "x",
+        "engine_form": "aicoding",
+    }
+
+
+def test_legacy_aicoding_plain_bot_folds_without_any_marker() -> None:
+    """A plain no-template bot has no form: it is simply a claude_code bot."""
+    prepared = _prepare_spec(
+        BotCreateSpec(
+            entity_id="u1",
+            engine_type="aicoding",
+            bot_type="personal",
+            bot_name="Bot",
+        )
+    )
+    assert prepared.engine_type == "claude_code"
+    assert prepared.template_type is None
+    assert prepared.template_config is None
+
+
+def test_legacy_aicoding_without_template_config_writes_no_marker() -> None:
+    """Legacy Core-only shape (template present, config intentionally None):
+    nothing to merge the marker into; the existing template-type semantics
+    (claude_code + applicationCoding → aicoding runtime) already route it."""
+    prepared = _prepare_spec(
+        _application_coding_spec(engine_type="aicoding", template_config=None)
+    )
+    assert prepared.engine_type == "claude_code"
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config is None
+
+
+def test_engine_folding_is_idempotent_for_real_engines() -> None:
+    spec = _application_coding_spec()  # engine_type="claude_code"
+    prepared = _prepare_spec(spec)
+    assert prepared.engine_type == "claude_code"
+    assert prepared.template_config == {"devflow_workflow": "x"}
+    # Re-prepare of the translated output keeps a stable single marker.
+    second = _prepare_spec(
+        _application_coding_spec(
+            engine_type="aicoding",
+            template_config={"devflow_workflow": "x", "engine_form": "aicoding"},
+        )
+    )
+    assert second.template_config == {
+        "devflow_workflow": "x",
+        "engine_form": "aicoding",
+    }
+
+
+def test_public_input_cannot_smuggle_the_form_marker() -> None:
+    """The marker is server-managed: PUBLIC validation rejects caller input."""
+    with pytest.raises(BotTemplateInvalidError) as excinfo:
+        _strategy_prepare(
+            engine_properties={
+                "template": {"devflow_workflow": "x", "engine_form": "aicoding"}
+            },
+            template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+        )
+    assert "engine_form" in str(excinfo.value)
+    # The legacy internal shape may carry it (platform-written snapshot).
+    prepared = _strategy_prepare(
+        engine_properties={
+            "template": {"devflow_workflow": "x", "engine_form": "aicoding"}
+        },
+        template_validation_mode=BotCreateTemplateValidationMode.LEGACY,
+    )
+    assert prepared.template_config["engine_form"] == "aicoding"

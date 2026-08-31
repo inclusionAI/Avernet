@@ -182,3 +182,116 @@ class TestSearchBasedDispatchStrategy:
         assert result.outcome == SearchOutcome.MISS
         assert result.miss_reason == "no_candidates"
         assert strategy._bot.calls == []
+
+
+def test_search_strategy_default_rule_samples_one_test_bot_for_one_or_two_candidates(monkeypatch):
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [{"bot_id": "first"}, {"bot_id": "second"}]}
+
+    class _Bot:
+        def __init__(self):
+            self.calls = []
+
+        async def send_and_wait_async(self, **kwargs):
+            self.calls.append(kwargs)
+            raise AssertionError("default dispatch rule must not call search skill")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    bot = _Bot()
+    sampled = ["default:146836"]
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
+        lambda population, count: sampled[:count],
+    )
+    result = _run(SearchBasedDispatchStrategy(bot, _Discover()).apply(_node("c1"), graph))
+
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "default:146836"
+    assert result.owner_id == "146836"
+    assert bot.calls == []
+
+
+def test_search_strategy_default_rule_samples_all_count_as_manager_worker_for_more_than_two_candidates(monkeypatch):
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {
+                "items": [
+                    {"bot_id": "manager"},
+                    {"bot_id": "worker-1"},
+                    {"bot_id": "worker-2"},
+                ]
+            }
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("default dispatch rule must not call search skill")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    sampled = ["bot-a:1", "bot-b:2", "bot-c:3"]
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
+        lambda population, count: sampled[:count],
+    )
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
+
+    assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+    assert result.group_formation is not None
+    assert result.group_formation.bot_ids == sampled
+    assert result.group_formation.collab_mode == "manager_worker"
+    assert [m["role"] for m in result.group_formation.members_info] == [
+        "manager", "worker", "worker"
+    ]
+
+
+def test_search_strategy_composes_owner_identity_for_openapi_call():
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [{"bot_id": "candidate"}]}
+
+    class _Bot:
+        def __init__(self):
+            self.calls = []
+
+        async def send_and_wait_async(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "status": "COMPLETED",
+                "result": {
+                    "content": (
+                        '{"outcome":"MISS","miss_reason":"not matched"}'
+                    )
+                },
+            }
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "default:old-owner", "owner_user_id": "146836"},
+    )
+    bot = _Bot()
+    result = _run(
+        SearchBasedDispatchStrategy(bot, _Discover(), use_search_skill=True).apply(
+            _node("c1"), graph
+        )
+    )
+
+    assert result.outcome == SearchOutcome.MISS
+    assert bot.calls[0]["bot_id"] == "default:146836"

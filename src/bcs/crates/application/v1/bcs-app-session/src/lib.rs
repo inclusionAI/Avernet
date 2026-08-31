@@ -556,6 +556,8 @@ impl SessionServiceImpl {
             input: session.input.clone(),
             meta: session.meta.clone(),
             participants,
+            caller_principal: session.caller_principal.clone(),
+            created_by: session.created_by.clone(),
             created_at: session.created_at,
             updated_at: session.updated_at,
             state_machine_run_id: state_machine_run

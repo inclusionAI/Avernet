@@ -200,6 +200,7 @@ class ExpertChatSessionRuntimeMixin:
         return resolve_baas_engine_bucket(
             engine_type=raw_engine_type,
             template_type=bot.get("template_type") or "",
+            template_config=template_config,
         )
 
     def _resolve_chat_engine_strategy(

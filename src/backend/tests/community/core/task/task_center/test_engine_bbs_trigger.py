@@ -1,15 +1,16 @@
 """Task 4 — BBS 主动触发引擎接线单测(spec §5:engine trigger)。
 
-验证 ``_maybe_propagate_hung`` 命中根 BBS 可恢复态拦截点(``miss_depth_exhausted`` + ``bbs_mode`` + 未 claim)
-时,调用 ``_schedule_bbs_notify`` 主动通知 dream-mode bot;以及 ``_schedule_bbs_notify`` 本身的
-fire-and-forget 语义(``asyncio.create_task(runner.run_bbs)`` + ``_bg_tasks`` tracking)与端口缺失静默跳过。
+验证 ``_maybe_propagate_hung`` 将根节点置为 HUNG 后进入 BBS 可恢复态(``miss_depth_exhausted`` + ``bbs_mode`` + 未 claim),
+并调用 ``_schedule_bbs_notify`` 主动通知 claim-enabled bot;以及 ``_schedule_bbs_notify`` 本身的
+durable-loop fire-and-forget 语义(``asyncio.run_coroutine_threadsafe`` + ``_bg_tasks`` tracking)与端口缺失静默跳过。
 
-可恢复拦截仅对 ``miss_depth_exhausted``;其它 reason(硬死锁)不触发——不在本单测范围(由既有
-``test_engine.py`` 覆盖 HUNG 冒泡收口)。
+BBS 调度仍由根 HUNG 后的统一入口负责;本文件覆盖 miss 与 harness 两类触发。
 """
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import threading
 from typing import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -117,9 +118,8 @@ def svc() -> TaskGraphService:
 
 
 # ===== _schedule_bbs_notify 直测 =====
-def test_engine_schedule_bbs_notify_creates_task():
-    """_schedule_bbs_notify 经 asyncio.create_task 调度 runner.run_bbs 并登记 _bg_tasks。"""
-    # bot/bcs 留 None 构造(不启 poller 线程);再注入 mock 端口避免守卫跳过
+def test_engine_schedule_bbs_notify_submits_to_durable_loop():
+    """BBS submission is independent of the caller's short-lived Harness loop."""
     engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
     engine._runner = MagicMock()
     engine._runner.run_bbs = AsyncMock(return_value=None)
@@ -127,13 +127,49 @@ def test_engine_schedule_bbs_notify_creates_task():
     engine._bcs = MagicMock()
     fake_g = MagicMock()
     fake_g.task_id = "t1"
+    durable_loop = MagicMock()
+    durable_future = concurrent.futures.Future()
 
-    with patch("asyncio.create_task") as mock_create:
+    def submit(coro, loop):
+        assert loop is durable_loop
+        coro.close()
+        return durable_future
+
+    with patch.object(engine, "_ensure_bbs_loop", return_value=durable_loop), \
+         patch("asyncio.run_coroutine_threadsafe", side_effect=submit) as mock_submit:
         engine._schedule_bbs_notify("t1", fake_g)
-        mock_create.assert_called_once()
+        mock_submit.assert_called_once()
+        assert len(engine._bg_tasks) == 1
+        durable_future.set_result(None)
 
-    # bg 任务登记进 _bg_tasks(由 _on_bg_done 回收)
-    assert len(engine._bg_tasks) == 1
+    assert engine._bg_tasks == set()
+
+
+def test_engine_bbs_survives_caller_loop_shutdown():
+    """A caller driven by asyncio.run cannot cancel the durable BBS coroutine."""
+    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    started = threading.Event()
+    finished = threading.Event()
+
+    async def run_bbs(_execution_graph):
+        started.set()
+        await asyncio.sleep(0)
+        finished.set()
+
+    engine._runner = MagicMock()
+    engine._runner.run_bbs = run_bbs
+    engine._bot = MagicMock()
+    engine._bcs = MagicMock()
+    fake_g = MagicMock()
+    fake_g.task_id = "t-harness-loop"
+
+    async def schedule_from_short_lived_loop():
+        engine._schedule_bbs_notify(fake_g.task_id, fake_g)
+
+    asyncio.run(schedule_from_short_lived_loop())
+
+    assert started.wait(1.0)
+    assert finished.wait(1.0)
 
 
 def test_engine_schedule_bbs_notify_skips_when_no_runner():
@@ -145,10 +181,9 @@ def test_engine_schedule_bbs_notify_skips_when_no_runner():
     assert engine._bg_tasks == set()
 
 
-# ===== 可恢复拦截点接线:on_miss → miss_depth_exhausted → _schedule_bbs_notify =====
+# ===== 根 HUNG 接线:on_miss → miss_depth_exhausted → _schedule_bbs_notify =====
 def test_engine_schedule_bbs_notify_fires_at_recoverable_intercept(svc):
-    """on_miss 达 MAX_DEPTH → miss_depth_exhausted → _maybe_propagate_hung 根可恢复态拦截
-    (parent-is-root)→ 调用 _schedule_bbs_notify(task_id, graph)。"""
+    """on_miss 达 MAX_DEPTH → miss_depth_exhausted → 根 HUNG → 调用 _schedule_bbs_notify。"""
     g = svc.initialize_graph(_task_info("t4", max_depth=1))
     svc.add_task_nodes([_child("c1", "t4")], parent_node_id="t4")
     eng = _engine(svc, planner=StubPlanner(lambda g: []), dispatcher=StubDispatcher(miss=True))
@@ -157,25 +192,29 @@ def test_engine_schedule_bbs_notify_fires_at_recoverable_intercept(svc):
         _run(eng.on_miss(_patch("t4", "c1", extend_props_patch={"miss_events": ["no_bot"]})))
         mock_sched.assert_called_once()
 
-    # 命中可恢复拦截:根保持 PLANNING(未置图 HUNG)、bbs_mode 已升
+    # 命中统一根 HUNG→BBS 路径:根先置 HUNG,bbs_mode 已升。
     called_args = mock_sched.call_args.args
     assert called_args[0] == "t4"  # task_id
     assert g.extend_props.get("bbs_mode") is True
-    assert g.status != Status.HUNG  # 可恢复态不收口图 HUNG
+    assert g.tasks[0].status == Status.HUNG
+    assert g.status != Status.HUNG  # graph.status 仍是进行态镜像，根 HUNG 是 BBS 可恢复入口
 
 
-def test_engine_does_not_schedule_bbs_notify_for_non_recoverable_hung(svc):
-    """硬死锁 reason(exec_stuck 等)即便 bbs_mode 也不触发 _schedule_bbs_notify——
-    走正常 HUNG 冒泡收口(非 miss_depth_exhausted 不进可恢复拦截)。"""
+def test_engine_harness_exhausted_schedules_bbs_recoverable(svc):
+    """harness 耗尽(exec_stuck)→节点 HUNG 冒泡到根→根 HUNG 升 BBS 可恢复态。
+
+    exec_stuck 属可恢复 reason:_maybe_propagate_hung 在根处不限 reason(根 HUNG + bbs_mode +
+    未 claim → _schedule_bbs_notify),与"根/图 HUNG 升 BBS"设计一致(harness→bbs 回收默认开)。
+    """
     g = svc.initialize_graph(_task_info("t5", max_depth=1))
     svc.add_task_nodes([_child("c1", "t5")], parent_node_id="t5")
     svc.update_task_node_info(
         _patch("t5", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
-    svc.update_task_node_info(_patch("t5", "c1", extend_props_patch={"harness_retries": 2}))
+    svc.update_task_node_info(_patch("t5", "c1", extend_props_patch={"harness_retries": 3}))
     eng = _engine(svc, planner=StubPlanner(lambda g: []), dispatcher=StubDispatcher())
 
     with patch.object(eng, "_schedule_bbs_notify") as mock_sched:
-        _run(eng.on_harness(_patch("t5", "c1", exec_error="acceptance_fail_retry")))
-        mock_sched.assert_not_called()
-    # 硬死锁收口:节点 HUNG
+        _run(eng.on_harness(_patch("t5", "c1", exec_error="exec_failed_retry")))
+        mock_sched.assert_called_once()  # exec_stuck 可恢复 → 升 BBS
+    # 节点仍 HUNG(exec_stuck 收口)
     assert svc._get_node(g, "c1").status == Status.HUNG

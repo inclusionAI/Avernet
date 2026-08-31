@@ -396,10 +396,14 @@ def _validate_category_list(
             what="identity type",
         )
     elif category == "cli_tools":
-        commands: list[str] = []
-        for at, entry in entries:
-            commands.extend(validate_cli_tool_entry(ctx, at, entry))
-        _check_command_names(ctx, location, commands)
+        commands = [validate_cli_tool_entry(ctx, at, entry) for at, entry in entries]
+        _check_duplicates(
+            ctx,
+            location,
+            [c for c in commands if c],
+            code="duplicate_command_name",
+            what="tool name",
+        )
 
 
 def _check_entry_placeholders(ctx: Context, location: str, entry: dict[str, Any]) -> None:
@@ -450,23 +454,6 @@ def _check_resource_layout(ctx: Context, location: str, paths: list[str]) -> Non
                     f"'{directory}'; a directory entry owns its whole subtree",
                 )
                 break
-
-
-def _check_command_names(ctx: Context, location: str, commands: list[str]) -> None:
-    """Two tools cannot expose the same command name.
-
-    The exposed command **is** the basename, so ``bin/tool`` and
-    ``helpers/tool`` collide however different their packages are: one shadows
-    the other and which one wins depends on install order. v1 has no alias
-    field, so the declaration is refused rather than resolved arbitrarily.
-    """
-    for command in duplicates(commands):
-        ctx.add(
-            location,
-            "duplicate_command_name",
-            f"two cli_tools entrypoints expose the command '{command}'; the "
-            "command name is the basename, so one would shadow the other",
-        )
 
 
 def _validate_script(ctx: Context, script: Any) -> None:

@@ -98,14 +98,40 @@ class RequestTaskSpecDTO(BaseModel):
 
 
 class ExecutionConfigDTO(BaseModel):
-    """执行配置(task_type 必填;静态单工作流/静态组工作流/workflow_id 可选;其余键允许透传)。"""
+    """执行配置(task_type 必填;yaml/workflow_id 可选;其余键允许透传)。"""
 
     model_config = ConfigDict(extra="allow")
-    task_type: Literal["yaml", "workflow", "dynamic"] = Field(
+    task_type: Literal["yaml", "workflow", "dynamic", "static_plan", "bbs"] = Field(
         ..., description="任务类型"
     )
     yaml: str | dict[str, Any] | None = Field(None, description="yaml 内联或引用")
     workflow_id: str | None = Field(None, description="workflow id")
+    panel_component_name: str | None = Field(
+        None,
+        description="state_machine 协作群 opening_message 使用的业务面板组件名",
+    )
+
+
+class TemplateRunRequestDTO(BaseModel):
+    """运行仓内置静态模板;触发者身份从调用方上下文解析。
+
+    触发者身份对称 dynamic execute:caller_bot_id 必填(触发执行的 bot id),
+    owner_user_id/owner_account_id 由登录态 principal 解析后注入。
+    """
+
+    template_id: str = Field(..., min_length=1, description="仓内置静态模板标识,如 okr-implementation")
+    caller_bot_id: str = Field(
+        ..., min_length=1,
+        description="触发执行这条静态模板的 caller bot id(必填,对称 dynamic execute.owner_bot_id)",
+    )
+    input: dict[str, Any] = Field(default_factory=dict, description="模板输入键值,按模板 input_schema 规定填入")
+    auto_advance: bool | None = Field(
+        default=None,
+        description=(
+            "演示自驱开关:true=跳过真实派发用 mock 结果推进静态 DAG,"
+            "false=强制真实派发,null=由服务端默认开关决定。"
+        ),
+    )
 
 
 class TaskInfoRequestDTO(BaseModel):
@@ -160,6 +186,30 @@ class BbsResultDTO(BaseModel):
     exec_error: str | None = Field(None, description="执行报错(fold 进节点)")
 
 
+class TaskNodeUpdateDTO(BaseModel):
+    """POST /api/v1/collaboration/tasks/nodes/update 请求体(内部节点写口:直接更新节点 run_info)。
+
+    内部调用方/测试用直驱写口,透传 ``TaskNodePatch`` 经 ``ExecutionEngine.on_report`` 落库并触发翻态/
+    验收/收敛传播(与回投同一入口,故 status 直驱仍会触发引擎收敛旁路)。
+    终态翻转三选一(互斥,与 ``TaskNodePatch`` 对齐):``acceptance_result`` 验收驱动 / ``exec_error`` 执行报错
+    (→ on_harness 重投)/ ``status`` 框架直驱;三者全空仅 fold 非状态字段。
+    """
+
+    task_id: str = Field(..., description="任务ID")
+    node_id: str = Field(..., description="节点ID")
+    status: str | None = Field(None, description="框架直驱状态(HUNG/DONE/PENDING/RUNNING 等)")
+    run_mode: str | None = Field(None, description="执行模态(single_bot / bbs 等)")
+    assignee: str | None = Field(None, description="承接者(bot_id 或 group_id)")
+    output_patch: dict[str, Any] | None = Field(None, description="增量输出(fold 进 run_info.output)")
+    acceptance_result: AcceptanceResultDTO | None = Field(
+        None, description="验收结论(PASS→DONE / FAIL+gaps→FAILED)"
+    )
+    exec_error: str | None = Field(None, description="执行报错信号(非验收;→ on_harness 重投)")
+    extend_props_patch: dict[str, Any] | None = Field(
+        None, description="增量扩展属性(miss_events / hung_reason / harness_retries 等)"
+    )
+
+
 class TaskCallbackDataDTO(BaseModel):
     """POST /api/v1/collaboration/tasks/callback/report 请求体(执行实体回投)。"""
 
@@ -193,14 +243,14 @@ class TaskOpResultDTO(BaseModel):
 
 
 class AcceptanceResultDTO(BaseModel):
-    """验收结论(PASS/FAIL + 通过项与缺口)。"""
+    """验收结论(DONE/FAILED + 通过项与缺口)。"""
 
-    verdict: str = Field(..., description="PASS / FAIL")
-    acceptances_metric: list[str] = Field(
-        default_factory=list, description="通过的验收项标识列表"
+    verdict: str = Field(..., description="DONE / FAILED")
+    acceptances_metric: list[Any] = Field(
+        default_factory=list, description="通过的验收项明细列表(新协议为对象数组,[{项:结论}])"
     )
-    gaps: list[str] = Field(
-        default_factory=list, description="未通过的验收项标识列表(gap)"
+    gaps: list[Any] = Field(
+        default_factory=list, description="未通过的验收项明细/差距(对象数组 [{项:原因}] 或字符串数组)"
     )
 
 
@@ -228,8 +278,9 @@ class RuntimeInfoDTO(BaseModel):
     assignee: str | None = Field(None, description="当前承接节点执行的 bot id")
     start_time: int | None = Field(None, description="执行开始时间戳(毫秒)")
     end_time: int | None = Field(None, description="执行结束时间戳(毫秒)")
-    output: dict[str, Any] = Field(
-        default_factory=dict, description="节点输出(checkpoint fold)"
+    output: Any = Field(
+        default_factory=dict,
+        description="节点输出(checkpoint fold);adapter 路径以 output key 落 run_info.output,DTO 层展平为标量(去除两层 output 嵌套)",
     )
     acceptance_result: AcceptanceResultDTO | None = Field(None, description="验收结论")
     extend_props: dict[str, Any] = Field(
@@ -303,6 +354,10 @@ class TaskExecutionGraphDTO(BaseModel):
         None,
         description="回调审计 DAG 快照(按 root session_id 从 task_callback 反查挂图级)",
     )
+    execution_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="执行配置投影(task_type/yaml/workflow_id + 会话/群/父任务上下文扁平,扩展上下文兼容归一)",
+    )
 
 
 def runtime_status_to_product_status(status: Any) -> str:
@@ -321,6 +376,38 @@ def runtime_status_to_product_status(status: Any) -> str:
         "FAILED": "FAILED",
         "CANCELLED": "CANCELLED",
     }.get(value, "EXECUTING")
+
+
+def execution_graph_to_product_status(execution_graph: Any) -> Any:
+    """Return an execution-graph response copy with product-facing statuses.
+
+    ``execution_graph`` is a third-party execution snapshot stored as a plain
+    dictionary, so it does not pass through :func:`graph_to_dto`'s typed graph
+    conversion. Normalize only the graph-level ``status`` and each direct
+    task's ``status`` at the HTTP response boundary, leaving the stored
+    execution snapshot and nested metadata untouched.
+    """
+    if not isinstance(execution_graph, dict):
+        return execution_graph
+
+    normalized = dict(execution_graph)
+    if "status" in normalized:
+        normalized["status"] = runtime_status_to_product_status(normalized["status"])
+
+    raw_tasks = normalized.get("tasks")
+    if isinstance(raw_tasks, list):
+        normalized["tasks"] = [
+            (
+                {
+                    **task,
+                    "status": runtime_status_to_product_status(task["status"]),
+                }
+                if isinstance(task, dict) and "status" in task
+                else task
+            )
+            for task in raw_tasks
+        ]
+    return normalized
 
 
 # ===== DTO <-> domain conversion(Rule 22:adapter 唯一写/读翻译位) =====
@@ -399,13 +486,21 @@ def task_info_request_from_dto(dto: TaskInfoRequestDTO):
 def callback_from_dto(dto: TaskCallbackDataDTO):
     from agentclaw.community.core.task.domain.models import TaskCallbackData
 
+    result = dict(dto.result)
+    # Legacy report callers may send the envelope-shaped {code, data};
+    # normalize it to the callback adapter's {success, data} contract.
+    if "success" not in result and "exec_error" not in result:
+        result = {
+            "success": result.get("code", 200000) == 200000,
+            **({"data": result["data"]} if "data" in result else {}),
+        }
     return TaskCallbackData(
         data={
             "loop_task_id": dto.loop_task_id,
             "workflow_type": dto.workflow_type,
             "workflow_id": dto.workflow_id,
             "instance_id": dto.instance_id,
-            "result": dict(dto.result),
+            "result": result,
         }
     )
 
@@ -422,6 +517,51 @@ def acceptance_result_from_dto(dto: AcceptanceResultDTO):
         acceptances_metric=list(dto.acceptances_metric),
         gaps=list(dto.gaps),
     )
+
+
+def _normalize_execution_config(graph) -> dict[str, Any]:
+    """Dashboard ``execution_config`` 顶层投影(统一新规范)。
+
+    优先取 ``graph.extend_props["execution_config"]``(新建图时由 task_graph_service 写入);
+    历史记录若该处缺会话/群/父任务 4 字段、但根节点 ``task_spec.context.extend_props.teamclaw_context``
+    保留旧值,则只读回填进响应 ``execution_config``(不改存储,兼容归一)。``task_type`` 枚举转 value。
+    """
+    raw = graph.extend_props.get("execution_config") or {}
+    ec: dict[str, Any] = dict(raw) if isinstance(raw, dict) else {}
+    root = next(
+        (n for n in graph.tasks if n.node_id == getattr(graph, "task_id", "")),
+        None,
+    )
+    if root is None and graph.tasks:
+        root = graph.tasks[0]
+    if root is not None:
+        tc = (root.task_spec.context.extend_props or {}).get("teamclaw_context") or {}
+        if isinstance(tc, dict):
+            for key in ("main_session_id", "main_session_name", "source_group_id", "parent_task_id"):
+                # key in tc 而非 value 非空:历史 tc.parent_task_id 显式 None 同样回填,确保归一后繁键一致。
+                if key not in ec and key in tc:
+                    ec[key] = tc[key]
+    _tt = ec.get("task_type")
+    if hasattr(_tt, "value"):  # TaskType 枚举转字符串值,便于前端消费
+        ec["task_type"] = _tt.value
+    return ec
+
+
+def _unwrap_node_output(d: Any) -> Any:
+    """展平 adapter 落库的 ``{"output": <content>}`` 单键 dict 为标量内容。
+
+    pull(poller)与 push(callback/report)两条链路统一按 callback/report 协议把产出挂在
+    ``run_info.output["output"]``,与字典字段名 ``output`` 同名会形成 dashboard
+    ``{output: {output: <content>}}`` 两层嵌套;此处仅在 DTO 出口展平为 ``output: <content>``,
+    内部 sibling/child output、static/bbs/notify 等多键分支原样保留 dict。"""
+    if isinstance(d, dict) and len(d) == 1 and "output" in d:
+        return d["output"]
+    return dict(d) if isinstance(d, dict) else d
+
+
+# 内部飞行态标志(纯在途去重/陈旧判定),无 dashboard 价值且恒为 null 噪音 → 不透出到外部 DTO。
+# 持久化与编排核内部仍读 extend_props["dispatching"] 做跨实例/跨协程去重;仅外部序列化剥离。
+_INTERNAL_NODE_EXT_PROPS = frozenset({"dispatching", "dispatching_at"})
 
 
 def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGraphDTO:
@@ -465,9 +605,13 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
                     assignee=n.run_info.assignee,
                     start_time=n.run_info.start_time,
                     end_time=n.run_info.end_time,
-                    output=dict(n.run_info.output),
+                    output=_unwrap_node_output(n.run_info.output),
                     acceptance_result=ar_dto,
-                    extend_props=dict(n.run_info.extend_props),
+                    extend_props={
+                        k: v
+                        for k, v in n.run_info.extend_props.items()
+                        if k not in _INTERNAL_NODE_EXT_PROPS
+                    },
                     action_log=(
                         [
                             NodeActionEventDTO(
@@ -507,7 +651,8 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
         tasks=nodes,
         relations=relations,
         extend_props=dict(graph.extend_props),
-        execution_graph=graph.execution_graph,
+        execution_graph=execution_graph_to_product_status(graph.execution_graph),
+        execution_config=_normalize_execution_config(graph),
     )
 
 
@@ -615,25 +760,40 @@ class TaskRevokeResultDTO(BaseModel):
     grant_status: str = Field(..., description="授权状态(revoked)")
 
 
-# ===== claim_on JOIN 灰度开关 DTO =====
-# 默认关闭;开启后派发「搜推候选 ∩ task_claim_mode-on 名单」JOIN。详
-# ``core/task/task_dispatch/claim_join_gate.py``。
+# ===== 通用任务开关 DTO =====
 
 
-class TaskClaimJoinFilterRequestDTO(BaseModel):
-    """设置 claim_on JOIN 开关的请求体。"""
+class TaskSettingRequestDTO(BaseModel):
+    """设置一种任务开关。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = Field(
-        ...,
-        description="claim_on JOIN 开关:true=启用「搜推候选 ∩ claim_on 名单」JOIN 过滤(未命中降 MISS/降级);"
-        "false=关闭(直按 assignee 派发,即当前线上行为)",
+    setting_type: Literal["claim_join_filter", "search_skill", "single_bot_skill_report", "harness_poller"] = Field(
+        ..., description="任务开关类型"
     )
+    enabled: bool = Field(..., description="是否启用")
+
+
+class TaskSettingStateDTO(BaseModel):
+    """任务开关当前状态。"""
+
+    setting_type: Literal["claim_join_filter", "search_skill", "single_bot_skill_report", "harness_poller"] = Field(
+        ..., description="任务开关类型"
+    )
+    enabled: bool = Field(..., description="当前开关状态")
+    env: str = Field(..., description="生效环境(prod/pre/dev)")
+
+
+class TaskClaimJoinFilterRequestDTO(BaseModel):
+    """Legacy request DTO for the hidden compatibility route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(..., description="是否启用 claim_join_filter")
 
 
 class TaskClaimJoinFilterStateDTO(BaseModel):
-    """开关当前状态回包(GET 读 / POST 写后回显)。"""
+    """Legacy response DTO for the hidden compatibility route."""
 
-    enabled: bool = Field(..., description="当前开关状态(true=已启用 claim_on JOIN)")
+    enabled: bool = Field(..., description="当前开关状态")
     env: str = Field(..., description="生效环境(prod/pre/dev)")

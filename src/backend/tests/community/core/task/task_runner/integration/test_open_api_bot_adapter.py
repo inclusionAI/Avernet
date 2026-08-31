@@ -303,6 +303,48 @@ def test_owned_client_pinned_reused_same_loop_isolated_across_loops():
     assert a._client_loop is not None
 
 
+def test_send_message_uses_loop_compatible_client_across_event_loops(monkeypatch):
+    """Real adapter requests must not reuse an owned AsyncClient across loops."""
+    import agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter as module
+
+    created = []
+    used = []
+
+    class _LoopBoundClient:
+        def __init__(self, **kwargs):
+            self.base_url = httpx.URL(kwargs.get("base_url", "http://b:8890"))
+            self.timeout = kwargs.get("timeout")
+            self._bound_loop = None
+            created.append(self)
+
+        async def post(self, *args, **kwargs):
+            loop = asyncio.get_running_loop()
+            if self._bound_loop is None:
+                self._bound_loop = loop
+            elif self._bound_loop is not loop:
+                raise RuntimeError("client used from a different event loop")
+            used.append(self)
+            return httpx.Response(
+                200,
+                json={"data": {"message_id": "run-1"}},
+            )
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", _LoopBoundClient)
+    adapter = OpenApiBotAdapter(_Key())
+
+    async def send():
+        return await adapter.send_message(bot_id="bot9:ent1", message="hi", metadata={})
+
+    assert _run(send()).run_id == "run-1"
+    assert _run(send()).run_id == "run-1"
+    assert len(created) == 2
+    assert used[0] is created[0]
+    assert used[1] is created[1]
+
+
 def test_injected_client_kept_across_loops():
     """注入的 client(测试 MockTransport)由调用方管理 loop 绑定;_client_for_current_loop 原样返回同一
     client,跨 loop 不变、永不重建。"""

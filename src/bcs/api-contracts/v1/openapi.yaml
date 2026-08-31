@@ -12,6 +12,8 @@ tags:
     description: Collaboration groups and their participants.
   - name: Collaboration / Sessions
     description: Group sessions, participants, messages, and connection access.
+  - name: Collaboration / Register
+    description: Bot registration token issuance and anonymous bot registration.
   - name: Collaboration / Invitations
     description: Invitations for joining collaboration groups and sessions.
   - name: Collaboration / Channels
@@ -77,6 +79,10 @@ paths:
     $ref: ./openapi/invitations.yaml#/CreateSessionInvitationPath
   /openapi/v1/collaboration/invitations/{token}/accept:
     $ref: ./openapi/invitations.yaml#/AcceptInvitationPath
+  /openapi/v1/collaboration/register/token:
+    $ref: ./openapi/register.yaml#/RegisterTokenPath
+  /openapi/v1/collaboration/register:
+    $ref: ./openapi/register.yaml#/RegisterPath
   /openapi/v1/collaboration/messages/ws:
     $ref: ./openapi/connections.yaml#/GroupSessionWebSocketPath
   /openapi/v1/collaboration/channels/bindings:

@@ -88,8 +88,8 @@ _DESKTOP_BOT_TYPE = "desktop"
 # or adds the code that applies it — "let this surface accept something nothing
 # applies" is never the third option.
 _REASON_CLI_TOOLS = (
-    "cli_tools is deferred (W9): nothing materializes a tool, puts it on PATH, "
-    "or carries it in an artifact"
+    "cli_tools delivery is deferred: nothing materializes a tool, puts it on "
+    "PATH, or carries it in an artifact"
 )
 _REASON_ENGINE_CONFIG = (
     "engine_config was moved out of the first wave, so no materializer writes it"

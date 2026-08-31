@@ -6,9 +6,11 @@ TaskLoopCallback.report_result→engine.on_report、start_run 进度信号不驱
 from __future__ import annotations
 
 import asyncio
+import uuid
 
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
+    Status,
     TaskCallbackData,
     TaskNodePatch,
 )
@@ -62,15 +64,29 @@ class TestAdapt:
         assert patch.task_id == "t1"
         assert patch.node_id == "c1"
         assert patch.acceptance_result is not None
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.PASS
-        assert patch.output_patch == {"data": "行业全貌"}
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
+        assert patch.output_patch == {"output": "行业全貌"}
         assert patch.extend_props_patch is None
+
+    def test_pass_flattens_result_wrapper_to_bare_string(self):
+        """pull 拉取的原始 response ``data`` 可能为 ``{"result": <str>}`` 二次包裹
+        (bot 把结论挂在 result key);统一展平为裸字符串,与 push(callback/report output 裸字符串)
+        一致,消除 dashboard ``{output: {result: ...}}`` 二次 json 嵌套。"""
+        adapter = CallbackAdapter()
+        patch = adapter.adapt(_data(success=True, data={"result": "技术栈概览文档已完整产出..."}))
+        assert patch.output_patch == {"output": "技术栈概览文档已完整产出..."}  # 裸字符串,不带 result
+
+    def test_pass_keeps_non_result_dict_unchanged(self):
+        """非 ``result`` 包裹的多键 dict(bcs/notify 检查点等)原样保留,不被误展平。"""
+        adapter = CallbackAdapter()
+        patch = adapter.adapt(_data(success=True, data={"r": 1}))
+        assert patch.output_patch == {"output": {"r": 1}}
 
     def test_fail_with_detail_mapping(self):
         adapter = CallbackAdapter()
         patch = adapter.adapt(_data(success=False, fail_detail="tech深度不足"))
         assert patch.acceptance_result is not None
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAIL
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
         assert patch.acceptance_result.gaps == ["tech深度不足"]
         assert patch.extend_props_patch == {"fail_detail": "tech深度不足"}
         assert patch.output_patch is None  # 无 data
@@ -150,7 +166,7 @@ class TestTaskLoopCallback:
         p = engine.reports[0]
         assert (p.task_id, p.node_id) == ("t1", "c1")
         assert p.acceptance_result is not None
-        assert p.acceptance_result.verdict == AcceptanceVerdict.PASS
+        assert p.acceptance_result.verdict == AcceptanceVerdict.DONE
 
     def test_report_result_fail_routes_with_gaps(self):
         engine = RecordingEngine()
@@ -191,6 +207,8 @@ class TestPersist:
         assert rec.run_id == "t1" and rec.node_id == "c1"
         assert rec.result_success is True
         assert rec.exec_error is None
+        assert rec.event_id
+        assert str(uuid.UUID(rec.event_id)) == rec.event_id
         # 无 workflow_source/instance_in data → NOT NULL 列退 ""(空保持空)
         assert rec.invoker == ""
         assert rec.main_session_id == ""
@@ -243,17 +261,8 @@ class TestPersist:
         assert rec.result_success is True
         assert rec.exec_error is None
         assert rec.result == {"success": True, "data": {"answer": 42}}
-        # execution_graph 已转结构化 TaskExecutionGraph(graph_to_dict 形状),非原始 ext_info 透传
-        eg = rec.execution_graph
-        assert eg["run_id"] == 0 and eg["task_id"] == "" and eg["status"] == "DONE"
-        assert eg["output"] == {}
-        assert eg["extend_props"] == {"origin_session_id": "S-9"}
-        assert len(eg["tasks"]) == 1
-        assert eg["tasks"][0]["node_id"] == "N1"
-        assert eg["tasks"][0]["status"] == "DONE"
-        assert eg["tasks"][0]["task_spec"]["metadata"]["title"] == "N1"   # 无 node_title → 退 node_id
-        assert eg["tasks"][0]["run_info"]["output"] == {"answer": 42}
-        assert eg["relations"] == []
+        # execution_graph 不在 translator 产物(由 CallbackDataEnricher.enrich_claw_mind 构建后落库)
+        assert rec.execution_graph is None
         assert rec.extend_props is None                            # claw_mind 无额外扩展
         assert _json.loads(rec.orig_callback_data) == raw          # 原始 body
 
@@ -278,12 +287,13 @@ class TestPersist:
         assert engine.reports == [] and engine.starts == []         # ingest 不推进编排核
         rec = repo.calls[0]
         assert rec.invoker == "bcn"
-        assert rec.run_id == "run-1" and rec.node_id == "N1"
+        assert rec.run_id == "run-1" and rec.node_id == ""        # req4:node_id 恒空
         assert rec.main_session_id == "s-1"                       # scope.session_id
-        assert rec.status == "state_machine.node.completed"       # event_type
+        assert rec.status == "RUNNING"                            # req2:node.completed → Status.RUNNING
         assert rec.result_success is True
         assert rec.result == {"success": True, "data": {"answer": 7}}
-        assert rec.execution_graph == raw["data"]                 # 事件体
+        # execution_graph 不在 translator 产物(由 CallbackDataEnricher.enrich_bcn 取 run 明细后构建)
+        assert rec.execution_graph is None
         assert rec.extend_props is None
         assert _json.loads(rec.orig_callback_data) == raw         # 原始 event
 
@@ -314,3 +324,33 @@ class TestZeroCase:
         forbidden = ["N_overview", "N_market", "N_aggregate", "N_verify", "N_report", "N_practice", "n_root", "dim_"]
         hits = [f for f in forbidden if f in src]
         assert hits == [], f"runner 出现写死节点名: {hits}"
+
+    def test_actual(self):
+        adapter = CallbackAdapter()
+        data = {'loop_task_id': '46fa696d-1714-4294-bc36-a46c709637e2', 'node_id': 'N_dual_view', 'workflow_type': 'task_loop', 'workflow_id': 0, 'instance_id': 0, 'workflow_source': 'task_loop', 'workflow_instance_id': '', 'event_id': '', 'status': 'DONE', '_raw_callback_body': {'task_id': '46fa696d-1714-4294-bc36-a46c709637e2', 'node_id': 'N_dual_view', 'status': 'DONE', 'output': '完整分析内容...', 'acceptance_result': {'verdict': 'DONE', 'acceptances_metric': [{'ac_1': 'exec_ok'}], 'gaps': []}, 'extend_props': {}}, 'result': '完整分析内容...'}
+        task_callback_data = TaskCallbackData(data=data)
+        res = adapter.adapt(task_callback_data)
+
+        print("===" + str(res))
+
+    def test_common_task_output_unified_to_output_key_no_double_output(self):
+        """push(skill HTTP /callback/report 上报)与 pull(poller)两条链路统一按上报协议把产出
+        挂在 ``output`` key;两条链路写入 run_info.output 的字段一致,DTO 层再展平成标量。
+        不得让 push 存成 ``{"data": ...}`` 与 pull 不一致。"""
+        adapter = CallbackAdapter()
+        patch = adapter.adapt(TaskCallbackData(data={
+            "loop_task_id": "t9::N1", "node_id": "N1", "workflow_type": "task_loop",
+            "status": "DONE",
+            "_raw_callback_body": {
+                "task_id": "t9", "node_id": "N1", "status": "DONE",
+                "output": "完整分析内容...",
+                "acceptance_result": {"verdict": "DONE", "acceptances_metric": [], "gaps": []},
+                "extend_props": {},
+            },
+            "result": "完整分析内容...",
+        }))
+        assert patch.status == Status.DONE
+        assert patch.output_patch == {"output": "完整分析内容..."}  # 统一 output key,对齐 callback/report 协议
+        assert patch.acceptance_result is not None
+        assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
+

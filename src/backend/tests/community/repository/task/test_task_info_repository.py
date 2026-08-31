@@ -70,8 +70,12 @@ def test_list_records_returns_full_records_and_filters(db):
     assert [record.task_id for record in all_records] == ["T-2", "T-1"]
     assert all_records[0].task_spec["metadata"]["instruction"] == "do"
 
-    running = repo.list_records(Status.RUNNING)
+    running = repo.list_records([Status.RUNNING])
     assert [record.task_id for record in running] == ["T-2"]
+
+    # 多值 status 集合(运行时态 IN 过滤):PENDING + RUNNING 全命中。
+    two = repo.list_records([Status.PENDING, Status.RUNNING])
+    assert {record.task_id for record in two} == {"T-1", "T-2"}
 
 
 def test_list_records_filters_owner(db):
@@ -111,7 +115,7 @@ def test_list_records_page_filters_and_returns_total(db):
     ))
 
     records, total = repo.list_records_page(
-        Status.RUNNING,
+        [Status.RUNNING],
         owner_user_id="U-1",
         page=1,
         page_size=1,

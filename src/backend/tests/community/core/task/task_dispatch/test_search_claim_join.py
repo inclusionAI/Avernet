@@ -115,6 +115,35 @@ def test_join_on_multi_none_in_miss():
     ]
 
 
+def test_join_on_single_out_rule_pool_owner_from_suffix():
+    """规则派发(``_RULE_TEST_BOT_POOL`` 的 ``product:owner``)bot 不在 prefetch 候选内时,
+    unauthorized_bots 的 owner_user_id 从 bot_id 的 ``:owner`` 后缀解析,不再落空串。"""
+    r = _run(
+        _strat(_Bcn(CLAIM_ON), _Gate(True))._apply_claim_join(
+            _single("20260824_nwlj25w6:35983"), CANDS
+        )
+    )
+    assert r.outcome == SearchOutcome.MISS and r.miss_reason == "claim_mode_off"
+    assert r.unauthorized_bots == [
+        {"bot_id": "20260824_nwlj25w6", "owner_user_id": "35983", "reason": "claim_mode_off"},
+    ]
+
+
+def test_join_on_multi_rule_pool_owner_from_suffix_mixed():
+    """多候选混入规则池 bot:候选内(带 owner_id)走候选回查;候选外的 product:owner 走后缀解析。"""
+    r = _run(
+        _strat(_Bcn(CLAIM_ON), _Gate(True))._apply_claim_join(
+            _multi(["default:146836", "20260824_nwlj25w6:35983", "X"]), CANDS
+        )
+    )
+    assert r.outcome == SearchOutcome.MISS and r.miss_reason == "claim_mode_off_multi"
+    assert r.unauthorized_bots == [
+        {"bot_id": "default", "owner_user_id": "146836", "reason": "claim_mode_off"},
+        {"bot_id": "20260824_nwlj25w6", "owner_user_id": "35983", "reason": "claim_mode_off"},
+        {"bot_id": "X", "owner_user_id": "Xo", "reason": "claim_mode_off"},
+    ]
+
+
 def test_join_on_multi_partial_keeps_subset():
     r = _run(
         _strat(_Bcn(CLAIM_ON), _Gate(True))._apply_claim_join(

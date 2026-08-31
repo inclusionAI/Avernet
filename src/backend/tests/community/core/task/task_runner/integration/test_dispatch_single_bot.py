@@ -21,7 +21,7 @@ from agentclaw.community.core.task.task_runner.integration.task_executor import 
 )
 
 
-def _node(assignee="bot9:ent1"):
+def _node(assignee="bot9:ent1", extend_props=None):
     return TaskNode(
         node_id="c1",
         task_id="t1",
@@ -31,7 +31,9 @@ def _node(assignee="bot9:ent1"):
             Context("bg"),
             Goal("O", [AcceptanceCriteria("a1", "d")]),
         ),
-        run_info=RuntimeInfo(run_mode="single_bot", assignee=assignee),
+        run_info=RuntimeInfo(
+            run_mode="single_bot", assignee=assignee, extend_props=extend_props or {}
+        ),
         node_run_graph=None,
     )  # type: ignore[arg-type]
 
@@ -104,6 +106,67 @@ def test_dispatch_single_bot_registers_handle():
     assert poller.registered[0].loop_task_id == "t1::c1"
 
 
+
+def test_dispatch_single_bot_composes_owner_for_pure_assignee():
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+    )
+
+    ok = _run(exe.dispatch([_node("default", {"assignee_owner_id": "146836"})]))
+
+    assert ok == [True]
+    assert bot.sent[0][0] == "default:146836"
+    assert poller.registered[0].bot_id == "default:146836"
+
+
+def test_dispatch_single_bot_rebuilds_composite_with_explicit_owner():
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+    )
+
+    ok = _run(
+        exe.dispatch([_node("default:old-owner", {"assignee_owner_id": "146836"})])
+    )
+
+    assert ok == [True]
+    assert bot.sent[0][0] == "default:146836"
+    assert poller.registered[0].bot_id == "default:146836"
+
+
+def test_dispatch_single_bot_uses_explicit_owner_for_composite_assignee():
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+    )
+
+    ok = _run(
+        exe.dispatch([_node("default:146836", {"assignee_owner_id": "other-owner"})])
+    )
+
+    assert ok == [True]
+    assert bot.sent[0][0] == "default:other-owner"
+
+
 def test_dispatch_single_bot_sends_assignee_verbatim():
     """single_bot 直接按 assignee 原样派发(claim_on JOIN 在派发策略层完成,执行器不做表级授权 JOIN)。"""
     bot = _Bot()
@@ -127,8 +190,39 @@ def test_prompt_formatter_uses_context_and_node_spec():
     s = fmt.format_execute({"mode": "execute", "node_instruction": "分析行业"}, n)
     assert "分析行业" in s
     assert "验收标准" in s
-    assert '"success"' in s
-    assert '"gaps"' in s
+    # skill 上报协议 status 已对齐后端 Status 枚举 DONE/FAILED(不再用 SUCCESS/FAIL)。
+    assert '"status": "DONE"' in s
+    assert '"task_id"' in s
+    assert '"acceptance_result"' in s
+
+
+def test_prompt_formatter_single_bot_default_uses_poller_protocol():
+    """single_bot 默认走 poller 回收链路:产 {success,data,gaps} JSON,不下发 HTTP POST /callback/report。"""
+    fmt = PromptFormatterImpl()
+    n = _node()
+    s = fmt.format_execute({
+        "mode": "execute",
+        "node_instruction": "分析行业",
+        "execution_mode": "single_bot",
+        "single_bot_skill_report": False,
+    }, n)
+    assert '"success": true' in s and '"data"' in s and '"gaps"' in s
+    assert "callback/report" not in s  # 默认不引导 HTTP 上报(避免与 poller 并存)
+
+
+def test_prompt_formatter_single_bot_skill_report_on_uses_http_post():
+    """single_bot 开启 skill 上报开关:下发 HTTP POST /callback/report,status=DONE/FAILED。"""
+    fmt = PromptFormatterImpl()
+    n = _node()
+    s = fmt.format_execute({
+        "mode": "execute",
+        "node_instruction": "分析行业",
+        "execution_mode": "single_bot",
+        "single_bot_skill_report": True,
+    }, n)
+    assert "callback/report" in s
+    assert '"status": "DONE"' in s
+    assert '"success": true' not in s  # 走 HTTP 上报,不产 poller JSON
 
 
 def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():
@@ -154,3 +248,66 @@ def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():
     assert ep.get("session_id") == "s_1"
     assert ep.get("run_id") == "r_1"
     assert "group_id" not in ep  # 单 bot 无群 id,不写 group_id 键
+
+
+class _TaskSettingsOn:
+    """Fake task settings: single_bot_skill_report 开关返回 True(skill HTTP 上报链路)。"""
+
+    def is_enabled(self, setting_type):
+        return setting_type == "single_bot_skill_report"
+
+    def get_enabled(self, *, setting_type, env):
+        return setting_type == "single_bot_skill_report"
+
+    def set_enabled(self, *, setting_type, enabled, env, operator=None):
+        return setting_type == "single_bot_skill_report" and enabled
+
+
+class _TaskSettingsOff:
+    """Fake task settings: 全部开关 False(默认 poller 回收链路)。"""
+
+    def is_enabled(self, setting_type):
+        return False
+
+    def get_enabled(self, *, setting_type, env):
+        return False
+
+    def set_enabled(self, *, setting_type, enabled, env, operator=None):
+        return False
+
+
+def test_dispatch_single_bot_skill_report_on_skips_poller_registration():
+    """开关开启时 single_bot 走 skill HTTP 上报链路,不注册 poller(与 poller 互斥,不并存)。"""
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+        task_settings=_TaskSettingsOn(),
+    )
+    ok = _run(exe.dispatch([_node()]))
+    assert ok == [True]
+    assert bot.sent  # 仍投递消息给 bot
+    assert poller.registered == []  # skill 上报模式下不注册 poller,避免双链路并存
+
+
+def test_dispatch_single_bot_skill_report_off_registers_poller():
+    """开关关闭(默认)时 single_bot 仍注册 poller 拉消息回收(现行默认行为保持)。"""
+    bot = _Bot()
+    poller = _Poller()
+    exe = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+        task_settings=_TaskSettingsOff(),
+    )
+    ok = _run(exe.dispatch([_node()]))
+    assert ok == [True]
+    assert poller.registered and poller.registered[0].run_id == "mid_1"

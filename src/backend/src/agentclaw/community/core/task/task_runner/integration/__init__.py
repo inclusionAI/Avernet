@@ -22,8 +22,9 @@ from agentclaw.community.core.task.task_runner.integration.task_executor_result_
 
 
 def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = True,
-                      identity_resolver=None) -> TaskExecutor:
-    """组合根:double(singlebox)/real(corp 覆写)。返装配好的 TaskExecutor(poller 可选起线程)。"""
+                      identity_resolver=None, on_bbs_report=None) -> TaskExecutor:
+    """组合根:double(singlebox)/real(corp 覆写)。返装配好的 TaskExecutor(poller 可选起线程)。
+    on_bbs_report:引擎收口回调;corp 适配器接线时应透传引擎 on_bbs_report,确保 bbs 接力走引擎收敛(不退 else 直写)。"""
     if double:
         bot = _DoubleOpenApiBot()
         bcs = _DoubleBcsClient()
@@ -42,7 +43,7 @@ def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = 
     poller.set_on_result(sink)
     exe = TaskExecutor(
         bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=ctx, sink=sink,
-        poller=poller, identity_resolver=identity_resolver,
+        poller=poller, identity_resolver=identity_resolver, on_bbs_report=on_bbs_report,
     )
     if poller_thread:
         t = threading.Thread(target=poller.run_poll_loop, daemon=True)

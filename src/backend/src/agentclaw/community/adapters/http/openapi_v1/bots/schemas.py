@@ -47,7 +47,9 @@ _CLUSTER_DESC = (
 _ENGINE_DESC = (
     "Engine that powers the bot, fixed at creation. The valid set is "
     "deployment-configured — read it from the engine group's available-engines "
-    "endpoint; an unlisted engine is refused (400)."
+    "endpoint; an unlisted engine is refused (400). Internal implementation "
+    "engines (e.g. 'aicoding', the internal runtime behind 'claude_code') are "
+    "not accepted; runtime forms travel on the template, not the engine."
 )
 
 # The status vocabulary is a pass-through of the stored lifecycle state, and the
@@ -116,7 +118,9 @@ class Bot(BaseModel):
     template_config: dict | None = Field(
         default=None,
         description="Server-projected template snapshot (display-safe subset; "
-        "secrets never returned). Null without a template.",
+        "secrets never returned). Null without a template. Includes the "
+        "server-managed 'engine_form' marker for bots whose runtime form "
+        "differs from the engine (e.g. engine_form='aicoding').",
     )
     space: BusinessSpace | None = Field(
         default=None,
@@ -841,7 +845,9 @@ class BotInventoryItem(BaseModel):
     template_config: dict | None = Field(
         default=None,
         description="Server-projected template snapshot (display-safe subset; "
-        "secrets never returned). Null without a template.",
+        "secrets never returned). Null without a template. Includes the "
+        "server-managed 'engine_form' marker for bots whose runtime form "
+        "differs from the engine (e.g. engine_form='aicoding').",
     )
     avatar_url: str | None = Field(
         default=None, description="Avatar URL for the bot, when configured."

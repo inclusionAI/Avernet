@@ -10,17 +10,37 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Protocol
 
 from agentclaw.community.core.task.domain.json_extract import extract_json
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
 from agentclaw.community.core.task.domain.prompt_constants import (
     NO_WEB_SEARCH_CONSTRAINT,
 )
 
 logger = logging.getLogger("task.dispatcher")
+
+# Temporary pre-authorized Bot pool for validating the multi-Bot dispatch path.
+# The rule mode intentionally samples from this fixed pool instead of using the
+# discovered candidates as assignees, because discovered Bots may not have the
+# task-claim switch enabled in the target environment.
+_RULE_TEST_BOT_POOL: tuple[str, ...] = (
+    # 仅取已在 BCN 开启 task_claim_mode 的 owner 内 pool bot,使 claim-join 不误 drop、
+    # 随机抽样命中数 == 派发数稳定覆盖协作群链路(全 claim_on,8 条)。
+    # 已剔除 claim_mode_off:`20260824_nwlj25w6:35983`、`20260825_aeqp3xky:440718` 需 owner 开 claim 才可回填。
+    "20260825_bohtfhe6:35983",
+    "default:35983",
+    "default:146836",
+    "20260825_p8e63hms:35983",
+    "20260823_1c4am0ei:146836",
+    "20260826_q3tbj2da:146836",
+    "20260826_fmszf5aq:146836",
+    "20260826_20rphqo0:146836",
+)
 
 
 class SearchOutcome(StrEnum):
@@ -111,11 +131,14 @@ class DirectDispatchStrategy:
 
     async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
         cfg = graph.extend_props.get("execution_config", {}) or {}
-        return cfg.get("bot") is not None
+        return cfg.get("bot") is not None or bool(node.run_info.extend_props.get("static_bot_id")) or bool(node.run_info.extend_props.get("pending_group_formation"))
 
     async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
         cfg = graph.extend_props.get("execution_config", {}) or {}
-        return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=cfg.get("bot"))
+        static_group = node.run_info.extend_props.get("pending_group_formation")
+        if static_group is not None:
+            return SearchResult(outcome=SearchOutcome.HIT_MULTI_BOTS, group_formation=static_group)
+        return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=node.run_info.extend_props.get("static_bot_id") or cfg.get("bot"))
 
 
 class SearchBasedDispatchStrategy:
@@ -129,7 +152,16 @@ class SearchBasedDispatchStrategy:
     rule_id = "search"
     priority = 99
 
-    def __init__(self, bot=None, discover=None, bcn=None, join_gate=None) -> None:
+    def __init__(
+        self,
+        bot=None,
+        discover=None,
+        bcn=None,
+        join_gate=None,
+        *,
+        use_search_skill: bool = False,
+        task_settings=None,
+    ) -> None:
         """bot: OpenApiBotPort(round-trip 投 search skill);discover: BotDiscoverServiceProtocol(语义预查候选)。
 
         None=stub 路径(恒 MISS)。候选集由框架预查喂入。
@@ -141,37 +173,101 @@ class SearchBasedDispatchStrategy:
         self._discover = discover
         self._bcn = bcn
         self._join_gate = join_gate
+        self._use_search_skill = use_search_skill
+        self._task_settings = task_settings
 
     async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
         return True  # 兜底
 
     async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
         if self._bot is None or self._discover is None:
+            logger.warning(
+                "[task][search] task=%s node=%s dispatch unavailable bot_port=%s discover=%s → MISS(no_port_stub)",
+                node.task_id,
+                node.node_id,
+                type(self._bot).__name__ if self._bot is not None else "None",
+                type(self._discover).__name__ if self._discover is not None else "None",
+            )
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_port_stub")
-        owner = str(graph.extend_props.get("owner_bot_id") or "")
+        owner = compose_bot_identity(
+            str(graph.extend_props.get("owner_bot_id") or ""),
+            graph.extend_props.get("owner_user_id"),
+        )
         if not owner:
+            logger.warning(
+                "[task][search] task=%s node=%s owner identity missing owner_bot_id=%s owner_user_id=%s → MISS(no_owner)",
+                node.task_id,
+                node.node_id,
+                graph.extend_props.get("owner_bot_id"),
+                graph.extend_props.get("owner_user_id"),
+            )
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
         candidates = await _prefetch_candidates(self._discover, node, graph)
         if not candidates:
             logger.info(
-                "[task][search] node=%s 候选为空→MISS(no_candidates)", node.node_id
+                "[task][search] task=%s node=%s 候选为空→MISS(no_candidates)",
+                node.task_id,
+                node.node_id,
             )
             return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
-        prompt = _compose_search_prompt(node, candidates)
+        candidate_ids = [c.get("bot_id") for c in candidates]
         logger.info(
-            "[task][search] owner=%s node=%s 候选=%s",
+            "[task][search] task=%s owner=%s node=%s candidate_count=%d candidate_ids=%s",
+            node.task_id,
             owner,
             node.node_id,
-            [c.get("bot_id") for c in candidates],
+            len(candidate_ids),
+            candidate_ids,
         )
-        run = await self._bot.send_and_wait_async(
-            bot_id=owner,
-            message=prompt,
-            metadata={"phase": "search"},
+        use_skill = self._use_search_skill
+        setting_source = "constructor"
+        if self._task_settings is not None:
+            use_skill = self._task_settings.is_enabled("search_skill")
+            setting_source = "task_settings"
+        logger.info(
+            "[task][search] task=%s node=%s decision_mode=%s use_search_skill=%s source=%s candidate_count=%d",
+            node.task_id,
+            node.node_id,
+            "skill" if use_skill else "rule",
+            use_skill,
+            setting_source,
+            len(candidates),
         )
-        sr = _parse_search_result(run)
-        # JOIN 灰度开关:开启时对 LLM 决出的 assignee 做 task_claim_mode-on 名单交集(下游 post-filter)
+        if use_skill:
+            prompt = _compose_search_prompt(node, candidates)
+            run = await self._bot.send_and_wait_async(
+                bot_id=owner,
+                message=prompt,
+                metadata={"phase": "search"},
+            )
+            sr = _parse_search_result(run)
+            logger.info(
+                "[task][search] task=%s node=%s raw_skill_status=%s raw_skill_result=%s",
+                node.task_id,
+                node.node_id,
+                run.get("status") if isinstance(run, dict) else None,
+                _search_result_summary(sr),
+            )
+        else:
+            sr = _rule_based_search_result(candidates)
+            logger.info(
+                "[task][search] task=%s node=%s 使用候选数量规则 outcome=%s bot_id=%s bot_ids=%s",
+                node.task_id,
+                node.node_id,
+                sr.outcome,
+                sr.bot_id,
+                sr.group_formation.bot_ids if sr.group_formation else None,
+            )
+        before_join = _search_result_summary(sr)
+        # JOIN 灰度开关:开启时对决出的 assignee 做 task_claim_mode-on 名单交集(下游 post-filter)
         sr = await self._apply_claim_join(sr, candidates)
+        logger.info(
+            "[task][search] task=%s node=%s final_result before_claim_join=%s after_claim_join=%s",
+            node.task_id,
+            node.node_id,
+            before_join,
+            _search_result_summary(sr),
+        )
         # 把任务描述(目标)塞进 GroupFormation.extend_props,供 form_coop_group 设 BCS 建群 context
         # (→ <GroupContext> `目标`);与 _run_yaml 路径对齐。取 goal.objective→instruction→title。
         if sr.group_formation is not None:
@@ -297,19 +393,41 @@ class SearchBasedDispatchStrategy:
         return sr
 
 
+def _search_result_summary(result: SearchResult) -> dict[str, Any]:
+    """Bounded result summary for dispatch logs, excluding prompt/output content."""
+    gf = result.group_formation
+    return {
+        "outcome": result.outcome.value,
+        "bot_id": result.bot_id,
+        "group_id": result.group_id,
+        "bot_ids": list(gf.bot_ids) if gf is not None else None,
+        "collab_mode": gf.collab_mode if gf is not None else None,
+        "manager_bot_id": (
+            gf.extend_props.get("manager_bot_id") if gf is not None else None
+        ),
+        "miss_reason": result.miss_reason,
+    }
+
+
 def _dropped_unauthorized(candidates: list[dict], dropped_ids: list[str | None]) -> list[dict]:
     """JOIN 丢掉的候选 → ``unauthorized_bots`` 条目列表(供 dispatcher 写 run_info.extend_props)。
 
     与 dashboard 现有 ``unauthorized_bots`` 契约对齐:``{bot_id(无冒号 product), owner_user_id, reason}``。
-    owner 经 ``_find_candidate`` 回查(无候选时空串);reason=``claim_mode_off``(claim_on 未开启)。
-    """
+    owner 优先取 ``_find_candidate`` 回查候选的 ``owner_id``(BCSFuse/search item 自带 owner_id);
+    无候选回查时(规则派发 ``_RULE_TEST_BOT_POOL`` 的 ``product:owner`` bot 不在 prefetch 候选内),
+    退而从 bot_id 的 ``:owner`` 后缀解析,避免 ``owner_user_id`` 落空串。
+    reason=``claim_mode_off``(claim_on 未开启)。"""
     out: list[dict] = []
     for bid in dropped_ids:
         c = _find_candidate(candidates, bid)
+        owner = (c.get("owner_id") if c else "") or ""
+        if not owner:
+            _, sep, suffix = (bid or "").partition(":")
+            owner = suffix if sep else ""
         out.append(
             {
                 "bot_id": _claim_product(bid),
-                "owner_user_id": (c.get("owner_id") if c else "") or "",
+                "owner_user_id": owner or "",
                 "reason": "claim_mode_off",
             }
         )
@@ -379,7 +497,7 @@ async def _prefetch_candidates(
                 tokens.append(t)
     if not tokens:
         return []
-    logger.info("[task][search] node=%s 分词 tokens=%s", node.node_id, tokens)
+    logger.info("[task][search] task=%s node=%s 分词 tokens=%s", node.task_id, node.node_id, tokens)
 
     async def _q(kw: str) -> list[dict]:
         try:
@@ -402,10 +520,66 @@ async def _prefetch_candidates(
             bid = item.get("bot_id")
             if bid and bid not in seen:
                 seen[bid] = item
-    return sorted(
+    result = sorted(
         seen.values(),
         key=lambda x: (x.get("recommend") or {}).get("score", 0.0),
         reverse=True,
+    )
+    logger.info(
+        "[task][search] task=%s node=%s prefetch_complete token_count=%d candidate_count=%d candidate_ids=%s",
+        node.task_id,
+        node.node_id,
+        len(tokens),
+        len(result),
+        [c.get("bot_id") for c in result],
+    )
+    return result
+
+
+def _rule_based_search_result(candidates: list[dict]) -> SearchResult:
+    """Build a deterministic-shape result with random test Bot identities.
+
+    The discovered candidate count controls the dispatch shape, while the
+    final assignees come from the temporary pre-authorized test pool. One or
+    two candidates produce one single-Bot assignee. More than two candidates
+    produce a manager-worker group with the same number of sampled Bots.
+    """
+    candidate_count = sum(1 for candidate in candidates if candidate.get("bot_id"))
+    if candidate_count == 0:
+        return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
+
+    dispatch_count = 1 if candidate_count <= 2 else candidate_count
+    dispatch_count = min(dispatch_count, len(_RULE_TEST_BOT_POOL))
+    selected = random.sample(_RULE_TEST_BOT_POOL, dispatch_count)
+    if dispatch_count == 1:
+        bot_id = selected[0]
+        _, _, owner_id = bot_id.partition(":")
+        return SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id=bot_id,
+            owner_id=owner_id or None,
+        )
+
+    members_info = [
+        {
+            "bot_id": bot_id,
+            "role": "manager" if index == 0 else "worker",
+            "responsibility": (
+                "统筹任务、汇总所有成员产出并负责最终结果"
+                if index == 0
+                else "执行当前任务并向 manager 汇报产出"
+            ),
+        }
+        for index, bot_id in enumerate(selected)
+    ]
+    return SearchResult(
+        outcome=SearchOutcome.HIT_MULTI_BOTS,
+        group_formation=GroupFormation(
+            bot_ids=selected,
+            collab_mode="manager_worker",
+            group_name="任务主从协作群",
+            members_info=members_info,
+        ),
     )
 
 

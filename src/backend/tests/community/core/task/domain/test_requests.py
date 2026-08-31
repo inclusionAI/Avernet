@@ -15,7 +15,7 @@ def _request() -> TaskInfoRequest:
         source_type=TaskSourceType.COOP_GROUP,
         owner_user_id="U1",
         owner_bot_id="B1",
-        execution_config={"task_type": TaskType.STATIC_SINGLE_WORKFLOW, "workflow_id": "wf-1"},
+        execution_config={"task_type": TaskType.WORKFLOW, "workflow_id": "wf-1"},
     )
 
 
@@ -45,4 +45,4 @@ def test_task_spec_to_dict_is_domain_shape():
 
 def test_enums_values():
     assert {e.value for e in TaskSourceType} == {"bot", "coop_group", "api"}
-    assert {e.value for e in TaskType} == {"STATIC-SINGLE-WORKFLOW", "STATIC-GROUP-WORKFLOW", "dynamic"}
+    assert {e.value for e in TaskType} == {"yaml", "workflow", "dynamic", "static_plan", "bbs"}

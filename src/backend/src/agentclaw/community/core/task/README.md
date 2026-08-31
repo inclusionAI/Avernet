@@ -11,7 +11,7 @@
 |---|---|---|
 | api/ | `community/api/task/` | 对外 Service API Protocols(transport-agnostic) |
 | core/ | `community/core/task/` | 业务实现(transport-agnostic,禁 transport import) |
-| adapters/http/ | `community/adapters/http/task/`(内部:execute/dashboard/list 公开面镜像 + callback-report/bbs 接力/discovery,前缀 `/api/v1/collaboration/tasks`,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:execute/dashboard/list,前缀 `/openapi/v1/collaboration/tasks`,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
+| adapters/http/ | `community/adapters/http/task/`(内部:run-template/execute/dashboard/list 公开面镜像 + callback-report/bbs 接力/discovery,前缀 `/api/v1/collaboration/tasks`,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:run-template/execute/dashboard/list,前缀 `/openapi/v1/collaboration/tasks`,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
 | di/modules/ | `community/di/modules/task_module.py` | composition root(DI 接线) |
 
 ## core/task/ 目录树
@@ -66,8 +66,8 @@ stateDiagram-v2
     PLANNING --> HUNG : on_miss(depth>=MAX 拆不出子) / gap_no_progress(有 gap 拆不出)
     PLANNING --> PLANNING : 新子 add_task_nodes(父维持委托态)
 
-    RUNNING --> DONE : 回投 verdict=PASS(_on_pass_collect)
-    RUNNING --> FAILED : 回投 verdict=FAIL+gaps(_on_fail_collect)
+    RUNNING --> DONE : 回投 verdict=DONE(_on_pass_collect)
+    RUNNING --> FAILED : 回投 verdict=FAILED+gaps(_on_fail_collect)
     RUNNING --> PENDING : Harness 复位(超时/崩溃/exec_error _on_harness_collect)
     RUNNING --> HUNG : Harness 重试达 MAX_HARNESS
 

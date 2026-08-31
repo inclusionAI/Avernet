@@ -9,6 +9,7 @@ import contextvars
 import hashlib
 import json
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.task.repository.types import TaskCallbackRecord
@@ -34,6 +35,20 @@ def _split_loop_task_id(loop_task_id: Any) -> tuple[str, str]:
     s = loop_task_id if isinstance(loop_task_id, str) else ""
     parts = s.split("::", 1)
     return parts[0], (parts[1] if len(parts) == 2 else "")
+
+
+def _unwrap_poller_content(data_field: Any) -> Any:
+    """pull(poller)终态 ``{success, data, gaps}`` 的 ``data`` 归一为最终文本内容。
+
+    bot 终态内容两种形态:
+      1) 裸字符串(如 ``"行业全貌"``)——直接采用;
+      2) 二次包裹 ``{"result": <str>}``(bot 把结论挂在 result key)——展平为 result 字符串,
+         使 pull 与 push(callback/report ``output`` 裸字符串)在 run_info.output 中形态一致,
+         dashboard 不再出现 ``{output: {result: ...}}`` 二次 json 嵌套。
+    其它多键 dict(bcs/notify 检查点等)原样保留,避免误展平。"""
+    if isinstance(data_field, dict) and isinstance(data_field.get("result"), str):
+        return data_field["result"]
+    return data_field
 
 
 # Pending callback audit shared with the graph service so it can persist the
@@ -95,6 +110,11 @@ def _to_callback_record(payload: dict[str, Any], *, event_id: str | None = None,
     按同事务落库语义传入(callback 驱动路径=``PROCESSED``,``ingest`` 审计路径=``None``)。
     """
     run_id, node_id = _split_loop_task_id(payload.get("loop_task_id"))
+    tmp_node_id = payload.get("node_id")
+    if tmp_node_id:
+        node_id = tmp_node_id
+    logger.info("[task][task_callback] to_callback_record, payload=%s, node_id=%s", payload, node_id)
+
     result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     success = result.get("success")
     ext_info = result.get("_ext_info")
@@ -131,65 +151,119 @@ class CallbackAdapter:
     """
 
     def adapt(self, data: TaskCallbackData) -> TaskNodePatch:
-        """组装 TaskNodePatch。三路互斥(对齐 on_report 分流):
-        ① result["exec_error"] 非空 → 执行报错(bot 没跑通)→ patch.exec_error(无 acceptance,→ on_harness 重投);
-        ② success=True → 验收 PASS → acceptance_result=PASS;
-        ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAIL(→ harness 重派)。
-        非法/空终态 → exec_error=terminal_result_invalid。"""
+        """组装 TaskNodePatch。两路互斥,按 data 形态分流:
+
+        A) poller 形态(single_bot/BCN 翻译器产出的 ``result`` 是 dict 且含 ``success``):
+           result.success/data/gaps/_ext_info/exec_error 组装;三段互斥(对齐 on_report 分流):
+           ① exec_error 非空 → 执行报错(bot 没跑通)→ patch.exec_error(无 acceptance,→ on_harness 重投);
+           ② success=True → 验收 DONE → content=_unwrap_poller_content(data)(展平 {"result":<str>})
+           + output_patch={"output": content};
+           ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAILED(→ harness 重派);
+           ④ success 非布尔/失败无 gaps → exec_error=terminal_result_invalid。
+
+        B) common_task 形态(skill HTTP 上报 ``/callback/report`` 翻译后 ``result`` 非上述 dict,
+           关键字段挂在 ``_raw_callback_body``):task_id/node_id/status/output/acceptance_result/extend_props
+           原样映射(task_id 来自 body;status 来自 body 或顶层;verdict 来自 acceptance_result)。"""
         d = data.data if isinstance(data.data, dict) else {}
+        result = d.get("result")
+        if isinstance(result, dict) and ("success" in result or "exec_error" in result):
+            return self._adapt_poller(d, result)
+        return self._adapt_common_task(d)
+
+    @staticmethod
+    def _adapt_poller(d: dict, result: dict) -> TaskNodePatch:
         task_id, node_id = _split_loop_task_id(d.get("loop_task_id"))
-        result = d.get("result") if isinstance(d.get("result"), dict) else {}
-        out = result.get("data")
-        fail_detail = result.get("fail_detail")
-        raw_gaps = result.get("gaps")
-        gaps = [str(g).strip() for g in raw_gaps if str(g).strip()] \
-            if isinstance(raw_gaps, list) else []
-        if fail_detail and not gaps:
-            gaps = [str(fail_detail)]
+        if d.get("node_id"):
+            node_id = d["node_id"]
+        ext = result.get("_ext_info")
+        ext = ext if isinstance(ext, dict) else {}
+        ext_patch = dict(ext) if ext else None
         exec_error = result.get("exec_error")
-        ext = result.get("_ext_info") or {}
-        ep_patch: dict[str, Any] = dict(ext)
-        if fail_detail:
-            ep_patch["fail_detail"] = fail_detail
+        # ① 执行报错(bot 没跑通):无验收,留 exec_error 走 harness 重投。
         if exec_error:
-            # 执行报错:不设 acceptance(与验收不过区分);on_report 据 exec_error 走 harness
             return TaskNodePatch(
                 task_id=task_id,
                 node_id=node_id,
-                exec_error=str(exec_error),
-                output_patch={"data": out} if out is not None else None,
-                extend_props_patch=ep_patch if ep_patch else None,
+                status=Status.FAILED,
+                exec_error=exec_error,
+                extend_props_patch=ext_patch,
             )
         success = result.get("success")
-        if type(success) is not bool:
+        data_field = result.get("data")
+        content = _unwrap_poller_content(data_field)  # 归一裸文本(展平 {result:<str>})
+        # ④ success 非 boolean → 非法终态,无 acceptance。
+        if success is None or not isinstance(success, bool):
             return TaskNodePatch(
                 task_id=task_id,
                 node_id=node_id,
+                status=Status.FAILED,
                 exec_error="terminal_result_invalid: success must be bool",
-                output_patch={"data": out} if out is not None else None,
-                extend_props_patch=ep_patch if ep_patch else None,
+                extend_props_patch=ext_patch,
             )
+        # ② success=True → 验收 DONE。
         if success:
-            acceptance = AcceptanceResult(verdict=AcceptanceVerdict.PASS, acceptances_metric=["exec_ok"])
-        else:
-            if not gaps:
-                return TaskNodePatch(
-                    task_id=task_id,
-                    node_id=node_id,
-                    exec_error="terminal_result_invalid: failed result requires gaps",
-                    output_patch={"data": out} if out is not None else None,
-                    extend_props_patch=ep_patch if ep_patch else None,
-                )
-            acceptance = AcceptanceResult(
-                verdict=AcceptanceVerdict.FAIL,
-                gaps=gaps,
+            return TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                status=Status.DONE,
+                output_patch={"output": content} if content is not None else None,
+                acceptance_result=AcceptanceResult(
+                    verdict=AcceptanceVerdict.DONE,
+                    acceptances_metric=[],
+                    gaps=[],
+                ),
+                extend_props_patch=ext_patch,
             )
+        # ③ success=False:必须有 gaps,否则 ④ 非法终态。
+        gaps_raw = result.get("gaps")
+        fail_detail = result.get("fail_detail")
+        if isinstance(gaps_raw, list) and gaps_raw:
+            gaps = list(gaps_raw)
+        elif isinstance(fail_detail, str) and fail_detail:
+            gaps = [fail_detail]
+        else:
+            return TaskNodePatch(
+                task_id=task_id,
+                node_id=node_id,
+                status=Status.FAILED,
+                exec_error="terminal_result_invalid: failed result requires gaps",
+                extend_props_patch=ext_patch,
+            )
+        merged_ext = dict(ext)
+        if isinstance(fail_detail, str) and fail_detail:
+            merged_ext["fail_detail"] = fail_detail
         return TaskNodePatch(
             task_id=task_id,
             node_id=node_id,
-            output_patch={"data": out} if out is not None else None,
-            acceptance_result=acceptance,
-            extend_props_patch=ep_patch if ep_patch else None,
+            status=Status.FAILED,
+            output_patch={"output": content} if content is not None else None,
+            acceptance_result=AcceptanceResult(
+                verdict=AcceptanceVerdict.FAILED,
+                acceptances_metric=[],
+                gaps=gaps,
+            ),
+            extend_props_patch=merged_ext if merged_ext else None,
+        )
+
+    @staticmethod
+    def _adapt_common_task(d: dict) -> TaskNodePatch:
+        body = d.get("_raw_callback_body")
+        body = body if isinstance(body, dict) else {}
+        accept = body.get("acceptance_result")
+        accept = accept if isinstance(accept, dict) else {}
+        # push(skill HTTP 上报)按协作群既定协议产 ``body["output"]``;保持该协议不变,
+        # 产状按 ``"output"`` key 落 run_info.output(pull/poller 归一映射到同 key,见 _adapt_poller)。
+        return TaskNodePatch(
+            task_id=body.get("task_id"),
+            node_id=d.get("node_id") or body.get("node_id"),
+            status=Status(d.get("status") or body.get("status")),
+            output_patch={"output": body.get("output")} if body.get("output") is not None else None,
+            acceptance_result=AcceptanceResult(
+                verdict=AcceptanceVerdict(accept.get("verdict")),
+                acceptances_metric=accept.get("acceptances_metric", []),
+                gaps=accept.get("gaps", []),
+            ) if accept else None,
+            extend_props_patch=body.get("extend_props"),
         )
 
     def adapt_start(self, data: TaskCallbackData) -> TaskNodePatch:
@@ -238,7 +312,7 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         try:
             prior = finder(event_id)
         except Exception as exc:  # noqa: BLE001 查幂等键失败不阻断回投(落库/推进仍进行)
-            logger.warning("[task][task-callback] idempotency check failed event_id=%s: %s", event_id, exc)
+            logger.warning("[task][task_callback] idempotency check failed event_id=%s: %s", event_id, exc)
             return False
         return prior is not None and prior.process_status == "PROCESSED"
 
@@ -259,7 +333,11 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         if payload is not None:
             event_id = _derive_event_id(payload, "start")
             if self._is_already_processed(event_id):
-                logger.info("[task][task-callback] idempotent start event_id=%s", event_id)
+                logger.info(
+                    "[task][task_callback] idempotent start event_id=%s session_id=%s",
+                    event_id,
+                    payload.get("workflow_instance_id") or "",
+                )
                 return
             record = _to_callback_record(payload, event_id=event_id, process_status="PROCESSED")
         patch = self._adapter.adapt_start(data)
@@ -276,17 +354,35 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
     async def report_result(self, data: TaskCallbackData) -> None:
         """任务完成或失败:适配层组装 TaskNodePatch → 编排核 on_report(await) → graph.update_task_node_info → 翻态/传播/补救。
         回放幂等:``event_id`` 已 PROCESSED → 直接 ack;否则把回调审计挂到图变同事务落库。"""
+
+        logger.info("[task_callback] report_result, begin, data=%s", data)
         payload = data.data if isinstance(data.data, dict) else None
-        record = None
-        if payload is not None:
-            event_id = _derive_event_id(payload, "result")
-            if self._is_already_processed(event_id):
-                logger.info("[task][task-callback] idempotent result event_id=%s", event_id)
-                return
-            record = _to_callback_record(payload, event_id=event_id, process_status="PROCESSED")
-        patch = self._adapter.adapt(data)
+        record = (
+            _to_callback_record(
+                payload,
+                event_id=str(uuid.uuid4()),
+                process_status="PROCESSED",
+            )
+            if payload is not None
+            else None
+        )
+        logger.info("[task_callback] report_result, to_callback_record, %s", record)
+
         if record is not None:
             self._set_pending_audit(record)
+
+        # 非 dict 回调无法组装 TaskNodePatch(无 loop_task_id/result/body):仅记录审计后返回,
+        # 不推进图态(对齐 ``start_run`` 的非 dict 跳过语义;非 dict 不落库/不推进)。
+        if payload is None:
+            logger.warning(
+                "[task_callback] report_result 非 dict data, 跳过 adapt/on_report: %s", data
+            )
+            self._set_pending_audit(None)
+            return
+
+        patch = self._adapter.adapt(data)
+        logger.info("[task_callback] report_result, adapt patch, %s", patch)
+
         try:
             await self._engine.on_report(patch)
         finally:
@@ -294,6 +390,7 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
                 self._fallback_persist_audit()
             else:
                 self._set_pending_audit(None)
+        logger.info("[task_callback] report_result, finish")
 
     async def ingest(self, data: TaskCallbackData) -> None:
         """仅落回投审计(``task_callback``),不推进编排核。供 ClawMind/BCN 等事件/工作流级回投用:
@@ -312,7 +409,11 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         try:
             self._callback_repo.upsert(record)
         except Exception as exc:  # noqa: BLE001 审计落库失败不阻断回投推进
-            logger.warning("[task][task-callback] fallback persist task_callback failed: %s", exc)
+            logger.warning(
+                "[task][task_callback] fallback persist task_callback failed session_id=%s: %s",
+                record.main_session_id or "",
+                exc,
+            )
 
     def _persist(self, data: TaskCallbackData, *, disposition: str = "ingest") -> None:
         """``data`` 为 dict → 解析回调记录字段,落 ``task_callback``(按 (run_id,node_id) upsert);
@@ -329,4 +430,8 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
         try:
             self._callback_repo.upsert(_to_callback_record(payload, event_id=event_id))
         except Exception as exc:  # noqa: BLE001 落库失败不影响编排核推进
-            logger.warning("[task][task-callback] persist task_callback failed: %s", exc)
+            logger.warning(
+                "[task][task_callback] persist task_callback failed session_id=%s: %s",
+                payload.get("workflow_instance_id") or "",
+                exc,
+            )

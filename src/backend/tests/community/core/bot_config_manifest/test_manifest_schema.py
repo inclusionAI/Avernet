@@ -560,9 +560,30 @@ manifest:
 # ── cli_tools ───────────────────────────────────────────────────────────────
 
 
-def test_two_entrypoints_with_the_same_basename_are_refused():
-    """The exposed command *is* the basename, so one would shadow the other and
-    which wins depends on install order. v1 has no alias field."""
+def test_two_tools_with_the_same_name_are_refused():
+    """One entry is one command is one file (schema §3.7), and ``name`` *is* the
+    command name — unique within a bot. Two entries claiming it means one shadows
+    the other, and which wins depends on install order."""
+    document = f"""schema_version: 1
+manifest:
+  cli_tools:
+    - name: tk
+      source: https://cdn.example.com/toolkit.tar.gz
+      subpath: bin/tk
+      digest: "{_DIGEST}"
+    - name: tk
+      source: https://cdn.example.com/other.tar.gz
+      subpath: bin/tk
+      digest: "{_DIGEST}"
+"""
+    assert ("manifest.cli_tools", "duplicate_command_name") in _reject(document)
+
+
+def test_the_retired_entrypoints_field_is_refused_rather_than_ignored():
+    """An earlier draft made an entry "a directory plus a list of files inside it
+    to expose". That shape was flattened, and a document written against it is
+    refused by name — a silently ignored key is a caller believing they
+    configured something."""
     document = f"""schema_version: 1
 manifest:
   cli_tools:
@@ -570,32 +591,29 @@ manifest:
       source: https://cdn.example.com/toolkit.tar.gz
       unpack: tar.gz
       digest: "{_DIGEST}"
-      entrypoints: [bin/tool, helpers/tool]
+      entrypoints: [bin/tk, bin/tk-helper]
 """
     assert (
-        "manifest.cli_tools",
-        "duplicate_command_name",
+        "manifest.cli_tools[0].entrypoints",
+        "unknown_field",
     ) in _reject(document)
 
 
-@pytest.mark.parametrize("entrypoint", ["/usr/bin/tool", "../../bin/tool"])
-def test_a_syntactically_unsafe_entrypoint_is_refused(entrypoint):
-    """Only the syntax half — existence and symlink resolution need materialized
-    content, which this work item never produces."""
+def test_the_archive_form_selects_its_one_file_with_subpath():
+    """The flattened shape's own spelling: `subpath` names the file in the
+    package that becomes the command. Refused only because the category has no
+    materializer yet — the entry itself is well-formed."""
     document = f"""schema_version: 1
 manifest:
   cli_tools:
-    - name: toolkit
+    - name: tk
       source: https://cdn.example.com/toolkit.tar.gz
+      subpath: bin/tk
       unpack: tar.gz
       digest: "{_DIGEST}"
-      entrypoints: ["{entrypoint}"]
+      version: "0.9.0"
 """
-    assert "unsupported_category" in _codes(document)
-    assert any(
-        location.startswith("manifest.cli_tools[0].entrypoints[0]")
-        for location, _ in _reject(document)
-    )
+    assert _codes(document) == {"unsupported_category"}
 
 
 def test_cli_tools_requires_a_digest():

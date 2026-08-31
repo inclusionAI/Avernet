@@ -2025,6 +2025,42 @@ CreatedInvitationEnvelope:
     request_id:
       type: string
 
+RegisterTokenEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "./openapi/register.yaml#/RegisterTokenResult"
+    request_id:
+      type: string
+
+BotRegistrationEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "./openapi/register.yaml#/BotRegistrationResult"
+    request_id:
+      type: string
+
 InvitationAcceptanceEnvelope:
   type: object
   additionalProperties: false

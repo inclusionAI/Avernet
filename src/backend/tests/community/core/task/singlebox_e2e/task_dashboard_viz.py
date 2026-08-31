@@ -292,7 +292,7 @@ function detail(t){const m=t.task_spec||{},ri=t.run_info||{};const ac=ri.accepta
   h+=`<div class="k">目标 Objective</div><div class="v">${esc(m.goal.objective)}</div>`;
   h+=`<div class="k">指令 Instruction</div><div class="v">${esc(m.metadata.instruction)}</div>`;
   const acs=m.goal.acceptances||[];if(acs.length){h+=`<div class="k">验收标准</div><div class="v">${acs.map(a=>'• '+esc(a.description)).join('<br>')}</div>`;}
-  if(ac){h+=`<div class="k">验收结果</div><div class="v acc" style="color:${ac.verdict==='PASS'?'#3fe07a':'#ff5c6c'}">${ac.verdict}${ac.gaps&&ac.gaps.length?'<br>gaps: '+esc(ac.gaps.join('; ')):''}</div>`;}
+  if(ac){h+=`<div class="k">验收结果</div><div class="v acc" style="color:${ac.verdict==='DONE'?'#3fe07a':'#ff5c6c'}">${ac.verdict}${ac.gaps&&ac.gaps.length?'<br>gaps: '+esc(ac.gaps.join('; ')):''}</div>`;}
   if(ri.extend_props&&ri.extend_props.dispatch_error){h+=`<div class="k">派发错误</div><div class="v miss">${esc(ri.extend_props.dispatch_error)}</div>`;}
   if(miss.length){h+=`<div class="k">MISS 事件</div><div class="v miss">${miss.map(x=>'• '+esc(x)).join('<br>')}</div>`;}
   if(grp){h+=`<div class="k">协作群(待建)</div><div class="v grp">${esc(grp.group_name||'')} · 模式:${esc(grp.collab_mode||'')}<br>成员: ${(grp.members_info||[]).map(x=>esc(x.bot_id)).join(', ')}</div>`;}

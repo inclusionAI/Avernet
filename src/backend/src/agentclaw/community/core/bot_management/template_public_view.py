@@ -17,10 +17,16 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
+
 #: Keys that are display-safe. Keep alphabetized.
 _PUBLIC_TEMPLATE_KEYS = (
     "code_repos",
     "devflow_workflow",
+    # Server-managed form marker (e.g. "aicoding" on bots created by folding
+    # the legacy aicoding engine into claude_code): the display-side way to
+    # tell an aicoding-form bot from a plain claude_code bot.
+    ENGINE_FORM_KEY,
     "template_key",
     "template_uid",
     "yuque_kb_repos",

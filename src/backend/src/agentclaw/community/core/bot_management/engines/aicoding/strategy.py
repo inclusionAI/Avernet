@@ -11,7 +11,7 @@ import json
 from copy import deepcopy
 import threading
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
@@ -21,7 +21,7 @@ from agentclaw.community.core.bot_management.errors import (
     BotTemplateInvalidError,
 )
 from agentclaw.community.core.workspace.runtime_identity import (
-    claude_code_uses_aicoding_runtime,
+    uses_aicoding_runtime,
 )
 
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -58,6 +58,11 @@ _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
 _AICODING_RESTART_MARKER_KEY = "_aicoding_restart"
 _AICODING_RESTART_RESYNC_KEY = "resync_authorization"
 logger = get_logger()
+
+
+def _as_mapping(value: Any) -> Mapping[str, Any] | None:
+    """Coerce a raw bot-record field to a read-only mapping, or None."""
+    return value if isinstance(value, Mapping) else None
 
 
 def _validate_application_coding_config(
@@ -104,10 +109,12 @@ class AicodingBaasEngineBucketResolver:
         *,
         normalized_engine_type: str,
         template_type: str | None,
+        template_config: Mapping[str, Any] | None = None,
     ) -> str | None:
         return AicodingProvisioningStrategy.resolve_baas_engine_bucket(
             active_engine=normalized_engine_type,
             template_type=template_type,
+            template_config=template_config,
         )
 
     def resolve_default_capabilities_engine_bucket(
@@ -115,10 +122,12 @@ class AicodingBaasEngineBucketResolver:
         *,
         normalized_engine_type: str,
         template_type: str | None,
+        template_config: Mapping[str, Any] | None = None,
     ) -> str | None:
         return self.resolve_baas_engine_bucket(
             normalized_engine_type=normalized_engine_type,
             template_type=template_type,
+            template_config=template_config,
         )
 
 
@@ -227,6 +236,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         if self.should_use_aicoding_runtime_engine(
             active_engine=active_engine,
             template_type=bot.get("template_type"),
+            template_config=_as_mapping(bot.get("template_config")),
         ):
             return AICODING_ENGINE_TYPE
         return active_engine
@@ -247,11 +257,19 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         *,
         active_engine: str | None,
         template_type: str | None,
+        template_config: Mapping[str, Any] | None = None,
     ) -> bool:
-        """Whether this bot should use the aicoding runtime engine."""
-        return claude_code_uses_aicoding_runtime(
+        """Whether this bot should use the aicoding runtime engine.
+
+        ``template_config`` carries the server-managed ``engine_form`` marker
+        written by creation normalization (legacy ``aicoding`` engine folded
+        into ``claude_code``); a stored ``aicoding`` engine short-circuits to
+        True (read paths never rewrite stored engines).
+        """
+        return uses_aicoding_runtime(
             active_engine=active_engine,
             template_type=template_type,
+            template_config=template_config,
         )
 
     @classmethod
@@ -260,11 +278,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         *,
         active_engine: str | None,
         template_type: str | None,
+        template_config: Mapping[str, Any] | None = None,
     ) -> bool:
         """Whether this context should select the aicoding BaaS bucket."""
         return cls.should_use_aicoding_runtime_engine(
             active_engine=active_engine,
             template_type=template_type,
+            template_config=template_config,
         )
 
     @classmethod
@@ -273,11 +293,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         *,
         active_engine: str | None,
         template_type: str | None,
+        template_config: Mapping[str, Any] | None = None,
     ) -> str | None:
         """Return the aicoding BaaS bucket override, if this engine owns it."""
         if cls.should_use_aicoding_baas_bucket(
             active_engine=active_engine,
             template_type=template_type,
+            template_config=template_config,
         ):
             return AICODING_ENGINE_TYPE
         return None

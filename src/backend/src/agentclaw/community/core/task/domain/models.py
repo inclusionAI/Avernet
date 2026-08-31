@@ -26,10 +26,25 @@ class Status(StrEnum):
 
 
 class AcceptanceVerdict(StrEnum):
-    """验收结论。"""
+    """验收结论。``status`` 与 ``verdict`` 统一用 ``DONE``/``FAILED``。"""
 
-    PASS = "PASS"
-    FAIL = "FAIL"
+    DONE = "DONE"
+    FAILED = "FAILED"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "AcceptanceVerdict | None":
+        """向后兼容:历史库数据/旧上报中的 ``PASS``/``FAIL`` 自动归一到新枚举。
+
+        覆盖所有 ``AcceptanceVerdict(value)`` 构造点(repository serializers/types 反序列化、
+        callback_adapter/schemas 上报解析),使历史 ``PASS``/``FAIL`` 字面量不再抛 ValueError。
+        单向归一,不回写旧值;真正非法值仍按 Enum 默认抛错。
+        """
+        if isinstance(value, str):
+            if value == "PASS":
+                return cls.DONE
+            if value == "FAIL":
+                return cls.FAILED
+        return None
 
 
 class RelationType(StrEnum):
@@ -60,9 +75,12 @@ class TaskSourceType(StrEnum):
 class TaskType(StrEnum):
     """任务类型(static-single-workflow / static-group-workflow / dynamic)。"""
 
-    STATIC_SINGLE_WORKFLOW = "STATIC-SINGLE-WORKFLOW"
-    STATIC_GROUP_WORKFLOW = "STATIC-GROUP-WORKFLOW"
+    # Legacy task-type names remain accepted by the task API.
+    YAML = "yaml"
+    WORKFLOW = "workflow"
     DYNAMIC = "dynamic"
+    STATIC_PLAN = "static_plan"
+    BBS = "bbs"
 
 
 # ===== 规格面(Task Specification)=====
@@ -124,6 +142,7 @@ class TaskInfo:
     task_spec: TaskSpec
     source_type: str       # "bot" | "coop_group"
     owner_bot_id: str         # owning bot id
+    owner_user_id: str = ""   # owning user id, kept separate from owner_bot_id
     execution_config: dict[str, Any] = field(default_factory=dict)  # 指定 bot/workflow yaml/MAX_DEPTH 等
 
 
@@ -133,8 +152,8 @@ class AcceptanceResult:
     """验收/审计结果(无 verifier 字段)。"""
 
     verdict: AcceptanceVerdict
-    acceptances_metric: list[str] = field(default_factory=list)  # 已满足的验收指标明细
-    gaps: list[str] = field(default_factory=list)                # 与期望目标的差距(驱动 plan 自算,非 plan 入参)
+    acceptances_metric: list[Any] = field(default_factory=list)  # 已满足的验收指标明细(新协议为指标对象数组,放宽为 Any)
+    gaps: list[Any] = field(default_factory=list)  # 与期望目标的差距(驱动 plan 自算,非 plan 入参);新协议 FAIL 为对象数组,放宽为 Any
 
 
 @dataclass
@@ -214,6 +233,18 @@ class TaskExecutionGraph:
                         # 因 run_bbs 链路只拿到 execution_graph、无法回溯 task_id)
     # 派生不持久: depth / child_tasks / parent_task(均从 relations 分解树派生)
 
+    @property
+    def effective_status(self) -> "Status":
+        """图级有效态(乙' c+R2 只读派生根态):有根节点时以根态为准,使"图状态与根节点状态保持一致"
+        落在观测口径;无根(未初始化)回落存储的图级 ``status``。
+
+        纯只读派生,不改并发主线——图级 ``status`` 仍由编排核 ``update_task_graph_info`` 显式写
+        (终态收口 / loop_exhausted / 外部镜像);控制流(``_is_graph_terminal`` 等)继续读 ``status``,
+        本属性供看板/持久化等"以根态为准"的观测口径消费。与 ``_persist_locked`` 既有 root 派生
+        (runtime_status)完全等价,是其单源化的命名口径。"""
+        root = next((n for n in self.tasks if n.node_id == self.task_id), None)
+        return root.status if root is not None else self.status
+
 
 
 @dataclass
@@ -234,7 +265,8 @@ class TaskNodePatch:
     """节点级原子写(``update_task_node_info`` 入参)。
 
     终态翻转三选一(互斥):　
-    ① ``acceptance_result`` 非空 → 验收驱动(RUNNING→DONE/FAILED):PASS→DONE / FAIL+gaps→FAILED;　
+    ① ``acceptance_result`` 非空 → 验收驱动(RUNNING→DONE/[折叠]HUNG):PASS→DONE / FAIL→HUNG(动态折叠,
+       gaps 可空,verdict=FAILED 即统一收口);　
     ② ``exec_error`` 非空 → 执行报错(bot 压根没跑通:run FAILED / SLA 超时 / poll 耗尽),
        不翻终态,由编排核 on_harness 复位重投(计数,达上限→HUNG);　
     ③ ``status`` 非空(无前两者)→ 框架直驱(PENDING→RUNNING 派发 / RUNNING→PENDING harness 复位 等)。　
@@ -328,3 +360,4 @@ class PlanResult:
     children: list["TaskNode"] = field(default_factory=list)
     has_gap: bool = False
     gap_detail: str = ""                # gap 描述(空+has_gap=True 时说明为何拆不出;has_gap=False 时可为 "done")
+    acceptance_verdicts: list[dict[str, Any]] = field(default_factory=list)  # 逐条验收结论:[{ac_id,passed,reason}];owner bot plan 一并吐出,供结构父 gap 闭翻 DONE 时构造父自身 acceptance_result

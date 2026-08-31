@@ -65,8 +65,7 @@ CATEGORY_ENTRY_KEYS: dict[str, frozenset[str]] = {
     "resources": _COMMON_SOURCE_KEYS | {"path", "unpack", "strip_components"},
     "skills": _COMMON_SOURCE_KEYS | {"name", "unpack"},
     "identity": _COMMON_SOURCE_KEYS | {"type"},
-    "cli_tools": _COMMON_SOURCE_KEYS
-    | {"name", "version", "unpack", "strip_components", "entrypoints"},
+    "cli_tools": _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
     # A registry reference, not a fetch: no source-side field applies.
     "mcp": frozenset({"server_code", "config"}),
 }
@@ -516,8 +515,18 @@ def validate_identity_entry(
 
 def validate_cli_tool_entry(
     ctx: Context, location: str, entry: dict[str, Any]
-) -> list[str]:
-    """A command-line tool. Returns the command names it would expose."""
+) -> str | None:
+    """A command-line tool. Returns its ``name`` — the command it exposes.
+
+    **One entry is one command is one file** (schema §3.7). An earlier draft
+    made an entry "a directory plus a list of files inside it to expose", and
+    that shape has been flattened: two commands in one archive are two entries,
+    each pointing at its own file with ``subpath``. The flattening removed a
+    whole rule set that existed only to constrain it — in-package traversal,
+    symlink escape, basename collisions across a bot's tools — so none of it is
+    implemented here either. What remains is the ordinary source machinery plus
+    the two rules below.
+    """
     check_entry_keys(ctx, location, entry, "cli_tools")
     name = entry.get("name")
     name_ok = check_name(ctx, f"{location}.name", name, what="a tool name")
@@ -527,7 +536,8 @@ def validate_cli_tool_entry(
         ctx.add(f"{location}.version", "invalid_version", "'version' must be a string")
     # Mandatory for every form: the platform is distributing an executable on a
     # caller's behalf, and the digest is also the only thing convergence can
-    # compare (schema §3.7).
+    # compare (schema §3.7). It covers the fetched source object — the binary
+    # itself, or the whole archive — with ``subpath`` selecting the file inside.
     if form.kind is not None and form.kind != SOURCE_GIT and "digest" not in entry:
         ctx.add(
             location,
@@ -535,28 +545,4 @@ def validate_cli_tool_entry(
             "cli_tools requires a 'digest' — the platform is distributing an "
             "executable, so the supply chain is pinned or the entry is refused",
         )
-
-    exposed: list[str] = []
-    if "unpack" in entry:
-        entrypoints = entry.get("entrypoints")
-        if not isinstance(entrypoints, list) or not entrypoints:
-            ctx.add(
-                f"{location}.entrypoints",
-                "missing_entrypoints",
-                "an archive tool must declare 'entrypoints' — which files in "
-                "the package become commands",
-            )
-            return exposed
-        for index, entrypoint in enumerate(entrypoints):
-            at = f"{location}.entrypoints[{index}]"
-            # Syntax only. Whether the file exists, is a regular file, or is a
-            # symlink out of the tree needs materialized content, which this
-            # work item never produces — those checks belong to W9.
-            if not check_relative_path(ctx, at, entrypoint, what="an entrypoint"):
-                continue
-            exposed.append(entrypoint.rsplit("/", 1)[-1])
-        return exposed
-
-    if name_ok and isinstance(name, str):
-        exposed.append(name)
-    return exposed
+    return name if name_ok and isinstance(name, str) else None

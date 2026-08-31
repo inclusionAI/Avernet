@@ -86,6 +86,49 @@ def test_rejection_is_not_a_silent_fallback_to_the_default(stub_app_name):
         ConfigModule().task_queue()
 
 
+def test_absent_config_source_reads_as_none_not_as_a_failure():
+    """The legitimate absence: no composition root has registered a provider,
+    so there is genuinely nothing to read and the caller may default."""
+    from agentclaw.community.core.config import provider as config_provider
+
+    saved_provider, saved_cached = config_provider._provider, config_provider._cached
+    config_provider._provider = None
+    config_provider._cached = None
+    try:
+        assert config_module._app_name() is None
+    finally:
+        config_provider._provider = saved_provider
+        config_provider._cached = saved_cached
+
+
+def test_a_failing_config_source_propagates_instead_of_defaulting():
+    """The case this must never treat as absence.
+
+    A registered provider that cannot load — a missing or malformed overlay —
+    used to be swallowed into ``None``, which ``task_queue`` reads as "no
+    config" and answers with the shipped default. For a deployment whose
+    ``app_name`` is *not* that default, booting on it means stamping and
+    claiming the other fleet's queue rows: exactly the corruption ``app``
+    scoping exists to prevent. The failure has to reach the boot."""
+    from agentclaw.community.core.config import provider as config_provider
+
+    class _Broken:
+        def load(self):
+            raise FileNotFoundError("application-whatever.yaml is missing")
+
+    saved_provider, saved_cached = config_provider._provider, config_provider._cached
+    config_provider._provider = _Broken()
+    config_provider._cached = None
+    try:
+        with pytest.raises(FileNotFoundError):
+            config_module._app_name()
+        with pytest.raises(FileNotFoundError):
+            ConfigModule().task_queue()
+    finally:
+        config_provider._provider = saved_provider
+        config_provider._cached = saved_cached
+
+
 def test_the_owner_is_read_off_the_real_top_level_app_name(stub_app_name):
     """``_app_name`` is stubbed everywhere above, so pin once that it reads the
     top-level key rather than a ``user_config`` block — the reason this provider

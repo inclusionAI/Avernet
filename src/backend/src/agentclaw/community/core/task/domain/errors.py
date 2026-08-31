@@ -14,6 +14,10 @@ class GraphIntegrityError(TaskError):
     """分解树完整性违反:单入防环/汇聚、结构父不存在、本批互为父子。"""
 
 
+class GraphVersionConflictError(TaskError):
+    """图基于过期版本写入时的乐观并发冲突。"""
+
+
 class GraphAlreadyInitializedError(TaskError):
     """``initialize_graph`` 幂等冲突:同 task_id 已存在图。"""
 

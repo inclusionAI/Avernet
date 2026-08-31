@@ -546,10 +546,17 @@ class DeadlineRenewalScheduler:
         # ---- Step 3(a): Get authoritative TTL from Arca ----
         try:
             device_info = await self._paas_facade.get_device_info(sandbox_id)
-        except Exception:
-            log.exception(
-                "[DeadlineRenewalScheduler] get_device_info failed sandbox_id=%s",
+        except Exception as e:
+            log.warning(
+                "[DeadlineRenewalScheduler] get_device_info failed sandbox_id=%s: %s",
                 sandbox_id,
+                e,
+            )
+            log.debug(
+                "[DeadlineRenewalScheduler] get_device_info failed sandbox_id=%s: %s",
+                sandbox_id,
+                e,
+                exc_info=True,
             )
             outcome = await self._handle_failure(record)
             self._emit_renew_digest(record, outcome, run_uuid=run_uuid)
@@ -669,12 +676,21 @@ class DeadlineRenewalScheduler:
 
         try:
             renewed = await self._paas_facade.extend_ttl(sandbox_id, ttl_minutes)
-        except Exception:
-            log.exception(
+        except Exception as e:
+            log.warning(
                 "[DeadlineRenewalScheduler] extend_ttl failed sandbox_id=%s "
-                "ttl_minutes=%d",
+                "ttl_minutes=%d: %s",
                 sandbox_id,
                 ttl_minutes,
+                e,
+            )
+            log.debug(
+                "[DeadlineRenewalScheduler] extend_ttl failed sandbox_id=%s "
+                "ttl_minutes=%d: %s",
+                sandbox_id,
+                ttl_minutes,
+                e,
+                exc_info=True,
             )
             outcome = await self._handle_failure(record)
             self._emit_renew_digest(
@@ -778,7 +794,7 @@ class DeadlineRenewalScheduler:
             self._schedule_repo.set_status(
                 self._config.env, record["source_table"], record["source_id"], "STOPPED"
             )
-            log.error(
+            log.warning(
                 "[DeadlineRenewalScheduler] sandbox_id=%s "
                 "source=%s:%s reached max_fail_count=%d, marked STOPPED",
                 record.get("sandbox_id"),

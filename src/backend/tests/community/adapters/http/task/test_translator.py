@@ -10,6 +10,19 @@ from agentclaw.community.core.errors import NotFound
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
+from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+    LocalBcsTokenProvider,
+)
+from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+    CallbackDataEnricher,
+)
+
+
+def _claw_mind_graph(raw, disposition="result"):
+    """translate_claw_mind + enrich_claw_mind → execution_graph(execution_graph 构建已移至 CallbackDataEnricher)。"""
+    _tc = translate_claw_mind(raw, disposition)
+    CallbackDataEnricher(LocalBcsTokenProvider(base_url="http://bcs")).enrich_claw_mind(_tc.data, raw)
+    return _tc.data.data.get("execution_graph")
 
 
 def _reg_with(source="bcn", instance_id_str="i1", **kw):
@@ -132,6 +145,7 @@ class TestClawMind:
 
     def test_translate_claw_mind_maps_fields(self):
         tc = translate_claw_mind(self._BODY, "result")
+        CallbackDataEnricher(LocalBcsTokenProvider(base_url="http://bcs")).enrich_claw_mind(tc.data, self._BODY)
         assert tc.disposition == "result"
         d = tc.data.data
         assert d["loop_task_id"] == "flow-abc-123"  # loop_task_id = flow_id(run 实例,对齐 BCN);node_id 空
@@ -250,7 +264,7 @@ class TestClawMind:
     }
 
     def test_execution_graph_is_structured_task_graph_real_payload(self):
-        g = translate_claw_mind(self._REAL_BODY, "result").data.data["execution_graph"]
+        g = _claw_mind_graph(self._REAL_BODY, "result")
         assert g is not None
         # 图级
         assert g["run_id"] == 36018
@@ -335,7 +349,7 @@ class TestClawMind:
                     "ext_info": {"flow_runs": {"id": 1, "status": src,
                                                "result_json": "{}", "params_json": "{}"},
                                  "node_executions": []}}
-            g = translate_claw_mind(body, "result").data.data["execution_graph"]
+            g = _claw_mind_graph(body, "result")
             assert g["status"] == want, f"{src!r} → {g['status']!r}, want {want!r}"
             assert g["run_id"] == 1
 
@@ -344,7 +358,7 @@ class TestClawMind:
                 "ext_info": {"flow_runs": {"origin_session_id": "S-1", "status": "failed"},
                              "node_executions": [{"node_id": "N1", "status": "failed",
                                                   "error_text": "boom", "node_title": "调研拆题"}]}}
-        g = translate_claw_mind(body, "result").data.data["execution_graph"]
+        g = _claw_mind_graph(body, "result")
         assert g["status"] == "FAILED"
         assert g["tasks"][0]["status"] == "FAILED"
         assert g["tasks"][0]["task_spec"]["metadata"]["title"] == "调研拆题"
@@ -356,13 +370,13 @@ class TestClawMind:
                 "ext_info": {"flow_runs": {"status": "succeeded"},
                              "node_executions": [{"node_id": "n", "status": "succeeded",
                                  "input_json": '{"params":{},"nodeOutputKeys":["ghost","n2"]}'}]}}
-        g = translate_claw_mind(body, "result").data.data["execution_graph"]
+        g = _claw_mind_graph(body, "result")
         assert g["relations"] == []
         assert len(g["tasks"]) == 1
 
     def test_execution_graph_empty_ext_returns_none(self):
         body = {"workflow_id": "w", "flow_id": "f", "status": "started", "ext_info": {}}
-        assert translate_claw_mind(body, "start").data.data["execution_graph"] is None
+        assert _claw_mind_graph(body, "start") is None
 
 
 class TestBCN:
@@ -392,13 +406,15 @@ class TestBCN:
         tc = translate_bcn(self._EVT)
         assert tc.disposition == "result"
         d = tc.data.data
-        assert d["loop_task_id"] == "run-1::N1"
+        assert d["loop_task_id"] == "run-1"             # req4:node_id 恒空,= run_id
         assert d["workflow_source"] == "bcn"
         assert d["workflow_instance_id"] == "s-1"          # scope.session_id → main_session_id
-        assert d["status"] == "state_machine.node.completed"
+        assert d["event_id"] == "evt-1"                    # CloudEvent 幂等键透传
+        assert d["status"] == "RUNNING"                     # req2:node.completed → RUNNING
         assert d["result"]["success"] is True
         assert d["result"]["data"] == {"answer": 7}
-        assert d["execution_graph"] == self._EVT["data"]
+        # execution_graph 不在 translator 产物(由 CallbackDataEnricher.enrich_bcn 取 BCS run 明细后构建)
+        assert "execution_graph" not in d
         assert d["_raw_callback_body"] == self._EVT
 
     def test_node_started_is_start_no_success(self):
@@ -406,7 +422,8 @@ class TestBCN:
         e["data"] = {"run_id": "run-1", "node_id": "N1", "attempt": 1, "started_at": "t"}
         tc = translate_bcn(e)
         assert tc.disposition == "start"
-        assert tc.data.data["loop_task_id"] == "run-1::N1"
+        assert tc.data.data["loop_task_id"] == "run-1"   # req4:node_id 恒空
+        assert tc.data.data["status"] == "RUNNING"        # req2:node.started → RUNNING
         assert "success" not in tc.data.data["result"]     # started 不设 success
 
     def test_run_started_and_created_have_no_node_id(self):
@@ -414,7 +431,8 @@ class TestBCN:
         e["data"] = {"run_mode": "configured", "started_at": "t"}
         tc = translate_bcn(e)
         assert tc.disposition == "start"
-        assert tc.data.data["loop_task_id"] == "run-1"     # 无 node_id
+        assert tc.data.data["loop_task_id"] == "run-1"     # 无 node_id(req4 恒空)
+        assert tc.data.data["status"] == "RUNNING"          # req2:run.started → RUNNING
         ec = dict(self._EVT, event_type="state_machine.run.created")
         ec["data"] = {"definition_id": "d", "status": "running"}
         assert translate_bcn(ec).disposition == "start"
@@ -425,13 +443,17 @@ class TestBCN:
         tc = translate_bcn(e)
         assert tc.disposition == "result"
         assert tc.data.data["loop_task_id"] == "run-1"
+        assert tc.data.data["status"] == "DONE"           # req2:run.completed → DONE
         assert tc.data.data["result"]["success"] is True
         assert tc.data.data["result"]["data"] == {"final": True}
+        # execution_graph 不在 translator 产物(极简兜底由 CallbackDataEnricher.enrich_bcn 构建)
+        assert "execution_graph" not in tc.data.data
 
     def test_node_completed_failed_outcome(self):
         e = dict(self._EVT, event_type="state_machine.node.completed")
         e["data"] = {"run_id": "run-1", "node_id": "N1", "outcome": "failed", "reason": "boom"}
         d = translate_bcn(e).data.data
+        assert d["status"] == "RUNNING"                   # req2:node.completed → RUNNING(失败态由结果/收敛处理)
         assert d["result"]["success"] is False
         assert d["result"]["exec_error"] == "boom"
 

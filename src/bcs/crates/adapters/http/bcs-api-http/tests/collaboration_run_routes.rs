@@ -248,6 +248,7 @@ fn test_router(service: Arc<FakeRuntimeService>) -> axum::Router {
             Arc::new(NoopSessionService),
             Arc::new(NoopMessageService),
             Arc::new(NoopInvitationService),
+            Arc::new(NoopRegisterService),
             Arc::new(NoopFriendshipService),
             Arc::new(HeaderVerifier),
         )
@@ -755,5 +756,24 @@ impl FriendshipService for NoopFriendshipService {
         _: RejectFriendRequest,
     ) -> Result<FriendRequest, ApplicationError> {
         Err(ApplicationError::internal("not configured"))
+    }
+}
+
+struct NoopRegisterService;
+
+#[async_trait]
+impl RegisterService for NoopRegisterService {
+    async fn issue_register_token(
+        &self,
+        _command: IssueRegisterToken,
+    ) -> Result<RegisterTokenView, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+
+    async fn register_bot(
+        &self,
+        _command: RegisterBot,
+    ) -> Result<BotRegistration, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
     }
 }

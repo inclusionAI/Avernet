@@ -1,30 +1,23 @@
 """ConfigModule — single source of truth for ``user_config.get(...)`` reads.
-
 Every cluster of legacy ``user_config.get(...)`` calls collapses to one
 ``@singleton`` ``@provider`` here. Downstream services receive the typed
 dataclass via constructor injection and never reach into
 ``sofa.sofa_config`` themselves.
-
 Per architectural test (Task 8), ``user_config.get`` and ``get_config()``
 must NOT appear anywhere outside this file (and the thin
 ``core/config/sofa.py`` handle).
-
 Defaults live in ``agentclaw.community.di.config`` (the dataclass field defaults).
 Providers instantiate the dataclass to read those defaults, then
 override individual fields from YAML where present. This keeps the
 literal default in exactly one place per field.
-
 Providers do **no I/O** (no Mist calls, no HTTP) — secret resolution
 and client construction happen in downstream module providers.
 """
 from __future__ import annotations
-
 import math
 from dataclasses import fields
 from typing import Any
-
 from injector import Module, inject, provider, singleton
-
 from agentclaw.community.core.skill_center import draft_content
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
 from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
@@ -38,11 +31,7 @@ from agentclaw.community.plugin_api.http_client import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
-
-
 logger = get_logger()
-
-
 def _user_config() -> dict[str, Any]:
     """Read the ``user_config`` dict from sofa, defensively.
 
@@ -59,12 +48,10 @@ def _user_config() -> dict[str, Any]:
         logger.warning("ConfigModule: sofa user_config unavailable (%s)", exc)
         return {}
 
-
 def _block(name: str) -> dict[str, Any]:
     """Pull one named block out of ``user_config``; ``{}`` if missing."""
     raw = _user_config().get(name) or {}
     return dict(raw) if isinstance(raw, dict) else {}
-
 
 def _object_prefix_setting(name: str, default: str) -> Any:
     raw = _user_config().get(name)
@@ -77,24 +64,14 @@ def _object_prefix_setting(name: str, default: str) -> Any:
         raise ValueError(f"{name} contains unknown keys: " + ", ".join(unknown))
     return raw.get("base_prefix_template", default)
 
-
 def _app_name() -> str | None:
-    """The **top-level** ``app_name``, or ``None`` when there is no config.
+    """Return the configured top-level app name, or None without a source."""
+    from agentclaw.community.core.config import provider as config_provider
 
-    Same defensiveness as :func:`_user_config` — local mode and ad-hoc tests
-    often have no sofa config at all — but the two outcomes are kept apart on
-    purpose: ``None`` means "nothing to read", while ``""`` means an app config
-    that names itself nothing. Only the consumer knows which of those is a
-    misconfiguration worth refusing (see :meth:`ConfigModule.task_queue`).
-    """
-    try:
-        from agentclaw.community.core.config import sofa
-
-        return str(getattr(sofa.sofa_config, "app_name", "") or "")
-    except Exception as exc:  # pragma: no cover — defensive
-        logger.warning("ConfigModule: sofa app_name unavailable (%s)", exc)
+    if not config_provider.has_config_provider():
         return None
-
+    from agentclaw.community.core.config import sofa
+    return str(getattr(sofa.sofa_config, "app_name", "") or "")
 
 # The closed set of HttpClient bindings an ``overrides`` entry may name. Taken
 # from the qualifier constants themselves so the config surface cannot drift
@@ -102,15 +79,12 @@ def _app_name() -> str | None:
 _HTTP_CLIENT_QUALIFIERS = frozenset(
     {QUALIFIER_BAAS, QUALIFIER_BCN, QUALIFIER_GENERAL, QUALIFIER_MASA_AGENT_EVAL}
 )
-
 # The policy fields an ``http_client`` block (or an override body) may name,
 # derived from the dataclass so the accepted config surface cannot drift from
 # the type it populates.
 _POOL_POLICY_FIELDS = frozenset(f.name for f in fields(cfg.HttpClientPoolPolicy))
-
 _TRUE_SCALARS = frozenset({"true", "yes", "on", "1"})
 _FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
-
 
 def _coerce(block: dict[str, Any], key: str, cast, fallback, where: str, valid=None):
     """One config value, cast defensively, falling back on anything unusable.
@@ -158,7 +132,6 @@ def _coerce(block: dict[str, Any], key: str, cast, fallback, where: str, valid=N
         return fallback
     return value
 
-
 def _as_int(raw: Any) -> int:
     """Strict integer: no silent truncation, no ``True`` meaning 1.
 
@@ -178,7 +151,6 @@ def _as_int(raw: Any) -> int:
     if isinstance(raw, str):
         return int(raw.strip())
     raise TypeError(f"not an integer: {type(raw).__name__}")
-
 
 def _as_bool(raw: Any) -> bool:
     """Strict-ish boolean: YAML may hand back a string, and ``bool("false")``
@@ -205,7 +177,6 @@ def _as_bool(raw: Any) -> bool:
         raise ValueError(f"not a boolean: {raw!r}")
     raise TypeError(f"not a boolean: {type(raw).__name__}")
 
-
 def _reject_unknown_keys(
     block: dict[str, Any], where: str, *, allow_overrides: bool
 ) -> None:
@@ -226,7 +197,6 @@ def _reject_unknown_keys(
             f"unknown {where} key(s) "
             f"{', '.join(repr(u) for u in unknown)}; expected one of {valid}"
         )
-
 
 def _pool_policy(
     block: dict[str, Any], base: cfg.HttpClientPoolPolicy, where: str = "http_client"
@@ -257,7 +227,6 @@ def _pool_policy(
         ),
         http2=_coerce(block, "http2", _as_bool, base.http2, where),
     )
-
 
 class ConfigModule(Module):
     """Bind every typed config dataclass."""
@@ -948,6 +917,40 @@ class ConfigModule(Module):
                 "claim under the full one, so none of its own work would ever run"
             )
         return cfg.TaskQueueConfig(app=app)
+
+    @singleton
+    @provider
+    def task_dispatch(self) -> cfg.TaskDispatchConfig:
+        """Task dispatch policy.
+
+        YAML shape::
+
+            task_dispatch:
+              task_search_skill_enabled: false
+              single_bot_skill_report_enabled: false
+
+        The default keeps dispatch deterministic and avoids depending on the
+        owner Bot's task-search skill. Set it to true to restore the skill
+        round-trip for staged experiments.
+        """
+        block = _block("task_dispatch")
+        defaults = cfg.TaskDispatchConfig()
+        return cfg.TaskDispatchConfig(
+            task_search_skill_enabled=_coerce(
+                block,
+                "task_search_skill_enabled",
+                _as_bool,
+                defaults.task_search_skill_enabled,
+                "task_dispatch",
+            ),
+            single_bot_skill_report_enabled=_coerce(
+                block,
+                "single_bot_skill_report_enabled",
+                _as_bool,
+                defaults.single_bot_skill_report_enabled,
+                "task_dispatch",
+            ),
+        )
 
     @singleton
     @provider

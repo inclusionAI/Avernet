@@ -418,8 +418,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: (``GET``/``PUT``/``DELETE …/{bot_id}/config-manifest`` and
 #: ``GET …/config-manifest/capabilities``). Each addresses one bot and
 #: resolves it as the named user's, so all four are bot-path-addressed like
-#: the rest of the surface.
-_BOT_ID_PLACEMENT = {"path": 150, "query": 1, "none": 97}
+#: the rest of the surface. ``none`` is 98 from the public static-template
+#: mirror, which addresses no bot.
+_BOT_ID_PLACEMENT = {"path": 150, "query": 1, "none": 98}
 
 
 def _schema() -> dict:
@@ -552,10 +553,11 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Group 4 adds three Bot-addressed Reference operations plus
     # one account-level manual SC Public Sync operation, and Group 5 adds the
     # Offline impact and command operations. All twelve are user-scoped,
-    # bringing the combined surface to 218. The config manifest adds four
-    # Bot-addressed operations — read, replace, clear, and the capability read —
-    # all user-scoped, bringing it to 222.
-    assert len(taking) == 222
+    # bringing the combined surface to 218. The public static-template mirror
+    # adds one more user-scoped operation, bringing that to 219. The config
+    # manifest adds four Bot-addressed operations — read, replace, clear, and
+    # the capability read — all user-scoped, bringing it to 223.
+    assert len(taking) == 223
 
 
 def test_the_exempt_operations_take_none():

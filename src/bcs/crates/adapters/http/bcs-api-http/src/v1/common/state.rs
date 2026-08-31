@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bcs_config_api::ManifestConfig;
 use bcs_service_api::application::v1::{
     BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService,
+    RegisterService,
     SessionFileApplicationService, SessionMessageService, SessionService,
 };
 use bcs_service_api::application::channel::ChannelService;
@@ -24,6 +25,7 @@ pub struct ApiState {
     pub session_service: Arc<dyn SessionService>,
     pub message_service: Arc<dyn SessionMessageService>,
     pub invitation_service: Arc<dyn InvitationService>,
+    pub register_service: Arc<dyn RegisterService>,
     pub friendship_service: Arc<dyn FriendshipService>,
     pub friend_connection_service: Option<Arc<dyn FriendConnectionService>>,
     pub channel_service: Option<Arc<dyn ChannelService>>,
@@ -43,6 +45,7 @@ impl ApiState {
         session_service: Arc<dyn SessionService>,
         message_service: Arc<dyn SessionMessageService>,
         invitation_service: Arc<dyn InvitationService>,
+        register_service: Arc<dyn RegisterService>,
         friendship_service: Arc<dyn FriendshipService>,
         principal_verifier: Arc<dyn PrincipalVerifier>,
     ) -> Self {
@@ -53,6 +56,7 @@ impl ApiState {
             session_service,
             message_service,
             invitation_service,
+            register_service,
             friendship_service,
             friend_connection_service: None,
             channel_service: None,

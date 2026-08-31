@@ -1,0 +1,121 @@
+{
+  "report_id": "audit_report_fixed_okr_template_run_20260828",
+  "delivery_task_id": "task_fixed_okr_template_run_20260828",
+  "dima_work_item_id": "2026082400118473657",
+  "status": "delivered",
+  "payload_status": "compiled",
+  "persistence_status": "uploaded",
+  "upload_transport": "native_mcp",
+  "delivery_audit_mcp": {
+    "server_code": "mcp.ant.ecb.delivery-audit",
+    "tool_name": "save_delivery_audit_report",
+    "call_status": "success",
+    "report_id": "audit_report_fixed_okr_template_run_20260828",
+    "raw_result_summary": "Native MCP upsert returned the report_id."
+  },
+  "mcp_availability": {
+    "server_code": "mcp.ant.ecb.delivery-audit",
+    "status": "available",
+    "checked_by": "native_tool_scan",
+    "evidence": "Native delivery audit MCP tool is visible in the current session."
+  },
+  "dima": {
+    "url": "https://project.alipay.com/project/W24001004413/P26001029876/requirement",
+    "work_item_id": "2026082400118473657",
+    "title": "固定 OKR 模板运行",
+    "binding_status": "aligned"
+  },
+  "final_status": {
+    "status": "delivered",
+    "result": "passed",
+    "rework_count": 4,
+    "human_escalation_count": 0,
+    "open_blocker_count": 0,
+    "conclusion": "固定 OKR 模板运行能力已实现并通过 blocking AC 验收；HTTP adapter 专项测试因既有循环导入未能收集。"
+  },
+  "acceptance_snapshot": {
+    "ledger_version": 3,
+    "total": 7,
+    "blocking": 7,
+    "passed": 7,
+    "failed": 0,
+    "deferred": 0,
+    "items": [
+      {
+        "ac_id": "AC-FIXED-001",
+        "title": "模板 API 创建 Task",
+        "description": "POST /openapi/v1/collaboration/tasks/run-template 接收 template_id 与 input，并以认证主体创建固定计划 Task。",
+        "blocking": true,
+        "final_status": "verified_passed"
+      },
+      {
+        "ac_id": "AC-FIXED-002",
+        "title": "首批并行",
+        "description": "风险评估协作群与大促营销策略 Bot 均无前置依赖，首帧同批派发。",
+        "blocking": true,
+        "final_status": "verified_passed"
+      },
+      {
+        "ac_id": "AC-FIXED-003",
+        "title": "审核 Join",
+        "description": "审核节点仅在风险评估与营销策略两个前置节点均 DONE 后启动，并同时解析两路输出。",
+        "blocking": true,
+        "final_status": "verified_passed"
+      },
+      {
+        "ac_id": "AC-FIXED-004",
+        "title": "审核通过后实施",
+        "description": "审核结果 approved=true 才派发实施；approved=false 时实施节点被 skip 且不派发。",
+        "blocking": true,
+        "final_status": "verified_passed"
+      },
+      {
+        "ac_id": "AC-FIXED-005",
+        "title": "运行时建群与空绑定拒绝",
+        "description": "协作群不配置 group_id，运行时由既有 Runner 建群；Bot ID 来自 YAML，任一绑定为空时运行前拒绝。",
+        "blocking": true,
+        "final_status": "verified_passed"
+      },
+      {
+        "ac_id": "AC-FIXED-006",
+        "title": "旧任务兼容",
+        "description": "dynamic、workflow、yaml 既有执行路径继续使用原有 Planner/Workflow/YAML 逻辑，固定计划仅由 task_type=static_plan 选择。",
+        "blocking": true,
+        "final_status": "verified_passed"
+      },
+      {
+        "ac_id": "AC-FIXED-007",
+        "title": "明确非范围",
+        "description": "本迭代只实现固定 OKR 演示 DAG；冲突解决群、业务共识群、BBS 广场、自动研发 Bot、模板管理/发布不实现。",
+        "blocking": true,
+        "final_status": "verified_passed"
+      }
+    ]
+  },
+  "audit_events": [
+    {
+      "event_id": "evt_delivery_completed",
+      "event_type": "delivery_completed",
+      "phase": "delivery",
+      "attempt_no": 1,
+      "related_acceptance": [],
+      "failure_reason": "",
+      "missing_evidence": [],
+      "decision": "continue",
+      "status_after_event": "delivered",
+      "created_at": "2026-08-28T00:00:00+08:00"
+    },
+    {
+      "event_id": "evt_report_submitted",
+      "event_type": "report_submitted",
+      "phase": "delivery",
+      "attempt_no": 1,
+      "related_acceptance": [],
+      "failure_reason": "",
+      "missing_evidence": [],
+      "decision": "continue",
+      "status_after_event": "delivered",
+      "created_at": "2026-08-28T00:00:00+08:00"
+    }
+  ]
+}

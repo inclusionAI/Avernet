@@ -38,6 +38,13 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
 )
+from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
+    FrontendUrlProvider,
+    NullFrontendUrlProvider,
+)
+from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
+    NotifyMessagesProvider,
+)
 from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
     OpenApiBotSessionInitiator,
 )
@@ -63,7 +70,6 @@ from agentclaw.community.core.task.task_runner.integration.ports import (
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.plugin_api.notify_sender import NotifySenderPlugin
 
 logger = get_logger()
 
@@ -133,12 +139,18 @@ class TaskDiscoveryModule(Module):
         self,
         reader: TaskReader,
         session_initiator: SessionInitiator,
-        notify_sender: NotifySenderPlugin,
+        notify_sender: NotifyMessagesProvider,
         bot_service: _TaskDiscoveryBotServiceProtocol,
         discovery_lock_repo: TaskDiscoveryLockRepositoryProtocol,
         work_order_service: _TaskDiscoveryWorkOrderServiceProtocol,
+        injector: Injector,
     ) -> DiscoveryService:
-        """构建 DiscoveryService（注入 reader + initiator + notify + bot_service + lock + work_order）。"""
+        """构建 DiscoveryService（注入 reader + initiator + notify + bot_service + lock + work_order + frontend_url_provider）。"""
+        logger.debug("[task_discovery] → TaskDiscoveryModule._provide_discovery_service()")
+        try:
+            fe_provider: FrontendUrlProvider = injector.get(FrontendUrlProvider)
+        except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
+            fe_provider = NullFrontendUrlProvider()
         return DiscoveryService(
             reader=reader,
             session_initiator=session_initiator,
@@ -146,6 +158,7 @@ class TaskDiscoveryModule(Module):
             bot_service=bot_service,
             discovery_lock_repo=discovery_lock_repo,
             work_order_service=work_order_service,
+            frontend_url_provider=fe_provider,
         )
 
     @singleton
@@ -163,7 +176,16 @@ class TaskDiscoveryModule(Module):
           当 ``OpenApiBotPort`` 未绑定或返回 None (fail-closed) → 回退 CronRelaySessionInitiator。
 
         对齐 ``task_module.py`` 的 ``injector.get(OpenApiBotPort)`` + try/except 降级模式。
+
+        ``FrontendUrlProvider`` 由 DI 注入(corp 列 ``CorpFrontendUrlProvider``,
+        community/singlebox 列未绑定 → fallback ``NullFrontendUrlProvider``)。
         """
+        logger.debug("[task_discovery] → TaskDiscoveryModule._provide_session_initiator()")
+        try:
+            fe_provider: FrontendUrlProvider = injector.get(FrontendUrlProvider)
+        except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
+            fe_provider = NullFrontendUrlProvider()
+
         if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
             # corp/pre/prod: 尝试从 DI 注入 OpenApiBotPort (corp overlay 绑定)
             try:
@@ -171,13 +193,15 @@ class TaskDiscoveryModule(Module):
                 if openapi_bot is not None:
                     logger.info(
                         "[task_discovery] SessionInitiator → OpenApiBotSessionInitiator "
-                        "(corp path, openapi_bot=%s)",
+                        "(corp path, openapi_bot=%s, frontend_url_provider=%s)",
                         type(openapi_bot).__name__,
+                        type(fe_provider).__name__,
                     )
                     return OpenApiBotSessionInitiator(
                         openapi_bot=openapi_bot,
                         frontend_url=_resolve_frontend_url(),
                         backend_url=_resolve_backend_url(),
+                        frontend_url_provider=fe_provider,
                     )
                 logger.warning(
                     "[task_discovery] OpenApiBotPort resolved to None (fail-closed) "
@@ -194,6 +218,7 @@ class TaskDiscoveryModule(Module):
             cron_relay=cron_relay,
             frontend_url=_resolve_frontend_url(),
             backend_url=_resolve_backend_url(),
+            frontend_url_provider=fe_provider,
         )
 
     @singleton

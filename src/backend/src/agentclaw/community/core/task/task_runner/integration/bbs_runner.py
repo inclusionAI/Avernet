@@ -1,52 +1,57 @@
 """BBS 主动触发:bid→select→claim→dispatch。
 
-升 BBS 可恢复态后,向 dream bot roster 广播评估消息;从回复中选 completion_rate 最高的 bot;
-引擎服务端 claim_bbs_owner;发任务消息给胜出 bot(best-effort,不抛)。
-
-TEMP(e2e):roster 取数临时改走 ``BotPublicServiceProtocol.search_public_bots_by_keyword``,
-按关键字 ``_BBS_BID_DREAM_KEYWORD`` 命中命名的 e2e dream bot(替代需 provider_id +
-task_dream_mode PATCH 的 ``bcs.list_bots_by_task_modes``)。**全局生效**——prod/corp 的
-BBS active-relay roster 路径在位期间失效(只搜 e2e 命名 bot),跑完 e2e 需回退,或换成
-per-profile 的 ``BbsRosterPort`` 抽象(singlebox 走 keyword、prod 走 bcs.provider_id 过滤)。"""
+根节点进入 runtime HUNG 后升 BBS 可恢复态,向 claim-enabled bot roster 广播评估消息;
+从回复中选 completion_rate 最高的 bot;引擎服务端 claim_bbs_owner;发任务消息给
+胜出 bot(best-effort,不抛)。roster 查询只要求 ``claim=True``,并对临时失败做有界
+超时与重试。"""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import uuid
 from typing import Any
+from agentclaw.community.core.task.domain.models import (
+    AcceptanceResult, AcceptanceVerdict, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskNodePatch, TaskSpec,
+)
 
 logger = logging.getLogger(__name__)
 
 _BBS_SKILL_NAME = "bbs-relay-single-task"
 _BID_TIMEOUT = 170.0
-_OVERALL_TIMEOUT = 180.0
+_OVERALL_TIMEOUT = 300.0
+_ROSTER_TIMEOUT = 60.0
+_ROSTER_MAX_RETRIES = 3
+_ROSTER_RETRY_DELAY = 1.0
 
 
 async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
-                 skill_name: str = _BBS_SKILL_NAME) -> None:
-    """查询同时开启 claim/dream 的 provider Bot(复用统一 provider 身份 BcnService),再执行 bid→select→claim→dispatch。
+                 skill_name: str = _BBS_SKILL_NAME,
+                 on_bbs_report=None) -> None:
+    """查询开启 claim 的 provider Bot,再执行 bid→select→claim→dispatch。
 
     ``bcn``: :class:`BcnService`(由 DI 注入的任务模块普通消费依赖),复用 register/switch provider-bot 同源
-    统一身份访问 ``GET /providers/{provider_id}/bots/by-task-modes``。``None``/异常 → 静默留可恢复态。
+    统一身份访问 ``GET /providers/{provider_id}/bots/by-task-modes``。roster 查询失败时有界重试,
+    最终仍失败则静默留可恢复态。``dream`` 不参与筛选,BBS 候选只要求 ``claim=True``。
     """
+    logger.info("[task][bbs_mode] bbs_runner, begin, task_id=%s, backend_url=%s, skill_name=%s", execution_graph.task_id, backend_url, skill_name)
     task_id = execution_graph.task_id
     if bcn is None or bot is None:
-        logger.info("[task][bbs-runner] skip: bcn/bot 缺失 task=%s", task_id)
+        logger.error("[task][bbs_mode] skip: bcn/bot 缺失 task=%s", task_id)
         return
-    try:
-        entries = await asyncio.to_thread(
-            bcn.list_bots_by_task_modes, claim=True, dream=True, match="all",
-        )
-        if len(entries) > 10:
-            entries = entries[:10]
-    except Exception as exc:
-        logger.warning("[task][bbs-runner] roster 取失败 task=%s:%s", task_id, exc)
-        return
+    logger.info("[task][bbs_mode] bbs_runner, list_bots, task_id=%s", execution_graph.task_id)
+    entries = await _list_claim_bots(bcn, task_id)
+    logger.info(
+        "[task][bbs_mode] bbs_runner, begin, task_id=%s, entries=%d,%s",
+        execution_graph.task_id, len(entries), entries,
+    )
+    if len(entries) > 10:
+        entries = entries[:10]
     if not entries:
-        logger.info("[task][bbs-runner] 无 dream bot 命中 task=%s,留可恢复态", task_id)
+        logger.info("[task][bbs_mode] 无 claim bot 命中 task=%s,留可恢复态", task_id)
         return
 
-    logger.info("[task][bbs-runner] roster 取成功 task=%s, num=%d", task_id, len(entries))
+    logger.info("[task][bbs_mode] roster 取成功 task=%s, num=%d", task_id, len(entries))
     # Phase 1: bid (并发评估,3分钟超时)
     try:
         bid_results = await asyncio.wait_for(
@@ -56,8 +61,9 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             ),
             timeout=_OVERALL_TIMEOUT,
         )
+        logger.info("[task][bbs_mode] task_id=%s, bid_results=%s", task_id, bid_results)
     except asyncio.TimeoutError:
-        logger.info("[task][bbs-runner] bid 超时(180s)task=%s,取已回复", task_id)
+        logger.error("[task][bbs_mode] bid 超时(180s)task=%s,取已回复", task_id)
         bid_results = []
 
     # 解析回复
@@ -67,7 +73,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         if bid and bid.get("completion_rate", 0) > 0:
             bids.append(bid)
     if not bids:
-        logger.info("[task][bbs-runner] 无有效 bid task=%s,留可恢复态", task_id)
+        logger.info("[task][bbs_mode] 无有效 bid task=%s,留可恢复态", task_id)
         return
 
     # Phase 2: select + claim + dispatch
@@ -76,21 +82,144 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     try:
         graph.claim_bbs_owner(task_id, winner_bot_id)
     except Exception as exc:
-        logger.warning("[task][bbs-runner] claim 失败 task=%s:%s", task_id, exc)
+        logger.warning("[task][bbs_mode] claim 失败 task=%s:%s", task_id, exc)
         return
+    logger.info("[task][bbs_mode] bid winner is=%s, task_id=%s", winner_bot_id, task_id)
 
     msg = _task_msg(skill_name, execution_graph, backend_url, winner_bot_id)
+
+    # 先增加一个bbs节点,RUNNING
+    bbs_task_node = TaskNode(
+        node_id=f"bbs-{uuid.uuid4().hex[:8]}",
+        task_id=task_id,
+        status=Status.RUNNING,
+        task_spec=TaskSpec(
+            metadata=Metadata(task_id=task_id, title="BBS 接力", instruction=""),
+            context=Context(background=""),
+            goal=Goal(objective=msg, acceptances=[]),
+        ),
+        run_info=RuntimeInfo(
+            run_mode="bbs",
+            assignee=winner_bot_id
+        ),
+        node_run_graph=None
+    )
+
+    graph.add_task_nodes([bbs_task_node], task_id)
+    logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
+    edges = [
+        (task_id, bbs_task_node.node_id),
+    ]
+    graph.add_relations(task_id, edges)
+    logger.info("[task][bbs_mode] add_edge, task_id=%s, edges=%s", task_id, edges)
+
+    # 执行bbs，执行完后再更新
     try:
-        await bot.send_message(
+        logger.info("[task][bbs_mode] begin_rely_task, task_id=%s", task_id)
+        task_result = await bot.send_and_wait_async(
             bot_id=winner_bot_id, message=msg, metadata={"biz_task_id": task_id},
+            timeout=_OVERALL_TIMEOUT
         )
+        logger.info("[task][bbs_mode] send_and_wait, task_id=%s, result_msg=%s", task_id, task_result)
+
+        _bbs_output = task_result.get("result") if isinstance(task_result, dict) else task_result
+        _bbs_session = task_result.get("session_id") if isinstance(task_result, dict) else ""
+        _scoped_patch = TaskNodePatch(
+            task_id=task_id,
+            node_id=bbs_task_node.node_id,
+            status=Status.DONE,
+            # assignee=持有者身份:on_bbs_report 持有者校验要求 bbs_owner==patch.assignee
+            # (claim_bbs_owner 已置根 bbs_owner=winner_bot_id;此处同源补齐,校验才放行)。
+            assignee=winner_bot_id,
+            output_patch={"output": _bbs_output},
+            acceptance_result=AcceptanceResult(
+                verdict=AcceptanceVerdict.DONE,
+                acceptances_metric=list(),
+                gaps=list(),
+            ),
+            extend_props_patch={
+                "output": _bbs_output,
+                "assignee_bot_id": winner_bot_id,
+                "session_id": _bbs_session,
+            },
+        )
+        if on_bbs_report is not None:
+            # 收口走引擎:翻 scoped DONE → finally 释放 bbs_owner → _on_pass_collect 驱动根重算 gap
+            # (plan(root)→_maybe_finish_graph/HUNG)。不再直写根 status=PLANNING(收敛自驱根态),
+            # 也不再裸写 scoped —— 全部由 on_bbs_report 一次落入 SSOT 并触发收敛。
+            await on_bbs_report(_scoped_patch)
+            logger.info(
+                "[task][bbs_mode] on_bbs_report 收口 task_id=%s node=%s",
+                task_id, bbs_task_node.node_id,
+            )
+        else:
+            # 无引擎回调(轻量/stub):遵守 bbs 模式不变量——只能改根节点状态 + graph 加关系,
+            # 绝不改根节点 output(根 output 仅由 plan 算 gap / runner 执行完成 pull·push 收敛写入)。
+            # 故此处仅落 scoped 接力节点终态(其自身执行产出,属 runner 回投)+ 保持根 HUNG(可恢复态,
+            # 等下段重 claim/升 BBS);不驱动收敛(需 engine 收口)、不直写根 output/extend_props.output。
+            logger.warning(
+                "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 终态 + 根 HUNG,"
+                "不驱动收敛、不写根 output(排查 engine._build_executor/build_integration 漏传 on_bbs_report)",
+                task_id,
+            )
+            graph.update_task_node_info(_scoped_patch)
+            graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=task_id,
+                    status=Status.PLANNING,
+                )
+            )
+        logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s", task_id, task_result)
     except Exception as exc:
-        # send 失败 → 回收 claim
-        from agentclaw.community.core.task.domain.models import TaskNodePatch
+        logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
+        # send 失败 → 回收 claim(释放 bbs_owner,避免泄漏挡住后续重升 BBS)。
+        # 注:FAIL 收口(删 scoped 节点 + 图回可恢复态)语义待定,此处仅做无歧义的 claim 释放。
         graph.update_task_node_info(
-            TaskNodePatch(task_id=task_id, node_id=task_id, extend_props_patch={"bbs_owner": None})
+            TaskNodePatch(
+                task_id=task_id,
+                node_id=task_id,
+                status=Status.PLANNING,
+                extend_props_patch={"bbs_owner": None},
+            )
         )
-        logger.warning("[task][bbs-runner] send 失败 bot=%s task=%s:%s", winner_bot_id, task_id, exc)
+        logger.warning("[task][bbs_mode] send 失败 bot=%s task=%s:%s", winner_bot_id, task_id, exc)
+
+
+async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
+    """查询 claim-enabled roster with bounded timeout/retry.
+
+    Empty results are valid and are not retried. Only request failures and
+    timeouts retry, so an empty roster does not create an external query storm.
+    """
+    for attempt in range(1, _ROSTER_MAX_RETRIES + 1):
+        try:
+            entries = await asyncio.wait_for(
+                asyncio.to_thread(
+                    bcn.list_bots_by_task_modes,
+                    claim=True,
+                    match="all",
+                ),
+                timeout=_ROSTER_TIMEOUT,
+            )
+            return entries if isinstance(entries, list) else []
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 roster is a best-effort BBS input
+            if attempt >= _ROSTER_MAX_RETRIES:
+                logger.error(
+                    "[task][bbs_mode] list_bots exhausted task=%s attempts=%d error=%s",
+                    task_id, attempt, exc,
+                )
+                return []
+            delay = _ROSTER_RETRY_DELAY * (2 ** (attempt - 1))
+            logger.warning(
+                "[task][bbs_mode] list_bots failed task=%s attempt=%d/%d "
+                "retry_in=%.1fs error=%s",
+                task_id, attempt, _ROSTER_MAX_RETRIES, delay, exc,
+            )
+            await asyncio.sleep(delay)
+    return []
 
 
 async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
@@ -103,9 +232,9 @@ async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
             bot_id=bot_id, message=prompt,
             metadata={"biz_task_id": task_id}, timeout=_BID_TIMEOUT,
         )
-        logger.info("[bbs-runner] bid send_and_wait 成功 bot=%s，%s", bot_id, run)
+        logger.info("[task][bbs_mode] bid send_and_wait 成功 bot=%s，%s", bot_id, run)
     except Exception as exc:
-        logger.warning("[task][bbs-runner] bid send_and_wait 失败 bot=%s:%s", bot_id, exc)
+        logger.error("[task][bbs_mode] bid send_and_wait 失败 bot=%s:%s", bot_id, exc)
         return None
     return {"bot_id": bot_id, "run": run}
 
@@ -216,13 +345,10 @@ def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str) -
     task_id = getattr(execution_graph, "task_id", "") or ""
     snapshot = _build_task_snapshot(execution_graph)
     return (
-        f"请用 {skill_name} 接力执行已升 BBS 的单子。\n"
-        f"你自身 bot_id={bot_id};task_id={task_id};task API backend base url={backend_url}。\n"
-        "引擎已替你占根(bbs_owner已设为你的 bot_id)——不需 scan/claim/自判。\n"
+        f"请为我执行一下任务。\n"
         "**任务态快照已内联**(下方 JSON):含根 goal(objective+acceptances)、instruction、background、"
         "done_children(已 DONE 子节点+产出)、gaps、loop_round。**直接据快照归纳剩余事项**"
         "(剩余 = goal.acceptances 全集 − done_children 产出并集,再按 gaps 细化),无需先读 dashboard;\n"
-        "随后步骤② attach(用 task_id/backend_url/bot_id)→ 步骤③ 执行 → 步骤④ result。"
-        "仅当快照缺字段时才 GET dashboard 兜底。\n"
-        f"任务态快照\n{json.dumps(snapshot, ensure_ascii=False)}"
+        "然后请为我完成基于剩余事项\n"
+        f"任务态快照如下：\n{json.dumps(snapshot, ensure_ascii=False)}"
     )
