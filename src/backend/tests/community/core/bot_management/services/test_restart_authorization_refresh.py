@@ -114,7 +114,7 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-9",
-        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+        scope=ProjectionScope(mcp=True),
     )
     factory.create.assert_called_once_with(
         user_id="ent-9",
@@ -146,7 +146,7 @@ def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_projection_erro
     runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+        scope=ProjectionScope(mcp=True),
     )
     factory.create.assert_called_once()
     skill_set_service.project_skills.assert_awaited_once_with()
@@ -170,7 +170,6 @@ def test_aicoding_refresh_skips_projection_when_runtime_not_ready_and_still_sync
 
     skill_set_service.project_skills.assert_awaited_once_with()
 
-
 def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
@@ -192,7 +191,7 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+        scope=ProjectionScope(mcp=True),
     )
     skill_set_service.project_skills.assert_awaited_once_with()
 
@@ -236,7 +235,7 @@ def test_aicoding_refresh_does_not_retry_mcp_projection_exception() -> None:
     runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+        scope=ProjectionScope(mcp=True),
     )
     skill_set_service.project_skills.assert_awaited_once_with()
 
@@ -300,7 +299,7 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
     runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+        scope=ProjectionScope(mcp=True),
     )
     skill_set_service.project_skills.assert_awaited_once_with()
 
@@ -362,7 +361,7 @@ def test_aicoding_refresh_clears_persisted_marker_after_confirmed_extra_success(
     runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+        scope=ProjectionScope(mcp=True),
     )
     cleared = template_service.update_template.call_args.kwargs["template_config"]
     assert "_aicoding_restart" not in cleared
@@ -450,7 +449,7 @@ def test_aicoding_refresh_keeps_succeeded_refresh_when_marker_clear_fails() -> N
     runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+        scope=ProjectionScope(mcp=True),
     )
     skill_set_service.project_skills.assert_awaited_once_with()
     template_service.update_template.assert_not_called()
@@ -513,6 +512,69 @@ def test_baas_restart_publish_listener_dispatches_strategy_after_restart_event()
         None,
         skill_set_factory=factory,
         runtime_reconciler=runtime_reconciler,
+        template_service=template_service,
+    )
+
+
+def test_baas_restart_publish_listener_logs_runtime_provider_failure() -> None:
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = {
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "binding_id": 42,
+        "bot_type": "personal",
+        "active_engine": "claude_code",
+        "template_type": "architect",
+    }
+    template_service = MagicMock()
+    template_service.get_template_config.return_value = {
+        "template_version_id": 101,
+        "_aicoding_restart": {"resync_authorization": True},
+    }
+    runtime_reconciler_provider = MagicMock(side_effect=RuntimeError("runtime down"))
+    strategy = MagicMock()
+    strategy.engine_type = "claude_code"
+    strategy.refresh_restart_authorization.return_value = True
+
+    listener = AicodingRestartAuthorizationBaasPublishListener(
+        bot_repo=bot_repo,
+        template_service=template_service,
+        runtime_reconciler=None,
+        runtime_reconciler_provider=runtime_reconciler_provider,
+    )
+
+    with patch(
+        "agentclaw.community.core.bot_management.engines.aicoding.restart_authorization_listener.resolve_provisioning",
+        return_value=("ctx", strategy),
+    ) as resolve:
+        listener.handle(
+            BaasPublishCompletedEvent(
+                binding_id=42,
+                bot_id="bot-1",
+                owner_id="owner-1",
+                publish_id=1001,
+                publish_kind="restart",
+            )
+        )
+
+    runtime_reconciler_provider.assert_called_once_with()
+    resolve.assert_called_once_with(
+        bot_id="bot-1",
+        owner_id="owner-1",
+        bot_type="personal",
+        active_engine="claude_code",
+        template_type="architect",
+        template_config={
+            "template_version_id": 101,
+            "_aicoding_restart": {"resync_authorization": True},
+        },
+    )
+    strategy.refresh_restart_authorization.assert_called_once_with(
+        "ctx",
+        bot_repo.get_by_id_and_owner.return_value,
+        None,
+        skill_set_factory=None,
+        runtime_reconciler=None,
         template_service=template_service,
     )
 

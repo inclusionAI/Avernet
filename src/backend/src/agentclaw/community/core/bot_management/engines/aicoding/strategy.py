@@ -729,7 +729,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         await runtime_reconciler.project_mcp_and_cli(
                             bot_id=ctx.bot_id,
                             owner_id=effective_entity_id,
-                            scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+                            scope=ProjectionScope(mcp=True),
                         )
 
                     asyncio.run(_do_mcp_projection())
