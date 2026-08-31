@@ -30,8 +30,7 @@ use tracing::warn;
 
 use crate::transaction_plan::EventAppendTransactionPlan;
 use crate::timestamp::{
-    lease_timestamp_value_from_ms, optional_timestamp_value_from_ms, sql_with_timestamp_params,
-    timestamp_value_from_ms,
+    optional_timestamp_value_from_ms, sql_with_timestamp_params, timestamp_value_from_ms,
 };
 use crate::{event_filter_matches, validate_scope};
 
@@ -747,7 +746,7 @@ impl EventRepoPort for DbEventStore {
             &command.env,
         )?;
         let now = timestamp_value_from_ms(self.flavor, command.now_ms)?;
-        let lease_until = lease_timestamp_value_from_ms(self.flavor, command.lease_until_ms)?;
+        let lease_until = timestamp_value_from_ms(self.flavor, command.lease_until_ms)?;
         let lease_owner = claim_owner(&command.worker_id);
         let steps = vec![
             DbTransactionStep::Execute(DbStatement::with_params(
@@ -916,7 +915,7 @@ impl EventRepoPort for DbEventStore {
             &command.env,
         )?;
         let now = timestamp_value_from_ms(self.flavor, command.now_ms)?;
-        let lease_until = lease_timestamp_value_from_ms(self.flavor, command.lease_until_ms)?;
+        let lease_until = timestamp_value_from_ms(self.flavor, command.lease_until_ms)?;
         let lease_owner = claim_owner(&command.worker_id);
         let steps = vec![
             DbTransactionStep::Execute(DbStatement::with_params(
@@ -1019,7 +1018,7 @@ impl EventRepoPort for DbEventStore {
     ) -> Result<EventDeliveryRecord, EventRepoError> {
         validate_lease_renewal(&command)?;
         let now = timestamp_value_from_ms(self.flavor, command.now_ms)?;
-        let lease_until = lease_timestamp_value_from_ms(self.flavor, command.lease_until_ms)?;
+        let lease_until = timestamp_value_from_ms(self.flavor, command.lease_until_ms)?;
         let result = self
             .db
             .execute(DbStatement::with_params(

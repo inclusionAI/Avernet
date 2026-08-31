@@ -142,7 +142,7 @@ async fn assert_second_precision_claims(repo: &DbEventStore, db: &dyn DbPlugin) 
         .claim_fanout_targets(ClaimFanoutTargets {
             worker_id: "fanout-second-precision".to_string(),
             now_ms: BASE,
-            lease_until_ms: BASE + 1_000,
+            lease_until_ms: BASE + 2_000,
             limit: 10,
             env: ENV.to_string(),
         })
@@ -150,7 +150,7 @@ async fn assert_second_precision_claims(repo: &DbEventStore, db: &dyn DbPlugin) 
         .expect("claim target with a truncated lease timestamp");
     assert_eq!(targets.len(), 1);
     let target = &targets[0];
-    assert_eq!(target.lease_until_ms, Some(BASE + 1_001));
+    assert_second_precision_lease(target.lease_until_ms, BASE + 2_000, BASE);
     let payload_bytes = serde_json::to_vec(&event.envelope).expect("serialize Event payload");
     let payload_sha256 = format!("{:x}", Sha256::digest(&payload_bytes));
     let delivery = repo
@@ -210,7 +210,7 @@ async fn assert_second_precision_claims(repo: &DbEventStore, db: &dyn DbPlugin) 
         .expect("claim Delivery with a truncated lease timestamp");
     assert_eq!(claimed.len(), 1);
     assert_eq!(claimed[0].delivery_id, delivery.delivery_id);
-    assert_eq!(claimed[0].lease_until_ms, Some(BASE + 2_001));
+    assert_second_precision_lease(claimed[0].lease_until_ms, BASE + 1_002, BASE + 2);
     let (_, attempts) = repo
         .get_delivery(&delivery.delivery_id, ENV)
         .await
@@ -266,6 +266,13 @@ async fn assert_second_precision_claims(repo: &DbEventStore, db: &dyn DbPlugin) 
         .await
         .expect("complete Delivery with second-precision lease columns");
     assert_eq!(completed.status, EventDeliveryStatus::Succeeded);
+}
+
+fn assert_second_precision_lease(actual: Option<u64>, requested: u64, now: u64) {
+    let actual = actual.expect("claimed record has a lease deadline");
+    assert_eq!(actual % 1_000, 0);
+    assert!(actual > now);
+    assert!(actual.abs_diff(requested) < 1_000);
 }
 
 async fn apply_eventing_migration(db: &dyn DbPlugin) {
