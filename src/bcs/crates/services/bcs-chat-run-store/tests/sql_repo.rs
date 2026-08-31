@@ -363,13 +363,18 @@ async fn streaming_append_failover_ignores_stale_overlay_and_rebases_on_db() {
     repo.create(record("a", 1)).await.unwrap();
 
     // Pretend five prior deltas streamed into the overlay while the DB stayed
-    // at the create-time version 1.
+    // at the create-time version 1. The overlay value is the whole-record
+    // shape (env-gated); this replica's env is "test".
     let stale = serde_json::to_vec(&serde_json::json!({
-        "version": 5u64,
-        "state": "running",
-        "accumulated_content": "ABCDE",
-        "content_truncated": false,
-        "expires_at_ms": 9_000_000_000_000u64,
+        "env": "test",
+        "record": {
+            "run_id": "a", "bot_uuid": "bot", "from_bot_id": "from", "session_key": "sk",
+            "state": "running", "accumulated_content": "ABCDE", "error_message": null,
+            "created_at_ms": 0u64, "updated_at_ms": 0u64, "completed_at_ms": null,
+            "expires_at_ms": 9_000_000_000_000u64, "version": 5u64, "content_truncated": false,
+            "client": "http-chat-async", "response_mode": "full"
+        },
+        "completion_policy": "WaitForFinal", "delivery_ack_at_ms": null,
     }))
     .unwrap();
     cache.seed("bcs:chat_run:a", stale).await;
@@ -666,8 +671,8 @@ impl CachePlugin for NoDeleteCache {
 }
 
 #[tokio::test]
-async fn overlay_v2_roundtrips_every_record_field() {
-    // The V2 cache value must round-trip the WHOLE record — including the two
+async fn overlay_roundtrips_every_record_field() {
+    // The overlay value must round-trip the WHOLE record — including the two
     // fields ChatRunRecord's own serde skips (completion_policy /
     // delivery_ack_at_ms). Losing either would silently degrade the detach
     // classification in `record_run_event` on every cache hit.
@@ -682,7 +687,7 @@ async fn overlay_v2_roundtrips_every_record_field() {
     full.completion_policy = ChatRunCompletionPolicy::DetachDeliveryAck;
     full.delivery_ack_at_ms = Some(0);
     repo.create(full.clone()).await.unwrap();
-    // Create seeds the V2 overlay, so this `get` is served cache-first.
+    // Create seeds the overlay, so this `get` is served cache-first.
     let stored = repo.get("full").await.unwrap().unwrap();
     assert_eq!(stored, full);
 }
@@ -761,11 +766,11 @@ async fn state_cas_midstream_preserves_streamed_overlay_content() {
 }
 
 #[tokio::test]
-async fn legacy_overlay_value_still_reads_through_db_merge() {
-    // Rolling-upgrade window: a pre-upgrade replica wrote the legacy
-    // five-field overlay. The V2-first read must fall back to the historical
-    // DB read + legacy-merge (the two format generations meet at the
-    // authoritative DB row), preserving the pre-change read behavior.
+async fn unparseable_overlay_value_degrades_to_db_read() {
+    // The cache holds a single shape. Any value that is not the whole-record
+    // overlay (a stale blob left over from a different writer, a corrupt
+    // entry, or a foreign-env entry) must be treated as a miss and fall
+    // straight to the authoritative DB row — never served and never merged.
     let db = Arc::new(CountingDb::new());
     let cache = Arc::new(InMemoryCachePlugin::new());
     let repo = SqlChatRunRepo::new(
@@ -779,34 +784,41 @@ async fn legacy_overlay_value_still_reads_through_db_merge() {
     repo.create(record("lg", 1)).await.unwrap();
     let selects_after_create = db.selects();
 
-    // Replace the V2 seed with a legacy-shaped, ahead-of-DB overlay.
-    let legacy = serde_json::to_vec(&serde_json::json!({
-        "version": 2u64,
-        "state": "running",
-        "accumulated_content": "legacy",
-        "content_truncated": false,
-        "expires_at_ms": 9_000_000_000_000u64,
+    // Replace the seed with a whole-record overlay carrying a FOREIGN env.
+    // The key is env-less, so the same run_id may hold another environment's
+    // value in a shared Redis; this replica must NOT serve it.
+    let foreign = serde_json::to_vec(&serde_json::json!({
+        "env": "other",
+        "record": {
+            "run_id": "lg", "bot_uuid": "bot", "from_bot_id": "from", "session_key": "sk",
+            "state": "running", "accumulated_content": "LEAK", "error_message": null,
+            "created_at_ms": 0u64, "updated_at_ms": 0u64, "completed_at_ms": null,
+            "expires_at_ms": 9_000_000_000_000u64, "version": 9u64, "content_truncated": false,
+            "client": "x", "response_mode": "full"
+        },
+        "completion_policy": "WaitForFinal", "delivery_ack_at_ms": null,
     }))
     .unwrap();
     cache
-        .set_value("bcs:chat_run:lg", legacy, None, CacheSetMode::Upsert)
+        .set_value("bcs:chat_run:lg", foreign, None, CacheSetMode::Upsert)
         .await
         .unwrap();
 
+    // The foreign overlay is not served; the DB row defines the truth.
     let stored = repo.get("lg").await.unwrap().unwrap();
-    assert_eq!(stored.accumulated_content, "legacy");
-    assert_eq!(stored.version, 2);
-    assert_eq!(stored.state, ChatRunState::Running);
+    assert_eq!(stored.accumulated_content, "", "foreign-env overlay must NOT leak");
+    assert_eq!(stored.version, 1);
+    assert_eq!(stored.state, ChatRunState::Pending);
     assert_eq!(
         db.selects(),
         selects_after_create + 1,
-        "a legacy value falls back to exactly one DB read"
+        "a non-serving overlay falls back to exactly one DB read"
     );
 }
 
 #[tokio::test]
 async fn terminal_tombstone_covers_failed_overlay_delete() {
-    // Terminal CAS tombstones the overlay (V2 terminal record) before
+    // Terminal CAS tombstones the overlay (terminal record) before
     // deleting it. When the delete is rejected but the write landed, the
     // cache-first read serves the TERMINAL record — never a stale
     // pre-terminal running snapshot.
