@@ -118,6 +118,12 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("put", "/openapi/v1/bots/{bot_id}/config-manifest"),
     ("delete", "/openapi/v1/bots/{bot_id}/config-manifest"),
     ("get", "/openapi/v1/bots/{bot_id}/config-manifest/capabilities"),
+    # Apply and its two reads address the same (owner, bot_id) pair as the
+    # document they act on, and take no ``stage`` for the same reason: an
+    # apply targets the bot, not one of its runtimes.
+    ("post", "/openapi/v1/bots/{bot_id}/config-manifest/apply"),
+    ("get", "/openapi/v1/bots/{bot_id}/config-manifest/last-apply"),
+    ("get", "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}"),
     # The product chat reads address a bot that may be shared with the acting
     # user, so they take the owner half of ``(owner, bot_id)`` for the same
     # reason and with the same default — the caller's own bot.

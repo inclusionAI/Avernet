@@ -690,7 +690,9 @@ class ConfigManifestApply(BaseModel):
         description="`RUNNING` while the work is in flight, then `SUCCEEDED` / "
         "`PARTIAL` / `FAILED`, derived from the entries below."
     )
-    started_at: datetime | None = Field(default=None)
+    started_at: datetime | None = Field(
+        default=None, description="When the apply began. Null when the bot has never been applied."
+    )
     finished_at: datetime | None = Field(
         default=None, description="Null exactly while `result` is `RUNNING`."
     )
@@ -699,8 +701,17 @@ class ConfigManifestApply(BaseModel):
         description="Resolved named sources. Always empty in this release — "
         "nothing is fetched yet. Credentials appear by name only, never by value.",
     )
-    categories: list[ConfigManifestApplyCategory] = Field(default_factory=list)
-    entries: list[ConfigManifestApplyEntry] = Field(default_factory=list)
+    categories: list[ConfigManifestApplyCategory] = Field(
+        default_factory=list,
+        description="One summary per category the document declared. A category "
+        "the document did not mention does not appear, because it was not touched.",
+    )
+    entries: list[ConfigManifestApplyEntry] = Field(
+        default_factory=list,
+        description="One row per declared entry, across every category. Removals "
+        "are not here — they have no declared entry, so they are reported under "
+        "the category's `removed`.",
+    )
 
 
 class ConfigManifest(BaseModel):
