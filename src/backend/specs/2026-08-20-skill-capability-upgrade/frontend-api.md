@@ -9,8 +9,13 @@
 
 ### 1.1 当前阶段
 
-本文包含目标合同，其中一部分尚未在 Gateway 正式发布。前端可以据此开发页面和 Mock；只有
-对应 Backend Router 合入、自动生成 OpenAPI 更新后，才能进行真实联调。
+当前 `dev` 已包含 Space Skill 创建/读取、Draft、Grant、Lease、Publication、Version、Offline 和
+Artifact 主链。SC Public Reference、周期同步和 Track Latest 由 PR #1707 交付；只有部署版本的
+Gateway `/openapi.json` 已出现 `skill-center-references` 路由后，前端才可从 Mock 切换真实联调。
+
+Group 6 是 Runtime/Artifact/Gateway 的跨链路集成验收，不再新增一套前端业务 API。本文中的
+单接口字段、required、状态码始终以目标部署环境的 Gateway OpenAPI 为准，不能仅凭 PR 已合入
+判断环境已经可调用。
 
 不得通过以下方式绕过：
 
@@ -39,11 +44,20 @@ Attempt/Reference 这种持久异步资源会在 `data` 内返回自己的 `erro
 
 ### 1.3 身份、缓存与重复提交
 
+- 除明确标注为 App-only 的市场读取外，本文 Space、Repo 和 Bot 接口都要求
+  `?user_id={actor_id}`；后续示例为突出业务路径会省略该公共 query。
 - `user_id` 表示当前调用者，不是 Bot owner；Gateway/Backend 会校验认证上下文。
+- Bot-scoped 接口还接受可选 `owner_id`。操作自己的 Bot 时省略即可；操作协作 Bot 时必须传
+  `owner_id={bot_owner_id}`，不能用当前调用者代替 Owner。建议在统一 API client 层注入这两个参数。
 - Space Skill 写操作只允许明确用户身份；不要使用 App-only Principal。
 - 需要 `Idempotency-Key` 的请求，前端应为一次用户意图生成 UUID，并在网络重试、页面恢复时
   复用同一个 Key；用户重新发起一次新动作时生成新 Key。
 - GET 可以按页面生命周期缓存；执行任意 mutation 后按本文指出的刷新范围重新读取。
+
+当前 Space Skill DTO 的 `skill_id`、Publication DTO 的 `attempt_id` 是十进制字符串，而部分 Path
+参数在生成客户端中仍是 integer。前端状态中保留原始字符串；调用 Path 参数前通过统一
+`parseSafeDecimalId()` 校验并转换，禁止在页面组件里散落 `Number(id)`。这是 Backend 合同统一前的
+兼容规则。
 
 ## 2. 前端状态模型
 
@@ -143,7 +157,8 @@ GET /openapi/v1/bots/spaces/{space_id}/skills?keyword=&page=1&page_size=20
 | `actor.skill_role` | 当前用户角色 |
 | `lease_summary` | 锁图标和 holder；不保存 token |
 
-列表返回 `pending_editor_request` 时，普通成员展示“申请中”，不能再次申请。
+列表返回 `actor.pending_editor_request` 时，普通成员展示“申请中”，不能再次申请。该字段不是
+`SpaceSkillSummary` 的顶层字段。
 
 ### 4.2 打开 Skill 详情
 
@@ -220,7 +235,7 @@ Idempotency-Key: <uuid>
 - 用户指定 subdir：只解析该目录；
 - 未指定：根 SKILL.md 优先，否则选择规范化父目录字节序第一项；
 - 选择必须确定性，不能随机，也不能第一个非法后继续碰运气；
-- 201 响应返回最终 `source_subdir/source_commit_sha`。
+- 201 响应在 `data.draft.source_subdir/source_commit_sha` 返回最终选择结果。
 
 Git 导入是 Snapshot，不会加入 aiworkbench Repo Catalog，也不会自动跟随 Git 更新。
 
@@ -343,8 +358,8 @@ GET .../versions/{version}/files/{path}
 
 ```http
 GET .../grants
-PUT .../managers/{user_id}
-DELETE .../managers/{user_id}
+PUT .../managers/{manager_user_id}
+DELETE .../managers/{manager_user_id}
 POST .../owner-transfer
 ```
 
@@ -424,6 +439,9 @@ POST .../publications/{attempt_id}/retry
 前端不判断重试 publish、SC status 还是 materialization；Backend 根据 recovery.kind 恢复同一
 Attempt。普通 FAILED 需要修改 Draft 后新建 Attempt。RESULT_UNKNOWN 且 NOT_AVAILABLE 不显示按钮。
 
+- HTTP 202：恢复任务已重新入队，继续轮询同一 Attempt；
+- HTTP 200：Attempt 已经成功，无需创建任务，直接刷新 detail/list。
+
 ## 10. 下线与重新发布
 
 先调用：
@@ -434,6 +452,17 @@ GET .../offline-impact?page=1&page_size=20
 
 与 publication-impact 不同，下线是硬门禁。存在 Membership、Installation、Draft/Attempt、
 可重放 Service Artifact 或 UNKNOWN_ARTIFACT 时不能继续。
+
+`data.items[].kind` 的稳定枚举及前端建议文案：
+
+| kind | 含义 |
+| --- | --- |
+| `DRAFT` | 已存在可编辑或冻结 Draft |
+| `PUBLICATION` | Publication 仍进行中或结果未知 |
+| `MEMBERSHIP` | 普通或 Default SkillSet 仍引用该 Skill |
+| `INSTALLATION` | Bot Effective Installation 仍存在 |
+| `SERVICE_ARTIFACT` | 可重放的 Service Artifact 仍冻结该精确 Version |
+| `UNKNOWN_ARTIFACT` | Artifact 血缘无法完整证明，按安全策略阻断 |
 
 `blocked=false` 才启用：
 
@@ -462,7 +491,7 @@ Backend 会重新检查，所以仍可能返回 `SKILL_OFFLINE_BLOCKED`。成功
 ### 11.1 添加本地文件夹（Bot-owned Local）
 
 ```http
-POST /openapi/v1/bots/{bot_id}/skills/upload-folder?user_id={actor_id}
+POST /openapi/v1/bots/{bot_id}/skills/upload-folder?user_id={actor_id}&owner_id={bot_owner_id}
 Content-Type: multipart/form-data
 
 files=<file1>
@@ -483,8 +512,10 @@ file_paths=["SKILL.md","references/example.md"]
 需要加入目标 Set 时调用：
 
 ```http
-PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
+PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}?user_id={actor_id}&owner_id={bot_owner_id}
 ```
+
+`owner_id` 仅在协作 Bot 场景必传；当前调用者就是 Owner 时可省略。
 
 目标 Set 默认 active 时，添加成功后立即写 Installation 并投影 Runtime。这里不能误调 Space Skill
 创建接口；Local 资产属于 Bot，Space Skill 属于 Space。
@@ -492,17 +523,19 @@ PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
 ### 11.2 TeamClaw 市场
 
 ```http
-GET /openapi/v1/bots/skills/repository?keyword=&page=1&page_size=20
-PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
+GET /openapi/v1/bots/skills/repository?keyword=&page=1&page_size=20&user_id={actor_id}
+PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}?user_id={actor_id}&owner_id={bot_owner_id}
 ```
 
 返回 Repo Skill，已有 TeamClaw `skill_id`，直接调用普通 Membership。
+Phase 2 弹窗统一使用该 canonical Repo Catalog；不要切换到仍存在的通用
+`POST /openapi/v1/bots/market/skills`，避免两套分页和字段合同并存。
 
 ### 11.3 能力工坊
 
 ```http
-GET /openapi/v1/bots/spaces/{space_id}/skills/consumable?keyword=&page=1&page_size=20
-PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
+GET /openapi/v1/bots/spaces/{space_id}/skills/consumable?keyword=&page=1&page_size=20&user_id={actor_id}
+PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}?user_id={actor_id}&owner_id={bot_owner_id}
 ```
 
 只展示 Published、物化完成、非 Offline 的 Space Skill；同样已有 `skill_id`。
@@ -511,10 +544,29 @@ PUT /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}
 
 ```http
 POST /openapi/v1/bots/market/skill-center/skills
+
+{
+  "keyword": "search",
+  "pageNum": 1,
+  "pageSize": 20,
+  "sortBy": "latest",
+  "tagList": [],
+  "creatorName": null,
+  "creatorWorkNo": null,
+  "belongTo": null,
+  "isOfficial": null,
+  "isRecommended": null
+}
 ```
 
-详情使用结果 `homepageUrl` iframe，不创建 TeamClaw Asset。确认引用时只有外部 `skillCode`，
-不能调用普通 Membership，必须发起异步 Reference。
+卡片至少消费 `skillCode/skillName/description/tagList`；版本标签和详情入口分别使用
+`latestVersionNumber/homepageUrl`，图标使用可选 `iconUrl`。详情使用 `homepageUrl` iframe，不创建
+TeamClaw Asset。确认引用时只有外部 `skillCode`，不能调用普通 Membership，必须发起异步 Reference。
+
+兼容说明：当前 Router 已透传 `homepageUrl/iconUrl/latestVersionNumber`，但这些字段仍以 additive
+字段存在，尚未全部显式进入生成 OpenAPI 的 `SkillCenterMarketItem`。前端临时 compatibility type
+必须把它们声明为 optional；Backend 后续应将前端实际消费字段收敛为显式 DTO，不能长期依赖
+`additionalProperties`。
 
 选择项和去重键必须使用 `skillCode`，不能使用名称。若异常上游记录没有 skillCode，该卡片只可
 查看、不可勾选；不能由前端生成临时代码。
@@ -526,7 +578,7 @@ POST /openapi/v1/bots/market/skill-center/skills
 用户可勾选多个 Skill，前端去重后最多 20 个：
 
 ```http
-POST /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references
+POST /openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references?user_id={actor_id}&owner_id={bot_owner_id}
 Idempotency-Key: <uuid>
 
 {"skill_codes":["public-a","public-b"]}
@@ -542,6 +594,10 @@ Reference 批次身份，前端不要混用。
 
 202 不直接返回卡片详情；前端随后按 `data.request_id` 查询 collection。
 
+如果 POST 超时或返回 503，复用同一 `Idempotency-Key` 重放；Batch 可能已经持久化，不能生成新 Key。
+协作 Bot 未持有编辑锁时可能返回 HTTP 423，前端应进入既有 Bot edit-lock 获取流程后再用同一 Key
+重放。前端必须先按 `skillCode` 去重，并限制为 1–20 项；Backend 会再次校验。
+
 ### 12.2 卡片状态
 
 | Backend status | 前端阶段 |
@@ -553,13 +609,14 @@ Reference 批次身份，前端不要混用。
 | COMPLETED | 添加成功 |
 | FAILED | 添加失败 |
 
-COMPLETED 前不是 Membership，不能提前显示为已激活。
+COMPLETED 前前端不得把卡片视为“已添加”或“已激活”。内部在 `PROJECTING_RUNTIME` 阶段可能已进入
+事务性 Membership/Installation/Runtime 处理，但只有 COMPLETED 才是前端可提交的成功事实。
 
 ### 12.3 轮询与恢复
 
 ```http
-GET .../skill-center-references?request_id=req-01&page=1&page_size=20
-GET .../skill-center-references/{reference_id}
+GET .../skill-center-references?request_id=req-01&page=1&page_size=20&user_id={actor_id}&owner_id={bot_owner_id}
+GET .../skill-center-references/{reference_id}?user_id={actor_id}&owner_id={bot_owner_id}
 ```
 
 建议每 2 秒轮询，全部终态后停止。关闭弹窗不会取消任务；重新打开、页面刷新或目标 Set 删除后，
@@ -569,6 +626,20 @@ GET .../skill-center-references/{reference_id}
 
 3 项中 2 成功、1 失败时：成功项保留，失败项展示 error；不回滚成功项；本期没有原地 retry，
 用户重新选择失败项并使用新 Key 提交。物化已完成但 Membership 失败时，共享资产继续保留。
+
+“没有原地 retry”仅指没有用户可调用的 Reference retry API。Backend 对可恢复的上游/物化失败会
+自动做有限重试，前端只轮询持久状态。FAILED 常见稳定 `error_code`：
+
+| error_code | 前端处理 |
+| --- | --- |
+| `SC_SKILL_NOT_FOUND` | 提示市场项不可用，刷新搜索结果 |
+| `SC_MARKET_UNAVAILABLE` | 提示 SC 暂时不可用，可用新请求重试失败项 |
+| `MATERIALIZATION_FAILED` | 提示 Skill 同步失败 |
+| `SKILL_OFFLINE` | 提示该 TeamClaw 资产已下线 |
+| `SKILL_SET_NOT_FOUND` | 目标能力集已删除，刷新能力集 |
+| `SKILL_SET_FORBIDDEN` | 当前用户已无目标能力集权限 |
+| `RUNTIME_PROJECTION_FAILED` | 添加/运行时投影失败，刷新最终能力集状态 |
+| `SKILL_SET_UPDATE_FAILED` | 通用能力集更新失败 |
 
 ## 13. SkillSet 与生效语义
 
@@ -614,6 +685,7 @@ Center Skill 的技术合同支持所有实际存在的 Bot Type × Engine 组�
 | Publication RESULT_UNKNOWN | 显示“确认中”；不重新发布 |
 | recovery AVAILABLE | 显示统一重试按钮，POST 同 Attempt retry |
 | Reference 部分失败 | 保留成功项；失败项新请求重试 |
+| Bot mutation 返回 423 | 获取/刷新 Bot edit lock 后重放原请求 |
 | Runtime projection 失败 | 展示失败并刷新最终 SkillSet/Reference 状态 |
 | Offline blocker 变化 | 重新 GET offline-impact |
 | 页面刷新 | 从 detail、Attempt collection 或 Reference collection 恢复 |
@@ -623,7 +695,7 @@ Center Skill 的技术合同支持所有实际存在的 Bot Type × Engine 组�
 ### 16.1 Mock/合同阶段
 
 - 按 Operation ID 建 API client，不自行改路径。
-- 覆盖未知 additive 字段、200/201/202、403、404、409、422、503。
+- 覆盖未知 additive 字段、200/201/202、403、404、409、422、423、503。
 - 模拟 Published V1 + Draft V2、Offline + Draft、RESULT_UNKNOWN、Reference 部分成功。
 - 不把候选 API 当成已发布 Gateway 路由。
 
