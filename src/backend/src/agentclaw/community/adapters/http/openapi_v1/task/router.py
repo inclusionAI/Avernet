@@ -88,8 +88,7 @@ async def run_template(
     """运行预置静态模板;owner 由公开面鉴权 + user_id 自确认决定。
 
     user_id 经 require_user_id 自确认(与签名 principal 不符→403);owner_user_id=user_id。
-    owner_bot_id 留空:触发执行 bot 的提名由内部 /api/v1/collaboration/tasks/run-template
-    携带 body.caller_bot_id 提供;公开面回退到 IAM 鉴权态自身触发。
+    触发执行 bot 由请求体提供并交由任务服务处理。
     """
     result = await service.run_template(body.template_id, body.input,
                                         owner_user_id=user_id, owner_bot_id="",
