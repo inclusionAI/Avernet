@@ -203,7 +203,7 @@ class TaskService:
             owner_bot_id,
             sorted(inputs),
         )
-        template_dir = Path(__file__).resolve().parents[3] / "configs" / "task-plans"
+        template_dir = Path(__file__).resolve().parents[1] / "task_plan" / "plans"
         template_path = template_dir / f"{template_id}.yaml"
         try:
             definition = StaticPlanDefinition.from_file(template_id, template_dir)

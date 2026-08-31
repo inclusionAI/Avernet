@@ -6,7 +6,7 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
 
 
-TEMPLATE_DIR = Path(__file__).parents[7] / "src" / "backend" / "src" / "agentclaw" / "community" / "configs" / "task-plans"
+TEMPLATE_DIR = Path(__file__).parents[7] / "src" / "backend" / "src" / "agentclaw" / "community" / "core" / "task" / "task_plan" / "plans"
 
 
 def test_okr_template_declares_parallel_branches_and_join():
