@@ -76,7 +76,8 @@
     },
     "git_sync": {
       "bolt_shared_dir_name": "bolt_shared",
-      "enable_oss_sync": true
+      "enable_oss_sync": true,
+      "enable_skill_sync": false
     },
     "health_check": {
       "bcs_url": "http://localhost:21000"
