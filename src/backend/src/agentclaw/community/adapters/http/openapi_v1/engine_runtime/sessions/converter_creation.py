@@ -1,4 +1,4 @@
-"""OpenClaw create-response reconciliation for the public sessions surface."""
+"""OpenClaw create-response conversion for the public sessions surface."""
 from __future__ import annotations
 
 import asyncio

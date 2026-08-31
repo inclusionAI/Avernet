@@ -48,7 +48,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     _require_within_depth,
     _window,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.creation_reconciliation import reconcile_created_session
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.converter_creation import reconcile_created_session
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
