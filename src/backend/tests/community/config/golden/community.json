@@ -22,6 +22,7 @@
       "base_url": "${BCS_FUSE_URL:-}"
     },
     "bot_config_manifest": {
+      "content_store_dir": "./data/manifest_content",
       "fetch_transport_allowlist": []
     },
     "bot_oss_config": {

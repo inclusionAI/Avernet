@@ -99,6 +99,8 @@ provides:
   - BotRestartLockRepositoryProtocol
   - BotStartupScriptRepositoryProtocol
   - CollaboratorRepositoryProtocol
+  - ManifestContentRepositoryProtocol
+  - ManifestContentRepository
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository

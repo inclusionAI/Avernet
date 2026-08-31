@@ -217,6 +217,16 @@ user_config:
   # 中性默认为空（无任何例外）；corp env overlay 在此处提供镜像 host。
   # 读取方：core/bot_config_manifest/fetch/limits.py 的
   # transport_allowlist_from_config（组合根在装配 GuardedFetcher 时调用）。
+  #
+  # content_store_dir（W11 #1510）：平台留存副本（内容寻址 blob 目录）的根。
+  # 溯源行在数据库（ac_manifest_content）；字节在这里——schema §5 单条上限
+  # 100–200MiB，放 BLOB 列是自毁形态（max_allowed_packet/行宽/备份放大）。
+  # 中性默认落在进程工作目录（同 skill_scan.storage_dir 形态）；部署需要
+  # 共享卷（NAS）时由各环境 overlay 覆写为绝对路径。v1 留存策略：行与字节
+  # 一律不删，理由与机件见 sql/2026_08_31_manifest_content.sql 头注释。
+  # 读取方：core/bot_config_manifest/content/settings.py 的
+  # content_store_root_from_config（W4 组合根在装配存储服务时调用）。
   bot_config_manifest:
     fetch_transport_allowlist: []
+    content_store_dir: "./data/manifest_content"
 

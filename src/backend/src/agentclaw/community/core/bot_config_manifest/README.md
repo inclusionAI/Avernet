@@ -3,7 +3,7 @@ that bot should have — MCP servers, workspace resources, skills, engine config
 identity files, command-line tools — plus the imperative `script` that #926
 already owned.
 
-Four waves of `docs/bot-config-manifest/work-items.zh-CN.md` live in this
+Five waves of `docs/bot-config-manifest/work-items.zh-CN.md` live in this
 module now. W1 **stores, validates and describes** a manifest. W2 (the `fetch/`
 package, #1470) is the guarded transport underneath the fetching wave: the
 fetcher and the unpack pipeline every remote-source byte rides through. W3 (the
@@ -12,11 +12,17 @@ tenant-level credentials, presented by the platform within stored prefixes. W4
 (the `apply/` package, #1472) **applies** a stored document to its bot — it
 fetches nothing, so the two materialisers that ship are the two constructs
 needing no fetched bytes, `mcp` and `script`; `skills` and `identity` arrive
-with W5, `resources` with W6.
+with W5, `resources` with W6. W11 (the `content/` package, #1510) is the
+platform-side copy: the content-addressed blob store and the append-only
+provenance log that §2.8 demands, so that everything after fetch reads *the
+platform's* bytes. Bytes fetched by W2 and kept by W11 are write-or-hash
+material, never run.
 
 A credential never enters a document (W1 refuses it at the boundary); W2
-declares the injector protocol, and W3 binds it. Apply holds none either: it
-calls the services that own each area and passes no secret of its own.
+declares the injector protocol, and W3 binds it. W11 records a credential
+*name* in provenance and nothing else. Apply holds none either: it calls the
+services that own each area and passes no secret of its own.
+
 ## The one rule everything here is shaped by
 
 **This surface never accepts something it cannot apply.**
@@ -165,6 +171,55 @@ What it deliberately does not own:
   the apply report's wording; the binding surfaces the name and the boundary,
   not a classified outcome.
 
+## The content store (W11): the platform's own copy
+
+§2.8 is a hard requirement from audit and reconciliation: content fetched on a
+manifest's behalf is kept as **the platform's durable copy**, and every step
+after fetch reads that copy. The `content/` package is that mechanism — one
+store behind all three consumers of the requirement (audit, delivery,
+`keep_last`), not a copy per consumer:
+
+- **Bytes live in a content-addressed blob tree** —
+  `<root>/blobs/<hex[:2]>/<hex64>` under the `content_store_dir` from
+  `application.yaml`. The digest (`sha256:<hex>`, the fetcher's own
+  vocabulary) IS the address: identical bytes are written once, ever, and the
+  write is atomic (temp + `os.replace` in the shard directory). They are not
+  in the database — schema §5 lets one entry be 100–200 MiB, and a column
+  holding that is a self-destructing design.
+- **Provenance lives in `ac_manifest_content`**, append-only, one row per
+  store event: the bot axes `(avernet_tenant, env, entity_id, bot_id)`, the
+  digest, both URLs (entry source after `${BOT_*}` substitution, and the
+  final hop — differing values mean a redirect happened), the credential
+  **name** (W3's identifier; the value never crosses into this layer), size,
+  fetch time, and who triggered it. No unique key: fetching the same digest
+  twice is two audit events, not one row to overwrite. Dedup lives in the
+  blob layer by content address; repetition in the log is the fact.
+- **`read(digest)` is the one read path**, shared by delivery and audit:
+  streaming with the hash computed on the same pass, so the store returns
+  bytes it can prove or fails — a re-delivery that "mostly" matches its
+  address would defeat the receipt contract exactly where it matters. A
+  missing address is terminal; this layer **never re-fetches** (§2.8's
+  decoupling: a retried apply re-reads here, and a source-side fault cannot
+  pollute a delivery in progress).
+- **URLs in provenance carry path but neither userinfo nor query** — the
+  same posture as the fetcher's own log line (query strings are where
+  signed-source tokens live). The reconciliation anchor for audit is the
+  digest, never a one-time signed URL.
+- **Retention is stated, not defaulted**: v1 retains rows and blobs
+  unconditionally — no delete, no sweep, no TTL. Until an audit horizon is
+  named, any deletion is a manufactured audit gap. A retention window, when
+  audit names one, lands as a DDL-comment change plus a sweep mechanism in
+  that PR, not as a silent default.
+
+The store is a declared machine part in the same shape as the fetcher: the
+service takes its repository and the blob root as constructor values, and the
+composition root that constructs it (reading
+`user_config.bot_config_manifest.content_store_dir` through
+`content.settings.content_store_root_from_config`) arrives with W5, the wave
+that fetches — W4's apply (#1472) landed fetch-free, so it wires no store and
+no caller exists yet. The per-entry digests that wave's apply records carry
+are how `keep_last` reuses this store without a second addressing.
+
 ## Tenancy is load-bearing here
 
 `ac_bots` is itself tenant-scoped, so a `bot_id` is unique only *within* a
@@ -290,7 +345,7 @@ below.
 ## Context Boundary
 
 ```yaml
-purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, and which constructs a bot can be told to have at all; plus (W2) the guarded fetch + unpack transport that fetches a manifest's remote sources on the platform's behalf.
+purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, and which constructs a bot can be told to have at all; plus (W2) the guarded fetch + unpack transport that fetches a manifest's remote sources on the platform's behalf, and (W11) the platform's own durable copy of what was fetched, with its provenance log.
 provides:
   - BotConfigManifestApplyService
   - BotConfigManifestApplyServiceProtocol
@@ -358,12 +413,24 @@ provides:
   - PrefixAuthorizationError
   - CanonicalPrefix
   - validate_prefixes
+  - ManifestContentService
+  - ManifestContentServiceProtocol
+  - ManifestContentRepositoryProtocol
+  - ManifestContentModel
+  - StoredContentRecord
+  - ContentScope
+  - ContentStoreError
+  - ContentMissingError
+  - ContentIntegrityError
+  - content_store_root_from_config
+  - DEFAULT_CONTENT_STORE_DIR
 consumes:
   - "BotConfigManifestRepositoryProtocol (core.repository) — persistence for the one table"
   - "BotConfigManifestApplyRepositoryProtocol / BotConfigManifestApplyLockRepositoryProtocol (core.repository) — the apply record and its serialization lock"
   - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the `script` materialiser's only write"
   - "DirectActivationServiceProtocol (core.skill_center) — the `mcp` materialiser's per-bot activation writes"
   - "MCPAuthServiceProtocol (api) — the same permission check DirectActivationService consults, asked up front so a category is all-or-nothing"
+  - "ManifestContentRepositoryProtocol (core.repository) — persistence for the append-only provenance log"
   - "TeclawEngineTestProtocol (core.bot_startup_script, bound to core.bot_management TeclawProvisionService) — the single definition of 'runs in a teclaw container'"
   - "VALID_IDENTITY_FILES / CLAUDE_CODE_IDENTITY_FILES (core.services.identity) — the identity vocabulary, imported lazily because that module pulls in the device dispatcher"
   - "MAX_SCRIPT_BYTES (core.bot_startup_script) — script.body IS the #926 startup script, so it takes that cap rather than a second one"
@@ -371,7 +438,7 @@ consumes:
   - "SourceCredentialRepositoryProtocol (core.repository) — persistence for the credential table"
 consumed_by:
   - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface"
-  - "the apply orchestration (W4, future) — constructor-injected transport_allowlist and FetchBudget"
+  - "the apply orchestration (W4, `apply/`, #1472) — the fetching wave that extends it constructor-injects the transport_allowlist, FetchBudget, and the content store root (read via content_store_root_from_config), and carries per-entry digests in its apply records for keep_last"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base

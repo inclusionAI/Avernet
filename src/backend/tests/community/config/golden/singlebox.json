@@ -67,6 +67,7 @@
       "base_url": "https://bcsfuse-pre.teamclaw.com"
     },
     "bot_config_manifest": {
+      "content_store_dir": "./data/manifest_content",
       "fetch_transport_allowlist": []
     },
     "bot_oss_config": {
