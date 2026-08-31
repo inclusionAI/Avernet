@@ -246,10 +246,20 @@ class SkillCenterReferenceProcessor:
             return self._retry_or_fail(
                 batch.env, current, "SC_MARKET_UNAVAILABLE"
             )
-        except SkillVersionMaterializationError:
-            logger.exception(
-                "[SkillCenterReference] materialization failure: reference_id=%s",
+        except SkillVersionMaterializationError as exc:
+            # Do not log the exception text or traceback here: download errors
+            # can embed an exact-package presigned URL.  The materializer's
+            # finite stage plus the exception type remain sufficient to locate
+            # the failed Ready Gate without exposing credentials.
+            cause = exc.__cause__
+            logger.warning(
+                "[SkillCenterReference] materialization failure: reference_id=%s "
+                "skill_code=%s skill_version_id=%s failure_stage=%s cause_type=%s",
                 item.reference_id,
+                item.skill_code,
+                current.skill_version_id,
+                exc.stage or "unknown",
+                type(cause).__name__ if cause is not None else type(exc).__name__,
             )
             return self._retry_or_fail(
                 batch.env, current, "MATERIALIZATION_FAILED"

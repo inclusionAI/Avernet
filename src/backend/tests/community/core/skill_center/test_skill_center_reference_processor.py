@@ -385,7 +385,7 @@ def test_gateway_failure_persists_only_public_error_message() -> None:
     assert "signature" not in repr(references.batch.items)
 
 
-def test_materialization_failure_persists_only_public_error_message() -> None:
+def test_materialization_failure_logs_safe_stage_without_leaking_url(caplog) -> None:
     class _LeakyMaterializer(_Materializer):
         def materialize(self, request):
             from agentclaw.community.core.skill_center.materialization_contract import (
@@ -410,6 +410,9 @@ def test_materialization_failure_persists_only_public_error_message() -> None:
         "Exact Version materialization failed"
     }
     assert "signature" not in repr(references.batch.items)
+    assert "failure_stage=unknown" in caplog.text
+    assert "cause_type=SkillVersionMaterializationError" in caplog.text
+    assert "private-token" not in caplog.text
 
 
 def test_final_membership_infrastructure_failure_propagates_for_task_retry() -> None:
