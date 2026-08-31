@@ -275,11 +275,12 @@ impl AuthService for OAuthRouteState {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        let iat = now.max(claims.iat.saturating_add(1));
         let new_claims = Claims {
             sub: claims.sub.clone(),
             src: claims.src.clone(),
-            iat: now,
-            exp: now + self.config.idle_timeout_secs(),
+            iat,
+            exp: iat + self.config.idle_timeout_secs(),
         };
         let new_jwt = self.jwt_service.sign(&new_claims).map_err(|e| {
             warn!(error = %e, "refresh: JWT signing failed");

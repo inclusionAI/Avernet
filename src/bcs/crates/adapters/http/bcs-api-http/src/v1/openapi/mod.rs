@@ -28,8 +28,7 @@ pub fn protected_router() -> Router<ApiState> {
 }
 
 pub fn public_router() -> Router<ApiState> {
-    Router::new().nest(
-        "/openapi/v1/auth",
-        routes::auth::router(),
-    )
+    Router::new()
+        .nest("/openapi/v1/auth", routes::auth::router())
+        .merge(routes::register::public_router())
 }
