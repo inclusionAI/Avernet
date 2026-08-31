@@ -87,6 +87,8 @@ provides:
   - BotAppGrantRepositoryProtocol
   - BotCollabLockRepositoryProtocol
   - BotCollabLogRepositoryProtocol
+  - BotConfigManifestRepositoryProtocol
+  - BotConfigManifestRepository
   - BotFriendRepositoryProtocol
   - BotRepository
   - BotRestartLockRepositoryProtocol
@@ -240,6 +242,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_public
+  - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.channel

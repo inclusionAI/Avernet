@@ -14,8 +14,8 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_CREATED,
     CODE_OK,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors import ClusterMismatchError
 from agentclaw.community.adapters.http.openapi_v1.responses import (
-    ClusterMismatchError,
     accepted,
     created,
     deleted,

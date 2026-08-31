@@ -17,6 +17,9 @@ from pydantic import BaseModel, ConfigDict, Field
 # From ``api/`` — the Service API seam — not the core service module it lives in.
 from agentclaw.community.api.bot_startup_script_service import MAX_SCRIPT_BYTES
 
+# The published manifest document limit, imported for the same reason.
+from agentclaw.community.api.bot_config_manifest_service import MAX_DOCUMENT_BYTES
+
 #: The prefix every operation on this surface is mounted under.
 #:
 #: Defined here rather than in the package's ``__init__`` because ``access_log``
@@ -241,6 +244,33 @@ STARTUP_SCRIPT_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
         **error_example(
             413, f"Startup script exceeds the {MAX_SCRIPT_BYTES}-byte limit"
         ),
+    },
+}
+
+# The two extra failures the config-manifest **write** can produce. Same
+# placement, and the same reason, as the startup-script table above: applying
+# either surface-wide would make every operation advertise a status it cannot
+# return.
+#
+# The 422 is the one that matters to a client. It is the all-or-nothing refusal,
+# and unlike every other error on this surface it carries a ``data`` block: a
+# list of ``{location, code, message}`` naming each offending entry. A fixed
+# message alone would tell a caller their document is invalid and leave them to
+# bisect it.
+CONFIG_MANIFEST_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
+    **USER_SCOPED_403,
+    413: {
+        "model": ErrorEnvelope,
+        "description": "Manifest document exceeds the size limit.",
+        **error_example(
+            413, f"Config manifest exceeds the {MAX_DOCUMENT_BYTES}-byte limit"
+        ),
+    },
+    422: {
+        "model": ErrorEnvelope,
+        "description": "The document was refused; `data.violations` names every "
+        "reason, each with the entry it applies to.",
+        **error_example(422, "Config manifest is invalid"),
     },
 }
 

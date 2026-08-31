@@ -179,6 +179,7 @@ from .bots import router as bots_router
 from .collaboration_bots import public_router as collaboration_public_router
 from .task import task_router
 from .bots.engine_config import router as engine_config_router
+from .bots.config_manifest import router as config_manifest_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
 from .channels import router as channels_router
@@ -374,6 +375,11 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
+    # The config manifest is own-bot on all four of its operations, so the grant
+    # check is declared once for the group. It carries its own feature switch as
+    # a router-level dependency — the switch decides whether the surface is
+    # served at all, which is a different question from who may reach it.
+    config_manifest_router,
     identity_router,
     resources_router,
     routines_router,

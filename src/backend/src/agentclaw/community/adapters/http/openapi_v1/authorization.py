@@ -373,6 +373,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
+    # Same bar as the startup script, for the same reason: the manifest decides
+    # what a bot is configured with, no collaborator level has been decided for
+    # it, and the operation resolves the bot as (bot_id, caller) so only the
+    # owner reaches it. Migrates with the rest of the OWNER_SCOPED rows.
+    ("DELETE", "/openapi/v1/bots/{bot_id}/config-manifest"): OWNER_SCOPED,
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest"): OWNER_SCOPED,
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest/capabilities"): OWNER_SCOPED,
+    ("PUT", "/openapi/v1/bots/{bot_id}/config-manifest"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/status"): OWNER_SCOPED,
 
     # ── Operations that address no bot ────────────────────────────────────

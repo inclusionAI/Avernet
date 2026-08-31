@@ -93,6 +93,15 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
                      # deliberately no FastAPI, which is what lets them be
                      # tested without a client. Named in full rather than as a
                      # short pattern so this entry cannot exempt anything else.
+    "config_manifest_support",
+                     # the same split, for the same reason, in the bots group's
+                     # config-manifest helpers. Also named in full.
+    "envelope_error_table",
+                     # the domain-error → (status, message) tables, split out of
+                     # responses.py when it reached the module line cap. It is
+                     # an inventory of error *types*, so it imports ~180 of them
+                     # and nothing from the HTTP stack; responses.py, which does
+                     # touch the stack, re-exports it.
     "auth",          # callback HMAC verification ports (e.g. task/auth.py) —
                      # import-light by design: a pluggable authenticator must not
                      # depend on the HTTP stack.

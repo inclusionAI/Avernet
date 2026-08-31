@@ -577,6 +577,126 @@ class StartupScript(BaseModel):
     )
 
 
+class ConfigManifestWrite(BaseModel):
+    """A configuration manifest submitted for storage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document: str = Field(
+        description=(
+            "The manifest document (YAML). Stored and returned byte for byte — "
+            "the `script` body's quoting and whitespace are preserved exactly."
+        ),
+    )
+
+
+class ConfigManifest(BaseModel):
+    """A bot's stored configuration manifest. Every field but the document is
+    server-derived."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "bot_id": "20260813_a7k2m9p1",
+                "document": "schema_version: 1\nmanifest:\n  identity:\n"
+                "    - type: SOUL.md\n      content: |\n        # Who I am\n",
+                "size_bytes": 84,
+                "schema_version": 1,
+                "updated_by": "u_165137",
+                "updated_at": "2026-08-31T09:12:04+00:00",
+                "warnings": [],
+            }
+        }
+    )
+
+    bot_id: str = Field(description="The bot this manifest belongs to.")
+    document: str = Field(
+        description="Empty when the bot has no stored manifest.",
+    )
+    size_bytes: int = Field(
+        description="Size of the stored document in bytes; 0 when none is stored."
+    )
+    schema_version: int | None = Field(
+        default=None,
+        description="Null only when the bot has no stored manifest.",
+    )
+    updated_by: str = Field(description="Empty when the bot has no stored manifest.")
+    updated_at: datetime | None = Field(
+        default=None,
+        description="Null only when the bot has no stored manifest.",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Non-fatal notes about the document just written — for example a "
+            "source declared under `sources` that nothing references. Always "
+            "empty on a read."
+        ),
+    )
+
+
+class ManifestConstruct(BaseModel):
+    """One thing a manifest can declare, and whether this bot accepts it."""
+
+    kind: str = Field(
+        description=(
+            "`category` (one of the six under `manifest`), `section` (a "
+            "top-level section such as `script`), or `source` (how an entry "
+            "names its content)."
+        )
+    )
+    name: str = Field(description="The construct's name within its kind.")
+    supported: bool = Field(
+        description="False when a document using this construct is refused."
+    )
+    reason: str = Field(description="Empty when supported; otherwise names the cause.")
+
+
+class ConfigManifestCapabilities(BaseModel):
+    """Which manifest constructs a bot accepts.
+
+    Answered from the same resolver the write path refuses with, so this can
+    never claim support for something a `PUT` then rejects.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "bot_id": "20260813_a7k2m9p1",
+                "engine_type": "openclaw",
+                "bot_type": "personal",
+                "schema_versions": [1],
+                "constructs": [
+                    {
+                        "kind": "category",
+                        "name": "identity",
+                        "supported": True,
+                        "reason": "",
+                    },
+                    {
+                        "kind": "source",
+                        "name": "git",
+                        "supported": False,
+                        "reason": "git sources are resolved by the "
+                        "named-and-git source work item (W7), which has not "
+                        "landed",
+                    },
+                ],
+            }
+        }
+    )
+
+    bot_id: str = Field(description="The bot these capabilities describe.")
+    engine_type: str = Field(description="The engine the answer was computed for.")
+    bot_type: str = Field(description="The bot type the answer was computed for.")
+    schema_versions: list[int] = Field(
+        description="The `schema_version` values this deployment accepts."
+    )
+    constructs: list[ManifestConstruct] = Field(
+        description="Every construct, supported or not, with its reason."
+    )
+
+
 class DataInitRequest(BaseModel):
     """Options for starting a bot's cold-start data initialization."""
 

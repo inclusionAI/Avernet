@@ -115,7 +115,7 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 | O6 | 模板级 manifest（一份声明 → 多个 bot） | v2；v1 仅 bot 级 | 业务 |
 | O7 | `center://` skill-center 引用源 | v2 | backend |
 | O8 | 凭证注入方式是否需要请求头之外的形态（query 参数 token / mTLS） | v1 仅请求头；有真实业务源依赖再评估 | backend + 业务 |
-| O9 | `cli_tools` 的目标架构：容器架构是否统一（x86_64），是否需要多架构源（per-arch URL / `${OCB_ARCH}` 变量） | 先确认容器架构现状；v1 单 URL | backend + 业务 |
+| O9 | `cli_tools` 的目标架构：容器架构是否统一（x86_64），是否需要多架构源（per-arch URL / `${BOT_ARCH}` 变量） | 先确认容器架构现状；v1 单 URL | backend + 业务 |
 | O10 | engine plugin 类目（openclaw extensions / claude_code plugins）如何声明化 | v2；方向定为**注册表引用**（照 MCP 模子，不走任意 URL——插件在引擎进程内自动执行，供应链敏感度最高）。两项引擎侧前置确认：openclaw extensions 目录作为落点是否成立；claude_code 的同步规则**刻意排除 `plugins/`** 的原因 | backend + 两引擎 + 业务 |
 | O11 | 公司 git 托管服务（业务内容源）的能力确认：① 有无仓库级只读 token（Project/Deploy Token 类；无则机器人账号方案是否合规）；② 归档 API 能否按 ref + 子目录取 tar/zip，配额如何；③ refs 解析 API 形态、tag 有无不可变保护；④ 鉴权头形态（`PRIVATE-TOKEN` / `Authorization`）；⑤ 平台侧网络可达性 | 走 API 编译为归档拉取（design §10.5）；①②不成立再评估 clone / 退回 zip | backend + git 托管方 + 业务 |
 

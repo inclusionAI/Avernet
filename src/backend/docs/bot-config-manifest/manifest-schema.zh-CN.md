@@ -1,8 +1,14 @@
-# Manifest Schema v1（草案）
+# Manifest Schema v1
 
-> 状态：DRAFT（讨论稿）。设计论证见 `design.zh-CN.md`；每类配置的完整业务
-> 案例见 `examples.zh-CN.md`。本文只定义文档形状、校验规则与到各引擎的
-> 映射。字段名以定稿评审为准。
+> 状态：**存储与校验已实现**（W1，#1469），apply 尚未落地。设计论证见
+> `design.zh-CN.md`；每类配置的完整业务案例见 `examples.zh-CN.md`。本文只定义
+> 文档形状、校验规则与到各引擎的映射。
+>
+> **本文是用户可见的契约。**已落地的校验器与本文若有分歧，改的是本文——照着
+> 已发布契约写的客户端被拒绝，是这条规则要防的那个后果。首批交付带来的更正
+> 已经并入正文：`OCB_*` → `BOT_*`（§4）、`on_fetch_failure` 去掉 `skip`
+> （§2）、源上新增 `mode` 选择器（§2.3）。当前实际拒绝了什么见 §5.1，哪些
+> 构造还没有代码能 apply 见 §5.2。
 
 ## 1. 顶层结构
 
@@ -69,8 +75,18 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 | `subpath` | 无 | **源内路径**：命名源/git 仓库内、或归档内的子目录或文件。缺省 = 源的根 |
 | `digest` | 无 | `sha256:…`。校验 fetch 内容，不匹配按 fetch 失败处理（钉扎可复现）。**仅适用于 URL 源**——git 源以 commit SHA 为天然 digest，写了报错 |
 | `auth` | 无 | 租户级命名凭证的引用（§2.1）；仅对内联 `source` 有效（命名源的凭证声明在源上）。fetch 时注入为请求头 |
-| `on_fetch_failure` | `keep_last` | `keep_last` / `skip` / `fail`（design §4.3） |
-| `apply_once` | —— | **v1 保留字，拒绝写入**；v2 语义见 design §3.2 |
+| `on_fetch_failure` | `keep_last` | `keep_last` / `fail`。**`skip` 已移除**：在逐条 diff 下它意为「跳过这一条」，而在类目覆盖语义下（design §3.2）它会意味着「删掉这一条」——与字面相反。写了 `skip` 会被拒绝 |
+| `apply_once` | —— | **v1 保留字，拒绝写入**（文档任意深度出现即拒）；v2 语义见 design §3.2 |
+
+**源 URL 的两条硬规则**（对内联 `source` 字符串、命名源的 `url`、git 源的
+`git` 一律适用）：
+
+- 必须是**绝对 https URL**。取回来的是 bot 要据以运行的内容（identity、
+  skill、可执行物），明文传输等于把它交给中间人；`allowed_prefixes`
+  （§2.1）本来也只接受 https。
+- **不得内联 userinfo**——`https://user:token@host/path` 写入时即拒绝。文档
+  会被原样存储、被 `GET` 逐字节读回、还被平台作为溯源记录下来，而这三处正是
+  那个加密、写后不可读回的凭证库存在的理由。私有源一律走 `auth` 引用。
 
 ### 2.0 字段命名规范
 
@@ -229,7 +245,7 @@ identity:
     source:
       git: https://code.example-corp.com/team/content.git
       ref: v1.2.0
-      subpath: bots/${OCB_BOT_ID}/soul.md # 变量替换照常可用
+      subpath: bots/${BOT_ID}/soul.md # 变量替换照常可用
     auth: corp-git-content
 ```
 
@@ -277,7 +293,7 @@ manifest:
   identity:
     - type: SOUL.md
       from: content
-      subpath: bots/${OCB_BOT_ID}/soul.md
+      subpath: bots/${BOT_ID}/soul.md
   skills:
     - name: quality-check
       from: content
@@ -298,6 +314,23 @@ manifest:
 - URL 源的 `url` 作为前缀，条目的 `subpath` 拼在其后；git 源的 `subpath`
   为仓库内路径。拼接前后均施加路径穿越校验。
 - 内联 `source` 写法**保留**：单条目、跨仓库、一次性来源仍可直接写。
+
+#### `mode`：这个 ref 允不允许在我脚下移动
+
+源上可选字段 `mode`，取值 `strict` / `non_strict`，**缺省 `non_strict`**：
+
+| 取值 | 行为 |
+| --- | --- |
+| `non_strict`（默认） | ref 解析出的 SHA 与上次 apply 不同时，应用新内容并在 apply 报告里告警（记前后两个 SHA） |
+| `strict` | 解析出的 SHA 与上次不同时**拒绝这次变更**，bot 继续跑它现在跑的 |
+
+- **写在源上，不是写在 bot 上、也不是写在整份 manifest 上**：要描述的性质是
+  「这个 ref 允不允许移动」，它属于持有 ref 的那个东西。同一份 manifest 里
+  一个钉死的外部依赖 + 一个快速变动的内部仓库是常态。
+- **默认非严格**：写 `ref: main` 而不写 SHA 的人，要的就是会动的行为。
+- **SHA 形式的 ref 完全忽略这个字段**——它动不了，两个分支都触发不了。
+- 拼错的取值**直接拒绝**，不落默认值：否则一个 typo 会静默地什么都没钉住。
+  与 `on_fetch_failure` 的枚举检查同形、同理由。
 
 ## 3. 类别定义
 
@@ -424,7 +457,7 @@ engine_config:
 ```yaml
 identity:
   - type: SOUL.md                # 必须属于该引擎的合法 identity 文件集
-    source: https://my-svc.example.com/bots/${OCB_BOT_ID}/soul.md
+    source: https://my-svc.example.com/bots/${BOT_ID}/soul.md
   - type: RULES.md
     content: |                   # 小文件可内联
       # 团队规范
@@ -501,16 +534,23 @@ cli_tools:
 
 | 变量 | 含义 |
 | --- | --- |
-| `OCB_BOT_ID` | bot 标识 |
-| `OCB_ENGINE_TYPE` | 当前引擎类型 |
-| `OCB_ENV` | 环境（dev/prod/…） |
-| `OCB_TENANT` | 租户标识 |
+| `BOT_ID` | bot 标识 |
+| `BOT_ENGINE_TYPE` | 当前引擎类型 |
+| `BOT_ENV` | 环境（dev/prod/…） |
+| `BOT_TENANT` | 租户标识 |
+| `BOT_ARCH` | 目标 CPU 架构。今天恒为 `amd64` |
 
-- manifest 中以 `${OCB_*}` 占位、apply 时替换；仅允许白名单变量，未知占位
-  报错。
+> **前缀是 `BOT_`，不是 `OCB_`。**本文早先的版本写的是 `OCB_*`；实现按
+> `BOT_*` 落地，本表随之更正。照着旧前缀写的文档会在 `PUT` 时以「未知占位符」
+> 被拒绝。
+
+- manifest 中以 `${BOT_*}` 占位、apply 时替换；仅允许白名单变量，未知占位
+  **在 `PUT` 时**即报错（不是等到 apply）。
+- **内联 `content` 正文与 `script.body` 不做占位符扫描**：它们是写给别人读的
+  字面文本，一份知识库或一段 shell 脚本里出现 `${...}` 是它自己的事。
 - script 中以环境变量注入（注意：#935 的 base64 封装保证 BaaS
   `_safe_format_hook` 的 `{token}`/`{client_id}` 替换不会触碰脚本体，
-  `${OCB_*}` 在脚本里就是普通 shell 变量展开）。
+  `${BOT_*}` 在脚本里就是普通 shell 变量展开）。
 
 ## 5. 限额（建议值，评审定稿）
 
@@ -527,6 +567,51 @@ cli_tools:
 超限在 PUT 时能校验的（文档大小、条目数、内联大小）当场拒绝；只能在
 fetch 时发现的（远端内容大小）按 `on_fetch_failure` 处理并记入 apply
 report。
+
+### 5.1 写入时校验：`PUT` 会拒绝什么
+
+`PUT` 是 **all-or-nothing**：只要有一条不通过，整份文档被拒绝、什么都不写入，
+响应里给出**逐条原因**，每条都指名违规条目在文档中的位置。上面各节散落的规则
+在这里汇总一次，便于对照：
+
+| 类别 | 拒绝的情形 |
+| --- | --- |
+| 文档 | `schema_version` 缺失、非整数或未知；YAML 解析失败；顶层出现未知键；文档超过 64 KiB |
+| 词汇 | `manifest` 下出现未知类目；条目上出现该类目未定义的字段。**未知的东西一律拒绝，不静默忽略**——被忽略的键会让调用方以为自己配置了什么 |
+| 来源 | 一个条目上同时出现两个及以上来源；一个来源都没有；`from` 指向未声明的源；`source` URL 非绝对 https、或内联 userinfo |
+| 凭证与钉扎 | 用了 `from` 的条目上写 `auth`；`content` 条目上写 `auth` / `digest` / `on_fetch_failure`；git 源条目上写 `digest`；`digest` 不是 `sha256:` + 64 位小写十六进制；URL 形态的 skill 或任何 cli_tool 缺 `digest` |
+| 枚举 | `on_fetch_failure` 不是 `keep_last` / `fail`；`mode` 不是 `strict` / `non_strict`；`unpack` 不是 `zip` / `tar.gz` |
+| 保留字 | 任意深度出现 `apply_once` |
+| 占位符 | 出现白名单（§4）以外的 `${...}` |
+| 路径 | `resources.path` 为绝对路径、含 `..` 路径段、或含白名单外字符；条目的 `path` 位于另一个目录条目之下（嵌套禁令）；URL 形态的目录条目缺 `unpack` |
+| identity | `type` 不在该引擎的合法集合内（`claude_code` 仅 `CLAUDE.md`）；`type` 是保留文件 `MEMORY.md` / `IDENTITY.md`——它们是引擎生成的运行期状态，apply 永不写入也永不移除，声明了就永远收敛不了 |
+| cli_tools | 两个 entrypoint 的 **basename 相同**（暴露出来的命令名就是 basename，重名必有一个遮住另一个）；entrypoint 是绝对路径或含 `..` 段；压缩包形态缺 `entrypoints` |
+| 重复 | 同一类目内出现重复的 `skills.name` / `identity.type` / `resources.path` / `mcp.server_code` |
+| 限额 | 单类目超过 50 条；`script.body` 超过 24 KiB；内联 `content` 超过 64 KiB |
+
+`cli_tools.entrypoints` **只在这里校验语法那一半**。存在性、是否普通文件、
+symlink 是否逃出物化树，需要已解包的目录树才能判断，属于 apply 侧。
+
+### 5.2 v1 实现状态：这个面绝不接受它 apply 不了的东西
+
+schema 描述的是**完整的 v1 词汇**，而交付是分批的。凡是文档表达得出、但当前
+版本没有任何代码能 apply 的构造，一律在 `PUT` 时以 `unsupported` 拒绝——把一份
+永远不会生效的文档收下来，比拒绝它更糟。
+
+`GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities` 按**构造**（类目 /
+顶层段 / 来源形态）逐条回答当前 bot 支持什么，且与 `PUT` 的拒绝走**同一个
+函数**——所以它不可能声称支持而 `PUT` 随后拒绝。以这个端点的返回为准，下表是
+首批交付时的快照：
+
+| 构造 | 为什么现在不支持 |
+| --- | --- |
+| 类目 `cli_tools` | 交付后置：没有物化器、没有 PATH 下发 |
+| 类目 `engine_config` | 移出首批，物化器未落地 |
+| `from` 指向**命名源** | 命名源解析器未落地 |
+| **git** 源（内联或命名源上） | 同上，git 解析器未落地 |
+| `script`（teclaw / desktop） | 这两类容器不从共享启动序列取启动命令，脚本永远不会执行 |
+| 全部构造（desktop bot） | desktop 不在本特性范围内 |
+| 全部构造（未知引擎类型） | 无法说明一个类目会如何被下发给它 |
 
 ## 6. 非目标（v1 明确不做）
 

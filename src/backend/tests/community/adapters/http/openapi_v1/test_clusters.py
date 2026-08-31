@@ -8,7 +8,7 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
     cluster_for_engine,
     validate_engine_cluster,
 )
-from agentclaw.community.adapters.http.openapi_v1.responses import ClusterMismatchError
+from agentclaw.community.adapters.http.openapi_v1.errors import ClusterMismatchError
 
 
 def test_teclaw_maps_to_andc():

@@ -652,7 +652,7 @@ Agent 在前，组件的字面名称挂在它下面。
 
 Agent 是这套 API 所讨论的那个名词，所以地址先说是哪个 Agent，再说关于它的什么；同一个
 Agent 上的所有操作共享同一个前缀。bots 组件自己的子资源（`/status`、`/passport`、
-`/restart`、`/auth-status`、`/engine/config`、`/startup-script`）就落在第三段的同一个
+`/restart`、`/auth-status`、`/engine/config`、`/startup-script`、`/config-manifest`）就落在第三段的同一个
 位置上，与 `sessions`、`skills` 等并列 —— Agent 的属性与 Agent 的组件在寻址上不再有
 区别。
 

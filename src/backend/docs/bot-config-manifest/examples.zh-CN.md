@@ -92,7 +92,7 @@ manifest:
   identity:                                  # ④ 人设/规则文件
     - type: SOUL.md                          # 每个 bot 一份，路径按 bot 变量拼
       from: content
-      subpath: bots/${OCB_BOT_ID}/soul.md
+      subpath: bots/${BOT_ID}/soul.md
     - type: RULES.md                          # 全体共享一份话术规范
       from: content
       subpath: kb/service-rules.md
@@ -242,7 +242,7 @@ engine_config:
 identity:
   - type: SOUL.md
     from: content
-    subpath: bots/${OCB_BOT_ID}/soul.md
+    subpath: bots/${BOT_ID}/soul.md
   - type: RULES.md
     from: content
     subpath: kb/service-rules.md
@@ -253,7 +253,7 @@ identity:
 ```
 
 **含义**：人设集中运营——SOUL.md 每个 bot 一份（用平台注入变量
-`${OCB_BOT_ID}` 拼源内路径），RULES.md 全体共享一份，SAFETY.md 是三行
+`${BOT_ID}` 拼源内路径），RULES.md 全体共享一份，SAFETY.md 是三行
 红线。
 
 **`type` 是白名单枚举**，不是自由命名：RULES / OKR / SAFETY / SOUL /
