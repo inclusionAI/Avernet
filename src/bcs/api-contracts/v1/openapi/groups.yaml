@@ -611,10 +611,12 @@ CreateCollaborationGroup:
         Optional caller-designated originator. When omitted, the selected
         HumanOrOwnedBot Principal becomes the originator. A Human Principal
         may instead select a registered Bot it owns (`created_by` matches the
-        caller). A Bot Principal may select only itself. When a Human selects
-        an owned Bot distinct from the driver, the driver must be reachable
-        from that originator (public visibility, or a friend of it). The `dm`
-        group kind does not carry an originator.
+        caller). A Bot Principal may select only itself. Every Bot participant
+        — including the driver when it differs from the originator — is
+        anchored on the originator: a public bot is always reachable; a
+        protected bot is reachable only if the originator is a Human that owns
+        it (`created_by` matches the caller) or a Bot that is friends with it.
+        The `dm` group kind does not carry an originator.
     event_subscriptions:
       type: array
       maxItems: 32
