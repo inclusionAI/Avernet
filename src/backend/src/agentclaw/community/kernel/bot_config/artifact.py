@@ -45,6 +45,16 @@ from typing import Any
 # top-level ``command``/``args``/``env``, the shape MCP clients themselves
 # consume (an early v4 iteration nested it under a ``stdio`` object;
 # ``from_dict`` still re-flattens that form on read).
+#
+# v5 (declared, NOT yet emitted): the optional top-level ``cli_tools`` array —
+# command-line tools the model can invoke. The shape is defined here and in
+# ``artifact.schema.json`` so the contract is reviewable, but the constant stays
+# at 4 on purpose. ``ConfigComposer`` stamps this value onto *every* artifact it
+# builds, so bumping it ships ``"schema_version": 5`` to engines running today —
+# and ``teclaw-cli-contract.zh-CN.md`` §6 promises teclaw the opposite: that an
+# old engine will not be handed a new artifact. Bump this to 5 in the same
+# change that first populates ``cli_tools``, once teclaw has answered §8's
+# question 4 (do they accept v5, and from when).
 SCHEMA_VERSION = 4
 
 
@@ -91,6 +101,30 @@ class ResourceRef:
     name: str
     store: str
     path: str
+
+
+@dataclass(frozen=True)
+class CliToolRef:
+    """One command-line tool the engine should expose to the model.
+
+    **One entry = one command = one file.** ``path`` names the executable file
+    itself, never a directory: the platform does the fetching, the ``sha256``
+    enforcement, the unpacking of an archive form and the selection of the one
+    declared file, so both source forms look identical here. The command the
+    model invokes is ``name`` (uniqueness is enforced at write time, so the
+    engine never arbitrates a clash), and placement — where the file lands and
+    how it reaches the agent's PATH — is the engine owner's decision.
+
+    ``md5`` is computed by the platform over the bytes at ``path`` for the
+    engine to verify what it retrieves from the store. It is **not** the store's
+    ETag: a multipart upload's ETag is not the content MD5.
+    """
+
+    name: str
+    store: str
+    path: str
+    md5: str
+    version: str | None = None  # audit/display metadata; the engine ignores it
 
 
 @dataclass(frozen=True)
@@ -186,6 +220,10 @@ class BotConfigArtifact:
     skills: list[SkillRef] = field(default_factory=list)
     resources: list[ResourceRef] = field(default_factory=list)
     identity_files: list[FileRef] = field(default_factory=list)
+    # ``None`` = not declared → the applier leaves the bot's tools alone.
+    # ``[]`` = declared empty → the applier removes every manifest-delivered
+    # tool. The two are NOT interchangeable; see ``to_dict``.
+    cli_tools: list[CliToolRef] | None = None
     stores: dict[str, StoreRef] = field(default_factory=dict)
     engine_overrides: dict[str, Any] = field(default_factory=dict)
     engine_ext: dict[str, Any] = field(default_factory=dict)
@@ -201,12 +239,22 @@ class BotConfigArtifact:
         pre-local-form definition (which is ``additionalProperties: false``)
         would reject them. Omitting them keeps those bytes exactly what they
         were, so only artifacts that genuinely carry the local form differ.
+
+        ``cli_tools`` is omitted on the same principle, but the stakes are
+        higher than wire shape: for that key **absence and ``[]`` are different
+        instructions**. Absence means "the manifest said nothing about tools —
+        leave them alone"; ``[]`` means "remove every tool". ``asdict`` would
+        emit ``"cli_tools": []`` on every artifact, so an unrelated change (a
+        skill edit, say) would ship a wipe order for tools the bot is using.
+        Only a genuine declaration puts the key on the wire.
         """
         data = asdict(self)
         for server in data.get("mcp", {}).get("servers", []):
             if server.get("command") is None:
                 for key in ("command", "args", "env"):
                     server.pop(key, None)
+        if self.cli_tools is None:
+            data.pop("cli_tools", None)
         return data
 
     @classmethod
@@ -223,6 +271,14 @@ class BotConfigArtifact:
             skills=[SkillRef(**s) for s in data.get("skills", [])],
             resources=[ResourceRef(**r) for r in data.get("resources", [])],
             identity_files=[FileRef(**f) for f in data.get("identity_files", [])],
+            # Absent stays absent: reading a v4 artifact (or any artifact whose
+            # manifest declared no tools) must not manufacture an empty
+            # declaration, which would round-trip back out as a wipe order.
+            cli_tools=(
+                [CliToolRef(**t) for t in data["cli_tools"]]
+                if data.get("cli_tools") is not None
+                else None
+            ),
             stores={k: StoreRef(**v) for k, v in data.get("stores", {}).items()},
             engine_overrides=dict(data.get("engine_overrides", {})),
             engine_ext=dict(data.get("engine_ext", {})),

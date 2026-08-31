@@ -15,6 +15,7 @@ import pytest
 from agentclaw.community.kernel.bot_config import (
     SCHEMA_VERSION,
     BotConfigArtifact,
+    CliToolRef,
     FileRef,
     McpManifest,
     McpServerRef,
@@ -222,3 +223,104 @@ def test_example_artifact_conforms_and_roundtrips() -> None:
     jsonschema.validate(instance=EXAMPLE_ARTIFACT.to_dict(), schema=schema)
     assert BotConfigArtifact.from_dict(EXAMPLE_ARTIFACT.to_dict()) == EXAMPLE_ARTIFACT
     assert EXAMPLE_ARTIFACT.schema_version == SCHEMA_VERSION
+
+
+@pytest.mark.unit
+def test_undeclared_cli_tools_leaves_the_key_off_the_wire() -> None:
+    """Absence and ``[]`` are different instructions, so absence must stay absent.
+
+    ``asdict`` would put ``"cli_tools": []`` on every artifact. Under the
+    convergence contract an explicit empty array orders the applier to remove
+    every manifest-delivered tool, so an unrelated change — a skill edit, say —
+    would ship a wipe order for tools the bot is actively using. An artifact
+    that declares nothing must be byte-identical to one built before the field
+    existed.
+    """
+    artifact = BotConfigArtifact(schema_version=SCHEMA_VERSION, engine_type="teclaw")
+
+    assert artifact.cli_tools is None
+    assert "cli_tools" not in artifact.to_dict()
+
+
+@pytest.mark.unit
+def test_declared_empty_cli_tools_is_carried_as_an_explicit_wipe() -> None:
+    """The other half of the same rule: ``[]`` is a declaration and must ship."""
+    artifact = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION, engine_type="teclaw", cli_tools=[]
+    )
+
+    assert artifact.to_dict()["cli_tools"] == []
+
+
+@pytest.mark.unit
+def test_cli_tool_entry_carries_one_file_per_command() -> None:
+    artifact = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION,
+        engine_type="teclaw",
+        cli_tools=[
+            CliToolRef(
+                name="mycli",
+                store="bot-data",
+                path="staff_u1/bot7/teclaw/cli/mycli",
+                md5="9f2c1b7d4e5a60318c2f0ab4d7e9c135",
+                version="1.4.2",
+            )
+        ],
+    )
+
+    entry = artifact.to_dict()["cli_tools"][0]
+    assert entry == {
+        "name": "mycli",
+        "store": "bot-data",
+        "path": "staff_u1/bot7/teclaw/cli/mycli",
+        "md5": "9f2c1b7d4e5a60318c2f0ab4d7e9c135",
+        "version": "1.4.2",
+    }
+
+
+@pytest.mark.unit
+def test_from_dict_does_not_manufacture_an_empty_declaration() -> None:
+    """Reading a v4 artifact must yield "not declared", not "wipe everything".
+
+    Round-tripping is where this would bite: had ``from_dict`` defaulted to
+    ``[]``, a v4 artifact read and re-emitted would come back out carrying an
+    explicit wipe order the original never contained.
+    """
+    v4_payload = {"schema_version": 4, "engine_type": "teclaw"}
+
+    restored = BotConfigArtifact.from_dict(v4_payload)
+
+    assert restored.cli_tools is None
+    assert "cli_tools" not in restored.to_dict()
+
+
+@pytest.mark.unit
+def test_cli_tools_roundtrip_preserves_both_states() -> None:
+    for declared in ([], [CliToolRef(name="t", store="s", path="p", md5="d")]):
+        artifact = BotConfigArtifact(
+            schema_version=SCHEMA_VERSION, engine_type="teclaw", cli_tools=declared
+        )
+        assert BotConfigArtifact.from_dict(artifact.to_dict()) == artifact
+
+
+@pytest.mark.unit
+def test_cli_tools_artifacts_conform_to_schema() -> None:
+    schema = json.loads(_SCHEMA_PATH.read_text())
+    for declared in ([], [CliToolRef(name="t", store="s", path="p", md5="d")]):
+        artifact = BotConfigArtifact(
+            schema_version=SCHEMA_VERSION, engine_type="teclaw", cli_tools=declared
+        )
+        jsonschema.validate(instance=artifact.to_dict(), schema=schema)
+
+
+@pytest.mark.unit
+def test_schema_version_stays_at_4_until_cli_tools_ship() -> None:
+    """The shape is declared; the version bump is deliberately not taken yet.
+
+    ``ConfigComposer`` stamps ``SCHEMA_VERSION`` onto every artifact it builds,
+    so bumping it here ships ``"schema_version": 5`` to engines running today —
+    which is exactly what ``teclaw-cli-contract.zh-CN.md`` §6 promises teclaw
+    will not happen. Bump it in the change that first populates ``cli_tools``,
+    once teclaw has confirmed it accepts v5.
+    """
+    assert SCHEMA_VERSION == 4

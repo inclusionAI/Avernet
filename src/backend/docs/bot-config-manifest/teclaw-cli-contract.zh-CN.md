@@ -43,11 +43,21 @@ PATH 上，再配一个 SKILL.md 教模型怎么用。`cli_tools` 是把这套�
 `schema_version` 从 `4` 升到 `5`。旧 artifact（无 `cli_tools`）在新引擎上必须
 继续可用——见 §6 兼容性。
 
-> **平台侧要同步改的东西（我们负责，写在这里是为了让你们知道时间点）：**
-> 语言无关的 `kernel/bot_config/artifact.schema.json` 顶层是
-> `"additionalProperties": false`，所以在它被改掉之前，一份带 `cli_tools` 的
-> artifact 会被这份 schema **判为非法**。我们会连同 `SCHEMA_VERSION` 4 → 5 一起
-> 改，并同步更新兼容性测试。**在那之前我们不会下发带 `cli_tools` 的 artifact。**
+> **平台侧的状态（我们负责，写在这里是为了让你们知道时间点）：**
+>
+> - **形状已经落地，可以照着实现了。**语言无关的
+>   `kernel/bot_config/artifact.schema.json` 顶层原本是
+>   `"additionalProperties": false`，一份带 `cli_tools` 的 artifact 会被它**判为
+>   非法**；现在 `cli_tools` 与 `cliToolRef` 已经写进这份 schema，代码侧的
+>   `CliToolRef` 也已就位，两边都有测试钉住。**本文档 §3 描述的字段就是当前代码
+>   里的字段。**
+> - **`SCHEMA_VERSION` 仍然是 `4`，这是有意的。**平台给**每一份**下发的 artifact
+>   都盖上这个值，所以一旦改成 `5`，今天在跑的所有 bot 立刻就会收到
+>   `"schema_version": 5`——那正是 §6 承诺不会发生的事（旧引擎读到新 artifact）。
+>   我们会在**第一次真正填充 `cli_tools`** 的那次改动里把它升到 `5`，而那要等
+>   §8 的第 4 问有答案。
+> - 因此：**在你们确认支持 v5 之前，我们既不下发 `cli_tools`，也不改变
+>   `schema_version` 的取值。**你们现在收到的 artifact 与今天逐字节同构。
 
 ---
 

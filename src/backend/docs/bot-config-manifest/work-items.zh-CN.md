@@ -1719,6 +1719,22 @@ manifest 层，所以 W8 没有「去激活」需要安放。）
 `SCHEMA_VERSION` 从 4 升到 5，并调和 `README.zh-CN.md` 与 §9 里那些「artifact
 schema 不变」的表述 —— 那些话对其他每个类目都成立，唯独对这一个不再成立。
 
+> **已提前落地：形状部分（不含版本号）。**`cliToolRef` 与可选的 `cli_tools` 已写进
+> schema，`CliToolRef` 已写进 `artifact.py`，`README.zh-CN.md` 的三处「不改」表述
+> 已调和。这一半没有任何依赖 —— 它只是声明形状，不产出内容 —— 所以先做掉，好让
+> teclaw 拿到的规格与代码一致。
+>
+> **`SCHEMA_VERSION` 仍是 4，这是本项余下的部分，而且它有前置条件。**
+> `ConfigComposer` 给**每一份** artifact 盖这个值，所以升到 5 会立刻让今天在跑的
+> 引擎收到 `"schema_version": 5` —— 恰恰是 `teclaw-cli-contract.zh-CN.md` §6 向
+> teclaw 承诺不会发生的事。**升版要和「第一次真正填充 `cli_tools`」放在同一次改动
+> 里**，且要等 teclaw 回答 §8 的第 4 问。
+>
+> 与之配套的一条语义已经由测试钉住：**`cli_tools` 字段缺席 ≠ `[]`**。`asdict` 会
+> 给每份 artifact 都发出 `"cli_tools": []`，而在覆盖语义下那是一道「清空所有工具」
+> 的指令 —— 于是一次无关的 skill 改动就会清掉用户正在用的命令。`to_dict` 因此在
+> 未声明时**整个省略这个键**，`from_dict` 也不会把缺席读成空数组。
+
 **teclaw 那一半已经写好，可以直接交付出去。**
 `teclaw-cli-contract.zh-CN.md` 就是面向引擎的规格：下发契约不变，`cli_tools` 是
 唯一新增，而且拉取、digest 校验、解包、取文件全部由平台完成，引擎每个条目收到的是

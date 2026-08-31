@@ -59,6 +59,11 @@
       "description": "User/platform-authored workspace files (e.g. RULES.md). Engine-generated files are referenced via engine_ext, not here.",
       "items": { "$ref": "#/definitions/fileRef" }
     },
+    "cli_tools": {
+      "type": "array",
+      "description": "Command-line tools the model can invoke (schema_version 5+). Deliberately NOT in 'required': an absent key means 'not declared - leave the bot's tools alone', an explicit [] means 'remove every manifest-delivered tool'. Those are different instructions.",
+      "items": { "$ref": "#/definitions/cliToolRef" }
+    },
     "stores": {
       "type": "object",
       "description": "Physical coordinates of content stores, keyed by store_id (the source scheme; name it for the store, not the scope). Location only — NEVER credentials. A ref {store:'skill-repo', path:'team/x'} resolves against stores['skill-repo'].",
@@ -104,6 +109,19 @@
         "scope": { "type": "string", "enum": ["shared", "user"] },
         "store": { "type": "string", "description": "store_id key into 'stores'." },
         "path": { "type": "string", "description": "Path relative to the store (e.g. 'team/weather'); placement decided by the engine owner." }
+      }
+    },
+    "cliToolRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "store", "path", "md5"],
+      "description": "One command-line tool: one entry = one command = one file. The platform fetches, enforces the declared sha256, unpacks an archive form and selects the one declared file, so 'path' always names a single executable file - never a directory, and never something the engine has to pick from a tree.",
+      "properties": {
+        "name": { "type": "string", "description": "Tool identifier AND the command name the agent invokes (e.g. 'mycli', not an absolute path). Unique per bot and free of path separators, both enforced at write time." },
+        "store": { "type": "string", "description": "store_id key into 'stores'." },
+        "path": { "type": "string", "description": "Path relative to the store, naming the single executable file; physical placement and PATH exposure decided by the engine owner." },
+        "md5": { "type": "string", "description": "Platform-computed MD5 (32 lowercase hex) of the bytes at 'path', for the engine to verify what it retrieves. NOT the store's ETag - a multipart upload's ETag is not the content MD5." },
+        "version": { "type": ["string", "null"], "description": "Optional audit/display metadata; the engine need not interpret it." }
       }
     },
     "mcpServerRef": {
