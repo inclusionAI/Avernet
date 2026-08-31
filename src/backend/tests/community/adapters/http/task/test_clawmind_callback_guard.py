@@ -1,8 +1,9 @@
-"""ClawMind 回调解析出错时的落库保护(router guard 单测)。
+"""ClawMind 回调解析出错时的兜底落库(router guard 单测)。
 
 口径:claw_mind 内嵌 JSON 非法 → enrich_claw_mind 构图抛错 → router claw_mind 分支 try/except 捕获,
-打 error 日志并返回 200 ack,**不落库**(不调 callback.ingest → 不 upsert task_callback,避免脏数据
-覆盖已有记录)。复用 dashboard harness(TaskModule + _StubModule + 记账 _FakeCallbackRepo)。
+打 error 日志并返回 200 ack;**不跳过落库**,而是经 ``ingest_parse_error`` 兜底:仅写 ``exec_error``
+(错误信息)+ ``extend_props``(原始上报数据),其它已有字段不动(callback_repo.upsert_error 部分更新)。
+复用 dashboard harness(TaskModule + _StubModule + 记账 _FakeCallbackRepo)。
 """
 from __future__ import annotations
 
@@ -20,13 +21,18 @@ from agentclaw.community.core.repository.protocols.task import (
 
 
 class _FakeCallbackRepo:
-    """记账 upsert:guard 生效时不应有任何落库。"""
+    """记账 upsert / upsert_error:正常路径走 upsert,解析失败兜底走 upsert_error。"""
 
     def __init__(self):
         self.upserts: list = []
+        self.upsert_errors: list = []
 
     def upsert(self, rec):
         self.upserts.append(rec)
+        return rec
+
+    def upsert_error(self, rec):
+        self.upsert_errors.append(rec)
         return rec
 
 
@@ -70,20 +76,26 @@ def _harness():
     return TestClient(app, raise_server_exceptions=False), fake
 
 
-def test_malformed_claw_mind_acks_without_persist():
-    """内嵌 result_json 非法 → router 打日志、返回 200、不落库(不 upsert task_callback)。"""
+def test_malformed_claw_mind_persists_error_record():
+    """内嵌 result_json 非法 → router 返回 200,并兜底落错误记录(exec_error + extend_props=原始 body),
+    其它字段不动;不走正常 ingest upsert。"""
     c, fake = _harness()
     body = {"workflow_id": "w", "flow_id": "f", "status": "succeeded",
             "ext_info": {"flow_runs": {"status": "succeeded",
                          "result_json": "not-a-valid-json{"},
                          "node_executions": []}}
     r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=body)
-    assert r.status_code == 200, r.text          # guard 收为 ack,而非 500
-    assert fake.upserts == []                     # 未落库,不污染已有 task_callback
+    assert r.status_code == 200, r.text                  # guard 收为 ack,而非 500
+    assert fake.upserts == []                            # 未走正常 ingest 全量 upsert
+    assert len(fake.upsert_errors) == 1                  # 走兜底 upsert_error 一次
+    rec = fake.upsert_errors[0]
+    assert rec.exec_error                                # 错误信息已落 exec_error
+    assert rec.extend_props == body                      # 原始上报数据落 extend_props
+    assert rec.run_id == "f"                             # 主键按 flow_id 取
 
 
 def test_valid_claw_mind_persists():
-    """合法 claw_mind 回调仍正常落库(guard 不影响正常路径)。"""
+    """合法 claw_mind 回调仍走正常 ingest 落库(不进兜底 upsert_error)。"""
     c, fake = _harness()
     body = {"workflow_id": "w", "flow_id": "f", "status": "succeeded",
             "ext_info": {"flow_runs": {"status": "succeeded",
@@ -92,4 +104,5 @@ def test_valid_claw_mind_persists():
                          "node_executions": []}}
     r = c.post("/api/v1/collaboration/tasks/callback/workflow_result", json=body)
     assert r.status_code == 200, r.text
-    assert len(fake.upserts) == 1                 # 正常落库
+    assert len(fake.upserts) == 1                        # 正常落库
+    assert fake.upsert_errors == []                      # 未进兜底

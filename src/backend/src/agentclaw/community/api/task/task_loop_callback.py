@@ -25,3 +25,8 @@ class TaskLoopCallbackProtocol(Protocol):
         """仅落回投审计(``task_callback``),不推进编排核。供事件/工作流级回投(ClawMind/BCN)用:
         其 run_id/workflow_id 不对应框架节点,走 ``start_run``/``report_result`` 会 NodeNotFoundError。"""
         ...
+
+    async def ingest_parse_error(self, raw: dict, error: str) -> None:
+        """回调解析失败兜底落库:仅写 ``exec_error``(错误信息)+ ``extend_props``(原始上报数据),
+        其它已有字段不动(经 ``callback_repo.upsert_error`` 部分更新),不推进编排核。"""
+        ...
