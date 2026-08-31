@@ -614,3 +614,101 @@ async def test_an_unanswerable_platform_default_lookup_writes_nothing():
 
     assert activations.writes == 0
     assert report.categories[0].aborted is True
+
+
+# ── an aborted category must never read as success ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_declared_empty_category_that_fails_is_not_reported_successful():
+    """Review finding: an aborted category with no entries read as SUCCEEDED.
+
+    ``derive_status`` worked entirely from entry outcomes, and a *declared-empty*
+    category produces none — there is nothing declared to report on. So
+    ``mcp: []`` whose removal raised aborted the category and still summarised
+    the apply as ``SUCCEEDED``, telling a poller its bot had converged on an
+    empty set that was in fact untouched.
+    """
+    activations = FakeActivationService(
+        installed={"stuck"}, platform_defaults=set()
+    )
+
+    async def _explode(**_kwargs):
+        raise RuntimeError("the activation service is down")
+
+    activations.deactivate_mcp = _explode
+
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp: []\n",
+    )
+
+    category = report.categories[0]
+    assert category.aborted is True
+    assert category.entries == (), "a declared-empty category declares no entries"
+    assert report.status is ApplyStatus.FAILED, (
+        "an aborted category with no entries left the summary at SUCCEEDED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_one_aborted_empty_category_downgrades_an_otherwise_good_apply():
+    """The mixed case, which a "no entries at all" special case would miss.
+
+    A successful `script` alongside a failed `mcp: []` gives a non-empty entry
+    list, so the summary has to count the silent failure directly rather than
+    fall back to "no entries means nothing was asked".
+    """
+    activations = FakeActivationService(installed={"stuck"})
+
+    async def _explode(**_kwargs):
+        raise RuntimeError("the activation service is down")
+
+    activations.deactivate_mcp = _explode
+
+    report = await _apply(
+        _engine(activations=activations),
+        'schema_version: 1\nscript:\n  body: "echo hi"\nmanifest:\n  mcp: []\n',
+    )
+
+    assert report.status is ApplyStatus.PARTIAL
+
+
+@pytest.mark.asyncio
+async def test_an_abort_during_the_write_says_the_area_may_have_changed():
+    """``aborted`` alone overclaimed; the write case needs its own signal.
+
+    Aborting from ``resolve`` leaves the area untouched, and the API documents
+    that. Aborting from ``write`` does not, and the two are indistinguishable
+    from entry outcomes — so a caller told only "aborted" would read "left
+    exactly as it was" and never re-apply.
+    """
+    activations = FakeActivationService()
+
+    async def _explode(**_kwargs):
+        raise RuntimeError("the activation service is down")
+
+    activations.activate_mcp = _explode
+
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: gh\n",
+    )
+
+    category = report.categories[0]
+    assert category.aborted is True
+    assert category.partially_written is True
+    assert category.as_dict()["partially_written"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_abort_before_the_write_says_nothing_changed():
+    """The counterpart, so the flag means something rather than being always on."""
+    report = await _apply(
+        _engine(auth=FakeMcpAuth(denied={"nope"})),
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: nope\n",
+    )
+
+    category = report.categories[0]
+    assert category.aborted is True
+    assert category.partially_written is False

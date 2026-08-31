@@ -121,6 +121,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         bot: dict,
         owner_id: str,
         actor_id: str,
+        audit_actor: Optional[str] = None,
         trigger: str = "explicit",
         phases: Optional[frozenset[ApplyPhase]] = None,
     ) -> ApplyAccepted:
@@ -128,6 +129,17 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
 
         The order is the contract. Both refusals happen **before** an id exists,
         so a caller never holds a handle to an apply that never ran.
+
+        ``actor_id`` and ``audit_actor`` are two different things and must not be
+        collapsed. ``actor_id`` is the **principal** every downstream
+        authorization check is made against — ``can_manage_bot``,
+        ``check_mcp_permission_detail``. ``audit_actor`` is a *label* for the
+        record's actor column, and for an application caller it is a synthetic
+        string (``app:<id>:on-behalf-of:<user>``) that is deliberately not a
+        principal. Passing the label as the principal denied every application
+        caller: the activation service compared that string against owner and
+        collaborator rows and found nobody. It defaults to ``actor_id`` so a
+        caller with nothing to distinguish keeps the obvious behaviour.
         """
         env = get_current_env()
         lock = self._locks.acquire(
@@ -156,7 +168,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 bot_id=bot_id,
                 apply_id=apply_id,
                 trigger=trigger,
-                actor=actor_id,
+                # The audit label, never the principal — this column is the one
+                # place the application-formatted value belongs.
+                actor=audit_actor or actor_id,
                 report=json.dumps(
                     ApplyReport(
                         apply_id=apply_id,

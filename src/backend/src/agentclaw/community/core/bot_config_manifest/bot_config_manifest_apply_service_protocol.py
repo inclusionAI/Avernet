@@ -88,6 +88,7 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         bot: dict,
         owner_id: str,
         actor_id: str,
+        audit_actor: Optional[str] = None,
         trigger: str = "explicit",
         phases: Optional[frozenset[ApplyPhase]] = None,
     ) -> ApplyAccepted:

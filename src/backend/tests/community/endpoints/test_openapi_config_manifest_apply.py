@@ -18,6 +18,7 @@ import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManifestApplyLockRepositoryProtocol,
     BotConfigManifestApplyRepositoryProtocol,
     BotConfigManifestRepositoryProtocol,
     BotRepository,
@@ -180,6 +181,17 @@ def _await_the_background_apply(_response, world) -> None:
     )
     assert record is not None, "the accepted apply left no record"
     assert record.status == "SUCCEEDED", record.status
+
+
+def _seed_bot_with_a_held_lock(world) -> None:
+    """A bot whose apply lock is already held by someone else."""
+    _seed_bot_with_manifest(world)
+    world.get(BotConfigManifestApplyLockRepositoryProtocol).acquire(
+        env=get_current_env(),
+        entity_id=_OWNER,
+        bot_id=_BOT_ID,
+        holder_user_id="someone-else",
+    )
 
 
 # ── POST .../apply ─────────────────────────────────────────────────────────
@@ -404,4 +416,25 @@ def poll_by_id_unknown_bot_is_a_404():
     id this bot does not own reads empty, and this one proves a *bot* the caller
     does not own is refused outright, rather than leaking the difference between
     "no such bot" and "that bot has no such apply".
+    """
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/config-manifest/apply",
+    scenario="a_second_apply_while_one_runs_is_a_409",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS
+    ),
+    seed=_seed_bot_with_a_held_lock,
+    expect=ExpectError(status=409),
+)
+def apply_while_locked_is_a_409():
+    """Applies are serialized per bot, and contention is retryable — not a 500.
+
+    The route's own documentation promises this 409, but
+    ``ManifestApplyInProgressError`` was not registered in the envelope's error
+    map, so ``@envelope_errors`` re-raised it and the caller got a 500. Pinned
+    through the assembled app rather than at the service, because the defect was
+    entirely in the mapping: the service raised the right exception all along.
     """

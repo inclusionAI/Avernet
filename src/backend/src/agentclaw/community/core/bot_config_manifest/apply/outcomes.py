@@ -126,18 +126,38 @@ class CategoryResult:
     construct: ApplyConstruct
     entries: tuple[EntryResult, ...] = ()
     #: Identities that existed in the area and are no longer declared, so
-    #: overwrite removed them. Empty on an aborted category by construction:
-    #: an aborted category is not written at all.
+    #: overwrite removed them. Empty on an aborted category: the report never
+    #: claims a removal it cannot confirm, which is why a partially written
+    #: category says so through ``partially_written`` instead.
     removals: tuple[str, ...] = ()
-    #: True when the category was not written at all — the all-or-nothing rule
-    #: (§3.2). Everything about its area is unchanged.
+    #: True when the category did not converge — the all-or-nothing rule (§3.2).
+    #: On its own this does **not** promise the area is untouched; see
+    #: ``partially_written``.
     aborted: bool = False
+    #: True when the abort happened *during* the write, so some of the area may
+    #: already have changed.
+    #:
+    #: Every refusal this engine can foresee is asked in ``resolve``, before the
+    #: first write, and an abort from there leaves the area genuinely untouched.
+    #: But a write can still fail for reasons no precondition can rule out — the
+    #: service is down, a concurrent change lands, the row is gone — and the
+    #: writes already made are real. This module cannot roll them back: the
+    #: services it materialises through expose no transaction spanning several
+    #: calls, and a compensating undo can fail exactly as the write did, so
+    #: claiming atomicity would be a stronger promise than the platform can keep.
+    #:
+    #: The honest thing is therefore to *report* it rather than assert it away.
+    #: ``aborted`` with this false means nothing was written; with this true it
+    #: means "do not trust the area, re-apply to converge it". Silently reporting
+    #: the second as the first is what a caller cannot recover from.
+    partially_written: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """The wire shape for one category's summary."""
         return {
             "category": self.construct.value,
             "aborted": self.aborted,
+            "partially_written": self.partially_written,
             "removed": list(self.removals),
         }
 
@@ -253,13 +273,27 @@ def derive_status(categories: tuple[CategoryResult, ...]) -> ApplyStatus:
     * Every entry ``created`` / ``updated`` / ``unchanged`` ⇒ ``SUCCEEDED``.
     * Some delivered and some not ⇒ ``PARTIAL``.
     * Nothing delivered ⇒ ``FAILED``.
+
+    An aborted category **with no entries of its own** has to be counted
+    directly, not inferred from entries, because it produced none to inspect.
+    A declared-empty category is the case: ``mcp: []`` whose removal raised, or
+    ``script: null`` whose delete failed, aborts having asked for a state it
+    never reached — and with an empty entry list it would otherwise fall through
+    every entry-based test and be reported ``SUCCEEDED``. A caller polling that
+    report would be told its bot converged on a state the apply had just failed
+    to reach.
     """
     entries = tuple(entry for category in categories for entry in category.entries)
-    if not entries:
+    # Counted as failures in their own right; see the docstring.
+    silent_failures = sum(
+        1 for category in categories if category.aborted and not category.entries
+    )
+    if not entries and not silent_failures:
         return ApplyStatus.SUCCEEDED
     delivered = {EntryOutcome.CREATED, EntryOutcome.UPDATED, EntryOutcome.UNCHANGED}
     ok = sum(1 for entry in entries if entry.outcome in delivered)
-    if ok == len(entries):
+    total = len(entries) + silent_failures
+    if ok == total:
         return ApplyStatus.SUCCEEDED
     return ApplyStatus.PARTIAL if ok else ApplyStatus.FAILED
 

@@ -328,3 +328,55 @@ def test_the_lock_ttl_is_long_enough_to_be_a_safety_net(world):
     lock stolen mid-write.
     """
     assert APPLY_LOCK_TTL_SECONDS >= 15 * 60
+
+
+def test_the_audit_label_is_recorded_without_becoming_the_principal(world):
+    """Review finding: the two actors are different things.
+
+    ``audit_actor`` is a label — for an application caller a synthetic
+    ``app:<id>:on-behalf-of:<user>`` that matches no owner or collaborator row.
+    It belongs in the record's actor column. It was also being passed on as the
+    operational ``actor_id``, which is what every downstream authorization check
+    is made against (``can_manage_bot``, ``check_mcp_permission_detail``), so
+    every application caller was denied.
+
+    Asserted on both sides at once: the label reaches the record, and the
+    principal — not the label — reaches the work.
+    """
+    service, applies, _locks, scripts, _manifests = world
+    label = "app:the-app:on-behalf-of:u_owner"
+
+    service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        audit_actor=label,
+    )
+    report = _drain(service)
+
+    assert report.status is ApplyStatus.SUCCEEDED
+    row = applies.latest(env="dev", entity_id=_ENTITY, bot_id=_BOT)
+    assert row.actor == label, "the audit column lost the application label"
+    # The work ran as the principal: had the label been passed through as the
+    # actor, the script write below would have been attributed to a non-principal
+    # — and on the mcp path it would have been refused outright.
+    assert scripts.puts[0]["modifier"] == _ENTITY
+
+
+def test_the_audit_label_defaults_to_the_principal(world):
+    """A caller with nothing to distinguish keeps the obvious behaviour."""
+    service, applies, _locks, _scripts, _manifests = world
+
+    service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+    )
+    _drain(service)
+
+    row = applies.latest(env="dev", entity_id=_ENTITY, bot_id=_BOT)
+    assert row.actor == _ENTITY

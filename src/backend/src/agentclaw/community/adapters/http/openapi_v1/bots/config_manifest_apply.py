@@ -129,17 +129,31 @@ async def apply_bot_config_manifest(
     manifest does not mention is not touched at all, and deleting a manifest
     therefore deletes nothing.
 
-    **A category is written all-or-nothing.** If any declared entry cannot be
-    materialized, that whole category is left exactly as it was and its other
+    **A category is written all-or-nothing.** Every refusal that can be foreseen
+    is checked before the first write, so if any declared entry cannot be
+    materialized that whole category is left exactly as it was and its other
     entries report `skipped` — a momentary failure never deletes something that
     was working. Categories do not affect each other.
+
+    A write can still fail for a reason no check can foresee: the underlying
+    service is down, or a concurrent change lands. There is no transaction
+    spanning those calls to roll back, so such a category reports
+    `partially_written` and re-applying converges it. That flag is the one case
+    where `aborted` does not mean "nothing changed".
 
     A bot with no stored manifest applies nothing and reports nothing applied.
     That is not an error.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # addressed owner/tenant guard
     entity_id = manifest_target(bot)
-    actor = audit_actor(caller, actor_id)
+    # Two values, deliberately not one. ``actor_id`` is the principal every
+    # downstream authorization check is made against; ``audit_actor`` is a label
+    # for the record's actor column, and for an application caller it is a
+    # synthetic ``app:<id>:on-behalf-of:<user>`` string that no owner or
+    # collaborator row will ever match. W1 uses it as the manifest's ``modifier``
+    # — an audit column — which is exactly what it is for. Sending it on as the
+    # principal denied every application caller at ``can_manage_bot``.
+    audit = audit_actor(caller, actor_id)
 
     if dry_run:
         # A dry run is finished when it answers — nothing was accepted for later
@@ -150,7 +164,9 @@ async def apply_bot_config_manifest(
             bot_id=bot_id,
             bot=bot,
             owner_id=owner_id,
-            actor_id=actor,
+            # A dry run writes no record, so it has no audit column to fill and
+            # needs only the principal.
+            actor_id=actor_id,
         )
         return envelope(apply_payload(report), request)
 
@@ -159,7 +175,8 @@ async def apply_bot_config_manifest(
         bot_id=bot_id,
         bot=bot,
         owner_id=owner_id,
-        actor_id=actor,
+        actor_id=actor_id,
+        audit_actor=audit,
     )
     return envelope(
         ConfigManifestApplyAccepted(

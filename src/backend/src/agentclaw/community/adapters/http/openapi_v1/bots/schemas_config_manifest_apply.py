@@ -68,9 +68,17 @@ class ConfigManifestApplyCategory(BaseModel):
 
     category: str = Field(description="The category or section.")
     aborted: bool = Field(
-        description="True when the category was not written at all, because at "
-        "least one declared entry could not be materialized. Everything about "
-        "its area is unchanged."
+        description="True when the category did not converge, because at least "
+        "one declared entry could not be materialized. Read it together with "
+        "`partially_written`: on its own it does not promise the area is "
+        "untouched."
+    )
+    partially_written: bool = Field(
+        default=False,
+        description="True when the failure happened partway through writing, so "
+        "part of the category's area may already have changed. `aborted` with "
+        "this false means nothing was written and there is nothing to undo; "
+        "with this true, re-apply to converge the area.",
     )
     removed: list[str] = Field(
         default_factory=list,

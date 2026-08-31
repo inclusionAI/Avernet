@@ -202,13 +202,24 @@ class ApplyOrchestrator:
             # failure of every entry rather than claiming any of them: the
             # record must never say something was materialised when it may not
             # have been.
+            #
+            # ``partially_written`` is the other half of that honesty. Aborting
+            # from ``resolve`` or ``plan`` leaves the area untouched; aborting
+            # from here does not, and the two are not distinguishable from the
+            # entry outcomes alone. A caller told only "aborted" would read the
+            # documented "left exactly as it was" and stop — when what it should
+            # do is re-apply to converge an area that may now be half-written.
             logger.exception(
                 "[manifest_apply] write raised, construct=%s, bot_id=%s",
                 construct.value,
                 ctx.bot_id,
             )
             return self._aborted(
-                construct, entries, cause=None, reason=f"write failed: {exc}"
+                construct,
+                entries,
+                cause=None,
+                reason=f"write failed: {exc}",
+                partially_written=True,
             )
 
         return CategoryResult(
@@ -225,6 +236,7 @@ class ApplyOrchestrator:
         *,
         cause: ResolveResult | None,
         reason: str | None,
+        partially_written: bool = False,
     ) -> CategoryResult:
         """The category was not written. Report every entry, blame precisely.
 
@@ -272,7 +284,11 @@ class ApplyOrchestrator:
                     )
                 )
         return CategoryResult(
-            construct=construct, entries=tuple(results), removals=(), aborted=True
+            construct=construct,
+            entries=tuple(results),
+            removals=(),
+            aborted=True,
+            partially_written=partially_written,
         )
 
     def _projected(
