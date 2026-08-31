@@ -74,10 +74,21 @@ class McpMaterialiser(Materialiser):
         applies. That endpoint is advisory and fail-open during an upstream
         outage — an empty ``access_level`` is its documented outage sentinel —
         and a desired-state write must not act on that.
+
+        Permission is not the only way the write can refuse, and asking about
+        only one of them is what made the all-or-nothing claim above untrue.
+        ``activate_mcp`` and ``deactivate_mcp`` *also* refuse a code the Bot's
+        engine/template policy owns, raising
+        ``SkillSetControlPlaneConflictError`` from a guard that runs before the
+        permission check. So a declaration of ``{A, B}`` where A is permitted and
+        B is a platform default passed resolve, activated A for real, and then
+        raised on B — leaving the category half-written and reported aborted.
+        Both refusals are now asked here, before anything is written.
         """
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
         seen: set[str] = set()
+        platform_owned = self._platform_owned(ctx)
 
         for index, entry in enumerate(entries):
             server_code = entry.get("server_code") if isinstance(entry, dict) else None
@@ -100,6 +111,21 @@ class McpMaterialiser(Materialiser):
                 continue
             seen.add(server_code)
 
+            if server_code in platform_owned:
+                # Refused rather than accepted as a no-op. It *is* active, so
+                # "already satisfied" is tempting — but the manifest does not
+                # control it, and pretending otherwise would turn the
+                # declaration into a real install the day the platform stopped
+                # making it a default. The author is told instead.
+                failures.append(
+                    ResolveFailure(
+                        server_code,
+                        "this MCP server is a platform default for this bot: it "
+                        "is managed by engine/template policy, not by a "
+                        "manifest, and is enabled without being declared",
+                    )
+                )
+                continue
             if not self._permitted(ctx, server_code):
                 failures.append(
                     ResolveFailure(
@@ -112,6 +138,23 @@ class McpMaterialiser(Materialiser):
             intents.append(Intent(server_code, server_code))
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
+
+    def _platform_owned(self, ctx: ApplyContext) -> frozenset[str]:
+        """The codes the write would refuse on policy grounds.
+
+        Fail-closed for the same reason ``_permitted`` is, but the closed
+        direction is the opposite one: an unanswerable question here must not
+        widen what the manifest may touch, and the safe reading of "I could not
+        find out which codes are platform-owned" is *none of them are mine to
+        write*. Returning an empty set on failure would restore exactly the bug
+        this method exists to close, so the failure is raised and the
+        orchestrator aborts the category with nothing written.
+        """
+        return frozenset(
+            self._activation.platform_default_mcp_codes(
+                bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
+            )
+        )
 
     def _permitted(self, ctx: ApplyContext, server_code: str) -> bool:
         """The activation service's own verdict, asked the same way.
@@ -131,12 +174,27 @@ class McpMaterialiser(Materialiser):
     async def plan(
         self, ctx: ApplyContext, intents: Sequence[Intent]
     ) -> CategoryPlan:
-        """Diff the declared set against what is actually installed."""
+        """Diff the declared set against what is actually installed.
+
+        The installed set is narrowed by the codes the platform owns before the
+        diff, so a platform default can never become a removal. Overwrite reads
+        an absent entry as "remove it", but that reading only makes sense for
+        entries the manifest could have declared — and a platform default is one
+        this materialiser refuses in ``resolve``. Leaving it in would mean every
+        apply on such a bot called ``deactivate_mcp`` on a code the policy
+        refuses, failing a category for something no author could fix from the
+        document.
+
+        A default is normally absent from ``ac_bot_mcp_installation`` (it is code
+        policy, not installation provenance), so this is usually a no-op. It
+        stops being one when a bot's ``active_engine`` or ``template_type``
+        changes and turns an ordinary installed server into a default.
+        """
         current = set(
             self._activation.list_installed_mcps(
                 bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
             )
-        )
+        ) - self._platform_owned(ctx)
         declared = {intent.identity for intent in intents}
 
         planned = tuple(

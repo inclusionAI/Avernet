@@ -48,11 +48,33 @@ class FakeStartupScriptService:
         return len(self.puts) + len(self.deletes)
 
 
-class FakeActivationService:
-    """Stands in for ``DirectActivationService``, recording every call."""
+class PlatformPolicyConflict(Exception):
+    """Stands in for ``SkillSetControlPlaneConflictError``.
 
-    def __init__(self, installed: set[str] | None = None) -> None:
+    Imported by shape rather than by name to keep these fakes free of the
+    skill_center import graph; what matters to the engine is that the real
+    service raises *something* from inside a write.
+    """
+
+
+class FakeActivationService:
+    """Stands in for ``DirectActivationService``, recording every call.
+
+    ``platform_defaults`` models the guard the real service runs *before* the
+    permission check: ``activate_mcp``/``deactivate_mcp`` raise
+    ``SkillSetControlPlaneConflictError`` on an engine/template default code.
+    The fake raises too — without that, a materialiser that forgot to ask about
+    platform defaults would pass every test here while half-writing the category
+    in production, which is exactly the gap this models.
+    """
+
+    def __init__(
+        self,
+        installed: set[str] | None = None,
+        platform_defaults: set[str] | None = None,
+    ) -> None:
         self.installed = set(installed or ())
+        self.platform_defaults = set(platform_defaults or ())
         self.activated: list[str] = []
         self.deactivated: list[str] = []
 
@@ -61,9 +83,15 @@ class FakeActivationService:
     ) -> set[str]:
         return set(self.installed)
 
+    def platform_default_mcp_codes(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> frozenset[str]:
+        return frozenset(self.platform_defaults)
+
     async def activate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, Any]:
+        self._refuse_if_platform_owned(server_code)
         self.activated.append(server_code)
         self.installed.add(server_code)
         return {}
@@ -71,9 +99,14 @@ class FakeActivationService:
     async def deactivate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
     ) -> dict[str, Any]:
+        self._refuse_if_platform_owned(server_code)
         self.deactivated.append(server_code)
         self.installed.discard(server_code)
         return {}
+
+    def _refuse_if_platform_owned(self, server_code: str) -> None:
+        if server_code in self.platform_defaults:
+            raise PlatformPolicyConflict("RESOURCE_MANAGED_BY_PLATFORM_POLICY")
 
     @property
     def writes(self) -> int:

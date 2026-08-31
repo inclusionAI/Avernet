@@ -517,3 +517,100 @@ def test_the_report_payload_names_every_field_it_emits():
         "categories",
         "entries",
     }
+
+
+# ── platform-owned MCP codes ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_platform_default_is_refused_before_anything_is_activated():
+    """The review finding, as its regression test.
+
+    ``activate_mcp`` refuses a code the bot's engine/template policy owns, from
+    a guard that runs *before* the permission check. Only asking about
+    permission meant a declaration of ``{ordinary, platform-default}`` passed
+    resolve, activated the ordinary one for real, and then raised — leaving the
+    category half-written and reported aborted.
+
+    The assertion that matters is ``writes == 0``: not "the apply failed", which
+    it did before the fix too, but that it failed *having written nothing*.
+    """
+    activations = FakeActivationService(platform_defaults={"platform-owned"})
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n"
+        "    - server_code: ordinary\n"
+        "    - server_code: platform-owned\n",
+    )
+
+    assert activations.writes == 0, (
+        "the category was half-written: the ordinary server was activated for "
+        "real before the platform default was refused"
+    )
+    assert activations.installed == set()
+    assert report.categories[0].aborted is True
+    reasons = {entry.identity: entry.reason for entry in report.categories[0].entries}
+    assert "platform default" in (reasons["platform-owned"] or "")
+
+
+@pytest.mark.asyncio
+async def test_the_ordinary_server_still_applies_when_no_default_is_declared():
+    """The counterpart, so the guard cannot pass by refusing everything."""
+    activations = FakeActivationService(platform_defaults={"platform-owned"})
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: ordinary\n",
+    )
+
+    assert activations.activated == ["ordinary"]
+    assert report.categories[0].aborted is False
+
+
+@pytest.mark.asyncio
+async def test_a_platform_default_is_never_removed_by_omission():
+    """The removal half of the same guard.
+
+    Overwrite reads an absent entry as "remove it", but a platform default is
+    one the manifest may not declare in the first place, so its absence cannot
+    be a request. Reachable because ``server_codes_for`` is keyed off
+    ``active_engine``/``template_type``: an ordinary installed server becomes a
+    default the moment a bot's engine changes. Left in the removal set, every
+    later apply would call ``deactivate_mcp`` on it and abort the category for
+    something no author could fix from the document.
+    """
+    activations = FakeActivationService(
+        installed={"keep", "became-a-default"},
+        platform_defaults={"became-a-default"},
+    )
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: keep\n",
+    )
+
+    assert report.categories[0].aborted is False
+    assert activations.deactivated == []
+    assert report.categories[0].removals == ()
+    assert "became-a-default" in activations.installed
+
+
+@pytest.mark.asyncio
+async def test_an_unanswerable_platform_default_lookup_writes_nothing():
+    """Fail-closed, in the direction that keeps the manifest's reach narrow.
+
+    Returning an empty set when the policy cannot be reached would restore the
+    original bug exactly — every code would look un-owned and the write would
+    discover the truth mid-loop.
+    """
+
+    class Unreachable(FakeActivationService):
+        def platform_default_mcp_codes(self, **_kwargs):
+            raise RuntimeError("policy lookup unavailable")
+
+    activations = Unreachable()
+    report = await _apply(
+        _engine(activations=activations),
+        "schema_version: 1\nmanifest:\n  mcp:\n    - server_code: ordinary\n",
+    )
+
+    assert activations.writes == 0
+    assert report.categories[0].aborted is True
