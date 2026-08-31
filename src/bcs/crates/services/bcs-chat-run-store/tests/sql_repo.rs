@@ -963,3 +963,48 @@ async fn original_request_is_write_once_across_state_streaming_and_terminal() {
         payload
     );
 }
+
+#[tokio::test]
+async fn gmt_columns_are_db_managed_and_mapped_to_record_timestamps() {
+    // The internal `gmt_create`/`gmt_modified` convention replaces the
+    // app-written created_at_ms/updated_at_ms columns: the app never writes them
+    // (the DB defaults them at insert and advances gmt_modified on every UPDATE
+    // via set_modified_now), and on read the record's created_at_ms/updated_at_ms
+    // are derived from gmt_create/gmt_modified as Unix-epoch millis.
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let repo = SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Sqlite,
+        cache.clone(),
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    );
+    repo.create(record("ts", 1)).await.unwrap();
+
+    // The DB populated the convention columns on insert (the app never wrote them).
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT CAST(strftime('%s', gmt_create) AS INTEGER) AS gmt_create_ts, \
+             CAST(strftime('%s', gmt_modified) AS INTEGER) AS gmt_modified_ts \
+             FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+            vec![
+                DbValue::from("ts".to_string()),
+                DbValue::from("test".to_string()),
+            ],
+        ))
+        .await
+        .unwrap();
+    let gmt_create_ts: i64 = db_get_column(&rows[0], "gmt_create_ts").unwrap();
+    let gmt_modified_ts: i64 = db_get_column(&rows[0], "gmt_modified_ts").unwrap();
+    assert!(gmt_create_ts > 0, "gmt_create must be DB-set on insert");
+    assert!(gmt_modified_ts > 0, "gmt_modified must be DB-set on insert");
+
+    // Evict the seeded overlay so the next `get` falls back to the DB row, where
+    // created_at_ms/updated_at_ms are derived from gmt_create/gmt_modified.
+    cache.delete("bcs:chat_run:ts").await.unwrap();
+    let stored = repo.get("ts").await.unwrap().unwrap();
+    assert_eq!(stored.created_at_ms, (gmt_create_ts as u64) * 1000);
+    assert_eq!(stored.updated_at_ms, (gmt_modified_ts as u64) * 1000);
+}

@@ -293,6 +293,9 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_groups_visibility ON bcs_groups(visibility)",
     // ── chat_runs (Direct Chat async governance, #1546) ─────
     "CREATE TABLE IF NOT EXISTS bcs_chat_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         env TEXT NOT NULL,
         run_id TEXT NOT NULL,
         bot_uuid TEXT NOT NULL,
@@ -302,8 +305,6 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         accumulated_content TEXT,
         error_message TEXT,
         original_request TEXT,
-        created_at_ms INTEGER NOT NULL,
-        updated_at_ms INTEGER NOT NULL,
         completed_at_ms INTEGER,
         expires_at_ms INTEGER NOT NULL,
         version INTEGER NOT NULL,
@@ -312,11 +313,12 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         response_mode TEXT NOT NULL,
         completion_policy TEXT NOT NULL,
         delivery_ack_at_ms INTEGER,
-        PRIMARY KEY (env, run_id)
+        CONSTRAINT uk_env_run_id UNIQUE (env, run_id)
     )",
-    "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_expires ON bcs_chat_runs(env, state, expires_at_ms)",
-    "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_completed ON bcs_chat_runs(env, state, completed_at_ms)",
-    "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_from_bot ON bcs_chat_runs(env, from_bot_id)",
+    "CREATE INDEX IF NOT EXISTS idx_env_expires ON bcs_chat_runs(env, state, expires_at_ms)",
+    "CREATE INDEX IF NOT EXISTS idx_env_completed ON bcs_chat_runs(env, state, completed_at_ms)",
+    "CREATE INDEX IF NOT EXISTS idx_env_from_bot ON bcs_chat_runs(env, from_bot_id)",
+    "CREATE INDEX IF NOT EXISTS idx_env_bot ON bcs_chat_runs(env, bot_uuid)",
     // ── group_participants ────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_group_participants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
