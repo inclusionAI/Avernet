@@ -77,11 +77,11 @@ ENV_FILE=""
 declare -A DEFAULT_PORT=(
     # baas is the exception: it has NO port env override (nothing in src/baas/
     # reads BAAS_PORT), so its listener is whatever the mounted config says.
-    # Every k8s deployment here sets SERVER_ENV=prod (scripts/k8s-tests/*/baas.env),
-    # which merges application-prod.yaml and pins web.port to 8080 — the base
-    # application.yaml's 8888 never applies there. Publishing 8888 would point
-    # the Service at a dead port. NB: BAAS_PORT=8888 in those env files is inert;
-    # it is read by nothing.
+    # Every k8s deployment here sets COMMUNITY_DEPLOY=community
+    # (scripts/k8s-tests/*/baas.env), which merges application-community.yaml
+    # and pins web.port to 8080 — the base application.yaml's 8888 never applies
+    # there. Publishing 8888 would point the Service at a dead port. NB:
+    # BAAS_PORT=8888 in those env files is inert; it is read by nothing.
     [baas]=8080
     [gateway]=8888
     [proxy]=8080

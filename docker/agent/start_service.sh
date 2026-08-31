@@ -1,27 +1,31 @@
 #!/bin/bash
 
 ##############################################
-# start_service.sh - Simplified pod startup script
+# start_service.sh - Pod startup dispatcher
 #
 # Reference: agentclaw-daas-scripts/bootstrapping/start_service.sh
 #
-# This script orchestrates service startup for the Avernet
-# Engine + OpenClaw pod.  It is invoked by the container
-# entrypoint after supervisord is running as PID 1.
+# Thin dispatcher. It parses arguments, saves credentials, then checks
+# --engine and execs the per-engine script; ALL engine-specific startup
+# logic lives in the target script, not here:
+#   openclaw    → start_openclaw.sh     (engine program only)
+#   claude_code → start_claude_code.sh  (claude_relay + engine; requires
+#                                      ANTHROPIC_* model credentials in
+#                                      the pod env — see that script's
+#                                      header for the contract)
+#
+# Invoked by the platform (docker exec) once supervisord is PID 1.
 #
 # Flow:
 #   1. Parse arguments (token, engine, bot_id, stage, ...)
 #   2. Save credentials
-#   3. Configure engine environment
-#   4. Start the engine program via supervisorctl
-#   5. Wait for engine /health endpoint to respond
-#   6. Write ready marker
+#   3. Check --engine and dispatch
 #
 # Usage:
 #   start_service.sh \
 #       --token <token> \
 #       --client_id <client_id> \
-#       --engine openclaw \
+#       --engine openclaw|claude_code  (default openclaw) \
 #       [--bot_id <bot_id>] \
 #       [--stage <stage>] \
 #       [--owner_id <owner_id>]
@@ -40,7 +44,7 @@ source "$SCRIPT_DIR/util.sh"
 LOG_FILE="/home/admin/logs/start_service.log"
 set_log_file "$LOG_FILE"
 
-# --- Ready marker ---
+# --- Ready marker (path exported for the per-engine scripts) ---
 
 MARKER_DIR="/var/run/agentclaw"
 MARKER_FILE="$MARKER_DIR/.starting_done"
@@ -85,7 +89,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-section "start_service.sh - pod startup"
+section "start_service.sh - pod startup dispatcher"
 
 # --- Step 1: Save credentials ---
 
@@ -104,101 +108,24 @@ EOF
 chmod 600 "$CREDENTIALS_FILE"
 success "Credentials saved to $CREDENTIALS_FILE"
 
-# --- Step 2: Configure engine environment ---
+# --- Step 2: Check engine and dispatch ---
 
-section "Step 2: Configuring engine environment..."
+# Shared context for the per-engine scripts (they also carry their own
+# fallbacks so they stay independently runnable for recovery/debugging).
+export MARKER_FILE ADAPTOR_PORT
 
-ADAPTOR_ENV_FILE="/home/admin/.adaptorEnv"
-cat > "$ADAPTOR_ENV_FILE" <<EOF
-export ENGINE=$ENGINE
-export CHAT_ENGINE=$ENGINE
-EOF
-success "Engine env file written to $ADAPTOR_ENV_FILE"
-
-# Export for this script's scope
-export TOKEN CLIENT_ID OWNER_ID BOT_ID STAGE ENGINE CHAT_ENGINE="$ENGINE"
-
-# --- Step 3: Wait for supervisord socket ---
-
-section "Step 3: Waiting for supervisord..."
-
-SUPERVISOR_SOCK="/var/run/supervisor.sock"
-MAX_WAIT=30
-waited=0
-while [ ! -S "$SUPERVISOR_SOCK" ]; do
-    if [ $waited -ge $MAX_WAIT ]; then
-        fail "supervisord socket not ready after ${MAX_WAIT}s"
+case "$ENGINE" in
+    openclaw)
+        info "Engine type: openclaw — dispatching to start_openclaw.sh"
+        exec "$SCRIPT_DIR/start_openclaw.sh"
+        ;;
+    claude_code)
+        info "Engine type: claude_code — dispatching to start_claude_code.sh"
+        exec "$SCRIPT_DIR/start_claude_code.sh"
+        ;;
+    *)
+        fail "Unknown engine: $ENGINE (supported: openclaw, claude_code)"
         echo "FAILED" > "$MARKER_FILE"
         exit 1
-    fi
-    sleep 1
-    waited=$((waited + 1))
-done
-success "supervisord ready (waited ${waited}s)"
-
-# --- Step 4: Start engine via supervisorctl ---
-
-section "Step 4: Starting engine program..."
-
-ENGINE_RUNNING=$(sudo /usr/local/bin/supervisorctl status engine 2>/dev/null | grep -c "RUNNING" || true)
-
-if [ "$ENGINE_RUNNING" -gt 0 ]; then
-    info "Engine is already running"
-else
-    info "Starting engine via supervisorctl..."
-    if sudo /usr/local/bin/supervisorctl start engine; then
-        success "Engine program started"
-    else
-        fail "Failed to start engine via supervisorctl"
-        echo "FAILED" > "$MARKER_FILE"
-        exit 1
-    fi
-fi
-
-# --- Step 5: Wait for engine /health endpoint ---
-
-section "Step 5: Waiting for engine health (port $ADAPTOR_PORT)..."
-
-HEALTH_CHECK_TIMEOUT=120
-HEARTBEAT_INTERVAL=10
-ADAPTOR_READY=0
-
-for i in $(seq 1 "$HEALTH_CHECK_TIMEOUT"); do
-    HEALTH_RESP=$(curl -s --max-time 3 "http://127.0.0.1:${ADAPTOR_PORT}/health" 2>/dev/null || true)
-    if echo "$HEALTH_RESP" | grep -q '"status".*:.*"ok"'; then
-        ADAPTOR_READY=1
-        break
-    fi
-    if [ $((i % HEARTBEAT_INTERVAL)) -eq 0 ]; then
-        info "  Still waiting for engine /health (${i}s / ${HEALTH_CHECK_TIMEOUT}s)..."
-    fi
-    sleep 1
-done
-
-if [ "$ADAPTOR_READY" -ne 1 ]; then
-    warn "Engine health check not ready after ${HEALTH_CHECK_TIMEOUT}s"
-    info "  Last response: $HEALTH_RESP"
-else
-    success "Engine health check passed"
-fi
-
-# --- Step 6: Write ready marker & print status ---
-
-echo "SUCCEEDED" > "$MARKER_FILE"
-
-section "Service startup completed"
-info ""
-info "Service Status:"
-info "  - Engine:   Running (port $ADAPTOR_PORT)"
-info "  - OpenClaw: On-demand (started by engine when a session is requested)"
-info "  - Health:   http://127.0.0.1:${ADAPTOR_PORT}/health"
-info ""
-info "Log Files:"
-info "  - Engine:   /home/admin/logs/engine_out.log"
-info "  - OpenClaw: /home/admin/logs/openclaw_out.log"
-info "  - Startup:  $LOG_FILE"
-info ""
-info "Credentials:"
-info "  - Stored in: $CREDENTIALS_FILE"
-info "  - Engine:    $ENGINE"
-section "====="
+        ;;
+esac

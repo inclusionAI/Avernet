@@ -129,6 +129,7 @@ test pipeline without the coverage gate.
 | Variable | Purpose |
 |---|---|
 | `SERVER_ENV` | Deployment environment (dev, prepub, prod) |
+| `COMMUNITY_DEPLOY` | When set, its value replaces `SERVER_ENV` for naming the `application-<value>.yaml` overlay (community deployments set `COMMUNITY_DEPLOY=community`) |
 | `SOFAPY_CONFIG_OVERLAY` | Additional YAML overlay path |
 | `DEPLOY_ENV` | Custom deploy-env probe variable |
 

@@ -42,8 +42,8 @@ def app_no_lifespan() -> Generator[FastAPI, None, None]:
     DI container.  The real lifespan (DB startup, forwarding refresh) is
     replaced with a noop so tests stay fast and don't touch persistent state.
 
-    Old overlay / SERVER_ENV values are restored after the test so stale
-    state doesn't leak between test modules.
+    Old overlay / SERVER_ENV / COMMUNITY_DEPLOY values are restored after the
+    test so stale state doesn't leak between test modules.
 
     An explicitly-requested ``SOFAPY_CONFIG_OVERLAY`` (e.g.
     ``SOFAPY_CONFIG_OVERLAY=e2e-mariadb``) is preserved so the suite can run
@@ -52,6 +52,7 @@ def app_no_lifespan() -> Generator[FastAPI, None, None]:
     env_overlay = os.getenv("SOFAPY_CONFIG_OVERLAY")
     old_overlay = os.environ.pop("SOFAPY_CONFIG_OVERLAY", None)
     old_server_env = os.environ.pop("SERVER_ENV", None)
+    old_community_deploy = os.environ.pop("COMMUNITY_DEPLOY", None)
     old_gateway_mode = os.environ.pop("GATEWAY_RUN_MODE", None)
     if env_overlay:
         os.environ["SOFAPY_CONFIG_OVERLAY"] = env_overlay
@@ -75,6 +76,10 @@ def app_no_lifespan() -> Generator[FastAPI, None, None]:
         os.environ["SERVER_ENV"] = old_server_env
     else:
         os.environ.pop("SERVER_ENV", None)
+    if old_community_deploy is not None:
+        os.environ["COMMUNITY_DEPLOY"] = old_community_deploy
+    else:
+        os.environ.pop("COMMUNITY_DEPLOY", None)
     if old_gateway_mode is not None:
         os.environ["GATEWAY_RUN_MODE"] = old_gateway_mode
     else:

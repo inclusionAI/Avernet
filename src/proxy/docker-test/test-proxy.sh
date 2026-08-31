@@ -4,7 +4,9 @@
 #
 # Flow:
 #   1. Build proxy:local from docker/services/proxy.dockerfile
-#   2. Start the proxy (SERVER_ENV=prod, test JWT secret)
+#   2. Start the proxy (COMMUNITY_DEPLOY=community, which loads the
+#      application-community.yaml overlay; SERVER_ENV=prod stays set, test
+#      JWT secret)
 #   3. Wait for the proxy /health endpoint and report success / failure
 #
 # Usage:

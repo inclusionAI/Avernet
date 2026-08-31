@@ -43,6 +43,10 @@ user_config:
   skill_scan:
     enabled: false
 
+  # Community has no corp git skills repo, so disable skill sync entirely.
+  git_sync:
+    enable_skill_sync: false
+
   # Per-owner device allocation policy (neutral knobs only).
   device_allocation:
     mode: "multi"
