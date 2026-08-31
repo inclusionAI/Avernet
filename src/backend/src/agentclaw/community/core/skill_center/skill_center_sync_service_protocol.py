@@ -1,17 +1,19 @@
-"""Service API Protocol for skill_center sync."""
+"""Service API Protocol for exact-version SC Public synchronization."""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
+
+from agentclaw.community.core.skill_center.skill_center_sync_contract import (
+    SkillCenterSyncSummary,
+)
 
 
 @runtime_checkable
 class SkillCenterSyncServiceProtocol(Protocol):
-    """Service API for syncing skills with the SkillCenter remote."""
+    def sync(self) -> SkillCenterSyncSummary: ...
 
-    def force_sync(self, *args: Any, **kwargs: Any) -> Any: ...
+    async def sync_bootstrap(self) -> SkillCenterSyncSummary: ...
 
-    def is_synced(self, *args: Any, **kwargs: Any) -> Any: ...
 
-    def cleanup_stale(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    async def sync_bootstrap(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = ["SkillCenterSyncServiceProtocol"]

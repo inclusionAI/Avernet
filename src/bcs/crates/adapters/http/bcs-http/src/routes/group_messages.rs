@@ -1,12 +1,12 @@
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
 use bcs_service_api::{
     BotActor, CallerContext, DeliveryType, GroupCallbackCommand, GroupChatCommand,
-    GroupDetailCommand, GroupHistoryCommand, GroupMessage, GroupMessageType, GroupUseCaseError,
+    GroupDetailCommand, GroupMessageType, GroupUseCaseError,
     HumanActor, MessageDeliveryResult, MessageRole, PersistentGroupSendCommand, ServiceError,
 };
 use bcs_service_api::application::v1::{
@@ -44,16 +44,6 @@ pub struct SendMessageRequest {
     pub message_type: Option<GroupMessageType>,
     #[serde(default)]
     pub role: Option<MessageRole>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct GetMessagesQuery {
-    #[serde(default)]
-    pub view_bot_id: Option<String>,
-    #[serde(default)]
-    pub limit: Option<u64>,
-    #[serde(default)]
-    pub before: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -249,33 +239,6 @@ pub async fn send_message(
         "routed_to": outcome.routed_to,
         "mentions": outcome.mentions,
     })))
-}
-
-pub async fn get_messages(
-    State(state): State<HttpAppState>,
-    Path(id): Path<String>,
-    headers: HeaderMap,
-    uri: Uri,
-    Query(query): Query<GetMessagesQuery>,
-) -> Result<Json<Vec<GroupMessage>>, LegacyGroupError> {
-    let caller = human_caller_from_identity(&state, &headers, &uri).await?;
-    let result = state
-        .services
-        .group_message_history
-        .get_history(GroupHistoryCommand {
-            caller: CallerContext::Human(HumanActor {
-                actor_id: caller.actor_id,
-                staff_no: caller.staff_no,
-            }),
-            group_id: id,
-            view_bot_id: query.view_bot_id,
-            limit: query.limit.unwrap_or(u64::MAX),
-            before: query.before,
-        })
-        .await
-        .map_err(group_use_case_error_to_legacy)?;
-
-    Ok(Json(result.messages))
 }
 
 async fn ensure_group_message_group_exists(

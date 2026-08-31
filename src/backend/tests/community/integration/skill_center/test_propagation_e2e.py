@@ -91,7 +91,7 @@ def e2e_service(tmp_path):
     db.restore()
 
 
-def test_upgrade_writes_done_log_and_calls_sync(e2e_service):
+def test_upgrade_writes_done_log_without_legacy_nas_sync(e2e_service):
     service, log_repo, sync_service = e2e_service
     service._find_affected_bots = MagicMock(return_value=[
         {"bot_id": "bot-X", "owner_id": "100", "engine_type": "openclaw"},
@@ -102,7 +102,7 @@ def test_upgrade_writes_done_log_and_calls_sync(e2e_service):
     assert result.affected_bot_count == 1
     assert result.success_bot_count == 1
     assert result.failed_bot_ids == []
-    sync_service.force_sync.assert_called_once_with(skill_uuid="uuid-upg", env="dev")
+    sync_service.force_sync.assert_not_called()
 
     log = log_repo.find_recent("uuid-upg", "dev", within_seconds=60)
     assert log["status"] == "done"
@@ -117,7 +117,7 @@ def test_idempotent_within_window(e2e_service):
     assert r1.propagation_log_id == r2.propagation_log_id
 
 
-def test_sync_failure_does_not_block_softlink_refresh(e2e_service):
+def test_obsolete_sync_seam_is_not_called_during_softlink_refresh(e2e_service):
     service, log_repo, sync_service = e2e_service
     service._find_affected_bots = MagicMock(return_value=[
         {"bot_id": "bot-Y", "owner_id": "200", "engine_type": "openclaw"},
@@ -126,5 +126,6 @@ def test_sync_failure_does_not_block_softlink_refresh(e2e_service):
 
     result = service.propagate_on_upgrade("uuid-upg", "dev", "2")
     assert result.affected_bot_count == 1  # 软链刷新仍进行
+    sync_service.force_sync.assert_not_called()
     log = log_repo.find_recent("uuid-upg", "dev", within_seconds=60)
     assert log["status"] == "done"  # 整体标 done

@@ -164,3 +164,31 @@ async def test_cancelled_error_marks_failed_and_reraises(repo: OrmBotRunReposito
     rec = repo.get_by_run_id(run_id)
     assert rec.status == "FAILED"
     assert "execution cancelled" in (rec.error or "")
+
+
+async def test_cancelled_by_abort_reuses_failed_status(repo: OrmBotRunRepository):
+    """D1: abort cancels a local task; ResultGuardExecutor reuses FAILED (no TERMINATED).
+
+    Mirrors the chat.abort local-task cancel path: the worker cancels the running
+    task, CancelledError propagates through ResultGuardExecutor.execute, which
+    stamps FAILED via update_error. The run ends in the same FAILED status as a
+    timeout/executor exception — no new TERMINATED state is introduced.
+    """
+    run_id = _insert_run(repo)
+
+    class _BlockingInner:
+        async def execute(self, record):
+            await asyncio.sleep(999)
+
+    ex = ResultGuardExecutor(_BlockingInner(), repo)
+    record = _record(run_id)
+
+    task = asyncio.create_task(ex.execute(record))
+    await asyncio.sleep(0)  # let inner start
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    rec = repo.get_by_run_id(run_id)
+    assert rec.status == "FAILED"
+    assert "execution cancelled" in (rec.error or "")

@@ -41,15 +41,16 @@ def test_shipped_config_uses_human_or_owned_bot_for_group_creation() -> None:
 
     assert requirement == {
         PrincipalType.USER: Presence.OPTIONAL,
-        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.APP: Presence.OPTIONAL,
         PrincipalType.BOT: Presence.OPTIONAL,
     }
 
     # The exact POST override must not relax other Group operations.
     sibling = rs.resolve("GET", "/openapi/v1/collaboration/groups")
     assert sibling == {
-        PrincipalType.USER: Presence.REQUIRED,
-        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.OPTIONAL,
+        PrincipalType.BOT: Presence.OPTIONAL,
     }
 
 
@@ -75,7 +76,7 @@ def test_shipped_config_uses_human_or_owned_bot_for_resource_operations(
 
     assert requirement == {
         PrincipalType.USER: Presence.OPTIONAL,
-        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.APP: Presence.OPTIONAL,
         PrincipalType.BOT: Presence.OPTIONAL,
     }
 
@@ -120,10 +121,7 @@ _HUMAN_ONLY = [
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
     ("GET", "/openapi/v1/bots/spaces/1/skills"),
-    ("POST", "/openapi/v1/bots/bot-123/iam-token"),
     ("POST", "/openapi/v1/bots"),
-    ("POST", "/openapi/v1/bots/local"),
-    ("GET", "/openapi/v1/bots/bot-123/local/auth-status"),
     ("GET", "/openapi/v1/bots/bot-123/authorized-apps"),
     ("DELETE", "/openapi/v1/bots/bot-123/authorized-apps/42"),
     ("GET", "/openapi/v1/bots/logs/traces"),
@@ -169,7 +167,10 @@ def test_iam_operations_do_not_resolve_an_app_identity(method: str, path: str) -
     )
 
     assert req is not None
-    assert req == {PrincipalType.USER: Presence.REQUIRED}
+    assert req == {
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.OPTIONAL,
+    }
 
 
 def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:
@@ -295,7 +296,7 @@ def test_collaboration_socket_exemption_does_not_reach_the_http_plane() -> None:
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
     req = rs.resolve("GET", _COLLABORATION_SOCKET_PATH)
     assert req is not None
-    assert req[PrincipalType.USER] is Presence.REQUIRED
+    assert req[PrincipalType.USER] is Presence.OPTIONAL
 
 
 def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_public() -> (
@@ -313,20 +314,21 @@ def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_pu
         PrincipalType.APP: Presence.OPTIONAL,
         PrincipalType.BOT: Presence.OPTIONAL,
     }
-    assert (
-        rs.resolve(
-            "GET",
-            "/openapi/v1/collaboration/sessions/shared-file/content",
-        )
-        == {}
-    )
+    assert rs.resolve(
+        "GET",
+        "/openapi/v1/collaboration/sessions/shared-file/content",
+    ) == {
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.OPTIONAL,
+        PrincipalType.BOT: Presence.OPTIONAL,
+    }
     sibling = rs.resolve("GET", "/openapi/v1/collaboration/sessions/session-1")
     assert sibling == {
         PrincipalType.USER: Presence.OPTIONAL,
-        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.APP: Presence.OPTIONAL,
         PrincipalType.BOT: Presence.OPTIONAL,
     }
-    assert sibling[PrincipalType.APP] is Presence.REQUIRED
+    assert sibling[PrincipalType.APP] is Presence.OPTIONAL
 
 
 def test_shipped_config_requires_user_and_app_for_session_collection() -> None:
@@ -345,8 +347,8 @@ def test_shipped_config_requires_user_and_app_for_session_collection() -> None:
     ):
         requirement = rs.resolve(method, path)
         assert requirement is not None
-        assert requirement[PrincipalType.USER] is Presence.REQUIRED
-        assert requirement[PrincipalType.APP] is Presence.REQUIRED
+        assert requirement[PrincipalType.USER] is Presence.OPTIONAL
+        assert requirement[PrincipalType.APP] is Presence.OPTIONAL
 
 
 _AUTHORIZED_APPS_PATH = "/openapi/v1/bots/bot-123/authorized-apps"

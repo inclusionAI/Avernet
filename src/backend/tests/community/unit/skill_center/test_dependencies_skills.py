@@ -16,9 +16,30 @@ def test_skill_center_sync_service_resolves_from_injector(test_injector):
 
     svc = test_injector.get(SkillCenterSyncService)
     assert svc is not None
-    assert hasattr(svc, "force_sync")
-    assert hasattr(svc, "cleanup_stale")
-    assert hasattr(svc, "is_synced")
+    assert hasattr(svc, "sync")
+    assert hasattr(svc, "sync_bootstrap")
+
+
+def test_group4_service_protocols_resolve_from_injector(test_injector):
+    from agentclaw.community.api.skill_center_reference_service import (
+        SkillCenterReferenceServiceProtocol,
+    )
+    from agentclaw.community.api.skill_center_sync_service import (
+        SkillCenterSyncServiceProtocol,
+    )
+    from agentclaw.community.api.track_latest import TrackLatestServiceProtocol
+    from agentclaw.community.core.skill_center.services.group4_task_registrar import (
+        SkillCenterGroup4TaskRegistrar,
+    )
+    from agentclaw.community.core.skill_center.services.track_latest_event_listener import (
+        TrackLatestPublishedVersionListener,
+    )
+
+    assert test_injector.get(SkillCenterReferenceServiceProtocol) is not None
+    assert test_injector.get(SkillCenterSyncServiceProtocol) is not None
+    assert test_injector.get(TrackLatestServiceProtocol) is not None
+    assert test_injector.get(SkillCenterGroup4TaskRegistrar) is not None
+    assert test_injector.get(TrackLatestPublishedVersionListener) is not None
 
 
 def test_skill_propagation_service_resolves_from_injector(test_injector):

@@ -16,6 +16,7 @@ provides:
   - "BaasService"
   - "ServiceSkillsManifestBuilder"
   - "ResolvedSharedCorpusDelivery"
+  - "ServiceArtifactLineageReader"
   - "ServiceBot SQLAlchemy models"
 consumes:
   - "BotManagement"

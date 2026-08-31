@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,7 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
     CapabilityDesiredStateRepository,
 )
 from agentclaw.community.core.skill_center.errors import (
+    SkillOfflineError,
     SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
@@ -2345,6 +2347,49 @@ def test_unexclusion_restores_the_installation_row_in_one_command():
     ).changed
 
 
+def test_offline_skill_rejects_membership_direct_and_default_restore_before_writes():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, skill = _seed_default_with_member(db)
+    repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    with db.transactional_orm_session() as session:
+        row = session.query(Skill).filter_by(id=skill.id).one()
+        row.offline_at = datetime(2026, 8, 30)
+        ordinary = SkillSet(
+            name="ordinary",
+            user_id="owner",
+            bolt_id="bot",
+            is_active=True,
+            env="dev",
+        )
+        session.add(ordinary)
+        session.flush()
+        ordinary_id = ordinary.id
+
+    with pytest.raises(SkillOfflineError, match="SKILL_OFFLINE"):
+        repository.add_skill(
+            bot_id="bot",
+            owner_id="owner",
+            set_id=str(ordinary_id),
+            skill_id=str(skill.id),
+        )
+    with pytest.raises(SkillOfflineError, match="SKILL_OFFLINE"):
+        repository.install_skill(
+            bot_id="bot", owner_id="owner", skill_id=str(skill.id)
+        )
+    with pytest.raises(SkillOfflineError, match="SKILL_OFFLINE"):
+        repository.unexclude_default_skill(
+            set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+        )
+
+    with db.orm_session() as session:
+        assert session.query(SkillSetSkill).filter_by(skill_set_id=ordinary_id).count() == 0
+        assert session.query(BotSkillInstallation).count() == 0
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 1
+
+
 def test_unexclusion_fails_closed_on_a_runtime_name_conflict():
     """The name guard aborts the whole command: the exclusion stays."""
     db = _Database()
@@ -2553,6 +2598,31 @@ def test_restore_desired_state_compensates_exclusion_commands():
     assert repository.unexclude_default_skill(
         set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
     ).changed
+
+
+def test_compensation_cannot_restore_reference_after_offline_wins():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    default, skill = _seed_default_with_member(db)
+    previous = repository.snapshot_desired_state(
+        bot_id="bot", owner_id="owner", engine_type="openclaw"
+    )
+    with db.transactional_orm_session() as session:
+        session.query(BotSkillInstallation).filter_by(skill_id=skill.id).delete()
+        persisted = session.query(Skill).filter_by(id=skill.id).one()
+        persisted.offline_at = datetime(2026, 8, 30, 12, 0)
+        persisted.offline_by = "owner"
+
+    with pytest.raises(SkillOfflineError, match="SKILL_OFFLINE"):
+        repository.restore_desired_state(
+            bot_id="bot",
+            owner_id="owner",
+            state=previous,
+            engine_type="openclaw",
+        )
+
+    with db.orm_session() as session:
+        assert session.query(BotSkillInstallation).count() == 0
 
 
 def test_excluding_a_stray_mcp_code_owns_neither_half():

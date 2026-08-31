@@ -50,6 +50,7 @@ user_config:
       avernet-sidecar: "${SIDECAR_IMAGE}"
       init: "${INIT_IMAGE}"
       nas-server: "${NAS_SERVER}"
+      env: "${ENV:-}"
 
   bot_service:
     proxy_base_url: "${BOT_SERVICE_PROXY_BASE_URL:-https://backend.avernet-inc.com}"

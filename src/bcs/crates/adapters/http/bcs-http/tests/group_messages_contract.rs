@@ -1540,9 +1540,9 @@ async fn group_message_routes_preserve_delivery_and_history_shapes() {
         routing,
         bot_delivery,
         frontend_delivery,
-        bot_request,
+        _bot_request,
         message_flow,
-        group_message_history,
+        _group_message_history,
     ) = build_group_app().await;
 
     let response = app
@@ -1583,40 +1583,6 @@ async fn group_message_routes_preserve_delivery_and_history_shapes() {
     assert!(routing.sent_to_bot.lock().await.is_empty());
     let group = group_store.get("group-1").await.unwrap();
     assert_eq!(group.messages.len(), 1);
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/groups/group-1/messages?view_bot_id=owner-bot")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json[0]["id"], "hist-use-case");
-    assert_eq!(json[0]["sender"], "owner-bot");
-    assert_eq!(json[0]["content"], "history answer");
-    assert_eq!(json[0]["role"], "assistant");
-    let history_calls = group_message_history.calls.lock().await;
-    assert_eq!(history_calls.len(), 1);
-    assert_eq!(history_calls[0].group_id, "group-1");
-    assert_eq!(history_calls[0].view_bot_id.as_deref(), Some("owner-bot"));
-    assert_eq!(history_calls[0].limit, u64::MAX);
-    assert_eq!(history_calls[0].before, None);
-    assert!(matches!(
-        &history_calls[0].caller,
-        CallerContext::Human(human)
-            if human.actor_id == "human_123" && human.staff_no == "123"
-    ));
-    drop(history_calls);
-    let history_requests = bot_request.requests.lock().await;
-    assert!(history_requests.is_empty());
 
     let response = app
         .clone()

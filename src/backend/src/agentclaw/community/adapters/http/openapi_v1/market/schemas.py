@@ -165,6 +165,26 @@ class SkillCenterTag(BaseModel):
         return [] if value is None else value
 
 
+class SkillCenterSyncFailure(BaseModel):
+    """One materialized public Skill that could not be synchronized."""
+
+    skill_id: str = Field(description="Stable local Skill identifier.")
+    skill_code: str = Field(description="External Skill Center code.")
+    error_code: str = Field(description="Stable synchronization failure category.")
+
+
+class SkillCenterSyncSummary(BaseModel):
+    """Result of one environment-wide materialized-public synchronization."""
+
+    scanned: int = Field(description="Number of eligible local Skills inspected.")
+    updated: int = Field(description="Number of newly materialized exact versions.")
+    unchanged: int = Field(description="Number already at the external latest version.")
+    failed: int = Field(description="Number that failed without stopping other Skills.")
+    failures: list[SkillCenterSyncFailure] = Field(
+        description="Per-Skill failures from this synchronization run."
+    )
+
+
 class SkillMarketItem(BaseModel):
     """A Skill record from the built-in marketplace."""
 

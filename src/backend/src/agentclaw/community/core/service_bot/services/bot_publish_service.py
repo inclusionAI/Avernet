@@ -363,6 +363,31 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         logger.info(f"[update_publish_status_with_ext] id={publish_id}, target_status={target_status}, source_status={source_status}")
         return record
 
+    def commit_built_artifact(
+        self,
+        *,
+        publish_id: int,
+        ext: Dict[str, Any],
+        expected_ext: Optional[Dict[str, Any]],
+        center_skill_uuids: tuple[str, ...],
+        env: str,
+    ) -> BotPublishRecord:
+        record = self._repo.compare_and_set_built_with_ext(
+            publish_id=publish_id,
+            source_status=PublishStatus.BUILDING.value,
+            target_status=PublishStatus.BUILT.value,
+            expected_ext=expected_ext,
+            ext=ext,
+            center_skill_uuids=center_skill_uuids,
+            env=env,
+        )
+        if record is None:
+            raise PublishNotFoundError(
+                "Publish record changed before Artifact commit: "
+                f"publish_id={publish_id}"
+            )
+        return record
+
     def update_publish_ext(
         self,
         publish_id: int,

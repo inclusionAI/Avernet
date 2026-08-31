@@ -1057,7 +1057,11 @@ def _build_svc_with_router(router, bot, provider="baas", **publish_flow_kwargs):
     )
     # Avoid touching real status/ext plumbing — isolate the build phase.
     svc._ext_state.get_latest_ext = Mock(return_value={})
-    svc._ext_state.update_status = Mock()
+    artifact_commit = Mock()
+    svc._ext_state.commit_built_artifact = artifact_commit
+    # Existing assertions read this historical attribute; both names point at
+    # the same call recorder while build now commits through the Offline fence.
+    svc._ext_state.update_status = artifact_commit
     svc._ext_state.owner_id = Mock(return_value="u1")
     publish_service.update_publish_status = Mock()
     return svc, publish_service
@@ -1180,6 +1184,53 @@ async def test_build_phase_routes_external_and_merges_artifact_ext():
     }
     assert ext_written["content_hash"] == "sha256:y"
     assert ext_written["engine_ext"] == {"k": 1}
+
+
+@pytest.mark.asyncio
+async def test_build_commit_fences_exact_center_skills_before_built_status():
+    skill_uuid = "11111111-1111-4111-8111-111111111111"
+    teclaw = _StubProducer(
+        {
+            "config_artifact": {
+                "schema_version": 4,
+                "engine_type": "teclaw",
+                "skills": [
+                    {
+                        "name": "center",
+                        "scope": "shared",
+                        "store": "skill-center",
+                        "path": f"{skill_uuid}/2.0.0",
+                    }
+                ],
+                "stores": {
+                    "skill-center": {
+                        "type": "oss",
+                        "bucket": "bucket",
+                        "base": "skills-center",
+                    }
+                },
+            }
+        }
+    )
+    router = DeployArtifactProducerRouter(
+        providers={"teclaw": teclaw}, default_provider_key="teclaw"
+    )
+    bot = {
+        "bot_id": "b2",
+        "owner_id": "owner-1",
+        "active_engine": "teclaw",
+        "env": "prod",
+    }
+    svc, _ = _build_svc_with_router(router, bot, provider="teclaw")
+
+    result = await svc.execute_build_phase(
+        _make_publish_record(status=PublishStatus.DRAFT.value, version=2), "op"
+    )
+
+    assert result.status == PublishStatus.BUILT
+    assert svc._ext_state.commit_built_artifact.call_args.kwargs[
+        "center_skill_uuids"
+    ] == (skill_uuid,)
 
 
 @pytest.mark.asyncio
@@ -3413,10 +3464,6 @@ async def test_eval_publish_with_default_tag():
 
 def test_eval_teardown_with_default_tag():
     """场景三：eval_teardown 传入 default_tag 时记录到 result。"""
-    from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
-        EVAL_TEARDOWN_TASK,
-    )
-
     build_service = Mock()
     baas_service = Mock()
     task_queue_service = Mock()

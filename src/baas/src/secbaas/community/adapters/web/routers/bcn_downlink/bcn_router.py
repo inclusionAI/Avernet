@@ -34,6 +34,8 @@ from pydantic import BaseModel, ValidationError
 from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
     BcnErrorDetail,
     BcnErrorResponse,
+    ChatAbortRequest,
+    ChatAbortSuccessResponse,
     ChatHistoryRequest,
     ChatHistorySuccessResponse,
     ChatInjectRequest,
@@ -55,6 +57,7 @@ from secbaas.community.api.bcn import (
     BcnInvalidRequestError,
     BcnUnauthorizedError,
     BcnUnsupportedMethodError,
+    ChatAbortInput,
     ChatHistoryInput,
     ChatInjectInput,
     ChatSendInput,
@@ -187,7 +190,7 @@ def _register_stream(method: str, req_model: type[BaseModel]):
     summary="BCN 下行统一入口",
     description=(
         "接收 BCN 下行请求 "
-        "(chat.send / chat.inject / chat.history / interaction.resolve)，"
+        "(chat.send / chat.inject / chat.history / chat.abort / interaction.resolve)，"
         "根据 body.method 分发"
     ),
     response_model=None,
@@ -197,6 +200,9 @@ def _register_stream(method: str, req_model: type[BaseModel]):
         401: {"description": "认证失败"},
         404: {"description": "Bot 或会话不存在"},
         409: {"description": "幂等键冲突"},
+        410: {
+            "description": "run 已终态（chat.abort 重复或 run 已 COMPLETED/FAILED/TIME_OUT）"
+        },
         412: {"description": "协议版本不兼容"},
         429: {"description": "流控"},
         500: {"description": "服务内部错误"},
@@ -218,6 +224,7 @@ async def bcn_downlink(
     ChatSendSuccessResponse
     | ChatInjectSuccessResponse
     | ChatHistorySuccessResponse
+    | ChatAbortSuccessResponse
     | InteractionResolveAckResponse
     | StreamingResponse
 ):
@@ -229,6 +236,7 @@ async def bcn_downlink(
       - 否则快速返回 200 OK，异步执行后通过 uplink 回调
     - chat.inject: 向 Bot 注入消息（不触发推理）
     - chat.history: 查询聊天历史
+    - chat.abort: 按 session_id 中止运行中的 run（已终态返回 410 run_terminated）
     - interaction.resolve: 持久化并排队 Engine interaction resolution
     """
     body = await request.json()
@@ -399,6 +407,36 @@ async def _dispatch_chat_inject(
         raise BcnBotNotFoundError(provider_bot_ref=exc.bot_id) from exc
 
     return ChatInjectSuccessResponse(ok=result.ok)
+
+
+# ─────────────────────────── chat.abort ───────────────────────────
+
+
+@_register("chat.abort", ChatAbortRequest)
+async def _dispatch_chat_abort(
+    req: ChatAbortRequest,
+    service: BcnDownlinkService,
+) -> ChatAbortSuccessResponse:
+    """chat.abort: Pydantic -> 领域模型 -> 调用 service -> 响应
+
+    按 session_id 中止运行中的 run。成功返回 200 ``{ok, aborted, aborted_run_ids}``；
+    run 已终态时 service 抛 ``BcnRunTerminatedError`` (410)，由
+    ``bcn_exception_handler`` 按 ``http_status`` 统一映射，无须此处捕获。
+    """
+    input_ = ChatAbortInput(
+        id=req.id,
+        session_id=req.session_id,
+        bcn_group_id=req.bcn_group_id,
+        to_bot=req.to_bot.to_domain(),
+    )
+
+    result = await service.handle_chat_abort(input_)
+
+    return ChatAbortSuccessResponse(
+        ok=True,
+        aborted=result.aborted,
+        aborted_run_ids=result.aborted_run_ids,
+    )
 
 
 # ─────────────────────────── chat.history ───────────────────────────

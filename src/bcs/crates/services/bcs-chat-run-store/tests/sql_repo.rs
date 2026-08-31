@@ -107,7 +107,7 @@ async fn streaming_append_advances_cache_ahead_of_db() {
 }
 
 #[tokio::test]
-async fn list_active_and_delete_expired_terminal() {
+async fn list_active_overdue_and_delete_expired_terminal_noop() {
     let repo = repo();
     let mut overdue = record("overdue", 1);
     overdue.expires_at_ms = 5;
@@ -119,7 +119,13 @@ async fn list_active_and_delete_expired_terminal() {
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].run_id, "overdue");
 
-    // Mark overdue terminal then delete past retention.
+    // Mark overdue terminal. SQL repos do not prune — terminal-row deletion is
+    // delegated to the platform scheduled task (spec §11.2); the code path is a
+    // uniform no-op across DB flavors, so the auditable row stays in the DB.
+    //
+    // `delete_expired_terminal` returning the dropped records (so the engine can
+    // attribute the Dropped lifecycle) is exercised by the memory impl and the
+    // memory_repo.rs tests; the SQL impl returns empty and emits nothing here.
     let mut failed = active[0].clone();
     failed.state = ChatRunState::Failed;
     failed.completed_at_ms = Some(0);
@@ -127,12 +133,8 @@ async fn list_active_and_delete_expired_terminal() {
         .await
         .unwrap();
     let dropped = repo.delete_expired_terminal(100, 50).await.unwrap();
-    assert_eq!(dropped.len(), 1);
-    assert_eq!(dropped[0].run_id, "overdue");
-    // The deleted record carries `client` so the engine can attribute the
-    // Dropped lifecycle event without a separate full-table client scan.
-    assert_eq!(dropped[0].client.as_deref(), Some("http-chat-async"));
-    assert!(repo.get("overdue").await.unwrap().is_none());
+    assert!(dropped.is_empty());
+    assert!(repo.get("overdue").await.unwrap().is_some());
     assert!(repo.get("future").await.unwrap().is_some());
 }
 
@@ -164,16 +166,17 @@ async fn metric_counts_counts_active_runs_only() {
 }
 
 fn repo_mysql() -> SqlChatRunRepo {
-    // MySQL flavor over the local SQLite db. The MySQL code paths we test here
-    // return early (no-op) before issuing any DB statement, so the SQLite db is
-    // never actually queried — it just satisfies the constructor.
+    // Mysql flavor over the local in-memory SQLite db. The delete/retire code
+    // paths are uniform no-ops across DB flavors (spec §11.2, delegated to the
+    // platform), so this db is never actually queried — it just exercises the
+    // Mysql-flavor constructor.
     let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
     let cache = Arc::new(InMemoryCachePlugin::new());
     SqlChatRunRepo::new(db, DbSqlFlavor::Mysql, cache, "bcs:".to_string(), 120_000, "test".to_string())
 }
 
 #[tokio::test]
-async fn list_active_excludes_acked_detached_and_drop_retires_them() {
+async fn list_active_excludes_acked_detached_and_drop_is_noop() {
     let repo = repo();
     // Acknowledged detached-delivery run: delivered successfully, overdue, but
     // must NOT be failed on timeout — list_active skips it.
@@ -192,22 +195,26 @@ async fn list_active_excludes_acked_detached_and_drop_retires_them() {
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].run_id, "overdue");
 
-    // Retire the acked-detached run past its retention (now=100, retention=50).
+    // SQL repos do not retire detached rows here — acknowledged detached runs
+    // are pruned by the platform scheduled task (spec §11.2 detach branch). The
+    // code path is a uniform no-op; the auditable row stays, and list_active
+    // keeps excluding it so force_fail won't mark a delivered run as failed.
     let dropped = repo.drop_detached_expired(100, 50).await.unwrap();
-    assert_eq!(dropped.len(), 1);
-    assert_eq!(dropped[0].run_id, "detached");
-    assert!(repo.get("detached").await.unwrap().is_none());
+    assert!(dropped.is_empty());
+    assert!(repo.get("detached").await.unwrap().is_some());
     assert!(repo.get("overdue").await.unwrap().is_some());
 }
 
 #[tokio::test]
-async fn mysql_flavor_deletes_are_noops_delegated_to_platform() {
-    // In MySQL mode, terminal-row and detached-row pruning are delegated to the
-    // platform scheduled task (spec §11.2); the code paths must no-op (return
-    // empty) without touching the DB.
-    let repo = repo_mysql();
-    assert!(repo.delete_expired_terminal(100, 50).await.unwrap().is_empty());
-    assert!(repo.drop_detached_expired(100, 50).await.unwrap().is_empty());
+async fn deletes_are_noops_delegated_to_platform_across_flavors() {
+    // Terminal-row and detached-row pruning are delegated to the platform
+    // scheduled task (spec §11.2); the code paths no-op (return empty) without
+    // touching the DB, uniformly across DB flavors. list_active exclusion is
+    // covered above; here we confirm both delete ports no-op for both flavors.
+    for repo in [repo(), repo_mysql()] {
+        assert!(repo.delete_expired_terminal(100, 50).await.unwrap().is_empty());
+        assert!(repo.drop_detached_expired(100, 50).await.unwrap().is_empty());
+    }
 }
 
 #[tokio::test]

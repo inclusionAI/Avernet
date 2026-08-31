@@ -873,3 +873,22 @@ class CategoryDetailResponse(BaseModel):
 class CategoryListResponse(BaseModel):
     success: bool
     data: List[CategoryResponse]
+
+
+# ==================== Installation backfill (internal) ====================
+
+class BackfillBotRequest(BaseModel):
+    bot_id: str = Field(..., min_length=1, description="Bot to converge")
+    owner_id: str = Field(..., min_length=1, description="Owner of that Bot")
+
+
+class BackfillOutcomeModel(BaseModel):
+    """Echoes the pair that was converged, so a driver can log per-call."""
+
+    bot_id: str
+    owner_id: str
+
+
+class BackfillBotResponse(BaseModel):
+    success: bool
+    data: BackfillOutcomeModel

@@ -6,7 +6,10 @@ from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.service.bcn import DefaultBcnDownlinkService
 from secbaas.community.core.service.bcn.uplink import BcnUplinkClient
-from secbaas.community.core.service.bot_run import BotRunner
+from secbaas.community.core.service.bot_run import (
+    BotRunAbortSurface,
+    BotRunner,
+)
 
 # Assign value, will trigger mypy type check
 _bcn_downlink_service: BcnDownlinkServiceProtocol = DefaultBcnDownlinkService(
@@ -16,4 +19,5 @@ _bcn_downlink_service: BcnDownlinkServiceProtocol = DefaultBcnDownlinkService(
     uplink_client=MagicMock(spec=BcnUplinkClient),
     run_repository=MagicMock(spec=BotRunRepository),
     interaction_service=MagicMock(spec=BotInteractionService),
+    abort_surface=MagicMock(spec=BotRunAbortSurface),
 )

@@ -696,6 +696,12 @@ _UNGRANTED_APP_CASES = {
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
+    ("POST", "/openapi/v1/bots/market/skill-center/sync"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/market/skill-center/sync"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("GET", "/openapi/v1/bots"): {
         "request": lambda client: client.get("/openapi/v1/bots"),
         "assert_starved": lambda response: (

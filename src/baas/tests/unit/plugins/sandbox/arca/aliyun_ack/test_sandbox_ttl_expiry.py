@@ -319,7 +319,15 @@ class TestExtendTtl:
 class TestDestroy:
     def test_destroy_success(self) -> None:
         with _CoreHarness() as h:
-            assert _sandbox(deployment_name="avernet-agent-uid").destroy() is True
+            sb = _sandbox(
+                deployment_name="avernet-agent-uid",
+                resource_names={
+                    "Deployment": "avernet-agent-uid",
+                    "ConfigMap": "envoy-header-rules-uid",
+                    "NetworkPolicy": "avernet-agent-netpol-uid",
+                },
+            )
+            assert sb.destroy() is True
         h.apps.delete_namespaced_deployment.assert_called_once()
         h.core.delete_namespaced_config_map.assert_called_once()
         h.core.delete_namespaced_network_policy.assert_called_once()
@@ -368,12 +376,12 @@ class TestUpdateOutboundRule:
 class TestBuildTemplateVars:
     def test_empty_ttl_when_none(self) -> None:
         vars_ = _build_template_vars("u", "ns", {})
-        assert vars_["TTL_EXPIRATION_TIMESTAMP"] == ""
+        assert vars_["ttl_expiration_timestamp"] == ""
 
     def test_computes_absolute_deadline(self) -> None:
         now_ms = int(time.time() * 1000)
         vars_ = _build_template_vars("u", "ns", {}, ttl_in_minutes=10)
-        expiry = int(vars_["TTL_EXPIRATION_TIMESTAMP"])
+        expiry = int(vars_["ttl_expiration_timestamp"])
         assert expiry >= now_ms + 10 * 60 * 1000 - 1000
         assert expiry <= now_ms + 10 * 60 * 1000 + 1000
 
@@ -389,12 +397,12 @@ class TestBuildTemplateVars:
         vars_ = _build_template_vars(
             "u", "ns", images, storage=storage, resource_spec=spec
         )
-        assert vars_["STORAGE_ID"] == "sid"
-        assert vars_["MOUNT_PATH"] == "/mnt"
-        assert vars_["STORAGE_SIZE"] == "2Gi"
-        assert vars_["CPU"] == "4"
-        assert vars_["MEMORY"] == "8Gi"
-        assert vars_["AGENT_IMAGE"] == "img"
+        assert vars_["storage_id"] == "sid"
+        assert vars_["mount_path"] == "/mnt"
+        assert vars_["storage_size"] == "2Gi"
+        assert vars_["cpu"] == "4"
+        assert vars_["memory"] == "8Gi"
+        assert vars_["agent_image"] == "img"
 
 
 class TestConvertOutboundRules:
@@ -488,7 +496,7 @@ class TestConnectTtlRecovery:
             h.core.list_namespaced_pod.return_value = _FakePodList([pod])
             sb = _plugin().connect_sync_sandbox("aliyun-ack-abc123")
         assert sb._template_id == "ALIYUN_ACK_DEFAULT"
-        assert sb._deployment_name == "avernet-agent-xyz"
+        assert sb._deployment_name == "avernet-agent-aliyun-ack-abc123"
         assert sb._container_name == "avernet-agent"
 
     def test_connect_defaults_when_metadata_missing(self) -> None:
@@ -500,8 +508,8 @@ class TestConnectTtlRecovery:
             h.core.list_namespaced_pod.return_value = _FakePodList([pod])
             sb = _plugin().connect_sync_sandbox("aliyun-ack-abc123")
         assert sb._template_id == "aliyun_ack"
-        assert sb._deployment_name == ""
-        assert sb._container_name == ""
+        assert sb._deployment_name == "avernet-agent-aliyun-ack-abc123"
+        assert sb._container_name == "avernet-agent"
 
     def test_connect_defaults_when_no_owner_or_spec(self) -> None:
         with _CoreHarness() as h:
@@ -512,8 +520,8 @@ class TestConnectTtlRecovery:
             h.core.list_namespaced_pod.return_value = _FakePodList([pod])
             sb = _plugin().connect_sync_sandbox("aliyun-ack-abc123")
         assert sb._template_id == "aliyun_ack"
-        assert sb._deployment_name == ""
-        assert sb._container_name == ""
+        assert sb._deployment_name == "avernet-agent-aliyun-ack-abc123"
+        assert sb._container_name == "avernet-agent"
 
     def test_connect_owner_ref_not_replicaset(self) -> None:
         with _CoreHarness() as h:
@@ -523,7 +531,7 @@ class TestConnectTtlRecovery:
             ]
             h.core.list_namespaced_pod.return_value = _FakePodList([pod])
             sb = _plugin().connect_sync_sandbox("aliyun-ack-abc123")
-        assert sb._deployment_name == ""
+        assert sb._deployment_name == "avernet-agent-aliyun-ack-abc123"
 
     def test_connect_api_exception_raises(self) -> None:
         from kubernetes.client.exceptions import ApiException

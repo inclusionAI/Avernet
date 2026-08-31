@@ -27,10 +27,11 @@ re-copy by hand.
 from ._key_gen import APIKeyGenerator
 from ._orm import AppRow
 from ._registrar import AppRegistrar, IssuedApp, PrefixAllocationError
-from ._repository import AppRepository, PrefixTakenError
+from ._repository import AppNameTakenError, AppRepository, PrefixTakenError
 
 __all__ = [
     "APIKeyGenerator",
+    "AppNameTakenError",
     "AppRegistrar",
     "AppRepository",
     "AppRow",

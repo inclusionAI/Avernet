@@ -64,10 +64,10 @@ class IdentityChain:
         for strategy in self._strategies:
             # AuthError (present-but-invalid) propagates and short-circuits the
             # chain; None (absent) falls through to the next strategy.
-            logger.debug("chain %s trying strategy %s", self.name, strategy.name)
+            logger.info("chain %s trying strategy %s", self.name, strategy.name)
             principal = await strategy.build(creds)
             if principal is None:
-                logger.debug(
+                logger.info(
                     "chain %s strategy %s returned None", self.name, strategy.name
                 )
                 continue
@@ -82,7 +82,7 @@ class IdentityChain:
                     f"strategy {strategy.name!r} built wrong principal type for "
                     f"{self.principal_type.value!r}"
                 )
-            logger.debug(
+            logger.info(
                 "chain %s strategy %s resolved principal", self.name, strategy.name
             )
             return principal

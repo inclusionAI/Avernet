@@ -23,6 +23,7 @@ from json import JSONDecodeError
 from typing import Awaitable, Callable, Mapping, TypeVar
 
 from fastapi import Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.error_logging import (
@@ -220,6 +221,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillEngineNotSupportedError,
     SkillParameterValidationError,
     SkillRuntimeNameConflictError,
+    SkillOfflineBlockedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
@@ -228,6 +230,7 @@ from agentclaw.community.core.skill_center.errors import (
     McpPermissionDeniedError,
     LocalSkillTooLargeError,
 )
+from agentclaw.community.adapters.http.openapi_v1 import errors_skill_center
 from agentclaw.community.core.services.identity import (
     InvalidIdentityEntityTypeError,
     InvalidIdentityFileTypeError,
@@ -609,6 +612,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogNotFoundError: (404, "Not found"),
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
+    **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
     # caller learns the limit instead of hitting it inside a container. The
@@ -753,7 +757,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     CallbackCorrelationError: (400, "Bad request"),
     TaskError: (500, "Internal error"),
 }
-
 # Most public categories retain the ordinary ``xxx000`` business code.  A
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
@@ -789,6 +792,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillEngineNotSupportedError: 409107,
     RepositoryCatalogSyncInProgressError: 409108,
     RepositoryCatalogSyncFailedError: 502103,
+    **errors_skill_center.SKILL_CENTER_ENVELOPE_ERROR_CODES,
     SkillSetControlPlaneLockUnavailableError: 409209,
     SkillSetAccessDeniedError: 403201,
     McpPermissionDeniedError: 403202,
@@ -892,22 +896,24 @@ def _error_response(
     *,
     headers: Mapping[str, str] | None = None,
     code: int | None = None,
+    data: object | None = None,
 ) -> JSONResponse:
     # ``ErrorEnvelope``, not ``Envelope``: it is the model every route documents
-    # for failures (``ERROR_RESPONSES``), and since ``Envelope`` gained the
-    # optional ``warning`` field the two shapes are no longer identical. Building
-    # the documented model keeps the wire and the published schema in step — an
-    # error body has no partial payload to caveat, so ``warning`` has no meaning
-    # here.
-    body = ErrorEnvelope(
-        code=code if code is not None else http_status * 1000,
-        message=message,
-        data=None,
-        request_id=_trace_id(request),
-    )
+    resolved_code = code if code is not None else http_status * 1000
+    request_id = _trace_id(request)
+    if data is None:
+        content = ErrorEnvelope(
+            code=resolved_code, message=message, data=None, request_id=request_id
+        ).model_dump()
+    else:
+        # P2-OFF-002 documents Envelope[SkillOfflineImpact], not ErrorEnvelope.
+        content = dict(
+            code=resolved_code, message=message,
+            data=jsonable_encoder(data), request_id=request_id,
+        )
     return JSONResponse(
         status_code=http_status,
-        content=body.model_dump(),
+        content=content,
         headers=_error_headers(request, headers),
     )
 
@@ -989,5 +995,6 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
                 message,
                 request,
                 code=ENVELOPE_ERROR_CODES.get(error_type),
+                data=(exc.impact if isinstance(exc, SkillOfflineBlockedError) else None),
             )
     return None

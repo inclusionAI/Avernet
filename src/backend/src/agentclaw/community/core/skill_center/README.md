@@ -30,6 +30,8 @@ provides:
   - "SkillSetManagementService"
   - "SpaceSkillGrantService"
   - "SpaceSkillApplicationService"
+  - "SpaceSkillOfflineService"
+  - "PublishedVersionDraftBuilder"
   - "SpaceSkillApplicationServiceProtocol"
   - "SpaceSkillDraftRepository"
   - "SpaceSkillReadRepository"
@@ -46,6 +48,14 @@ provides:
   - "SkillVersionMaterializer"
   - "SkillVersionMaterializerProtocol"
   - "PublishedMaterializedSkillVersion"
+  - "SpaceSkillPublicationService"
+  - "SpaceSkillPublicationServiceProtocol"
+  - "SkillCenterPublicationGatewayProtocol"
+  - "SpaceSkillPublicationTaskHandler"
+  - "ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES"
+  - "PublicationAttemptRecord"
+  - "InstallationBackfillService"
+  - "InstallationBackfillServiceProtocol"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
   - "LocalSkillCleanupWorkModel"
@@ -60,6 +70,12 @@ provides:
   - "SkillManifestValidationIssue"
   - "SkillManifestValidationResult"
   - "SkillCenterGatewayService"
+  - "SkillCenterReferenceService"
+  - "SkillCenterReferenceProcessor"
+  - "SkillCenterSyncService"
+  - "TrackLatestService"
+  - "TrackLatestPublishedVersionListener"
+  - "PublicCenterSkillIdentity"
   - "CanonicalCenterVersionStore"
   - "CanonicalCenterVersion"
   - "CanonicalCenterVersionIdentity"
@@ -96,14 +112,24 @@ consumes:
   - "SpaceSkillReadRepository"
   - "SkillVersionRepositoryProtocol"
   - "SkillVersionMaterializationRepositoryProtocol"
+  - "SpaceSkillPublicationRepositoryProtocol"
   - "SkillVersionScannerProtocol"
   - "HttpClient"
+  - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.space_skill_version # published Space Skill read contract consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
+  - agentclaw.community.core.repository.protocols.space_skill_publication # Publication aggregate persistence contract
+  - agentclaw.community.core.repository.protocols.skill_center_reference
+  - agentclaw.community.core.repository.protocols.track_latest
+  - agentclaw.community.core.repository.skill_center_reference_types
+  - agentclaw.community.core.repository.track_latest_types
   - agentclaw.community.core.repository.protocols.work_orders
+  - agentclaw.community.core.repository.protocols.space_skill_offline
+  - agentclaw.community.core.repository.space_skill_offline_types
+  - agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol
   - agentclaw.community.core.work_orders
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
@@ -178,6 +204,17 @@ domain readiness. Publication and SC Reference producers consume the public
 Materializer Service API; Runtime reads consume only PUBLISHED Versions through
 `SkillVersionResolver`.
 
+`SpaceSkillPublicationService` freezes the current immutable Draft Revision and
+persists its `frozen_draft_locator` on the durable Attempt before enqueueing;
+the worker never re-reads mutable `Skill.zip_url` as its input. Its worker is the only owner of
+the one-shot SC submit/status state machine: it records `sc_post_started_at`
+before the external call, never submits the same Attempt twice, and moves an
+uncertain response to `RESULT_UNKNOWN`. Once SC identifies an exact Version it
+delegates exclusively to `SkillVersionMaterializerProtocol`; retries keep the
+same `skill_version_id`. The returned `PublishedMaterializedSkillVersion` is
+also the unified at-least-once Published event seam. Track Latest, Offline,
+Reference and Artifact consumers remain outside the Publication transaction.
+
 `DraftContentStore` persists one canonical ZIP per immutable Draft revision.
 Its business reference is `draft://<skill_uuid>/v<target>/<revision_id>`; only
 the OSS adapter knows the configured physical object prefix. The Store owns no
@@ -203,15 +240,19 @@ retry, Attempt, persistence, and materialization decisions remain above it.
 Public version/download reads use an explicit scope and verify public visibility
 before crossing the exact-version boundary.
 
-This change is the staged outbound seam only. A follow-up OCB change provides
-the Corp HTTP adapter, authentication/configuration binding, and wire mapping.
-A separate Avernet change migrates the `openapi_v1` public catalogue and
-publication consumers onto domain services backed by this seam. Until both are
-present, existing routers keep using the legacy client; this module is not a
-claim that production traffic has migrated.
-No Catalog, Publication, Public Reference, or Track Latest application module
-is introduced speculatively by this change; those modules remain owned by their
-later workflow PRs.
+The catalogue Gateway, Space Publication, SC Public Reference, materialized-only
+Sync, and Track Latest application modules now consume the typed seams above.
+`TrackLatestPublishedVersionListener` is the single required EventBus bridge
+from the unified at-least-once PUBLISHED event to durable fanout. Publication
+still owns no Track Latest policy or task type, and Reference/Sync still own no
+Publication Attempt state.
+
+SC Public Sync's distributed cache lease is a best-effort batch coordinator,
+not a transactional fencing token. If renewal is lost while one exact,
+idempotent materialization is already running, that item may complete; Sync
+observes the loss at the next item boundary, stops subsequent items, and reports
+the stable coordinator error. A later periodic/manual pass converges the
+materialized-only set again.
 
 ### One writer, one flush, one reader, one rule book
 
@@ -262,6 +303,19 @@ reads such as `GET /openapi/v1/bots/{bot_id}/skills` (see
 `specs/2026-08-24-installation-single-source-of-truth/`). It writes only the
 difference, in one transaction, after the caller's Bot access has been checked,
 and never touches runtime.
+
+`InstallationBackfillService` runs that same flush deliberately for one named
+Bot, behind the Bearer-token
+`POST /api/internal/skill-center/installations/backfill/bot` endpoint. The lazy
+flush converges a Bot only when something reads it, which is enough for per-Bot
+commands but not for configuration that reaches many Bots at once and has no
+per-Bot write to ride on: platform Default-Set content edited through the
+`/api/skillsets/admin/*` tooling, an `is_active` flipped straight on the row, or
+a `center://` membership resolving to a newly published version. The endpoint is
+the tool a backfill invokes for each affected Bot; selecting the Bots and pacing
+the calls stays with whoever drives it. It is DB-side only, exactly like the
+flush it runs, so a Bot converged this way still needs a runtime projection
+before its engine sees the change.
 
 MCP Direct activation and ordinary SkillSet MCP membership share the same
 active-only desired-state and compensation boundary as Skills.  The MCP

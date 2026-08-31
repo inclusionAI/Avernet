@@ -37,13 +37,13 @@ Send = Callable[[dict[str, Any]], Awaitable[None]]
 
 # The gateway signs every forwarded identity, and there is no fallback key, so
 # a test that forwards has to provision one exactly as a deployment does: the
-# community resolver reads ``{env_prefix}{NAME}_VALUE``.
+# community resolver reads ``{NAME}`` directly from the environment.
 _TEST_KEY = "integration-test-shared-secret-32b!!"
 
 
 @pytest.fixture(autouse=True)
 def _signing_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE", _TEST_KEY)
+    monkeypatch.setenv("principal_signing_key", _TEST_KEY)
 
 
 def _load_user_config() -> UserConfig:
@@ -54,7 +54,7 @@ def _build_signer():
     uc = _load_user_config()
     return build_principal_signer(
         user_config=uc,
-        secret_resolver=CommunitySecretResolver(env_prefix=uc.secret.env_prefix),
+        secret_resolver=CommunitySecretResolver(),
     )
 
 

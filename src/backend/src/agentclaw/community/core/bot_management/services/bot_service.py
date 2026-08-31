@@ -1324,17 +1324,17 @@ class BotService(BotServiceProtocol):
 
         # Always use backend configured engine types, ignore frontend input.
         # _get_engine_types() (ENGINE_TYPES env, falling back to the static list)
-        # is what validation and switch_engine both use; persisting the static
-        # list instead meant a bot created on a deployment-enabled engine (e.g.
-        # teclaw) stored an enabled-engine list that omitted its own active
-        # engine — so switch_engine would refuse to switch back to it.
+        # is what validation uses; persisting the static list instead meant a bot
+        # created on a deployment-enabled engine (e.g. teclaw) stored an
+        # enabled-engine list that omitted its own active engine.
         resolved_engine_types = _get_engine_types()
 
         # A bot's active engine must be a member of its own enabled-engine list —
-        # switch_engine checks that list, so a row violating this can never
-        # return to the engine it was created on. The invariant held by accident
-        # while the static list was persisted (it contains DEFAULT_ENGINE_TYPE);
-        # persisting the configured registry broke it wherever the two differ.
+        # consumers that enumerate that list (``get_engine_paths``, the bot-detail
+        # read surfaces) would otherwise skip the engine the bot actually runs on.
+        # The invariant held by accident while the static list was persisted (it
+        # contains DEFAULT_ENGINE_TYPE); persisting the configured registry broke
+        # it wherever the two differ.
         #
         # Guaranteed by construction rather than by rejecting: teclaw is a
         # supported engine that is absent from the default registry, so
@@ -3462,73 +3462,6 @@ class BotService(BotServiceProtocol):
             )
             for engine in engine_types
         }
-
-    def switch_engine(self, bot_id: str, user_id: str, engine_type: str) -> Dict[str, Any]:
-        """
-        Switch the active engine for a bot.
-
-        Args:
-            bot_id: Bot ID
-            user_id: User ID for permission check (must be the owner)
-            engine_type: New engine type to switch to
-
-        Returns:
-            Updated bot record
-
-        Raises:
-            BotNotFoundError: If bot not found
-            BotServiceError: If engine type is invalid or update fails
-        """
-        # Check user_id is provided
-        if not user_id:
-            raise BotServiceError("User ID is required for switching engine")
-
-        # Validate engine_type
-        supported_engines = _get_engine_types()
-        if engine_type not in supported_engines:
-            raise BotServiceError(f"Invalid engine type: {engine_type}. Supported engines: {supported_engines}")
-
-        # Get bot by bot_id and owner_id (user_id)
-        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot not found: {bot_id}")
-
-        self._validate_default_bot_engine(bot_id, engine_type)
-
-        # Check if the engine is in bot's engine_types
-        bot_engine_types = bot.get("engine_types", [])
-        if engine_type not in bot_engine_types:
-            raise BotServiceError(f"Engine '{engine_type}' is not enabled for this bot. Enabled engines: {bot_engine_types}")
-
-        try:
-            # Update active_engine (use update_by_owner to ensure we only update the owner's bot)
-            update_data = {
-                "active_engine": engine_type,
-                "modifier_id": user_id,
-            }
-            updated_bot = self._repository.update_by_owner(bot_id, user_id, update_data)
-            if not updated_bot:
-                raise BotNotFoundError(f"Bot not found: {bot_id}")
-
-            logger.info(f"[bot_service.switch_engine] Bot {bot_id} active_engine switched to {engine_type} by user {user_id}")
-
-            # Fetch binding info from ac_entity_device_binding if exists
-            binding_id = updated_bot.get("binding_id")
-            if binding_id:
-                try:
-                    service = self._device_service_provider()
-                    binding = service.get_device(binding_id=binding_id)
-                    if binding:
-                        updated_bot["device_binding"] = binding.to_dict()
-                except Exception as e:
-                    logger.warning(f"[bot_service.switch_engine] Failed to get device binding {binding_id}: {e}")
-
-            return updated_bot
-        except BotNotFoundError:
-            raise
-        except Exception as e:
-            logger.error(f"[bot_service.switch_engine] Failed to switch engine for bot {bot_id}: {e}")
-            raise BotServiceError(f"Failed to switch engine: {e}")
 
     def delete_bot(self, bot_id: str, user_id: str, nick_name: Optional[str] = None) -> bool:
         """

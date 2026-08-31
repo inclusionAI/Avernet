@@ -8,13 +8,16 @@ from injector import inject
 from sqlalchemy import and_, func
 
 from agentclaw.community.core.models.skill import Skill
-from agentclaw.community.core.models.space_skill import SkillVersion
+from agentclaw.community.core.models.space_skill import SkillSpaceBinding, SkillVersion
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillVersionMaterializationRepositoryProtocol,
     SkillVersionRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center_types import (
     SkillVersionRecord,
+)
+from agentclaw.community.core.repository.implementations.skill_center.skill_version_lock import (
+    lock_skill_then_exact_version,
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     MaterializingSkillVersion,
@@ -138,21 +141,15 @@ class SkillVersionRepository(
         published_at: datetime,
     ) -> PublishedMaterializedSkillVersion:
         with self._db.orm_session() as session:
-            result = (
-                session.query(SkillVersion, Skill)
-                .join(Skill, Skill.id == SkillVersion.skill_id)
-                .filter(
-                    SkillVersion.id == skill_version_id,
-                    SkillVersion.skill_id == skill_id,
-                    SkillVersion.env == env,
-                    Skill.env == env,
-                )
-                .with_for_update()
-                .one_or_none()
+            locked = lock_skill_then_exact_version(
+                session,
+                env=env,
+                skill_id=skill_id,
+                skill_version_id=skill_version_id,
             )
-            if result is None:
+            if locked is None:
                 raise RuntimeError("materializing Skill Version not found")
-            version, skill = result
+            skill, version = locked
             if version.status == "PUBLISHED":
                 if (
                     version.metadata_json != metadata_json
@@ -169,6 +166,24 @@ class SkillVersionRepository(
                 version.status = "PUBLISHED"
                 skill.description = description
                 skill.status = "PUBLISHED"
+                # Only a real new publication of a Space-owned Skill restores
+                # TeamClaw visibility. An idempotent replay of an already
+                # PUBLISHED Version must never clear a later Offline fact, and
+                # SC Public Reference/Sync has no Space ownership to restore.
+                owns_space = (
+                    session.query(SkillSpaceBinding.id)
+                    .filter(
+                        SkillSpaceBinding.skill_id == skill_id,
+                        SkillSpaceBinding.env == env,
+                    )
+                    .one_or_none()
+                )
+                if (
+                    owns_space is not None
+                    and version.publication_attempt_id is not None
+                ):
+                    skill.offline_at = None
+                    skill.offline_by = None
                 session.flush()
             else:
                 raise RuntimeError("Skill Version is not MATERIALIZING")

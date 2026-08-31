@@ -9,7 +9,9 @@ Three reads, one write:
 
 - ``switch`` is deliberately **not** wrapped: it would be a back door around the
   rule that a bot's engine is fixed at creation (``PUT /openapi/v1/bots/{bot_id}``
-  rejects it).
+  rejects it). The legacy ``POST /api/bots/switch-engine`` was the last surface
+  that still flipped ``active_engine`` after creation; it has been removed, so
+  the rule now holds across every surface rather than only the public one.
 - ``restart`` *is* wrapped here as ``POST /openapi/v1/bots/{bot_id}/engine/restart``,
   relaying the device-side engine daemon's ``POST /api/engine/restart`` (**not**
   ``shell exec supervisorctl``). This is *not* the same verb as

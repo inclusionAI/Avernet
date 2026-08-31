@@ -413,7 +413,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The task grant/revoke operations also carry the target in ``bcs_bot_id``
 #: request-body fields rather than a ``bot_id`` parameter, adding two more
 #: operations without changing the path/query counts.
-_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 90}
+_BOT_ID_PLACEMENT = {"path": 146, "query": 1, "none": 98}
 
 
 def _schema() -> dict:
@@ -542,8 +542,13 @@ def test_the_pinned_number_of_operations_take_it():
     # account-level operation. Phase 2 Group 1 adds fourteen Space-addressed
     # creation/detail/Draft/Published-Version operations; none addresses a Bot,
     # and each carries the explicit user dimension. The merged surface contains
-    # 207 operations.
-    assert len(taking) == 208
+    # 207 operations. Phase 2 Group 3 Publication adds five Space-addressed
+    # operations, Group 4 adds three Bot-addressed Reference operations plus
+    # one account-level manual SC Public Sync operation, and Group 5 adds the
+    # Offline impact and command operations. All twelve are user-scoped,
+    # bringing the combined surface to 218. The public static-template mirror
+    # adds one more user-scoped operation, bringing the current surface to 219.
+    assert len(taking) == 219
 
 
 def test_the_exempt_operations_take_none():

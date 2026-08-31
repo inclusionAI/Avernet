@@ -367,24 +367,22 @@ class ConfigModule(Module):
     @provider
     def secret_names(self) -> cfg.SecretNamesConfig:
         """Secret-registry key names (neutral empty defaults; corp env overlays
-        set the real Mist names via the ``secret_names`` yaml block)."""
+        set the real Mist names via the ``secret_names`` yaml block).
+
+        Built reflectively: every field is a plain string whose yaml key is its
+        own name, and a hand-written constructor call silently pins any field
+        left out of it to its default while nobody reads its yaml key.
+        ``skill_center_internal_token`` shipped that way, which for a token
+        name meant the auth guard fell back to the public singlebox constant
+        in every environment. A field needing other handling must be lifted out.
+        """
         block = _block("secret_names")
         defaults = cfg.SecretNamesConfig()
         return cfg.SecretNamesConfig(
-            dormant_internal_token=block.get(
-                "dormant_internal_token", defaults.dormant_internal_token
-            ),
-            aiworkbench_repo_url=block.get(
-                "aiworkbench_repo_url", defaults.aiworkbench_repo_url
-            ),
-            gateway_principal_signing_key=block.get(
-                "gateway_principal_signing_key",
-                defaults.gateway_principal_signing_key,
-            ),
-            aicoding_theta_master_key=block.get(
-                "aicoding_theta_master_key",
-                defaults.aicoding_theta_master_key,
-            ),
+            **{
+                f.name: block.get(f.name, getattr(defaults, f.name))
+                for f in fields(cfg.SecretNamesConfig)
+            }
         )
 
     @singleton

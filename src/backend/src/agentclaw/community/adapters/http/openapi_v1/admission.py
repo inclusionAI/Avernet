@@ -6,7 +6,6 @@ follows from its **shape** — which identities it takes, and how it resolves th
 bot it acts on — not from taste. ``test_principal_seam.py`` fails if the surface
 and this table disagree in either direction, so a route added tomorrow is
 refused until someone puts it in a group on purpose.
-
 """
 
 from __future__ import annotations
@@ -22,11 +21,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.log import get_logger
-
-
 logger = get_logger()
-
-
+_SPACE_SKILL_BASE = "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"
+_SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: Every public operation, keyed by ``(method, path)`` exactly as FastAPI
 #: reports it. Grouped by mode, with the reason each group has the mode it has.
 #:
@@ -164,6 +161,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/mcps",
@@ -574,6 +574,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skill-center/skills"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/market/skill-center/sync"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/catalog/search"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/catalog/discover"): AdmissionMode.OPEN,
     # ── Space and work-order APIs ───────────────────────────────────────────
@@ -604,6 +605,8 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/upgrade"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git"): AdmissionMode.REFUSED,
     ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"): AdmissionMode.USER_GATED,
     ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"): AdmissionMode.REFUSED,
     ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"): AdmissionMode.REFUSED,
@@ -631,6 +634,11 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover",
     ): AdmissionMode.REFUSED,
+    ("GET", f"{_SPACE_SKILL_BASE}/publication-impact"): AdmissionMode.REFUSED,
+    ("POST", _SPACE_SKILL_PUBLICATION): AdmissionMode.REFUSED,
+    ("GET", _SPACE_SKILL_PUBLICATION): AdmissionMode.REFUSED,
+    ("GET", f"{_SPACE_SKILL_PUBLICATION}/{{attempt_id}}"): AdmissionMode.REFUSED,
+    ("POST", f"{_SPACE_SKILL_PUBLICATION}/{{attempt_id}}/retry"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",

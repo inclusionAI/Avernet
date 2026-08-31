@@ -353,6 +353,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills"): Check(PermissionLevel.MEMBER),
     ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.skill_query_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills"):
@@ -412,6 +415,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("tenant-identical marketplace"),
     ("POST", "/openapi/v1/bots/market/skill-center/skills"):
         NoCheck("tenant-identical marketplace"),
+    ("POST", "/openapi/v1/bots/market/skill-center/sync"):
+        NoCheck("tenant-identical materialized Skill Center synchronization"),
     ("GET", "/openapi/v1/bots/market/skill-center/tags"):
         NoCheck("tenant-identical marketplace"),
     ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),
@@ -495,6 +500,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Skill Grant, frozen Git source and revision CAS, adjudicated by the Skill service"),
     ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"):
         NoCheck("Skill Grant, revision CAS, Lease fencing and aggregate history, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact"):
+        NoCheck("Skill Owner or Manager Grant and fail-closed lineage, adjudicated by the Offline service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline"):
+        NoCheck("Skill Owner or Manager Grant and transactional blocker recheck, adjudicated by the Offline service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"):
         NoCheck("Space membership and Skill Grants, adjudicated by the Grant service"),
     ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"):
@@ -513,6 +522,16 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Lease holder and fencing token, adjudicated by the Lease service"),
     ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover"):
         NoCheck("Skill Owner or Manager Grant, adjudicated by the Lease service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publication-impact"):
+        NoCheck("Skill Owner or Manager Grant and current Installation state, adjudicated by the Publication service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"):
+        NoCheck("Skill Grant, Draft, Lease, idempotency and task recovery, adjudicated by the Publication service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"):
+        NoCheck("Space membership and Publication history, adjudicated by the Publication service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}"):
+        NoCheck("Space membership and exact Publication Attempt scope, adjudicated by the Publication service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}/retry"):
+        NoCheck("Skill Grant and Attempt recovery state, adjudicated by the Publication service"),
     ("POST", "/openapi/v1/bots/work-order-notifications/read-all"):
         NoCheck("the named user's own work orders and notifications"),
     ("GET", "/openapi/v1/bots/work-order-notifications/unread-count"):

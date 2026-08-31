@@ -284,8 +284,11 @@ Phase 2 复用一条 `ac_skill` 作为跨版本稳定 Identity：
   `publication_attempt_id` 必须允许为空：TeamClaw 工坊发布产生的 Version 指向
   Publication Attempt；SC Public 懒加载 Version 没有 TeamClaw 发布动作，值为 `null`，
   不得伪造 Publication Attempt。
-- `ac_skill_publication_attempt` 保存幂等键、目标版本、外部提交阶段、失败原因和
-  RESULT_UNKNOWN；一个 Skill 同时最多一个进行中 Attempt。
+- `ac_skill_publication_attempt` 保存幂等键、目标版本、冻结的
+  `frozen_draft_locator`、外部提交阶段、失败原因和 RESULT_UNKNOWN；一个 Skill 同时最多一个
+  进行中 Attempt。`frozen_draft_locator` 是 Attempt 创建事务内从当前 `ac_skill.zip_url` 获取的
+  immutable Revision snapshot；迁移列为 nullable 仅用于兼容存量，所有新 Attempt 必须非空，
+  active 存量缺失时 fail closed。
 - `ac_skill_center_reference_operation` 保存一次把 SC Public 外部 `skill_code` 懒物化并加入
   目标 Bot SkillSet 的持久业务过程；每个 code 一行、同一批共享 `request_id`。它保存冻结
   `sc_version_number`、最终 `resolved_skill_id`、状态和错误，不替代 Asset、Version、Membership
@@ -823,6 +826,12 @@ PREPARING → SC_SUBMITTING → WAITING_SC → MATERIALIZING
 - Publication POST 不要求 `fencing_token`：Personal 直接发布；Team 重新校验权限和 Lease，
   `HELD_BY_OTHER` 拒绝，FREE/HELD_BY_ME 冻结服务端最新已提交 Revision。并发保存通过
   `EDITING + fencing_token` CAS 与发布冻结互斥。
+- Worker 只读 Attempt 的 `frozen_draft_locator`，不得重新读取可能已变化的 `Skill.zip_url` 作为
+  冻结输入。FAILED 后新建 Attempt 时，只有当前 `Skill.zip_url` 已不同于最近 FAILED Attempt
+  的 locator 才能受理；`package_url` 仅保存 active Attempt 调 SC 的临时 signed URL，并在
+  FAILED/SUCCEEDED 终态清理。
+- Publication `request_id` 唯一范围为 `(tenant,env,request_id)`；相同 Key 只重放原 Attempt，
+  用于不同 Space 或 Skill 时返回 `IDEMPOTENCY_KEY_REUSED`，不得创建第二个 Attempt。
 - `PREPARING + sc_post_started_at=NULL` 的 Retry 可继续首次 submit；`SC_SUBMITTING/
   WAITING_SC/RESULT_UNKNOWN` 只能查询状态，禁止再次 publish；`MATERIALIZING` 只重试同一
   `skill_version_id`；FAILED 必须修改 Draft 后新建 Attempt；SUCCEEDED 幂等成功。

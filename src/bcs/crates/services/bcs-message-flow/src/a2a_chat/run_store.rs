@@ -126,6 +126,47 @@ impl ChatRunStore {
         self.notifiers.write().await.remove(run_id);
     }
 
+    /// Reclaim node-local notifier entries that have no parked long-poll waiter.
+    ///
+    /// The `Notify` registry is a latency-only optimization for `wait_update`
+    /// — correctness comes from re-reading the repo, and [`Self::notifier`]
+    /// rebuilds an entry on demand — so evicting an idle entry is always safe.
+    /// This is the only reclaim path for runs that retire without a terminal
+    /// CAS (acknowledged detached-delivery runs, which are excluded from the
+    /// timeout sweep and retire as `Dropped`), since [`Self::drop_notifier`]
+    /// is only reached on a terminal transition. It is independent of the repo
+    /// retirement path, so it also covers MySQL production, where detached
+    /// retirement is delegated to platform cleanup and `drop_detached_expired`
+    /// is a no-op that returns no retired rows.
+    ///
+    /// An entry is idle iff the map is its sole owner (`Arc::strong_count == 1`),
+    /// i.e. no `wait_update` call currently holds a clone. Every clone is taken
+    /// while holding the map's `RwLock` (in [`Self::notifier`]), and the
+    /// re-check below runs under the write lock, so the count is precise at the
+    /// decision point and a parked waiter can never be evicted.
+    async fn sweep_idle_notifiers(&self) {
+        let candidates: Vec<String> = {
+            let map = self.notifiers.read().await;
+            map.iter()
+                .filter(|(_, notify)| Arc::strong_count(notify) == 1)
+                .map(|(run_id, _)| run_id.clone())
+                .collect()
+        };
+        if candidates.is_empty() {
+            return;
+        }
+        let mut map = self.notifiers.write().await;
+        for run_id in candidates {
+            // Re-check under the write lock: a waiter may have cloned the entry
+            // between the read and write phases. Only remove if still idle.
+            if let Some(notify) = map.get(&run_id) {
+                if Arc::strong_count(notify) == 1 {
+                    map.remove(&run_id);
+                }
+            }
+        }
+    }
+
     pub async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunStoreError> {
         self.repo.create(record).await.map_err(|err| match err {
             ChatRunRepoError::Capacity { max_entries } => {
@@ -458,6 +499,11 @@ impl ChatRunStore {
         Vec<(String, DirectChatClientKind)>,
         Vec<(String, DirectChatClientKind)>,
     ) {
+        // Reclaim idle notifier entries every tick. This runs before the repo
+        // sweeps so it always fires (even if a repo call below errors) and is
+        // the only reclaim path for detached runs that retire without a CAS.
+        self.sweep_idle_notifiers().await;
+
         let mut expired = Vec::new();
         let active = match self.repo.list_active(now_ms_v).await {
             Ok(active) => active,
@@ -519,6 +565,21 @@ pub(crate) fn direct_chat_client_kind(client: Option<&str>) -> DirectChatClientK
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bcs_service_api::ChatResponseMode;
+
+    fn record(run_id: &str) -> ChatRunRecord {
+        ChatRunRecord::new(
+            run_id.to_string(),
+            "bot".to_string(),
+            "from".to_string(),
+            "sk".to_string(),
+            0,
+            u64::MAX,
+            Some("http-chat-async".to_string()),
+            ChatResponseMode::Full,
+            ChatRunCompletionPolicy::WaitForFinal,
+        )
+    }
 
     #[test]
     fn direct_chat_client_kind_uses_closed_low_cardinality_mapping() {
@@ -540,5 +601,112 @@ mod tests {
             direct_chat_client_kind(Some("custom-client")),
             DirectChatClientKind::Unknown
         );
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_reclaims_idle_notifier_for_retired_detached_run() {
+        let store = ChatRunStore::new();
+        // Acked detached-delivery run, eligible for retirement (ack far in past).
+        let mut rec = record("detached");
+        rec.completion_policy = ChatRunCompletionPolicy::DetachDeliveryAck;
+        rec.state = ChatRunState::Running;
+        rec.delivery_ack_at_ms = Some(0);
+        store.create(rec).await.unwrap();
+
+        // A status long-poll registers a node-local notifier entry; the poller
+        // then returns (no parked waiter) leaving the entry idle.
+        let _ = store
+            .wait_update("detached", 1, Duration::from_millis(20))
+            .await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            1,
+            "wait_update poll should register a notifier entry"
+        );
+
+        // The 10s cleanup retires the acked detached run and must also reclaim
+        // its now-idle notifier. Without the sweep this entry leaks, because the
+        // run retires as Dropped without a terminal CAS, so drop_notifier is
+        // never called for it.
+        let _ = store.cleanup_expired(5_000_000, 5_000_000).await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            0,
+            "idle notifier for a retired detached run must be swept"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_reclaims_idle_notifier_independent_of_retirement() {
+        // The run stays alive in the repo (nothing is overdue or past
+        // retention), yet its notifier must be reclaimed once the poller has
+        // left — idleness alone is the criterion. This independence from the
+        // retirement path is what makes the sweep effective in MySQL production,
+        // where detached retirement is delegated to platform cleanup.
+        let store = ChatRunStore::new();
+        store.create(record("alive")).await.unwrap();
+        let _ = store
+            .wait_update("alive", 1, Duration::from_millis(20))
+            .await;
+        assert_eq!(store.notifiers.read().await.len(), 1);
+        // now=0, retention=max: nothing expires, nothing retires — only the sweep runs.
+        let _ = store.cleanup_expired(0, u64::MAX).await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            0,
+            "idle notifier must be reclaimed even when the run still exists"
+        );
+        assert!(
+            store.get("alive").await.is_some(),
+            "the run itself must be untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_keeps_notifier_for_parked_waiter() {
+        // A parked long-poll holds a clone of the notifier, so strong_count > 1
+        // and the sweep must not evict it. We verify by waking the parked
+        // waiter via notify_waiters and asserting it resolves promptly rather
+        // than waiting out its timeout (which would mean the entry was evicted
+        // and the wake became a no-op).
+        let store = Arc::new(ChatRunStore::new());
+        store.create(record("parked")).await.unwrap();
+        let s = store.clone();
+        let waiter = tokio::spawn(async move {
+            s.wait_update("parked", 1, Duration::from_secs(2)).await
+        });
+        // Let the poller reach the `notified().await` park point.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let _ = store.cleanup_expired(0, u64::MAX).await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            1,
+            "notifier for a parked waiter must survive the sweep"
+        );
+
+        store.mark_completed("parked", Some("done")).await;
+        let resolved = tokio::time::timeout(Duration::from_millis(300), waiter)
+            .await
+            .expect("parked waiter should wake via notify, not wait for timeout");
+        assert_eq!(resolved.unwrap().unwrap().state, ChatRunState::Completed);
+    }
+
+    #[tokio::test]
+    async fn sweep_coexists_with_terminal_cas_drop() {
+        // A terminal CAS already drops the notifier via apply_terminal_cas; the
+        // sweep must be an idempotent no-op on the already-empty map.
+        let store = ChatRunStore::new();
+        store.create(record("term")).await.unwrap();
+        let _ = store.wait_update("term", 1, Duration::from_millis(10)).await;
+        assert_eq!(store.notifiers.read().await.len(), 1);
+        assert!(store.mark_completed("term", Some("done")).await);
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            0,
+            "terminal CAS drops the notifier"
+        );
+        let _ = store.cleanup_expired(0, u64::MAX).await;
+        assert_eq!(store.notifiers.read().await.len(), 0);
     }
 }

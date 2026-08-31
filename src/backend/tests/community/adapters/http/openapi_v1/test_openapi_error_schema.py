@@ -26,6 +26,7 @@ _ERROR_REF = "#/components/schemas/ErrorEnvelope"
 # ``data`` and the route declares that shape. Every other error stays uniform.
 _DOCUMENTED_DATA_BEARING_ERRORS = {
     ("/openapi/v1/bots/{bot_id}/auth-status", 400),
+    ("/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline", 409),
 }
 
 

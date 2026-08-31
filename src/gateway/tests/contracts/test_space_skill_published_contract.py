@@ -52,6 +52,25 @@ _EXPECTED_OPERATIONS = {
         "post",
         "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover",
     ),
+    (
+        "get",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publication-impact",
+    ),
+    ("post", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"),
+    ("get", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"),
+    (
+        "get",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}",
+    ),
+    (
+        "post",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}/retry",
+    ),
+    (
+        "get",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact",
+    ),
+    ("post", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline"),
 }
 
 
@@ -68,4 +87,8 @@ def test_published_artifact_contains_complete_space_skill_loop() -> None:
     assert not missing, f"generated bots OpenAPI is missing: {sorted(missing)}"
     schemas = document["components"]["schemas"]
     assert "SpaceSkillSummary" in schemas
+    assert "PublicationAttempt" in schemas
+    assert "PublicationImpactItem" in schemas
+    assert "SkillOfflineImpact" in schemas
+    assert "SkillOfflineResult" in schemas
     assert "SpaceSkillItem" not in schemas

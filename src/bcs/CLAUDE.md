@@ -391,7 +391,7 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/groups/{id}` | DELETE | Delete group |
 | `/groups/{id}/members` | POST | Add member to group |
 | `/groups/{id}/chat` | POST | Send group chat message |
-| `/groups/{id}/messages` | GET | Get message history |
+| `/groups/{id}/messages` | POST | Send a persistent group message |
 | `/groups/{id}/fuse` | POST | Fuse participant contexts |
 | `/groups/{id}/workspace` | GET/PUT | Get/update workspace |
 

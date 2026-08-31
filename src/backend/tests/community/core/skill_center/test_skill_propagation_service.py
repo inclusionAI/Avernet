@@ -296,21 +296,19 @@ class TestNotifyHotReload:
 
 
 class TestSyncServiceIntegration:
-    def test_propagate_on_upgrade_calls_sync_service(self):
-        """upgrade 时应触发 sync_service.force_sync。"""
+    def test_published_service_upgrade_does_not_trigger_sc_public_sync(self):
+        """Published Service Release does not participate in G4 propagation."""
         from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
         mock_log = MagicMock()
         mock_log.find_recent.return_value = None
         mock_log.create.return_value = {"propagation_id": "p1", "id": 1}
 
         mock_sync = MagicMock()
-        mock_sync.force_sync.return_value = True
-
         svc = SkillPropagationService(log_repo=mock_log, sync_service=mock_sync, skill_set_repo=MagicMock(), resolver=MagicMock(), device_sync_dispatcher=MagicMock(), skill_set_service_factory=MagicMock())
         svc._find_affected_bots = MagicMock(return_value=[])
 
         result = svc.propagate_on_upgrade("uuid-x", "dev", "2")
-        mock_sync.force_sync.assert_called_once_with(skill_uuid="uuid-x", env="dev")
+        mock_sync.assert_not_called()
         assert result.propagation_log_id is not None
 
     def test_propagate_on_removal_does_not_force_sync(self):
@@ -325,7 +323,7 @@ class TestSyncServiceIntegration:
         svc._find_affected_bots = MagicMock(return_value=[])
 
         svc.propagate_on_removal("uuid-x", "dev")
-        mock_sync.force_sync.assert_not_called()
+        mock_sync.assert_not_called()
 
     def test_sync_service_none_is_safe(self):
         """sync_service 为 None 时不应抛异常。"""

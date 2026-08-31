@@ -39,13 +39,12 @@ class AuthnPluginConfig(BaseSettings):
 class SecretConfig(BaseModel):
     """SecretResolver configuration (mirrors backend ``CommunitySecretConfig``).
 
-    ``env_prefix`` is the prefix the community (env-backed) SecretResolver
-    prepends to ``{NAME}_VALUE`` / ``{NAME}_USER`` lookups. Enterprise overlays
-    may swap the resolver implementation entirely via the plugin registry.
+    The community SecretResolver reads ``{NAME}`` / ``{NAME}_USER`` directly
+    from the process environment. Enterprise overlays may swap the resolver
+    implementation entirely via the plugin registry.
     """
 
     model_config = {"extra": "allow"}
-    env_prefix: str = "AVERNET_SECRET_"
 
 
 class PrincipalSignerPluginConfig(BaseModel):

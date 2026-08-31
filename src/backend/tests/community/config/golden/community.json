@@ -10,7 +10,7 @@
       "api_base_url": "${BASS_URL:-}",
       "deploy_runtime": "ack",
       "template_uuid": "${BAAS_TEMPLATE_ID:-}",
-      "tenant": "community"
+      "tenant": "${BAAS_TENANT:-}"
     },
     "bcs": {
       "base_url": "${BCS_URL:-}",
@@ -151,7 +151,7 @@
       "personal_bot_template_uuid": "",
       "teclaw_template_uuid": "",
       "template_uuid": "${BAAS_TEMPLATE_ID:-}",
-      "tenant": "community"
+      "tenant": "${BAAS_TENANT:-}"
     },
     "bcn": {
       "base_url": "",
@@ -249,7 +249,8 @@
       "aicoding_theta_master_key": "",
       "aiworkbench_repo_url": "",
       "dormant_internal_token": "",
-      "gateway_principal_signing_key": "gateway_principal_signing_key"
+      "gateway_principal_signing_key": "gateway_principal_signing_key",
+      "skill_center_internal_token": ""
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",

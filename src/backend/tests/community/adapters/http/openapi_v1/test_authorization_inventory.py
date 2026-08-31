@@ -529,6 +529,7 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
     }
