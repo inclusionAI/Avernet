@@ -57,26 +57,6 @@ def _digest_ttl(ms: int | None) -> str | None:
         return None
 
 
-def _requested_ttl_minutes(
-    default_ttl_minutes: int,
-    remaining_hours: float,
-    ttl_safety_margin_minutes: int,
-) -> int:
-    """Requested extension minutes for one renewal (WR-03 clamp).
-
-    Full-TTL target minus the currently-remaining lead, with the safety
-    margin subtracted and a 1-minute floor. The clamp lives in this
-    module-level helper so it keeps honest unit coverage even though the
-    derived threshold (EG-4) makes the negative input unreachable via
-    _renew_one.
-    """
-    return max(
-        1,
-        int((default_ttl_minutes * 60 - remaining_hours * 3600) / 60)
-        - ttl_safety_margin_minutes,
-    )
-
-
 class DeadlineRenewalScheduler:
     """Deadline-driven ARCA container TTL renewal scheduler.
 
@@ -686,15 +666,13 @@ class DeadlineRenewalScheduler:
         # TTL period comes from the configured default_ttl_minutes (1440:
         # identical to the former 86400-second constant); the safety margin
         # is subtracted so an extension never lands exactly on the expiry.
-        # WR-03: clamps the requested minutes to a 1-minute floor so
-        # extend_ttl never receives a non-positive value — the clamp lives
-        # in the module-level _requested_ttl_minutes helper so it keeps
-        # honest unit coverage even though the derived threshold (EG-4)
-        # makes the negative input unreachable via _renew_one.
-        ttl_minutes = _requested_ttl_minutes(
-            self._config.default_ttl_minutes,
-            remaining_hours,
-            self._config.ttl_safety_margin_minutes,
+        # WR-03: clamp to a 1-minute floor — when the operator configures a
+        # default_ttl_minutes below the derived threshold the raw formula
+        # can go 0/negative, which extend_ttl must never receive.
+        ttl_minutes = max(
+            1,
+            int((self._config.default_ttl_minutes * 60 - remaining_hours * 3600) / 60)
+            - self._config.ttl_safety_margin_minutes,
         )
 
         try:
