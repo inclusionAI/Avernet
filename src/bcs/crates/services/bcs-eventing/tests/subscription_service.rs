@@ -203,7 +203,7 @@ async fn inline_group_finalization_activates_and_snapshots_ordered_creation_even
             "group-provisioning",
             vec![inline_subscription(
                 "creation-events",
-                vec!["group.created", "session.created"],
+                vec!["group.created", "session.created", "state_machine.*"],
             )],
         )
         .await
@@ -223,6 +223,46 @@ async fn inline_group_finalization_activates_and_snapshots_ordered_creation_even
         .upsert(group.clone())
         .await
         .expect("persist provisioning Group");
+    append_provisioning_state_machine_event(
+        &harness,
+        "evt-run-created",
+        "state_machine.run.created",
+        None,
+        "state-machine-run:run-1",
+    )
+    .await;
+    append_provisioning_state_machine_event(
+        &harness,
+        "evt-run-started",
+        "state_machine.run.started",
+        Some("evt-run-created"),
+        "state-machine-run:run-1",
+    )
+    .await;
+    append_provisioning_state_machine_event(
+        &harness,
+        "evt-node-started",
+        "state_machine.node.started",
+        Some("evt-run-started"),
+        "state-machine-run:run-1",
+    )
+    .await;
+    append_provisioning_state_machine_event(
+        &harness,
+        "evt-cross-stream-cause",
+        "state_machine.node.completed",
+        None,
+        "z-state-machine-cause",
+    )
+    .await;
+    append_provisioning_state_machine_event(
+        &harness,
+        "evt-cross-stream-effect",
+        "state_machine.node.started",
+        Some("evt-cross-stream-cause"),
+        "a-state-machine-effect",
+    )
+    .await;
     let session = Session {
         id: "group-provisioning:12345678".to_string(),
         group_id: group.id.clone(),
@@ -272,7 +312,7 @@ async fn inline_group_finalization_activates_and_snapshots_ordered_creation_even
     assert_eq!(revision.activated_at_ms, NOW_MS);
 
     let targets = claim_targets(&harness).await;
-    assert_eq!(targets.len(), 2);
+    assert_eq!(targets.len(), 7);
     let mut events = Vec::new();
     for target in &targets {
         events.push(
@@ -309,6 +349,44 @@ async fn inline_group_finalization_activates_and_snapshots_ordered_creation_even
     assert_eq!(
         session_target.depends_on_target_id.as_deref(),
         Some(group_target.target_id.as_str())
+    );
+    let run_targets = targets
+        .iter()
+        .filter_map(|target| {
+            events
+                .iter()
+                .find(|event| event.envelope.event_id == target.event_id)
+                .filter(|event| event.envelope.stream.key == "state-machine-run:run-1")
+                .map(|event| (event.envelope.stream.sequence, target))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        run_targets
+            .iter()
+            .map(|(sequence, _)| *sequence)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert_eq!(
+        run_targets[1].1.depends_on_target_id.as_deref(),
+        Some(run_targets[0].1.target_id.as_str())
+    );
+    assert_eq!(
+        run_targets[2].1.depends_on_target_id.as_deref(),
+        Some(run_targets[1].1.target_id.as_str())
+    );
+    let cross_stream_causes = targets
+        .iter()
+        .filter(|target| target.event_id == "evt-cross-stream-cause")
+        .collect::<Vec<_>>();
+    assert_eq!(cross_stream_causes.len(), 1);
+    let cross_stream_effect = targets
+        .iter()
+        .find(|target| target.event_id == "evt-cross-stream-effect")
+        .expect("cross-stream effect target");
+    assert_eq!(
+        cross_stream_effect.depends_on_target_id.as_deref(),
+        Some(cross_stream_causes[0].target_id.as_str())
     );
 
     let redacted = harness
@@ -855,6 +933,48 @@ async fn append_group_event(harness: &support::Harness, event_id: &str) {
         })
         .await
         .expect("append group Event");
+}
+
+async fn append_provisioning_state_machine_event(
+    harness: &support::Harness,
+    event_id: &str,
+    event_type: &str,
+    causation_event_id: Option<&str>,
+    stream_key: &str,
+) {
+    harness
+        .repo
+        .append_event(AppendEventRecord {
+            event: NewEvent {
+                event_id: event_id.to_string(),
+                event_type: event_type.to_string(),
+                schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+                producer: "state-machine-runtime".to_string(),
+                producer_key: event_id.to_string(),
+                occurred_at: "2026-08-18T04:40:00.000Z".to_string(),
+                subject: EventSubject {
+                    subject_type: "state_machine.run".to_string(),
+                    id: "run-1".to_string(),
+                },
+                scope: EventScope {
+                    group_id: Some("group-provisioning".to_string()),
+                    session_id: Some("group-provisioning:12345678".to_string()),
+                    run_id: Some("run-1".to_string()),
+                    ..EventScope::default()
+                },
+                stream_key: stream_key.to_string(),
+                actor: None,
+                correlation_id: None,
+                causation_event_id: causation_event_id.map(str::to_string),
+                trace_id: None,
+                data: BTreeMap::new(),
+            },
+            recorded_at: "2026-08-18T04:40:00.000Z".to_string(),
+            retention_until_ms: NOW_MS + 86_400_000,
+            env: "test".to_string(),
+        })
+        .await
+        .expect("append provisioning state-machine Event");
 }
 
 async fn claim_targets(

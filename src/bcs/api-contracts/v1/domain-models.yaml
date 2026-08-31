@@ -777,9 +777,10 @@ AixUiOpeningMessage:
 
 OpeningMessage:
   description: >-
-    StateMachine Run opening-message template. Supported placeholders are
-    {{bcs.group_id}}, {{bcs.session_id}}, {{bcs.run_id}},
-    {{bcs.group_name}}, and {{bcs.session_name}}.
+    Group opening-message template. Chat and Manager-Worker render it once per
+    new Session and support {{bcs.group_id}}, {{bcs.session_id}},
+    {{bcs.group_name}}, and {{bcs.session_name}}. StateMachine renders it once
+    per Run and additionally supports {{bcs.run_id}}.
   oneOf:
     - type: string
       minLength: 1

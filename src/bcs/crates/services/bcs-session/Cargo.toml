@@ -22,6 +22,7 @@ uuid = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-group = { workspace = true }
 bcs-group-store = { workspace = true }
+bcs-message-store = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio = { workspace = true }
 tokio-test = "0.4"

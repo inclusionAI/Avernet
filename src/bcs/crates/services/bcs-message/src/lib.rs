@@ -9,15 +9,16 @@ use async_trait::async_trait;
 use tracing::info;
 
 use bcs_domain::{
-    BCS_STATE_MACHINE_MESSAGE_SENDER_NAME, MessageAttachment, MessageOwnerFilter, MessageQuery,
+    BCS_SESSION_OPENING_MESSAGE_SENDER_NAME, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+    MessageAttachment, MessageOwnerFilter, MessageQuery, SESSION_OPENING_MESSAGE_TYPE,
     STATE_MACHINE_PANEL_MESSAGE_TYPE, Session,
 };
 use bcs_service_api::{
-    application::session_files::SessionFileService, BotRegistryCoreService, GroupCoreService,
-    GroupHistoryCommand, GroupHistoryResult, GroupMessageHistoryService, GroupUseCaseError,
-    SessionHistoryCommand, SessionHistoryResult, Group, GroupMessage, GroupMessageType,
-    GroupStrategy, MessageRole, ParticipantRole, port::repo::{MessageRepoPort, SessionRepoPort},
-    ServiceError,
+    application::session_files::SessionFileService, BotRegistryCoreService, CallerContext,
+    Group, GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
+    GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError, MessageRole,
+    ParticipantRole, ServiceError, SessionHistoryCommand, SessionHistoryResult,
+    port::repo::{MessageRepoPort, SessionRepoPort},
 };
 
 /// Application service implementing [`GroupMessageHistoryService`].
@@ -307,19 +308,25 @@ fn persisted_to_group_message(
     pm: bcs_domain::PersistedMessage,
     bot_name: Option<String>,
 ) -> GroupMessage {
-    let is_state_machine_panel = pm.message_type == STATE_MACHINE_PANEL_MESSAGE_TYPE;
-    let message_id = if is_state_machine_panel {
+    let is_persisted_bcs_ui = matches!(
+        pm.message_type.as_str(),
+        STATE_MACHINE_PANEL_MESSAGE_TYPE | SESSION_OPENING_MESSAGE_TYPE
+    );
+    let message_id = if is_persisted_bcs_ui {
         pm.client_msg_id
             .clone()
             .unwrap_or_else(|| pm.message_id.clone())
     } else {
         pm.message_id.clone()
     };
-    let panel_bot_name = is_state_machine_panel.then(|| {
+    let bcs_bot_name = is_persisted_bcs_ui.then(|| {
         pm.content
             .get("bot_name")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or(BCS_STATE_MACHINE_MESSAGE_SENDER_NAME)
+            .unwrap_or_else(|| match pm.message_type.as_str() {
+                SESSION_OPENING_MESSAGE_TYPE => BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
+                _ => BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+            })
             .to_string()
     });
     let (role, metadata, content_str, attachments) = match pm.message_type.as_str() {
@@ -332,7 +339,7 @@ fn persisted_to_group_message(
             let (text, attachments) = extract_text_and_attachments(&pm.content);
             (role, None, text, attachments)
         }
-        STATE_MACHINE_PANEL_MESSAGE_TYPE => {
+        STATE_MACHINE_PANEL_MESSAGE_TYPE | SESSION_OPENING_MESSAGE_TYPE => {
             // TODO(sm-history-node-expansion): expand this persisted panel anchor
             // into node task/output messages after pagination and cursor semantics
             // for expanded state-machine history are defined.
@@ -370,7 +377,7 @@ fn persisted_to_group_message(
         sender: pm.sender_id,
         content: content_str,
         message_type: GroupMessageType::Bot,
-        bot_name: panel_bot_name.or(bot_name),
+        bot_name: bcs_bot_name.or(bot_name),
         role,
         run_id: pm.run_id,
         history_meta: None,
@@ -411,6 +418,7 @@ impl GroupMessageHistoryService for MessageService {
         &self,
         cmd: GroupHistoryCommand,
     ) -> Result<GroupHistoryResult, GroupUseCaseError> {
+        let hide_opening_message = matches!(&cmd.caller, CallerContext::Bot(_));
         let group = self
             .group
             .get(&cmd.group_id)
@@ -456,7 +464,14 @@ impl GroupMessageHistoryService for MessageService {
                 std::collections::HashMap::new();
             let messages: Vec<GroupMessage> = {
                 let mut result = Vec::with_capacity(page.messages.len());
-                for pm in page.messages {
+                for pm in page
+                    .messages
+                    .into_iter()
+                    .filter(|message| {
+                        !hide_opening_message
+                            || message.message_type != SESSION_OPENING_MESSAGE_TYPE
+                    })
+                {
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                         std::collections::hash_map::Entry::Vacant(e) => {
@@ -511,6 +526,7 @@ impl GroupMessageHistoryService for MessageService {
         &self,
         cmd: SessionHistoryCommand,
     ) -> Result<SessionHistoryResult, GroupUseCaseError> {
+        let hide_opening_message = matches!(&cmd.caller, CallerContext::Bot(_));
         let session_id = cmd.session_id.clone();
         let session = self.session_repo.get(&session_id).await;
 
@@ -530,6 +546,8 @@ impl GroupMessageHistoryService for MessageService {
                 cmd.view_bot_id.as_deref(),
                 self.new_participant_visible_limit,
             )?;
+            let merge_public_opening_message = !hide_opening_message
+                && matches!(&owner_filter, MessageOwnerFilter::Eq(_));
 
             info!(
                 session_id = %session_id,
@@ -540,7 +558,7 @@ impl GroupMessageHistoryService for MessageService {
             );
 
             let query = MessageQuery {
-                group_id: cmd.group_id,
+                group_id: cmd.group_id.clone(),
                 session_id: session_id.clone(),
                 cursor: cmd.before,
                 limit: self.effective_limit(cmd.limit),
@@ -551,17 +569,65 @@ impl GroupMessageHistoryService for MessageService {
                 time_range: None,
                 visible_from_seq,
             };
-            let page = self.message_repo.query_messages(query).await.map_err(|e| {
+            let mut page = self.message_repo.query_messages(query).await.map_err(|e| {
                 GroupUseCaseError::Service(ServiceError::InternalError(format!(
                     "message repo error: {}",
                     e
                 )))
             })?;
+            if merge_public_opening_message {
+                let opening_page = self
+                    .message_repo
+                    .query_messages(MessageQuery {
+                        group_id: cmd.group_id.clone(),
+                        session_id: session_id.clone(),
+                        cursor: cmd.before,
+                        limit,
+                        keyword: None,
+                        sender_id: None,
+                        message_type: Some(SESSION_OPENING_MESSAGE_TYPE.to_string()),
+                        owner_filter: MessageOwnerFilter::IsNull,
+                        time_range: None,
+                        visible_from_seq: None,
+                    })
+                    .await
+                    .map_err(|error| {
+                        GroupUseCaseError::Service(ServiceError::InternalError(format!(
+                            "message repo opening-message error: {error}"
+                        )))
+                    })?;
+                let source_has_more = page.has_more || opening_page.has_more;
+                page.messages.extend(opening_page.messages);
+                page.messages.sort_by(|left, right| {
+                    right
+                        .created_at
+                        .cmp(&left.created_at)
+                        .then_with(|| right.session_seq.cmp(&left.session_seq))
+                });
+                let combined_has_more = page.messages.len() > limit as usize;
+                page.messages.truncate(limit as usize);
+                page.has_more = source_has_more || combined_has_more;
+                page.next_cursor = page
+                    .has_more
+                    .then(|| {
+                        page.messages
+                            .last()
+                            .map(|message| (message.created_at, message.session_seq))
+                    })
+                    .flatten();
+            }
             let mut bot_names: std::collections::HashMap<String, Option<String>> =
                 std::collections::HashMap::new();
             let messages: Vec<GroupMessage> = {
                 let mut result = Vec::with_capacity(page.messages.len());
-                for pm in page.messages {
+                for pm in page
+                    .messages
+                    .into_iter()
+                    .filter(|message| {
+                        !hide_opening_message
+                            || message.message_type != SESSION_OPENING_MESSAGE_TYPE
+                    })
+                {
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                         std::collections::hash_map::Entry::Vacant(e) => {
@@ -628,14 +694,14 @@ impl GroupMessageHistoryService for MessageService {
             let panel_page = self
                 .message_repo
                 .query_messages(MessageQuery {
-                    group_id: cmd.group_id,
+                    group_id: cmd.group_id.clone(),
                     session_id: session_id.clone(),
                     cursor: cmd.before,
                     limit,
                     keyword: None,
                     sender_id: None,
                     message_type: Some(STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string()),
-                    owner_filter,
+                    owner_filter: owner_filter.clone(),
                     time_range: None,
                     visible_from_seq: None,
                 })
@@ -645,20 +711,45 @@ impl GroupMessageHistoryService for MessageService {
                         "message repo panel-anchor error: {error}"
                     )))
                 })?;
-            if panel_page.messages.is_empty() {
+            let mut persisted_anchors = panel_page.messages;
+            let mut persisted_anchors_have_more = panel_page.has_more;
+            if !hide_opening_message {
+                let opening_page = self
+                    .message_repo
+                    .query_messages(MessageQuery {
+                        group_id: cmd.group_id,
+                        session_id: session_id.clone(),
+                        cursor: cmd.before,
+                        limit,
+                        keyword: None,
+                        sender_id: None,
+                        message_type: Some(SESSION_OPENING_MESSAGE_TYPE.to_string()),
+                        owner_filter: MessageOwnerFilter::IsNull,
+                        time_range: None,
+                        visible_from_seq: None,
+                    })
+                    .await
+                    .map_err(|error| {
+                        GroupUseCaseError::Service(ServiceError::InternalError(format!(
+                            "message repo opening-message error: {error}"
+                        )))
+                    })?;
+                persisted_anchors_have_more |= opening_page.has_more;
+                persisted_anchors.extend(opening_page.messages);
+            }
+            if persisted_anchors.is_empty() {
                 return Ok(fallback_result);
             }
 
             let source_has_more =
-                fallback_result.next_before.is_some() || panel_page.has_more;
+                fallback_result.next_before.is_some() || persisted_anchors_have_more;
             let mut seen_ids = fallback_result
                 .messages
                 .iter()
                 .map(|message| message.id.clone())
                 .collect::<std::collections::HashSet<_>>();
             fallback_result.messages.extend(
-                panel_page
-                    .messages
+                persisted_anchors
                     .into_iter()
                     .map(|message| persisted_to_group_message(message, None))
                     .filter(|message| seen_ids.insert(message.id.clone())),
@@ -698,7 +789,8 @@ mod tests {
             PrepareUploadResult, SessionFileService, SessionFileUseCaseError, ShareConsumeResult,
             ShareMintCommand, ShareMintResult,
         },
-        CallerContext, Group, MessageRole, Participant, ParticipantRole, SessionKind,
+        BotActor, CallerContext, Group, HumanActor, MessageRole, Participant, ParticipantRole,
+        SessionKind,
         port::repo::{
             MessageRepoError, NewSessionParams, SessionFileListPage, SessionFileListParams,
             SessionRepoPort,
@@ -1171,6 +1263,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_opening_message_is_visible_to_humans_and_hidden_from_bots() {
+        let (service, repo, _sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+        let stable_message_id = format!("{session_id}:000-opening");
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: bcs_domain::BCS_SESSION_OPENING_MESSAGE_SENDER.to_string(),
+            sender_type: SenderType::Bot,
+            message_type: SESSION_OPENING_MESSAGE_TYPE.to_string(),
+            content: serde_json::json!({
+                "text": "欢迎来到研发群",
+                "bot_name": BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
+                "metadata": {
+                    "opening_message": {
+                        "scope": "session",
+                        "strategy": "chat",
+                    }
+                }
+            }),
+            client_msg_id: Some(stable_message_id.clone()),
+            created_at: 1,
+            run_id: format!("{session_id}:opening"),
+            owner_bot_id: None,
+        })
+        .await
+        .expect("append opening message");
+
+        let human_result = service
+            .get_session_history(SessionHistoryCommand {
+                caller: CallerContext::Human(HumanActor {
+                    actor_id: "human-1".to_string(),
+                    staff_no: "human-1".to_string(),
+                }),
+                group_id: "group-1".to_string(),
+                session_id: session_id.clone(),
+                session_participants: Vec::new(),
+                view_bot_id: None,
+                limit: 50,
+                before: None,
+            })
+            .await
+            .expect("human history");
+        assert_eq!(human_result.messages.len(), 1);
+        assert_eq!(human_result.messages[0].id, stable_message_id);
+        assert_eq!(human_result.messages[0].content, "欢迎来到研发群");
+        assert_eq!(
+            human_result.messages[0].bot_name.as_deref(),
+            Some(BCS_SESSION_OPENING_MESSAGE_SENDER_NAME)
+        );
+
+        let bot_result = service
+            .get_session_history(SessionHistoryCommand {
+                caller: CallerContext::Bot(BotActor {
+                    bot_uuid: "worker-a".to_string(),
+                }),
+                group_id: "group-1".to_string(),
+                session_id,
+                session_participants: Vec::new(),
+                view_bot_id: Some("worker-a".to_string()),
+                limit: 50,
+                before: None,
+            })
+            .await
+            .expect("bot history");
+        assert!(bot_result.messages.is_empty());
+        assert_eq!(fallback.session_calls().await, 0);
+    }
+
+    #[tokio::test]
     async fn chat_session_history_interleaves_every_state_machine_panel() {
         let (service, repo, _sessions, fallback, session_id) =
             service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
@@ -1248,6 +1410,69 @@ mod tests {
         assert_eq!(fallback.session_calls().await, 1);
         assert_eq!(result.messages.len(), 1);
         assert_eq!(result.messages[0].content, "legacy");
+    }
+
+    #[tokio::test]
+    async fn pre_cutoff_manager_worker_merges_opening_message_only_for_humans() {
+        let (service, repo, _sessions, fallback, session_id) = service_fixture(
+            GroupStrategy::ManagerWorker,
+            0,
+            u64::MAX,
+            vec![fallback_message("legacy")],
+        )
+        .await;
+        let stable_message_id = format!("{session_id}:000-opening");
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: bcs_domain::BCS_SESSION_OPENING_MESSAGE_SENDER.to_string(),
+            sender_type: SenderType::Bot,
+            message_type: SESSION_OPENING_MESSAGE_TYPE.to_string(),
+            content: serde_json::json!({
+                "text": "任务协作群开场消息",
+                "bot_name": BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
+                "metadata": {
+                    "opening_message": {
+                        "scope": "session",
+                        "strategy": "manager_worker",
+                    }
+                }
+            }),
+            client_msg_id: Some(stable_message_id.clone()),
+            created_at: 2,
+            run_id: format!("{session_id}:opening"),
+            owner_bot_id: None,
+        })
+        .await
+        .expect("append opening message");
+
+        let mut human_command = session_cmd("group-1", &session_id, Some("worker-a"));
+        human_command.caller = CallerContext::Human(HumanActor {
+            actor_id: "human-1".to_string(),
+            staff_no: "human-1".to_string(),
+        });
+        let human_result = service
+            .get_session_history(human_command)
+            .await
+            .expect("human legacy history");
+        assert!(human_result
+            .messages
+            .iter()
+            .any(|message| message.id == stable_message_id));
+
+        let mut bot_command = session_cmd("group-1", &session_id, Some("worker-a"));
+        bot_command.caller = CallerContext::Bot(BotActor {
+            bot_uuid: "worker-a".to_string(),
+        });
+        let bot_result = service
+            .get_session_history(bot_command)
+            .await
+            .expect("bot legacy history");
+        assert!(bot_result
+            .messages
+            .iter()
+            .all(|message| message.id != stable_message_id));
+        assert_eq!(fallback.session_calls().await, 2);
     }
 
     #[tokio::test]
@@ -1341,6 +1566,79 @@ mod tests {
         assert_eq!(fallback.session_calls().await, 0);
         assert_eq!(result.messages.len(), 1);
         assert_eq!(result.messages[0].content, "a-only");
+    }
+
+    #[tokio::test]
+    async fn manager_worker_human_worker_view_keeps_public_opening_message_after_cutoff() {
+        let (service, repo, _sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
+        let stable_message_id = format!("{session_id}:000-opening");
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: bcs_domain::BCS_SESSION_OPENING_MESSAGE_SENDER.to_string(),
+            sender_type: SenderType::Bot,
+            message_type: SESSION_OPENING_MESSAGE_TYPE.to_string(),
+            content: serde_json::json!({
+                "text": "任务协作群开场消息",
+                "bot_name": BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
+                "metadata": {
+                    "opening_message": {
+                        "scope": "session",
+                        "strategy": "manager_worker",
+                    }
+                }
+            }),
+            client_msg_id: Some(stable_message_id.clone()),
+            created_at: 1,
+            run_id: format!("{session_id}:opening"),
+            owner_bot_id: None,
+        })
+        .await
+        .expect("append opening message");
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-a",
+            "a-only",
+            Some("worker-a"),
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-b",
+            "b-only",
+            Some("worker-b"),
+        )
+        .await;
+
+        let mut command = session_cmd("group-1", &session_id, Some("worker-a"));
+        command.caller = CallerContext::Human(HumanActor {
+            actor_id: "human-1".to_string(),
+            staff_no: "human-1".to_string(),
+        });
+        let result = service
+            .get_session_history(command)
+            .await
+            .expect("manager worker human worker view history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        let message_ids = result
+            .messages
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<Vec<_>>();
+        let contents = result
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect::<Vec<_>>();
+        assert!(message_ids.contains(&stable_message_id.as_str()));
+        assert!(contents.contains(&"a-only"));
+        assert!(!contents.contains(&"b-only"));
     }
 
     #[tokio::test]

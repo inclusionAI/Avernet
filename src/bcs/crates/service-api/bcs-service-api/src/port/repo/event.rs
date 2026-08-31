@@ -301,13 +301,16 @@ pub struct EventDeliveryAttemptRecord {
     pub delivery_id: String,
     pub attempt_no: u32,
     pub started_at_ms: u64,
-    pub completed_at_ms: u64,
-    pub latency_ms: u64,
-    pub result: EventDeliveryAttemptRecordResult,
+    /// Empty while the worker still owns the attempt lease.
+    pub completed_at_ms: Option<u64>,
+    /// Empty while in flight and when lease recovery cannot know the HTTP duration.
+    pub latency_ms: Option<u64>,
+    /// Empty while the attempt is in flight.
+    pub result: Option<EventDeliveryAttemptRecordResult>,
     pub http_status: Option<u16>,
     pub error_category: Option<String>,
     pub error_summary: Option<String>,
-    pub response_bytes_observed: u64,
+    pub response_bytes_observed: Option<u64>,
     pub worker_id: String,
 }
 

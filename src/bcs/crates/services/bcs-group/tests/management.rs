@@ -345,7 +345,7 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
 }
 
 #[tokio::test]
-async fn create_chat_group_rejects_opening_message() {
+async fn create_chat_group_accepts_session_scoped_opening_message() {
     let fixture = Fixture::new().with_bot("driver", "Driver", "public", Some("alice"));
     let service = fixture.service_with_limits(5, 10, 10);
     let mut cmd = create_cmd(
@@ -353,13 +353,21 @@ async fn create_chat_group_rejects_opening_message() {
         "driver",
         vec![participant("driver", Some("driver"))],
     );
-    cmd.opening_message = Some(OpeningMessage::Text("hello".to_string()));
+    let opening_message = OpeningMessage::Text(
+        "hello {{bcs.session_id}}".to_string(),
+    );
+    cmd.opening_message = Some(opening_message.clone());
 
-    let error = service
-        .create_group(cmd)
-        .await
-        .expect_err("Chat Group must reject opening_message");
-    assert!(error.to_string().contains("invalid_opening_message"));
+    service.create_group(cmd).await.expect("create Chat Group");
+    assert_eq!(
+        fixture
+            .group
+            .get("group-under-test")
+            .await
+            .expect("created group")
+            .opening_message,
+        Some(opening_message)
+    );
 }
 
 #[tokio::test]

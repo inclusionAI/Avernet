@@ -28,6 +28,9 @@ use chrono::{SecondsFormat, TimeZone, Utc};
 use sha2::{Digest, Sha256};
 
 use crate::transaction_plan::EventAppendTransactionPlan;
+use crate::timestamp::{
+    optional_timestamp_value_from_ms, sql_with_timestamp_params, timestamp_value_from_ms,
+};
 use crate::{event_filter_matches, validate_scope};
 
 #[derive(Clone)]
@@ -241,9 +244,9 @@ impl EventRepoPort for DbEventStore {
         validate_new_subscription(&record)?;
         let scope_id = scope_storage_id(&record.subscription.scope);
         let scope_type = scope_type_name(record.subscription.scope.scope_type);
-        let created_at = db_timestamp_from_ms(record.subscription.created_at_ms)?;
-        let updated_at = db_timestamp_from_ms(record.subscription.updated_at_ms)?;
-        let activated_at = db_timestamp_from_ms(record.revision.activated_at_ms)?;
+        let created_at = timestamp_value_from_ms(self.flavor, record.subscription.created_at_ms)?;
+        let updated_at = timestamp_value_from_ms(self.flavor, record.subscription.updated_at_ms)?;
+        let activated_at = timestamp_value_from_ms(self.flavor, record.revision.activated_at_ms)?;
         let audit_id = uuid::Uuid::new_v4().to_string();
         let event_filters = serde_json::to_string(&record.revision.event_filters)
             .map_err(|error| EventRepoError::InvalidInput(format!("serialize filters: {error}")))?;
@@ -268,10 +271,12 @@ impl EventRepoPort for DbEventStore {
         let subscription_insert_step = steps.len();
         steps.push(DbTransactionStep::Execute(
             DbStatement::with_transaction_params(
-                "INSERT INTO bcs_event_subscriptions (subscription_id, name, scope_type, scope_id, \
+                sql_with_timestamp_params(self.flavor, "INSERT INTO bcs_event_subscriptions \
+                 (subscription_id, name, scope_type, scope_id, \
                  status, current_revision, created_by_type, created_by_id, \
                  created_at, updated_at, deleted_at, env) \
-                 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ? < ?",
+                 SELECT ?, ?, ?, ?, ?, ?, ?, ?, __bcs_timestamp_ms__, \
+                 __bcs_timestamp_ms__, __bcs_timestamp_ms__, ? WHERE ? < ?"),
                 vec![
                     DbValue::from(record.subscription.subscription_id.as_str()).into(),
                     DbValue::from(record.subscription.name.as_str()).into(),
@@ -282,9 +287,13 @@ impl EventRepoPort for DbEventStore {
                     DbValue::from(actor_type_name(record.subscription.created_by.actor_type))
                         .into(),
                     DbValue::from(record.subscription.created_by.id.as_str()).into(),
-                    DbValue::from(created_at.as_str()).into(),
-                    DbValue::from(updated_at.as_str()).into(),
-                    optional_db_timestamp(record.subscription.deleted_at_ms)?.into(),
+                    created_at.clone().into(),
+                    updated_at.clone().into(),
+                    optional_timestamp_value_from_ms(
+                        self.flavor,
+                        record.subscription.deleted_at_ms,
+                    )?
+                    .into(),
                     DbValue::from(record.subscription.env.as_str()).into(),
                     DbTransactionParam::query_result(reserved_count_step, 0, "reserved_count"),
                     DbValue::from(record.scope_limit).into(),
@@ -296,22 +305,24 @@ impl EventRepoPort for DbEventStore {
                 &record.revision,
                 &record.subscription.env,
                 &event_filters,
+                self.flavor,
                 &activated_at,
             )?,
         ));
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            "INSERT INTO bcs_event_subscription_audits (audit_id, subscription_id, revision, \
+            sql_with_timestamp_params(self.flavor, "INSERT INTO bcs_event_subscription_audits \
+             (audit_id, subscription_id, revision, \
              action, actor_type, actor_id, reason, details_json, created_at, env) \
-             SELECT ?, ?, ?, 'created', ?, ?, NULL, NULL, ?, ? WHERE EXISTS (\
+             SELECT ?, ?, ?, 'created', ?, ?, NULL, NULL, __bcs_timestamp_ms__, ? WHERE EXISTS (\
                SELECT 1 FROM bcs_event_subscriptions WHERE env = ? AND subscription_id = ?\
-             )",
+             )"),
             vec![
                 DbValue::from(audit_id),
                 DbValue::from(record.subscription.subscription_id.as_str()),
                 DbValue::from(record.subscription.current_revision),
                 DbValue::from(actor_type_name(record.subscription.created_by.actor_type)),
                 DbValue::from(record.subscription.created_by.id.as_str()),
-                DbValue::from(created_at),
+                created_at,
                 DbValue::from(record.subscription.env.as_str()),
                 DbValue::from(record.subscription.env.as_str()),
                 DbValue::from(record.subscription.subscription_id.as_str()),
@@ -348,37 +359,40 @@ impl EventRepoPort for DbEventStore {
                 "pending Subscription cancellation reason must not be empty".to_string(),
             ));
         }
-        let cancelled_at = db_timestamp_from_ms(command.cancelled_at_ms)?;
+        let cancelled_at = timestamp_value_from_ms(self.flavor, command.cancelled_at_ms)?;
         let mut steps = Vec::with_capacity(command.subscription_ids.len() * 2);
         let mut update_steps = Vec::with_capacity(command.subscription_ids.len());
         for subscription_id in &command.subscription_ids {
             update_steps.push(steps.len());
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_event_subscriptions SET status = 'deleted', updated_at = ?, \
-                 deleted_at = ? WHERE env = ? AND subscription_id = ? AND status = 'pending'",
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_subscriptions SET \
+                 status = 'deleted', updated_at = __bcs_timestamp_ms__, \
+                 deleted_at = __bcs_timestamp_ms__ WHERE env = ? AND subscription_id = ? \
+                 AND status = 'pending'"),
                 vec![
-                    DbValue::from(cancelled_at.as_str()),
-                    DbValue::from(cancelled_at.as_str()),
+                    cancelled_at.clone(),
+                    cancelled_at.clone(),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(subscription_id.as_str()),
                 ],
             )));
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-                "INSERT INTO bcs_event_subscription_audits \
+                sql_with_timestamp_params(self.flavor, "INSERT INTO bcs_event_subscription_audits \
                  (audit_id, subscription_id, revision, action, actor_type, actor_id, reason, \
                   details_json, created_at, env) \
                  SELECT ?, subscription_id, current_revision, 'provisioning_cancelled', ?, ?, ?, \
-                        NULL, ?, env FROM bcs_event_subscriptions \
-                 WHERE env = ? AND subscription_id = ? AND status = 'deleted' AND deleted_at = ?",
+                        NULL, __bcs_timestamp_ms__, env FROM bcs_event_subscriptions \
+                 WHERE env = ? AND subscription_id = ? AND status = 'deleted' \
+                   AND deleted_at = __bcs_timestamp_ms__"),
                 vec![
                     DbValue::from(uuid::Uuid::new_v4().to_string()),
                     DbValue::from(actor_type_name(command.actor.actor_type)),
                     DbValue::from(command.actor.id.as_str()),
                     DbValue::from(command.reason.as_str()),
-                    DbValue::from(cancelled_at.as_str()),
+                    cancelled_at.clone(),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(subscription_id.as_str()),
-                    DbValue::from(cancelled_at.as_str()),
+                    cancelled_at.clone(),
                 ],
             )));
         }
@@ -519,10 +533,10 @@ impl EventRepoPort for DbEventStore {
 
         let scope_id = scope_storage_id(&current.scope);
         let scope_type = scope_type_name(current.scope.scope_type);
-        let updated_at = db_timestamp_from_ms(command.updated_at_ms)?;
+        let updated_at = timestamp_value_from_ms(self.flavor, command.updated_at_ms)?;
         let event_filters = serde_json::to_string(&command.revision.event_filters)
             .map_err(|error| EventRepoError::InvalidInput(format!("serialize filters: {error}")))?;
-        let activated_at = db_timestamp_from_ms(command.revision.activated_at_ms)?;
+        let activated_at = timestamp_value_from_ms(self.flavor, command.revision.activated_at_ms)?;
         let audit_id = uuid::Uuid::new_v4().to_string();
         let mut steps = scope_lock_steps(self.flavor, &command.env, scope_type, scope_id.as_str());
         steps.push(DbTransactionStep::Query(DbStatement::with_params(
@@ -533,10 +547,11 @@ impl EventRepoPort for DbEventStore {
             ],
         )));
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            "UPDATE bcs_event_subscription_revisions SET retired_at = ? \
-             WHERE env = ? AND subscription_id = ? AND revision = ? AND retired_at IS NULL",
+            sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_subscription_revisions \
+             SET retired_at = __bcs_timestamp_ms__ \
+             WHERE env = ? AND subscription_id = ? AND revision = ? AND retired_at IS NULL"),
             vec![
-                DbValue::from(updated_at.as_str()),
+                updated_at.clone(),
                 DbValue::from(command.env.as_str()),
                 DbValue::from(command.subscription_id.as_str()),
                 DbValue::from(command.expected_revision),
@@ -546,20 +561,21 @@ impl EventRepoPort for DbEventStore {
             &command.revision,
             &command.env,
             &event_filters,
+            self.flavor,
             &activated_at,
         )?));
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            "UPDATE bcs_event_subscriptions SET name = ?, status = ?, current_revision = ?, \
-             updated_at = ?, \
-             deleted_at = CASE WHEN ? = 'deleted' THEN ? ELSE deleted_at END \
-             WHERE env = ? AND subscription_id = ? AND current_revision = ?",
+            sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_subscriptions SET \
+             name = ?, status = ?, current_revision = ?, updated_at = __bcs_timestamp_ms__, \
+             deleted_at = CASE WHEN ? = 'deleted' THEN __bcs_timestamp_ms__ ELSE deleted_at END \
+             WHERE env = ? AND subscription_id = ? AND current_revision = ?"),
             vec![
                 DbValue::from(command.name.as_str()),
                 DbValue::from(subscription_status_name(command.status)),
                 DbValue::from(command.revision.revision),
-                DbValue::from(updated_at.as_str()),
+                updated_at.clone(),
                 DbValue::from(subscription_status_name(command.status)),
-                DbValue::from(updated_at.as_str()),
+                updated_at.clone(),
                 DbValue::from(command.env.as_str()),
                 DbValue::from(command.subscription_id.as_str()),
                 DbValue::from(command.expected_revision),
@@ -571,13 +587,14 @@ impl EventRepoPort for DbEventStore {
                 EventSubscriptionStatus::Disabled | EventSubscriptionStatus::Deleted
             );
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_event_deliveries SET status = 'cancelled', cancelled_at = ?, \
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_deliveries SET \
+                 status = 'cancelled', cancelled_at = __bcs_timestamp_ms__, \
                  lease_owner = NULL, lease_until = NULL \
                  WHERE env = ? AND subscription_id = ? \
                    AND (? = TRUE OR subscription_revision = ?) \
-                   AND status IN ('pending', 'retry_wait')",
+                   AND status IN ('pending', 'retry_wait')"),
                 vec![
-                    DbValue::from(updated_at.as_str()),
+                    updated_at.clone(),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(command.subscription_id.as_str()),
                     DbValue::from(cancel_all_revisions),
@@ -585,12 +602,13 @@ impl EventRepoPort for DbEventStore {
                 ],
             )));
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_event_fanout_targets SET status = 'cancelled', cancelled_at = ? \
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_fanout_targets SET \
+                 status = 'cancelled', cancelled_at = __bcs_timestamp_ms__ \
                  WHERE env = ? AND subscription_id = ? \
                    AND (? = TRUE OR subscription_revision = ?) \
-                   AND status = 'pending'",
+                   AND status = 'pending'"),
                 vec![
-                    DbValue::from(updated_at.as_str()),
+                    updated_at.clone(),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(command.subscription_id.as_str()),
                     DbValue::from(cancel_all_revisions),
@@ -608,9 +626,10 @@ impl EventRepoPort for DbEventStore {
             )));
         }
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            "INSERT INTO bcs_event_subscription_audits (audit_id, subscription_id, revision, \
+            sql_with_timestamp_params(self.flavor, "INSERT INTO bcs_event_subscription_audits \
+             (audit_id, subscription_id, revision, \
              action, actor_type, actor_id, reason, details_json, created_at, env) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, __bcs_timestamp_ms__, ?)"),
             vec![
                 DbValue::from(audit_id),
                 DbValue::from(command.subscription_id.as_str()),
@@ -619,7 +638,7 @@ impl EventRepoPort for DbEventStore {
                 DbValue::from(actor_type_name(command.actor.actor_type)),
                 DbValue::from(command.actor.id.as_str()),
                 DbValue::from(command.reason.clone()),
-                DbValue::from(updated_at),
+                updated_at,
                 DbValue::from(command.env.as_str()),
             ],
         )));
@@ -725,31 +744,37 @@ impl EventRepoPort for DbEventStore {
             command.limit,
             &command.env,
         )?;
-        let now = db_timestamp_from_ms(command.now_ms)?;
-        let lease_until = db_timestamp_from_ms(command.lease_until_ms)?;
+        let now = timestamp_value_from_ms(self.flavor, command.now_ms)?;
+        let lease_until = timestamp_value_from_ms(self.flavor, command.lease_until_ms)?;
         let lease_owner = claim_owner(&command.worker_id);
         let steps = vec![
             DbTransactionStep::Execute(DbStatement::with_params(
-                claim_fanout_targets_sql(),
+                claim_fanout_targets_sql(self.flavor),
                 vec![
                     DbValue::from(lease_owner.as_str()),
-                    DbValue::from(lease_until.as_str()),
+                    lease_until.clone(),
                     DbValue::from(command.env.as_str()),
-                    DbValue::from(now.as_str()),
+                    now.clone(),
                     DbValue::from(command.limit),
                     DbValue::from(command.env.as_str()),
-                    DbValue::from(now.as_str()),
+                    now,
                 ],
             )),
             DbTransactionStep::Query(DbStatement::with_params(
-                self.target_select_sql(
+                sql_with_timestamp_params(self.flavor, &self.target_select_sql(
                     "WHERE env = ? AND status = 'pending' AND lease_owner = ? \
-                     AND lease_until = ? ORDER BY created_at, target_id",
-                ),
+                     AND lease_until = __bcs_timestamp_ms__ ORDER BY created_at, \
+                     (SELECT event.stream_key FROM bcs_events event \
+                       WHERE event.env = bcs_event_fanout_targets.env \
+                         AND event.event_id = bcs_event_fanout_targets.event_id), \
+                     (SELECT event.sequence FROM bcs_events event \
+                       WHERE event.env = bcs_event_fanout_targets.env \
+                         AND event.event_id = bcs_event_fanout_targets.event_id), target_id",
+                )),
                 vec![
                     DbValue::from(command.env.as_str()),
                     DbValue::from(lease_owner.as_str()),
-                    DbValue::from(lease_until),
+                    lease_until,
                 ],
             )),
         ];
@@ -792,13 +817,17 @@ impl EventRepoPort for DbEventStore {
                 "Delivery does not match its immutable fanout target and Event".into(),
             ));
         }
-        let materialized_at = db_timestamp_from_ms(command.materialized_at_ms)?;
-        let created_at = db_timestamp_from_ms(command.delivery.created_at_ms)?;
-        let dead_lettered_at = optional_db_timestamp(command.delivery.dead_lettered_at_ms)?;
+        let materialized_at = timestamp_value_from_ms(self.flavor, command.materialized_at_ms)?;
+        let created_at = timestamp_value_from_ms(self.flavor, command.delivery.created_at_ms)?;
+        let dead_lettered_at = optional_timestamp_value_from_ms(
+            self.flavor,
+            command.delivery.dead_lettered_at_ms,
+        )?;
         let insert_step = 0;
         let steps = vec![
             DbTransactionStep::Execute(DbStatement::with_params(
-                "INSERT INTO bcs_event_deliveries (delivery_id, fanout_target_id, event_id, \
+                sql_with_timestamp_params(self.flavor, "INSERT INTO bcs_event_deliveries \
+                 (delivery_id, fanout_target_id, event_id, \
                  subscription_id, subscription_revision, stream_key, sequence, payload_bytes, \
                  payload_sha256, status, attempt_count, first_attempt_at, last_attempt_at, \
                  next_attempt_at, lease_owner, lease_until, last_http_status, \
@@ -807,12 +836,14 @@ impl EventRepoPort for DbEventStore {
                  resolved_by_delivery_id, resolved_at, created_at, succeeded_at, env) \
                  SELECT ?, target.target_id, target.event_id, target.subscription_id, \
                  target.subscription_revision, event.stream_key, event.sequence, ?, ?, ?, \
-                 0, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, NULL, NULL, NULL, NULL, \
-                 target.replay_of_delivery_id, NULL, NULL, ?, NULL, target.env \
+                 0, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, __bcs_timestamp_ms__, NULL, NULL, \
+                 NULL, NULL, target.replay_of_delivery_id, NULL, NULL, \
+                 __bcs_timestamp_ms__, NULL, target.env \
                  FROM bcs_event_fanout_targets target JOIN bcs_events event \
                    ON event.env = target.env AND event.event_id = target.event_id \
                  WHERE target.env = ? AND target.target_id = ? AND target.status = 'pending' \
-                   AND target.lease_owner = ? AND target.lease_until > ?",
+                   AND target.lease_owner = ? \
+                   AND target.lease_until > __bcs_timestamp_ms__"),
                 vec![
                     DbValue::from(command.delivery.delivery_id.as_str()),
                     DbValue::from(command.delivery.payload_bytes.clone()),
@@ -821,24 +852,25 @@ impl EventRepoPort for DbEventStore {
                     DbValue::from(command.delivery.last_error_category.clone()),
                     DbValue::from(command.delivery.last_error_summary.clone()),
                     dead_lettered_at,
-                    DbValue::from(created_at),
+                    created_at,
                     DbValue::from(command.delivery.env.as_str()),
                     DbValue::from(command.target_id.as_str()),
                     DbValue::from(command.expected_lease_owner.as_str()),
-                    DbValue::from(materialized_at.as_str()),
+                    materialized_at.clone(),
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_event_fanout_targets SET status = 'materialized', \
-                 materialized_at = ?, lease_owner = NULL, lease_until = NULL \
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_fanout_targets SET \
+                 status = 'materialized', materialized_at = __bcs_timestamp_ms__, \
+                 lease_owner = NULL, lease_until = NULL \
                  WHERE env = ? AND target_id = ? AND status = 'pending' \
-                   AND lease_owner = ? AND lease_until > ?",
+                   AND lease_owner = ? AND lease_until > __bcs_timestamp_ms__"),
                 vec![
-                    DbValue::from(materialized_at.as_str()),
+                    materialized_at.clone(),
                     DbValue::from(command.delivery.env.as_str()),
                     DbValue::from(command.target_id.as_str()),
                     DbValue::from(command.expected_lease_owner.as_str()),
-                    DbValue::from(materialized_at.as_str()),
+                    materialized_at,
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
@@ -881,40 +913,79 @@ impl EventRepoPort for DbEventStore {
             command.limit,
             &command.env,
         )?;
-        let now = db_timestamp_from_ms(command.now_ms)?;
-        let lease_until = db_timestamp_from_ms(command.lease_until_ms)?;
+        let now = timestamp_value_from_ms(self.flavor, command.now_ms)?;
+        let lease_until = timestamp_value_from_ms(self.flavor, command.lease_until_ms)?;
         let lease_owner = claim_owner(&command.worker_id);
         let steps = vec![
             DbTransactionStep::Execute(DbStatement::with_params(
-                claim_deliveries_sql(),
+                claim_deliveries_sql(self.flavor),
                 vec![
                     DbValue::from(lease_owner.as_str()),
-                    DbValue::from(lease_until.as_str()),
-                    DbValue::from(now.as_str()),
-                    DbValue::from(now.as_str()),
+                    lease_until.clone(),
+                    now.clone(),
+                    now.clone(),
                     DbValue::from(command.env.as_str()),
-                    DbValue::from(now.as_str()),
-                    DbValue::from(now.as_str()),
+                    now.clone(),
+                    now.clone(),
                     DbValue::from(command.limit),
                     DbValue::from(command.env.as_str()),
-                    DbValue::from(now.as_str()),
-                    DbValue::from(now.as_str()),
+                    now.clone(),
+                    now,
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_params(
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_delivery_attempts SET \
+                 completed_at = __bcs_timestamp_ms__, result = 'retryable', \
+                 error_category = 'lease_expired', \
+                 error_summary = 'Delivery lease expired before completion; remote outcome is unknown', \
+                 response_bytes_observed = 0 \
+                 WHERE completed_at IS NULL AND EXISTS (\
+                   SELECT 1 FROM bcs_event_deliveries delivery \
+                   WHERE delivery.delivery_id = bcs_event_delivery_attempts.delivery_id \
+                     AND delivery.env = ? AND delivery.status = 'in_flight' \
+                     AND delivery.lease_owner = ? \
+                     AND delivery.lease_until = __bcs_timestamp_ms__ \
+                     AND delivery.attempt_count = bcs_event_delivery_attempts.attempt_no + 1\
+                 )"),
+                vec![
+                    timestamp_value_from_ms(self.flavor, command.now_ms)?,
+                    DbValue::from(command.env.as_str()),
+                    DbValue::from(lease_owner.as_str()),
+                    timestamp_value_from_ms(self.flavor, command.lease_until_ms)?,
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_params(
+                sql_with_timestamp_params(self.flavor, "INSERT INTO \
+                 bcs_event_delivery_attempts (delivery_id, attempt_no, started_at, \
+                 completed_at, latency_ms, result, http_status, error_category, error_summary, \
+                 response_bytes_observed, worker_id) \
+                 SELECT delivery_id, attempt_count, __bcs_timestamp_ms__, NULL, NULL, NULL, \
+                        NULL, NULL, NULL, NULL, ? \
+                 FROM bcs_event_deliveries WHERE env = ? AND status = 'in_flight' \
+                   AND lease_owner = ? AND lease_until = __bcs_timestamp_ms__"),
+                vec![
+                    timestamp_value_from_ms(self.flavor, command.now_ms)?,
+                    DbValue::from(command.worker_id.as_str()),
+                    DbValue::from(command.env.as_str()),
+                    DbValue::from(lease_owner.as_str()),
+                    timestamp_value_from_ms(self.flavor, command.lease_until_ms)?,
                 ],
             )),
             DbTransactionStep::Query(DbStatement::with_params(
-                self.delivery_select_sql(
+                sql_with_timestamp_params(self.flavor, &self.delivery_select_sql(
                     "WHERE d.env = ? AND d.status = 'in_flight' AND d.lease_owner = ? \
-                     AND d.lease_until = ? ORDER BY d.created_at, d.sequence, d.delivery_id",
-                ),
+                     AND d.lease_until = __bcs_timestamp_ms__ \
+                     ORDER BY d.created_at, d.sequence, d.delivery_id",
+                )),
                 vec![
                     DbValue::from(command.env.as_str()),
                     DbValue::from(lease_owner.as_str()),
-                    DbValue::from(lease_until),
+                    lease_until,
                 ],
             )),
         ];
         let results = self.db.transaction(steps).await.map_err(storage_error)?;
-        transaction_rows(&results, 1)?
+        transaction_rows(&results, 3)?
             .iter()
             .map(delivery_from_row)
             .collect()
@@ -925,21 +996,23 @@ impl EventRepoPort for DbEventStore {
         command: RenewEventDeliveryLease,
     ) -> Result<EventDeliveryRecord, EventRepoError> {
         validate_lease_renewal(&command)?;
-        let now = db_timestamp_from_ms(command.now_ms)?;
-        let lease_until = db_timestamp_from_ms(command.lease_until_ms)?;
+        let now = timestamp_value_from_ms(self.flavor, command.now_ms)?;
+        let lease_until = timestamp_value_from_ms(self.flavor, command.lease_until_ms)?;
         let result = self
             .db
             .execute(DbStatement::with_params(
-                "UPDATE bcs_event_deliveries SET lease_until = ? \
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_deliveries SET \
+                 lease_until = __bcs_timestamp_ms__ \
                  WHERE env = ? AND delivery_id = ? AND status = 'in_flight' \
-                   AND lease_owner = ? AND attempt_count = ? AND lease_until > ?",
+                   AND lease_owner = ? AND attempt_count = ? \
+                   AND lease_until > __bcs_timestamp_ms__"),
                 vec![
-                    DbValue::from(lease_until),
+                    lease_until,
                     DbValue::from(command.env.as_str()),
                     DbValue::from(command.delivery_id.as_str()),
                     DbValue::from(command.expected_lease_owner.as_str()),
                     DbValue::from(command.attempt_no),
-                    DbValue::from(now),
+                    now,
                 ],
             ))
             .await
@@ -958,72 +1031,79 @@ impl EventRepoPort for DbEventStore {
         command: CompleteEventDeliveryAttempt,
     ) -> Result<EventDeliveryRecord, EventRepoError> {
         validate_completion(&command)?;
-        let started_at = db_timestamp_from_ms(command.started_at_ms)?;
-        let completed_at = db_timestamp_from_ms(command.completed_at_ms)?;
-        let next_attempt_at = optional_db_timestamp(command.next_attempt_at_ms)?;
+        let started_at = timestamp_value_from_ms(self.flavor, command.started_at_ms)?;
+        let completed_at = timestamp_value_from_ms(self.flavor, command.completed_at_ms)?;
+        let next_attempt_at =
+            optional_timestamp_value_from_ms(self.flavor, command.next_attempt_at_ms)?;
         let succeeded_at = (command.next_status == EventDeliveryStatus::Succeeded)
             .then_some(command.completed_at_ms);
         let dead_lettered_at = (command.next_status == EventDeliveryStatus::DeadLettered)
             .then_some(command.completed_at_ms);
-        let insert_step = 0;
+        let attempt_update_step = 0;
         let mut steps = vec![
             DbTransactionStep::Execute(DbStatement::with_params(
-                "INSERT INTO bcs_event_delivery_attempts (delivery_id, attempt_no, started_at, \
-                 completed_at, latency_ms, result, http_status, error_category, error_summary, \
-                 response_bytes_observed, worker_id) \
-                 SELECT delivery_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? \
-                 FROM bcs_event_deliveries WHERE delivery_id = ? AND status = 'in_flight' \
-                   AND lease_owner = ? AND lease_until > ? AND attempt_count = ?",
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_delivery_attempts SET \
+                 started_at = __bcs_timestamp_ms__, completed_at = __bcs_timestamp_ms__, \
+                 latency_ms = ?, result = ?, http_status = ?, error_category = ?, \
+                 error_summary = ?, response_bytes_observed = ? \
+                 WHERE delivery_id = ? AND attempt_no = ? AND completed_at IS NULL \
+                   AND EXISTS (SELECT 1 FROM bcs_event_deliveries delivery \
+                     WHERE delivery.delivery_id = bcs_event_delivery_attempts.delivery_id \
+                       AND delivery.status = 'in_flight' AND delivery.lease_owner = ? \
+                       AND delivery.lease_until > __bcs_timestamp_ms__ \
+                       AND delivery.attempt_count = ?)"),
                 vec![
-                    DbValue::from(command.attempt_no),
-                    DbValue::from(started_at),
-                    DbValue::from(completed_at.as_str()),
+                    started_at,
+                    completed_at.clone(),
                     DbValue::from(command.completed_at_ms - command.started_at_ms),
                     DbValue::from(attempt_result_name(command.result)),
                     optional_u64_value(command.http_status.map(u64::from)),
                     DbValue::from(command.error_category.clone()),
                     DbValue::from(command.error_summary.clone()),
                     DbValue::from(command.response_bytes_observed),
-                    DbValue::from(lease_worker_id(&command.expected_lease_owner)),
                     DbValue::from(command.delivery_id.as_str()),
+                    DbValue::from(command.attempt_no),
                     DbValue::from(command.expected_lease_owner.as_str()),
-                    DbValue::from(completed_at.as_str()),
+                    completed_at.clone(),
                     DbValue::from(command.attempt_no),
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_event_deliveries SET status = ?, last_attempt_at = ?, \
-                 next_attempt_at = ?, lease_owner = NULL, lease_until = NULL, \
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_deliveries SET \
+                 status = ?, last_attempt_at = __bcs_timestamp_ms__, \
+                 next_attempt_at = __bcs_timestamp_ms__, lease_owner = NULL, lease_until = NULL, \
                  last_http_status = ?, last_error_category = ?, last_error_summary = ?, \
-                 dead_lettered_at = ?, succeeded_at = ? \
+                 dead_lettered_at = __bcs_timestamp_ms__, \
+                 succeeded_at = __bcs_timestamp_ms__ \
                  WHERE delivery_id = ? AND status = 'in_flight' AND lease_owner = ? \
-                   AND lease_until > ? AND attempt_count = ?",
+                   AND lease_until > __bcs_timestamp_ms__ AND attempt_count = ?"),
                 vec![
                     DbValue::from(delivery_status_name(command.next_status)),
-                    DbValue::from(completed_at.as_str()),
+                    completed_at.clone(),
                     next_attempt_at,
                     optional_u64_value(command.http_status.map(u64::from)),
                     DbValue::from(command.error_category.clone()),
                     DbValue::from(command.error_summary.clone()),
-                    optional_db_timestamp(dead_lettered_at)?,
-                    optional_db_timestamp(succeeded_at)?,
+                    optional_timestamp_value_from_ms(self.flavor, dead_lettered_at)?,
+                    optional_timestamp_value_from_ms(self.flavor, succeeded_at)?,
                     DbValue::from(command.delivery_id.as_str()),
                     DbValue::from(command.expected_lease_owner.as_str()),
-                    DbValue::from(completed_at.as_str()),
+                    completed_at.clone(),
                     DbValue::from(command.attempt_no),
                 ],
             )),
         ];
         if command.next_status == EventDeliveryStatus::Succeeded {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_event_deliveries SET resolved_by_delivery_id = ?, resolved_at = ? \
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_deliveries SET \
+                 resolved_by_delivery_id = ?, resolved_at = __bcs_timestamp_ms__ \
                  WHERE delivery_id = (SELECT replay_of_delivery_id FROM (\
                    SELECT replay_of_delivery_id FROM bcs_event_deliveries WHERE delivery_id = ?\
                  ) replacement) AND status = 'dead_lettered' \
-                   AND resolved_by_delivery_id IS NULL",
+                   AND resolved_by_delivery_id IS NULL"),
                 vec![
                     DbValue::from(command.delivery_id.as_str()),
-                    DbValue::from(completed_at),
+                    completed_at,
                     DbValue::from(command.delivery_id.as_str()),
                 ],
             )));
@@ -1034,7 +1114,7 @@ impl EventRepoPort for DbEventStore {
             vec![DbValue::from(command.delivery_id.as_str())],
         )));
         let results = self.db.transaction(steps).await.map_err(map_write_error)?;
-        if transaction_affected_rows(&results, insert_step)? != 1 {
+        if transaction_affected_rows(&results, attempt_update_step)? != 1 {
             return Err(EventRepoError::LeaseLost(command.delivery_id));
         }
         transaction_rows(&results, delivery_query_step)?
@@ -1205,7 +1285,7 @@ impl EventRepoPort for DbEventStore {
             }
         }
 
-        let created_at = db_timestamp_from_ms(command.created_at_ms)?;
+        let created_at = timestamp_value_from_ms(self.flavor, command.created_at_ms)?;
         let mut steps = vec![DbTransactionStep::Query(DbStatement::with_params(
             replay_delivery_lock_sql(self.flavor),
             vec![
@@ -1221,7 +1301,7 @@ impl EventRepoPort for DbEventStore {
                     DbValue::from(cause_event_id.as_str()),
                     DbValue::from(command.subscription_id.as_str()),
                     DbValue::from(command.subscription_revision),
-                    DbValue::from(created_at.as_str()),
+                    created_at.clone(),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(command.original_delivery_id.as_str()),
@@ -1230,19 +1310,19 @@ impl EventRepoPort for DbEventStore {
         }
         let replay_insert_step = steps.len();
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            replay_target_insert_sql(),
+            replay_target_insert_sql(self.flavor),
             vec![
                 DbValue::from(command.target_id.as_str()),
                 DbValue::from(command.subscription_revision),
                 DbValue::from(command.replay_request_id.as_str()),
                 DbValue::from(command.original_delivery_id.as_str()),
                 DbValue::from(dependency),
-                DbValue::from(created_at.as_str()),
+                created_at.clone(),
                 DbValue::from(command.env.as_str()),
                 DbValue::from(command.original_delivery_id.as_str()),
                 DbValue::from(command.subscription_id.as_str()),
                 DbValue::from(command.subscription_revision),
-                DbValue::from(created_at.as_str()),
+                created_at.clone(),
             ],
         )));
         let replay_audit_id = uuid::Uuid::new_v4().to_string();
@@ -1252,24 +1332,25 @@ impl EventRepoPort for DbEventStore {
         })
         .to_string();
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            "INSERT INTO bcs_event_subscription_audits (audit_id, subscription_id, revision, \
+            sql_with_timestamp_params(self.flavor, "INSERT INTO bcs_event_subscription_audits \
+             (audit_id, subscription_id, revision, \
              action, actor_type, actor_id, reason, details_json, created_at, env) \
              SELECT ?, target.subscription_id, target.subscription_revision, \
-             'delivery_replayed', ?, ?, ?, ?, ?, target.env \
+             'delivery_replayed', ?, ?, ?, ?, __bcs_timestamp_ms__, target.env \
              FROM bcs_event_fanout_targets target WHERE target.env = ? AND target.target_id = ? \
                AND target.purpose = 'manual_replay' AND NOT EXISTS (\
                  SELECT 1 FROM bcs_event_subscription_audits audit \
                  WHERE audit.env = target.env \
                    AND audit.subscription_id = target.subscription_id \
                    AND audit.action = 'delivery_replayed' AND audit.details_json = ?\
-               )",
+               )"),
             vec![
                 DbValue::from(replay_audit_id),
                 DbValue::from(actor_type_name(command.actor.actor_type)),
                 DbValue::from(command.actor.id.as_str()),
                 DbValue::from(command.reason.clone()),
                 DbValue::from(replay_details.as_str()),
-                DbValue::from(created_at.as_str()),
+                created_at,
                 DbValue::from(command.env.as_str()),
                 DbValue::from(command.target_id.as_str()),
                 DbValue::from(replay_details),
@@ -1336,19 +1417,20 @@ impl EventRepoPort for DbEventStore {
                 "skip reason must be between 1 and 128 bytes".into(),
             ));
         }
-        let skipped_at = db_timestamp_from_ms(command.skipped_at_ms)?;
+        let skipped_at = timestamp_value_from_ms(self.flavor, command.skipped_at_ms)?;
         let skip_actor = serde_json::to_string(&command.actor)
             .map_err(|error| EventRepoError::InvalidInput(format!("serialize actor: {error}")))?;
         let audit_id = uuid::Uuid::new_v4().to_string();
         let update_step = 0;
         let steps = vec![
             DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_event_deliveries SET status = 'skipped', skipped_at = ?, \
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_deliveries SET \
+                 status = 'skipped', skipped_at = __bcs_timestamp_ms__, \
                  skip_actor = ?, skip_reason = ?, lease_owner = NULL, lease_until = NULL \
                  WHERE env = ? AND delivery_id = ? AND status = 'dead_lettered' \
-                   AND resolved_by_delivery_id IS NULL",
+                   AND resolved_by_delivery_id IS NULL"),
                 vec![
-                    DbValue::from(skipped_at.as_str()),
+                    skipped_at.clone(),
                     DbValue::from(skip_actor),
                     DbValue::from(command.reason.as_str()),
                     DbValue::from(command.env.as_str()),
@@ -1356,40 +1438,44 @@ impl EventRepoPort for DbEventStore {
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_event_deliveries SET status = 'cancelled', cancelled_at = ?, \
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_deliveries SET \
+                 status = 'cancelled', cancelled_at = __bcs_timestamp_ms__, \
                  lease_owner = NULL, lease_until = NULL WHERE env = ? \
-                 AND replay_of_delivery_id = ? AND status IN ('pending', 'retry_wait')",
+                 AND replay_of_delivery_id = ? AND status IN ('pending', 'retry_wait')"),
                 vec![
-                    DbValue::from(skipped_at.as_str()),
+                    skipped_at.clone(),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(command.delivery_id.as_str()),
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
-                "UPDATE bcs_event_fanout_targets SET status = 'cancelled', cancelled_at = ?, \
+                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_fanout_targets SET \
+                 status = 'cancelled', cancelled_at = __bcs_timestamp_ms__, \
                  lease_owner = NULL, lease_until = NULL WHERE env = ? \
-                 AND replay_of_delivery_id = ? AND status = 'pending'",
+                 AND replay_of_delivery_id = ? AND status = 'pending'"),
                 vec![
-                    DbValue::from(skipped_at.as_str()),
+                    skipped_at.clone(),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(command.delivery_id.as_str()),
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
-                "INSERT INTO bcs_event_subscription_audits (audit_id, subscription_id, \
+                sql_with_timestamp_params(self.flavor, "INSERT INTO \
+                 bcs_event_subscription_audits (audit_id, subscription_id, \
                  revision, action, actor_type, actor_id, reason, details_json, created_at, env) \
                  SELECT ?, subscription_id, subscription_revision, 'delivery_skipped', ?, ?, ?, \
-                 NULL, ?, env FROM bcs_event_deliveries WHERE env = ? AND delivery_id = ? \
-                   AND status = 'skipped' AND skipped_at = ?",
+                 NULL, __bcs_timestamp_ms__, env FROM bcs_event_deliveries \
+                 WHERE env = ? AND delivery_id = ? AND status = 'skipped' \
+                   AND skipped_at = __bcs_timestamp_ms__"),
                 vec![
                     DbValue::from(audit_id),
                     DbValue::from(actor_type_name(command.actor.actor_type)),
                     DbValue::from(command.actor.id.as_str()),
                     DbValue::from(command.reason.as_str()),
-                    DbValue::from(skipped_at.as_str()),
+                    skipped_at.clone(),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(command.delivery_id.as_str()),
-                    DbValue::from(skipped_at.as_str()),
+                    skipped_at.clone(),
                 ],
             )),
         ];
@@ -1414,7 +1500,7 @@ impl EventRepoPort for DbEventStore {
                 "retention limits and env must be non-empty".into(),
             ));
         }
-        let now = db_timestamp_from_ms(command.now_ms)?;
+        let now = timestamp_value_from_ms(self.flavor, command.now_ms)?;
         let attempt_delete_step = 0;
         let delivery_delete_step = 1;
         let event_delete_step = 3;
@@ -1422,12 +1508,13 @@ impl EventRepoPort for DbEventStore {
             .db
             .transaction(vec![
                 DbTransactionStep::Execute(DbStatement::with_params(
-                    "DELETE FROM bcs_event_delivery_attempts WHERE delivery_id IN (\
+                    sql_with_timestamp_params(self.flavor, "DELETE FROM \
+                       bcs_event_delivery_attempts WHERE delivery_id IN (\
                        SELECT delivery_id FROM (SELECT delivery.delivery_id \
                        FROM bcs_event_deliveries delivery WHERE delivery.env = ? \
                          AND delivery.event_id IN (SELECT event_id FROM (\
                            SELECT event.event_id FROM bcs_events event WHERE event.env = ? \
-                             AND event.retention_until <= ? AND NOT EXISTS (\
+                             AND event.retention_until <= __bcs_timestamp_ms__ AND NOT EXISTS (\
                                SELECT 1 FROM bcs_event_fanout_targets target \
                                WHERE target.env = event.env AND target.event_id = event.event_id \
                                  AND (target.status = 'pending' OR EXISTS (\
@@ -1444,21 +1531,22 @@ impl EventRepoPort for DbEventStore {
                                  ))\
                              ) ORDER BY event.retention_until, event.event_id LIMIT ?\
                          ) eligible_events)\
-                       ) eligible_deliveries)",
+                       ) eligible_deliveries)"),
                     vec![
                         DbValue::from(command.env.as_str()),
                         DbValue::from(command.env.as_str()),
-                        DbValue::from(now.as_str()),
+                        now.clone(),
                         DbValue::from(command.event_limit),
                     ],
                 )),
                 DbTransactionStep::Execute(DbStatement::with_params(
-                    "DELETE FROM bcs_event_deliveries WHERE delivery_id IN (\
+                    sql_with_timestamp_params(self.flavor, "DELETE FROM bcs_event_deliveries \
+                       WHERE delivery_id IN (\
                        SELECT delivery_id FROM (SELECT delivery.delivery_id \
                        FROM bcs_event_deliveries delivery WHERE delivery.env = ? \
                          AND delivery.event_id IN (SELECT event_id FROM (\
                            SELECT event.event_id FROM bcs_events event WHERE event.env = ? \
-                             AND event.retention_until <= ? AND NOT EXISTS (\
+                             AND event.retention_until <= __bcs_timestamp_ms__ AND NOT EXISTS (\
                                SELECT 1 FROM bcs_event_fanout_targets target \
                                WHERE target.env = event.env AND target.event_id = event.event_id \
                                  AND (target.status = 'pending' OR EXISTS (\
@@ -1475,21 +1563,23 @@ impl EventRepoPort for DbEventStore {
                                  ))\
                              ) ORDER BY event.retention_until, event.event_id LIMIT ?\
                          ) eligible_events)\
-                       ) eligible_deliveries)",
+                       ) eligible_deliveries)"),
                     vec![
                         DbValue::from(command.env.as_str()),
                         DbValue::from(command.env.as_str()),
-                        DbValue::from(now.as_str()),
+                        now.clone(),
                         DbValue::from(command.event_limit),
                     ],
                 )),
                 DbTransactionStep::Execute(DbStatement::with_params(
-                    "DELETE FROM bcs_event_fanout_targets WHERE target_id IN (\
+                    sql_with_timestamp_params(self.flavor, "DELETE FROM \
+                       bcs_event_fanout_targets WHERE target_id IN (\
                        SELECT target_id FROM (SELECT target.target_id \
                        FROM bcs_event_fanout_targets target \
                        JOIN bcs_events event ON event.env = target.env \
                          AND event.event_id = target.event_id \
-                       WHERE target.env = ? AND event.retention_until <= ? \
+                       WHERE target.env = ? \
+                         AND event.retention_until <= __bcs_timestamp_ms__ \
                          AND target.status <> 'pending' AND NOT EXISTS (\
                            SELECT 1 FROM bcs_event_fanout_targets dependent \
                            WHERE dependent.env = target.env \
@@ -1499,24 +1589,25 @@ impl EventRepoPort for DbEventStore {
                            WHERE delivery.env = target.env \
                              AND delivery.fanout_target_id = target.target_id\
                          ) ORDER BY event.retention_until, event.event_id LIMIT ?\
-                       ) eligible_targets)",
+                       ) eligible_targets)"),
                     vec![
                         DbValue::from(command.env.as_str()),
-                        DbValue::from(now.as_str()),
+                        now.clone(),
                         DbValue::from(command.event_limit),
                     ],
                 )),
                 DbTransactionStep::Execute(DbStatement::with_params(
-                    "DELETE FROM bcs_events WHERE event_id IN (SELECT event_id FROM (\
+                    sql_with_timestamp_params(self.flavor, "DELETE FROM bcs_events \
+                     WHERE event_id IN (SELECT event_id FROM (\
                    SELECT event.event_id FROM bcs_events event WHERE event.env = ? \
-                     AND event.retention_until <= ? AND NOT EXISTS (\
+                     AND event.retention_until <= __bcs_timestamp_ms__ AND NOT EXISTS (\
                        SELECT 1 FROM bcs_event_fanout_targets target \
                        WHERE target.env = event.env AND target.event_id = event.event_id\
                      ) ORDER BY event.retention_until, event.event_id LIMIT ?\
-                 ) eligible)",
+                 ) eligible)"),
                     vec![
                         DbValue::from(command.env.as_str()),
-                        DbValue::from(now),
+                        now,
                         DbValue::from(command.event_limit),
                     ],
                 )),
@@ -1532,21 +1623,27 @@ impl EventRepoPort for DbEventStore {
     }
 }
 
-fn claim_fanout_targets_sql() -> &'static str {
-    "UPDATE bcs_event_fanout_targets SET lease_owner = ?, lease_until = ? \
+fn claim_fanout_targets_sql(flavor: DbSqlFlavor) -> String {
+    sql_with_timestamp_params(flavor, "UPDATE bcs_event_fanout_targets SET lease_owner = ?, \
+     lease_until = __bcs_timestamp_ms__ \
      WHERE target_id IN (SELECT target_id FROM (\
        SELECT target.target_id FROM bcs_event_fanout_targets target \
+       JOIN bcs_events event ON event.env = target.env AND event.event_id = target.event_id \
        WHERE target.env = ? AND target.status = 'pending' \
-         AND (target.lease_until IS NULL OR target.lease_until <= ?) \
-       ORDER BY created_at, target_id LIMIT ?\
+         AND (target.lease_until IS NULL \
+           OR target.lease_until <= __bcs_timestamp_ms__) \
+       ORDER BY target.created_at, event.stream_key, event.sequence, target.target_id LIMIT ?\
      ) claimable) AND env = ? AND status = 'pending' \
-       AND (lease_until IS NULL OR lease_until <= ?)"
+       AND (lease_until IS NULL OR lease_until <= __bcs_timestamp_ms__)"
+    )
 }
 
-fn claim_deliveries_sql() -> &'static str {
-    "UPDATE bcs_event_deliveries SET status = 'in_flight', attempt_count = attempt_count + 1, \
-     lease_owner = ?, lease_until = ?, first_attempt_at = COALESCE(first_attempt_at, ?), \
-     last_attempt_at = ?, next_attempt_at = NULL \
+fn claim_deliveries_sql(flavor: DbSqlFlavor) -> String {
+    sql_with_timestamp_params(flavor, "UPDATE bcs_event_deliveries SET status = 'in_flight', \
+     attempt_count = attempt_count + 1, lease_owner = ?, \
+     lease_until = __bcs_timestamp_ms__, \
+     first_attempt_at = COALESCE(first_attempt_at, __bcs_timestamp_ms__), \
+     last_attempt_at = __bcs_timestamp_ms__, next_attempt_at = NULL \
      WHERE delivery_id IN (SELECT delivery_id FROM (\
        SELECT delivery.delivery_id FROM bcs_event_deliveries delivery \
        JOIN bcs_event_subscription_revisions revision \
@@ -1556,9 +1653,11 @@ fn claim_deliveries_sql() -> &'static str {
        JOIN bcs_event_fanout_targets target \
          ON target.env = delivery.env AND target.target_id = delivery.fanout_target_id \
        WHERE delivery.env = ? \
-         AND (delivery.lease_until IS NULL OR delivery.lease_until <= ?) \
+         AND (delivery.lease_until IS NULL \
+           OR delivery.lease_until <= __bcs_timestamp_ms__) \
          AND (delivery.status = 'pending' \
-           OR (delivery.status = 'retry_wait' AND delivery.next_attempt_at <= ?) \
+           OR (delivery.status = 'retry_wait' \
+             AND delivery.next_attempt_at <= __bcs_timestamp_ms__) \
            OR delivery.status = 'in_flight') \
          AND (target.depends_on_target_id IS NULL OR EXISTS (\
            SELECT 1 FROM bcs_event_deliveries dependency \
@@ -1580,19 +1679,20 @@ fn claim_deliveries_sql() -> &'static str {
          ) \
        ORDER BY delivery.created_at, delivery.sequence, delivery.delivery_id LIMIT ?\
      ) claimable) AND env = ? \
-       AND (lease_until IS NULL OR lease_until <= ?) \
-       AND (status = 'pending' OR (status = 'retry_wait' AND next_attempt_at <= ?) \
-         OR status = 'in_flight')"
+       AND (lease_until IS NULL OR lease_until <= __bcs_timestamp_ms__) \
+       AND (status = 'pending' OR (status = 'retry_wait' \
+         AND next_attempt_at <= __bcs_timestamp_ms__) OR status = 'in_flight')"
+    )
 }
 
-fn causal_replay_insert_sql(flavor: DbSqlFlavor) -> &'static str {
-    match flavor {
+fn causal_replay_insert_sql(flavor: DbSqlFlavor) -> String {
+    sql_with_timestamp_params(flavor, match flavor {
         DbSqlFlavor::Mysql => {
             "INSERT IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
              subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
              depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
              cancelled_at, env) SELECT ?, ?, ?, ?, 'causal_prerequisite', '', NULL, NULL, \
-             'pending', NULL, NULL, ?, NULL, NULL, ? WHERE EXISTS (\
+             'pending', NULL, NULL, __bcs_timestamp_ms__, NULL, NULL, ? WHERE EXISTS (\
                SELECT 1 FROM bcs_event_deliveries original WHERE original.env = ? \
                  AND original.delivery_id = ? AND original.status = 'dead_lettered' \
                  AND original.resolved_by_delivery_id IS NULL\
@@ -1603,21 +1703,23 @@ fn causal_replay_insert_sql(flavor: DbSqlFlavor) -> &'static str {
              subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
              depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
              cancelled_at, env) SELECT ?, ?, ?, ?, 'causal_prerequisite', '', NULL, NULL, \
-             'pending', NULL, NULL, ?, NULL, NULL, ? WHERE EXISTS (\
+             'pending', NULL, NULL, __bcs_timestamp_ms__, NULL, NULL, ? WHERE EXISTS (\
                SELECT 1 FROM bcs_event_deliveries original WHERE original.env = ? \
                  AND original.delivery_id = ? AND original.status = 'dead_lettered' \
                  AND original.resolved_by_delivery_id IS NULL\
              )"
         }
-    }
+    })
 }
 
-fn replay_target_insert_sql() -> &'static str {
-    "INSERT INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
+fn replay_target_insert_sql(flavor: DbSqlFlavor) -> String {
+    sql_with_timestamp_params(flavor, "INSERT INTO bcs_event_fanout_targets \
+     (target_id, event_id, subscription_id, \
      subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
      depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
      cancelled_at, env) SELECT ?, original.event_id, original.subscription_id, ?, \
-     'manual_replay', ?, ?, ?, 'pending', NULL, NULL, ?, NULL, NULL, original.env \
+     'manual_replay', ?, ?, ?, 'pending', NULL, NULL, __bcs_timestamp_ms__, \
+     NULL, NULL, original.env \
      FROM bcs_event_deliveries original JOIN bcs_events event \
        ON event.env = original.env AND event.event_id = original.event_id \
      JOIN bcs_event_subscriptions subscription \
@@ -1626,7 +1728,8 @@ fn replay_target_insert_sql() -> &'static str {
      WHERE original.env = ? AND original.delivery_id = ? AND original.subscription_id = ? \
        AND original.status = 'dead_lettered' AND original.resolved_by_delivery_id IS NULL \
        AND subscription.current_revision = ? \
-       AND subscription.status = 'active' AND event.retention_until > ? \
+       AND subscription.status = 'active' \
+       AND event.retention_until > __bcs_timestamp_ms__ \
        AND NOT EXISTS (\
          SELECT 1 FROM bcs_event_fanout_targets replay \
          LEFT JOIN bcs_event_deliveries replacement \
@@ -1635,7 +1738,7 @@ fn replay_target_insert_sql() -> &'static str {
            AND replay.replay_of_delivery_id = original.delivery_id \
            AND (replay.status = 'pending' \
              OR replacement.status IN ('pending', 'in_flight', 'retry_wait'))\
-       )"
+       )")
 }
 
 fn replay_delivery_lock_sql(flavor: DbSqlFlavor) -> &'static str {
@@ -1721,12 +1824,6 @@ fn validate_lease_renewal(command: &RenewEventDeliveryLease) -> Result<(), Event
 
 fn claim_owner(worker_id: &str) -> String {
     format!("{worker_id}#{}", uuid::Uuid::new_v4())
-}
-
-fn lease_worker_id(lease_owner: &str) -> &str {
-    lease_owner
-        .split_once('#')
-        .map_or(lease_owner, |(worker, _)| worker)
 }
 
 fn validate_materialization(command: &MaterializeFanoutTarget) -> Result<(), EventRepoError> {
@@ -1936,13 +2033,15 @@ fn revision_insert_statement(
     revision: &EventSubscriptionRevisionRecord,
     env: &str,
     event_filters: &str,
-    activated_at: &str,
+    flavor: DbSqlFlavor,
+    activated_at: &DbValue,
 ) -> Result<DbStatement, EventRepoError> {
     Ok(DbStatement::with_params(
-        "INSERT INTO bcs_event_subscription_revisions (subscription_id, revision, \
+        sql_with_timestamp_params(flavor, "INSERT INTO bcs_event_subscription_revisions \
+         (subscription_id, revision, \
          event_filters_json, payload_mode, \
          endpoint_url, request_timeout_ms, activated_at, retired_at, env) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, __bcs_timestamp_ms__, __bcs_timestamp_ms__, ?)"),
         vec![
             DbValue::from(revision.subscription_id.as_str()),
             DbValue::from(revision.revision),
@@ -1950,8 +2049,8 @@ fn revision_insert_statement(
             DbValue::from(payload_mode_name(revision.payload_mode)),
             DbValue::from(revision.endpoint_url.as_str()),
             DbValue::from(revision.request_timeout_ms),
-            DbValue::from(activated_at),
-            optional_db_timestamp(revision.retired_at_ms)?,
+            activated_at.clone(),
+            optional_timestamp_value_from_ms(flavor, revision.retired_at_ms)?,
             DbValue::from(env),
         ],
     ))
@@ -1961,19 +2060,21 @@ fn revision_insert_if_subscription_exists_statement(
     revision: &EventSubscriptionRevisionRecord,
     env: &str,
     event_filters: &str,
-    activated_at: &str,
+    flavor: DbSqlFlavor,
+    activated_at: &DbValue,
 ) -> Result<DbStatement, EventRepoError> {
-    let mut params =
-        revision_insert_statement(revision, env, event_filters, activated_at)?.into_params();
+    let mut params = revision_insert_statement(revision, env, event_filters, flavor, activated_at)?
+        .into_params();
     params.push(DbValue::from(env));
     params.push(DbValue::from(revision.subscription_id.as_str()));
     Ok(DbStatement::with_params(
-        "INSERT INTO bcs_event_subscription_revisions (subscription_id, revision, \
+        sql_with_timestamp_params(flavor, "INSERT INTO bcs_event_subscription_revisions \
+         (subscription_id, revision, \
          event_filters_json, payload_mode, endpoint_url, request_timeout_ms, \
          activated_at, retired_at, env) \
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (\
+         SELECT ?, ?, ?, ?, ?, ?, __bcs_timestamp_ms__, __bcs_timestamp_ms__, ? WHERE EXISTS (\
            SELECT 1 FROM bcs_event_subscriptions WHERE env = ? AND subscription_id = ?\
-         )",
+         )"),
         params,
     ))
 }
@@ -2133,12 +2234,9 @@ fn delivery_from_row(row: &DbRow) -> Result<EventDeliveryRecord, EventRepoError>
 }
 
 fn attempt_from_row(row: &DbRow) -> Result<EventDeliveryAttemptRecord, EventRepoError> {
-    let completed_at_ms = optional_column(row, "completed_at_ms")?
-        .ok_or_else(|| EventRepoError::Storage("persisted Attempt is incomplete".into()))?;
-    let latency_ms = optional_column(row, "latency_ms")?
-        .ok_or_else(|| EventRepoError::Storage("persisted Attempt latency is missing".into()))?;
     let result = optional_column::<String>(row, "result")?
-        .ok_or_else(|| EventRepoError::Storage("persisted Attempt result is missing".into()))?;
+        .map(|result| parse_attempt_result(&result))
+        .transpose()?;
     let http_status = optional_column::<u64>(row, "http_status")?
         .map(u16::try_from)
         .transpose()
@@ -2147,14 +2245,13 @@ fn attempt_from_row(row: &DbRow) -> Result<EventDeliveryAttemptRecord, EventRepo
         delivery_id: column(row, "delivery_id")?,
         attempt_no: column(row, "attempt_no")?,
         started_at_ms: column(row, "started_at_ms")?,
-        completed_at_ms,
-        latency_ms,
-        result: parse_attempt_result(&result)?,
+        completed_at_ms: optional_column(row, "completed_at_ms")?,
+        latency_ms: optional_column(row, "latency_ms")?,
+        result,
         http_status,
         error_category: optional_column(row, "error_category")?,
         error_summary: optional_column(row, "error_summary")?,
-        response_bytes_observed: optional_column(row, "response_bytes_observed")?
-            .unwrap_or_default(),
+        response_bytes_observed: optional_column(row, "response_bytes_observed")?,
         worker_id: column(row, "worker_id")?,
     })
 }
@@ -2244,25 +2341,6 @@ fn timestamp_ms_expr(flavor: DbSqlFlavor, column: &str, alias: &str) -> String {
             )
         }
     }
-}
-
-fn db_timestamp_from_ms(timestamp_ms: u64) -> Result<String, EventRepoError> {
-    let timestamp_ms = i64::try_from(timestamp_ms).map_err(|_| {
-        EventRepoError::InvalidInput("timestamp is outside supported range".to_string())
-    })?;
-    Utc.timestamp_millis_opt(timestamp_ms)
-        .single()
-        .map(|timestamp| timestamp.format("%Y-%m-%d %H:%M:%S%.3f").to_string())
-        .ok_or_else(|| {
-            EventRepoError::InvalidInput("timestamp is outside supported range".to_string())
-        })
-}
-
-fn optional_db_timestamp(timestamp_ms: Option<u64>) -> Result<DbValue, EventRepoError> {
-    timestamp_ms
-        .map(db_timestamp_from_ms)
-        .transpose()
-        .map(DbValue::from)
 }
 
 fn rfc3339_from_ms(timestamp_ms: u64) -> Result<String, EventRepoError> {
@@ -2469,12 +2547,13 @@ mod tests {
 
     #[test]
     fn task_six_sql_has_expected_parameter_counts_for_both_dialects() {
-        assert_eq!(claim_fanout_targets_sql().matches('?').count(), 7);
-        assert_eq!(claim_deliveries_sql().matches('?').count(), 11);
-        assert_eq!(replay_target_insert_sql().matches('?').count(), 11);
         for flavor in [DbSqlFlavor::Mysql, DbSqlFlavor::Sqlite] {
+            assert_eq!(claim_fanout_targets_sql(flavor).matches('?').count(), 7);
+            assert_eq!(claim_deliveries_sql(flavor).matches('?').count(), 11);
+            assert_eq!(replay_target_insert_sql(flavor).matches('?').count(), 11);
             assert_eq!(causal_replay_insert_sql(flavor).matches('?').count(), 8);
             assert_eq!(replay_delivery_lock_sql(flavor).matches('?').count(), 2);
+            assert!(!claim_deliveries_sql(flavor).contains("__bcs_timestamp_ms__"));
         }
     }
 }

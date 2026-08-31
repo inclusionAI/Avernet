@@ -5,6 +5,8 @@ pub mod memory;
 pub mod recorder;
 pub mod transaction_plan;
 
+mod timestamp;
+
 pub use db::DbEventStore;
 pub use memory::MemoryEventStore;
 pub use recorder::EventRecorder;

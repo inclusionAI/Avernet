@@ -2,8 +2,13 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
+use bcs_domain::{
+    BCS_SESSION_OPENING_MESSAGE_SENDER, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME, NewMessage,
+    OpeningMessageRenderContext, SESSION_OPENING_MESSAGE_TYPE, SenderType,
+};
 
 use bcs_service_api::application::session::{
     ClaimSessionCallbackCommand, ClaimSessionCallbackOutcome,
@@ -14,9 +19,12 @@ use bcs_service_api::core::session::new_session_id;
 use bcs_service_api::port::repo::{
     AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
     CompleteSessionWithEvent, CreateSessionWithEvent, GroupRepoPort,
-    RemoveSessionParticipantWithEvent, SessionRepoPort,
+    MessageRepoPort, RemoveSessionParticipantWithEvent, SessionRepoPort,
 };
-use bcs_service_api::port::{EventRecordFactoryPort, NewEvent};
+use bcs_service_api::port::{
+    EventRecordFactoryPort, FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
+    FrontendDeliveryTarget, NewEvent,
+};
 use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
 use bcs_service_api::{
     ActorKind, BotRuntimeConnectionService, CollaborationRuntimeService, GroupStrategy,
@@ -31,6 +39,8 @@ pub struct SessionManagementServiceImpl {
     group_repo: Arc<dyn GroupRepoPort>,
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
+    message_repo: Option<Arc<dyn MessageRepoPort>>,
+    frontend_delivery: Option<Arc<dyn FrontendDeliveryPort>>,
 }
 
 pub struct SessionManagementWithRuntimeCleanup {
@@ -260,6 +270,8 @@ impl SessionManagementServiceImpl {
             group_repo,
             bot_runtime: None,
             event_record_factory: None,
+            message_repo: None,
+            frontend_delivery: None,
         }
     }
 
@@ -277,6 +289,154 @@ impl SessionManagementServiceImpl {
     ) -> Self {
         self.event_record_factory = Some(event_record_factory);
         self
+    }
+
+    pub fn with_opening_message_delivery(
+        mut self,
+        message_repo: Arc<dyn MessageRepoPort>,
+        frontend_delivery: Arc<dyn FrontendDeliveryPort>,
+    ) -> Self {
+        self.message_repo = Some(message_repo);
+        self.frontend_delivery = Some(frontend_delivery);
+        self
+    }
+
+    async fn persist_session_opening_message(
+        &self,
+        group: &bcs_service_api::Group,
+        session: &Session,
+    ) -> Result<(), SessionUseCaseError> {
+        if !matches!(
+            group.group_strategy,
+            GroupStrategy::Chat | GroupStrategy::ManagerWorker
+        ) {
+            return Ok(());
+        }
+        let Some(opening_message) = group.opening_message.as_ref() else {
+            return Ok(());
+        };
+        let Some(message_repo) = self.message_repo.as_ref() else {
+            return Err(SessionUseCaseError::Internal(ServiceError::InternalError(
+                "Session opening-message persistence is not configured".to_string(),
+            )));
+        };
+        let rendered = opening_message
+            .render(OpeningMessageRenderContext::Session {
+                group_id: &group.id,
+                session_id: &session.id,
+                group_name: group.label.as_deref(),
+                session_name: session.session_title.as_deref(),
+            })
+            .map_err(|error| {
+                SessionUseCaseError::Internal(ServiceError::InternalError(format!(
+                    "Failed to render opening_message for session '{}': {error}",
+                    session.id
+                )))
+            })?;
+        let strategy = match group.group_strategy {
+            GroupStrategy::Chat => "chat",
+            GroupStrategy::ManagerWorker => "manager_worker",
+            GroupStrategy::StateMachine => unreachable!("filtered above"),
+        };
+        let mut opening_metadata = serde_json::json!({
+            "scope": "session",
+            "strategy": strategy,
+        });
+        if let Some(component) = rendered.component.as_ref() {
+            opening_metadata["component"] = Value::String(component.clone());
+        }
+        let metadata = serde_json::json!({ "opening_message": opening_metadata });
+        let client_msg_id = format!("{}:000-opening", session.id);
+        let run_id = format!("{}:opening", session.id);
+        let persisted = message_repo
+            .append_message(NewMessage {
+                group_id: group.id.clone(),
+                session_id: session.id.clone(),
+                sender_id: BCS_SESSION_OPENING_MESSAGE_SENDER.to_string(),
+                sender_type: SenderType::Bot,
+                message_type: SESSION_OPENING_MESSAGE_TYPE.to_string(),
+                content: serde_json::json!({
+                    "text": rendered.content,
+                    "bot_name": BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
+                    "metadata": metadata,
+                }),
+                client_msg_id: Some(client_msg_id),
+                owner_bot_id: None,
+                created_at: session.created_at,
+                run_id: run_id.clone(),
+            })
+            .await
+            .map_err(|error| {
+                SessionUseCaseError::Internal(ServiceError::InternalError(format!(
+                    "Failed to persist opening_message for session '{}': {error}",
+                    session.id
+                )))
+            })?;
+
+        let Some(frontend_delivery) = self.frontend_delivery.as_ref() else {
+            return Ok(());
+        };
+        let content = persisted
+            .content
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let metadata = persisted
+            .content
+            .get("metadata")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let payload = serde_json::json!({
+            "run_id": persisted.run_id,
+            "bcs_group_id": persisted.group_id,
+            "bcs_session_id": persisted.session_id,
+            "state": "final",
+            "role": "assistant",
+            "sender": BCS_SESSION_OPENING_MESSAGE_SENDER,
+            "content": content.clone(),
+            "message_type": "bot",
+            "bot_name": BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
+            "metadata": metadata,
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": content}],
+                "timestamp": persisted.created_at,
+            },
+        });
+        let frame = serde_json::json!({
+            "type": "event",
+            "event": "chat",
+            "payload": payload,
+            "group_id": group.id,
+            "bot_uuid": BCS_SESSION_OPENING_MESSAGE_SENDER,
+        });
+        match tokio::time::timeout(
+            Duration::from_millis(500),
+            frontend_delivery.publish(FrontendDeliveryCommand {
+                target: FrontendDeliveryTarget::Session {
+                    session_id: session.id.clone(),
+                },
+                event_json: frame.to_string(),
+                delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
+                run_fallback: None,
+                exclude_conn_id: None,
+            }),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => tracing::warn!(
+                session_id = %session.id,
+                error = %error,
+                "failed to publish persisted session opening message"
+            ),
+            Err(_) => tracing::warn!(
+                session_id = %session.id,
+                "timed out publishing persisted session opening message"
+            ),
+        }
+        Ok(())
     }
 
     fn prepare_event(
@@ -363,10 +523,9 @@ impl SessionManagementService for SessionManagementServiceImpl {
                 &cmd.params.participants,
             )
             .await?;
-            let group_is_provisioning = self
-                .group_repo
-                .try_get(&cmd.group_id)
-                .await?
+            let group = self.group_repo.try_get(&cmd.group_id).await?;
+            let group_is_provisioning = group
+                .as_ref()
                 .is_some_and(|group| group.record_status == "provisioning");
             let mut params = cmd.params;
             let session = if group_is_provisioning || self.event_record_factory.is_none() {
@@ -413,6 +572,39 @@ impl SessionManagementService for SessionManagementServiceImpl {
                     None => self.repo.create(&cmd.group_id, params).await?,
                 }
             };
+            if let Some(group) = group.as_ref() {
+                if let Err(opening_error) = self
+                    .persist_session_opening_message(group, &session)
+                    .await
+                {
+                    let opening_error_message = opening_error.to_string();
+                    let compensation_reason =
+                        Some("opening_message_persistence_failed".to_string());
+                    let compensation_result = if group_is_provisioning {
+                        self.repo
+                            .complete_if_running(&session.id, None, compensation_reason)
+                            .await
+                            .map_err(SessionUseCaseError::from)
+                    } else {
+                        SessionManagementService::complete_if_running(
+                            self,
+                            &session.id,
+                            None,
+                            compensation_reason,
+                        )
+                        .await
+                    };
+                    if let Err(compensation_error) = compensation_result {
+                        return Err(SessionUseCaseError::Internal(
+                            ServiceError::InternalError(format!(
+                                "{opening_error_message}; failed to compensate session '{}': {compensation_error}",
+                                session.id
+                            )),
+                        ));
+                    }
+                    return Err(opening_error);
+                }
+            }
             Ok(CreateOrReactivateOutcome {
                 session,
                 created: true,

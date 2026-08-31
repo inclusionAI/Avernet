@@ -112,6 +112,22 @@ def test_revision_cursor_and_status_contracts_are_explicit() -> None:
     assert set(skip["responses"]) >= {"200", "404", "409"}
 
 
+def test_in_flight_attempt_summary_requires_only_started_identity() -> None:
+    document = contract()
+    detail = document["paths"][
+        f"{BASE}/event-deliveries/{{delivery_id}}"
+    ]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    attempt = detail["properties"]["data"]["properties"]["attempts"]["items"]
+    assert attempt["required"] == ["attempt_no", "started_at"]
+    assert {
+        "completed_at",
+        "latency_ms",
+        "result",
+        "http_status",
+        "error_category",
+    } <= set(attempt["properties"])
+
+
 def test_stable_event_error_vocabulary_is_declared() -> None:
     document = contract()
     declared = {
