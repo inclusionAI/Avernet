@@ -31,6 +31,21 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 
+class FrontendUrlHolder:
+    """Runtime frontend URL override shared by task discovery integrations."""
+
+    _url: str = ""
+
+    @classmethod
+    def set(cls, url: str) -> None:
+        cls._url = url.rstrip("/")
+        logger.info("[FrontendUrlHolder] frontend url injected at runtime: %s", cls._url)
+
+    @classmethod
+    def get(cls) -> str:
+        return cls._url
+
+
 #: WebSocket 协议常量
 _WS_PROTOCOL = 3
 _WS_HANDSHAKE_TIMEOUT = 10.0

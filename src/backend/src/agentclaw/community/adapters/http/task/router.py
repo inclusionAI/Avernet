@@ -819,10 +819,11 @@ async def set_dingtalk_config(
     injected = ["dingtalk credentials"]
 
     if frontend_url:
-        logger.info(
-            "[task_discovery] frontend_url provided via API (no-op, use DI FrontendUrlProvider instead): %s",
-            frontend_url,
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
         )
+
+        FrontendUrlHolder.set(frontend_url)
 
     logger.info(
         "[task_discovery] injected via API: %s (robot=%s, template=%s)",
