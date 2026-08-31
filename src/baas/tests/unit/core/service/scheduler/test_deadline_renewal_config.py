@@ -85,6 +85,39 @@ class TestSchedulerConfig:
         assert config.engine == "deadline"
         assert config.env == ""
 
+    def test_post_extend_consistency_tol_defaults_to_five(self):
+        """D1/D-01 locked value: the post-extend consistency watermark
+        tolerance defaults to 5 minutes."""
+        config = DeadlineRenewalSchedulerConfig()
+        assert config.post_extend_consistency_tol_minutes == 5
+
+    def test_renew_threshold_minutes_defaults_to_half_default_ttl(self):
+        """EG-4 derivation: the default config's threshold is half the
+        default TTL period — 1440 // 2 == 720 minutes (12h)."""
+        config = DeadlineRenewalSchedulerConfig()
+        assert config.renew_threshold_minutes == 720
+
+    def test_renew_threshold_minutes_derives_for_custom_and_odd_ttl(self):
+        """EG-4 minute granularity: threshold follows default_ttl_minutes // 2
+        for custom periods, preserving odd half-periods (1500 -> 750)."""
+        cases = [
+            (2880, 1440),
+            (600, 300),
+            (1500, 750),
+        ]
+        for default_ttl_minutes, expected in cases:
+            config = DeadlineRenewalSchedulerConfig(
+                default_ttl_minutes=default_ttl_minutes,
+            )
+            assert config.renew_threshold_minutes == expected
+
+    def test_renew_threshold_hours_knob_retained_with_default_12(self):
+        """Keep-and-assert (EG-4/D-03): the renew_threshold_hours field stays
+        as the bootstrap assertion subject and the dual-track YAML test
+        input — default unchanged at 12."""
+        config = DeadlineRenewalSchedulerConfig()
+        assert config.renew_threshold_hours == 12
+
 
 class TestResolvedLockName:
     """F4/D-11': resolved_lock_name() appends the runtime env suffix.

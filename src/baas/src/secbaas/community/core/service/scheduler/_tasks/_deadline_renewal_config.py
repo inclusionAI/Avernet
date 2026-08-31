@@ -29,6 +29,8 @@ class DeadlineRenewalSchedulerConfig:
         retry_delay_minutes: Delay between renewal retry attempts.
         max_fail_count: Consecutive failure count before marking STOPPED.
         ttl_safety_margin_minutes: Safety buffer subtracted from ttl_minutes.
+        post_extend_consistency_tol_minutes: Upper-bound tolerance for the
+            post-extend TTL consistency watermark (D1).
         anti_join_verify_interval_cycles: Periodic anti-join verification interval.
         engine: Config switch — "legacy" or "deadline".
         env: Deployment environment identifier ('pre', 'prod', or '' for test).
@@ -48,8 +50,21 @@ class DeadlineRenewalSchedulerConfig:
     max_fail_count: int = 10
     ttl_safety_margin_minutes: int = 1
     anti_join_verify_interval_cycles: int = 48
+    post_extend_consistency_tol_minutes: int = 5
     engine: str = "legacy"
     env: str = ""
+
+    @property
+    def renew_threshold_minutes(self) -> int:
+        """Renewal threshold in minutes — half the configured TTL period.
+
+        EG-4 single-source: the (g)/(h) decision derives from
+        default_ttl_minutes instead of the YAML renew_threshold_hours, so a
+        reconfigured TTL period keeps the threshold coherent. Minutes
+        granularity preserves odd half-periods (e.g. 1500//2 = 750) that
+        the hours field cannot express.
+        """
+        return self.default_ttl_minutes // 2
 
     def resolved_lock_name(self) -> str:
         """Return the env-scoped distributed lock name.
