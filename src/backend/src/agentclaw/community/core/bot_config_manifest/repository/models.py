@@ -23,6 +23,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
@@ -75,7 +76,28 @@ class BotConfigManifestModel(Base):
     bot_id = Column(String(256), nullable=False, comment="Bot ID")
     # The caller's bytes, not a re-serialisation: ``script.body`` is a shell
     # body and a YAML round trip preserves its value, not its bytes.
-    document = Column(Text, nullable=False, comment="配置清单文档原文（清空即删行）")
+    #
+    # ``MEDIUMTEXT`` on MySQL, and that variant is load-bearing rather than
+    # decorative. Plain ``Text`` renders as MySQL ``TEXT``, which holds 65,535
+    # bytes — one *less* than ``MAX_DOCUMENT_BYTES`` (65,536), and the size check
+    # is a strict ``>``, so a document of exactly 64 KiB passes validation. On a
+    # ``TEXT`` column that accepted write then either fails outright (strict SQL
+    # mode) or silently truncates (non-strict): the byte-exact "stored verbatim"
+    # guarantee broken for a document the API itself called valid.
+    #
+    # It is reachable because ``create_schema`` defaults to ``True``
+    # (``di/config_community.py``), so a deployment that lets the app emit its
+    # own DDL gets this column rather than the out-of-band prod DDL — which
+    # already says ``mediumtext``. The variant is what makes the two agree.
+    #
+    # ``ac_bot_startup_script.script`` has the same divergence and is dormant
+    # there: its 24 KiB cap sits far under ``TEXT``. Here the limit lands exactly
+    # on top of it.
+    document = Column(
+        Text().with_variant(mysql.MEDIUMTEXT(), "mysql"),
+        nullable=False,
+        comment="配置清单文档原文（清空即删行）",
+    )
     size_bytes = Column(Integer, nullable=False, comment="文档字节数（UTF-8）")
     schema_version = Column(Integer, nullable=False, comment="schema 版本")
     modifier = Column(String(1024), nullable=False, comment="审计：最后写入者")

@@ -271,3 +271,39 @@ def test_the_uniqueness_key_fits_innodbs_index_limit():
             f"{constraint.name} is {chars} chars = {chars * 4} utf8mb4 bytes, "
             f"over InnoDB's 3072-byte index-key limit"
         )
+
+
+def test_the_document_column_can_hold_a_document_the_api_accepts():
+    """The size limit and the column have to agree, and on MySQL they only do
+    because of the ``MEDIUMTEXT`` variant.
+
+    ``MAX_DOCUMENT_BYTES`` is 65,536 and the validator's check is a strict
+    ``>``, so a document of exactly 64 KiB is accepted. MySQL ``TEXT`` — what
+    plain ``Text`` renders as — holds 65,535, one byte less. A deployment that
+    emits its own DDL (``create_schema`` defaults to True) would then take an
+    accepted document and either refuse the write or silently truncate it,
+    breaking the byte-exact guarantee this feature is built on.
+
+    Asserted against the compiled MySQL DDL because the repository tests run on
+    SQLite, where ``TEXT`` is unbounded and the boundary is invisible.
+    """
+    from sqlalchemy.dialects import mysql
+    from sqlalchemy.schema import CreateTable
+
+    from agentclaw.community.core.bot_config_manifest.repository.models import (
+        BotConfigManifestModel,
+    )
+    from agentclaw.community.core.bot_config_manifest.schema import (
+        MAX_DOCUMENT_BYTES,
+    )
+
+    #: MySQL's ``TEXT`` capacity, in bytes.
+    mysql_text_capacity = 65_535
+    assert MAX_DOCUMENT_BYTES > mysql_text_capacity, (
+        "the limit no longer exceeds TEXT — if it was lowered on purpose, this "
+        "test and the column comment should say so"
+    )
+
+    ddl = str(CreateTable(BotConfigManifestModel.__table__).compile(dialect=mysql.dialect()))
+    document_line = next(line for line in ddl.splitlines() if "document" in line)
+    assert "MEDIUMTEXT" in document_line, document_line
