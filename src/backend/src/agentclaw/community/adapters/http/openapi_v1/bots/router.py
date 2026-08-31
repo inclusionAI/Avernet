@@ -36,6 +36,7 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
     validate_engine_cluster,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    ManifestDisabledError,
     StartupScriptUnsupportedError,
     UnsupportedEngineError,
 )
@@ -56,6 +57,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     deleted as deleted_envelope,
     envelope,
     envelope_errors,
+    error_response,
     page,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -85,6 +87,15 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
     BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.api.bot_config_manifest_service import (
+    ManifestServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.feature_flags import (
+    get_bot_config_manifest_flags,
+)
+from agentclaw.community.core.bot_config_manifest.manifest_schema import (
+    ManifestInvalidError,
 )
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.core.workspace.constants import (
@@ -129,6 +140,13 @@ from .startup_script_support import (
     _startup_script_target,
     _withdraw_the_write_if_the_bot_was_deleted,
 )
+from .config_manifest_support import (
+    capabilities_payload,
+    manifest_payload,
+    manifest_put_payload,
+    resolve_manifest_bot,
+    script_supported_for_bot,
+)
 from .schemas import (
     Bot,
     BotMetadata,
@@ -144,6 +162,9 @@ from .schemas import (
     BotSpaceAssignment,
     BotSpaceUpdate,
     BotUpdate,
+    BotConfigManifest,
+    BotConfigManifestCapabilities,
+    BotConfigManifestPutResult,
     Ceiling,
     DataInitRequest,
     DataInitResult,
@@ -1432,6 +1453,189 @@ async def delete_bot_startup_script(
         raise BotNotFoundError("bot has no associated entity")
     startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
+
+
+# ── Bot config manifest (W1, #1469) ─────────────────────────────────────────
+# The document-level logic (what a valid manifest is, what this engine may
+# declare) is ``core/bot_config_manifest``; these handlers resolve the bot,
+# merge the #935 form-factor judgment for ``script``, and shape envelopes.
+# The surface ships dark: every handler checks the flag first and answers
+# a 404 indistinguishable from an unknown route until ``BCM_API_ENABLED``.
+
+
+def _require_bot_config_manifest_enabled() -> None:
+    """Dark-launch gate — inside the handler, not a route dependency.
+
+    A dependency would raise *before* ``@envelope_errors`` wraps the call, so
+    the answer would need an app-level handler to keep the envelope contract;
+    the flag check here rides the decorator every other error uses.
+    """
+    if not get_bot_config_manifest_flags().api_enabled:
+        raise ManifestDisabledError()
+
+
+def _manifest_invalid_response(exc: ManifestInvalidError, request: Request) -> JSONResponse:
+    """422 with the per-entry violation list — #1469 acceptance verbatim.
+
+    Fixed message by the surface's rule; the *reasons* ride ``data``, never
+    the message (which would be an un-validated caller-data echo).
+    """
+    return error_response(
+        422,
+        "Config manifest violates schema v1",
+        request,
+        data={
+            "violations": [
+                {"entry": v.entry, "rule": v.rule, "message": v.message}
+                for v in exc.violations
+            ]
+        },
+    )
+
+
+@router.get(
+    "/{bot_id}/config-manifest",
+    response_model=Envelope[BotConfigManifest],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
+)
+@envelope_errors
+async def get_bot_config_manifest(
+    bot_id: BotIdPath,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    manifest_service: ManifestServiceProtocol = Injected(ManifestServiceProtocol),
+) -> Envelope[BotConfigManifest]:
+    """Read a bot's configuration-manifest document.
+
+    A bot that has never declared one reads as the empty document, not an
+    error — absence is "no opinion", distinct from declaring an empty
+    category. The stored script body is returned byte-exact.
+    """
+    _require_bot_config_manifest_enabled()
+    (
+        _entity_id,
+        _engine_type,
+        _bot_type,
+        record,
+        document,
+    ) = resolve_manifest_bot(bot_id, owner_id, bot_service, manifest_service)
+    return envelope(manifest_payload(bot_id, record, document), request)
+
+
+@router.put(
+    "/{bot_id}/config-manifest",
+    response_model=Envelope[BotConfigManifestPutResult],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
+)
+@envelope_errors
+async def put_bot_config_manifest(
+    bot_id: BotIdPath,
+    body: dict[str, Any],
+    request: Request,
+    owner_id: UserIdDep,
+    caller: ActingCallerDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    manifest_service: ManifestServiceProtocol = Injected(ManifestServiceProtocol),
+    startup_script_service: BotStartupScriptServiceProtocol = Injected(
+        BotStartupScriptServiceProtocol
+    ),
+) -> Envelope[BotConfigManifestPutResult] | JSONResponse:
+    """Set or replace the whole configuration-manifest document.
+
+    All-or-nothing: one invalid or unsupported part rejects the entire
+    document with a per-entry violation list, and nothing is stored. The
+    document is applied at lifecycle points by the platform — nothing runs
+    at write time. Warnings carry non-fatal notes (an unreferenced source,
+    a reserved identity file).
+    """
+    _require_bot_config_manifest_enabled()
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    entity_id = bot.get("entity_id")
+    if not entity_id:
+        raise BotNotFoundError("bot has no associated entity")
+    try:
+        result = manifest_service.put(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=bot.get("active_engine") or "",
+            bot_type=bot.get("bot_type") or "",
+            document=body,
+            # From the verified caller, never the body — same actor rule as
+            # the startup-script write.
+            modifier=_audit_actor(caller, owner_id),
+            # The #935 form-factor judgment narrows the engine table: a bot
+            # whose own container cannot run scripts refuses a declared one.
+            script_supported=script_supported_for_bot(bot, startup_script_service),
+        )
+    except ManifestInvalidError as exc:
+        return _manifest_invalid_response(exc, request)
+    return envelope(manifest_put_payload(bot_id, result), request)
+
+
+@router.delete(
+    "/{bot_id}/config-manifest",
+    response_model=Envelope[Deleted],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
+)
+@envelope_errors
+async def delete_bot_config_manifest(
+    bot_id: BotIdPath,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    manifest_service: ManifestServiceProtocol = Injected(ManifestServiceProtocol),
+) -> Envelope[Deleted]:
+    """Remove a bot's configuration-manifest declaration. Idempotent.
+
+    Deletes the *declaration* only: materialized entities and managed markers
+    are the apply layer's business. Absence afterwards reads as the empty
+    document, never an error.
+    """
+    _require_bot_config_manifest_enabled()
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    entity_id = bot.get("entity_id")
+    if not entity_id:
+        raise BotNotFoundError("bot has no associated entity")
+    manifest_service.delete(entity_id=entity_id, bot_id=bot_id)
+    return deleted_envelope(request)
+
+
+@router.get(
+    "/{bot_id}/config-manifest/capabilities",
+    response_model=Envelope[BotConfigManifestCapabilities],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED_OWN_BOT,
+)
+@envelope_errors
+async def get_bot_config_manifest_capabilities(
+    bot_id: BotIdPath,
+    request: Request,
+    owner_id: UserIdDep,
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    manifest_service: ManifestServiceProtocol = Injected(ManifestServiceProtocol),
+    startup_script_service: BotStartupScriptServiceProtocol = Injected(
+        BotStartupScriptServiceProtocol
+    ),
+) -> Envelope[BotConfigManifestCapabilities]:
+    """What this bot's engine may declare, category by category.
+
+    The same resolver the write path consults — this view cannot advertise a
+    category a write would then refuse. Unsupported categories carry their
+    reason alongside; a supported engine whose bot cannot run scripts
+    reports script as false with one.
+    """
+    _require_bot_config_manifest_enabled()
+    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    support = manifest_service.capabilities(
+        engine_type=bot.get("active_engine") or "",
+        bot_type=bot.get("bot_type") or "",
+        script_supported=script_supported_for_bot(bot, startup_script_service),
+    )
+    return envelope(capabilities_payload(support), request)
 
 
 def _require_personal_cloud_bot(bot: dict[str, Any]) -> None:

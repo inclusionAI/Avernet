@@ -373,6 +373,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
+    # ── Bot config manifest (W1, #1469) — same own-bot rule as the script
+    # routes above: every operation names a bot, resolved as the caller's own.
+    ("DELETE", "/openapi/v1/bots/{bot_id}/config-manifest"): OWNER_SCOPED,
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest"): OWNER_SCOPED,
+    ("PUT", "/openapi/v1/bots/{bot_id}/config-manifest"): OWNER_SCOPED,
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest/capabilities"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/status"): OWNER_SCOPED,
 
     # ── Operations that address no bot ────────────────────────────────────

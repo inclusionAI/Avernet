@@ -62,6 +62,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UnsupportedEngineError,
     UserIdMismatchError,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors_manifest import (
+    CONFIG_MANIFEST_ENVELOPE_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
@@ -633,6 +636,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         "Startup script is not supported for this bot",
     ),
+    # Config-manifest rows (W1, #1469) live in errors_manifest.py — the
+    # map-of-last-resort for the 422 (the handler renders the per-entry list)
+    # and the dark-launch 404.
+    **CONFIG_MANIFEST_ENVELOPE_ERRORS,
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
@@ -853,13 +860,18 @@ def unmapped_error_response(
     return _error_response(http_status, message, request, headers=headers)
 
 
-def error_response(http_status: int, message: str, request: Request) -> JSONResponse:
-    """Build an enveloped error response (``data`` null, 6-digit code).
+def error_response(
+    http_status: int, message: str, request: Request, *, data: object | None = None
+) -> JSONResponse:
+    """Build an enveloped error response (``data`` null by default, 6-digit code).
 
     Public so pre-handler failures — which never reach ``@envelope_errors`` —
-    can answer in the same shape as everything else on this surface.
+    can answer in the same shape as everything else on this surface. ``data``
+    is for a contract that returns structured reasons with its error (the
+    config-manifest violation list): fixed message, machine-readable detail,
+    never a freetext message built from caller input.
     """
-    return _error_response(http_status, message, request)
+    return _error_response(http_status, message, request, data=data)
 
 
 # Headers that describe *this* response's body. JSONResponse computes them from

@@ -148,6 +148,19 @@ class StartupScriptUnsupportedError(Exception):
     """
 
 
+class ManifestDisabledError(Exception):
+    """The config-manifest surface is not enabled yet (→ 404, deliberately).
+
+    The routes ship dark behind ``BCM_API_ENABLED`` until the first
+    materializers land (W5 / M3); before that the routes exist but the
+    semantics are not callable. The answer is byte-identical to an unknown
+    route: a
+    caller probing for the surface before it ships learns nothing except
+    that it is not there, and enablement flips the answer without any
+    client-visible deprecation window.
+    """
+
+
 class DeptLookupError(Exception):
     """The staff directory could not answer a department lookup (→ 502).
 

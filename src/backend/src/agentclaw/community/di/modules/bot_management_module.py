@@ -55,6 +55,7 @@ from agentclaw.community.core.bot_management.render_screen.services.render_scree
     RenderScreenService,
 )
 from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManifestRepositoryProtocol,
     BotRestartLockRepositoryProtocol,
     BotStartupScriptRepositoryProtocol,
 )
@@ -67,6 +68,15 @@ from agentclaw.community.core.bot_startup_script.protocols import (
 )
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
+)
+from agentclaw.community.api.bot_config_manifest_service import (
+    ManifestServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.services.manifest_service import (
+    ManifestService,
+)
+from agentclaw.community.core.repository.implementations.bot.config_manifest import (
+    BotConfigManifestRepository,
 )
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
@@ -250,6 +260,22 @@ class BotManagementModule(Module):
         binder.bind(
             BotStartupScriptServiceProtocol,
             to=BotStartupScriptService,
+            scope=singleton,
+        )
+        # BotConfigManifestRepository: single unified ORM impl, same shape as
+        # the script repository above — UNIQUE(env, entity_id, bot_id) on
+        # ac_bot_config_manifest, one document per bot at most.
+        binder.bind(
+            BotConfigManifestRepositoryProtocol,
+            to=BotConfigManifestRepository,
+            scope=singleton,
+        )
+        # The manifest document service (W1: storage + validation only; no
+        # apply). Routers Inject the Protocol per the http-adapter rule.
+        binder.bind(ManifestService, to=ManifestService, scope=singleton)
+        binder.bind(
+            ManifestServiceProtocol,
+            to=ManifestService,
             scope=singleton,
         )
         # The delete side, handed to ``BotCleanupService`` so a deleted bot takes

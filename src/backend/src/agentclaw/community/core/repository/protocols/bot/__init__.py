@@ -30,11 +30,15 @@ from agentclaw.community.core.repository.protocols.bot.mcp import (
 from agentclaw.community.core.repository.protocols.bot.startup_script import (
     BotStartupScriptRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot.config_manifest import (
+    BotConfigManifestRepositoryProtocol,
+)
 
 __all__ = [
     "BotAppGrantRepositoryProtocol",
     "BotCollabLockRepositoryProtocol",
     "BotCollabLogRepositoryProtocol",
+    "BotConfigManifestRepositoryProtocol",
     "BotFriendRepositoryProtocol",
     "BotRepository",
     "BotRestartLockRepositoryProtocol",

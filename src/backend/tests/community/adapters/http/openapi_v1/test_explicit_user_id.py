@@ -412,8 +412,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: The task grant/revoke operations also carry the target in ``bcs_bot_id``
 #: request-body fields rather than a ``bot_id`` parameter, adding two more
-#: operations without changing the path/query counts.
-_BOT_ID_PLACEMENT = {"path": 146, "query": 1, "none": 97}
+#: operations without changing the path/query counts. W1 (#1469) adds four
+#: own-bot config-manifest operations, all addressing the bot in the path.
+_BOT_ID_PLACEMENT = {"path": 150, "query": 1, "none": 97}
 
 
 def _schema() -> dict:
@@ -546,8 +547,9 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Group 4 adds three Bot-addressed Reference operations plus
     # one account-level manual SC Public Sync operation, and Group 5 adds the
     # Offline impact and command operations. All twelve are user-scoped,
-    # bringing the combined surface to 218.
-    assert len(taking) == 218
+    # bringing the combined surface to 218. W1 (#1469) adds four own-bot
+    # config-manifest operations, all user-scoped: 222.
+    assert len(taking) == 222
 
 
 def test_the_exempt_operations_take_none():

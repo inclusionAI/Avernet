@@ -765,3 +765,83 @@ class BotActivateResult(BaseModel):
     message: str | None = Field(
         default=None, description="Additional reactivation detail, when available."
     )
+# ── Config manifest (issue #1469, W1) ────────────────────────────────────────
+# The wire shape is the manifest document itself: the models below only wrap
+# it for the envelope plus the audit stamps. The document models are the core
+# schema (``core/bot_config_manifest/manifest_schema.py``) — re-used, not
+# re-declared, so the published description cannot drift from validation.
+from agentclaw.community.core.bot_config_manifest.manifest_schema import (  # noqa: E402
+    ManifestSection,
+    NamedSource,
+    ScriptPart,
+)
+
+
+class BotConfigManifest(BaseModel):
+    """A bot's configuration-manifest document, as stored.
+
+    A bot that never had one reads as the empty document (schema version 1,
+    every category absent), not an error — absence is "no declaration",
+    a different state from declaring an empty category list.
+    """
+
+    bot_id: str = Field(description="Bot the document belongs to.")
+    schema_version: int = Field(
+        default=1, description="Manifest schema version (v1 = 1)."
+    )
+    sources: dict[str, NamedSource] = Field(
+        default_factory=dict,
+        description="Named sources: declared once, referenced by entries.",
+    )
+    manifest: ManifestSection = Field(
+        default_factory=ManifestSection,
+        description="Declarative categories (mcp/resources/skills/"
+        "engine_config/identity/cli_tools).",
+    )
+    script: ScriptPart | None = Field(
+        default=None,
+        description="Imperative per-bot startup script, engine-gated.",
+    )
+    updated_by: str | None = Field(
+        default=None, description="Last writer, when a document is stored.", examples=["u1"]
+    )
+    updated_at: datetime | None = Field(
+        default=None, description="Last write time, when a document is stored."
+    )
+
+
+class BotConfigManifestPutResult(BaseModel):
+    """Acknowledgement of storing a document — with non-fatal warnings.
+
+    Warnings carry notes that do not block the write: a source nothing
+    references, an identity file apply will never write.
+    """
+
+    bot_id: str = Field(description="Bot the document was stored for.")
+    schema_version: int = Field(
+        default=1, description="Stored manifest schema version."
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Non-fatal notes, e.g. unreferenced source declarations.",
+    )
+    updated_by: str = Field(
+        description="The acting principal the platform recorded for this write."
+    )
+    updated_at: datetime = Field(description="Server timestamp of this write.")
+
+
+class BotConfigManifestCapabilities(BaseModel):
+    """Per-category support for one bot's engine — the read/write shared view.
+
+    Reasons only carries entries for unsupported categories: a refusal
+    without a reason is a dead end for a caller deciding what to declare.
+    """
+
+    categories: dict[str, bool] = Field(
+        description="Category → whether a manifest may declare it.",
+    )
+    reasons: dict[str, str] = Field(
+        default_factory=dict,
+        description="Why an unsupported category is refused, keyed by category.",
+    )

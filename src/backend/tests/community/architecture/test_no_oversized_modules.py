@@ -130,6 +130,19 @@ _ALLOWLIST: dict[str, str] = {
         "~1027 lines — internal task router (execute/dashboard/list + callback + the "
         "new grant/revoke/claim-join-filter surface). Borderline; split the claim-grant "
         "sub-router into its own module in a follow-up.",
+
+    # ── public openapi_v1 policy tables (grew past the cap in W1 #1469) ─────────
+    "adapters/http/openapi_v1/admission.py":
+        "~1008 lines — the ROUTE×mode admission policy table; one row per public "
+        "operation by design (the principal-seam test fails a surface/table "
+        "disagreement in either direction). W1's four config-manifest rows tipped "
+        "it over; collapsing per-group blocks into per-group modules merged with "
+        "``**`` (see errors_manifest.py for the pattern) is the follow-up.",
+    "adapters/http/openapi_v1/responses.py":
+        "~1012 lines — the ENVELOPE_ERRORS fixed-message map plus the envelope "
+        "builders; sat at 996 before W1. New group error rows now merge from "
+        "their own modules (``errors_manifest.py``, following the skill-center "
+        "pattern); splitting the map wholesale is a separate refactor.",
 }
 
 

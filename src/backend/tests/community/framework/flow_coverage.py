@@ -165,6 +165,17 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
     "bot_dormant": _EXEMPT_REASON,
+    "bot_config_manifest": (
+        "W1 (#1469) stores and validates the document — apply does not exist "
+        "yet, so the only observable effect is storage and capability "
+        "answers, covered by "
+        "tests/community/repository/bot/test_bot_config_manifest_repository.py "
+        "(repository over a real database), "
+        "tests/community/core/bot_config_manifest/ (schema matrix, "
+        "capability table, service all-or-nothing), and the assembled-route "
+        "cases in tests/community/endpoints/test_openapi_bot_config_manifest.py. "
+        "Drain this when W4's apply gives singlebox an observable flow."
+    ),
     "bot_inventory": (
         "New public inventory/local Bot aggregation module. Covered by HTTP endpoint, "
         "service conformance, and architecture tests in this change; drain when "
