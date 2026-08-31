@@ -5917,6 +5917,16 @@ fn render_state_machine_opening_message(
     run: &StateMachineRun,
     session_title: Option<&str>,
 ) -> Result<RenderedOpeningMessage, CollaborationRuntimeError> {
+    // Chat and Manager-Worker opening messages are Session-scoped UI content.
+    // A one-shot StateMachine run inside either strategy must keep its own
+    // default panel instead of interpreting that Session template as a Run
+    // opening message.
+    if group.group_strategy != GroupStrategy::StateMachine {
+        return Ok(default_state_machine_opening_message(
+            &run.run_id,
+            session_title,
+        ));
+    }
     let Some(opening_message) = group.opening_message.as_ref() else {
         return Ok(default_state_machine_opening_message(
             &run.run_id,
@@ -6036,6 +6046,42 @@ mod tests {
                 component: Some("bcsPanel.StateMachineRunView".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn session_opening_message_does_not_override_one_shot_state_machine_panel() {
+        let run = StateMachineRun {
+            run_id: "run-1".to_string(),
+            root_run_id: Some("run-1".to_string()),
+            rerun_of: None,
+            definition_id: "one-shot".to_string(),
+            definition_version: 1,
+            group_id: "group-1".to_string(),
+            group_version: 1,
+            session_id: "session-1".to_string(),
+            session_activation_count: None,
+            created_by: None,
+            status: StateMachineRunStatus::Running,
+            input: Value::Null,
+            output: None,
+            error: None,
+            created_at: 1,
+            updated_at: 1,
+            completed_at: None,
+        };
+        for strategy in [GroupStrategy::Chat, GroupStrategy::ManagerWorker] {
+            let mut group = Group::new("group-1", "driver", Vec::new());
+            group.group_strategy = strategy;
+            group.opening_message = Some(bcs_domain::OpeningMessage::Text(
+                "Session opening {{bcs.session_id}}".to_string(),
+            ));
+
+            assert_eq!(
+                render_state_machine_opening_message(&group, &run, Some("一次性任务"))
+                    .expect("render one-shot panel"),
+                default_state_machine_opening_message("run-1", Some("一次性任务"))
+            );
+        }
     }
 
     #[test]

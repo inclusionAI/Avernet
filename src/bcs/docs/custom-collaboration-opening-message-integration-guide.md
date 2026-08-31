@@ -25,6 +25,8 @@ Chat 和 ManagerWorker 在新 Session 创建时，BCS 按以下顺序处理：
 
 开场白不会发送给 Bot，并且会从 Bot 的历史/上下文回放中排除。Session 重连、重新激活、成员加入和
 页面刷新不会创建第二条开场白。页面刷新直接读取已经持久化的最终消息，不使用 Group 当前配置重新渲染。
+Chat 或 ManagerWorker Session 内临时启动的一次性 StateMachine 仍使用 StateMachine 默认副屏，
+不会把该 Session 级 `opening_message` 当作 Run 开场消息。
 
 StateMachine 每次 Run 开始时，BCS 按以下顺序处理：
 

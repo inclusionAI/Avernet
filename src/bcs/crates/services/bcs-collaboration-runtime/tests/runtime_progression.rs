@@ -344,7 +344,10 @@ async fn current_session_permission_is_owned_by_chat_and_manager_group_driver() 
 #[tokio::test]
 async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publishes_as_initiator() {
     let group_store = Arc::new(GroupStore::new());
-    let group = test_group();
+    let mut group = test_group();
+    group.opening_message = Some(OpeningMessage::Text(
+        "Chat session opening {{bcs.session_id}}".to_string(),
+    ));
     group_store
         .upsert(group.clone())
         .await
@@ -454,6 +457,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         .expect("panel AixUI text");
     assert!(panel_text.contains("<AixUI"));
     assert!(panel_text.contains("bcsPanel.StateMachineRunView"));
+    assert!(!panel_text.contains("Chat session opening"));
     drop(frontend_commands);
 
     let panel_history = message_repo

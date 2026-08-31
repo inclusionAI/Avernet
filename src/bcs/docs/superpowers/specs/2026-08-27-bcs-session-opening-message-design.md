@@ -29,6 +29,9 @@ user sends a message.
   created. Reactivation, reconnect, participant join, and page refresh do not
   create another record.
 - StateMachine keeps its existing run-scoped behavior and default opening panel.
+- A one-shot StateMachine run launched inside a Chat or Manager-Worker Session
+  keeps the StateMachine default panel and never consumes the Session-scoped
+  group opening message.
 - Chat and Manager-Worker have no default opening message when the group omits
   the configuration.
 - Session-scoped templates support `bcs.group_id`, `bcs.session_id`,
@@ -59,3 +62,5 @@ user sends a message.
 - The creation UI offers opening-message configuration for all three Normal
   strategies and applies the strategy-specific template-variable rules.
 - Existing StateMachine behavior remains compatible.
+- One-shot StateMachine runs in Chat and Manager-Worker keep their default
+  StateMachine panel even when the parent Group configures `opening_message`.
