@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import UTC, datetime
 import io
+import logging
 from pathlib import Path
 from threading import Barrier, Event, Thread, current_thread
 from uuid import uuid4
@@ -895,11 +896,13 @@ class _Gateway:
         *,
         timeout_once: bool = False,
         timeout_message: str = "outcome unknown",
+        submit_error: SkillCenterGatewayError | None = None,
         exact_missing_once: bool = False,
         status_state: SkillCenterPublishState = SkillCenterPublishState.PUBLISHED,
     ) -> None:
         self.timeout_once = timeout_once
         self.timeout_message = timeout_message
+        self.submit_error = submit_error
         self.exact_missing_once = exact_missing_once
         self.status_state = status_state
         self.submit_calls = 0
@@ -907,6 +910,8 @@ class _Gateway:
 
     def submit_publish(self, request):
         self.submit_calls += 1
+        if self.submit_error is not None:
+            raise self.submit_error
         if self.timeout_once:
             self.timeout_once = False
             raise SkillCenterGatewayError(
@@ -1137,6 +1142,69 @@ def test_submit_timeout_enters_result_unknown_and_never_reposts() -> None:
         handler.handle(publication_task_payload(attempt.attempt_id)), Complete
     )
     assert gateway.submit_calls == 1
+
+
+def test_submit_rejection_logs_safe_upstream_diagnostics(caplog) -> None:
+    db = _Database()
+    space_id, skill_id = _seed_draft(db, lease_holder="owner")
+    repository = SpaceSkillPublicationRepository(db)
+    attempt = repository.create_or_replay_attempt(
+        space_id=space_id,
+        skill_id=skill_id,
+        actor_id="owner",
+        request_id="worker-business-rejection",
+        env="test",
+    ).attempt
+    with db.orm_session() as session:
+        skill = session.get(Skill, skill_id)
+        space = session.get(SpaceModel, space_id)
+        assert skill is not None
+        assert space is not None
+        expected_skill_uuid = skill.skill_uuid
+        expected_team_id = space.sc_team_id
+    secret_url = "https://sc.invalid/download.zip?signature=do-not-leak"
+    gateway = _Gateway(
+        submit_error=SkillCenterGatewayError(
+            SkillCenterGatewayErrorCode.BUSINESS,
+            secret_url,
+            upstream_code="ILLEGAL_PERMISSION",
+            trace_id="sc-trace-rejected",
+        )
+    )
+    handler = _handler(db, repository, gateway, _Materializer(db))
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger=(
+            "agentclaw.community.core.skill_center.services."
+            "space_skill_publication_task"
+        ),
+    ):
+        result = handler.handle(publication_task_payload(attempt.attempt_id))
+
+    assert isinstance(result, Complete)
+    [record] = [
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("[skill_center.publication.submit] failed")
+    ]
+    assert record.attempt_id == attempt.attempt_id
+    assert record.space_id == space_id
+    assert record.skill_id == skill_id
+    assert record.skill_uuid == expected_skill_uuid
+    assert record.team_id == expected_team_id
+    assert record.sc_version_number == "1.0.0"
+    assert record.gateway_error_code == "business_error"
+    assert record.upstream_code == "ILLEGAL_PERMISSION"
+    assert record.upstream_trace_id == "sc-trace-rejected"
+    assert record.env == "test"
+    assert f"attempt_id={attempt.attempt_id}" in caplog.text
+    assert f"skill_uuid={expected_skill_uuid}" in caplog.text
+    assert f"team_id={expected_team_id}" in caplog.text
+    assert "upstream_code=ILLEGAL_PERMISSION" in caplog.text
+    assert "upstream_trace_id=sc-trace-rejected" in caplog.text
+    assert "signature" not in caplog.text
+    assert secret_url not in caplog.text
 
 
 def test_sc_explicit_failure_restores_the_same_draft_to_editing() -> None:
