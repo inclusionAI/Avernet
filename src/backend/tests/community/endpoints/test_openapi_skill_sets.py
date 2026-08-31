@@ -7,6 +7,7 @@ same ACL, desired-state UoW, and router seam as a real request.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import time
 
 import jwt
@@ -17,6 +18,14 @@ from agentclaw.community.api.direct_activation_service import (
 )
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
+)
+from agentclaw.community.api.skill_center_reference_service import (
+    ReferenceNotFoundError,
+    SkillCenterReferenceBatch,
+    SkillCenterReferenceItem,
+    SkillCenterReferencePage,
+    SkillCenterReferenceServiceProtocol,
+    SkillCenterReferenceStatus,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -236,6 +245,52 @@ def _assert_reconciled(_response, world) -> None:
     ]
 
 
+class _ReferenceService:
+    @staticmethod
+    def _item() -> SkillCenterReferenceItem:
+        now = datetime(2026, 8, 30, tzinfo=UTC)
+        return SkillCenterReferenceItem(
+            reference_id="reference-1",
+            request_id="request-1",
+            skill_set_id="1",
+            skill_code="public-skill",
+            sc_version_number=None,
+            status=SkillCenterReferenceStatus.QUEUED,
+            skill_id=None,
+            error_code=None,
+            error_message=None,
+            gmt_created=now,
+            gmt_modified=now,
+        )
+
+    def create(self, **kwargs) -> SkillCenterReferenceBatch:
+        return SkillCenterReferenceBatch(
+            request_id="request-1",
+            bot_id=kwargs["bot_id"],
+            owner_id=kwargs["owner_id"],
+            skill_set_id=kwargs["skill_set_id"],
+            actor_id=kwargs["actor_id"],
+            items=(self._item(),),
+        )
+
+    def list(self, **_kwargs) -> SkillCenterReferencePage:
+        return SkillCenterReferencePage(total=1, items=(self._item(),))
+
+    def get(self, **kwargs) -> SkillCenterReferenceItem:
+        if kwargs["reference_id"] != "reference-1":
+            raise ReferenceNotFoundError("not found")
+        return self._item()
+
+
+def _seed_reference(world) -> None:
+    _seed(world)
+    world.injector.binder.bind(
+        SkillCenterReferenceServiceProtocol,
+        to=_ReferenceService(),
+        scope=None,
+    )
+
+
 def _case(
     method,
     path,
@@ -263,6 +318,112 @@ def _case(
         seed=seed,
         extra_assertions=extra,
     )
+
+
+@_case(
+    "POST",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    "accepts_reference_batch",
+    ExpectSuccess(
+        status=202,
+        json_contains={
+            "code": 202000,
+            "data": {
+                "request_id": "request-1",
+                "reference_ids": ["reference-1"],
+            },
+        },
+    ),
+    seed=_seed_reference,
+    headers={**_HEADERS, "Idempotency-Key": "reference-command"},
+    json_body={"skill_codes": ["public-skill"]},
+)
+def create_references_happy():
+    pass
+
+
+@_case(
+    "POST",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    "missing_idempotency_key",
+    ExpectError(status=422),
+    seed=_seed_reference,
+    json_body={"skill_codes": ["public-skill"]},
+)
+def create_references_error():
+    pass
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    "lists_persisted_references",
+    ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "total": 1,
+                "items": [
+                    {"reference_id": "reference-1", "status": "QUEUED"}
+                ],
+            },
+        },
+    ),
+    seed=_seed_reference,
+)
+def list_references_happy():
+    pass
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    "unauthenticated",
+    ExpectError(status=401),
+    seed=_seed_reference,
+    headers={},
+)
+def list_references_error():
+    pass
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}",
+    "gets_persisted_reference",
+    ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"reference_id": "reference-1", "skill_code": "public-skill"},
+        },
+    ),
+    seed=_seed_reference,
+    path_params={
+        "bot_id": _BOT_ID,
+        "set_id": "1",
+        "reference_id": "reference-1",
+    },
+)
+def get_reference_happy():
+    pass
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}",
+    "missing_reference",
+    ExpectError(status=404),
+    seed=_seed_reference,
+    path_params={
+        "bot_id": _BOT_ID,
+        "set_id": "1",
+        "reference_id": "missing",
+    },
+)
+def get_reference_error():
+    pass
 
 
 @_case(

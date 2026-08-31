@@ -5,6 +5,10 @@ import time
 
 import jwt
 
+from agentclaw.community.api.skill_center_sync_service import (
+    SkillCenterSyncServiceProtocol,
+    SkillCenterSyncSummary,
+)
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -50,6 +54,26 @@ def _enable_auth(_world) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
 
 
+class _SyncService:
+    def sync(self) -> SkillCenterSyncSummary:
+        return SkillCenterSyncSummary(
+            scanned=0,
+            updated=0,
+            unchanged=0,
+            failed=0,
+            failures=(),
+        )
+
+
+def _enable_sync(world) -> None:
+    _enable_auth(world)
+    world.injector.binder.bind(
+        SkillCenterSyncServiceProtocol,
+        to=_SyncService(),
+        scope=None,
+    )
+
+
 def _input(body: dict) -> CaseInput:
     return CaseInput(
         headers=_headers(),
@@ -89,6 +113,29 @@ endpoint_test(
     seed=_enable_auth,
     input=CaseInput(headers=_headers()),
     expect=ExpectSuccess(status=200),
+)(lambda: None)
+
+endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/market/skill-center/sync",
+    scenario="happy",
+    seed=_enable_sync,
+    input=CaseInput(headers=_headers(), query_params={"user_id": _USER_ID}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"scanned": 0, "updated": 0, "unchanged": 0, "failed": 0},
+        },
+    ),
+)(lambda: None)
+endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/market/skill-center/sync",
+    scenario="unauthenticated",
+    seed=_enable_sync,
+    input=CaseInput(headers={}, query_params={"user_id": _USER_ID}),
+    expect=ExpectError(status=401),
 )(lambda: None)
 endpoint_test(
     method="GET",

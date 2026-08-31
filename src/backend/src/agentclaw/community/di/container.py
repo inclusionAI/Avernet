@@ -53,6 +53,7 @@ from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
 from agentclaw.community.di.modules.session_resources_module import SessionResourcesModule
 from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
+from agentclaw.community.di.modules.skill_center_group4_module import SkillCenterGroup4Module
 from agentclaw.community.di.modules.skill_version_module import SkillVersionModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
 from agentclaw.community.di.modules.spaces_module import SpacesModule
@@ -108,6 +109,7 @@ def build_injector(
     modules: list[Module] = [
         ConfigModule(),
         SkillCenterModule(),
+        SkillCenterGroup4Module(),
         SkillVersionModule(),
         ServiceBotModule(),
         DesktopBotModule(),

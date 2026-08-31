@@ -107,6 +107,9 @@ provides:
   - SkillVersionMaterializerProtocol
   - SpaceSkillPublicationServiceProtocol
   - SkillCenterPublicationGatewayProtocol
+  - SkillCenterReferenceServiceProtocol
+  - SkillCenterSyncServiceProtocol
+  - TrackLatestServiceProtocol
   - SkillMetadataParserProtocol
   - ServiceArtifactLineageReaderProtocol
   - SpaceSkillOfflineServiceProtocol

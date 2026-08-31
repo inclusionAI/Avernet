@@ -163,6 +163,8 @@ provides:
   - SkillVersionMaterializationRepositoryProtocol
   - SpaceSkillPublicationRepositoryProtocol
   - SkillSetRepository
+  - SkillCenterReferenceRepositoryProtocol
+  - TrackLatestRepositoryProtocol
   # skills_pool
   - QuarantineRepositoryProtocol
   - SkillsPoolLayoutRepositoryProtocol
@@ -209,6 +211,8 @@ provides:
   - SpaceSkillRepository
   - SkillVersionRepository
   - SpaceSkillPublicationRepository
+  - SkillCenterReferenceRepository
+  - TrackLatestRepository
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository

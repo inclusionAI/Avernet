@@ -1,18 +1,12 @@
-"""SkillCenter Sync 测试接口 — 仅用于 DEV 环境手动测试 T2。
+"""Legacy SkillCenter diagnostic routes.
 
-POST /api/v1/skill-center/sync
-Body: { "skill_id": "...", "env": "dev", "version": "..." (可选) }
-
-说明：
-  - skill_id: ac_skill.id（本地主键），通过 skill_id 查表拿到 skill_uuid（跨版本标识）再调 SC API
-  - 内部会根据 ac_skill.name 查询 SC 的 skillCode
-
-响应: { "success": true, "skill_id": "...", "skill_uuid": "...", "skill_code": "...", "version": "...", "message": "..." }
+The retired per-Skill NAS sync address answers 410 and points callers to the
+canonical environment-wide G4 public operation.  This module no longer owns
+``current`` symlinks, name mapping, or caller-selected versions.
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_center_sync_service import SkillCenterSyncServiceProtocol
 from agentclaw.community.api.skill_propagation_service import SkillPropagationServiceProtocol
@@ -24,68 +18,13 @@ logger = get_logger()
 router = APIRouter(prefix="/api/v1/skill-center", tags=["skill-center"])
 
 
-class SyncRequest(BaseModel):
-    skill_id: str
-    env: str = "dev"
-    version: str | None = None
-
-
-class SyncResponse(BaseModel):
-    success: bool
-    skill_id: str
-    skill_uuid: str
-    skill_code: str
-    version: str | None
-    message: str
-
-
-@router.post("/sync", response_model=SyncResponse)
-async def force_sync_skill(
-    request: SyncRequest,
-    skill_repo: SkillRepository = Injected(SkillRepository),
-    sync_svc: SkillCenterSyncServiceProtocol = Injected(SkillCenterSyncServiceProtocol),
-):
-    """手动触发 force_sync — T2 测试用。
-
-    仅限 DEV 环境使用。
-
-    流程：skill_id → 查 ac_skill 表 → 拿到 skill_uuid（NAS 路径用）和 name（SC skillCode）→ 调 force_sync
-    """
-    logger.info("[SkillCenterSyncService] API /sync called: skill_id=%s env=%s version=%s",
-                request.skill_id, request.env, request.version)
-
-    # 用 skill_id 查 ac_skill 表
-    skill_record = skill_repo.get_by_id(request.skill_id, env=request.env)
-    if not skill_record:
-        raise HTTPException(status_code=404, detail=f"skill not found: skill_id={request.skill_id}")
-
-    skill_uuid = skill_record.get("skill_uuid") or request.skill_id
-    skill_code = skill_record.get("name", "")
-
-    if not skill_code:
-        raise HTTPException(status_code=400, detail=f"skill has no name (SC skillCode): skill_id={request.skill_id}")
-
-    logger.info("[SkillCenterSyncService] API resolved: skill_id=%s -> skill_uuid=%s skill_code=%s",
-                request.skill_id, skill_uuid, skill_code)
-
-    try:
-        result = sync_svc.force_sync(
-            skill_uuid=skill_uuid,
-            env=request.env,
-            version=request.version,
-        )
-        return SyncResponse(
-            success=True,
-            skill_id=request.skill_id,
-            skill_uuid=skill_uuid,
-            skill_code=skill_code,
-            version=request.version,
-            message="sync completed" if result else "skipped (already synced)",
-        )
-    except Exception as exc:
-        logger.exception("[SkillCenterSyncService] API /sync failed: skill_id=%s error=%s",
-                         request.skill_id, exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+@router.post("/sync", deprecated=True)
+async def retired_force_sync_skill() -> None:
+    """Retired: use POST /openapi/v1/bots/market/skill-center/sync."""
+    raise HTTPException(
+        status_code=410,
+        detail="Use POST /openapi/v1/bots/market/skill-center/sync",
+    )
 
 
 class BootstrapResponse(BaseModel):
@@ -155,7 +94,11 @@ async def trigger_bootstrap(
     logger.info("[SkillCenterSyncService] API /bootstrap called")
     try:
         result = await svc.sync_bootstrap()
-        return BootstrapResponse(**result)
+        return BootstrapResponse(
+            synced=result.updated,
+            failed=result.failed,
+            skipped=result.unchanged,
+        )
     except Exception as exc:
         logger.exception("[SkillCenterSyncService] API /bootstrap failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

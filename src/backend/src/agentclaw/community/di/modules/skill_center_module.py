@@ -213,7 +213,6 @@ from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
@@ -830,40 +829,8 @@ class SkillCenterModule(
             device_fs_dispatcher=device_fs_dispatcher,
         )
 
-    @singleton
-    @provider
-    @inject
-    def skill_center_sync_service(
-        self,
-        skill_center_client: SkillCenterClient,
-        sync_log_repo: SkillCenterSyncLogRepository,
-        skill_repo: SkillRepository,
-        cache_plugin: CachePlugin,
-        skill_scan_service_provider: Callable[[], SkillScanService],
-    ) -> SkillCenterSyncService:
-        from agentclaw.community.core.skill_center.feature_flags import (
-            get_skill_center_flags,
-        )
-
-        flags = get_skill_center_flags()
-        logger.info("[NEW-ARCH] SkillCenterSyncService initialized")
-        return SkillCenterSyncService(
-            skill_center_client=skill_center_client,
-            sync_log_repo=sync_log_repo,
-            skill_repo=skill_repo,
-            cache_plugin=cache_plugin,
-            skill_scan_service_provider=skill_scan_service_provider,
-            nas_sync_enabled=flags.nas_sync_enabled,
-        )
-
-    # Cycle-breaker: ``SkillScanService.__init__`` needs
-    # ``SkillCenterSyncService`` (passed by its provider above), and
-    # ``SkillCenterSyncService.scan_after_sync`` needs to construct a
-    # ``SkillScanService`` to scan a freshly-synced skill. Injecting the
-    # service directly closes the cycle at graph-build time. We expose a
-    # ``Callable[[], SkillScanService]`` instead so the lookup is deferred
-    # until ``scan_after_sync`` actually runs — by then both singletons
-    # exist and the lambda just returns the cached instance.
+    # Legacy callers still use a lazy scan-service factory; G4 exact-version
+    # materialization no longer calls the mutable NAS scan path.
     @singleton
     @provider
     @inject
@@ -890,13 +857,11 @@ class SkillCenterModule(
         log_repo: SkillPropagationLogRepository,
         resolver: DeviceContextResolver,
         device_sync_dispatcher: DeviceSyncDispatcher,
-        sync_service: SkillCenterSyncService,
         skill_set_repo: SkillSetRepository,
         skill_set_service_factory: SkillSetServiceFactory,
     ) -> SkillPropagationService:
         return SkillPropagationService(
             log_repo=log_repo,
-            sync_service=sync_service,
             skill_set_repo=skill_set_repo,
             resolver=resolver,
             device_sync_dispatcher=device_sync_dispatcher,

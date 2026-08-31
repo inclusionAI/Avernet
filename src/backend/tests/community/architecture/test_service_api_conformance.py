@@ -97,6 +97,13 @@ from agentclaw.community.api.skill_set_management_service import (
 from agentclaw.community.api.skill_version_materializer import (
     SkillVersionMaterializerProtocol,
 )
+from agentclaw.community.api.skill_center_reference_service import (
+    SkillCenterReferenceServiceProtocol,
+)
+from agentclaw.community.api.skill_center_sync_service import (
+    SkillCenterSyncServiceProtocol,
+)
+from agentclaw.community.api.track_latest import TrackLatestServiceProtocol
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
@@ -191,6 +198,13 @@ from agentclaw.community.core.skill_center.services.skill_set_management_service
 from agentclaw.community.core.skill_center.services.skill_version_materializer import (
     SkillVersionMaterializer,
 )
+from agentclaw.community.core.skill_center.services.skill_center_reference_service import (
+    SkillCenterReferenceService,
+)
+from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
+    SkillCenterSyncService,
+)
+from agentclaw.community.core.skill_center.services.track_latest import TrackLatestService
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     SpaceSkillGrantService,
 )
@@ -253,6 +267,9 @@ _PAIRS = [
     (RepositoryCatalogServiceProtocol, RepositoryCatalogService),
     (SkillSetManagementServiceProtocol, SkillSetManagementService),
     (SkillVersionMaterializerProtocol, SkillVersionMaterializer),
+    (SkillCenterReferenceServiceProtocol, SkillCenterReferenceService),
+    (SkillCenterSyncServiceProtocol, SkillCenterSyncService),
+    (TrackLatestServiceProtocol, TrackLatestService),
     (SpaceServiceProtocol, SpaceService),
     (SpaceAccessServiceProtocol, SpaceAccessService),
     (SpaceMemberServiceProtocol, SpaceMemberService),
