@@ -11,6 +11,7 @@ in ``tests/community/core/bot_config_manifest/apply/``. What these cover is the
 
 from __future__ import annotations
 
+import threading
 import time
 
 import jwt
@@ -148,6 +149,39 @@ def _seed_no_bot(world) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
 
 
+def _await_the_background_apply(_response, world) -> None:
+    """Join the worker before the case ends, then assert it finished.
+
+    Two jobs, and the first is not optional. ``POST …/apply`` answers 202 and
+    keeps working on a daemon thread; the per-test fixture disposes the engine
+    the moment the case returns. Disposing a SQLite engine while another thread
+    is mid-statement on one of its connections does not raise — it segfaults the
+    interpreter, taking the whole pytest process with it. Joining the thread is
+    what makes the case deterministic rather than a coin flip that usually lands
+    the right way.
+
+    Nothing here works around a production defect: a real deployment does not
+    dispose its engine under a live apply, and an apply killed mid-flight is
+    already answered by design — its ``RUNNING`` row has no live lock behind it,
+    so the read derives ``FAILED``.
+
+    Having waited, assert what the wait makes observable: a 202 is only worth
+    anything if the work behind the handle actually reaches a terminal status.
+    """
+    for thread in threading.enumerate():
+        # The name the service gives its workers. Coupling a test to it is the
+        # price of being able to wait for one deterministically.
+        if thread.name.startswith("manifest-apply-"):
+            thread.join(timeout=30)
+            assert not thread.is_alive(), "the apply thread never finished"
+
+    record = world.get(BotConfigManifestApplyRepositoryProtocol).latest(
+        env=get_current_env(), entity_id=_OWNER, bot_id=_BOT_ID
+    )
+    assert record is not None, "the accepted apply left no record"
+    assert record.status == "SUCCEEDED", record.status
+
+
 # ── POST .../apply ─────────────────────────────────────────────────────────
 
 
@@ -160,6 +194,7 @@ def _seed_no_bot(world) -> None:
     ),
     seed=_seed_bot_with_manifest,
     expect=ExpectSuccess(status=202, json_contains={"code": 200000}),
+    extra_assertions=(_await_the_background_apply,),
 )
 def apply_returns_202_with_a_handle():
     """Apply does not block: it answers 202 with an ``apply_id`` and continues
@@ -176,6 +211,7 @@ def apply_returns_202_with_a_handle():
     ),
     seed=_seed_bot,
     expect=ExpectSuccess(status=202, json_contains={"code": 200000}),
+    extra_assertions=(_await_the_background_apply,),
 )
 def apply_with_no_manifest_is_not_an_error():
     """A bot with no manifest applies nothing and reports nothing applied — the

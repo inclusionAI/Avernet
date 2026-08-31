@@ -143,8 +143,22 @@ def _start(service):
 
 
 def _drain(service):
-    """Let the background thread finish, then read the terminal report."""
+    """Let the background thread finish, then read the terminal report.
+
+    Joins the worker rather than only polling the record. The terminal write is
+    not the thread's last act — the lock release follows it — so a test that
+    stopped at "the report is terminal" could observe the lock still held, and
+    could tear the engine down while the worker was still on a connection.
+    Joining removes both windows: once ``join`` returns, the thread is done
+    touching anything.
+    """
+    import threading
     import time
+
+    for thread in threading.enumerate():
+        if thread.name.startswith("manifest-apply-"):
+            thread.join(timeout=30)
+            assert not thread.is_alive(), "the apply thread never finished"
 
     for _ in range(200):
         report = service.last_apply(entity_id=_ENTITY, bot_id=_BOT)
