@@ -559,14 +559,11 @@ POST /openapi/v1/bots/market/skill-center/skills
 }
 ```
 
-卡片至少消费 `skillCode/skillName/description/tagList`；版本标签和详情入口分别使用
-`latestVersionNumber/homepageUrl`，图标使用可选 `iconUrl`。详情使用 `homepageUrl` iframe，不创建
-TeamClaw Asset。确认引用时只有外部 `skillCode`，不能调用普通 Membership，必须发起异步 Reference。
-
-兼容说明：当前 Router 已透传 `homepageUrl/iconUrl/latestVersionNumber`，但这些字段仍以 additive
-字段存在，尚未全部显式进入生成 OpenAPI 的 `SkillCenterMarketItem`。前端临时 compatibility type
-必须把它们声明为 optional；Backend 后续应将前端实际消费字段收敛为显式 DTO，不能长期依赖
-`additionalProperties`。
+卡片只能消费生成 OpenAPI 的 `SkillCenterMarketItem` 已声明字段：
+`skillCode/skillName/description/tagList`（以及可选的归属和创建者字段）。版本标签、图标和
+iframe 详情入口在对应字段被显式加入 DTO、重新生成并发布 Gateway OpenAPI 前均为**未定义**，
+前端不得从 `additionalProperties` 或 Router 透传字段推断其语义。确认引用时只有外部 `skillCode`，
+不能调用普通 Membership，必须发起异步 Reference。
 
 选择项和去重键必须使用 `skillCode`，不能使用名称。若异常上游记录没有 skillCode，该卡片只可
 查看、不可勾选；不能由前端生成临时代码。
