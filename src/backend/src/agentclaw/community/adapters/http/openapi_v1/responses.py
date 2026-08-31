@@ -587,10 +587,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # proxies and client retry layers the whole surface is out of rotation over
     # a per-Bot conflict. The internal /api/skillsets mapping in
     # ``adapters.http.app`` answers 409 for the same reason.
-    SkillSetControlPlaneLockUnavailableError: (
-        409,
-        "Another SkillSet mutation holds this Bot's fence",
-    ),
+    SkillSetControlPlaneLockUnavailableError: (409, "Another SkillSet mutation holds this Bot's fence"),
     SkillSetRuntimeReconcileError: (502, "Skill runtime synchronization failed"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
@@ -603,10 +600,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
     LocalSkillEditBusyError: (409, "Another Skill update is in progress"),
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
-    LocalSkillEditLockUnavailableError: (
-        503,
-        "Skill update service is temporarily unavailable",
-    ),
+    LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
     SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
@@ -615,10 +609,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
-    # Directory download (download-dir): one message for all three caps
-    # (per-file / file-count / total bytes) — the numbers live with the
-    # service that enforces them, and a fixed string keeps them from drifting
-    # into the public contract twice.
+    # download-dir: one fixed message for all three caps (per-file / count / total).
     DirectoryTooLargeError: (413, "Directory too large to download"),
     # Startup script (issue #926): the body is refused at write time so a
     # caller learns the limit instead of hitting it inside a container. The

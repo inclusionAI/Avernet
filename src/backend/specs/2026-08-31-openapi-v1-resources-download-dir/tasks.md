@@ -37,17 +37,21 @@
 
 ## Group E — CI 门禁修复（PR #1747 首轮红）
 
+> 验收覆盖 yaml 地板**未调**（用户指令：不修改
+> `singlebox_coverage_modules.yaml`，`files` 模块 `core_min_percent` 维持 63.52）。
+
 - [x] `test_explicit_user_id.py` 两个钉数随新操作上调：user_id 操作数 219 → 220，
       `bot_id` path 计数 146 → 147（我此前漏更——本地只跑了分目录套件，全量里的
       表面级 tripwire 没跑到）
 - [x] `test_http_adapter_layer_is_http_only.py`：`zip_build` 加入
       `_NON_ENDPOINT_NAME_PATTERNS`（全名登记，照 `startup_script_support` 先例：
       从 router 拆出、刻意无 FastAPI、无 client 可测）
-- [x] `scripts/ci/singlebox_coverage_modules.yaml`：`files` 模块 `core_min_percent`
-      63.52 → 50.00。`iter_directory_files`（+49/195 语句）只被 openapi v1
-      download-dir 触达，而该模块的验收故事全是 console 路由——与 pending 的
-      `resources` 模块同类。地板为推算值（(0.6352·146+6)/195 ≈ 50.6%，留 0.6pp
-      余量吸收计数差异），下次 CI 报实测后应收紧
+
+- [x] `test_no_oversized_modules`：两个登记行把 `responses.py`（1006）与
+      `admission.py`（1004）顶过 1000 行硬顶——本地全量复算全部被 worker
+      崩溃截断、architecture 目录排在调度尾部从未跑到，只有 CI 看见了。
+      修复为格式级瘦身（多行 dict 元组收成单行，文件内有 123 字符单行先例），
+      两文件 997/998，不注册 allowlist（祖父清单是给千行级巨件的）
 - 未改：`test_skills_path_factory_provider` 的 1 个失败是本机环境噪音
       （依赖 `~/.openclaw` 布局，REL 基线上同样红；CI 与此无关）
 
