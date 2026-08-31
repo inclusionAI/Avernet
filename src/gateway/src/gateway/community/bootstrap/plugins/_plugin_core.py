@@ -8,8 +8,8 @@ from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrat
 from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
 from gateway.community.plugins.authn.dev_cookie import DevCookieUserStrategy
-from gateway.community.plugins.authn.oauth_session import OauthSessionStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
+from gateway.community.plugins.authn.oauth_session import OauthSessionStrategy
 from gateway.community.plugins.cache.in_memory import InMemoryCachePlugin
 from gateway.community.plugins.cache.redis import RedisCachePlugin
 from gateway.community.plugins.database.mariadb import MariaDbOrmPlugin

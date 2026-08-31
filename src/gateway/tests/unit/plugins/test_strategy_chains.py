@@ -19,7 +19,6 @@ from gateway.community.plugins.authn.google_token import GoogleUserStrategy
 from gateway.community.plugins.authn.oauth_session import OauthSessionStrategy
 from gateway.community.spi.authn import PrincipalType
 
-
 _TEST_BCS_SECRET = "test-bcs-session-secret-32-bytes!!"
 
 

@@ -15,14 +15,16 @@ import httpx
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
 from gateway.community.adapters.web._cors import install_cors
-from gateway.community.adapters.web.app import create_app
 from gateway.community.adapters.web._forward import (
     _ALL_METHODS,
+    _PRINCIPAL_HEADER,
     _request_body,
     forward_request,
 )
+from gateway.community.adapters.web.app import create_app
 from gateway.community.bootstrap._principal_signer import build_principal_signer
 from gateway.community.config import ConfigLoader, CorsConfig, UserConfig
 from gateway.community.core.forwarding import DomainMap
