@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS `bcs_chat_runs` (
   `state`               VARCHAR(16)  NOT NULL,
   `accumulated_content` MEDIUMTEXT,
   `error_message`       TEXT,
+  `original_request`    MEDIUMTEXT,
   `created_at_ms`       BIGINT       NOT NULL,
   `updated_at_ms`       BIGINT       NOT NULL,
   `completed_at_ms`     BIGINT,

@@ -369,6 +369,75 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
 }
 
 #[tokio::test]
+async fn chat_records_original_request_as_wrapped_chat_send_frame() {
+    // At run creation the exact chat.send frame delivered to the target bot is
+    // captured (write-once) into the run record's audit field
+    // `original_request` as {"method":"chat.send","params":{...}}, so the
+    // original request can be read back from the run table later. The audit
+    // params must be byte-identical to the frame actually sent to the bot.
+    let bot_delivery = Arc::new(support::RecordingBotDelivery::default());
+    let run_store = Arc::new(ChatRunStore::new());
+    let registry = Arc::new(MemoryRegistry::default());
+    registry
+        .insert_named("bot-source", "Source Bot", "public", Some("owner-1"))
+        .await;
+    registry.insert("bot-target", "public", None).await;
+    let service = A2aChat::new(
+        bot_delivery.clone(),
+        run_store.clone(),
+        30_000,
+        registry,
+        Arc::new(StaticFriendCoreService::default()),
+    );
+
+    service
+        .chat(A2aChatCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-source".to_string(),
+            }),
+            target_bot_id: "bot-target".to_string(),
+            message: "hello".to_string(),
+            from_actor_id: Some("api-user".to_string()),
+            run_id: Some("run-audit".to_string()),
+            async_mode: true,
+            session_key: Some("session-audit".to_string()),
+            timeout_ms: Some(10_000),
+            client: Some("contract-test".to_string()),
+            authenticated_staff_id: Some("owner-1".to_string()),
+            tags: vec!["tag1".to_string(), "tag2".to_string()],
+            response_mode: ChatResponseMode::Full,
+            caller_wait_mode: Some("detached".to_string()),
+            organization_code: None,
+            provider_bypass_headers: Vec::new(),
+        })
+        .await
+        .unwrap();
+
+    let run = run_store.get("run-audit").await.unwrap();
+    assert!(!run.original_request.is_empty(), "audit field must be set");
+    let wrapped: serde_json::Value =
+        serde_json::from_str(&run.original_request).expect("audit value is JSON");
+    assert_eq!(wrapped["method"], "chat.send");
+
+    // The audit params ARE exactly the frame params delivered to the bot.
+    let delivered = bot_delivery
+        .frames()
+        .await
+        .into_iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(req) if req.method == "chat.send" && req.id == "run-audit" => req.params,
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(wrapped["params"], delivered);
+
+    // Spot-check that request fields round-trip through the audit blob.
+    assert_eq!(wrapped["params"]["session_context"]["from"], "api-user");
+    assert_eq!(wrapped["params"]["tags"], serde_json::json!(["tag1", "tag2"]));
+    assert_eq!(wrapped["params"]["extensions"]["caller_wait_mode"], "detached");
+}
+
+#[tokio::test]
 async fn bcs_cli_a2a_chat_requests_callback_provider_transport() {
     let (service, bot_delivery, _) = build_service(
         vec![
