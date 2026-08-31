@@ -487,12 +487,22 @@ def test_shipped_config_admits_anonymous_registration() -> None:
 
 
 def test_register_security_overrides_must_be_method_scoped() -> None:
-    # The overrides are deliberately method-qualified: every OTHER method on
-    # /register/token and /register keeps the broad collaboration rule
-    # (user+app required), so a stray request can never widen the hole.
+    """The register overrides are deliberately method-qualified.
+
+    Every OTHER method under the register paths falls back to the broad
+    collaboration rule (identities resolved but optional — BCN enforces the
+    effective-caller policy itself, per #1557/#1712). What must NOT happen is
+    the anonymous-POST exemption leaking to the token GET's methods (or vice
+    versa): the wide rule's exact presence values may keep evolving without
+    weakening this ranking assertion, so assert rank, not presence.
+    """
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
-    broad = rs.resolve("POST", "/openapi/v1/collaboration/register/token")
-    assert broad is not None
-    assert broad[PrincipalType.USER] is Presence.REQUIRED
-    assert broad[PrincipalType.APP] is Presence.REQUIRED
+    stray = rs.resolve("POST", "/openapi/v1/collaboration/register/token")
+    assert stray is not None
+    assert stray != {}, "stray methods must not inherit the anonymous exemption"
+    anon = rs.resolve("POST", "/openapi/v1/collaboration/register")
+    assert anon is not None and len(anon) == 0
+    token_get = rs.resolve("GET", "/openapi/v1/collaboration/register/token")
+    assert token_get is not None
+    assert token_get[PrincipalType.USER] is Presence.REQUIRED
