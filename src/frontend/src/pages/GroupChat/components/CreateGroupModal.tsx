@@ -1620,9 +1620,10 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     const isManagerWorker = groupStrategy === 'manager_worker';
     const isStateMachine = groupStrategy === 'state_machine';
     const webhookUrlError = getGroupWebhookUrlError(webhookUrl);
-    const openingMessageError = isStateMachine
-      ? getGroupOpeningMessageError(openingMessage)
-      : undefined;
+    const openingMessageError = getGroupOpeningMessageError(
+      openingMessage,
+      groupStrategy,
+    );
 
     if (webhookUrlError || openingMessageError) {
       setAdvancedFieldErrors({
@@ -1854,6 +1855,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         : undefined,
       group_strategy: groupStrategy,
       master_bot: isManagerWorker ? masterBot : undefined,
+      opening_message: buildGroupOpeningMessage(openingMessage),
       event_subscriptions: eventSubscriptions,
     };
 
@@ -2697,52 +2699,55 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                       </p>
                     )}
                   </div>
-                  {groupStrategy === 'state_machine' && (
-                    <div>
-                      <label
-                        htmlFor="create-group-opening-message"
-                        className="mb-1 block text-sm font-medium text-slate-700"
-                      >
-                        自定义开场白
-                        <span className="ml-1 text-xs font-normal text-slate-400">
-                          （可选）
-                        </span>
-                      </label>
-                      <textarea
-                        ref={openingMessageInputRef}
-                        id="create-group-opening-message"
-                        rows={4}
-                        value={openingMessage}
-                        onChange={(event) => {
-                          setOpeningMessage(event.target.value);
-                          setAdvancedFieldErrors((current) => ({
-                            ...current,
-                            openingMessage: undefined,
-                          }));
-                        }}
-                        placeholder="协作群 {{bcs.group_name}} 已开始执行，Run ID：{{bcs.run_id}}"
-                        aria-invalid={Boolean(
-                          advancedFieldErrors.openingMessage
-                        )}
-                        className={cn(
-                          'w-full resize-y rounded-lg border bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:ring-2',
-                          advancedFieldErrors.openingMessage
-                            ? 'border-red-400 focus:border-red-400 focus:ring-red-100'
-                            : 'border-slate-200 focus:border-lavender-400 focus:ring-lavender-100',
-                        )}
-                      />
-                      <p className="mt-1 text-xs text-slate-400">
-                        支持 {'{{bcs.group_id}}'}、{'{{bcs.session_id}}'}、
-                        {'{{bcs.run_id}}'}、{'{{bcs.group_name}}'} 和
-                        {'{{bcs.session_name}}'}。
-                      </p>
-                      {advancedFieldErrors.openingMessage && (
-                        <p className="mt-1 text-xs text-red-500">
-                          {advancedFieldErrors.openingMessage}
-                        </p>
+                  <div>
+                    <label
+                      htmlFor="create-group-opening-message"
+                      className="mb-1 block text-sm font-medium text-slate-700"
+                    >
+                      自定义开场白
+                      <span className="ml-1 text-xs font-normal text-slate-400">
+                        （可选）
+                      </span>
+                    </label>
+                    <textarea
+                      ref={openingMessageInputRef}
+                      id="create-group-opening-message"
+                      rows={4}
+                      value={openingMessage}
+                      onChange={(event) => {
+                        setOpeningMessage(event.target.value);
+                        setAdvancedFieldErrors((current) => ({
+                          ...current,
+                          openingMessage: undefined,
+                        }));
+                      }}
+                      placeholder={
+                        groupStrategy === 'state_machine'
+                          ? '协作群 {{bcs.group_name}} 已开始执行，Run ID：{{bcs.run_id}}'
+                          : '欢迎来到 {{bcs.group_name}}，会话：{{bcs.session_name}}'
+                      }
+                      aria-invalid={Boolean(advancedFieldErrors.openingMessage)}
+                      className={cn(
+                        'w-full resize-y rounded-lg border bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:ring-2',
+                        advancedFieldErrors.openingMessage
+                          ? 'border-red-400 focus:border-red-400 focus:ring-red-100'
+                          : 'border-slate-200 focus:border-lavender-400 focus:ring-lavender-100',
                       )}
-                    </div>
-                  )}
+                    />
+                    <p className="mt-1 text-xs text-slate-400">
+                      支持 {'{{bcs.group_id}}'}、{'{{bcs.session_id}}'}、
+                      {'{{bcs.group_name}}'} 和 {'{{bcs.session_name}}'}
+                      {groupStrategy === 'state_machine' && (
+                        <>、{'{{bcs.run_id}}'}</>
+                      )}
+                      。
+                    </p>
+                    {advancedFieldErrors.openingMessage && (
+                      <p className="mt-1 text-xs text-red-500">
+                        {advancedFieldErrors.openingMessage}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

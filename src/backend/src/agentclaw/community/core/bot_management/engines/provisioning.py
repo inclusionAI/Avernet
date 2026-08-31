@@ -237,6 +237,7 @@ class EngineProvisioningStrategy(ABC):
         *,
         mcp_sync: Any = None,
         skill_set_factory: Any = None,
+        runtime_reconciler: Any = None,
         template_service: Any = None,
     ) -> bool:
         """Optionally refresh engine-owned restart authorization/runtime state.

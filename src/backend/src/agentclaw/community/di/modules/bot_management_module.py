@@ -17,7 +17,7 @@ they pick up the swapped repositories transparently.
 
 from __future__ import annotations
 
-from typing import Annotated, Callable, cast
+from typing import Annotated, Callable
 
 from injector import (
     Binder,
@@ -86,7 +86,6 @@ from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
 from agentclaw.community.core.devices.protocols import McpSyncProtocol
-from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.bot_management.services.bot_space_service import (
     BotSpaceService,
 )
@@ -154,6 +153,9 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
 )
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
+)
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
@@ -313,14 +315,14 @@ class BotManagementModule(Module):
         self,
         repository: BotRepository,
         template_service: TemplateService,
-        mcp_sync_service: MCPSyncService,
         skill_set_factory: SkillSetServiceFactory,
+        injector: Injector,
     ) -> AicodingRestartAuthorizationBaasPublishListener:
         return AicodingRestartAuthorizationBaasPublishListener(
             bot_repo=repository,
             template_service=template_service,
-            mcp_sync=mcp_sync_service,
             skill_set_factory=skill_set_factory,
+            runtime_reconciler_provider=lambda: injector.get(CoreBotRuntimeProjectorProtocol),
         )
 
     @singleton
@@ -399,7 +401,6 @@ class BotManagementModule(Module):
         task_queue_service: TaskQueueService,
         common_config_service: CommonConfigService,
         caller_identity_repo: CallerIdentityRepositoryProtocol,
-        mcp_sync_service: MCPSyncService,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -445,7 +446,7 @@ class BotManagementModule(Module):
             task_queue_service=task_queue_service,
             common_config_service=common_config_service,
             caller_identity_repo=caller_identity_repo,
-            mcp_sync=cast(McpSyncProtocol, mcp_sync_service),
+            runtime_reconciler_provider=lambda: injector.get(CoreBotRuntimeProjectorProtocol),
         )
 
     @singleton

@@ -63,9 +63,6 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
-from agentclaw.community.core.bot_management.services.engine_resolver import (
-    resolve_runtime_engine_for_bot,
-)
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
@@ -73,11 +70,14 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
-    InvalidResourcePathError,
 )
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
     is_readonly,
+    is_write_forbidden,
+    require_workspace_path,
+    resource_coords_from_record,
+    safe_workspace_path,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
@@ -120,86 +120,31 @@ _READ_ONLY_RESPONSE: dict[int | str, dict[str, object]] = {
 }
 
 
-def _safe_path(path: str) -> str:
-    """Normalize a caller-supplied workspace-relative path, or reject it.
-
-    Rejects any ``..`` segment outright instead of filtering it out. The console's
-    ``ResourceFileService.upload_file`` drops such segments silently
-    (``core/services/resource_file_service.py:409``) because it has to accept
-    whatever a browser sends for a whole-folder drag-upload; an explicit API has
-    no such caller, and quietly rewriting an address to a *different* valid one is
-    worse than refusing it — the caller is told nothing, and the file lands
-    somewhere they did not name.
-
-    This is the only barrier: neither ``build_workspace_mapper`` (which composes
-    with ``Path.__truediv__``, leaving ``..`` intact) nor the engine's
-    ``_convert_path`` normalizes or asserts containment. Engine-side bounding is
-    tracked in #1002.
-
-    Leading slashes and empty / ``.`` segments are normalized away rather than
-    rejected: they are noise, not an attempt to leave the workspace.
-    """
-    segments = [s for s in path.split("/") if s and s != "."]
-    if any(s == ".." for s in segments):
-        raise InvalidResourcePathError(f"path escapes the workspace: {path!r}")
-    return "/".join(segments)
-
-
-def _require_path(path: str) -> str:
-    """``_safe_path``, refusing the empty result.
-
-    Every endpoint but the listing addresses one entry, and the workspace root
-    is not one: there is nothing to download, delete or stat about it.
-    """
-    safe = _safe_path(path)
-    if not safe:
-        raise InvalidResourcePathError("path is required")
-    return safe
+#: The workspace-path rules, which live in ``core`` because they are statements
+#: about the workspace rather than about HTTP — and because manifest apply
+#: enforces the same ones with no request to hang them on. Bound here under the
+#: names this module has always used, so every call site below reads as it did;
+#: these are the core functions themselves, not wrappers, which is what
+#: ``test_config_surface.py`` pins with ``is``.
+_safe_path = safe_workspace_path
+_require_path = require_workspace_path
+_file_coords = resource_coords_from_record
 
 
 def _reject_read_only(safe: str) -> None:
     """Refuse a path the read-only policy protects, with the console's 403.
 
-    Applied to **creation** as well as deletion, so that the surface cannot be
-    talked into making something it then refuses to manage: a listing hides
-    dotfiles and the root identity files, and delete refuses them, so an upload
-    or mkdir that accepted one would leave an entry this API can neither show
-    nor remove. Uploading a workspace-root identity file would also overwrite
-    the bot's own configuration through a resource endpoint, which is not what
-    this surface is for.
-
-    Every ancestor is checked, not just the whole path. ``is_readonly`` looks at
-    the final segment only, so ``.private/file.md`` passes it — the leaf is an
-    ordinary name — while creating it brings a hidden ``.private`` directory into
-    existence along the way. Removing the visible descendant afterwards would
-    then leave a directory this API created and can neither list nor delete.
+    The *decision* is :func:`is_write_forbidden` in ``core``; this is the
+    protocol half, and it stays here deliberately. Core raising a domain error
+    that this module mapped back would have to reproduce this body exactly, and
+    "reproduced exactly" is a claim to verify where "never moved" is a fact. The
+    rule this feature is applying — an adapter may map errors, it may not own
+    policy — puts the line right here.
     """
-    segments = safe.split("/")
-    for depth in range(len(segments)):
-        ancestor = "/".join(segments[: depth + 1])
-        if is_readonly(ancestor):
-            raise HTTPException(
-                status_code=403, detail="Cannot write to a read-only path"
-            )
-
-
-def _file_coords(
-    bot_id: str, owner_id: str, bot_repo: BotRepository
-) -> tuple[str, str, str]:
-    """``(entity_type, entity_id, engine_type)`` for the file endpoints.
-
-    ``ResourceFileService`` addresses a bot's workspace by these three
-    coordinates, and ``DeviceContext`` carries none of them — it holds
-    provider / conn_info / binding only. Mirrors the console router's
-    ``_resolve_params`` (``adapters/http/resources/file_router.py:71``): the
-    entity is the bot owner, and ``engine_type`` defaults to the bot's
-    ``active_engine``. ``entity_type`` is ``"staff"``, matching
-    ``ResourceFileService``'s own default.
-    """
-    engine_type = resolve_runtime_engine_for_bot(
-        bot_id=bot_id, owner_id=owner_id, override=None, bot_repo=bot_repo
-    )
-    return ("staff", owner_id, engine_type)
+    if is_write_forbidden(safe):
+        raise HTTPException(
+            status_code=403, detail="Cannot write to a read-only path"
+        )
 
 
 def _to_file_entry(entry: dict[str, Any]) -> FileEntry:
@@ -237,7 +182,10 @@ async def _list_dir_or_empty(
     for an absent directory, so without this the same request is a 500 on baas
     and an empty page everywhere else. Every other status still propagates.
     """
-    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    coords = _file_coords(bot_id, owner_id, bot_repo)
+    entity_type, entity_id, engine_type = (
+        coords.entity_type, coords.entity_id, coords.engine_type
+    )
     try:
         listed = await file_svc.list_dir(
             entity_type=entity_type,
@@ -402,7 +350,10 @@ async def upload_resource(
     # fail-closed — mirroring the bots router.
     safe = _require_path(path)
     _reject_read_only(safe)
-    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    coords = _file_coords(bot_id, owner_id, bot_repo)
+    entity_type, entity_id, engine_type = (
+        coords.entity_type, coords.entity_id, coords.engine_type
+    )
     # Duplicate detection against the workspace, not the record table. Uploading
     # to an occupied path would otherwise overwrite silently, since the engine's
     # upload is a plain write. Asking the filesystem also fixes the old false
@@ -563,7 +514,10 @@ async def _read_file_or_404(
 ) -> bytes:
     """Bytes at ``path``, or 404. Shared by download and preview."""
     safe = _require_path(path)
-    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    coords = _file_coords(bot_id, owner_id, bot_repo)
+    entity_type, entity_id, engine_type = (
+        coords.entity_type, coords.entity_id, coords.engine_type
+    )
     try:
         content = await file_svc.read_file(
             entity_type=entity_type,
@@ -697,7 +651,10 @@ async def create_directory(
     # exactly the record-vs-filesystem divergence this change removed.
     safe = _require_path(path)
     _reject_read_only(safe)
-    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    coords = _file_coords(bot_id, owner_id, bot_repo)
+    entity_type, entity_id, engine_type = (
+        coords.entity_type, coords.entity_id, coords.engine_type
+    )
     await file_svc.create_directory(
         entity_type=entity_type,
         entity_id=entity_id,
@@ -744,7 +701,10 @@ async def delete_file(
     # id-addressed delete could not name them and needed no guard.
     if is_readonly(safe):
         raise HTTPException(status_code=403, detail="Cannot delete read-only file")
-    entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
+    coords = _file_coords(bot_id, owner_id, bot_repo)
+    entity_type, entity_id, engine_type = (
+        coords.entity_type, coords.entity_id, coords.engine_type
+    )
     if not await file_svc.exists(
         entity_type=entity_type,
         entity_id=entity_id,

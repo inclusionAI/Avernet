@@ -4,6 +4,10 @@
 - 状态：已实现，待人工联调验收
 - 范围：Normal StateMachine Group 的创建、更新、Run 开场消息、历史查询和前端高级设置
 
+> 2026-08-27 补充：Chat 和 ManagerWorker 的 Session 级行为由
+> `2026-08-27-bcs-session-opening-message-design.md` 扩展并作为对应策略的权威定义；本文的
+> StateMachine Run 行为保持不变。
+
 ## 1. 背景
 
 自定义协作群目前在每次 StateMachine Run 开始时固定生成以下 AixUI 消息：
@@ -204,10 +208,9 @@ V1 和兼容路由必须在同一版本具备相同行为，不能只更新 Open
 
 约束：
 
-- `opening_message` 仅允许用于 `group_kind=normal` 且
-  `group_strategy/collaboration.strategy=state_machine`；
-- DM、Chat 和 ManagerWorker 请求携带该字段时返回 `400 invalid_opening_message`；
-- 省略或传 `null` 表示使用默认开场消息；
+- `opening_message` 仅允许用于 `group_kind=normal`；
+- DM 请求携带该字段时返回 `400 invalid_opening_message`；
+- 省略或传 `null` 时，StateMachine 使用默认开场消息，Chat 和 ManagerWorker 不展示开场白；
 - 空字符串或仅包含空白字符的字符串无明确展示意义，返回 `400 invalid_opening_message`。
 
 ### 6.3 更新 Group
@@ -229,9 +232,8 @@ V1 和兼容 `PATCH /groups/{group_id}` 增加三态字段：
 省略 `opening_message` 表示不修改。Service API 和 repo patch 必须保留这三个状态，不能使用单层
 `Option<OpeningMessage>` 混淆“未提供”和“清除”。
 
-只有现有 Group 管理者可以修改该字段，沿用当前 Group PATCH 授权逻辑。非 StateMachine、DM 或不存在
-的 Group 按现有资源隐藏和错误映射处理；对可见但策略不支持的 Group 返回
-`400 invalid_opening_message`。
+只有现有 Group 管理者可以修改该字段，沿用当前 Group PATCH 授权逻辑。DM 或不存在的 Group 按现有
+资源隐藏和错误映射处理。
 
 ### 6.4 查询 Group
 
@@ -249,7 +251,7 @@ Group detail 在存在自定义值时返回 `opening_message`；未配置时省�
 | --- | --- | --- |
 | `{{bcs.group_id}}` | `Group.id` | 无；运行时必须存在 |
 | `{{bcs.session_id}}` | `Session.id` | 无；运行时必须存在 |
-| `{{bcs.run_id}}` | `StateMachineRun.run_id` | 无；运行时必须存在 |
+| `{{bcs.run_id}}` | `StateMachineRun.run_id` | 仅 StateMachine 可用；运行时必须存在 |
 | `{{bcs.group_name}}` | `Group.label` | 空字符串 |
 | `{{bcs.session_name}}` | `Session.session_title` | 空字符串 |
 
@@ -265,9 +267,9 @@ Group detail 在存在自定义值时返回 `opening_message`；未配置时省�
    文本安全传给 `params` 或 `tab`。
 6. 一期不定义占位符转义语法。普通 JSON 的单花括号不受影响。
 
-因为 Group 策略在写入时已知，一期 StateMachine Group 的 `group_id`、`session_id` 和 `run_id` 在
-渲染时都必须存在。未来其他策略启用 `opening_message` 时，必须另外定义触发时机和可用变量，不能把
-不存在的 `run_id` 静默替换为空字符串。
+因为 Group 策略在写入时已知，StateMachine 的 `group_id`、`session_id` 和 `run_id` 在渲染时都必须
+存在。Chat 和 ManagerWorker 使用 Session 作用域，只支持除 `run_id` 外的四个变量；对这两种策略引用
+`run_id` 会在创建或更新时被拒绝，不会静默替换为空字符串。
 
 ## 8. 内容生成
 
@@ -466,12 +468,12 @@ pub opening_message: Option<Option<OpeningMessage>>,
 
 1. 创建群弹层增加一个“高级设置”折叠区，初始状态为折叠。
 2. 现有 Webhook URL 从成员 Bot 上方移入“高级设置”，默认留空；折叠和展开不得清除用户已输入的值。
-3. `opening_message` 与 Webhook URL 放在同一“高级设置”区域，默认留空；只有选择
-   StateMachine 自定义协作策略时显示开场白输入，其他策略不显示也不发送该字段。
+3. `opening_message` 与 Webhook URL 放在同一“高级设置”区域，默认留空；Chat、ManagerWorker 和
+   StateMachine 都显示开场白输入并发送非空字段。
 4. 开场白使用支持多行的 textarea。普通用户输入按字符串模板发送；留空时不传
-   `opening_message`，由服务端使用默认副屏。
-5. UI 提示可用变量，变量名统一为 `{{bcs.group_id}}`、`{{bcs.session_id}}`、
-   `{{bcs.run_id}}`、`{{bcs.group_name}}` 和 `{{bcs.session_name}}`。
+   `opening_message`。StateMachine 由服务端使用默认副屏，Chat 和 ManagerWorker 不展示开场白。
+5. UI 提示可用变量，三种策略均支持 `{{bcs.group_id}}`、`{{bcs.session_id}}`、
+   `{{bcs.group_name}}` 和 `{{bcs.session_name}}`；仅 StateMachine 显示并支持 `{{bcs.run_id}}`。
 6. “高级设置”的展开状态不属于建群请求；关闭或成功提交弹层并 reset form 后恢复为折叠状态，输入值也
    恢复为空。
 7. 折叠区中存在非空但校验失败的字段时，提交不得忽略错误；前端自动展开“高级设置”，展示字段级错误
@@ -520,7 +522,7 @@ pub opening_message: Option<Option<OpeningMessage>>,
 3. Legacy 创建请求接受相同字段并传入 Service API。
 4. V1 和 Legacy PATCH 区分省略、设置和 `null` 清除。
 5. detail 返回原始配置，summary 不返回。
-6. DM、Chat、ManagerWorker 携带字段时返回 `invalid_opening_message`。
+6. DM 携带字段时返回 `invalid_opening_message`；Chat、ManagerWorker 携带 `run_id` 时返回该错误。
 7. 未知对象字段、`position`、`card + tab`、未知变量和超限内容被拒绝。
 
 ### 16.2 模板渲染
@@ -581,15 +583,9 @@ pub opening_message: Option<Option<OpeningMessage>>,
 8. V1 与当前前端使用的 Legacy 建群接口行为一致。
 9. 前端 Webhook 和自定义开场白位于同一个默认折叠、默认留空的高级设置区域。
 
-## 18. 后续扩展条件
+## 18. Chat / ManagerWorker 扩展
 
-未来为 Chat 或 ManagerWorker Group 启用同一字段前，必须先定义：
-
-- 开场消息在 Group 创建、Session 创建还是任务开始时触发；
-- 是否每个 Session 只发送一次；
-- 哪些模板变量在该策略下存在；
-- 不存在 `run_id` 时是禁止引用还是提供新的策略变量；
-- 历史消息的确定性 ID 和幂等规则。
-
-届时沿用 `type=card|panel`，不再增加 `position`。只有出现两个以上明确需求时才扩展新的 AixUI 来源或
-展示方式，避免把一期实现演变成通用消息编排系统。
+Chat 和 ManagerWorker 的扩展条件已在
+`2026-08-27-bcs-session-opening-message-design.md` 中确认并批准。两种策略沿用
+`type=card|panel`，在新 Session 创建时持久化一次，禁止引用 `run_id`，并使用确定性的 Session
+开场消息 ID。该扩展不改变本设计定义的 StateMachine Run 行为。

@@ -1908,7 +1908,8 @@ impl Default for BcsServerState {
         let session_management: Arc<dyn SessionManagementService> = Arc::new(
             SessionManagementServiceImpl::new(session_repo.clone(), group_repo_for_session.clone())
                 .with_bot_runtime(bot_use_cases.clone())
-                .with_event_record_factory(group_event_factory.clone()),
+                .with_event_record_factory(group_event_factory.clone())
+                .with_opening_message_delivery(message_repo.clone(), frontend_delivery.clone()),
         );
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
@@ -3472,7 +3473,8 @@ impl BcsServer {
         let session_management: Arc<dyn SessionManagementService> = Arc::new(
             SessionManagementServiceImpl::new(session_repo.clone(), group_repo_for_session.clone())
                 .with_bot_runtime(bot_use_cases.clone())
-                .with_event_record_factory(group_event_factory.clone()),
+                .with_event_record_factory(group_event_factory.clone())
+                .with_opening_message_delivery(message_repo.clone(), frontend_delivery.clone()),
         );
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
@@ -4254,7 +4256,11 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                     .with_event_record_factory(crate::eventing_wiring::event_record_factory(
                         &config,
                         event_repo.clone(),
-                    )),
+                    ))
+                    .with_opening_message_delivery(
+                        message_repo.clone(),
+                        frontend_delivery.clone(),
+                    ),
             );
             (
                 session_repo.clone() as Arc<dyn SessionRepoPort>,

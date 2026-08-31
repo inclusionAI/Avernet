@@ -42,6 +42,7 @@ consumes:
   - "PassportPlugin"
   - "CallerIdentityRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.core.bot_config_surface    # BotConfigCoords, the shared config-category address type
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.identity # Caller identity overrides used for Passport scope sync
   - agentclaw.community.core.default_capabilities

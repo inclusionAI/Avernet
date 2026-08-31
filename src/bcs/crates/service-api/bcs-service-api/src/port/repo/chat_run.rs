@@ -82,6 +82,14 @@ pub struct ChatRunRecord {
     pub completion_policy: ChatRunCompletionPolicy,
     #[serde(skip_serializing, default)]
     pub delivery_ack_at_ms: Option<u64>,
+    /// Write-once audit snapshot of the request actually sent to the target
+    /// bot — the `chat.send` frame serialized as
+    /// `{"method":"chat.send","params":{...}}`. Set at `create` only; no UPDATE
+    /// path touches it, no SELECT reads it back, and `#[serde(skip)]` keeps it
+    /// off the streaming overlay entirely. Inspect it by querying the
+    /// `original_request` column directly (the repo's `get` returns it empty).
+    #[serde(skip)]
+    pub original_request: String,
 }
 
 fn default_completion_policy() -> ChatRunCompletionPolicy {
@@ -118,6 +126,7 @@ impl ChatRunRecord {
             response_mode,
             completion_policy,
             delivery_ack_at_ms: None,
+            original_request: String::new(),
         }
     }
 }

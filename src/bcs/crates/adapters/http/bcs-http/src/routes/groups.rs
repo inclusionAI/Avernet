@@ -6,7 +6,7 @@ use axum::{
 };
 use bcs_domain::{
     CollaborationDefinition, CollaborationDefinitionRef, CollaborationRuntimeDefinition,
-    RuntimeParticipantBinding, StateMachineAssignee,
+    OpeningMessageScope, RuntimeParticipantBinding, StateMachineAssignee,
 };
 use bcs_protocol::{
     CreateGroupRequest, InlineEventPayloadMode, InlineEventSinkInfo,
@@ -515,16 +515,20 @@ fn validate_legacy_opening_message(req: &CreateGroupRequest) -> Result<(), HttpA
     let Some(opening_message) = req.opening_message.as_ref() else {
         return Ok(());
     };
-    let is_state_machine = req.group_kind.as_deref() != Some("dm")
-        && (req.collaboration_definition_yaml.is_some()
-            || req.group_strategy.as_deref() == Some("state_machine"));
-    if !is_state_machine {
+    if req.group_kind.as_deref() == Some("dm") {
         return Err(HttpAdapterError::InvalidOpeningMessage(
-            "opening_message is only supported for StateMachine Groups".to_string(),
+            "opening_message is not supported for DM Groups".to_string(),
         ));
     }
+    let scope = if req.collaboration_definition_yaml.is_some()
+        || req.group_strategy.as_deref() == Some("state_machine")
+    {
+        OpeningMessageScope::StateMachineRun
+    } else {
+        OpeningMessageScope::Session
+    };
     opening_message
-        .validate()
+        .validate_for(scope)
         .map_err(|error| HttpAdapterError::InvalidOpeningMessage(error.to_string()))
 }
 

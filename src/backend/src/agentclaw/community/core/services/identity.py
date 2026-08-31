@@ -15,6 +15,7 @@ import httpx
 from injector import inject
 from pydantic import BaseModel, Field
 
+from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
 from agentclaw.community.core.errors import InternalError
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -177,6 +178,55 @@ class BotIdentityFileUpdateResponse(BaseModel):
     entity_id: str
     bot_id: str
     file_path: str
+
+
+def identity_physical_file_name(file_type: str) -> str:
+    """The on-disk name for an identity file type — ``SOUL`` → ``SOUL.md``.
+
+    :meth:`IdentityService.validate_file_type` checks against
+    ``VALID_IDENTITY_FILES``, whose entries carry the ``.md`` suffix, so the
+    logical type a caller names has to be re-suffixed before it is forwarded.
+    The public router did that inline, three times, with a bare f-string; a
+    manifest declares identity entries by the same logical type and needs the
+    same conversion, so it is one function now rather than a fourth copy.
+
+    Reaches no repository, which is what lets W13 run it at preflight.
+    """
+    return f"{file_type}.md"
+
+
+def identity_coords_from_record(bot_id: str, owner_id: str) -> BotConfigCoords:
+    """Where the ``identity`` category writes, for a bot that exists.
+
+    ``engine_type`` is ``None``: identity files are addressed through the
+    identity namespace, not per engine, and the router never resolved one.
+    Handing this category an engine it never had would be an invention, so the
+    field states the absence instead.
+
+    Despite the name this reads no bot record — the entity *is* the owner, and
+    ``"staff"`` is the personal-bot surface's fixed entity type. It is named for
+    symmetry with the other four, so the table has one shape.
+    """
+    return BotConfigCoords(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        entity_type="staff",
+        entity_id=owner_id,
+        engine_type=None,
+    )
+
+
+def identity_coords_from_spec(bot_id: str, owner_id: str) -> BotConfigCoords:
+    """The same address, for a bot that does not exist yet.
+
+    Identical to the record path, and that is the finding rather than an
+    oversight: identity's coordinates never depended on the record, so creating
+    a bot changes nothing about them. Kept as its own function so every category
+    presents both entry points and the table stays one shape.
+
+    No caller until W13 (#1696).
+    """
+    return identity_coords_from_record(bot_id, owner_id)
 
 
 class IdentityService:

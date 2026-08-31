@@ -10,6 +10,7 @@ use bcs_config_api::{MysqlDbConfig, StatementProtocol};
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
 use bcs_event_store::DbEventStore;
+use bcs_service_api::port::repo::EventRepoPort;
 use bcs_test_support::contract::repo::{
     event_delivery_repo_port_contract_tests, event_repo_port_contract_tests,
 };
@@ -35,7 +36,9 @@ async fn mysql_event_store_passes_contract() {
             extra: BTreeMap::new(),
         })
         .with_statement_protocol(StatementProtocol::Text);
-    config.pool_size = 2;
+    // A single pooled connection keeps the non-UTC session timezone below
+    // stable for the entire regression test.
+    config.pool_size = 1;
     config.min_pool_size = 1;
 
     let manager = MysqlDbManager::new(config)
@@ -43,7 +46,45 @@ async fn mysql_event_store_passes_contract() {
         .expect("open MySQL contract datasource");
     let plugin = Arc::new(MysqlDbPlugin::new(manager.clone(), "bcs"));
     apply_eventing_migration(plugin.as_ref()).await;
+    plugin
+        .execute(DbStatement::new("SET SESSION time_zone = '+08:00'"))
+        .await
+        .expect("set non-UTC MySQL session timezone");
     let repo = DbEventStore::mysql(plugin);
+
+    let mut timezone_subscription = common::subscription("sub-mysql-timezone");
+    timezone_subscription.subscription.env = "contract-timezone-mysql".to_string();
+    let expected_activated_at_ms = timezone_subscription.revision.activated_at_ms;
+    repo.create_subscription(timezone_subscription)
+        .await
+        .expect("create subscription in non-UTC session");
+    let (_, timezone_revision) = repo
+        .get_subscription("sub-mysql-timezone", "contract-timezone-mysql")
+        .await
+        .expect("read timezone subscription")
+        .expect("timezone subscription exists");
+    assert_eq!(timezone_revision.activated_at_ms, expected_activated_at_ms);
+
+    let mut timezone_event = common::append(
+        "evt-mysql-timezone",
+        "mysql:timezone:group:created",
+        "group.created",
+    );
+    timezone_event.env = "contract-timezone-mysql".to_string();
+    let expected_occurred_at = timezone_event.event.occurred_at.clone();
+    let expected_recorded_at = timezone_event.recorded_at.clone();
+    let expected_retention_until_ms = timezone_event.retention_until_ms;
+    let stored_timezone_event = repo
+        .append_event(timezone_event)
+        .await
+        .expect("append Event in non-UTC session")
+        .event;
+    assert_eq!(stored_timezone_event.envelope.occurred_at, expected_occurred_at);
+    assert_eq!(stored_timezone_event.envelope.recorded_at, expected_recorded_at);
+    assert_eq!(
+        stored_timezone_event.retention_until_ms,
+        expected_retention_until_ms
+    );
 
     event_repo_port_contract_tests(
         &repo,

@@ -10,8 +10,8 @@ use bcs_service_api::port::NewEvent;
 use bcs_service_api::port::repo::{
     AppendEventRecord, ClaimFanoutTargets, CommitGroupEventfulMutation,
     CreateEventSubscriptionRecord, EventRepoPort, EventSubscriptionRecord,
-    EventSubscriptionRevisionRecord, FinalizeGroupProvisioning, GroupEventfulMutation,
-    GroupRepoPort,
+    EventSubscriptionRevisionRecord, EventFanoutTargetPurpose, FinalizeGroupProvisioning,
+    GroupEventfulMutation, GroupRepoPort,
 };
 use bcs_service_api::types::{
     EVENT_SCHEMA_VERSION_V1, EventActor, EventActorType, EventPayloadMode, EventScope,
@@ -30,6 +30,10 @@ const PROVISIONING_ENV: &str = "contract";
 const PROVISIONING_GROUP: &str = "group-provisioning";
 const PROVISIONING_SUBSCRIPTION: &str = "sub-provisioning";
 const PROVISIONING_EVENT: &str = "evt-group-provisioning";
+const PROVISIONING_PREWINDOW_CAUSE_EVENT: &str = "evt-provisioning-prewindow-cause";
+const PROVISIONING_WINDOW_EFFECT_EVENT: &str = "evt-provisioning-window-effect";
+const PROVISIONING_RUN_CREATED_EVENT: &str = "evt-provisioning-run-created";
+const PROVISIONING_RUN_STARTED_EVENT: &str = "evt-provisioning-run-started";
 
 #[tokio::test]
 async fn memory_group_repo_passes_group_repo_contract() {
@@ -445,10 +449,53 @@ async fn sqlite_group_provisioning_finalization_commits_group_subscription_event
     let groups = MySqlGroupStore::sqlite(db.clone(), PROVISIONING_ENV.to_string());
     let events = DbEventStore::sqlite(db.clone());
     seed_provisioning_group(&groups).await;
+    let mut prewindow_cause = provisioning_runtime_event(
+        PROVISIONING_PREWINDOW_CAUSE_EVENT,
+        "state_machine.node.completed",
+        None,
+    );
+    prewindow_cause.event.occurred_at = "2026-08-18T04:39:58.500Z".to_string();
+    prewindow_cause.recorded_at = "2026-08-18T04:39:58.500Z".to_string();
+    events
+        .append_event(prewindow_cause)
+        .await
+        .expect("append cause before Subscription creation");
     events
         .create_subscription(pending_subscription())
         .await
         .expect("create pending Subscription");
+    events
+        .append_event(provisioning_runtime_event(
+            PROVISIONING_WINDOW_EFFECT_EVENT,
+            "state_machine.node.started",
+            Some(PROVISIONING_PREWINDOW_CAUSE_EVENT),
+        ))
+        .await
+        .expect("append effect while Subscription is pending");
+    events
+        .append_event(provisioning_runtime_event(
+            PROVISIONING_RUN_CREATED_EVENT,
+            "state_machine.run.created",
+            None,
+        ))
+        .await
+        .expect("append run.created while Subscription is pending");
+    events
+        .append_event(provisioning_runtime_event(
+            PROVISIONING_RUN_STARTED_EVENT,
+            "state_machine.run.started",
+            Some(PROVISIONING_RUN_CREATED_EVENT),
+        ))
+        .await
+        .expect("append run.started while Subscription is pending");
+    assert_eq!(
+        target_count(db.as_ref(), PROVISIONING_RUN_CREATED_EVENT).await,
+        0
+    );
+    assert_eq!(
+        target_count(db.as_ref(), PROVISIONING_RUN_STARTED_EVENT).await,
+        0
+    );
 
     groups
         .finalize_provisioning(finalization(event_record(None)))
@@ -487,6 +534,69 @@ async fn sqlite_group_provisioning_finalization_commits_group_subscription_event
         .await
         .expect("query target snapshot");
     assert_eq!(db_get_column::<i64>(&rows[0], "target_count").unwrap(), 1);
+    assert_eq!(
+        target_count(db.as_ref(), PROVISIONING_RUN_CREATED_EVENT).await,
+        1
+    );
+    assert_eq!(
+        target_count(db.as_ref(), PROVISIONING_RUN_STARTED_EVENT).await,
+        1
+    );
+    assert_eq!(
+        target_count(db.as_ref(), PROVISIONING_PREWINDOW_CAUSE_EVENT).await,
+        1
+    );
+    assert_eq!(
+        target_count(db.as_ref(), PROVISIONING_WINDOW_EFFECT_EVENT).await,
+        1
+    );
+    let claimed_targets = events
+        .claim_fanout_targets(ClaimFanoutTargets {
+            worker_id: "provisioning-order".to_string(),
+            now_ms: 1_787_028_000_001,
+            lease_until_ms: 1_787_028_010_001,
+            limit: 100,
+            env: PROVISIONING_ENV.to_string(),
+        })
+        .await
+        .expect("claim provisioning targets");
+    let run_targets = claimed_targets
+        .iter()
+        .filter(|target| {
+            target.event_id == PROVISIONING_RUN_CREATED_EVENT
+                || target.event_id == PROVISIONING_RUN_STARTED_EVENT
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        run_targets
+            .iter()
+            .map(|target| target.event_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            PROVISIONING_RUN_CREATED_EVENT,
+            PROVISIONING_RUN_STARTED_EVENT
+        ]
+    );
+    assert_eq!(
+        run_targets[1].depends_on_target_id.as_deref(),
+        Some(run_targets[0].target_id.as_str())
+    );
+    let prewindow_cause_target = claimed_targets
+        .iter()
+        .find(|target| target.event_id == PROVISIONING_PREWINDOW_CAUSE_EVENT)
+        .expect("pre-window causal prerequisite target");
+    assert_eq!(
+        prewindow_cause_target.purpose,
+        EventFanoutTargetPurpose::CausalPrerequisite
+    );
+    let window_effect_target = claimed_targets
+        .iter()
+        .find(|target| target.event_id == PROVISIONING_WINDOW_EFFECT_EVENT)
+        .expect("in-window effect target");
+    assert_eq!(
+        window_effect_target.depends_on_target_id.as_deref(),
+        Some(prewindow_cause_target.target_id.as_str())
+    );
 }
 
 #[tokio::test]
@@ -848,7 +958,7 @@ fn pending_subscription() -> CreateEventSubscriptionRecord {
         revision: EventSubscriptionRevisionRecord {
             subscription_id: PROVISIONING_SUBSCRIPTION.to_string(),
             revision: 1,
-            event_filters: vec!["group.created".to_string()],
+            event_filters: vec!["group.created".to_string(), "state_machine.*".to_string()],
             payload_mode: EventPayloadMode::MetadataOnly,
             endpoint_url: "https://events.example.com/group-provisioning".to_string(),
             request_timeout_ms: 5_000,
@@ -895,6 +1005,42 @@ fn event_record(causation_event_id: Option<&str>) -> AppendEventRecord {
             data: BTreeMap::new(),
         },
         recorded_at: "2026-08-19T00:00:00.001Z".to_string(),
+        retention_until_ms: 2_000_000_000_000,
+        env: PROVISIONING_ENV.to_string(),
+    }
+}
+
+fn provisioning_runtime_event(
+    event_id: &str,
+    event_type: &str,
+    causation_event_id: Option<&str>,
+) -> AppendEventRecord {
+    AppendEventRecord {
+        event: NewEvent {
+            event_id: event_id.to_string(),
+            event_type: event_type.to_string(),
+            schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+            producer: "state-machine-runtime".to_string(),
+            producer_key: event_id.to_string(),
+            occurred_at: "2026-08-18T04:39:59.500Z".to_string(),
+            subject: EventSubject {
+                subject_type: "state_machine.run".to_string(),
+                id: "run-provisioning".to_string(),
+            },
+            scope: EventScope {
+                group_id: Some(PROVISIONING_GROUP.to_string()),
+                session_id: Some("session-provisioning".to_string()),
+                run_id: Some("run-provisioning".to_string()),
+                ..EventScope::default()
+            },
+            stream_key: "state-machine-run:run-provisioning".to_string(),
+            actor: Some(actor()),
+            correlation_id: None,
+            causation_event_id: causation_event_id.map(str::to_string),
+            trace_id: None,
+            data: BTreeMap::new(),
+        },
+        recorded_at: "2026-08-18T04:39:59.500Z".to_string(),
         retention_until_ms: 2_000_000_000_000,
         env: PROVISIONING_ENV.to_string(),
     }

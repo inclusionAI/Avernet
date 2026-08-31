@@ -8,7 +8,10 @@
 use bcs_db_api::{DbSqlFlavor, DbStatement, DbTransactionParam, DbTransactionStep, DbValue};
 use bcs_service_api::port::repo::{AppendEventRecord, EventRepoError};
 use bcs_service_api::types::{EventActor, EventActorType};
-use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
+
+use crate::timestamp::{
+    sql_with_timestamp_params, timestamp_value_from_ms, timestamp_value_from_rfc3339,
+};
 
 /// A composable set of Event append steps plus the result positions needed to
 /// interpret the committed Event.
@@ -23,8 +26,9 @@ pub struct EventAppendTransactionPlan {
 /// Event-store-owned half of Group provisioning finalization.
 ///
 /// The Group repository prepends its locked availability transition, then
-/// appends these steps to activate the pending inline subscriptions and write
-/// the ordered creation Events in the same database transaction.
+/// appends these steps to activate the pending inline subscriptions, snapshot
+/// Events produced during the pending provisioning window, and write the
+/// ordered creation Events in the same database transaction.
 #[derive(Debug)]
 pub struct GroupProvisioningEventTransactionPlan {
     pub steps: Vec<DbTransactionStep>,
@@ -50,7 +54,7 @@ impl GroupDeletionEventTransactionPlan {
                 "Group deletion group id and env must be non-empty".to_string(),
             ));
         }
-        let deleted_at = db_timestamp_from_ms(deleted_at_ms)?;
+        let deleted_at = timestamp_value_from_ms(flavor, deleted_at_ms)?;
         let audit_id_expression = match flavor {
             DbSqlFlavor::Mysql => "UUID()",
             DbSqlFlavor::Sqlite => "lower(hex(randomblob(16)))",
@@ -74,44 +78,47 @@ impl GroupDeletionEventTransactionPlan {
             )),
         ];
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            format!(
+            sql_with_timestamp_params(flavor, &format!(
                 "INSERT INTO bcs_event_subscription_audits \
                  (audit_id, subscription_id, revision, action, actor_type, actor_id, reason, \
                   details_json, created_at, env) \
                  SELECT {audit_id_expression}, subscription_id, current_revision, 'disabled', \
-                        'system', 'group-deletion', 'scope_deleted', NULL, ?, env \
+                        'system', 'group-deletion', 'scope_deleted', NULL, \
+                        __bcs_timestamp_ms__, env \
                  FROM bcs_event_subscriptions \
                  WHERE env = ? AND scope_type = 'group' AND scope_id = ? AND status = 'active'"
-            ),
+            )),
             vec![
-                DbValue::from(deleted_at.as_str()),
+                deleted_at.clone(),
                 DbValue::from(env),
                 DbValue::from(group_id),
             ],
         )));
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            "UPDATE bcs_event_deliveries SET status = 'cancelled', cancelled_at = ?, \
+            sql_with_timestamp_params(flavor, "UPDATE bcs_event_deliveries SET status = \
+             'cancelled', cancelled_at = __bcs_timestamp_ms__, \
              next_attempt_at = NULL, lease_owner = NULL, lease_until = NULL \
              WHERE env = ? AND status IN ('pending', 'retry_wait') AND subscription_id IN (\
                SELECT subscription_id FROM bcs_event_subscriptions \
                WHERE env = ? AND scope_type = 'group' AND scope_id = ? AND status = 'active'\
-             )",
+             )"),
             vec![
-                DbValue::from(deleted_at.as_str()),
+                deleted_at.clone(),
                 DbValue::from(env),
                 DbValue::from(env),
                 DbValue::from(group_id),
             ],
         )));
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            "UPDATE bcs_event_fanout_targets SET status = 'cancelled', cancelled_at = ?, \
+            sql_with_timestamp_params(flavor, "UPDATE bcs_event_fanout_targets SET status = \
+             'cancelled', cancelled_at = __bcs_timestamp_ms__, \
              lease_owner = NULL, lease_until = NULL \
              WHERE env = ? AND status = 'pending' AND subscription_id IN (\
                SELECT subscription_id FROM bcs_event_subscriptions \
                WHERE env = ? AND scope_type = 'group' AND scope_id = ? AND status = 'active'\
-             )",
+             )"),
             vec![
-                DbValue::from(deleted_at.as_str()),
+                deleted_at.clone(),
                 DbValue::from(env),
                 DbValue::from(env),
                 DbValue::from(group_id),
@@ -127,10 +134,11 @@ impl GroupDeletionEventTransactionPlan {
             vec![DbValue::from(env)],
         )));
         steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-            "UPDATE bcs_event_subscriptions SET status = 'disabled', updated_at = ? \
-             WHERE env = ? AND scope_type = 'group' AND scope_id = ? AND status = 'active'",
+            sql_with_timestamp_params(flavor, "UPDATE bcs_event_subscriptions SET status = \
+             'disabled', updated_at = __bcs_timestamp_ms__ WHERE env = ? AND scope_type = 'group' \
+             AND scope_id = ? AND status = 'active'"),
             vec![
-                DbValue::from(deleted_at.as_str()),
+                deleted_at,
                 DbValue::from(env),
                 DbValue::from(group_id),
             ],
@@ -169,7 +177,7 @@ impl GroupProvisioningEventTransactionPlan {
                     .to_string(),
             ));
         }
-        let finalized_at = db_timestamp_from_ms(finalized_at_ms)?;
+        let finalized_at = timestamp_value_from_ms(flavor, finalized_at_ms)?;
         let mut steps = vec![
             DbTransactionStep::Execute(DbStatement::with_params(
                 scope_epoch_insert_sql(flavor),
@@ -203,10 +211,11 @@ impl GroupProvisioningEventTransactionPlan {
                 DbTransactionParam::query_result(query_step, 0, "subscription_id");
             steps.push(DbTransactionStep::Execute(
                 DbStatement::with_transaction_params(
-                    "UPDATE bcs_event_subscriptions SET status = 'active', updated_at = ? \
-                     WHERE env = ? AND subscription_id = ? AND status = 'pending'",
+                    sql_with_timestamp_params(flavor, "UPDATE bcs_event_subscriptions SET \
+                     status = 'active', updated_at = __bcs_timestamp_ms__ WHERE env = ? \
+                     AND subscription_id = ? AND status = 'pending'"),
                     vec![
-                        value(finalized_at.as_str()),
+                        value(finalized_at.clone()),
                         value(env),
                         subscription_binding.clone(),
                     ],
@@ -214,10 +223,11 @@ impl GroupProvisioningEventTransactionPlan {
             ));
             steps.push(DbTransactionStep::Execute(
                 DbStatement::with_transaction_params(
-                    "UPDATE bcs_event_subscription_revisions SET activated_at = ? \
-                     WHERE env = ? AND subscription_id = ? AND revision = 1",
+                    sql_with_timestamp_params(flavor, "UPDATE bcs_event_subscription_revisions \
+                     SET activated_at = __bcs_timestamp_ms__ WHERE env = ? \
+                     AND subscription_id = ? AND revision = 1"),
                     vec![
-                        value(finalized_at.as_str()),
+                        value(finalized_at.clone()),
                         value(env),
                         subscription_binding.clone(),
                     ],
@@ -225,19 +235,58 @@ impl GroupProvisioningEventTransactionPlan {
             ));
             steps.push(DbTransactionStep::Execute(
                 DbStatement::with_transaction_params(
-                    "INSERT INTO bcs_event_subscription_audits \
+                    sql_with_timestamp_params(flavor, "INSERT INTO bcs_event_subscription_audits \
                      (audit_id, subscription_id, revision, action, actor_type, actor_id, reason, \
                       details_json, created_at, env) \
                      VALUES (?, ?, 1, 'provisioning_activated', ?, ?, \
-                             'group_provisioning_finalized', NULL, ?, ?)",
+                             'group_provisioning_finalized', NULL, __bcs_timestamp_ms__, ?)"),
                     vec![
                         value(uuid::Uuid::new_v4().to_string()),
-                        subscription_binding,
+                        subscription_binding.clone(),
                         value(event_actor_type_name(actor.actor_type)),
                         value(actor.id.as_str()),
-                        value(finalized_at.as_str()),
+                        value(finalized_at.clone()),
                         value(env),
                     ],
+                ),
+            ));
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    provisioning_target_backfill_sql(flavor),
+                    vec![
+                        value(env),
+                        subscription_binding.clone(),
+                        value(group_id),
+                    ],
+                ),
+            ));
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    provisioning_causal_target_backfill_sql(flavor),
+                    vec![
+                        value(env),
+                        subscription_binding.clone(),
+                        value(group_id),
+                    ],
+                ),
+            ));
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    provisioning_causal_dependency_sql(flavor),
+                    vec![
+                        value(env),
+                        subscription_binding.clone(),
+                        value(group_id),
+                    ],
+                ),
+            ));
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    "UPDATE bcs_events SET fanout_status = 'pending' WHERE env = ? \
+                     AND EXISTS (SELECT 1 FROM bcs_event_fanout_targets target \
+                       WHERE target.env = bcs_events.env AND target.event_id = bcs_events.event_id \
+                         AND target.subscription_id = ? AND target.status = 'pending')",
+                    vec![value(env), subscription_binding],
                 ),
             ));
         }
@@ -275,6 +324,188 @@ fn pending_subscription_lock_sql(flavor: DbSqlFlavor) -> &'static str {
     }
 }
 
+fn provisioning_target_backfill_sql(flavor: DbSqlFlavor) -> &'static str {
+    match flavor {
+        DbSqlFlavor::Mysql => {
+            "INSERT IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
+             subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
+             depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
+             cancelled_at, env) SELECT UUID(), event.event_id, subscription.subscription_id, \
+             subscription.current_revision, 'normal', '', NULL, NULL, 'pending', NULL, NULL, \
+             event.recorded_at, NULL, NULL, event.env FROM bcs_event_subscriptions subscription \
+             JOIN bcs_event_subscription_revisions revision \
+               ON revision.env = subscription.env \
+              AND revision.subscription_id = subscription.subscription_id \
+              AND revision.revision = subscription.current_revision \
+             JOIN bcs_events event ON event.env = subscription.env \
+              AND event.group_id = subscription.scope_id \
+             WHERE subscription.env = ? AND subscription.subscription_id = ? \
+               AND subscription.status = 'active' AND subscription.scope_type = 'group' \
+               AND event.group_id = ? AND event.recorded_at >= subscription.created_at \
+               AND event.recorded_at <= revision.activated_at \
+               AND event.retention_until > revision.activated_at \
+               AND (JSON_CONTAINS(revision.event_filters_json, JSON_QUOTE(event.event_type), '$') \
+                    OR EXISTS (SELECT 1 FROM JSON_TABLE(revision.event_filters_json, '$[*]' \
+                       COLUMNS(filter_value VARCHAR(128) PATH '$')) filters \
+                       WHERE RIGHT(filters.filter_value, 2) = '.*' \
+                         AND BINARY event.event_type LIKE CONCAT(LEFT(BINARY filters.filter_value, \
+                             CHAR_LENGTH(filters.filter_value) - 1), '%'))) \
+               AND NOT EXISTS (SELECT 1 FROM bcs_event_fanout_targets existing \
+                 WHERE existing.env = event.env AND existing.event_id = event.event_id \
+                   AND existing.subscription_id = subscription.subscription_id \
+                   AND existing.subscription_revision = subscription.current_revision \
+                   AND existing.purpose = 'normal') \
+             ORDER BY event.recorded_at, event.stream_key, event.sequence, event.event_id"
+        }
+        DbSqlFlavor::Sqlite => {
+            "INSERT OR IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
+             subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
+             depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
+             cancelled_at, env) SELECT lower(hex(randomblob(16))), event.event_id, \
+             subscription.subscription_id, subscription.current_revision, 'normal', '', NULL, \
+             NULL, 'pending', NULL, NULL, event.recorded_at, NULL, NULL, event.env \
+             FROM bcs_event_subscriptions subscription JOIN bcs_event_subscription_revisions revision \
+               ON revision.env = subscription.env \
+              AND revision.subscription_id = subscription.subscription_id \
+              AND revision.revision = subscription.current_revision \
+             JOIN bcs_events event ON event.env = subscription.env \
+              AND event.group_id = subscription.scope_id \
+             WHERE subscription.env = ? AND subscription.subscription_id = ? \
+               AND subscription.status = 'active' AND subscription.scope_type = 'group' \
+               AND event.group_id = ? AND event.recorded_at >= subscription.created_at \
+               AND event.recorded_at <= revision.activated_at \
+               AND event.retention_until > revision.activated_at \
+               AND EXISTS (SELECT 1 FROM json_each(revision.event_filters_json) filters \
+                 WHERE filters.value = event.event_type OR (substr(filters.value, -2) = '.*' \
+                   AND event.event_type LIKE substr(filters.value, 1, length(filters.value) - 1) || '%')) \
+               AND NOT EXISTS (SELECT 1 FROM bcs_event_fanout_targets existing \
+                 WHERE existing.env = event.env AND existing.event_id = event.event_id \
+                   AND existing.subscription_id = subscription.subscription_id \
+                   AND existing.subscription_revision = subscription.current_revision \
+                   AND existing.purpose = 'normal') \
+             ORDER BY event.recorded_at, event.stream_key, event.sequence, event.event_id"
+        }
+    }
+}
+
+fn provisioning_causal_target_backfill_sql(flavor: DbSqlFlavor) -> &'static str {
+    match flavor {
+        DbSqlFlavor::Mysql => {
+            "INSERT IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
+             subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
+             depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
+             cancelled_at, env) SELECT UUID(), cause.event_id, effect.subscription_id, \
+             effect.subscription_revision, 'causal_prerequisite', '', NULL, NULL, 'pending', \
+             NULL, NULL, effect.created_at, NULL, NULL, effect.env \
+             FROM bcs_event_fanout_targets effect \
+             JOIN bcs_events effect_event ON effect_event.env = effect.env \
+              AND effect_event.event_id = effect.event_id \
+             JOIN bcs_event_subscriptions subscription ON subscription.env = effect.env \
+              AND subscription.subscription_id = effect.subscription_id \
+             JOIN bcs_event_subscription_revisions revision ON revision.env = effect.env \
+              AND revision.subscription_id = effect.subscription_id \
+              AND revision.revision = effect.subscription_revision \
+             JOIN bcs_events cause ON cause.env = effect.env \
+              AND cause.event_id = effect_event.causation_event_id \
+             WHERE effect.env = ? AND effect.subscription_id = ? \
+               AND effect_event.group_id = ? AND effect.purpose = 'normal' \
+               AND effect.status <> 'cancelled' AND subscription.status = 'active' \
+               AND subscription.current_revision = effect.subscription_revision \
+               AND effect_event.recorded_at >= subscription.created_at \
+               AND effect_event.recorded_at <= revision.activated_at \
+               AND (JSON_CONTAINS(revision.event_filters_json, JSON_QUOTE(cause.event_type), '$') \
+                    OR EXISTS (SELECT 1 FROM JSON_TABLE(revision.event_filters_json, '$[*]' \
+                       COLUMNS(filter_value VARCHAR(128) PATH '$')) filters \
+                       WHERE RIGHT(filters.filter_value, 2) = '.*' \
+                         AND BINARY cause.event_type LIKE CONCAT(LEFT(BINARY filters.filter_value, \
+                             CHAR_LENGTH(filters.filter_value) - 1), '%'))) \
+               AND NOT EXISTS (SELECT 1 FROM bcs_event_fanout_targets existing \
+                 WHERE existing.env = effect.env AND existing.event_id = cause.event_id \
+                   AND existing.subscription_id = effect.subscription_id \
+                   AND existing.subscription_revision = effect.subscription_revision \
+                   AND existing.purpose IN ('normal', 'causal_prerequisite') \
+                   AND existing.status <> 'cancelled')"
+        }
+        DbSqlFlavor::Sqlite => {
+            "INSERT OR IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
+             subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
+             depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
+             cancelled_at, env) SELECT lower(hex(randomblob(16))), cause.event_id, \
+             effect.subscription_id, effect.subscription_revision, 'causal_prerequisite', '', \
+             NULL, NULL, 'pending', NULL, NULL, effect.created_at, NULL, NULL, effect.env \
+             FROM bcs_event_fanout_targets effect \
+             JOIN bcs_events effect_event ON effect_event.env = effect.env \
+              AND effect_event.event_id = effect.event_id \
+             JOIN bcs_event_subscriptions subscription ON subscription.env = effect.env \
+              AND subscription.subscription_id = effect.subscription_id \
+             JOIN bcs_event_subscription_revisions revision ON revision.env = effect.env \
+              AND revision.subscription_id = effect.subscription_id \
+              AND revision.revision = effect.subscription_revision \
+             JOIN bcs_events cause ON cause.env = effect.env \
+              AND cause.event_id = effect_event.causation_event_id \
+             WHERE effect.env = ? AND effect.subscription_id = ? \
+               AND effect_event.group_id = ? AND effect.purpose = 'normal' \
+               AND effect.status <> 'cancelled' AND subscription.status = 'active' \
+               AND subscription.current_revision = effect.subscription_revision \
+               AND effect_event.recorded_at >= subscription.created_at \
+               AND effect_event.recorded_at <= revision.activated_at \
+               AND EXISTS (SELECT 1 FROM json_each(revision.event_filters_json) filters \
+                 WHERE filters.value = cause.event_type OR (substr(filters.value, -2) = '.*' \
+                   AND cause.event_type LIKE substr(filters.value, 1, length(filters.value) - 1) || '%')) \
+               AND NOT EXISTS (SELECT 1 FROM bcs_event_fanout_targets existing \
+                 WHERE existing.env = effect.env AND existing.event_id = cause.event_id \
+                   AND existing.subscription_id = effect.subscription_id \
+                   AND existing.subscription_revision = effect.subscription_revision \
+                   AND existing.purpose IN ('normal', 'causal_prerequisite') \
+                   AND existing.status <> 'cancelled')"
+        }
+    }
+}
+
+fn provisioning_causal_dependency_sql(flavor: DbSqlFlavor) -> &'static str {
+    match flavor {
+        DbSqlFlavor::Mysql => {
+            "UPDATE bcs_event_fanout_targets effect \
+             JOIN bcs_events effect_event ON effect_event.env = effect.env \
+              AND effect_event.event_id = effect.event_id \
+             JOIN bcs_event_fanout_targets cause ON cause.env = effect.env \
+              AND cause.event_id = effect_event.causation_event_id \
+              AND cause.subscription_id = effect.subscription_id \
+              AND cause.subscription_revision = effect.subscription_revision \
+              AND cause.purpose IN ('normal', 'causal_prerequisite') \
+              AND cause.status <> 'cancelled' \
+             SET effect.depends_on_target_id = cause.target_id \
+             WHERE effect.env = ? AND effect.subscription_id = ? \
+               AND effect_event.group_id = ? AND effect.purpose = 'normal' \
+               AND effect.depends_on_target_id IS NULL"
+        }
+        DbSqlFlavor::Sqlite => {
+            "UPDATE bcs_event_fanout_targets AS effect SET depends_on_target_id = (\
+               SELECT cause.target_id FROM bcs_events effect_event \
+               JOIN bcs_event_fanout_targets cause ON cause.env = effect.env \
+                AND cause.event_id = effect_event.causation_event_id \
+                AND cause.subscription_id = effect.subscription_id \
+                AND cause.subscription_revision = effect.subscription_revision \
+                AND cause.purpose IN ('normal', 'causal_prerequisite') \
+                AND cause.status <> 'cancelled' \
+               WHERE effect_event.env = effect.env AND effect_event.event_id = effect.event_id \
+               ORDER BY CASE cause.purpose WHEN 'normal' THEN 0 ELSE 1 END \
+               LIMIT 1) \
+             WHERE effect.env = ? AND effect.subscription_id = ? AND effect.purpose = 'normal' \
+               AND effect.depends_on_target_id IS NULL \
+               AND EXISTS (SELECT 1 FROM bcs_events effect_event \
+                 JOIN bcs_event_fanout_targets cause ON cause.env = effect.env \
+                  AND cause.event_id = effect_event.causation_event_id \
+                  AND cause.subscription_id = effect.subscription_id \
+                  AND cause.subscription_revision = effect.subscription_revision \
+                 AND cause.purpose IN ('normal', 'causal_prerequisite') \
+                 AND cause.status <> 'cancelled' \
+                 WHERE effect_event.env = effect.env AND effect_event.event_id = effect.event_id \
+                   AND effect_event.group_id = ?)"
+        }
+    }
+}
+
 fn event_actor_type_name(actor_type: EventActorType) -> &'static str {
     match actor_type {
         EventActorType::Human => "human",
@@ -295,9 +526,9 @@ impl EventAppendTransactionPlan {
                 "event cannot cause itself".to_string(),
             ));
         }
-        let occurred_at = db_timestamp_from_rfc3339(&command.event.occurred_at)?;
-        let recorded_at = db_timestamp_from_rfc3339(&command.recorded_at)?;
-        let retention_until = db_timestamp_from_ms(command.retention_until_ms)?;
+        let occurred_at = timestamp_value_from_rfc3339(flavor, &command.event.occurred_at)?;
+        let recorded_at = timestamp_value_from_rfc3339(flavor, &command.recorded_at)?;
+        let retention_until = timestamp_value_from_ms(flavor, command.retention_until_ms)?;
         let actor_json = command
             .event
             .actor
@@ -350,12 +581,14 @@ impl EventAppendTransactionPlan {
         let event_insert_step = preceding_step_count + steps.len();
         steps.push(DbTransactionStep::Execute(
             DbStatement::with_transaction_params(
-                "INSERT INTO bcs_events (event_id, event_type, schema_version, producer, \
+                sql_with_timestamp_params(flavor, "INSERT INTO bcs_events \
+                 (event_id, event_type, schema_version, producer, \
                  producer_key, subject_type, subject_id, group_id, \
                  session_id, task_id, run_id, stream_key, sequence, actor_json, correlation_id, \
                  causation_event_id, trace_id, data_json, occurred_at, recorded_at, fanout_status, \
                  retention_until, env) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
-                 ?, ?, ?, ?, ?, ?, ?)",
+                 ?, ?, __bcs_timestamp_ms__, __bcs_timestamp_ms__, ?, \
+                 __bcs_timestamp_ms__, ?)"),
                 vec![
                     value(command.event.event_id.as_str()),
                     value(command.event.event_type.as_str()),
@@ -376,7 +609,7 @@ impl EventAppendTransactionPlan {
                     optional_value(command.event.trace_id.as_deref()),
                     value(data_json),
                     value(occurred_at),
-                    value(recorded_at.as_str()),
+                    value(recorded_at.clone()),
                     value("pending"),
                     value(retention_until),
                     value(command.env.as_str()),
@@ -392,7 +625,7 @@ impl EventAppendTransactionPlan {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
                 causal_target_snapshot_sql(flavor),
                 vec![
-                    DbValue::from(recorded_at.as_str()),
+                    recorded_at.clone(),
                     DbValue::from(cause_event_id),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(command.event.event_id.as_str()),
@@ -529,14 +762,14 @@ fn stream_sequence_sql(flavor: DbSqlFlavor) -> &'static str {
     }
 }
 
-fn target_snapshot_sql(flavor: DbSqlFlavor) -> &'static str {
-    match flavor {
+fn target_snapshot_sql(flavor: DbSqlFlavor) -> String {
+    sql_with_timestamp_params(flavor, match flavor {
         DbSqlFlavor::Mysql => {
             "INSERT INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
              subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
              depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
              cancelled_at, env) SELECT UUID(), ?, s.subscription_id, s.current_revision, 'normal', \
-             '', NULL, NULL, 'pending', NULL, NULL, ?, NULL, NULL, ? \
+             '', NULL, NULL, 'pending', NULL, NULL, __bcs_timestamp_ms__, NULL, NULL, ? \
              FROM bcs_event_subscriptions s JOIN bcs_event_subscription_revisions r \
                ON r.subscription_id = s.subscription_id AND r.revision = s.current_revision \
               AND r.env = s.env \
@@ -554,7 +787,8 @@ fn target_snapshot_sql(flavor: DbSqlFlavor) -> &'static str {
              subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
              depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
              cancelled_at, env) SELECT lower(hex(randomblob(16))), ?, s.subscription_id, \
-             s.current_revision, 'normal', '', NULL, NULL, 'pending', NULL, NULL, ?, NULL, NULL, ? \
+             s.current_revision, 'normal', '', NULL, NULL, 'pending', NULL, NULL, \
+             __bcs_timestamp_ms__, NULL, NULL, ? \
              FROM bcs_event_subscriptions s JOIN bcs_event_subscription_revisions r \
                ON r.subscription_id = s.subscription_id AND r.revision = s.current_revision \
               AND r.env = s.env \
@@ -564,13 +798,13 @@ fn target_snapshot_sql(flavor: DbSqlFlavor) -> &'static str {
                      AND ? LIKE substr(filters.value, 1, length(filters.value) - 1) || '%')) \
                AND s.scope_type = 'group' AND s.scope_id = ?"
         }
-    }
+    })
 }
 
-fn target_snapshot_params(command: &AppendEventRecord, recorded_at: &str) -> Vec<DbValue> {
+fn target_snapshot_params(command: &AppendEventRecord, recorded_at: &DbValue) -> Vec<DbValue> {
     vec![
         DbValue::from(command.event.event_id.as_str()),
-        DbValue::from(recorded_at),
+        recorded_at.clone(),
         DbValue::from(command.env.as_str()),
         DbValue::from(command.env.as_str()),
         DbValue::from(command.event.event_type.as_str()),
@@ -579,15 +813,15 @@ fn target_snapshot_params(command: &AppendEventRecord, recorded_at: &str) -> Vec
     ]
 }
 
-fn causal_target_snapshot_sql(flavor: DbSqlFlavor) -> &'static str {
-    match flavor {
+fn causal_target_snapshot_sql(flavor: DbSqlFlavor) -> String {
+    sql_with_timestamp_params(flavor, match flavor {
         DbSqlFlavor::Mysql => {
             "INSERT IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
              subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
              depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
              cancelled_at, env) SELECT UUID(), cause.event_id, effect.subscription_id, \
              effect.subscription_revision, 'causal_prerequisite', '', NULL, NULL, 'pending', \
-             NULL, NULL, ?, NULL, NULL, effect.env \
+             NULL, NULL, __bcs_timestamp_ms__, NULL, NULL, effect.env \
              FROM bcs_event_fanout_targets effect JOIN bcs_events cause \
                ON cause.env = effect.env AND cause.event_id = ? \
              JOIN bcs_event_subscription_revisions revision \
@@ -615,7 +849,7 @@ fn causal_target_snapshot_sql(flavor: DbSqlFlavor) -> &'static str {
              depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
              cancelled_at, env) SELECT lower(hex(randomblob(16))), cause.event_id, \
              effect.subscription_id, effect.subscription_revision, 'causal_prerequisite', '', \
-             NULL, NULL, 'pending', NULL, NULL, ?, NULL, NULL, effect.env \
+             NULL, NULL, 'pending', NULL, NULL, __bcs_timestamp_ms__, NULL, NULL, effect.env \
              FROM bcs_event_fanout_targets effect JOIN bcs_events cause \
                ON cause.env = effect.env AND cause.event_id = ? \
              JOIN bcs_event_subscription_revisions revision \
@@ -636,7 +870,7 @@ fn causal_target_snapshot_sql(flavor: DbSqlFlavor) -> &'static str {
                    AND existing.purpose IN ('normal', 'causal_prerequisite') \
                    AND existing.status <> 'cancelled')"
         }
-    }
+    })
 }
 
 fn causal_dependency_update_sql(flavor: DbSqlFlavor) -> &'static str {
@@ -664,34 +898,6 @@ fn causal_dependency_update_sql(flavor: DbSqlFlavor) -> &'static str {
              ) WHERE effect.env = ? AND effect.event_id = ? AND effect.purpose = 'normal'"
         }
     }
-}
-
-fn db_timestamp_from_rfc3339(timestamp: &str) -> Result<String, EventRepoError> {
-    let parsed = DateTime::parse_from_rfc3339(timestamp).map_err(|error| {
-        EventRepoError::InvalidInput(format!("invalid RFC3339 timestamp {timestamp:?}: {error}"))
-    })?;
-    Ok(parsed
-        .with_timezone(&Utc)
-        .format("%Y-%m-%d %H:%M:%S%.3f")
-        .to_string())
-}
-
-fn db_timestamp_from_ms(timestamp_ms: u64) -> Result<String, EventRepoError> {
-    let timestamp_ms = i64::try_from(timestamp_ms).map_err(|_| {
-        EventRepoError::InvalidInput("timestamp is outside supported range".to_string())
-    })?;
-    Utc.timestamp_millis_opt(timestamp_ms)
-        .single()
-        .map(|timestamp| {
-            timestamp
-                .to_rfc3339_opts(SecondsFormat::Millis, true)
-                .replace('T', " ")
-                .trim_end_matches('Z')
-                .to_string()
-        })
-        .ok_or_else(|| {
-            EventRepoError::InvalidInput("timestamp is outside supported range".to_string())
-        })
 }
 
 fn value(value: impl Into<DbValue>) -> DbTransactionParam {
@@ -775,6 +981,42 @@ mod tests {
         let sqlite = causal_dependency_update_sql(DbSqlFlavor::Sqlite);
         assert!(sqlite.contains("SET depends_on_target_id = ("));
         assert!(!sqlite.contains("JOIN bcs_event_fanout_targets AS cause_target"));
+    }
+
+    #[test]
+    fn provisioning_backfill_uses_backend_compatible_idempotent_sql() {
+        let mysql = provisioning_target_backfill_sql(DbSqlFlavor::Mysql);
+        assert!(mysql.starts_with("INSERT IGNORE"));
+        assert!(mysql.contains("event.recorded_at >= subscription.created_at"));
+        assert_eq!(mysql.matches('?').count(), 3);
+
+        let sqlite = provisioning_target_backfill_sql(DbSqlFlavor::Sqlite);
+        assert!(sqlite.starts_with("INSERT OR IGNORE"));
+        assert!(sqlite.contains("event.recorded_at >= subscription.created_at"));
+        assert_eq!(sqlite.matches('?').count(), 3);
+
+        let mysql_causal = provisioning_causal_target_backfill_sql(DbSqlFlavor::Mysql);
+        assert!(mysql_causal.starts_with("INSERT IGNORE"));
+        assert!(mysql_causal.contains("'causal_prerequisite'"));
+        assert_eq!(mysql_causal.matches('?').count(), 3);
+
+        let sqlite_causal = provisioning_causal_target_backfill_sql(DbSqlFlavor::Sqlite);
+        assert!(sqlite_causal.starts_with("INSERT OR IGNORE"));
+        assert!(sqlite_causal.contains("'causal_prerequisite'"));
+        assert_eq!(sqlite_causal.matches('?').count(), 3);
+
+        assert_eq!(
+            provisioning_causal_dependency_sql(DbSqlFlavor::Mysql)
+                .matches('?')
+                .count(),
+            3
+        );
+        assert_eq!(
+            provisioning_causal_dependency_sql(DbSqlFlavor::Sqlite)
+                .matches('?')
+                .count(),
+            3
+        );
     }
 
     fn command() -> AppendEventRecord {

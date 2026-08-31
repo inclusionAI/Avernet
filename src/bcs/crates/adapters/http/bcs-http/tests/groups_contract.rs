@@ -961,7 +961,7 @@ async fn post_groups_delegates_to_group_management_create_and_preserves_response
 }
 
 #[tokio::test]
-async fn post_groups_rejects_opening_message_for_chat_with_declared_code() {
+async fn post_groups_accepts_session_scoped_opening_message_for_chat() {
     let (app, recorder, _temp_dir) = test_app().await;
 
     let response = app
@@ -974,7 +974,7 @@ async fn post_groups_rejects_opening_message_for_chat_with_declared_code() {
                 .body(Body::from(
                     serde_json::json!({
                         "driver_bot": "driver-bot",
-                        "opening_message": "hello",
+                        "opening_message": "hello {{bcs.session_id}}",
                         "participants": [
                             { "bot_uuid": "driver-bot", "role": "driver" }
                         ]
@@ -986,11 +986,15 @@ async fn post_groups_rejects_opening_message_for_chat_with_declared_code() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["code"], "invalid_opening_message");
-    assert!(recorder.create_calls.lock().await.is_empty());
+    assert_eq!(response.status(), StatusCode::OK);
+    let calls = recorder.create_calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].opening_message,
+        Some(OpeningMessage::Text(
+            "hello {{bcs.session_id}}".to_string()
+        ))
+    );
 }
 
 #[tokio::test]

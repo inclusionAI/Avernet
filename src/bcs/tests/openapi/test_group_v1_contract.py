@@ -167,7 +167,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     )
 
 
-def test_group_opening_message_contract_is_state_machine_scoped_and_nullable() -> None:
+def test_group_opening_message_contract_is_normal_group_scoped_and_nullable() -> None:
     contract = load_contract(CONTRACT_ROOT)
     request_variants = contract["paths"][GROUPS_PATH]["post"]["requestBody"][
         "content"

@@ -70,16 +70,17 @@ pub use group_id::{
     channel_group_id, generated_group_id, is_valid_channel_type,
 };
 pub use message::{
-    AuditEntry, BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
-    DeliveryType, GroupMessage, GroupMessageType, MessageAttachment, MessageOwnerFilter,
-    MessagePage, MessageQuery, MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus,
-    STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType, Task, TaskStatus,
+    AuditEntry, BCS_SESSION_OPENING_MESSAGE_SENDER, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
+    BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME, DeliveryType,
+    GroupMessage, GroupMessageType, MessageAttachment, MessageOwnerFilter, MessagePage,
+    MessageQuery, MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus,
+    SESSION_OPENING_MESSAGE_TYPE, STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType, Task, TaskStatus,
 };
 pub use organization::{Organization, OrganizationMember};
 pub use opening_message::{
     AixUiOpeningMessage, AixUiOpeningMessageType, AixUiOpeningTab, MAX_OPENING_MESSAGE_BYTES,
     MAX_OPENING_MESSAGE_COMPONENT_BYTES, OpeningMessage, OpeningMessageError,
-    OpeningMessageRenderContext, RenderedOpeningMessage,
+    OpeningMessageRenderContext, OpeningMessageScope, RenderedOpeningMessage,
 };
 pub use proposal::GroupChatProposal;
 pub use provider::{
