@@ -780,7 +780,10 @@ async def test_executor_stream_agent_byte_threshold_splits_chunks():
     # 每个 metadata 约 100B，N=800 -> ~80KB > 64KB，应触发至少一次字节阈值 flush。
     per_frame = {"engine_frame": {"stream": "tool", "phase": "x"}, "data": "x" * 80}
     n_frames = 800
-    chunks = [StreamChunk(type="agent", content="", metadata=per_frame) for _ in range(n_frames)]
+    chunks = [
+        StreamChunk(type="agent", content="", metadata=per_frame)
+        for _ in range(n_frames)
+    ]
     chunks.append(StreamChunk(type="final", content="done"))
 
     async def _stream_gen(*a, **kw):
@@ -793,7 +796,12 @@ async def test_executor_stream_agent_byte_threshold_splits_chunks():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(),
+        repo,
+        plugin,
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
         stream_flush_max_content_bytes=4096,
     )
     await executor.execute(
@@ -854,7 +862,12 @@ async def test_executor_stream_delta_byte_threshold_splits_chunks():
 
     chunk_repo = MagicMock()
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(),
+        repo,
+        plugin,
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
         stream_flush_max_content_bytes=4096,
     )
     await executor.execute(
@@ -914,7 +927,12 @@ async def test_executor_stream_byte_threshold_not_triggered_preserves_merge():
     chunk_repo = MagicMock()
     # 阈值足够大，这批小 payload 不会触发字节 flush
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(),
+        repo,
+        plugin,
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
         stream_flush_max_content_bytes=1 << 20,
     )
     await executor.execute(
