@@ -16,6 +16,9 @@ from secbaas.community.api.bcn import (
     BcnDownlinkService,
     BcnInteractionResolveInput,
     BcnInteractionResolveResult,
+    BcnRunTerminatedError,
+    ChatAbortInput,
+    ChatAbortResult,
     ChatHistoryInput,
     ChatHistoryResult,
     ChatInjectInput,
@@ -33,6 +36,7 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.service.bcn.uplink import BcnUplinkCallback, UplinkClient
+from secbaas.community.core.service.bot_run import BotRunAbortSurface
 from secbaas.community.logger import get_logger
 
 logger = get_logger("core-service")
@@ -141,6 +145,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         uplink_client: UplinkClient,
         run_repository: BotRunRepository,
         interaction_service: BotInteractionService,
+        abort_surface: BotRunAbortSurface | None = None,
     ):
         self._bot_runner = bot_runner
         self._api_key_repository = api_key_repository
@@ -148,6 +153,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         self._uplink_client = uplink_client
         self._run_repository = run_repository
         self._interaction_service = interaction_service
+        self._abort_surface = abort_surface
         self._uplink_callback = BcnUplinkCallback(uplink_client, run_repository)
 
     async def handle_interaction_resolve(
@@ -162,6 +168,74 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
             idempotency_key=resolve_input.idempotency_key,
         )
         return BcnInteractionResolveResult(ok=True)
+
+    async def handle_chat_abort(
+        self, chat_abort_input: ChatAbortInput
+    ) -> ChatAbortResult:
+        """处理 chat.abort 请求
+
+        按 ``session_id`` 委派 ``BotRunAbortSurface.abort_runs_by_session`` 取消
+        当前 session 下所有未终结（PENDING/RUNNING）的 run，并据结果返回：
+
+        - 有可取消 run → 200 ``{aborted: true, aborted_run_ids: [...]}``；
+        - 无可取消 run 但存在已终结记录 → 抛 ``BcnRunTerminatedError`` (410)
+          （重复 abort 同一终态 run 稳定 410，幂等）；
+        - session 无任何 run 记录 → 200 ``{aborted: false, aborted_run_ids: []}``
+          （best-effort，决策 D2）。
+
+        ``body.id`` 为本次 abort 请求 ID（幂等键），用于日志追踪；abort 操作本身
+        幂等（``update_error`` / ``force_done`` 均幂等），重复请求自然落入 410 分支。
+        """
+        logger.info(
+            "[chat.abort] id=%s session_id=%s provider_id=%s "
+            "provider_bot_ref=%s bcn_group_id=%s",
+            chat_abort_input.id,
+            chat_abort_input.session_id,
+            chat_abort_input.to_bot.provider_id,
+            chat_abort_input.to_bot.provider_bot_ref,
+            chat_abort_input.bcn_group_id,
+        )
+
+        if self._abort_surface is None:
+            # 未注入 abort 接入面（如纯流式/测试装配）：best-effort 返回未取消，
+            # 不抛异常，保持下行链路稳定。
+            logger.warning(
+                "[chat.abort] no abort surface wired, returning aborted=false "
+                "id=%s session_id=%s",
+                chat_abort_input.id,
+                chat_abort_input.session_id,
+            )
+            return ChatAbortResult(aborted=False, aborted_run_ids=[])
+
+        outcome = await self._abort_surface.abort_runs_by_session(
+            chat_abort_input.session_id
+        )
+
+        if outcome.aborted_run_ids:
+            logger.info(
+                "[chat.abort] aborted id=%s session_id=%s run_ids=%s",
+                chat_abort_input.id,
+                chat_abort_input.session_id,
+                outcome.aborted_run_ids,
+            )
+            return ChatAbortResult(
+                aborted=True, aborted_run_ids=outcome.aborted_run_ids
+            )
+
+        if outcome.had_terminal:
+            logger.info(
+                "[chat.abort] run already terminated id=%s session_id=%s",
+                chat_abort_input.id,
+                chat_abort_input.session_id,
+            )
+            raise BcnRunTerminatedError(chat_abort_input.session_id)
+
+        logger.info(
+            "[chat.abort] no run record id=%s session_id=%s",
+            chat_abort_input.id,
+            chat_abort_input.session_id,
+        )
+        return ChatAbortResult(aborted=False, aborted_run_ids=[])
 
     async def handle_chat_send(self, chat_send_input: ChatSendInput) -> ChatSendResult:
         """处理 chat.send 请求

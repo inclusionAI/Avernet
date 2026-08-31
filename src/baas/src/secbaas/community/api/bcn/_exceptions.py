@@ -103,3 +103,20 @@ class BcnUnauthorizedError(BcnError):
 
     def __init__(self, message: str = "Unauthorized"):
         super().__init__(message)
+
+
+class BcnRunTerminatedError(BcnError):
+    """目标 run 已为终态（COMPLETED/FAILED/TIME_OUT/已 abort），不可再次中止。
+
+    用于 ``chat.abort``：当 session 下对应 run 已终结时返回 410
+    ``run_terminated``，与 BCS 侧 ``RunTerminated("run_terminated")`` 410 语义一致。
+    重复 abort 同一终态 run 稳定抛本异常，不产生重复终止或副作用。
+    """
+
+    error_code = "run_terminated"
+    http_status = 410
+    retryable = False
+
+    def __init__(self, session_id: str = ""):
+        self.session_id = session_id
+        super().__init__(f"Run already terminated for session: {session_id}")

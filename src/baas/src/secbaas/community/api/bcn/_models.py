@@ -111,6 +111,37 @@ class ChatInjectResult:
     already_in_progress: bool = False
 
 
+# ─────────────────────────── chat.abort ───────────────────────────
+
+
+@dataclass(slots=True, frozen=True)
+class ChatAbortInput:
+    """chat.abort 请求的领域输入。
+
+    BCN 请求中止某 session 下运行中的 run。与 send/inject 不同，abort 不携带
+    message / timeout_ms / attachments / from_，仅含路由与幂等字段。
+    ``id`` 为本次 abort 请求 ID（幂等键），非 run_id。
+    """
+
+    id: str
+    session_id: str
+    bcn_group_id: str
+    to_bot: BotRef
+
+
+@dataclass(slots=True)
+class ChatAbortResult:
+    """chat.abort 处理结果
+
+    Attributes:
+        aborted: 是否实际取消了至少一个运行中的 run。
+        aborted_run_ids: 本次被取消的 run_id 列表（session 下 RUNNING/PENDING）。
+    """
+
+    aborted: bool = False
+    aborted_run_ids: list[str] = field(default_factory=list)
+
+
 # ─────────────────────────── chat.history ───────────────────────────
 
 

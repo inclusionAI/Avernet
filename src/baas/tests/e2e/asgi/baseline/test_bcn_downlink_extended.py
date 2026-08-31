@@ -441,3 +441,181 @@ class TestBCNDownlinkStream:
             f"Expected 200, 400, 404, 405, or 500 for stream with SSE header, "
             f"got {response.status_code}: {response.text[:200]}"
         )
+
+
+class TestChatAbort:
+    """chat.abort end-to-end on /bcn/downlink — registration, success, 410, idempotent."""
+
+    _CHAT_ABORT_BODY: dict = {
+        "type": "req",
+        "id": "abort-001",
+        "session_id": "test-abort-session-001",
+        "bcn_group_id": "test-group-001",
+        "method": "chat.abort",
+        "to_bot": {"provider_id": "baas", "provider_bot_ref": "test-bot"},
+    }
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_registered_not_501(self, api: APITestHelper) -> None:
+        """chat.abort is registered — must not return 501 unsupported_method."""
+        response = await api.client.post(
+            _BCN_DOWNLINK_URL,
+            json=self._CHAT_ABORT_BODY,
+            headers=_VALID_HEADERS,
+        )
+        assert response.status_code != 501, (
+            f"chat.abort must be registered, got 501: {response.text[:200]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_success_returns_aborted_run_ids(
+        self, api: APITestHelper, _testclient_app
+    ) -> None:
+        """chat.abort with a RUNNING run -> 200 {ok, aborted:true, aborted_run_ids}."""
+        from secbaas.community.api.bcn import ChatAbortResult
+
+        class _CapturingService:
+            async def handle_chat_abort(self, input_):
+                captured["input"] = input_
+                return ChatAbortResult(aborted=True, aborted_run_ids=["run-1"])
+
+        captured: dict = {}
+        downlink_route = next(
+            route
+            for route in iter_api_routes(_testclient_app)
+            if route.path == _BCN_DOWNLINK_URL
+        )
+        dep_key = next(
+            dependency.call
+            for dependency in downlink_route.dependant.dependencies
+            if dependency.name == "service"
+        )
+        _testclient_app.dependency_overrides[dep_key] = lambda: _CapturingService()
+        try:
+            response = await api.client.post(
+                _BCN_DOWNLINK_URL,
+                json=self._CHAT_ABORT_BODY,
+                headers=_VALID_HEADERS,
+            )
+        finally:
+            _testclient_app.dependency_overrides.pop(dep_key, None)
+
+        assert response.status_code == 200, response.text[:200]
+        body = response.json()
+        assert body["ok"] is True
+        assert body["aborted"] is True
+        assert body["aborted_run_ids"] == ["run-1"]
+        assert captured["input"].session_id == "test-abort-session-001"
+        assert captured["input"].id == "abort-001"
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_terminal_run_returns_410(
+        self, api: APITestHelper, _testclient_app
+    ) -> None:
+        """Already-terminal run -> 410 run_terminated."""
+        from secbaas.community.api.bcn import BcnRunTerminatedError
+
+        class _TerminatedService:
+            async def handle_chat_abort(self, input_):
+                raise BcnRunTerminatedError(input_.session_id)
+
+        downlink_route = next(
+            route
+            for route in iter_api_routes(_testclient_app)
+            if route.path == _BCN_DOWNLINK_URL
+        )
+        dep_key = next(
+            dependency.call
+            for dependency in downlink_route.dependant.dependencies
+            if dependency.name == "service"
+        )
+        _testclient_app.dependency_overrides[dep_key] = lambda: _TerminatedService()
+        try:
+            response = await api.client.post(
+                _BCN_DOWNLINK_URL,
+                json=self._CHAT_ABORT_BODY,
+                headers=_VALID_HEADERS,
+            )
+        finally:
+            _testclient_app.dependency_overrides.pop(dep_key, None)
+
+        assert response.status_code == 410, response.text[:200]
+        body = response.json()
+        assert body["ok"] is False
+        assert body["error"]["code"] == "run_terminated"
+        assert body["error"]["retryable"] is False
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_idempotent_repeat_stable_410(
+        self, api: APITestHelper, _testclient_app
+    ) -> None:
+        """Repeat chat.abort on same terminal run stably returns 410 (idempotent)."""
+        from secbaas.community.api.bcn import BcnRunTerminatedError
+
+        class _AlwaysTerminatedService:
+            async def handle_chat_abort(self, input_):
+                raise BcnRunTerminatedError(input_.session_id)
+
+        downlink_route = next(
+            route
+            for route in iter_api_routes(_testclient_app)
+            if route.path == _BCN_DOWNLINK_URL
+        )
+        dep_key = next(
+            dependency.call
+            for dependency in downlink_route.dependant.dependencies
+            if dependency.name == "service"
+        )
+        _testclient_app.dependency_overrides[dep_key] = lambda: (
+            _AlwaysTerminatedService()
+        )
+        try:
+            statuses = []
+            for _ in range(3):
+                response = await api.client.post(
+                    _BCN_DOWNLINK_URL,
+                    json=self._CHAT_ABORT_BODY,
+                    headers=_VALID_HEADERS,
+                )
+                statuses.append(response.status_code)
+        finally:
+            _testclient_app.dependency_overrides.pop(dep_key, None)
+
+        assert statuses == [410, 410, 410], statuses
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_no_run_returns_aborted_false(
+        self, api: APITestHelper, _testclient_app
+    ) -> None:
+        """Session with no run record -> 200 {aborted:false, aborted_run_ids:[]}."""
+        from secbaas.community.api.bcn import ChatAbortResult
+
+        class _NoRunService:
+            async def handle_chat_abort(self, input_):
+                return ChatAbortResult(aborted=False, aborted_run_ids=[])
+
+        downlink_route = next(
+            route
+            for route in iter_api_routes(_testclient_app)
+            if route.path == _BCN_DOWNLINK_URL
+        )
+        dep_key = next(
+            dependency.call
+            for dependency in downlink_route.dependant.dependencies
+            if dependency.name == "service"
+        )
+        _testclient_app.dependency_overrides[dep_key] = lambda: _NoRunService()
+        try:
+            response = await api.client.post(
+                _BCN_DOWNLINK_URL,
+                json=self._CHAT_ABORT_BODY,
+                headers=_VALID_HEADERS,
+            )
+        finally:
+            _testclient_app.dependency_overrides.pop(dep_key, None)
+
+        assert response.status_code == 200, response.text[:200]
+        body = response.json()
+        assert body["ok"] is True
+        assert body["aborted"] is False
+        assert body["aborted_run_ids"] == []
