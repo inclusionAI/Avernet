@@ -181,6 +181,7 @@ class SecretNamesConfig:
     """
 
     dormant_internal_token: str = ""
+    skill_center_internal_token: str = ""
     aiworkbench_repo_url: str = ""
     gateway_principal_signing_key: str = "gateway_principal_signing_key"
     aicoding_theta_master_key: str = ""
@@ -607,6 +608,24 @@ class DormantInternalToken:
 
     Empty ``value`` makes the auth Depends 401 all requests
     (feature-off failure mode).
+    """
+
+    value: str = ""
+
+
+@dataclass(frozen=True)
+class SkillCenterInternalToken:
+    """Resolved bearer token for ``/api/internal/skill-center/*`` endpoints.
+
+    Produced by ``SkillCenterInternalTokenBindings._resolved_internal_token``,
+    with the same
+    resolution rules and the same failure-closed empty default as
+    ``DormantInternalToken``: an empty ``value`` makes the auth Depends 401
+    every request rather than authorize an unverified caller.
+
+    Separate from the dormant token on purpose — these endpoints converge
+    capability state for whole pages of Bots, so the two operations are
+    granted independently.
     """
 
     value: str = ""

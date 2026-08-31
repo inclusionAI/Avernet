@@ -54,6 +54,8 @@ provides:
   - "SpaceSkillPublicationTaskHandler"
   - "ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES"
   - "PublicationAttemptRecord"
+  - "InstallationBackfillService"
+  - "InstallationBackfillServiceProtocol"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
   - "LocalSkillCleanupWorkModel"
@@ -301,6 +303,19 @@ reads such as `GET /openapi/v1/bots/{bot_id}/skills` (see
 `specs/2026-08-24-installation-single-source-of-truth/`). It writes only the
 difference, in one transaction, after the caller's Bot access has been checked,
 and never touches runtime.
+
+`InstallationBackfillService` runs that same flush deliberately for one named
+Bot, behind the Bearer-token
+`POST /api/internal/skill-center/installations/backfill/bot` endpoint. The lazy
+flush converges a Bot only when something reads it, which is enough for per-Bot
+commands but not for configuration that reaches many Bots at once and has no
+per-Bot write to ride on: platform Default-Set content edited through the
+`/api/skillsets/admin/*` tooling, an `is_active` flipped straight on the row, or
+a `center://` membership resolving to a newly published version. The endpoint is
+the tool a backfill invokes for each affected Bot; selecting the Bots and pacing
+the calls stays with whoever drives it. It is DB-side only, exactly like the
+flush it runs, so a Bot converged this way still needs a runtime projection
+before its engine sees the change.
 
 MCP Direct activation and ordinary SkillSet MCP membership share the same
 active-only desired-state and compensation boundary as Skills.  The MCP
