@@ -413,7 +413,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The task grant/revoke operations also carry the target in ``bcs_bot_id``
 #: request-body fields rather than a ``bot_id`` parameter, adding two more
 #: operations without changing the path/query counts.
-_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 89}
+_BOT_ID_PLACEMENT = {"path": 143, "query": 1, "none": 90}
 
 
 def _schema() -> dict:
@@ -543,7 +543,7 @@ def test_the_pinned_number_of_operations_take_it():
     # creation/detail/Draft/Published-Version operations; none addresses a Bot,
     # and each carries the explicit user dimension. The merged surface contains
     # 207 operations.
-    assert len(taking) == 207
+    assert len(taking) == 208
 
 
 def test_the_exempt_operations_take_none():

@@ -1016,33 +1016,80 @@ async def _dispatch(
         logger.info("[task_callback] finish_process_callback session_id=%s run_id=%s", _sid, _run_id)
         return envelope({"ok": True}, request)
 
-    tc = None
+    # Framework task callbacks support the rich callback schema, the common
+    # task-loop payload, and the legacy loop_task_id/result DTO. Unknown JSON
+    # must be rejected instead of being acknowledged as success.
+    if not isinstance(_raw_obj, dict):
+        raise HTTPException(status_code=422, detail="callback body must be a JSON object")
+
     if is_common_task_payload(_raw_obj):
-        logger.info("[task_callback] common_task_callback, begin, task=%s", _raw_obj)
-
         tc = translate_common_task_callback(_raw_obj)
-        await svc.callback.ingest(tc.data)
-        logger.info("[task_callback] common_task_callback, finish")
-
-    logger.info("[task_callback] report_callback_to_driver_engine, begin")
-    if tc is not None:
         try:
-            if tc.disposition == "start":
-                logger.info("[task_callback] report_callback_to_driver_engine, type=start")
-                await svc.callback.start_run(tc.data)
-            else:
-                logger.info("[task_callback] report_callback_to_driver_engine, type=result")
-                await svc.callback.report_result(tc.data)
-        except TaskStateError as e:
-            # 非终态节点重投 / 非法翻态 → TaskStateError 上抛(envelope_errors → 409);终态节点重投
-            # 经 report_result event_id 幂等去重提前 ack,不至此。原 ``raise(<str>)`` 会抛 TypeError,修正为再抛原异常。
-            logger.error("[task_callback] report_callback_to_driver_engine, meet exception = %s", e)
+            await svc.callback.report_result(tc.data)
+        except TaskStateError:
+            loop_task_id = tc.data.data.get("loop_task_id", "")
+            try:
+                if _find_node_status(svc, loop_task_id) in _TERMINAL:
+                    return envelope({"ok": True}, request, message="idempotent")
+            except (AttributeError, KeyError, ValueError):
+                pass
             raise
         return envelope({"ok": True}, request)
 
-    logger.info("[task_callback] report_callback_to_driver_engine, finish")
-    return envelope({"ok": True}, request)
+    # Rich framework callback. Validation errors are intentionally allowed to
+    # fall through to the legacy DTO so the old report contract remains valid.
+    try:
+        req = schema_cls.model_validate(_raw_obj)
+    except Exception:
+        req = None
+    if req is not None:
+        auth.verify(
+            source=req.workflow_source,
+            headers=request.headers,
+            raw_body=raw,
+            method=request.method,
+            path=request.url.path,
+        )
+        tc = translate(req, disposition, registry)
+        try:
+            if tc.disposition == "start":
+                await svc.callback.start_run(tc.data)
+            else:
+                await svc.callback.report_result(tc.data)
+        except TaskStateError:
+            # A result replay against an already terminal node is idempotent.
+            if tc.disposition == "result":
+                loop_task_id = tc.data.data.get("loop_task_id", "")
+                try:
+                    if _find_node_status(svc, loop_task_id) in _TERMINAL:
+                        return envelope({"ok": True}, request, message="idempotent")
+                except (AttributeError, KeyError, ValueError):
+                    pass
+            raise
+        return envelope({"ok": True}, request)
 
+    # Legacy callback/report contract: {loop_task_id, workflow_type, result}.
+    try:
+        dto = TaskCallbackDataDTO.model_validate(_raw_obj)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="invalid callback body") from exc
+    auth.verify(
+        source=(dto.workflow_type or "single_bot"),
+        headers=request.headers,
+        raw_body=raw,
+        method=request.method,
+        path=request.url.path,
+    )
+    try:
+        await svc.callback.report_result(callback_from_dto(dto))
+    except TaskStateError:
+        try:
+            if _find_node_status(svc, dto.loop_task_id) in _TERMINAL:
+                return envelope({"ok": True}, request, message="idempotent")
+        except (AttributeError, KeyError, ValueError):
+            pass
+        raise
+    return envelope({"ok": True}, request)
 
 @task_callback_router.post("/workflow_start", response_model=Envelope[dict[str, Any]])
 @envelope_errors

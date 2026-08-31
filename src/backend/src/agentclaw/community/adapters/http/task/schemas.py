@@ -486,13 +486,21 @@ def task_info_request_from_dto(dto: TaskInfoRequestDTO):
 def callback_from_dto(dto: TaskCallbackDataDTO):
     from agentclaw.community.core.task.domain.models import TaskCallbackData
 
+    result = dict(dto.result)
+    # Legacy report callers may send the envelope-shaped {code, data};
+    # normalize it to the callback adapter's {success, data} contract.
+    if "success" not in result and "exec_error" not in result:
+        result = {
+            "success": result.get("code", 200000) == 200000,
+            **({"data": result["data"]} if "data" in result else {}),
+        }
     return TaskCallbackData(
         data={
             "loop_task_id": dto.loop_task_id,
             "workflow_type": dto.workflow_type,
             "workflow_id": dto.workflow_id,
             "instance_id": dto.instance_id,
-            "result": dict(dto.result),
+            "result": result,
         }
     )
 

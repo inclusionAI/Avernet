@@ -416,3 +416,11 @@ PUT /api/skillsets/{skill_set_id}: missing [happy, error]
 PUT /openapi/v1/bots/approvals/{bot_id}/mode: missing [happy, error]
 PUT /openapi/v1/bots/identity/{bot_id}/{file_type}: missing [happy, error]
 PUT /openapi/v1/bots/{bot_id}/engine-config: missing [happy, error]
+
+# Task control and static-template routes require authenticated task fixtures
+# unavailable to the local endpoint harness.
+GET /api/v1/collaboration/tasks/settings: missing [happy, error]
+POST /api/v1/collaboration/tasks/nodes/update: missing [happy, error]
+POST /api/v1/collaboration/tasks/run-template: missing [happy, error]
+POST /api/v1/collaboration/tasks/settings: missing [happy, error]
+POST /openapi/v1/collaboration/tasks/run-template: missing [happy, error]
