@@ -20,6 +20,13 @@ SUPPORTED_ENGINE_TYPES = [
 # 每个 bot 的实际引擎类型由 bot 自身属性决定，此值仅作 fallback。
 DEFAULT_ENGINE_TYPE = "openclaw"
 
+# 内部实现类引擎：不是可对外创建的产品引擎，只是某个产品引擎的运行时实现
+# （如 aicoding 是 claude_code 的内部实现）。形态信息记录在 template 的
+# 拓展字段（runtime_identity.ENGINE_FORM_KEY），不再作为 engine 值创建新 bot。
+# 存量 bot 的读路径（engine_types 列、{engine}_conf 目录、引擎过滤、
+# bucket 解析）仍需识别它们，故 SUPPORTED_ENGINE_TYPES 保持全集不动。
+INTERNAL_ENGINE_TYPES = frozenset({"aicoding"})
+
 
 def _get_engine_types() -> list[str]:
     """从环境变量或默认列表获取引擎类型。

@@ -153,6 +153,7 @@ class SystemConfigBaasTemplateResolver:
                 self.normalize_engine_for_template(
                     engine_type=engine_type,
                     template_type=template_type,
+                    template_config=template_config,
                 ),
                 template_type,
                 template_uid,
@@ -168,6 +169,7 @@ class SystemConfigBaasTemplateResolver:
         engine = self.normalize_engine_for_template(
             engine_type=engine_type,
             template_type=template_type,
+            template_config=template_config,
         )
         template_uid = self.select_template_uid(
             mapping=mapping,
@@ -176,6 +178,7 @@ class SystemConfigBaasTemplateResolver:
             bot_type=bot_type,
             engine_type=engine_type,
             template_type=template_type,
+            template_config=template_config,
         )
         version = self._config_version(mapping)
         logger.info(
@@ -302,16 +305,20 @@ class SystemConfigBaasTemplateResolver:
         bot_type: str,
         engine_type: str | None,
         template_type: str | None,
+        template_config: dict | None = None,
     ) -> str:
         """根据 selectors 选择最匹配的 template_uid。
 
         bot_type 只作为可选 selector 维度参与匹配；provider=baas 是否支持
         该 bot_type，由 BaasDeviceService 在真正创建前校验。
+        ``template_config`` 携带 server-managed ``engine_form`` 标记时参与
+        engine bucket 判定（老链路归一化后的 aicoding 形态 bot）。
         """
         normalized_bot_type = (bot_type or "").strip().lower()
         engine = self.normalize_engine_for_template(
             engine_type=engine_type,
             template_type=template_type,
+            template_config=template_config,
         )
         selectors = mapping.get("selectors")
         if not isinstance(selectors, list):
@@ -384,11 +391,17 @@ class SystemConfigBaasTemplateResolver:
         *,
         engine_type: str | None,
         template_type: str | None,
+        template_config: dict | None = None,
     ) -> str:
-        """把历史 engine 表达归一成 template 配置里的 engine。"""
+        """把历史 engine 表达归一成 template 配置里的 engine。
+
+        ``template_config`` 携带 server-managed ``engine_form`` 标记时参与
+        bucket 判定（老链路归一化后的 aicoding 形态 bot）。
+        """
         return resolve_baas_engine_bucket(
             engine_type=engine_type,
             template_type=template_type,
+            template_config=template_config,
         )
 
     def _legacy_template_whitelist_hit(
