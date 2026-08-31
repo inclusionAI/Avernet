@@ -339,7 +339,6 @@ class BotService:
         baas_service_provider: "Callable[[], BaasService] | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
         common_config_service: "CommonConfigService | None" = None,
-        mcp_sync: "McpSyncProtocol | None" = None,
         runtime_reconciler: "CoreBotRuntimeProjectorProtocol | None" = None,
     ) -> None:
         self._repository = repository
@@ -403,7 +402,6 @@ class BotService:
         self._baas_template_resolver = baas_template_resolver
         self._task_queue_service = task_queue_service
         self._common_config_service = common_config_service
-        self._mcp_sync = mcp_sync
         self._runtime_reconciler = runtime_reconciler
 
     def _service_bot_image_policy_enabled(self) -> bool:
@@ -1945,7 +1943,6 @@ class BotService:
                             refresh_ctx,
                             bot_record or {},
                             extra_configs,
-                            mcp_sync=self._mcp_sync,
                             skill_set_factory=self._skill_set_factory,
                             runtime_reconciler=self._runtime_reconciler,
                             template_service=self._template_service,

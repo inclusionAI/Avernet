@@ -146,6 +146,7 @@ def _make_service(
     task_queue_service: MagicMock | None = None,
     common_config_service: MagicMock | None = None,
     mcp_sync: object | None = None,
+    runtime_reconciler: object | None = None,
 ) -> BotService:
     if lock_repo is None:
         lock_repo = FakeRestartLockRepo()
@@ -164,7 +165,7 @@ def _make_service(
     svc._baas_template_resolver = baas_template_resolver
     svc._task_queue_service = task_queue_service or MagicMock()
     svc._common_config_service = common_config_service
-    svc._mcp_sync = mcp_sync if mcp_sync is not None else MagicMock()
+    svc._runtime_reconciler = runtime_reconciler if runtime_reconciler is not None else MagicMock()
     svc._teclaw_provision_provider = lambda: SimpleNamespace(
         is_teclaw=lambda active_engine: active_engine == "teclaw"
     )
@@ -2190,14 +2191,13 @@ class TestRestartAuthorizationResyncWiring:
     def test_async_replacement_refreshes_after_device_apply(self):
         repo = FakeRestartLockRepo()
         device_service = MagicMock()
-        mcp_sync = object()
         device_service.apply_device.return_value = SimpleNamespace(
             id=42,
             device_id="dev-42",
             device_provider="arca",
             status=DeviceBindingStatus.ACTIVE.value,
         )
-        svc = _make_service(repo, device_provider=device_service, mcp_sync=mcp_sync)
+        svc = _make_service(repo, device_provider=device_service)
         bot = _make_bot(
             owner_id="owner001",
             status="PENDING",
@@ -2237,8 +2237,8 @@ class TestRestartAuthorizationResyncWiring:
             ANY,
             bot,
             {"confirmed_template_update": True},
-            mcp_sync=mcp_sync,
             skill_set_factory=svc._skill_set_factory,
+            runtime_reconciler=svc._runtime_reconciler,
             template_service=svc._template_service,
         )
         assert repo.release_calls == 1
@@ -2246,7 +2246,6 @@ class TestRestartAuthorizationResyncWiring:
     def test_baas_in_place_restart_defers_refresh_to_publish_event(self):
         repo = FakeRestartLockRepo()
         device_service = MagicMock()
-        mcp_sync = object()
         device_service.get_device.return_value = SimpleNamespace(
             id=42,
             device_provider="baas",
@@ -2257,7 +2256,6 @@ class TestRestartAuthorizationResyncWiring:
             repo,
             device_provider=device_service,
             baas_service_provider=lambda: MagicMock(),
-            mcp_sync=mcp_sync,
         )
         bot = _make_bot(
             status="ACTIVE",

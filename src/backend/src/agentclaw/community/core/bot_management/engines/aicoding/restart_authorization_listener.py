@@ -36,13 +36,11 @@ class AicodingRestartAuthorizationBaasPublishListener(LifecycleBase):
         *,
         bot_repo: "BotRepository",
         template_service: "TemplateService",
-        mcp_sync: Any = None,
         skill_set_factory: Any = None,
         runtime_reconciler: BotRuntimeProjectorProtocol | None = None,
     ) -> None:
         self._bot_repo = bot_repo
         self._template_service = template_service
-        self._mcp_sync = mcp_sync
         self._skill_set_factory = skill_set_factory
         self._runtime_reconciler = runtime_reconciler
 
@@ -115,7 +113,6 @@ class AicodingRestartAuthorizationBaasPublishListener(LifecycleBase):
                 ctx,
                 bot,
                 None,
-                mcp_sync=self._mcp_sync,
                 skill_set_factory=self._skill_set_factory,
                 runtime_reconciler=self._runtime_reconciler,
                 template_service=self._template_service,

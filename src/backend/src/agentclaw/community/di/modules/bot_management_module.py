@@ -17,7 +17,7 @@ they pick up the swapped repositories transparently.
 
 from __future__ import annotations
 
-from typing import Annotated, Callable, cast
+from typing import Annotated, Callable
 
 from injector import (
     Binder,
@@ -79,7 +79,6 @@ from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
 from agentclaw.community.core.devices.protocols import McpSyncProtocol
-from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.bot_management.services.bot_space_service import (
     BotSpaceService,
 )
@@ -286,14 +285,12 @@ class BotManagementModule(Module):
         self,
         repository: BotRepository,
         template_service: TemplateService,
-        mcp_sync_service: MCPSyncService,
         skill_set_factory: SkillSetServiceFactory,
         runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> AicodingRestartAuthorizationBaasPublishListener:
         return AicodingRestartAuthorizationBaasPublishListener(
             bot_repo=repository,
             template_service=template_service,
-            mcp_sync=mcp_sync_service,
             skill_set_factory=skill_set_factory,
             runtime_reconciler=runtime_reconciler,
         )
@@ -375,7 +372,6 @@ class BotManagementModule(Module):
         task_queue_service: TaskQueueService,
         common_config_service: CommonConfigService,
         caller_identity_repo: CallerIdentityRepositoryProtocol,
-        mcp_sync_service: MCPSyncService,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -421,7 +417,6 @@ class BotManagementModule(Module):
             task_queue_service=task_queue_service,
             common_config_service=common_config_service,
             caller_identity_repo=caller_identity_repo,
-            mcp_sync=cast(McpSyncProtocol, mcp_sync_service),
             runtime_reconciler=runtime_reconciler,
         )
 
