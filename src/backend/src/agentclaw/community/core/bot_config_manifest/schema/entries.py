@@ -66,7 +66,24 @@ CATEGORY_ENTRY_KEYS: dict[ManifestCategory, frozenset[str]] = {
     ManifestCategory.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
     ManifestCategory.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
     # A registry reference, not a fetch: no source-side field applies.
-    ManifestCategory.MCP: frozenset({"server_code", "config"}),
+    #
+    # ``config`` was here and is deliberately gone. manifest-schema §3.1 defined
+    # it as per-bot configuration "the same shape as the existing MCP config
+    # API" — but that API writes ``ac_user_mcp_config``, keyed
+    # ``(user_id, server_code)``, and its write calls
+    # ``sync_mcp_detail_to_all_bots``. Materialising a declared ``config`` would
+    # therefore make applying ONE bot's manifest change MCP configuration for
+    # EVERY bot its owner has: a blast radius no other category has, and one
+    # §3.2's per-category area rule does not sanction. Its payload is also
+    # ``api_key`` and ``custom_headers``, which design §4.5 forbids a manifest
+    # from carrying at all.
+    #
+    # What is genuinely per-bot is the enabled-server set
+    # (``ac_bot_mcp_installation``) — exactly what §3.2 names as this category's
+    # area, and exactly what apply converges. So a v1 entry is a bare
+    # ``server_code``, and ``config`` is refused by the ``unknown_field`` path
+    # below the same way the retired ``cli_tools.entrypoints`` is.
+    ManifestCategory.MCP: frozenset({"server_code"}),
 }
 
 #: The four mutually exclusive ways an entry can name its content (schema §2).
@@ -427,12 +444,6 @@ def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> No
             f"{location}.server_code",
             "missing_server_code",
             "an mcp entry must name a registry 'server_code'",
-        )
-    if "config" in entry and not isinstance(entry["config"], dict):
-        ctx.add(
-            f"{location}.config",
-            "invalid_config",
-            "'config' must be a mapping",
         )
 
 

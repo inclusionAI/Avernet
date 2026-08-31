@@ -81,7 +81,7 @@ than something to work around:
         `entity_id` is 256.
 - **Depends on:** —
 
-## [ ] Task 3: Narrow the `mcp` entry, and fix the schema document
+## [x] Task 3: Narrow the `mcp` entry, and fix the schema document
 - **Goal:** Close the account-scoped-config hazard at the vocabulary, so no
   materialiser has to defend against it (spec *Decisions* 11).
 - **Files:** `.../core/bot_config_manifest/schema/entries.py`,
@@ -90,25 +90,25 @@ than something to work around:
   `.../core/bot_config_manifest/README.md`,
   `src/backend/tests/community/core/bot_config_manifest/test_manifest_schema.py`
 - **Done when:**
-  - [ ] `CATEGORY_ENTRY_KEYS[ManifestCategory.MCP]` is `{"server_code"}`.
-  - [ ] `validate_mcp_entry` drops its `config` branch; `config` is refused by
+  - [x] `CATEGORY_ENTRY_KEYS[ManifestCategory.MCP]` is `{"server_code"}`.
+  - [x] `validate_mcp_entry` drops its `config` branch; `config` is refused by
         the existing `unknown_field` path, exactly as retired `entrypoints` is.
-  - [ ] A named test pins the refusal, mirroring
+  - [x] A named test pins the refusal, mirroring
         `test_the_retired_entrypoints_field_is_refused_rather_than_ignored`.
         **This is the one new test in an existing file**, and it is an addition,
         not an edit of an existing case.
-  - [ ] `manifest-schema.zh-CN.md` §3.1 is rewritten: an `mcp` entry is a bare
+  - [x] `manifest-schema.zh-CN.md` §3.1 is rewritten: an `mcp` entry is a bare
         `server_code`; credentials, headers, endpoint env and transport are
         configured through `GET`/`PUT
         /openapi/v1/bots/mcp/servers/{server_code}/config`, which is
         account-scoped and always was.
-  - [ ] The rewrite states **why**, not just what: `ac_user_mcp_config` is keyed
+  - [x] The rewrite states **why**, not just what: `ac_user_mcp_config` is keyed
         `(user_id, server_code)` and its write fans out via
         `sync_mcp_detail_to_all_bots`, so a per-bot manifest could not own it;
         and design §4.5 forbids a credential in a manifest regardless.
-  - [ ] Both work-items files' `mcp` descriptions agree with the schema
+  - [x] Both work-items files' `mcp` descriptions agree with the schema
         document. A divergence between them is what Rule 16 exists to prevent.
-  - [ ] The module README's "known gaps" records the finding and that
+  - [x] The module README's "known gaps" records the finding and that
         `ac_bot_mcp_call_config` (`call_type`) is the additive follow-up.
 - **Depends on:** —
 

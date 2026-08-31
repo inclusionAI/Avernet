@@ -210,6 +210,21 @@ and does nothing else, which is what `GET …/capabilities` and this README say.
   until `AGENTCLAW_SECRET_*` carries a master key every PUT answers the loud
   503 rather than storing plaintext. That is the guard working, not a defect
   — the alternative is tenant tokens in the clear.
+- **`mcp[].config` was removed from schema v1, and the gap it exposed is
+  recorded rather than quietly patched.** `manifest-schema` §3.1 defined it as
+  per-bot configuration *"the same shape as the existing MCP config API"* —
+  which cannot be true of both halves. That API writes `ac_user_mcp_config`,
+  keyed `(user_id, server_code)`, and its write calls
+  `sync_mcp_detail_to_all_bots`: applying **one** bot's manifest would have
+  changed MCP configuration for **every** bot its owner has, a blast radius no
+  other category has and one §3.2's per-category area rule never sanctioned. Its
+  payload is `api_key` and `custom_headers`, which design §4.5 keeps out of a
+  manifest regardless. What *is* per-bot — `ac_bot_mcp_installation`, the
+  enabled-server set — is exactly what §3.2 names as the category's area and
+  exactly what apply converges. The follow-up, additive and non-breaking, is
+  `ac_bot_mcp_call_config`'s `call_type`: genuinely per-bot, but outside §3.2's
+  area and carrying draft/lock-epoch/irreversibility semantics an idempotent
+  re-apply has to answer for first.
 - **Fetch-time limits are absent from the write surface on purpose.** Schema
   §5's download sizes, unpacked sizes, archive file counts and timeouts cannot
   be enforced by a surface that never fetches; they are **the fetcher's

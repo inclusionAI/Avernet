@@ -1154,7 +1154,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` / `IDENTITY.md` 写入即拒** | identity 文件集合（减保留名单） |
 | `skills` | `name` | 标识符，不含位置信息 | active skill set |
 | `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套 | **仅被声明的 `path` 子树** |
-| `mcp` | `server_code` | 平台注册表引用（可选 `config`） | 已启用的 server 集合 |
+| `mcp` | `server_code` | 平台注册表引用；**条目只有这一个字段** | 已启用的 server 集合 |
 | `engine_config` | `config` 对象 | **第一期未开放** | 被声明的顶层键 |
 | `cli_tools` | `name` | 命令名，同 bot 内唯一；**第一期未开放** | 清单下发的工具集合 |
 | `script` | `body` | 仅 ARCA 系 | —— |
