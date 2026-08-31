@@ -16,6 +16,9 @@ of a surface the upstream does not serve, and nothing downstream would catch it.
 - `bcn.internal.openapi.json` — BCN collaboration service internal API spec for `/internal-docs`
 - `bcsfuse-fusion.openapi.json` — bcsfuse group-fusion endpoint served under `/openapi/v1/bcsfuse/groups/**`
 - `bcsfuse-workers.openapi.json` — bcsfuse worker-config + fusable-query endpoints served under `/openapi/v1/bcsfuse/workers/**`
+- `source-credentials.openapi.json` — Backend tenant source-credential
+  surface under `/openapi/v1/source-credentials/**` (W3, #1471: one body
+  schema, header mechanism, masked reads)
 - `bots.openapi.json` — Backend public OpenAPI spec (currently the
   `/openapi/v1/bots`, `/openapi/v1/org/user`, `/openapi/v1/org/dept`,`/openapi/v1/org`, `/openapi/v1/bots/spaces`,
   `/openapi/v1/bots/work-orders`, and `/openapi/v1/bots/work-order-notifications`

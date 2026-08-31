@@ -270,6 +270,14 @@ def _without_request_id(response) -> dict:
 _NO_USER_DIMENSION = {
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
+    # Source credentials (W3, #1471): tenant-level named objects. The
+    # reads/delete carry no user dimension (the tenant guard scopes every
+    # row); PUT names one — the audit actor is composed from the verified
+    # caller, and rotation is exactly the action an audit question cares
+    # about.
+    ("get", f"{PUBLIC_API_PREFIX}/source-credentials"),
+    ("get", f"{PUBLIC_API_PREFIX}/source-credentials/{{name}}"),
+    ("delete", f"{PUBLIC_API_PREFIX}/source-credentials/{{name}}"),
     # The marketplace catalogue is identical for every caller in the tenant.
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
@@ -419,8 +427,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``GET …/config-manifest/capabilities``). Each addresses one bot and
 #: resolves it as the named user's, so all four are bot-path-addressed like
 #: the rest of the surface. ``none`` is 97 because task template execution
-#: is internal to ``execute`` and has no separate route.
-_BOT_ID_PLACEMENT = {"path": 150, "query": 1, "none": 97}
+#: is internal to ``execute`` and has no separate route; it then moved
+#: 97 → 101 with the four source-credentials operations (W3, #1471) —
+#: tenant-level rows, no bot dimension at all.
+_BOT_ID_PLACEMENT = {"path": 150, "query": 1, "none": 101}
 
 
 def _schema() -> dict:
@@ -556,8 +566,11 @@ def test_the_pinned_number_of_operations_take_it():
     # bringing the combined surface to 218. The public task execute operation is the single task submission surface;
     # static-template execution is selected inside execute rather than exposed as a route. The config
     # manifest adds four Bot-addressed operations — read, replace, clear, and
-    # the capability read — all user-scoped, bringing it to 222 after removing the obsolete run-template route.
-    assert len(taking) == 222
+    # the capability read — all user-scoped, 223 after the obsolete
+    # run-template route was removed; W3 (#1471) adds
+    # PUT /source-credentials/{name} — the credential rotation names its
+    # user (the audit actor is composed from the verified caller), 223.
+    assert len(taking) == 223
 
 
 def test_the_exempt_operations_take_none():

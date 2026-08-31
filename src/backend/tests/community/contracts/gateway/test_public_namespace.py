@@ -38,6 +38,10 @@ _DECLARED_PREFIXES = (
     # out of the broad collaboration→bcs namespace). Declared with its gateway
     # domain + route_security entry.
     "/openapi/v1/collaboration/tasks",
+    # Tenant source credentials (W3, #1471) — its own backend domain,
+    # declared with the gateway `source-credentials` domain entry and the
+    # route_security REFUSED row (human-only).
+    "/openapi/v1/source-credentials",
 )
 
 

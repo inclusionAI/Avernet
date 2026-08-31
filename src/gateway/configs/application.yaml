@@ -271,6 +271,12 @@ user_config:
       user: required
       app: required
 
+    # Source credentials (W3 #1471): tenant-level secret management;
+    # human-principal only on every operation (REFUSED admission) — the
+    # method-default entry for the new prefix.
+    "/openapi/v1/source-credentials/**":
+      user: required
+
     "/openapi/v1/collaboration/**":
       user: optional
       app: optional
@@ -398,6 +404,15 @@ user_config:
         schema:
           source: file
           path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      # W3 (#1471): tenant source credentials — a new declared public
+      # domain, published from its own backend artifact and secured by the
+      # route_security REFUSED row below (`user: required`, human-only).
+      source-credentials:
+        server: backend
+        schema:
+          source: file
+          path: schemas/source-credentials.openapi.json
           refresh_seconds: 300
       collaboration:
         server: bcs

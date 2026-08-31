@@ -50,6 +50,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.bot_management.repository.models  # noqa: F401  ac_templates / ac_bot_restart_lock
     import agentclaw.community.core.bot_startup_script.repository.models  # noqa: F401  ac_bot_startup_script
     import agentclaw.community.core.bot_config_manifest.repository.models  # noqa: F401  ac_bot_config_manifest
+    import agentclaw.community.core.bot_config_manifest.credentials.models  # noqa: F401  ac_source_credential
     import agentclaw.community.core.bot_management.render_screen.sqlite_models  # noqa: F401  ac_bot_render_screen
     import agentclaw.community.core.system_config.orm  # noqa: F401  ac_config_*
     import agentclaw.community.core.harness.sqlite_models  # noqa: F401  ac_harness_*

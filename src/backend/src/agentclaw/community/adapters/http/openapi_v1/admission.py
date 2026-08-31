@@ -589,6 +589,15 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
     # Department directory search — a tenant-wide catalogue read, not a user's.
+    # ── Source credentials (W3, #1471) — REFUSED, human-only ──────────────
+    # A secret write and the tenant's credential inventory are operator
+    # surfaces: this is the one group with no business running headless, so
+    # every operation refuses an application-only caller. The tenant guard
+    # scopes the rows; a named human principal is the identity on record.
+    ("PUT", "/openapi/v1/source-credentials/{name}"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/source-credentials/{name}"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/source-credentials"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/source-credentials/{name}"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,

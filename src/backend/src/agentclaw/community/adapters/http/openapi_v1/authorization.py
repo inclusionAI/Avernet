@@ -397,6 +397,18 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 
     # ── Operations that address no bot ────────────────────────────────────
     ("GET", "/openapi/v1/org/user"): NoCheck("the caller's own verified identity"),
+    # Source credentials (W3, #1471): tenant-scoped by the request's
+    # tenant guard; the service resolves names within it and refuses on
+    # miss. No bot to address, no owner to pin — admission is the whole
+    # authorization story (human-only).
+    ("PUT", "/openapi/v1/source-credentials/{name}"):
+        NoCheck("tenant-guarded credential write; admission is human-only"),
+    ("GET", "/openapi/v1/source-credentials/{name}"):
+        NoCheck("tenant-guarded credential metadata; admission is human-only"),
+    ("GET", "/openapi/v1/source-credentials"):
+        NoCheck("tenant-guarded credential inventory; admission is human-only"),
+    ("DELETE", "/openapi/v1/source-credentials/{name}"):
+        NoCheck("tenant-guarded credential delete; admission is human-only"),
     ("GET", "/openapi/v1/org/dept"):
         NoCheck("the caller's own directory record"),
     ("GET", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),

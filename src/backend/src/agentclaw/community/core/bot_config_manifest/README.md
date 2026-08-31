@@ -1,18 +1,18 @@
-# `agentclaw.community.core.bot_config_manifest`
-
 A **configuration manifest** that belongs to a bot: one document declaring what
 that bot should have — MCP servers, workspace resources, skills, engine config,
 identity files, command-line tools — plus the imperative `script` that #926
 already owned.
 
-Two waves of `docs/bot-config-manifest/work-items.zh-CN.md` live in this module
-now. W1 **stores, validates and describes** a manifest. W2 (the `fetch/`
+Three waves of `docs/bot-config-manifest/work-items.zh-CN.md` live in this
+module now. W1 **stores, validates and describes** a manifest. W2 (the `fetch/`
 package, #1470) is the guarded transport underneath the fetching wave: the
-fetcher and the unpack pipeline every remote-source byte rides through.
-Neither wave applies anything — a document accepted by W1 sits inert until the
+fetcher and the unpack pipeline every remote-source byte rides through. W3 (the
+`credentials/` package, #1471) is where a secret may finally live: named
+tenant-level credentials, presented by the platform within stored prefixes.
+No wave applies anything — a document accepted by W1 sits inert until the
 apply engine lands, and bytes fetched by W2 are write-or-hash material, never
-run. Neither holds a credential: W1 refuses them at the boundary, and W2
-declares (but does not bind) the injector protocol W3 will.
+run. A credential never enters a document (W1 refuses it at the boundary); W2
+declares the injector protocol, and W3 binds it.
 
 ## The one rule everything here is shaped by
 
@@ -114,6 +114,47 @@ downloader (URL shape → global-only resolution → pinned connection with
 SNI, streaming double caps). Structure follows it; this is a backend-side
 re-implementation behind its own tests, not an import.
 
+## The credentials side (W3): presentation, named and scoped
+
+A manifest references a credential **by name**; the platform presents the
+secret while fetching within the stored `allowed_prefixes`. The name is the
+only spelling that ever appears in a document, a log, an error, or an apply
+report — the value is decryptable only in the fetch hop's memory.
+
+What `credentials/` owns:
+
+- **the write path's truth**: one body schema whose discriminating key is the
+  *mechanism* (`type`), v1 implementing `header` only, reserved mechanisms
+  (`oss_aksk`, `basic`) refused at write so the stored type is real from
+  day one;
+- **the boundary of presentation**: absolute `https` prefixes, matched on
+  path-segment boundaries (`…/team/content` never authorizes
+  `…/team/content-secret`), decode-then-normalize on both sides so a
+  doubly-encoded slash is an equivalent spelling, not an escape. A target
+  outside every prefix fails the hop; the platform never falls back to
+  fetching *without* the credential;
+- **fail-closed storage**: under the corp/community deployment columns a write
+  with no resolvable master key is refused before persistence (a loud 503) —
+  `TokenVault`'s empty-key plaintext passthrough is right for singlebox and
+  must never catch tenant tokens at rest;
+- **the rotation contract**: a rotation is a same-name re-PUT, no apply is
+  triggered, and the binding re-reads per hop — "the next fetch uses the new
+  value" needs no signal.
+
+What it deliberately does not own:
+
+- **transport**: the binding duck-satisfies W2's injector/policy seams — W2
+  enforces the pinned connection and per-hop revalidation; the fetcher
+  *calls* `reauthorize` on every hop, which is what keeps a credential from
+  leaving its prefixes across a redirect;
+- **reference integrity**: deleting a still-referenced credential is allowed;
+  the referencing entries fail their next fetch *with the name*, recorded
+  where failures are recorded (apply, W4). Storage never guesses the
+  reference graph;
+- **the fetch-failure vocabulary**: "credential X was rejected" (401/403) is
+  the apply report's wording; the binding surfaces the name and the boundary,
+  not a classified outcome.
+
 ## Tenancy is load-bearing here
 
 `ac_bots` is itself tenant-scoped, so a `bot_id` is unique only *within* a
@@ -156,6 +197,12 @@ and does nothing else, which is what `GET …/capabilities` and this README say.
   configuration outlives the bot they deleted. The purge belongs with this
   feature's other per-bot state — the apply record, W4 — rather than as a lone
   seam wired into the deletion path ahead of it.
+- **The community column refuses every credential write until a master key
+  is configured.** The DI provider binds `fail_closed=True` for corp and
+  community alike; community deploys Resolve `TokenVault` from env vars, so
+  until `AGENTCLAW_SECRET_*` carries a master key every PUT answers the loud
+  503 rather than storing plaintext. That is the guard working, not a defect
+  — the alternative is tenant tokens in the clear.
 - **Fetch-time limits are absent from the write surface on purpose.** Schema
   §5's download sizes, unpacked sizes, archive file counts and timeouts cannot
   be enforced by a surface that never fetches; they are **the fetcher's
@@ -211,17 +258,35 @@ provides:
   - unpack_archive
   - UnpackedTree
   - UnpackError
+  - SourceCredentialService
+  - SourceCredentialServiceProtocol
+  - SourceCredentialRecord
+  - SourceCredentialRow
+  - SourceCredentialModel
+  - SourceCredentialBinding
+  - SourceCredentialRepositoryProtocol
+  - CredentialError
+  - CredentialNotFoundError
+  - MasterKeyUnavailableError
+  - PrefixAuthorizationPolicy
+  - PrefixAuthorizationError
+  - CanonicalPrefix
+  - validate_prefixes
 consumes:
   - "BotConfigManifestRepositoryProtocol (core.repository) — persistence for the one table"
   - "TeclawEngineTestProtocol (core.bot_startup_script, bound to core.bot_management TeclawProvisionService) — the single definition of 'runs in a teclaw container'"
   - "VALID_IDENTITY_FILES / CLAUDE_CODE_IDENTITY_FILES (core.services.identity) — the identity vocabulary, imported lazily because that module pulls in the device dispatcher"
   - "MAX_SCRIPT_BYTES (core.bot_startup_script) — script.body IS the #926 startup script, so it takes that cap rather than a second one"
+  - "TokenVault (core.bot_management) — enc:v1: AES-GCM reversible encryption for the credential secret; the master key comes from the SecretResolver, and the fail-closed profiles refuse writes without one"
+  - "SourceCredentialRepositoryProtocol (core.repository) — persistence for the credential table"
 consumed_by:
   - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface"
   - "the apply orchestration (W4, future) — constructor-injected transport_allowlist and FetchBudget"
+  - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (REFUSED admission, human-only)"
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_startup_script
+  - agentclaw.community.core.bot_management.token_vault
   - agentclaw.community.core.repository
   - agentclaw.community.core.services.identity
   - agentclaw.community.core.workspace.constants

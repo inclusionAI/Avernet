@@ -236,6 +236,7 @@ from .spaces import router as spaces_router
 from .spaces.skill_routes import router as space_skill_router
 from .spaces.publication_routes import router as space_skill_publication_router
 from .work_orders import router as work_orders_router
+from .source_credentials import router as source_credentials_router
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     PublicAPIRoute,
     assert_every_route_authorized,
@@ -456,6 +457,17 @@ def build_public_router() -> APIRouter:
     # backed by the same StaffDeptPlugin as the whoami's dept fields.
     public.include_router(
         org_dept_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Source credentials (W3, #1471): tenant-level named credentials
+    # referenced from manifests by name. No bot_id on the wire and no
+    # user_id parameter — the tenant guard scopes every row, and the
+    # admission mode (REFUSED, human-only) is the authorization posture:
+    # secret writes and the tenant's credential inventory are operator
+    # surfaces, not machine-grantable ones.
+    public.include_router(
+        source_credentials_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
