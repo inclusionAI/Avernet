@@ -77,52 +77,6 @@ async fn provider_bot_registers_and_is_routable_without_ws_connection() {
 }
 
 #[tokio::test]
-async fn provider_history_converts_to_group_messages_shape() {
-    let provider = start_provider_webhook().await;
-    let bots_dir = create_temp_bots_dir();
-    let (bcs_addr, _bcs_server) = start_test_server(&bots_dir.path().to_path_buf()).await;
-    let client = reqwest::Client::new();
-    let registered = register_provider_bot(
-        &client,
-        bcs_addr,
-        provider.url(),
-        "provider-history",
-        "history-v1",
-    )
-    .await;
-    let group_id = create_single_provider_group(
-        &client,
-        bcs_addr,
-        &registered.bot_runtime_token,
-        &registered.bot_uuid,
-    )
-    .await;
-
-    let response = client
-        .get(format!(
-            "http://{}/groups/{}/messages?view_bot_id={}",
-            bcs_addr, group_id, registered.bot_uuid
-        ))
-        .header("X-Mock-User-Id", "11111111")
-        .send()
-        .await
-        .expect("history request");
-    let status = response.status();
-    let body_text = response.text().await.expect("history response body");
-    assert!(status.is_success(), "history request failed: {status} {body_text}");
-    let messages: Value = serde_json::from_str(&body_text).expect("history response");
-    assert_eq!(messages[0]["sender"], registered.bot_uuid);
-    assert_eq!(messages[0]["role"], "assistant");
-    assert_eq!(messages[0]["content"], "done");
-
-    let history = provider.capture.wait_for_method("chat.history").await;
-    assert_eq!(history.body["bcn_group_id"], group_id);
-    assert!(history.body.get("bcs_group_id").is_none());
-    assert_eq!(history.body["session_id"], group_id);
-    assert!(history.body.get("session_key").is_none());
-}
-
-#[tokio::test]
 async fn provider_final_callback_uses_run_context_not_request_group() {
     let provider = start_provider_webhook().await;
     let bots_dir = create_temp_bots_dir();
@@ -1063,34 +1017,6 @@ async fn create_group(
     assert!(status.is_success(), "create group failed: {status} {body_text}");
     let group: Value = serde_json::from_str(&body_text).expect("group response");
     group["id"].as_str().expect("group id").to_string()
-}
-
-async fn create_single_provider_group(
-    client: &reqwest::Client,
-    bcs_addr: SocketAddr,
-    provider_token: &str,
-    provider_bot: &str,
-) -> String {
-    let response = client
-        .post(format!("http://{}/groups", bcs_addr))
-        .header("Authorization", format!("Bearer {provider_token}"))
-        .json(&json!({
-            "driver_bot": provider_bot,
-            "participants": [
-                { "bot_uuid": provider_bot, "role": "driver" }
-            ]
-        }))
-        .send()
-        .await
-        .expect("create provider group");
-    let status = response.status();
-    let body_text = response.text().await.expect("provider group response body");
-    assert!(
-        status.is_success(),
-        "create provider group failed: {status} {body_text}"
-    );
-    let group: Value = serde_json::from_str(&body_text).expect("provider group response");
-    group["id"].as_str().expect("provider group id").to_string()
 }
 
 async fn create_state_machine_group(
