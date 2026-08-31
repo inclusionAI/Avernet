@@ -16,6 +16,12 @@ from collections.abc import Iterable
 
 from injector import Injector, Module
 
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterStoreConfig,
+)
+from agentclaw.community.core.skill_center.draft_content import DraftContentStoreConfig
+from agentclaw.community.di.config import HttpClientPoolConfig, TaskQueueConfig
+
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
@@ -47,16 +53,16 @@ from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
 from agentclaw.community.di.modules.session_resources_module import SessionResourcesModule
 from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
+from agentclaw.community.di.modules.skill_center_group4_module import SkillCenterGroup4Module
+from agentclaw.community.di.modules.skill_version_module import SkillVersionModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
 from agentclaw.community.di.modules.spaces_module import SpacesModule
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
-from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
-from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.log import get_logger
@@ -103,6 +109,8 @@ def build_injector(
     modules: list[Module] = [
         ConfigModule(),
         SkillCenterModule(),
+        SkillCenterGroup4Module(),
+        SkillVersionModule(),
         ServiceBotModule(),
         DesktopBotModule(),
         SystemConfigModule(),
@@ -151,6 +159,30 @@ def build_injector(
         modules.extend(extra_modules)
     global _app_injector
     _app_injector = Injector(modules)
+
+    # Validate the outbound HTTP transport config on EVERY profile, not just
+    # the pre/prod eager check below.
+    #
+    # `http_client` rejects unknown keys by raising, and that raise has to land
+    # somewhere that stops a boot. `eager_check_critical_bindings` only runs on
+    # pre/prod (adapters/http/app.py), and on a dev / singlebox / community boot
+    # the raise would instead surface inside `discover_lifecycle_participants`,
+    # which swallows provider exceptions — so the app would start with no real
+    # HttpClient bindings at all and defer the failure to the first outbound
+    # request. Resolving here makes an invalid block fail the same way in every
+    # column. It is a pure dict read with no I/O, so it costs nothing when the
+    # config is valid, which is the only case that reaches production.
+    _app_injector.get(HttpClientPoolConfig)
+
+    # Same reasoning for the task-queue owner: `task_queue` rejects an `app_name`
+    # the column cannot hold faithfully by raising, and a raise that only
+    # surfaced inside `discover_lifecycle_participants` would silently drop the
+    # TaskWorker binding — an app that boots clean and never runs a queued task.
+    # Resolving it here makes a bad owner name fail the boot on every profile.
+    _app_injector.get(TaskQueueConfig)
+    _app_injector.get(CanonicalCenterStoreConfig)
+    _app_injector.get(DraftContentStoreConfig)
+
     return _app_injector
 
 
@@ -183,6 +215,12 @@ def eager_check_critical_bindings(injector: Injector) -> None:
         DatabasePlugin,
         AuthPlugin,
         OpenBotChatServiceProtocol,
+        # Kept for parity with the rest of this allowlist; `build_injector`
+        # already resolves this on every profile, which is what actually makes
+        # an invalid `http_client` block fail at startup (ci.enforce.md §E)
+        # rather than at the first outbound call. This entry only ensures the
+        # pre/prod aggregate names it alongside the other critical bindings.
+        HttpClientPoolConfig,
         *get_eager_check_keys(),
     ]
 

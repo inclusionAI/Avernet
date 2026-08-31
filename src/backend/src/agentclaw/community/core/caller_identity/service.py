@@ -28,6 +28,7 @@ from agentclaw.community.core.caller_identity.contracts import (
 from agentclaw.community.core.caller_identity.credential import (
     CALLER_CHAT_TASK,
     AuthContext,
+    CallerToken,
 )
 from agentclaw.community.core.caller_identity.protocols import (
     CallerMcpSyncProtocol,
@@ -39,12 +40,13 @@ from agentclaw.community.core.caller_identity.contracts import CallerIdentityEng
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.caller_identity.caller_identity_service_protocol import CallerIdentityServiceProtocol
 
 
 logger = get_logger()
 
 
-class CallerIdentityService:
+class CallerIdentityService(CallerIdentityServiceProtocol):
     """Persist per-MCP modes and expose the aggregate Bot call type."""
 
     def __init__(
@@ -332,15 +334,18 @@ class CallerIdentityService:
         entity_id: str | None = None,
         binding_id: int | None = None,
         is_test_exchange: bool = False,
+        caller_token: CallerToken | None = None,
     ) -> None:
         """Exchange and install the Caller credential for one chat request."""
-        caller_token = token_provider.exchange(
-            auth_context=AuthContext(user_id=caller_user_id),
-            iam_token=iam_token,
-            bot_id=bot_id,
-            owner_user_id=owner_user_id,
-            task_metadata=CALLER_CHAT_TASK,
-        )
+        token_reused = caller_token is not None
+        if caller_token is None:
+            caller_token = self.exchange_caller_token(
+                iam_token=iam_token,
+                caller_user_id=caller_user_id,
+                bot_id=bot_id,
+                owner_user_id=owner_user_id,
+                token_provider=token_provider,
+            )
         runtime_update_kwargs: dict[str, Any] = {
             "bot_id": bot_id,
             "owner_user_id": owner_user_id,
@@ -358,13 +363,32 @@ class CallerIdentityService:
             # that controlled end-to-end test.
             runtime_update_kwargs["is_test_exchange"] = True
         logger.info(
-            "caller_runtime_update_requested bot_id=%s stage=%s test_exchange=%s",
+            "caller_runtime_update_requested bot_id=%s stage=%s test_exchange=%s token_reused=%s",
             bot_id,
             stage,
             is_test_exchange,
+            token_reused,
         )
         runtime_updater.update_caller_identity(
             **runtime_update_kwargs,
+        )
+
+    def exchange_caller_token(
+        self,
+        *,
+        iam_token: str,
+        caller_user_id: str,
+        bot_id: str,
+        owner_user_id: str,
+        token_provider: CallerTokenProviderProtocol,
+    ) -> CallerToken:
+        """Exchange one opaque Caller token for the current IAM request."""
+        return token_provider.exchange(
+            auth_context=AuthContext(user_id=caller_user_id),
+            iam_token=iam_token,
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
+            task_metadata=CALLER_CHAT_TASK,
         )
 
     def _compensate_after_sync_failure(

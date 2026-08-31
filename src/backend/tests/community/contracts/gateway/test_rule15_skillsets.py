@@ -10,6 +10,9 @@ from unittest.mock import MagicMock
 
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
@@ -76,10 +79,18 @@ def _bind_skillset_deps(app):
     mock_factory = _make_mock_skillset_factory()
     bind_mock_service(SkillSetServiceFactory, mock_factory, app)
 
-    # BotRepository 由 _get_path_params 调用，mock 以避免数据库访问
+    # BotRepository 由 _get_path_params 调用，mock 以避免数据库访问。
+    # 删 CLI 的分支还要用 bot 主键去查 MCP 调用身份，所以这里给出持久化行。
     mock_bot_repo = MagicMock(spec=BotRepository)
-    mock_bot_repo.get_by_id_and_owner.return_value = None
+    mock_bot_repo.get_by_id_and_owner.return_value = {
+        "id": 42, "bot_type": "personal",
+    }
     bind_mock_service(BotRepository, mock_bot_repo, app)
+
+    # 覆盖式 resource_scope 必须带上每个 MCP 的执行身份。
+    mock_identity_repo = MagicMock(spec=CallerIdentityRepositoryProtocol)
+    mock_identity_repo.list_draft_call_types.return_value = {}
+    bind_mock_service(CallerIdentityRepositoryProtocol, mock_identity_repo, app)
 
     mock_passport = MagicMock(spec=PassportPlugin)
     mock_passport.query_passport_clis.return_value = [
@@ -204,7 +215,9 @@ class TestDeleteSkillsetCli:
             bot_id="bot_test_001",
             user_id="448524",
             resource_scope={
+                # 覆盖式更新连 identityMode 一起替换，所以 MCP 必须带身份。
                 "mcp_codes": ["test-mcp"],
+                "mcp_items": [{"mcp_code": "test-mcp", "identity_mode": "owner"}],
                 "cli_items": [{"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept"}],
             },
         )

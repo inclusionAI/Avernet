@@ -16,6 +16,7 @@ from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegis
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
+from agentclaw.community.core.workspace.engines.hermes import HermesSandboxProvider
 from agentclaw.community.di import config as cfg
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 from agentclaw.community.plugins.local.outbound_rules import NoopOutboundRuleProvider
@@ -30,6 +31,7 @@ def _make_registry() -> EngineSandboxRegistry:
     registry.register(OpenClawSandboxProvider(workspace=workspace))
     registry.register(ClaudeCodeSandboxProvider(workspace=workspace))
     registry.register(AICodingSandboxProvider(workspace=workspace))
+    registry.register(HermesSandboxProvider(workspace=workspace))
     return registry
 
 
@@ -183,6 +185,105 @@ class TestSetupDirectoryEngineAware:
         )
         assert custom is not None
         assert custom.permission == "READ_WRITE"
+
+    def test_hermes_engine_uses_its_own_build_provider(self):
+        composer = _make_composer()
+
+        entries = composer._setup_directory(
+            entity_id="u1",
+            entity_type="staff",
+            bot_id="b1",
+            engine_type="hermes",
+        )
+
+        skills_repo = _skills_repo_mount(entries)
+        assert skills_repo.local_dir == "/home/admin/.hermes/skills/skills-repo"
+
+    def test_center_artifact_adds_frozen_read_only_mount(self):
+        composer = _make_composer()
+        manifest = {
+            "schema_version": 1,
+            "engine": "openclaw",
+            "active_layout": "pool",
+            "layout_contract_version": "skills-pool-p3-v1",
+            "center_skills": [
+                {
+                    "runtime_name": "pdf",
+                    "skill_uuid": "00000000-0000-4000-8000-000000000001",
+                    "sc_version_number": "1.0.0",
+                    "mcp_dependencies": [],
+                }
+            ],
+            "shared_corpora": [
+                {
+                    "corpus": "repo",
+                    "runtime_path": "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+                    "store_prefix": "skills-repo/b1",
+                    "layout_contract_version": "skills-pool-p3-v1",
+                    "permission": "read_only",
+                    "snapshot_policy": "exclude",
+                },
+                {
+                    "corpus": "center",
+                    "runtime_path": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+                    "store_prefix": "aidesktop/aidesktop_dev/bolt_shared/skills-center",
+                    "layout_contract_version": "skills-pool-p3-v1",
+                    "permission": "read_only",
+                    "snapshot_policy": "exclude",
+                }
+            ],
+        }
+
+        entries = composer._setup_directory(
+            entity_id="u1",
+            entity_type="staff",
+            bot_id="b1",
+            engine_type="openclaw",
+            ext_info={"skills_manifest": manifest},
+        )
+
+        center = next(entry for entry in entries if "skills-center" in entry.remote_dir)
+        repo = next(
+            entry
+            for entry in entries
+            if entry.local_dir
+            == "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
+        )
+        assert repo.remote_dir == "/skills-repo/b1"
+        assert repo.permission == "READ_ONLY"
+        assert all(
+            entry.local_dir
+            != "/home/admin/.openclaw/workspace/skills/skills-repo"
+            for entry in entries
+        )
+        assert center.remote_dir == (
+            "/aidesktop/aidesktop_dev/bolt_shared/skills-center"
+        )
+        assert center.local_dir == (
+            "/home/admin/.openclaw/workspace/skills-pool/skill-center"
+        )
+        assert center.permission == "READ_ONLY"
+
+    def test_old_artifact_does_not_add_center_mount(self):
+        composer = _make_composer()
+
+        entries = composer._setup_directory(
+            entity_id="u1",
+            entity_type="staff",
+            bot_id="b1",
+            engine_type="openclaw",
+            ext_info={"skills_manifest": {
+                "schema_version": 1,
+                "engine": "openclaw",
+                "active_layout": "legacy",
+                "layout_contract_version": None,
+            }},
+        )
+
+        assert all("skills-center" not in entry.remote_dir for entry in entries)
+        assert _skills_repo_mount(entries).local_dir == (
+            "/home/admin/.openclaw/workspace/skills/skills-repo"
+        )
 
 
 @pytest.mark.unit

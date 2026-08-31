@@ -19,12 +19,23 @@ and client construction happen in downstream module providers.
 """
 from __future__ import annotations
 
+import math
+from dataclasses import fields
 from typing import Any
 
 from injector import Module, inject, provider, singleton
 
+from agentclaw.community.core.skill_center import draft_content
+from agentclaw.community.core.task_queue.types import MAX_APP_LEN
+from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
+from agentclaw.community.plugin_api.http_client import (
+    QUALIFIER_BAAS,
+    QUALIFIER_BCN,
+    QUALIFIER_GENERAL,
+    QUALIFIER_MASA_AGENT_EVAL,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -55,6 +66,199 @@ def _block(name: str) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _object_prefix_setting(name: str, default: str) -> Any:
+    raw = _user_config().get(name)
+    if raw is None:
+        return default
+    if not isinstance(raw, dict):
+        raise ValueError(f"{name} must be a mapping")
+    unknown = sorted(set(raw) - {"base_prefix_template"})
+    if unknown:
+        raise ValueError(f"{name} contains unknown keys: " + ", ".join(unknown))
+    return raw.get("base_prefix_template", default)
+
+
+def _app_name() -> str | None:
+    """The **top-level** ``app_name``, or ``None`` when there is no config.
+
+    Same defensiveness as :func:`_user_config` — local mode and ad-hoc tests
+    often have no sofa config at all — but the two outcomes are kept apart on
+    purpose: ``None`` means "nothing to read", while ``""`` means an app config
+    that names itself nothing. Only the consumer knows which of those is a
+    misconfiguration worth refusing (see :meth:`ConfigModule.task_queue`).
+    """
+    try:
+        from agentclaw.community.core.config import sofa
+
+        return str(getattr(sofa.sofa_config, "app_name", "") or "")
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning("ConfigModule: sofa app_name unavailable (%s)", exc)
+        return None
+
+
+# The closed set of HttpClient bindings an ``overrides`` entry may name. Taken
+# from the qualifier constants themselves so the config surface cannot drift
+# from the injector keys.
+_HTTP_CLIENT_QUALIFIERS = frozenset(
+    {QUALIFIER_BAAS, QUALIFIER_BCN, QUALIFIER_GENERAL, QUALIFIER_MASA_AGENT_EVAL}
+)
+
+# The policy fields an ``http_client`` block (or an override body) may name,
+# derived from the dataclass so the accepted config surface cannot drift from
+# the type it populates.
+_POOL_POLICY_FIELDS = frozenset(f.name for f in fields(cfg.HttpClientPoolPolicy))
+
+_TRUE_SCALARS = frozenset({"true", "yes", "on", "1"})
+_FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
+
+
+def _coerce(block: dict[str, Any], key: str, cast, fallback, where: str, valid=None):
+    """One config value, cast defensively, falling back on anything unusable.
+
+    An empty, malformed or out-of-range YAML scalar (``max_connections:`` with
+    no value, ``keepalive_expiry: ~``, ``max_connections: .inf``,
+    ``max_connections: 0``) would otherwise either raise inside the provider or
+    sail through as a working-looking value that breaks the binding.
+
+    Raising here is not a loud failure — it is the quietest one available:
+    ``discover_lifecycle_participants`` swallows a provider exception, so all
+    four HttpClient bindings would vanish at boot with no log line and no
+    teardown registration, and the first outbound call would die somewhere
+    unrelated. Hence the broad ``except``: no config value is worth losing the
+    transport over, and every rejection is logged with the offending key.
+
+    ``valid`` rejects values that cast cleanly but cannot work — a
+    ``max_connections`` of 0 turns every request on that binding into a
+    ``PoolTimeout`` for the life of the process.
+    """
+    if key not in block:
+        return fallback
+    raw = block[key]
+    if raw is None:
+        logger.warning(
+            "ConfigModule: %s.%s is empty; using %r.", where, key, fallback
+        )
+        return fallback
+    try:
+        value = cast(raw)
+    except Exception as exc:  # noqa: BLE001 — see docstring: never fatal
+        logger.warning(
+            "ConfigModule: %s.%s=%r is not a valid %s (%s); using %r.",
+            # `_as_bool` / `_as_int` are internal names; an operator reading a
+            # boot log wants the type, not our helper.
+            where, key, raw, cast.__name__.removeprefix("_as_"),
+            type(exc).__name__, fallback,
+        )
+        return fallback
+    if valid is not None and not valid(value):
+        logger.warning(
+            "ConfigModule: %s.%s=%r is out of range; using %r.",
+            where, key, value, fallback,
+        )
+        return fallback
+    return value
+
+
+def _as_int(raw: Any) -> int:
+    """Strict integer: no silent truncation, no ``True`` meaning 1.
+
+    ``int(1.7)`` is ``1``. For a pool ceiling that is a legal-looking but
+    pathological value — a one-connection pool serialises every burst — and it
+    would pass the range guard, so it has to be rejected at the cast instead.
+    ``int("1.7")`` already raises, so string scalars need no special case.
+    """
+    if isinstance(raw, bool):
+        raise TypeError(f"not an integer: {raw!r}")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float):
+        if not math.isfinite(raw) or raw != int(raw):
+            raise ValueError(f"not a whole number: {raw!r}")
+        return int(raw)
+    if isinstance(raw, str):
+        return int(raw.strip())
+    raise TypeError(f"not an integer: {type(raw).__name__}")
+
+
+def _as_bool(raw: Any) -> bool:
+    """Strict-ish boolean: YAML may hand back a string, and ``bool("false")``
+    is ``True`` — which would silently enable a wire-protocol change that the
+    design requires to be opt-in."""
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in _TRUE_SCALARS:
+            return True
+        if text in _FALSE_SCALARS:
+            return False
+        raise ValueError(f"not a boolean: {raw!r}")
+    if isinstance(raw, (int, float)):
+        # Exactly 0 or 1. `bool()` reads 2, -1, 0.5 and .nan as True alike, and
+        # none of those is a plausible way to write a boolean — so accepting
+        # them means a typo silently enables a wire change documented as
+        # opt-in. 0/1 stay accepted because YAML users do write them.
+        if raw == 0:
+            return False
+        if raw == 1:
+            return True
+        raise ValueError(f"not a boolean: {raw!r}")
+    raise TypeError(f"not a boolean: {type(raw).__name__}")
+
+
+def _reject_unknown_keys(
+    block: dict[str, Any], where: str, *, allow_overrides: bool
+) -> None:
+    """Fail on any key the policy does not define.
+
+    ``_pool_policy`` probes only the names it knows, so a misspelled field
+    (``max_conections``, ``htttp2``) would otherwise be discarded in silence and
+    the process would boot on inherited defaults while looking configured —
+    the same failure as an unknown qualifier, one level down. ``overrides`` is
+    accepted in the top-level block only; nesting it inside an override body is
+    a misunderstanding of the shape, not a policy field.
+    """
+    allowed = _POOL_POLICY_FIELDS | ({"overrides"} if allow_overrides else frozenset())
+    unknown = sorted(str(k) for k in block if str(k) not in allowed)
+    if unknown:
+        valid = ", ".join(repr(k) for k in sorted(allowed))
+        raise ValueError(
+            f"unknown {where} key(s) "
+            f"{', '.join(repr(u) for u in unknown)}; expected one of {valid}"
+        )
+
+
+def _pool_policy(
+    block: dict[str, Any], base: cfg.HttpClientPoolPolicy, where: str = "http_client"
+) -> cfg.HttpClientPoolPolicy:
+    """One transport policy from a YAML mapping, per-field fallback to ``base``.
+
+    Run twice per override: once with the dataclass defaults to resolve the
+    shared ``defaults``, then again per override *starting from those defaults*.
+    That is what lets an override name one key and still resolve to a total
+    policy, so ``for_qualifier`` never has to merge at the call site.
+    """
+    return cfg.HttpClientPoolPolicy(
+        # A ceiling below 1 would make every request on the binding wait for a
+        # connection that can never exist, then fail as a timeout — forever.
+        max_connections=_coerce(
+            block, "max_connections", _as_int, base.max_connections, where,
+            valid=lambda v: v >= 1,
+        ),
+        # 0 is legitimate here: it disables keep-alive without disabling the pool.
+        max_keepalive_connections=_coerce(
+            block, "max_keepalive_connections", _as_int,
+            base.max_keepalive_connections, where,
+            valid=lambda v: v >= 0,
+        ),
+        keepalive_expiry=_coerce(
+            block, "keepalive_expiry", float, base.keepalive_expiry, where,
+            valid=lambda v: v >= 0 and math.isfinite(v),
+        ),
+        http2=_coerce(block, "http2", _as_bool, base.http2, where),
+    )
+
+
 class ConfigModule(Module):
     """Bind every typed config dataclass."""
 
@@ -62,23 +266,35 @@ class ConfigModule(Module):
 
     @singleton
     @provider
-    def workspace(self) -> cfg.WorkspaceConfig:
-        """Bot workspace filesystem layout.
+    def canonical_center_store(self) -> CanonicalCenterStoreConfig:
+        defaults = CanonicalCenterStoreConfig(env=get_current_env())
+        prefix = _object_prefix_setting(
+            "canonical_center_store", defaults.base_prefix_template
+        )
+        if not isinstance(prefix, str):
+            raise ValueError(
+                "canonical_center_store.base_prefix_template must be a string"
+            )
+        return CanonicalCenterStoreConfig(
+            env=get_current_env(),
+            base_prefix_template=prefix,
+        )
 
-        Sources both roots from the ``workspace`` user_config block;
-        falls back to the dataclass defaults (sandbox paths) when the
-        block is absent or a field is missing. ``~`` is expanded for
-        each path so application-dev.yaml can use ``~/.openclaw`` and
-        get the dev's home directory at boot.
+    @singleton
+    @provider
+    def workspace(self) -> cfg.WorkspaceConfig:
+        """Resolve workspace roots to absolute host paths at the DI boundary.
+
+        Missing fields retain the dataclass sandbox defaults.
         """
-        import pathlib
+        import os
 
         block = _block("workspace")
         defaults = cfg.WorkspaceConfig()
 
         def _expand(value: str | None, default: str) -> str:
             raw = value if isinstance(value, str) and value else default
-            return str(pathlib.Path(raw).expanduser())
+            return os.path.abspath(os.path.expanduser(raw))
 
         return cfg.WorkspaceConfig(
             openclaw_root=_expand(block.get("openclaw_root"), defaults.openclaw_root),
@@ -88,6 +304,7 @@ class ConfigModule(Module):
             aicoding_root=_expand(
                 block.get("aicoding_root"), defaults.aicoding_root
             ),
+            hermes_root=_expand(block.get("hermes_root"), defaults.hermes_root),
         )
 
     # ── Access policy ───────────────────────────────────────────────
@@ -181,24 +398,22 @@ class ConfigModule(Module):
     @provider
     def secret_names(self) -> cfg.SecretNamesConfig:
         """Secret-registry key names (neutral empty defaults; corp env overlays
-        set the real Mist names via the ``secret_names`` yaml block)."""
+        set the real Mist names via the ``secret_names`` yaml block).
+
+        Built reflectively: every field is a plain string whose yaml key is its
+        own name, and a hand-written constructor call silently pins any field
+        left out of it to its default while nobody reads its yaml key.
+        ``skill_center_internal_token`` shipped that way, which for a token
+        name meant the auth guard fell back to the public singlebox constant
+        in every environment. A field needing other handling must be lifted out.
+        """
         block = _block("secret_names")
         defaults = cfg.SecretNamesConfig()
         return cfg.SecretNamesConfig(
-            dormant_internal_token=block.get(
-                "dormant_internal_token", defaults.dormant_internal_token
-            ),
-            aiworkbench_repo_url=block.get(
-                "aiworkbench_repo_url", defaults.aiworkbench_repo_url
-            ),
-            gateway_principal_signing_key=block.get(
-                "gateway_principal_signing_key",
-                defaults.gateway_principal_signing_key,
-            ),
-            aicoding_theta_master_key=block.get(
-                "aicoding_theta_master_key",
-                defaults.aicoding_theta_master_key,
-            ),
+            **{
+                f.name: block.get(f.name, getattr(defaults, f.name))
+                for f in fields(cfg.SecretNamesConfig)
+            }
         )
 
     @singleton
@@ -245,6 +460,14 @@ class ConfigModule(Module):
                 block.get("access_key_secret", defaults.secret_name),
             ),
         )
+
+    @singleton
+    @provider
+    def draft_content_store(self) -> draft_content.DraftContentStoreConfig:
+        """Immutable Draft revision object-key prefix."""
+        defaults = draft_content.DraftContentStoreConfig()
+        value = _object_prefix_setting("draft_content_store", defaults.base_prefix_template)
+        return draft_content.DraftContentStoreConfig(base_prefix_template=value)
 
     # NOTE: codefuse_token provider moved to ``CorpConfigModule`` (B8).
 
@@ -400,6 +623,9 @@ class ConfigModule(Module):
             teclaw_template_uuid=block.get(
                 "teclaw_template_uuid", defaults.teclaw_template_uuid
             ),
+            eval_template_uuid=block.get(
+                "eval_template_uuid", defaults.eval_template_uuid
+            ),
             personal_bot_template_uuid=block.get(
                 "personal_bot_template_uuid", defaults.personal_bot_template_uuid
             ),
@@ -496,6 +722,77 @@ class ConfigModule(Module):
 
     @singleton
     @provider
+    def http_client_pool(self) -> cfg.HttpClientPoolConfig:
+        """Outbound HTTP transport policy for the ``HttpClient`` bindings.
+
+        YAML shape under ``user_config.http_client``::
+
+            max_connections: 100
+            max_keepalive_connections: 20
+            keepalive_expiry: 5.0
+            http2: false
+            overrides:                  # optional, keyed by HttpClient qualifier
+              baas: {http2: true}
+
+        Missing block ⇒ dataclass defaults for every binding, so no deployment
+        needs a config change to adopt pooling. An override names only the keys
+        it changes; the rest come from the resolved shared defaults, so a value
+        left unset keeps tracking those defaults if they later change.
+
+        An unrecognised qualifier key **raises**. The valid set is closed and
+        known (the four ``QUALIFIER_*`` constants), so a name outside it cannot
+        be honoured by any binding — unlike a malformed *value*, where falling
+        back to a working default is a sane reading of operator intent. Silently
+        ignoring it would leave the operator believing a ceiling had been raised
+        while the binding ran on the shared defaults, which is the failure this
+        block exists to prevent. ``ci.enforce.md`` §E requires startup to fail
+        early on invalid config, and ``baas.deploy_runtime`` already rejects an
+        unknown value the same way.
+
+        ``HttpClientPoolConfig`` is in ``container.py``'s eager-check allowlist
+        so that raise lands at boot on pre/prod rather than at the first
+        outbound call.
+        """
+        block = _block("http_client")
+        _reject_unknown_keys(block, "http_client", allow_overrides=True)
+        defaults = _pool_policy(block, cfg.HttpClientPoolPolicy())
+        raw_overrides = block.get("overrides") or {}
+        overrides: dict[str, cfg.HttpClientPoolPolicy] = {}
+        if isinstance(raw_overrides, dict):
+            unknown = sorted(
+                str(name) for name in raw_overrides if str(name) not in _HTTP_CLIENT_QUALIFIERS
+            )
+            if unknown:
+                valid = ", ".join(repr(q) for q in sorted(_HTTP_CLIENT_QUALIFIERS))
+                raise ValueError(
+                    f"unknown http_client.overrides qualifier(s) "
+                    f"{', '.join(repr(u) for u in unknown)}; expected one of {valid}"
+                )
+            for name, body in raw_overrides.items():
+                if isinstance(body, dict):
+                    scope = f"http_client.overrides.{name}"
+                    _reject_unknown_keys(dict(body), scope, allow_overrides=False)
+                    overrides[str(name)] = _pool_policy(dict(body), defaults, scope)
+                else:
+                    logger.warning(
+                        "ConfigModule: http_client.overrides.%s is not a mapping "
+                        "(%s); ignoring it — that binding uses the shared defaults.",
+                        name,
+                        type(body).__name__,
+                    )
+        elif raw_overrides:
+            # Dropping every override is the bigger misconfiguration, so it must
+            # not be the quieter one.
+            logger.warning(
+                "ConfigModule: http_client.overrides is not a mapping (%s); "
+                "ignoring ALL per-qualifier overrides — every binding uses the "
+                "shared defaults.",
+                type(raw_overrides).__name__,
+            )
+        return cfg.HttpClientPoolConfig(defaults=defaults, overrides=overrides)
+
+    @singleton
+    @provider
     def masa_agent_eval(self) -> cfg.MasaAgentEvalConfig:
         """MasaAgentEval API 配置 — 评测服务外部调用。"""
         block = _block("masa_agent_eval")
@@ -589,6 +886,68 @@ class ConfigModule(Module):
                 "action_link_pattern", defaults.action_link_pattern
             ),
         )
+
+    @singleton
+    @provider
+    def task_queue(self) -> cfg.TaskQueueConfig:
+        """Which application owns this deployment's ``ac_task_queue`` rows.
+
+        Read from the **top-level** ``app_name`` — the name the deployment
+        already goes by — rather than from a queue-specific key. Two backends
+        share the table and each claims only its own rows, so the owner is the
+        deployment's identity; giving it a second, independently settable name
+        would only create a way for the two to disagree.
+
+        No config at all (local mode, ad-hoc tests) ⇒ ``TaskQueueConfig``'s
+        default, which is the column default on the deployed table, so a
+        deployment that never set ``app_name`` keeps owning exactly the rows it
+        already owned.
+
+        A *present* but unusable value **raises** rather than falling back, and
+        the fallback is the reason: the default is the *other* deployment's name
+        as often as not, so quietly substituting it is how one backend starts
+        claiming and failing another's tasks — the failure this column exists to
+        prevent. Three rejections, each a value the ``app`` column cannot carry
+        faithfully:
+
+        - empty or whitespace-only — names no application at all;
+        - leading or trailing whitespace — MySQL/OceanBase compare with a PAD
+          SPACE collation, so ``"claw "`` and ``"claw"`` are one app there and
+          two on SQLite, which is a divergence no test on SQLite can see;
+        - longer than the stored width — a non-strict server truncates, and the
+          rows are then filed under a name the claim filter never matches, so
+          the work is enqueued and simply never runs.
+
+        ``container.py`` resolves ``TaskQueueConfig`` eagerly at build time (as
+        it does ``HttpClientPoolConfig``) so this raise stops the boot on every
+        profile instead of being swallowed by lifecycle discovery — which would
+        leave the app running with no worker and no explanation.
+        """
+        defaults = cfg.TaskQueueConfig()
+        app = _app_name()
+        if app is None:
+            return defaults
+        if not app.strip():
+            raise ValueError(
+                "app_name must name the application; it also owns this "
+                "deployment's ac_task_queue rows, and it is empty"
+            )
+        if app != app.strip():
+            raise ValueError(
+                f"app_name must not have leading or trailing whitespace "
+                f"({app!r}); it is stored on every ac_task_queue row, and "
+                "MySQL/OceanBase compare with a PAD SPACE collation, so such a "
+                "name would be a different app on SQLite than in production"
+            )
+        if len(app) > MAX_APP_LEN:
+            raise ValueError(
+                f"app_name exceeds {MAX_APP_LEN} chars ({len(app)}); it is "
+                f"stored on every ac_task_queue row in a VARCHAR({MAX_APP_LEN}), "
+                "and a non-strict MySQL/OceanBase would truncate it — this "
+                "deployment would then enqueue rows under the truncated name and "
+                "claim under the full one, so none of its own work would ever run"
+            )
+        return cfg.TaskQueueConfig(app=app)
 
     @singleton
     @provider

@@ -62,6 +62,12 @@ class TaskDispatcher:
                 if result.outcome == SearchOutcome.HIT_SINGLE:
                     node.run_info.run_mode = "single_bot"
                     node.run_info.assignee = result.bot_id
+                    if result.bot_name is not None:
+                        node.run_info.extend_props["assignee_name"] = result.bot_name
+                    if result.owner_id is not None:
+                        node.run_info.extend_props["assignee_owner_id"] = result.owner_id
+                    if result.owner_name is not None:
+                        node.run_info.extend_props["assignee_owner_name"] = result.owner_name
                 elif result.outcome == SearchOutcome.HIT_GROUP:
                     node.run_info.run_mode = "coop_group"
                     node.run_info.assignee = result.group_id
@@ -70,6 +76,9 @@ class TaskDispatcher:
                     node.run_info.extend_props["pending_group_formation"] = result.group_formation
                 else:  # MISS
                     node.run_info.extend_props["miss_events"] = [result.miss_reason or "no_bot"]
+                # JOIN 丢掉的候选透出到节点 unauthorized_bots(dashboard 暴露,引导 owner grant)
+                if getattr(result, "unauthorized_bots", None):
+                    node.run_info.extend_props["unauthorized_bots"] = result.unauthorized_bots
                 logger.info("[task][dispatch] node=%s outcome=%s run_mode=%s assignee=%s",
                             node.node_id, result.outcome, node.run_info.run_mode,
                             node.run_info.assignee or "<group pending/miss>")

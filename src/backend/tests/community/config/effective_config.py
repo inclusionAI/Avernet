@@ -28,8 +28,9 @@ own ``from_yaml`` merge, but since the same function is used to generate the
 golden and to check it, any drift introduced by a relocation is detected
 regardless — the invariant is *before == after*, not *matches sofapy exactly*.
 
-``~`` expansion in workspace paths is normalized back to ``~`` so the snapshot is
-machine-independent (CI / any dev home).
+Workspace paths under the process working directory are normalized to ``<CWD>``;
+``~`` expansion elsewhere is normalized back to ``~``. This keeps the snapshot
+machine-independent while preserving whether a configured path became absolute.
 """
 from __future__ import annotations
 
@@ -85,9 +86,11 @@ _PROVIDER_METHODS = (
     "workspace_hosting",
     "skill_scan",
     "masa_agent_eval",
+    "http_client_pool",
     "desktop_bot_periodic_scan",
     "dormant_config",
     "dormant_notify",
+    "task_queue",
     "task_queue_worker",
 )
 
@@ -109,6 +112,7 @@ PROFILE_PAIRS: dict[str, tuple[str, str | None]] = {
 # would force fabricating a full sim config).
 
 _HOME = os.path.expanduser("~")
+_CWD_PREFIX = os.path.abspath(os.curdir).rstrip(os.sep) + os.sep
 
 
 def _load(name: str | None, config_dirs: tuple[Path, ...]) -> dict[str, Any]:
@@ -131,6 +135,8 @@ def _normalize(obj: Any) -> Any:
         return {k: _normalize(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_normalize(x) for x in obj]
+    if isinstance(obj, str) and os.path.isabs(obj) and obj.startswith(_CWD_PREFIX):
+        return "<CWD>/" + obj.removeprefix(_CWD_PREFIX).replace(os.sep, "/")
     if isinstance(obj, str) and _HOME and _HOME in obj:
         return obj.replace(_HOME, "~")
     return obj

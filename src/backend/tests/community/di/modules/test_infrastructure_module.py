@@ -26,8 +26,9 @@ def test_general_http_client_provider_returns_httpx_client(module):
 
     DI smoke: 验证 import + log + return 三行都能执行，返回正确类型。
     """
+    from agentclaw.community.di import config as cfg
     from agentclaw.community.plugins.http_client import HttpxClient
 
-    client = module.general_http_client()
+    client = module.general_http_client(cfg.HttpClientPoolConfig())
 
     assert isinstance(client, HttpxClient)

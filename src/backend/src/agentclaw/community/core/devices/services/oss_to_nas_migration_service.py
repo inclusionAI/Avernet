@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Literal, TYPE_CHECKING
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.devices.oss_to_nas_migration_service_protocol import OssToNasMigrationServiceProtocol
 
 if TYPE_CHECKING:
     # Type-only: runtime ``from agentclaw.community.di import config`` would form a
@@ -29,7 +30,7 @@ DEFAULT_NAS_ROOT = os.getenv("NAS_ROOT", "/home/admin/.bot_shared_nas")
 DEFAULT_AIDESKTOP_ROOT = "/aidesktop"
 
 
-class OssToNasMigrationService:
+class OssToNasMigrationService(OssToNasMigrationServiceProtocol):
     """OSS 文件向 NAS 文件系统迁移服务。
 
     将指定 entity 和 bot 对应的数据从 OSS 存储路径

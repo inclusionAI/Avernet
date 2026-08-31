@@ -282,8 +282,11 @@ class _StreamService:
 
 
 class _ConverterFactory:
+    def __init__(self):
+        self.requested_names = []
+
     def create(self, name):
-        assert name == "default"
+        self.requested_names.append(name)
         return DefaultStreamConverter()
 
 
@@ -302,6 +305,21 @@ def _chat_send_request() -> ChatSendRequest:
             "extensions": {"response_mode": "stream"},
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_stream_dispatch_selects_default_converter():
+    converter_factory = _ConverterFactory()
+
+    response = await _dispatch_chat_send_stream(
+        _chat_send_request(),
+        _StreamService(),
+        converter_factory,
+    )
+    async for _ in response.body_iterator:
+        pass
+
+    assert converter_factory.requested_names == ["default"]
 
 
 @pytest.mark.asyncio

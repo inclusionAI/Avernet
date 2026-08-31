@@ -47,11 +47,16 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
+    mcp_claim_scope,
+    mcp_release_scope,
+    skill_claim_scope,
+    skill_release_scope,
 )
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
+from agentclaw.community.core.skill_center.direct_activation_service_protocol import DirectActivationServiceProtocol
 
 
-class DirectActivationService:
+class DirectActivationService(DirectActivationServiceProtocol):
     """Activate/deactivate ONE capability (skill or MCP) for a Bot, directly.
 
     Legal only when no Set governs it (Policy R1, enforced by the UoW under
@@ -124,6 +129,15 @@ class DirectActivationService:
                     skill_id=str(skill["id"]),
                     engine_type=bot_engine_type(bot),
                     default_engine_types=bot_default_engine_types(bot),
+                ),
+                # Skills only — unless the Skill carries MCP dependencies,
+                # which join the Bot's projected MCP set along with it. The
+                # repository names them on the mutation result, read under the
+                # row lock, exactly as ``add_skill`` does; declaring
+                # ``mcp=False`` regardless would leave a dependency
+                # whitelisted but never configured on the device.
+                scope_from_result=(
+                    skill_claim_scope if active else skill_release_scope
                 ),
             )
         except SkillSetControlPlaneNotFoundError as exc:
@@ -201,6 +215,7 @@ class DirectActivationService:
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             ),
+            scope_from_result=mcp_claim_scope,
         )
         self._audit(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,
@@ -225,6 +240,7 @@ class DirectActivationService:
                 engine_type=bot_engine_type(bot),
                 default_engine_types=bot_default_engine_types(bot),
             ),
+            scope_from_result=mcp_release_scope,
         )
         self._audit(
             bot_id=bot_id, owner_id=str(bot["owner_id"]), actor_id=actor_id,

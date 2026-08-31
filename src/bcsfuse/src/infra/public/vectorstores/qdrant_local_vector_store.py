@@ -14,6 +14,7 @@ import logging
 import time
 import uuid
 import builtins
+import threading
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -29,6 +30,15 @@ from src.infra.public.observability.storage_logging import (
     log_storage_error,
     mask_url,
 )
+
+# Process-level cache for embedded Qdrant clients.
+# qdrant-client local mode acquires a file lock per storage path and does not
+# allow concurrent access even from the same process. Multiple
+# QdrantLocalVectorStore instances targeting the same path therefore MUST
+# share a single QdrantClient instance.
+_QDRANT_CLIENT_CACHE: dict[str, tuple[Any, int]] = {}
+_QDRANT_CLIENT_CACHE_LOCK = threading.Lock()
+
 
 logger = logging.getLogger(__name__)
 
@@ -165,12 +175,40 @@ class QdrantLocalVectorStore:
         # Lazy initialization - don't connect until first method call
 
     def _ensure_client(self) -> None:
-        """Ensure Qdrant client is initialized (lazy)."""
-        if self._client is None:
-            start_time = time.time()
-            component = "qdrant_local_vector_store"
+        """Ensure Qdrant client is initialized (lazy).
 
-            # Log client init start
+        Embedded Qdrant clients are cached per storage path so that multiple
+        QdrantLocalVectorStore instances in the same process can safely share
+        the same local storage. qdrant-client uses a file lock that blocks
+        concurrent access, so the cache lookup and client creation must be
+        performed atomically under the same lock.
+        """
+        if self._client is not None:
+            return
+
+        path = self.path
+        component = "qdrant_local_vector_store"
+
+        # Atomically check the cache and, if necessary, create and cache a new
+        # client. Holding the lock for the whole initialization prevents two
+        # threads from creating competing QdrantClient instances for the same
+        # path (which would fail with AlreadyLocked on the underlying file lock).
+        with _QDRANT_CLIENT_CACHE_LOCK:
+            cached = _QDRANT_CLIENT_CACHE.get(path)
+            if cached is not None:
+                client, refcount = cached
+                self._client = client
+                self._collection_initialized = True
+                _QDRANT_CLIENT_CACHE[path] = (client, refcount + 1)
+                logger.debug(
+                    "[QDRANT_CLIENT_REUSE] path=%s refcount=%d",
+                    mask_url(path),
+                    refcount + 1,
+                )
+                return
+
+            start_time = time.time()
+
             log_storage_event(
                 logger,
                 logging.DEBUG,
@@ -181,16 +219,15 @@ class QdrantLocalVectorStore:
                 backend="qdrant",
                 target_resource=self.collection_name,
                 mode="local",
-                url_or_path_masked=mask_url(self.path),
+                url_or_path_masked=mask_url(path),
                 dimension=self.dimension,
                 distance=self.distance.name,
             )
 
             try:
-                self._client = QdrantClient(path=self.path)
+                client = QdrantClient(path=path)
                 duration_ms = (time.time() - start_time) * 1000
 
-                # Log client init success
                 log_storage_event(
                     logger,
                     logging.INFO,
@@ -203,14 +240,16 @@ class QdrantLocalVectorStore:
                     duration_ms=duration_ms,
                 )
 
+                self._client = client
                 if not self._collection_initialized:
                     self._ensure_collection()
                     self._collection_initialized = True
 
+                _QDRANT_CLIENT_CACHE[path] = (client, 1)
+
             except Exception as e:
                 duration_ms = (time.time() - start_time) * 1000
 
-                # Log client init failure
                 log_storage_error(
                     logger,
                     "qdrant_client_init_failure",
@@ -1153,6 +1192,41 @@ class QdrantLocalVectorStore:
                 pass
         self._collection_initialized = False
         # Force re-initialization on next operation
+
+    def close(self) -> None:
+        """Release the underlying Qdrant client if this instance holds the
+        last cached reference for the storage path.
+
+        This intentionally does not delete the collection, because the embedded
+        Qdrant storage is meant to be durable across instances in the same
+        process.
+        """
+        if self._client is None:
+            return
+
+        path = self.path
+        with _QDRANT_CLIENT_CACHE_LOCK:
+            cached = _QDRANT_CLIENT_CACHE.get(path)
+            if cached is not None:
+                client, refcount = cached
+                refcount -= 1
+                if refcount <= 0:
+                    try:
+                        client.close()
+                    except Exception:
+                        # Best-effort cleanup; OS/process lifecycle will finish
+                        pass
+                    _QDRANT_CLIENT_CACHE.pop(path, None)
+                else:
+                    _QDRANT_CLIENT_CACHE[path] = (client, refcount)
+                    logger.debug(
+                        "[QDRANT_CLIENT_CLOSE] path=%s remaining_refcount=%d",
+                        mask_url(path),
+                        refcount,
+                    )
+
+        self._client = None
+        self._collection_initialized = False
 
     def update_payloads(self, updates: list[tuple[str, dict]]) -> int:
         """Update payloads for multiple vectors.

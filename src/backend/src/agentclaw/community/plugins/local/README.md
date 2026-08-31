@@ -7,7 +7,7 @@ Local-mode plugin implementations — in-memory / fixture-backed / noop variants
 ```yaml
 purpose: "Local-mode plugin implementations — in-memory / fixture-backed / noop variants for offline dev and tests."
 provides:
-  - "19 Local* and Noop* classes implementing the 23 plugin Protocols"
+  - "Local* and Noop* implementations, including LocalSkillCenterGateway"
   - "Shared SQLite ORM models for local persistence"
 consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"
@@ -51,6 +51,7 @@ internal_dependencies:
   - agentclaw.community.core.skills_pool  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.task_queue   # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.task.repository.models  # SQLite ORM side-effect import for task_* table creation
+  - agentclaw.community.core.task.task_discovery.discovered_task_models  # SQLite ORM side-effect import for ac_discovered_tasks table creation
   - agentclaw.community.core.workspace
   - agentclaw.community.kernel
   - agentclaw.community.log
@@ -84,8 +85,10 @@ internal_dependencies:
   - agentclaw.community.plugin_api.sandbox_runtime
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
+  - agentclaw.community.plugin_api.skill_center_gateway
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
+  - agentclaw.community.plugin_api.space_skill_source
   - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.plugin_api.storage
   - agentclaw.community.plugin_api.token_exchange
@@ -97,4 +100,4 @@ internal_dependencies:
 
 ### Change impact
 
-Local-mode breakage shows up only when running ./scripts/local_setup.sh --local. Adding a new plugin Protocol requires a paired local impl here per Rule 20. Removing the local impl breaks offline dev for the entire feature.
+Local-mode breakage shows up only when running ./scripts/local_setup.sh --local. `LocalSkillCenterGateway` is a stateful offline Fake and records every call through `MockSeam`; it never selects a default Team or retries publish submission. Its public catalogue and tag tree are derived from public Fake submissions. Team catalogue reads stay Team-scoped, while publish status and public Reference version/download reads resolve the globally unique skill code without a Team. Each Fake submission creates a readable deterministic ZIP in an owned temporary directory, and exact download returns the SHA-256 of those actual bytes. Adding a new plugin Protocol requires a paired local impl here per Rule 20. Removing the local impl breaks offline dev for the entire feature.

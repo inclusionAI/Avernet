@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::rejection::{JsonRejection, PathRejection};
 use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
@@ -11,9 +12,10 @@ use bcs_service_api::application::v1::{ApplicationError, AuthenticatedCaller, Au
 use bcs_service_api::application::{
     AuthenticatedHumanCaller, CollaborationRuntimeError, CollaborationRuntimeService,
     HumanResponseSource, ListPendingHumanNodesCommand, PendingHumanNodeView,
-    RespondHumanNodeCommand, StateMachineRunAccessCommand,
+    RespondHumanNodeCommand, RerunStateMachineCommand, StateMachineRunAccessCommand,
+    StateMachineRunView,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
@@ -30,10 +32,18 @@ struct CancelStateMachineRunRequest {
     pub reason: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct RerunStateMachineRunResponse {
+    #[serde(flatten)]
+    view: StateMachineRunView,
+    idempotent_replay: bool,
+}
+
 pub fn protected_router() -> Router<ApiState> {
     Router::new()
         .route("/state-machine-runs/{run_id}", get(get_run))
         .route("/state-machine-runs/{run_id}/graph", get(get_graph))
+        .route("/state-machine-runs/{run_id}/reruns", post(rerun_run))
         .route(
             "/state-machine-runs/{run_id}/nodes/{node_id}",
             get(get_node),
@@ -50,6 +60,47 @@ pub fn protected_router() -> Router<ApiState> {
             "/state-machine-runs/{run_id}/cancel",
             post(cancel_state_machine_run),
         )
+}
+
+async fn rerun_run(
+    State(state): State<ApiState>,
+    Extension(caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    path: Result<Path<String>, PathRejection>,
+    body: Bytes,
+) -> Result<Response, ErrorResponse> {
+    if !body.is_empty() {
+        return Err(invalid_request(
+            &request_id,
+            "state-machine rerun request must not contain a body",
+        ));
+    }
+    let Path(source_run_id) = path.map_err(|e| invalid_request(&request_id, e.body_text()))?;
+    let outcome = service(&state, &request_id)?
+        .rerun_state_machine_run(RerunStateMachineCommand {
+            source_run_id,
+            authenticated_human: authenticated_human(&caller),
+        })
+        .await
+        .map_err(|e| runtime_error(&request_id, e))?;
+    let status = if outcome.created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((
+        status,
+        Json(Envelope::success(
+            20_000,
+            "OK",
+            RerunStateMachineRunResponse {
+                view: outcome.view,
+                idempotent_replay: !outcome.created,
+            },
+            request_id.0,
+        )),
+    )
+        .into_response())
 }
 
 fn service(state: &ApiState, request_id: &RequestId) -> Result<Arc<dyn CollaborationRuntimeService>, ErrorResponse> {
@@ -245,7 +296,7 @@ async fn cancel_state_machine_run(
         .into_response())
 }
 
-fn view_view_or_404<T: serde::Serialize>(
+fn view_view_or_404<T: Serialize>(
     view: Option<T>,
     request_id: &RequestId,
 ) -> Result<Response, ErrorResponse> {

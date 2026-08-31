@@ -5,7 +5,7 @@ use bcs_protocol::BcsFrame;
 use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::{
     A2aChatCommand, A2aChatRunService, A2aChatService, ActorKind, ActorStatus, AgentCredentials,
-    AsyncA2aChatCommand, BlockingA2aChatCommand, BotActor, BotCapabilities, BotDeliveryCommand,
+    AsyncA2aChatCommand, BotActor, BotCapabilities, BotDeliveryCommand,
     BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
     BotRegistryCoreService, CallerContext, ChatResponseMode, ChatRunCancelCommand, ChatRunCleanupPort, ChatRunEventPort, ChatRunQueryCommand,
     AuthorizedOrganizationPair, DirectChatClientKind, DirectChatRunSnapshotPort, FriendCoreService, OrganizationCoreService, RegisteredBot,
@@ -131,17 +131,6 @@ fn chat_event(state: &str, text: &str) -> String {
     .to_string()
 }
 
-fn chat_event_state(state: &str) -> String {
-    serde_json::json!({
-        "type": "event",
-        "event": "chat.event",
-        "payload": {
-            "state": state
-        }
-    })
-    .to_string()
-}
-
 fn chat_delta_text(text: &str) -> String {
     serde_json::json!({
         "type": "event",
@@ -235,11 +224,13 @@ async fn direct_chat_run_snapshot_port_contract() {
 
 #[tokio::test]
 async fn direct_chat_run_snapshot_maps_http_client_kinds() {
-    let (service, run_port, _run_store) =
-        build_run_service(vec![chat_event("final", "pong")], false).await;
+    // The snapshot gauge counts active (non-terminal) runs only — terminal
+    // totals come from the lifecycle counter. Use two active async runs (no
+    // `final` event, so they stay Running) with different HTTP client kinds.
+    let (service, _run_port, _run_store) = build_run_service(vec![], false).await;
 
     service
-        .run_blocking_chat(BlockingA2aChatCommand {
+        .start_async_chat(AsyncA2aChatCommand {
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "bot-source".to_string(),
             }),
@@ -251,9 +242,10 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
             tags: Vec::new(),
             run_id: "http-client-kind-run".to_string(),
             session_key: "http-client-kind-session".to_string(),
-            timeout_ms: 1_000,
-            client: None,
+            timeout_ms: 30_000,
+            client: Some("http-chat".to_string()),
             response_mode: ChatResponseMode::Full,
+            caller_wait_mode: None,
             organization_code: None,
             provider_bypass_headers: Vec::new(),
         })
@@ -272,7 +264,7 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
             tags: Vec::new(),
             run_id: "http-async-client-kind-run".to_string(),
             session_key: "http-async-client-kind-session".to_string(),
-            timeout_ms: 1_000,
+            timeout_ms: 30_000,
             client: None,
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
@@ -281,9 +273,6 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
         })
         .await
         .unwrap();
-    run_port
-        .wait_for_event_unregister("http-async-client-kind-run")
-        .await;
 
     let counts = DirectChatRunSnapshotPort::direct_chat_run_counts(service.as_ref())
         .await
@@ -397,96 +386,6 @@ async fn bcs_cli_a2a_chat_requests_callback_provider_transport() {
     assert_eq!(
         bot_delivery.provider_transports().await,
         vec![ProviderTransportPreference::Callback]
-    );
-}
-
-#[tokio::test]
-async fn blocking_run_service_records_final_event_and_unregisters_run() {
-    let (service, run_port, run_store) = build_run_service(
-        vec![chat_event("delta", "po"), chat_event("final", "ng")],
-        false,
-    )
-    .await;
-
-    let outcome = service
-        .run_blocking_chat(BlockingA2aChatCommand {
-            caller: CallerContext::Bot(BotActor {
-                bot_uuid: "bot-source".to_string(),
-            }),
-            target_bot_id: "bot-target".to_string(),
-            message: "hello".to_string(),
-            from_actor_id: Some("api-user".to_string()),
-            run_channel_from: Some("api-user".to_string()),
-            authenticated_staff_id: Some("owner-1".to_string()),
-            tags: Vec::new(),
-            run_id: "blocking-run".to_string(),
-            session_key: "blocking-session".to_string(),
-            timeout_ms: 1_000,
-            client: Some("contract-test".to_string()),
-            response_mode: ChatResponseMode::Full,
-            organization_code: None,
-            provider_bypass_headers: Vec::new(),
-        })
-        .await
-        .unwrap();
-
-    assert!(outcome.delivered);
-    assert_eq!(outcome.bot_uuid, "bot-target");
-    assert_eq!(outcome.session_id, "blocking-session");
-    assert_eq!(outcome.content, "pong");
-    assert_eq!(
-        run_store.get("blocking-run").await.unwrap().state.as_str(),
-        "completed"
-    );
-    assert_eq!(run_port.event_unregistered().await, vec!["blocking-run"]);
-}
-
-#[tokio::test]
-async fn blocking_run_service_keeps_delta_text_when_final_is_empty() {
-    let (service, run_port, run_store) = build_run_service(
-        vec![
-            chat_delta_text("streaming "),
-            chat_delta_text("result"),
-            chat_event_state("final"),
-        ],
-        false,
-    )
-    .await;
-
-    let outcome = service
-        .run_blocking_chat(BlockingA2aChatCommand {
-            caller: CallerContext::Bot(BotActor {
-                bot_uuid: "bot-source".to_string(),
-            }),
-            target_bot_id: "bot-target".to_string(),
-            message: "hello".to_string(),
-            from_actor_id: Some("api-user".to_string()),
-            run_channel_from: Some("api-user".to_string()),
-            authenticated_staff_id: Some("owner-1".to_string()),
-            tags: Vec::new(),
-            run_id: "delta-empty-final-run".to_string(),
-            session_key: "delta-empty-final-session".to_string(),
-            timeout_ms: 1_000,
-            client: Some("contract-test".to_string()),
-            response_mode: ChatResponseMode::Full,
-            organization_code: None,
-            provider_bypass_headers: Vec::new(),
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(outcome.content, "streaming result");
-    assert_eq!(
-        run_store
-            .get("delta-empty-final-run")
-            .await
-            .unwrap()
-            .accumulated_content,
-        "streaming result"
-    );
-    assert_eq!(
-        run_port.event_unregistered().await,
-        vec!["delta-empty-final-run"]
     );
 }
 
@@ -658,89 +557,6 @@ async fn detached_run_fails_when_error_is_the_first_event() {
     let run = run_store.get("detach-error-first").await.unwrap();
     assert_eq!(run.state.as_str(), "failed");
     assert_eq!(run.error_message.as_deref(), Some("provider failed"));
-}
-
-#[tokio::test]
-async fn blocking_run_service_unregisters_when_recording_event_fails() {
-    let (service, run_port, run_store) = build_run_service(Vec::new(), true).await;
-    let task = {
-        let service = service.clone();
-        tokio::spawn(async move {
-            service
-                .run_blocking_chat(BlockingA2aChatCommand {
-                    caller: CallerContext::Bot(BotActor {
-                        bot_uuid: "bot-source".to_string(),
-                    }),
-                    target_bot_id: "bot-target".to_string(),
-                    message: "hello".to_string(),
-                    from_actor_id: Some("api-user".to_string()),
-                    run_channel_from: Some("api-user".to_string()),
-                    authenticated_staff_id: Some("owner-1".to_string()),
-                    tags: Vec::new(),
-                    run_id: "record-error-run".to_string(),
-                    session_key: "record-error-session".to_string(),
-                    timeout_ms: 1_000,
-                    client: None,
-                    response_mode: ChatResponseMode::Full,
-                    organization_code: None,
-                    provider_bypass_headers: Vec::new(),
-                })
-                .await
-        })
-    };
-
-    for _ in 0..50 {
-        if run_store.get("record-error-run").await.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(run_store.mark_completed("record-error-run", None).await);
-    run_store.cleanup_expired(u64::MAX, 0).await;
-    run_port
-        .send_event("record-error-run", chat_event("final", "late"))
-        .await;
-
-    assert!(matches!(task.await.unwrap(), Err(ServiceError::BotNotFound(_))));
-    assert_eq!(run_port.event_unregistered().await, vec!["record-error-run"]);
-}
-
-#[tokio::test]
-async fn run_service_preserves_omitted_from_as_run_channel_metadata_none() {
-    let (service, run_port, _run_store) =
-        build_run_service(vec![chat_event("final", "pong")], false).await;
-
-    service
-        .run_blocking_chat(BlockingA2aChatCommand {
-            caller: CallerContext::Bot(BotActor {
-                bot_uuid: "bot-source".to_string(),
-            }),
-            target_bot_id: "bot-target".to_string(),
-            message: "hello".to_string(),
-            from_actor_id: Some("user".to_string()),
-            run_channel_from: None,
-            authenticated_staff_id: Some("owner-1".to_string()),
-            tags: Vec::new(),
-            run_id: "metadata-run".to_string(),
-            session_key: "metadata-session".to_string(),
-            timeout_ms: 1_000,
-            client: None,
-            response_mode: ChatResponseMode::Full,
-            organization_code: None,
-            provider_bypass_headers: Vec::new(),
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(
-        run_port.registrations().await,
-        vec![(
-            "metadata-run".to_string(),
-            "metadata-session".to_string(),
-            Some("http-chat".to_string()),
-            None,
-        )]
-    );
 }
 
 #[tokio::test]
@@ -2145,7 +1961,6 @@ impl RecordingDelivery {
 struct RecordingRunPort {
     events: Vec<String>,
     keep_open_after_send: bool,
-    registrations: Mutex<Vec<(String, String, Option<String>, Option<String>)>>,
     event_unregistered: Mutex<Vec<String>>,
     cleanup_unregistered: Mutex<Vec<String>>,
     open_senders: RwLock<HashMap<String, mpsc::Sender<String>>>,
@@ -2157,7 +1972,6 @@ impl RecordingRunPort {
         Self {
             events,
             keep_open_after_send,
-            registrations: Mutex::new(Vec::new()),
             event_unregistered: Mutex::new(Vec::new()),
             cleanup_unregistered: Mutex::new(Vec::new()),
             open_senders: RwLock::new(HashMap::new()),
@@ -2165,16 +1979,8 @@ impl RecordingRunPort {
         }
     }
 
-    async fn event_unregistered(&self) -> Vec<String> {
-        self.event_unregistered.lock().await.clone()
-    }
-
     async fn cleanup_unregistered(&self) -> Vec<String> {
         self.cleanup_unregistered.lock().await.clone()
-    }
-
-    async fn registrations(&self) -> Vec<(String, String, Option<String>, Option<String>)> {
-        self.registrations.lock().await.clone()
     }
 
     async fn send_event(&self, run_id: &str, event: String) {
@@ -2214,15 +2020,11 @@ impl ChatRunEventPort for RecordingRunPort {
     async fn register(
         &self,
         run_id: String,
-        session_key: String,
+        _session_key: String,
         sender: mpsc::Sender<String>,
-        source: Option<String>,
-        from: Option<String>,
+        _source: Option<String>,
+        _from: Option<String>,
     ) {
-        self.registrations
-            .lock()
-            .await
-            .push((run_id.clone(), session_key, source, from));
         for event_json in &self.events {
             sender.send(event_json.clone()).await.unwrap();
         }

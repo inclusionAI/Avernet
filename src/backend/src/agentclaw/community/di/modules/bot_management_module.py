@@ -17,7 +17,7 @@ they pick up the swapped repositories transparently.
 
 from __future__ import annotations
 
-from typing import Annotated, Callable
+from typing import Annotated, Callable, cast
 
 from injector import (
     Binder,
@@ -75,6 +75,11 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.repository.protocols.identity import (
+    CallerIdentityRepositoryProtocol,
+)
+from agentclaw.community.core.devices.protocols import McpSyncProtocol
+from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.bot_management.services.bot_space_service import (
     BotSpaceService,
 )
@@ -101,6 +106,9 @@ from agentclaw.community.core.bot_management.services.teclaw_publish_task_handle
 )
 from agentclaw.community.core.bot_management.services.template_service import (
     TemplateService,
+)
+from agentclaw.community.core.bot_management.engines.aicoding.restart_authorization_listener import (
+    AicodingRestartAuthorizationBaasPublishListener,
 )
 from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import (
     CronAutoSetupService,
@@ -267,6 +275,24 @@ class BotManagementModule(Module):
     def bot_repository(self, db: DatabasePlugin) -> BotRepository:
         return UnifiedBotRepository(db)
 
+
+    @singleton
+    @provider
+    @inject
+    def restart_authorization_baas_publish_listener(
+        self,
+        repository: BotRepository,
+        template_service: TemplateService,
+        mcp_sync_service: MCPSyncService,
+        skill_set_factory: SkillSetServiceFactory,
+    ) -> AicodingRestartAuthorizationBaasPublishListener:
+        return AicodingRestartAuthorizationBaasPublishListener(
+            bot_repo=repository,
+            template_service=template_service,
+            mcp_sync=mcp_sync_service,
+            skill_set_factory=skill_set_factory,
+        )
+
     @singleton
     @provider
     @inject
@@ -342,6 +368,8 @@ class BotManagementModule(Module):
         drm_reader: DRMReaderPlugin,
         task_queue_service: TaskQueueService,
         common_config_service: CommonConfigService,
+        caller_identity_repo: CallerIdentityRepositoryProtocol,
+        mcp_sync_service: MCPSyncService,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -386,6 +414,8 @@ class BotManagementModule(Module):
             baas_service_provider=lambda: injector.get(BaasService),
             task_queue_service=task_queue_service,
             common_config_service=common_config_service,
+            caller_identity_repo=caller_identity_repo,
+            mcp_sync=cast(McpSyncProtocol, mcp_sync_service),
         )
 
     @singleton

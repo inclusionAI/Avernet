@@ -23,10 +23,11 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
 from agentclaw.community.core.task.task_dispatch.strategies import (
     GroupFormation,
+    SearchBasedDispatchStrategy,
     SearchOutcome,
     SearchResult,
 )
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 def _run(coro):
@@ -93,6 +94,19 @@ class TestFourStates:
         assert out[0].run_info.run_mode == "single_bot"
         assert out[0].run_info.assignee == "bot_market"
 
+    def test_hit_single_preserves_owner_metadata(self, svc):
+        d, _ = _dispatcher(svc, SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id="default",
+            bot_name="默认Bot",
+            owner_id="146836",
+            owner_name="栖真",
+        ))
+        out = _run(d.dispatch([_node("c1")]))
+        assert out[0].run_info.extend_props["assignee_name"] == "默认Bot"
+        assert out[0].run_info.extend_props["assignee_owner_id"] == "146836"
+        assert out[0].run_info.extend_props["assignee_owner_name"] == "栖真"
+
     def test_hit_group(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_GROUP, group_id="grp_tech"))
         out = _run(d.dispatch([_node("c1")]))
@@ -138,3 +152,33 @@ class TestEmpty:
     def test_empty_list(self, svc):
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
         assert _run(d.dispatch([])) == []
+
+
+class TestSearchBasedDispatchStrategy:
+    def test_empty_candidates_returns_miss_without_calling_owner(self):
+        class _Discover:
+            def search_by_keyword(self, **kwargs):
+                return {"items": []}
+
+        class _Bot:
+            def __init__(self):
+                self.calls = []
+
+            async def send_and_wait_async(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"status": "COMPLETED", "result": {"content": "{\"outcome\":\"HIT_SINGLE\",\"bot_id\":\"fake\"}"}}
+
+        graph = __import__(
+            "agentclaw.community.core.task.domain.models", fromlist=["TaskExecutionGraph"]
+        ).TaskExecutionGraph(
+            run_id=1, loop_round=0, status=Status.PENDING,
+            extend_props={"owner_bot_id": "owner"},
+        )
+        node = _node("c1")
+        strategy = SearchBasedDispatchStrategy(_Bot(), _Discover())
+
+        result = _run(strategy.apply(node, graph))
+
+        assert result.outcome == SearchOutcome.MISS
+        assert result.miss_reason == "no_candidates"
+        assert strategy._bot.calls == []

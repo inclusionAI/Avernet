@@ -22,16 +22,22 @@ from agentclaw.community.core.skill_center.bot_engine_scope import (
     bot_engine_type,
 )
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+from agentclaw.community.core.skill_center.version_resolution_contract import (
+    SkillVersionResolverProtocol,
+)
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+from agentclaw.community.core.skill_center.bot_capability_state_reader_protocol import BotCapabilityStateReaderProtocol
 
 
-class BotCapabilityStateReader:
+class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
     """The one read model for a Bot's active capabilities.
 
-    Installation is the single source of truth; the tables are not
+    Installation is the active-identity source of truth; the tables are not
     backfilled, so every read first flushes SkillSet configuration into
-    Installation, then answers from Installation alone. The flush is
-    DB-side only — this reader never triggers a runtime projection.
+    Installation, then answers from Installation alone. Center identities are
+    resolved to an exact PUBLISHED Version before they leave this seam. The
+    flush and Version resolution are DB-side only — this reader never triggers
+    a runtime projection.
     """
 
     @inject
@@ -40,10 +46,12 @@ class BotCapabilityStateReader:
         repository: CapabilityDesiredStateRepositoryProtocol,
         bot_repo: BotRepository,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
+        version_resolver: SkillVersionResolverProtocol,
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
         self._pool_skills = pool_skills
+        self._version_resolver = version_resolver
 
     def member_skill_ids(self, *, bot: Mapping[str, Any]) -> frozenset[int]:
         plan = self._flush(
@@ -62,12 +70,15 @@ class BotCapabilityStateReader:
     ) -> tuple[RegisteredSkillAsset, ...]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
         self._flush(bot=bot, bot_id=bot_id, owner_id=owner_id)
-        return tuple(
+        assets = tuple(
             self._pool_skills.list_bot_installed_assets(
                 env=str(bot["env"]),
                 bot_id=bot_id,
                 owner_id=owner_id,
             )
+        )
+        return self._version_resolver.resolve_latest_runtime_assets(
+            env=str(bot["env"]), assets=assets
         )
 
     def active_mcp_server_codes(

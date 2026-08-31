@@ -60,6 +60,9 @@ class Routine(BaseModel):
                 # routine, not a way of addressing it, and the model requires
                 # it. Only the create *body* lost it, to the path.
                 "bot_id": "20260813_a7k2m9p1",
+                "bot_name": "TicketBot",
+                "owner_id": "209800",
+                "runtime_stage": "draft",
                 "name": "morning-brief",
                 "trigger": {"type": "schedule", "cron": "0 9 * * 1-5"},
                 "command": "Summarize yesterday's tickets and post the brief.",
@@ -78,6 +81,23 @@ class Routine(BaseModel):
     bot_id: str = Field(
         description="The bot the routine belongs to; may be empty on the "
         "detail read — keep the bot_id you queried with."
+    )
+    bot_name: str | None = Field(
+        default=None,
+        description="Name of the bot the routine belongs to; null when the "
+        "engine reports none.",
+    )
+    owner_id: str | None = Field(
+        default=None,
+        description="The bot owner's staff id; null when the engine reports "
+        "none.",
+    )
+    runtime_stage: str | None = Field(
+        default=None,
+        description="Which runtime holds this definition — 'draft', 'verify' "
+        "or 'online' for a service bot, null otherwise. The same definition "
+        "can exist in several runtimes; on a cross-bot list treat the pair "
+        "(routine_id, runtime_stage) as the distinct row.",
     )
     name: str = Field(description="Human-readable routine name.")
     trigger: ScheduleTrigger = Field(description="When the routine fires.")

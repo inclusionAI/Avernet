@@ -34,6 +34,8 @@ class WorkOrderApproverStatus(StrEnum):
 class WorkOrderBizType(StrEnum):
     SPACE_JOIN = "SPACE_JOIN"
     BOT_COLLABORATOR = "BOT_COLLABORATOR"
+    SKILL_COLLABORATOR = "SKILL_COLLABORATOR"
+    BOT_FRIEND = "BOT_FRIEND"
 
 
 class NotificationCategory(StrEnum):
@@ -104,6 +106,32 @@ APPROVAL_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
     for event_type, category in EVENT_CATEGORIES.items()
     if category is NotificationCategory.APPROVAL
 )
+FRIEND_APPROVAL_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
+    {
+        WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED,
+        WorkOrderEventType.BOT2BOT_FRIEND_APPLIED,
+    }
+)
+REVIEWED_EVENT_TYPES: dict[WorkOrderEventType, WorkOrderEventType] = {
+    WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED: (
+        WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED
+    ),
+    WorkOrderEventType.BOT2BOT_FRIEND_APPLIED: (
+        WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED
+    ),
+}
+
+
+def reviewed_event_type_for(*, source_event_type: str | None, biz_type: str) -> str:
+    """Resolve the notice event produced after an approval decision."""
+
+    try:
+        mapped = REVIEWED_EVENT_TYPES.get(WorkOrderEventType(source_event_type))
+    except (TypeError, ValueError):
+        mapped = None
+    return mapped.value if mapped is not None else f"{biz_type}_REVIEWED"
+
+
 NOTICE_EVENT_TYPES: frozenset[WorkOrderEventType] = frozenset(
     event_type
     for event_type, category in EVENT_CATEGORIES.items()
@@ -135,6 +163,9 @@ class WorkOrderMessageTitle(StrEnum):
     BOT_COLLABORATOR_PENDING = "Bot 共同编辑申请待审批"
     BOT_COLLABORATOR_APPROVED = "Bot 共同编辑申请已通过"
     BOT_COLLABORATOR_REJECTED = "Bot 共同编辑申请未通过"
+    SKILL_COLLABORATOR_PENDING = "Skill 共同编辑申请待审批"
+    SKILL_COLLABORATOR_APPROVED = "Skill 共同编辑申请已通过"
+    SKILL_COLLABORATOR_REJECTED = "Skill 共同编辑申请未通过"
 
 
 class WorkOrderMessageContent(StrEnum):
@@ -153,6 +184,13 @@ class WorkOrderMessageContent(StrEnum):
     BOT_COLLABORATOR_APPROVED = "你共同编辑 Bot「{bot_name}」的申请已通过。"
     BOT_COLLABORATOR_REJECTED = (
         "你共同编辑 Bot「{bot_name}」的申请未通过。拒绝原因：{review_remark}"
+    )
+    SKILL_COLLABORATOR_PENDING = (
+        "用户「{applicant_name}」申请共同编辑 Skill「{skill_name}」，请及时处理。"
+    )
+    SKILL_COLLABORATOR_APPROVED = "你共同编辑 Skill「{skill_name}」的申请已通过。"
+    SKILL_COLLABORATOR_REJECTED = (
+        "你共同编辑 Skill「{skill_name}」的申请未通过。拒绝原因：{review_remark}"
     )
 
 
@@ -240,6 +278,14 @@ class WorkOrderDetail(BaseModel):
     space_name: str
     applicant_name: str
     can_approve: bool
+
+
+class WorkOrderApprovalContext(BaseModel):
+    """Canonical source event and state used before an external callback."""
+
+    work_order: WorkOrderRecord
+    approver: WorkOrderApproverRecord
+    source_event_type: str | None
 
 
 class WorkOrderEventCreatedResult(BaseModel):

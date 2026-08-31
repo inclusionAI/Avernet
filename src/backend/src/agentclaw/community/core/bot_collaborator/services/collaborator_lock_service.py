@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from agentclaw.community.core.bot_collaborator.models import BotCollabLockRecord, LockInfoResult, SessionLockInfoResult
 from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_collaborator.collaborator_lock_service_protocol import CollaboratorLockServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_collaborator.protocols import (
@@ -54,7 +55,7 @@ class LockReleaseDeniedError(CollaboratorLockServiceError):
 # ============================================================================
 # 服务实现
 # ============================================================================
-class CollaboratorLockService:
+class CollaboratorLockService(CollaboratorLockServiceProtocol):
     """协作锁管理服务。
 
     提供 Bot 协作场景下的锁管理功能：

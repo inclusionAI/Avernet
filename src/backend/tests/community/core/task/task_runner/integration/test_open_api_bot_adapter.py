@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
-    OpenApiAuthError, OpenApiBotAdapter, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
+    OpenApiAuthError, OpenApiBotAdapter, OpenApiError, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
 )
 
 
@@ -19,7 +19,7 @@ class _Key:
 def _adapter(handler):
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(transport=transport, base_url="http://b:8890")
-    return OpenApiBotAdapter(_Key(), http_client=client)
+    return OpenApiBotAdapter(_Key(), http_client=client, ensure_grant=True)
 
 
 def _run(coro):
@@ -50,7 +50,7 @@ def test_ensure_grant_falls_back_to_api_key_prefix_when_unset():
 
     transport = httpx.MockTransport(h)
     client = httpx.AsyncClient(transport=transport, base_url="http://b:8890")
-    a = OpenApiBotAdapter(_KeyNoPrefix(), http_client=client)
+    a = OpenApiBotAdapter(_KeyNoPrefix(), http_client=client, ensure_grant=True)
     _run(a.ensure_grant("bot9:ent1"))  # 已 allowed → 不走 grant
     assert seen["get_path"] == "/api/v1/api-keys/ak123456/allowed-bots"
 
@@ -182,3 +182,137 @@ def test_send_and_wait_failed_returns_run():
     run = a.send_and_wait(bot_id="bot9:ent1", message="hi", timeout=2.0, poll_interval=0.001)
     assert run["status"] == "FAILED"
     assert run["error"] == "boom"
+
+
+# ===== ACE 网关后的真实 host 需在 Bearer 之外带 Cookie/Referer;adapter 各请求须透传 key 的 cookie/referer =====
+def test_send_message_forwards_cookie_and_referer():
+    seen: dict = {}
+
+    def h(req):
+        if req.url.path == "/openapi/v1/messages":
+            seen["cookie"] = req.headers.get("cookie")
+            seen["referer"] = req.headers.get("referer")
+            return httpx.Response(200, json={"data": {"message_id": "mid_ck"}})
+        return httpx.Response(404)
+
+    rid = _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
+    assert rid.run_id == "mid_ck"
+    assert seen["cookie"] == "sess=1"
+    assert seen["referer"] == "http://b/"
+
+
+def test_get_run_forwards_cookie_and_referer():
+    seen: dict = {}
+
+    def h(req):
+        if req.url.path == "/openapi/v1/messages/mid_77":
+            seen["cookie"] = req.headers.get("cookie")
+            seen["referer"] = req.headers.get("referer")
+            return httpx.Response(200, json={"data": {"status": "COMPLETED"}})
+        return httpx.Response(404)
+
+    _run(_adapter(h).get_run("mid_77"))
+    assert seen["cookie"] == "sess=1"
+    assert seen["referer"] == "http://b/"
+
+
+def test_ensure_grant_get_forwards_cookie_and_referer():
+    seen: dict = {}
+
+    def h(req):
+        if req.method == "GET" and req.url.path.endswith("/allowed-bots"):
+            seen["cookie"] = req.headers.get("cookie")
+            seen["referer"] = req.headers.get("referer")
+            return httpx.Response(200, json={"data": {"allowed_bots": ["bot9:ent1"]}})
+        return httpx.Response(404)
+
+    _run(_adapter(h).ensure_grant("bot9:ent1"))
+    assert seen["cookie"] == "sess=1"
+    assert seen["referer"] == "http://b/"
+
+
+# ===== 业务信封校验:HTTP 200 但 code!=0 / 无 message_id 不可当成功吞成 run_id=None(否则 get_run(None) 报误导 404) =====
+def test_send_message_raises_when_no_message_id():
+    def h(req):
+        # HTTP 200 但无 message_id(模拟 ACE 登录门回 USER_NOT_LOGIN、或未授权回空 data)
+        return httpx.Response(200, json={"code": 0, "data": {}})
+
+    with pytest.raises(OpenApiError):
+        _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
+
+
+def test_send_message_raises_on_nonzero_business_code():
+    def h(req):
+        # HTTP 200 但业务 code 非 0(如 bot 未在 allowed_bots → 403 业务信封)
+        return httpx.Response(200, json={"code": 40301, "message": "bot not in allowed_bots", "data": None})
+
+    with pytest.raises(OpenApiError):
+        _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
+
+
+def test_ensure_grant_skipped_by_default():
+    # 默认 ensure_grant=False(OOB 预授权模式):不发 allowed-bots GET/grant,直接 return。
+    # admin allowed-bots 端点只认 Human Cookie,corp 无 cookie 时 Bearer-only 会 500;
+    # prod 假定 bot 已 OOB 预授权 → ensure_grant 默认跳过,直进 send_message(dispatch 端点认 Bearer)。
+    seen: dict = {}
+
+    def h(req):
+        seen["path"] = req.url.path
+        return httpx.Response(200, json={"data": {"allowed_bots": []}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(h), base_url="http://b:8890")
+    a = OpenApiBotAdapter(_Key(), http_client=client)  # 默认 ensure_grant=False
+    _run(a.ensure_grant("bot9:ent1"))
+    assert "allowed-bots" not in seen.get("path", ""), f"默认应跳过 ensure_grant,却发了 {seen.get('path')!r}"
+
+
+
+
+def test_owned_client_pinned_reused_same_loop_isolated_across_loops():
+    """跨事件循环复用同一 httpx.AsyncClient 会抛 `RuntimeError: ... bound to a different event loop`
+    (生产:harness/scheduler/recovery 经 asyncio.run,HTTP 经 new_event_loop,共同驱动同一 adapter)。
+    _client_for_current_loop 把自建 client pin 到首个 loop(同 loop 复用,保留连接池),其它 loop 用一次性
+    client(对齐 BcsHttpAdapter 同款修复)。
+    """
+    import asyncio
+
+    a = OpenApiBotAdapter(_Key())  # 未注入 client → 自建,_owns_client=True(生产路径)
+
+    async def take():
+        async with a._client_for_current_loop() as c:
+            return c
+
+    # 首个持久 loop:pin,多次取复用同一持久 client(保留连接池)
+    loop_a = asyncio.new_event_loop()
+    c_a1 = c_a2 = None
+    try:
+        c_a1 = loop_a.run_until_complete(take())
+        c_a2 = loop_a.run_until_complete(take())
+    finally:
+        loop_a.close()
+    assert c_a1 is c_a2, "同一(首个)loop 内应复用 pinned 持久 client"
+
+    # 另一 loop(与首个不同):一次性独立 client,不得与首个 loop 的 client 共享
+    loop_b = asyncio.new_event_loop()
+    c_b = None
+    try:
+        c_b = loop_b.run_until_complete(take())
+    finally:
+        loop_b.close()
+    assert c_b is not c_a1, "跨 loop 不得共享连接池(否则抛 different event loop)"
+    assert a._client_loop is not None
+
+
+def test_injected_client_kept_across_loops():
+    """注入的 client(测试 MockTransport)由调用方管理 loop 绑定;_client_for_current_loop 原样返回同一
+    client,跨 loop 不变、永不重建。"""
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, json={"data": {}}))
+    injected = httpx.AsyncClient(transport=transport, base_url="http://b:8890")
+    a = OpenApiBotAdapter(_Key(), http_client=injected, ensure_grant=True)
+
+    async def take():
+        async with a._client_for_current_loop() as c:
+            return c
+
+    assert _run(take()) is injected
+    assert _run(take()) is injected  # 跨 loop 仍是注入的同一 client

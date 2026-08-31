@@ -54,6 +54,7 @@
       "arca_template_id_pre": "ARCA-TEMPLATE-000000001403860d",
       "deploy_runtime": "managed",
       "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
+      "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
@@ -175,7 +176,8 @@
     },
     "oss_mount_root": "/aidesktop",
     "secret_names": {
-      "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url"
+      "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
+      "skill_center_internal_token": "other_manual_agentclaw_skill_center_internal_token"
     },
     "skill": {
       "oss": {
@@ -201,6 +203,13 @@
       ],
       "storage_dir": "./data/skills_scan"
     },
+    "task_discovery_dingtalk": {
+      "ak_id": "dummy-ak-id",
+      "ak_secret": "dummy-ak-secret",
+      "card_template_id": "dummy-card-template-id.schema",
+      "frontend_url": "http://localhost:8000",
+      "robot_code": "dummy-robot-code"
+    },
     "task_queue_worker": {
       "enabled": true,
       "poll_interval_seconds": 0.2,
@@ -220,6 +229,7 @@
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
       "env_folder": "aidesktop_singlebox",
+      "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     }
   },
@@ -233,6 +243,7 @@
       "default_ttl_minutes": 1440,
       "desktop_template_uuid": "TEMPLATE-f996ecc77d224ef7bd80757d8d2bcd0d",
       "desktop_ttl_minutes": 0,
+      "eval_template_uuid": "TEMPLATE-2e3192faa8994fe8bb8bc7be8671b431",
       "personal_bot_template_uuid": "TEMPLATE-54942a40aa794eaaae2be166f94890ed",
       "teclaw_template_uuid": "TEMPLATE-3106e731ffb04e0285e27c387e153737",
       "template_uuid": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
@@ -302,6 +313,15 @@
       "base_url": "http://127.0.0.1:9999",
       "base_url_pre": ""
     },
+    "http_client_pool": {
+      "defaults": {
+        "http2": false,
+        "keepalive_expiry": 5.0,
+        "max_connections": 100,
+        "max_keepalive_connections": 20
+      },
+      "overrides": {}
+    },
     "kb": {
       "base_url": "",
       "function_name": "",
@@ -325,7 +345,8 @@
       "aicoding_theta_master_key": "",
       "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
       "dormant_internal_token": "",
-      "gateway_principal_signing_key": "gateway_principal_signing_key"
+      "gateway_principal_signing_key": "gateway_principal_signing_key",
+      "skill_center_internal_token": "other_manual_agentclaw_skill_center_internal_token"
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",
@@ -340,6 +361,9 @@
       "scan_interval_hours": 1,
       "scan_interval_minutes": 0,
       "storage_dir": "./data/skills_scan"
+    },
+    "task_queue": {
+      "app": "agentclaw"
     },
     "task_queue_worker": {
       "batch_size": 10,
@@ -358,6 +382,7 @@
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
       "claude_code_session_root": "/home/admin/.claude",
+      "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     },
     "workspace_hosting": {

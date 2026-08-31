@@ -23,6 +23,7 @@ from json import JSONDecodeError
 from typing import Awaitable, Callable, Mapping, TypeVar
 
 from fastapi import Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.error_logging import (
@@ -45,10 +46,9 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
-    ApplicationCodingUnavailableError,
     BotAccessRefusedError,
-    BotCombinationUnsupportedError,
-    BotTemplateInvalidError,
+    BotEditLockCheckError,
+    BotEditLockRequiredError,
     CallerIdentityConflictError,
     CallerIdentityForbiddenError,
     CallerIdentityInvalidError,
@@ -62,14 +62,10 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UnsupportedEngineError,
     UserIdMismatchError,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors_space import (
-    SpaceErrorCode,
-    SpacePublicErrorMessage,
-)
-from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
-    WorkOrderErrorCode,
-    WorkOrderPublicErrorMessage,
-)
+from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
+from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_work_order import WorkOrderErrorCode, WorkOrderPublicErrorMessage
 from agentclaw.community.core.bot_app_grant.errors import (
     GrantBotNotLiveError,
     GrantIdentityTooLongError,
@@ -122,11 +118,6 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
 )
-from agentclaw.community.core.bot_management.errors import (
-    ApplicationCodingUnavailableError,
-    BotCombinationUnsupportedError,
-    BotTemplateInvalidError,
-)
 from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
@@ -136,6 +127,17 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.cron.errors import (
     CronApiTimeoutError,
     CronRelayError,
+)
+from agentclaw.community.core.caller_identity.contracts import (
+    CallerCallTypeInvalidError,
+    CallerIdentityAmbiguousError,
+    CallerIdentityIrreversibleError,
+    CallerIdentityNotFoundError,
+    CallerIdentityPermissionError,
+    CallerIdentityReadOnlyError,
+    CallerLockEpochError,
+    CallerMcpNotFoundError,
+    CallerMcpSyncError,
 )
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
@@ -173,9 +175,12 @@ from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
     WorkOrderAlreadyPendingError,
     WorkOrderAlreadyProcessedError,
+    WorkOrderCallbackError,
     WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderBotEditorRequestNotAllowedError,
+    WorkOrderSkillEditorRequestNotAllowedError,
+    WorkOrderSkillApplicantAlreadyEditorError,
     WorkOrderInvalidReasonError,
     WorkOrderInvalidEventError,
     WorkOrderInvalidRemarkError,
@@ -216,6 +221,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillEngineNotSupportedError,
     SkillParameterValidationError,
     SkillRuntimeNameConflictError,
+    SkillOfflineBlockedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
@@ -224,6 +230,7 @@ from agentclaw.community.core.skill_center.errors import (
     McpPermissionDeniedError,
     LocalSkillTooLargeError,
 )
+from agentclaw.community.adapters.http.openapi_v1 import errors_skill_center
 from agentclaw.community.core.services.identity import (
     InvalidIdentityEntityTypeError,
     InvalidIdentityFileTypeError,
@@ -267,8 +274,11 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterPublishStatusError,
     SkillCenterTeamCreateError,
 )
-
 T = TypeVar("T")
+
+
+class SkillCenterMarketplaceUnavailableError(RuntimeError):
+    """A public Skill Center marketplace read could not be served."""
 
 
 def _trace_id(request: Request) -> str:
@@ -321,6 +331,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     CallerIdentityForbiddenError: (403, "Forbidden"),
     CallerIdentityConflictError: (409, "Caller identity target is ambiguous"),
     CallerIdentityOpenApiError: (502, "Caller identity operation failed"),
+    CallerIdentityPermissionError: (404, "Not found"),
+    CallerIdentityNotFoundError: (404, "Not found"),
+    CallerIdentityAmbiguousError: (409, "Caller identity target is ambiguous"),
+    CallerIdentityIrreversibleError: (409, "Caller identity cannot be reverted"),
+    CallerIdentityReadOnlyError: (409, "Caller identity configuration is read-only"),
+    CallerLockEpochError: (423, "Edit lock required"),
+    CallerMcpNotFoundError: (404, "Not found"),
+    CallerMcpSyncError: (502, "Caller identity synchronization failed"),
+    CallerCallTypeInvalidError: (500, "Internal error"),
     MissingPrincipalError: (401, "Unauthorized"),
     # Byte-identical to the line above, deliberately. "You sent no principal" and
     # "your principal did not verify" must be indistinguishable, or the response
@@ -345,6 +364,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     FavoriteNotFoundError: (404, "Not found"),
     SpaceAlreadyExistsError: (409, "Space already exists"),
     SpaceMemberAlreadyExistsError: (409, "Space member already exists"),
+    **SPACE_SKILL_HTTP_ERRORS,
     SpaceCreatorInvariantError: (409, "Space creator cannot be removed or demoted"),
     PersonalSpaceInvariantError: (409, "Personal space membership is immutable"),
     SkillCenterTeamCreateError: (
@@ -352,6 +372,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
     ),
     SkillCenterMarketSearchError: (502, "Skill Center marketplace unavailable"),
+    SkillCenterMarketplaceUnavailableError: (
+        502,
+        "Skill Center marketplace unavailable",
+    ),
     SkillCenterPublishStatusError: (502, "Skill Center publish status unavailable"),
     # Staff directory infra failure (master-data service unreachable/errored).
     # 502, not 200-null: "directory down" must stay distinct from "no dept" so an
@@ -382,6 +406,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         WorkOrderPublicErrorMessage.ALREADY_PROCESSED,
     ),
+    WorkOrderCallbackError: (502, WorkOrderPublicErrorMessage.CALLBACK_FAILED),
     WorkOrderApplicantAlreadyMemberError: (
         409,
         WorkOrderPublicErrorMessage.APPLICANT_ALREADY_MEMBER,
@@ -397,6 +422,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     WorkOrderBotEditorRequestNotAllowedError: (
         409,
         WorkOrderPublicErrorMessage.BOT_EDITOR_REQUEST_NOT_ALLOWED,
+    ),
+    WorkOrderSkillEditorRequestNotAllowedError: (
+        409,
+        WorkOrderPublicErrorMessage.SKILL_EDITOR_REQUEST_NOT_ALLOWED,
+    ),
+    WorkOrderSkillApplicantAlreadyEditorError: (
+        409,
+        WorkOrderPublicErrorMessage.SKILL_APPLICANT_ALREADY_EDITOR,
     ),
     WorkOrderNoReviewerError: (
         409,
@@ -420,6 +453,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # through to the raw ``{"detail": ...}`` shape — a *different* body from the
     # envelope a genuinely absent bot returns, which is the tell.
     BotAccessRefusedError: (404, "Not found"),
+    BotEditLockRequiredError: (423, "Edit lock required"),
+    BotEditLockCheckError: (500, "Internal error"),
     # Withdrawing an authorization that is not there. Shares the 404 shape with
     # an absent bot, and that is not a collision worth avoiding: an owner
     # reconciling their records needs "there was nothing to remove" to read
@@ -506,12 +541,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ChannelEditLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
-    BotTemplateInvalidError: (422, "Invalid coding template"),
-    BotCombinationUnsupportedError: (409, "Coding template combination not supported"),
-    ApplicationCodingUnavailableError: (
-        503,
-        "Application coding is unavailable in this deployment",
-    ),
+    **BOT_CREATE_HTTP_ERRORS,
     PassportError: (502, "Authorization service error"),
     AuthRelationshipError: (502, "Authorization relationship service error"),
     # Engine-config failures. None of these is a BotServiceError, so the base
@@ -582,6 +612,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogNotFoundError: (404, "Not found"),
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
+    **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
     # caller learns the limit instead of hitting it inside a container. The
@@ -726,12 +757,12 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     CallbackCorrelationError: (400, "Bad request"),
     TaskError: (500, "Internal error"),
 }
-
 # Most public categories retain the ordinary ``xxx000`` business code.  A
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
+    **SPACE_SKILL_ERROR_CODES,
     WorkOrderInvalidEventError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidReasonError: WorkOrderErrorCode.INVALID_REASON,
     WorkOrderInvalidRemarkError: WorkOrderErrorCode.INVALID_REMARK,
@@ -740,11 +771,14 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     WorkOrderNotificationNotFoundError: WorkOrderErrorCode.NOTIFICATION_NOT_FOUND,
     WorkOrderAlreadyPendingError: WorkOrderErrorCode.ALREADY_PENDING,
     WorkOrderAlreadyProcessedError: WorkOrderErrorCode.ALREADY_PROCESSED,
+    WorkOrderCallbackError: WorkOrderErrorCode.CALLBACK_FAILED,
     WorkOrderApplicantAlreadyMemberError: WorkOrderErrorCode.APPLICANT_ALREADY_MEMBER,
     WorkOrderApplicantAlreadyEditorError: WorkOrderErrorCode.APPLICANT_ALREADY_EDITOR,
     WorkOrderNoReviewerError: WorkOrderErrorCode.NO_REVIEWER,
     WorkOrderJoinNotAllowedError: WorkOrderErrorCode.JOIN_NOT_ALLOWED,
     WorkOrderBotEditorRequestNotAllowedError: WorkOrderErrorCode.BOT_EDITOR_REQUEST_NOT_ALLOWED,
+    WorkOrderSkillEditorRequestNotAllowedError: WorkOrderErrorCode.SKILL_EDITOR_REQUEST_NOT_ALLOWED,
+    WorkOrderSkillApplicantAlreadyEditorError: WorkOrderErrorCode.SKILL_APPLICANT_ALREADY_EDITOR,
     LocalSkillOwnerAmbiguousError: 409104,
     LocalSkillInvalidPackageError: 400101,
     LocalSkillNotReadyError: 409101,
@@ -758,6 +792,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillEngineNotSupportedError: 409107,
     RepositoryCatalogSyncInProgressError: 409108,
     RepositoryCatalogSyncFailedError: 502103,
+    **errors_skill_center.SKILL_CENTER_ENVELOPE_ERROR_CODES,
     SkillSetControlPlaneLockUnavailableError: 409209,
     SkillSetAccessDeniedError: 403201,
     McpPermissionDeniedError: 403202,
@@ -861,22 +896,24 @@ def _error_response(
     *,
     headers: Mapping[str, str] | None = None,
     code: int | None = None,
+    data: object | None = None,
 ) -> JSONResponse:
     # ``ErrorEnvelope``, not ``Envelope``: it is the model every route documents
-    # for failures (``ERROR_RESPONSES``), and since ``Envelope`` gained the
-    # optional ``warning`` field the two shapes are no longer identical. Building
-    # the documented model keeps the wire and the published schema in step — an
-    # error body has no partial payload to caveat, so ``warning`` has no meaning
-    # here.
-    body = ErrorEnvelope(
-        code=code if code is not None else http_status * 1000,
-        message=message,
-        data=None,
-        request_id=_trace_id(request),
-    )
+    resolved_code = code if code is not None else http_status * 1000
+    request_id = _trace_id(request)
+    if data is None:
+        content = ErrorEnvelope(
+            code=resolved_code, message=message, data=None, request_id=request_id
+        ).model_dump()
+    else:
+        # P2-OFF-002 documents Envelope[SkillOfflineImpact], not ErrorEnvelope.
+        content = dict(
+            code=resolved_code, message=message,
+            data=jsonable_encoder(data), request_id=request_id,
+        )
     return JSONResponse(
         status_code=http_status,
-        content=body.model_dump(),
+        content=content,
         headers=_error_headers(request, headers),
     )
 
@@ -958,5 +995,6 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
                 message,
                 request,
                 code=ENVELOPE_ERROR_CODES.get(error_type),
+                data=(exc.impact if isinstance(exc, SkillOfflineBlockedError) else None),
             )
     return None

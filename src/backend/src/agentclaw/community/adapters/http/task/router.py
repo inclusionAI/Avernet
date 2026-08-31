@@ -26,19 +26,23 @@ task_loop inbound PUSH callback(前缀 ``/api/v1/collaboration/tasks/callback``)
 仅对纯输入校验(callback 原文非 JSON / discover 顶层失败)用 ``HTTPException``/``InternalError`` 上抛,
 落到中央 handler 时内部路径下为 ``{"detail": ...}`` 形。对齐 api/task/{task_service,task_loop_callback}.py Protocol。
 """
+
 from __future__ import annotations
 
 import json
 import os
 
 import httpx
-from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+    page as page_envelope,
+)
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
 from agentclaw.community.adapters.http.task.schemas import (
     BbsAttachDTO,
@@ -55,16 +59,35 @@ from agentclaw.community.adapters.http.task.schemas import (
     callback_from_dto,
     graph_to_dto,
     op_result_to_dto,
+    TaskClaimJoinFilterRequestDTO,
+    TaskClaimJoinFilterStateDTO,
+    TaskGrantRequestDTO,
+    TaskGrantResultDTO,
+    TaskRevokeRequestDTO,
+    TaskRevokeResultDTO,
     task_info_record_to_dto,
     task_info_request_from_dto,
     task_spec_from_dto,
 )
 from agentclaw.community.adapters.http.task.translator import (
-    is_bcn_event_payload, is_claw_mind_payload, parse_manager_worker_bcn,
-    translate, translate_bcn, translate_claw_mind,
+    is_bcn_event_payload,
+    is_claw_mind_payload,
+    parse_manager_worker_bcn,
+    translate,
+    translate_bcn,
+    translate_claw_mind,
+)
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+    TaskClaimJoinGateProtocol,
+)
+from agentclaw.community.api.task.task_grant_service import (
+    TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.errors import InternalError
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.core.task.task_discovery.discovery_service import (
@@ -74,12 +97,15 @@ from agentclaw.community.core.task.task_discovery.scheduler import (
     TaskDiscoveryScheduler,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    SqliteTaskReader,
+    TaskReader,
+    clear_discovered_tasks,
+    upsert_discovered_tasks,
 )
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -126,20 +152,161 @@ async def get_task_dashboard_internal(
     return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
 
 
-@router.get("/list", response_model=Envelope[list[TaskInfoRecordDTO]])
+@router.get(
+    "/list",
+    response_model=Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]],
+)
 @envelope_errors
 async def list_tasks_internal(
     request: Request,
     status: str | None = None,
+    user_id: str | None = Query(
+        None,
+        description="可选:按 owner_user_id 过滤;为空返回全量。与公开面 "
+        "``/openapi/v1/.../list`` 的 owner 作用域语义对齐(内部镜像用查询参数身份,非签名 principal)",
+    ),
+    page: int | None = Query(
+        None, ge=1, description="分页页码(1-based);不传则不分页,返回全量。"
+    ),
+    page_size: int | None = Query(
+        None, ge=1, le=100, description="每页条数(1-100);不传则不分页,返回全量。"
+    ),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[TaskInfoRecordDTO]]:
-    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态过滤)。
+) -> Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]]:
+    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态/owner 过滤)。
 
-    非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。"""
+    非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。
+    ``user_id`` 为空时不按 owner 过滤(返回全量,供内部可信调用方);传入则按 ``owner_user_id``
+    过滤,与公开面 ``/openapi/v1/.../list`` 的 owner 作用域一致。
+
+    分页为可选入参(与公开面同步):page/page_size 均不传时 data 为列表(历史契约);
+    两者同时传入时返回 Page(total, items);仅传其一 → 400。"""
     if status is not None and status not in {s.value for s in Status}:
         raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
-    items = service.list_tasks(status)
-    return envelope([task_info_record_to_dto(item) for item in items], request)
+    if (page is None) != (page_size is None):
+        raise HTTPException(
+            status_code=400,
+            detail="page and page_size must be both provided or both omitted",
+        )
+    if page_size is None:
+        items = service.list_tasks(status, owner_user_id=user_id)
+        return envelope([task_info_record_to_dto(item) for item in items], request)
+    items, total = service.list_tasks_page(
+        status, owner_user_id=user_id, page=page or 1, page_size=page_size
+    )
+    return page_envelope(
+        total,
+        [task_info_record_to_dto(item) for item in items],
+        request,
+    )
+
+
+# ===== 任务认领 Bot 授权(grant/revoke,无状态中继) =====
+# 前端开「任务认领」时调:grant/revoke 透传浏览器 Cookie/Referer 到 secbaas admin(api-key 服务端持有,不落本地表)。
+# 内部面(/api/v1, BUC 登录态,operator=staffId);对外另有公开面 /openapi/v1(.../grant, /revoke,经 gateway spanner)。
+
+
+@router.post("/grant", response_model=Envelope[TaskGrantResultDTO])
+@envelope_errors
+async def grant_task_claim(
+    body: TaskGrantRequestDTO,
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskClaimGrantServiceProtocol = Injected(TaskClaimGrantServiceProtocol),  # noqa: B008
+) -> Envelope[TaskGrantResultDTO]:
+    """grant 公共 api-key 给某 Bot(透传人类 Cookie/Referer 到 secbaas;api-key 服务端持有,不落表)。
+
+    ``bcs_bot_id``=real:entity(/mine bot.id)。secbaas 401/403(未登录/非 Bot owner/非管理员)
+    → OpenApiAuthError → ``@envelope_errors`` 映射;4xx/5xx 可重试;幂等。"""
+    result = await service.grant(
+        bcs_bot_id=body.bcs_bot_id,
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        operator=user.id,
+    )
+    return envelope(
+        TaskGrantResultDTO(
+            bcs_bot_id=result.bcs_bot_id,
+            api_key_prefix=result.api_key_prefix,
+            grant_status=result.grant_status,
+            operator=result.operator,
+        ),
+        request,
+    )
+
+
+@router.post("/revoke", response_model=Envelope[TaskRevokeResultDTO])
+@envelope_errors
+async def revoke_task_claim(
+    body: TaskRevokeRequestDTO,
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskClaimGrantServiceProtocol = Injected(TaskClaimGrantServiceProtocol),  # noqa: B008
+) -> Envelope[TaskRevokeResultDTO]:
+    """撤销授权(透传人类 Cookie/Referer → secbaas revoke)。幂等(无记录/已 revoked 也返回 revoked)。"""
+    result = await service.revoke(
+        bcs_bot_id=body.bcs_bot_id,
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        operator=user.id,
+    )
+    return envelope(
+        TaskRevokeResultDTO(
+            bcs_bot_id=result.bcs_bot_id,
+            grant_status=result.grant_status,
+        ),
+        request,
+    )
+
+
+# ===== claim_on JOIN 灰度开关(GET/POST /claim-join-filter) =====
+# 默认关闭;开启后派发策略对 LLM 决出的 assignee 做「搜推候选 ∩ task_claim_mode-on 名单」JOIN,
+# 丢掉的候选写 run_info.extend_props.unauthorized_bots(dashboard 暴露,引导 owner 开「任务认领」grant)。
+
+
+@router.get(
+    "/claim-join-filter",
+    response_model=Envelope[TaskClaimJoinFilterStateDTO],
+)
+@envelope_errors
+async def get_task_claim_join_filter(
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskClaimJoinGateProtocol = Injected(TaskClaimJoinGateProtocol),  # noqa: B008
+) -> Envelope[TaskClaimJoinFilterStateDTO]:
+    """读取 claim_on JOIN 开关状态(库侧真实读,当前 ``env``)。
+
+    默认关闭(false)= 派发直按 assignee(当前线上行为);true= 启用「搜推候选 ∩ claim_on 名单」JOIN。
+    详见 ``core/task/task_dispatch/claim_join_gate.py``。"""
+    env = get_current_env()
+    return envelope(
+        TaskClaimJoinFilterStateDTO(enabled=service.get_enabled(env=env), env=env),
+        request,
+    )
+
+
+@router.post(
+    "/claim-join-filter",
+    response_model=Envelope[TaskClaimJoinFilterStateDTO],
+)
+@envelope_errors
+async def set_task_claim_join_filter(
+    body: TaskClaimJoinFilterRequestDTO,
+    request: Request,
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: TaskClaimJoinGateProtocol = Injected(TaskClaimJoinGateProtocol),  # noqa: B008
+) -> Envelope[TaskClaimJoinFilterStateDTO]:
+    """开启/关闭 claim_on JOIN(默认关闭)。
+
+    上线流程:确认前端已为相关 bot 开启「任务认领」(grant 公共 api-key)后,再 ``POST {enabled:true}`` 开启;
+    开启前未开认领的 bot 仍直按 assignee 派发(不回归)。operator 留 audit。"""
+    env = get_current_env()
+    enabled = service.set_enabled(
+        enabled=body.enabled,
+        env=env,
+        operator=user.id,
+    )
+    return envelope(TaskClaimJoinFilterStateDTO(enabled=enabled, env=env), request)
 
 
 # ===== 回投 / BBS 接力 =====
@@ -165,8 +332,12 @@ async def report_callback(
     _preview = _body[:4000].decode("utf-8", "replace")
     if len(_body) > 4000:
         _preview += f"...(truncated, total {len(_body)} bytes)"
-    logger.info("[report_callback] entry method=%s path=%s body=%s",
-                request.method, request.url.path, _preview)
+    logger.info(
+        "[report_callback] entry method=%s path=%s body=%s",
+        request.method,
+        request.url.path,
+        _preview,
+    )
     return await _dispatch(request, "result", TaskCallbackRequest, svc, auth, registry)
 
 
@@ -199,7 +370,9 @@ async def bbs_attach(
     → ``@envelope_errors`` 映射 409。
     """
     task_spec = task_spec_from_dto(body.task_spec)
-    node = service.attach_bbs_node(body.task_id, body.parent_node_id, task_spec, body.bot_id)
+    node = service.attach_bbs_node(
+        body.task_id, body.parent_node_id, task_spec, body.bot_id
+    )
     return envelope({"node_id": node.node_id, "task_id": body.task_id}, request)
 
 
@@ -216,27 +389,23 @@ async def bbs_result(
     ``exec_error``(执行报错 fold)。``bot_id`` 须为当前 ``bbs_owner``,否则 ``TaskStateError``
     → ``@envelope_errors`` 映射 409。
     """
-    ar = acceptance_result_from_dto(body.acceptance_result) if body.acceptance_result else None
+    ar = (
+        acceptance_result_from_dto(body.acceptance_result)
+        if body.acceptance_result
+        else None
+    )
     await service.report_bbs_result(
-        body.task_id, body.node_id, body.bot_id,
-        acceptance_result=ar, output_patch=body.output_patch,
+        body.task_id,
+        body.node_id,
+        body.bot_id,
+        acceptance_result=ar,
+        output_patch=body.output_patch,
         exec_error=body.exec_error,
     )
     return envelope({"ok": True}, request)
 
 
 # ===== 任务发现阶段(任务模块的一个阶段,非独立模块)=====
-
-#: 默认 db 文件路径(9 级上溯到仓库根 → scripts/.dependencies/data/discovered_tasks.db)
-_PROJECT_ROOT = Path(__file__).resolve()
-for _ in range(9):
-    _PROJECT_ROOT = _PROJECT_ROOT.parent
-_DEFAULT_DB = str(_PROJECT_ROOT / "scripts" / ".dependencies" / "data" / "discovered_tasks.db")
-
-
-def _resolve_db_path() -> str:
-    """从环境变量或默认路径解析 db 文件路径。"""
-    return os.environ.get("TASK_DISCOVERY_DATA_FILE", _DEFAULT_DB)
 
 
 @router.post("/discovery/discover", response_model=Envelope[dict[str, Any]])
@@ -257,11 +426,15 @@ async def discover_tasks(
     """
     logger.info(
         "[task_discovery] discover triggered: user_id=%s, agent_id=%s, bot_id=%s",
-        user_id, agent_id, bot_id,
+        user_id,
+        agent_id,
+        bot_id,
     )
     try:
         results = await service.discover(
-            bot_id=bot_id, owner_id=owner_id, agent_id=agent_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            agent_id=agent_id,
         )
     except Exception as exc:
         logger.error("[task_discovery] discover failed: %s", exc, exc_info=True)
@@ -289,6 +462,7 @@ async def discover_tasks(
 @envelope_errors
 async def get_discovery_status(
     request: Request,
+    reader: TaskReader = Injected(TaskReader),  # noqa: B008
     service: DiscoveryService = Injected(DiscoveryService),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     """查看任务发现状态。
@@ -297,9 +471,7 @@ async def get_discovery_status(
     有 session_id 的 task 会标注 discover 已执行；没有的说明 discover 还没跑过。
     db 读失败 → ``InternalError`` → 500。
     """
-    db_path = _resolve_db_path()
     try:
-        reader = SqliteTaskReader(db_path)
         tasks = reader.read_discovered_tasks()
     except Exception as exc:
         raise InternalError("status read failed") from exc
@@ -320,7 +492,9 @@ async def get_discovery_status(
         if result is not None:
             entry["discovered"] = True
             entry["session_id"] = result.session.session_id if result.session else None
-            entry["session_url"] = result.session.session_url if result.session else None
+            entry["session_url"] = (
+                result.session.session_url if result.session else None
+            )
             entry["notification_sent"] = result.notification_sent
             entry["error"] = result.error
         else:
@@ -341,6 +515,46 @@ async def get_discovery_status(
     )
 
 
+@router.post("/discovery/tasks", response_model=Envelope[dict[str, Any]])
+@envelope_errors
+async def write_discovered_tasks(
+    request: Request,
+    tasks: list[dict[str, Any]] = Body(..., embed=True),
+    db: DatabasePlugin = Injected(DatabasePlugin),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """写入已发现任务（upsert 语义）。
+
+    按 ``task_id`` 自然键判断：已存在则更新，不存在则插入。
+    跨 SQLite / OceanBase 兼容。供外部系统或 e2e 测试写入已发现任务数据。
+
+    Body::
+
+        {"tasks": [{"task_id": "...", "bot_id": "...", ...}, ...]}
+    """
+    try:
+        count = upsert_discovered_tasks(db, tasks)
+    except Exception as exc:
+        raise InternalError("write discovered tasks failed") from exc
+    return envelope({"written": count}, request)
+
+
+@router.delete("/discovery/tasks", response_model=Envelope[dict[str, Any]])
+@envelope_errors
+async def clear_discovered_tasks_endpoint(
+    request: Request,
+    db: DatabasePlugin = Injected(DatabasePlugin),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """清空所有已发现任务数据。
+
+    供测试清理或运维重置使用。
+    """
+    try:
+        count = clear_discovered_tasks(db)
+    except Exception as exc:
+        raise InternalError("clear discovered tasks failed") from exc
+    return envelope({"cleared": count}, request)
+
+
 # ===== task-discovery 调度端点（discovery 阶段；外部 cron / 运维触发）=====
 # 扁平 JSON 响应（success + 业务字段顶层直返），供外部 scheduler / 运维直接调用，
 # 契约：scheduler-status 顶层 running/jobs；scheduled-trigger 顶层 total_discovered/results。
@@ -357,7 +571,9 @@ async def get_scheduler_status(
         status = scheduler.get_status()
     except Exception as exc:
         logger.error(
-            "[task_discovery] scheduler-status failed: %s", exc, exc_info=True,
+            "[task_discovery] scheduler-status failed: %s",
+            exc,
+            exc_info=True,
         )
         return {"success": False, "message": str(exc), "running": False, "jobs": []}
     return {"success": True, **status}
@@ -377,7 +593,9 @@ async def run_scheduled_trigger(
         results = await service.discover_all_bots()
     except Exception as exc:
         logger.error(
-            "[task_discovery] scheduled-trigger failed: %s", exc, exc_info=True,
+            "[task_discovery] scheduled-trigger failed: %s",
+            exc,
+            exc_info=True,
         )
         return {
             "success": False,
@@ -423,12 +641,16 @@ async def reschedule_cron(
 
     扁平 JSON 响应（与 scheduler-status / scheduled-trigger 一致）。
     """
-    logger.info("[task_discovery] reschedule received: cron='%s' tz='%s'", cron, timezone)
+    logger.info(
+        "[task_discovery] reschedule received: cron='%s' tz='%s'", cron, timezone
+    )
     try:
         ok = scheduler.reschedule(cron, timezone=timezone)
     except Exception as exc:
         logger.error(
-            "[task_discovery] reschedule failed: %s", exc, exc_info=True,
+            "[task_discovery] reschedule failed: %s",
+            exc,
+            exc_info=True,
         )
         return {"success": False, "message": str(exc)}
     if not ok:
@@ -466,7 +688,10 @@ async def set_dingtalk_config(
     frontend_url = (body.get("frontend_url") or "").strip()
 
     if not all([ak_id, ak_secret, robot_code, card_template_id]):
-        return {"success": False, "message": "钉钉字段必填: ak_id, ak_secret, robot_code, card_template_id"}
+        return {
+            "success": False,
+            "message": "钉钉字段必填: ak_id, ak_secret, robot_code, card_template_id",
+        }
 
     DingTalkCredentialHolder.set(ak_id, ak_secret, robot_code, card_template_id)
     injected = ["dingtalk credentials"]
@@ -475,6 +700,7 @@ async def set_dingtalk_config(
         from agentclaw.community.core.task.task_discovery.session_initiator import (
             FrontendUrlHolder,
         )
+
         FrontendUrlHolder.set(frontend_url)
         injected.append(f"frontend_url={frontend_url}")
 
@@ -493,7 +719,9 @@ async def set_dingtalk_config(
 # CallbackAuthError→401 / CallbackCorrelationError→400 / TaskNotFoundError·NodeNotFoundError→404 /
 # TaskStateError→409。仅 raw-body 非 JSON 用 ``HTTPException(422)`` 走中央 handler(内部 ``{"detail": ...}``)。
 # 幂等:result 重投到已终态节点→200 ack(start stale→409)。无节点名字面量(零 case)。
-task_callback_router = APIRouter(prefix="/api/v1/collaboration/tasks/callback", tags=["task-callback"])
+task_callback_router = APIRouter(
+    prefix="/api/v1/collaboration/tasks/callback", tags=["task-callback"]
+)
 
 _TERMINAL = {Status.DONE, Status.FAILED, Status.HUNG}
 
@@ -505,7 +733,9 @@ def _find_node_status(svc: TaskServiceProtocol, loop_task_id: str) -> Status | N
     return node.status if node is not None else None
 
 
-def _build_task_status_graph(run_detail: dict | None, graph_detail: dict | None) -> dict | None:
+def _build_task_status_graph(
+    run_detail: dict | None, graph_detail: dict | None
+) -> dict | None:
     """结合 BCS DAG(graph nodes+edges)与实际执行结果(run nodes)→ 任务状态图谱。
 
     - run_detail: ``GET /state-machine-runs/{run_id}`` 响应(run 级 status/output + nodes 执行记录)。
@@ -529,21 +759,23 @@ def _build_task_status_graph(run_detail: dict | None, graph_detail: dict | None)
     for _dn in _dag_nodes:
         _nid = _dn.get("node_id")
         _exec = _exec_by_node.get(_nid, {})
-        _merged_nodes.append({
-            "node_id": _nid,
-            "display_name": _dn.get("display_name"),
-            "kind": _dn.get("kind"),
-            "assignee": _dn.get("assignee"),
-            "final_output": _dn.get("final_output"),
-            "execution": {
-                "status": _exec.get("status") or _dn.get("status"),
-                "attempt": _exec.get("attempt") or _dn.get("attempt"),
-                "outcome": _exec.get("outcome"),
-                "artifact_text": _exec.get("artifact_text"),
-                "assignee_bot_id": _exec.get("assignee_bot_id"),
-                "error": _exec.get("error"),
-            },
-        })
+        _merged_nodes.append(
+            {
+                "node_id": _nid,
+                "display_name": _dn.get("display_name"),
+                "kind": _dn.get("kind"),
+                "assignee": _dn.get("assignee"),
+                "final_output": _dn.get("final_output"),
+                "execution": {
+                    "status": _exec.get("status") or _dn.get("status"),
+                    "attempt": _exec.get("attempt") or _dn.get("attempt"),
+                    "outcome": _exec.get("outcome"),
+                    "artifact_text": _exec.get("artifact_text"),
+                    "assignee_bot_id": _exec.get("assignee_bot_id"),
+                    "error": _exec.get("error"),
+                },
+            }
+        )
     # fallback:graph 无 nodes 但 run_detail 有 → 直接用 run_detail 的 nodes
     if not _merged_nodes and run_detail:
         _merged_nodes = [
@@ -560,8 +792,12 @@ def _build_task_status_graph(run_detail: dict | None, graph_detail: dict | None)
 
 
 async def _dispatch(
-    request: Request, disposition: str, schema_cls: type[TaskCallbackRequest],
-    svc: TaskServiceProtocol, auth: CallbackAuthenticator, registry: CallbackCorrelationRegistry,
+    request: Request,
+    disposition: str,
+    schema_cls: type[TaskCallbackRequest],
+    svc: TaskServiceProtocol,
+    auth: CallbackAuthenticator,
+    registry: CallbackCorrelationRegistry,
 ) -> Envelope[dict[str, Any]]:
     raw = await request.body()
     # 回调 body 按调用者分流:ClawMind(HttpCallbackPayload 四字段)/ BCN(CloudEvent 信封)/ 羽雀(默认 schema)。
@@ -572,13 +808,23 @@ async def _dispatch(
     # ClawMind / BCN 是事件/工作流级回投(run_id/workflow_id 不对应框架节点):只落 task_callback 审计,
     # 不推进编排核(start_run/report_result 会 NodeNotFoundError),直接 ack。
     if is_claw_mind_payload(_raw_obj):
-        auth.verify(source="claw_mind", headers=request.headers, raw_body=raw,
-                    method=request.method, path=request.url.path)
+        auth.verify(
+            source="claw_mind",
+            headers=request.headers,
+            raw_body=raw,
+            method=request.method,
+            path=request.url.path,
+        )
         await svc.callback.ingest(translate_claw_mind(_raw_obj, disposition).data)
         return envelope({"ok": True}, request)
     if is_bcn_event_payload(_raw_obj):
-        auth.verify(source="bcn", headers=request.headers, raw_body=raw,
-                    method=request.method, path=request.url.path)
+        auth.verify(
+            source="bcn",
+            headers=request.headers,
+            raw_body=raw,
+            method=request.method,
+            path=request.url.path,
+        )
         # manager_worker(任务协作群)事件:走 manager_worker 分流(parse+merge 进单 session 行 +
         # session.completed 收敛),不进 state_machine 的 translate_bcn/run_detail 路径。
         if parse_manager_worker_bcn(_raw_obj) is not None:
@@ -590,48 +836,95 @@ async def _dispatch(
         # 从 CloudEvent 取 scope.run_id → 经 BCS GET /state-machine-runs/{run_id} 查 run 明细
         # → 把明细覆盖 _raw_callback_body,落 task_callback.orig_callback_data(而非原始 CloudEvent)。
         _run_detail: dict | None = None
-        _run_id = ((_raw_obj.get("scope") or {}).get("run_id")) if isinstance(_raw_obj, dict) else None
+        _run_id = (
+            ((_raw_obj.get("scope") or {}).get("run_id"))
+            if isinstance(_raw_obj, dict)
+            else None
+        )
         if _run_id:
             try:
-                _bcs_base = os.environ.get("BCS_API_BASE_URL", "http://127.0.0.1:21000").rstrip("/")
+                _bcs_base = os.environ.get(
+                    "BCS_API_BASE_URL", "http://127.0.0.1:21000"
+                ).rstrip("/")
                 async with httpx.AsyncClient(timeout=10.0) as _cli:
-                    _run_resp = await _cli.get(f"{_bcs_base}/state-machine-runs/{_run_id}")
-                    _graph_resp = await _cli.get(f"{_bcs_base}/state-machine-runs/{_run_id}/graph")
+                    _run_resp = await _cli.get(
+                        f"{_bcs_base}/state-machine-runs/{_run_id}"
+                    )
+                    _graph_resp = await _cli.get(
+                        f"{_bcs_base}/state-machine-runs/{_run_id}/graph"
+                    )
                 _run_detail = _run_resp.json() if _run_resp.status_code == 200 else None
-                _graph_detail = _graph_resp.json() if _graph_resp.status_code == 200 else None
+                _graph_detail = (
+                    _graph_resp.json() if _graph_resp.status_code == 200 else None
+                )
                 if _run_detail:
                     _tc.data.data["_raw_callback_body"] = _run_detail
-                    logger.info("[task_callback_report] BCN run 明细已取回 run_id=%s → orig_callback_data", _run_id)
+                    logger.info(
+                        "[task_callback_report] BCN run 明细已取回 run_id=%s → orig_callback_data",
+                        _run_id,
+                    )
                 else:
-                    logger.warning("[task_callback_report] BCS run 明细非 200 run_id=%s status=%s",
-                                   _run_id, _run_resp.status_code)
+                    logger.warning(
+                        "[task_callback_report] BCS run 明细非 200 run_id=%s status=%s",
+                        _run_id,
+                        _run_resp.status_code,
+                    )
                 # 结合 DAG(graph nodes+edges)与执行结果(run nodes)→ 任务状态图谱 → execution_graph
                 _task_graph = _build_task_status_graph(_run_detail, _graph_detail)
                 if _task_graph:
                     _tc.data.data["execution_graph"] = _task_graph
-                    logger.info("[task_callback_report] 任务状态图谱已构建 run_id=%s nodes=%d edges=%d → execution_graph",
-                                _run_id, len(_task_graph.get("nodes") or []), len(_task_graph.get("edges") or []))
+                    logger.info(
+                        "[task_callback_report] 任务状态图谱已构建 run_id=%s nodes=%d edges=%d → execution_graph",
+                        _run_id,
+                        len(_task_graph.get("nodes") or []),
+                        len(_task_graph.get("edges") or []),
+                    )
             except Exception as exc:  # noqa: BLE001 查 BCS 明细/DAG 失败不阻断落库(fallback 存原始 CloudEvent)
-                logger.warning("[task_callback_report] 查 BCS run 明细/DAG 失败 run_id=%s: %s", _run_id, exc)
+                logger.warning(
+                    "[task_callback_report] 查 BCS run 明细/DAG 失败 run_id=%s: %s",
+                    _run_id,
+                    exc,
+                )
         await svc.callback.ingest(_tc.data)
         # 终态收敛:优先用 BCS run 明细(run_detail.run.status);fetch 失败/非 200 时,若事件本身是
         # state_machine.run.completed(BCS 已表明 run 成功完成),用事件体兜底收敛,不让 BCS 瞬时
         # 抖动丢掉终态翻转(任务节点停在 RUNNING)。按 session_id 查 task_node_run_info → 框架
         # (task_id, node_id) → svc.converge_by_session → on_report → 翻态(验收+传播+根收敛)。
-        _run_status = ((_run_detail.get("run") or {}).get("status")) if _run_detail else None
-        _converge_output = ((_run_detail.get("run") or {}).get("output")) if _run_detail else None
-        if _run_status is None and _tc.data.data.get("status") == "state_machine.run.completed":
+        _run_status = (
+            ((_run_detail.get("run") or {}).get("status")) if _run_detail else None
+        )
+        _converge_output = (
+            ((_run_detail.get("run") or {}).get("output")) if _run_detail else None
+        )
+        if (
+            _run_status is None
+            and _tc.data.data.get("status") == "state_machine.run.completed"
+        ):
             _run_status = "completed"
             _converge_output = _tc.data.data.get("result", {}).get("data")
         if _run_status in ("completed", "failed", "aborted"):
-            _session_id = ((_raw_obj.get("scope") or {}).get("session_id")) if isinstance(_raw_obj, dict) else None
+            _session_id = (
+                ((_raw_obj.get("scope") or {}).get("session_id"))
+                if isinstance(_raw_obj, dict)
+                else None
+            )
             if _session_id:
                 _success = _run_status == "completed"
                 try:
-                    await svc.converge_by_session(_session_id, success=_success, output=_converge_output)
-                    logger.info("[task_callback_report] 终态收敛已触发 session_id=%s success=%s", _session_id, _success)
+                    await svc.converge_by_session(
+                        _session_id, success=_success, output=_converge_output
+                    )
+                    logger.info(
+                        "[task_callback_report] 终态收敛已触发 session_id=%s success=%s",
+                        _session_id,
+                        _success,
+                    )
                 except Exception as exc:  # noqa: BLE001 收敛失败不阻断(回调查询/落库已完成)
-                    logger.warning("[task_callback_report] 终态收敛失败 session_id=%s: %s", _session_id, exc)
+                    logger.warning(
+                        "[task_callback_report] 终态收敛失败 session_id=%s: %s",
+                        _session_id,
+                        exc,
+                    )
         return envelope({"ok": True}, request)
     # 羽雀/框架节点级回投:先按 schema_cls(TaskCallbackRequest 富 schema)校验 → translate → report_result/start_run;
     # 不符合则兜底 TaskCallbackDataDTO(loop_task_id+result,report_callback 旧契约)→ callback_from_dto → report_result。
@@ -641,8 +934,13 @@ async def _dispatch(
         req = None
     if req is not None:
         # source 来自已解析 body;HMAC 用原始字节。CallbackAuthError/CallbackCorrelationError 上抛 → @envelope_errors
-        auth.verify(source=req.workflow_source, headers=request.headers, raw_body=raw,
-                    method=request.method, path=request.url.path)
+        auth.verify(
+            source=req.workflow_source,
+            headers=request.headers,
+            raw_body=raw,
+            method=request.method,
+            path=request.url.path,
+        )
         tc = translate(req, disposition, registry)
         try:
             if tc.disposition == "start":
@@ -653,7 +951,9 @@ async def _dispatch(
             # 幂等:result 重投到已终态节点 → 200 ack;否则 TaskStateError 上抛 → @envelope_errors 409
             if tc.disposition == "result":
                 _payload = tc.data.data
-                _loop_task_id = _payload.get("loop_task_id") if isinstance(_payload, dict) else ""
+                _loop_task_id = (
+                    _payload.get("loop_task_id") if isinstance(_payload, dict) else ""
+                )
                 cur = _find_node_status(svc, _loop_task_id)
                 if cur in _TERMINAL:
                     return envelope({"ok": True}, request, message="idempotent")
@@ -661,13 +961,20 @@ async def _dispatch(
         return envelope({"ok": True}, request)
     # 兜底:TaskCallbackDataDTO(loop_task_id+result)→ callback_from_dto → report_result(落库 + 推进编排核)。
     try:
-        dto = TaskCallbackDataDTO.model_validate(_raw_obj if isinstance(_raw_obj, dict) else {})
+        dto = TaskCallbackDataDTO.model_validate(
+            _raw_obj if isinstance(_raw_obj, dict) else {}
+        )
     except Exception:
         raise HTTPException(status_code=422, detail="invalid callback body")
     # TaskCallbackDataDTO 无 workflow_source;按 workflow_type 取 source(单测/内部可信 Noop/singlebox 直通;
     # 生产侧该 source 应已登记密钥,否则 HMAC 校验会拒)。
-    auth.verify(source=(dto.workflow_type or "single_bot"), headers=request.headers, raw_body=raw,
-                method=request.method, path=request.url.path)
+    auth.verify(
+        source=(dto.workflow_type or "single_bot"),
+        headers=request.headers,
+        raw_body=raw,
+        method=request.method,
+        path=request.url.path,
+    )
     await svc.callback.report_result(callback_from_dto(dto))
     return envelope({"ok": True}, request)
 
@@ -702,7 +1009,9 @@ async def node_start(
     auth: CallbackAuthenticator = Injected(CallbackAuthenticator),  # noqa: B008
     registry: CallbackCorrelationRegistry = Injected(CallbackCorrelationRegistry),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
-    return await _dispatch(request, "start", TaskNodeCallbackRequest, svc, auth, registry)
+    return await _dispatch(
+        request, "start", TaskNodeCallbackRequest, svc, auth, registry
+    )
 
 
 @task_callback_router.post("/node_result", response_model=Envelope[dict[str, Any]])
@@ -713,4 +1022,6 @@ async def node_result(
     auth: CallbackAuthenticator = Injected(CallbackAuthenticator),  # noqa: B008
     registry: CallbackCorrelationRegistry = Injected(CallbackCorrelationRegistry),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
-    return await _dispatch(request, "result", TaskNodeCallbackRequest, svc, auth, registry)
+    return await _dispatch(
+        request, "result", TaskNodeCallbackRequest, svc, auth, registry
+    )

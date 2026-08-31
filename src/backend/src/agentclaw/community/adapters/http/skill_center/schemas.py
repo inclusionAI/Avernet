@@ -148,7 +148,10 @@ class AddSkillsToSetRequest(BaseModel):
 # AddSkillsRequest is the skillsets router version (same shape, kept for clarity)
 class AddSkillsRequest(BaseModel):
     skill_ids: List[str] = Field(..., description="List of skill IDs to add")
-    user_id: Optional[str] = Field(None, description="User ID for permission check")
+    user_id: Optional[str] = Field(
+        None,
+        description="Target Bot owner ID for legacy routing and permission checks",
+    )
     bot_id: Optional[str] = Field(None, description="Bot ID (optional, default: default)")
 
 
@@ -870,3 +873,22 @@ class CategoryDetailResponse(BaseModel):
 class CategoryListResponse(BaseModel):
     success: bool
     data: List[CategoryResponse]
+
+
+# ==================== Installation backfill (internal) ====================
+
+class BackfillBotRequest(BaseModel):
+    bot_id: str = Field(..., min_length=1, description="Bot to converge")
+    owner_id: str = Field(..., min_length=1, description="Owner of that Bot")
+
+
+class BackfillOutcomeModel(BaseModel):
+    """Echoes the pair that was converged, so a driver can log per-call."""
+
+    bot_id: str
+    owner_id: str
+
+
+class BackfillBotResponse(BaseModel):
+    success: bool
+    data: BackfillOutcomeModel

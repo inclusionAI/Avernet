@@ -2,7 +2,7 @@
 
 Companion to ``test_diagnose_llm_disabled_smoke.py``. That story pins the
 empty-config guard on a fresh bot; this one pins that a bot with a non-empty
-TOOLS.md plus an activated, schema-bearing MCP drives
+TOOLS.md plus a schema-bearing MCP association drives
 ``ToolsMcpFormatDiagnostic.analyze`` through the prompt-slimming helpers
 (``_compact_tool_for_prompt`` / ``_compact_mcp_tools_for_prompt`` /
 ``_format_mcp_block``) — the code that keeps MCP-heavy bots under antchat's
@@ -72,8 +72,10 @@ def test_diagnose_tools_mcp_format_runs_prompt_helpers(
         )
         assert write.status_code == 200, write.text
 
-        # Activate the schema-bearing fixture MCP on the bot via a skill-set, so
-        # bot_profile.get_activated_mcps returns it during the scan.
+        # Register the schema-bearing fixture MCP through a deliberately
+        # inactive SkillSet. This test covers prompt construction from persisted
+        # MCP metadata, not runtime projection; create defaults to active, so
+        # the fixture must opt out before mutating membership.
         skillset = assert_success(
             client.post(
                 "/api/skillsets",
@@ -86,6 +88,12 @@ def test_diagnose_tools_mcp_format_runs_prompt_helpers(
             )
         )
         skill_set_id = skillset["data"]["id"]
+        deactivate = client.post(
+            "/api/skillsets/admin/set-skillset-active",
+            json={"env": "dev", "skillset_id": skill_set_id, "is_active": 0},
+        )
+        assert deactivate.status_code == 200, deactivate.text
+        assert deactivate.json().get("success") is True, deactivate.json()
         add_mcp = client.post(
             f"/api/skillsets/{skill_set_id}/mcps",
             params={

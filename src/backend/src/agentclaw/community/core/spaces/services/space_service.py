@@ -17,6 +17,7 @@ from agentclaw.community.core.spaces.models import (
     PersonalSpaceLookupRecord,
     SpaceRecord,
     SpaceScTeamRepairResult,
+    SpaceListScope,
     SpaceScTeamRepairStatus,
     SpaceSummaryRecord,
     SpaceType,
@@ -32,6 +33,8 @@ from agentclaw.community.plugin_api.staff_dept import (
     StaffProfileLookupError,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
+from agentclaw.community.core.spaces.space_service_protocol import SpaceServiceProtocol
 
 
 logger = get_logger()
@@ -43,7 +46,7 @@ logger = get_logger()
 _SC_SPACE_REF_SOURCE = "OCB"
 
 
-class SpaceService:
+class SpaceService(SpaceServiceProtocol):
     @inject
     def __init__(
         self,
@@ -57,7 +60,9 @@ class SpaceService:
 
     def _get_creator_user_name(self, *, user_id: str) -> str | None:
         try:
-            profile = self._staff_dept.get_profile_by_work_no(work_no=user_id)
+            profile = self._staff_dept.get_profile_by_work_no(
+                work_no=normalize_work_no_for_lookup(user_id)
+            )
         except StaffProfileLookupError:
             logger.warning(
                 "staff profile lookup failed; creating space without creator name",
@@ -246,6 +251,7 @@ class SpaceService:
         space_type: SpaceType | None,
         page_no: int,
         page_size: int,
+        scope: SpaceListScope = SpaceListScope.ALL,
     ) -> tuple[int, list[SpaceSummaryRecord]]:
         return self._repository.list_spaces(
             user_id=user_id,
@@ -254,4 +260,5 @@ class SpaceService:
             space_type=space_type.value if space_type is not None else None,
             offset=(page_no - 1) * page_size,
             limit=page_size,
+            scope=scope,
         )

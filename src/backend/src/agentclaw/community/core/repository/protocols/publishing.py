@@ -12,7 +12,11 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Protocol, Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishOperationRecord
+    from agentclaw.community.core.service_bot.repository.models import (
+        BotPublishLineagePage,
+        BotPublishRecord,
+        PublishOperationRecord,
+    )
 
 
 class BotPublishRepositoryProtocol(Protocol):
@@ -193,6 +197,22 @@ class BotPublishRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def list_lineage_candidates_page(
+        self,
+        *,
+        env: str,
+        after_id: int | None,
+        limit: int,
+    ) -> BotPublishLineagePage:
+        """Page live Service Bot records by immutable ascending publish id.
+
+        The implementation transparently re-inlines offloaded artifacts.  A
+        non-final page must carry ``next_cursor``; the final page must set
+        ``complete=True`` and omit it.
+        """
+        ...
+
+    @abstractmethod
     def get_latest_by_source_bot_id_and_owner_and_status(
         self,
         source_bot_id: str,
@@ -316,6 +336,21 @@ class BotPublishRepositoryProtocol(Protocol):
         ext: Dict[str, Any],
     ) -> Optional[BotPublishRecord]:
         """Atomically replace status and ext when both snapshots still match."""
+        ...
+
+    @abstractmethod
+    def compare_and_set_built_with_ext(
+        self,
+        *,
+        publish_id: int,
+        source_status: str,
+        target_status: str,
+        expected_ext: Optional[Dict[str, Any]],
+        ext: Dict[str, Any],
+        center_skill_uuids: Sequence[str],
+        env: str,
+    ) -> Optional[BotPublishRecord]:
+        """Commit a replayable Artifact while exact Center Skills stay online."""
         ...
 
     @abstractmethod

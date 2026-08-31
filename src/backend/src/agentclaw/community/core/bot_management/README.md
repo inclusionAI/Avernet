@@ -22,6 +22,7 @@ provides:
 consumes:
   - "DeviceAccessor"
   - "PassportPlugin"
+  - "CallerIdentityRepositoryProtocol"
   - "AuthRelationshipPlugin"
   - "DeviceService"
   - "ResourceService"
@@ -35,10 +36,10 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.identity    # MCP execution identity carried into the restart Passport refresh
   - agentclaw.community.core.repository.protocols.platform    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
-  - agentclaw.community.api.policy_service
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_app_grant.protocols    # sweep contract: deletion withdraws the bot's app authorizations
   - agentclaw.community.core.bot_startup_script.protocols    # sweep contract: deletion removes the bot's stored startup script
@@ -73,6 +74,7 @@ internal_dependencies:
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
   - agentclaw.community.utils.secret_utils
+  - agentclaw.community.core.access.policy_service_protocol  # Service API Protocol consumed by this module
 ```
 
 ### Change impact

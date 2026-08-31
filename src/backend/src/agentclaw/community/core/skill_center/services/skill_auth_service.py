@@ -15,12 +15,13 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillSetR
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
+from agentclaw.community.core.skill_center.skill_auth_service_protocol import SkillAuthServiceProtocol
 
 
 logger = get_logger()
 
 
-class SkillAuthService:
+class SkillAuthService(SkillAuthServiceProtocol):
     """Skill 维度的鉴权与权限申请服务。
 
     复用 MCPCenterPlugin.check_mcp_permission_detail 做单 MCP 鉴权,

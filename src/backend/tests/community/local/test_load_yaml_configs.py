@@ -108,6 +108,105 @@ class TestLoadYamlConfigsOverlaySelection:
         assert str(first_configs) in str(error.value)
         assert str(fallback_configs) in str(error.value)
 
+    def test_corp_overlay_merges_on_top(self, monkeypatch, tmp_path):
+        """Three-layer merge: base + community overlay + corp overlay.
+
+        The corp overlay (``{stem}-corp.yaml``) injects real credentials that
+        must not live in community source. When present alongside the config
+        pair, ``_load_yaml_configs`` deep-merges it on top.
+        """
+        overlay_name = "application-test.yaml"
+        configs = tmp_path / "configs"
+        configs.mkdir()
+        (configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+        corp_name = "application-test-corp.yaml"
+        (configs / corp_name).write_text(
+            "user_config:\n  overlay: corp-override\n  corp_secret: real-secret\n"
+        )
+
+        community_root = tmp_path / "community"
+        community_configs = community_root / "configs"
+        community_configs.mkdir(parents=True)
+        (community_configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (community_configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            yaml_provider,
+            "__file__",
+            str(community_root / "core" / "config" / "yaml_provider.py"),
+        )
+
+        result = _load_yaml_configs(overlay_name)
+        assert result["user_config"]["base"] == "base-val"
+        assert result["user_config"]["overlay"] == "corp-override"
+        assert result["user_config"]["corp_secret"] == "real-secret"
+
+    def test_corp_overlay_resolves_beside_community_subtree(self, monkeypatch, tmp_path):
+        """The corp overlay resolves as ``agentclaw/corp/configs``.
+
+        The case above finds the corp file via ``cwd/configs``, so it passes even
+        if the package-relative dir is computed wrongly. This one puts the corp
+        overlay *only* in the subtree beside community and leaves cwd without a
+        configs/ dir, pinning that second search dir.
+
+        It also pins that the derivation is layout-relative, not a fixed count of
+        parent hops: ``tmp_path`` is shallow, and a hardcoded ascent deep enough to
+        clear a real monorepo checkout raises ``IndexError`` here.
+        """
+        overlay_name = "application-test.yaml"
+        agentclaw_root = tmp_path / "agentclaw"
+        community_configs = agentclaw_root / "community" / "configs"
+        community_configs.mkdir(parents=True)
+        (community_configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (community_configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+
+        corp_configs = agentclaw_root / "corp" / "configs"
+        corp_configs.mkdir(parents=True)
+        (corp_configs / "application-test-corp.yaml").write_text(
+            "user_config:\n  overlay: corp-override\n  corp_secret: real-secret\n"
+        )
+
+        # cwd holds no configs/, so the community subtree is the only source.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            yaml_provider,
+            "__file__",
+            str(agentclaw_root / "community" / "core" / "config" / "yaml_provider.py"),
+        )
+
+        result = _load_yaml_configs(overlay_name)
+        assert result["user_config"]["base"] == "base-val"
+        assert result["user_config"]["overlay"] == "corp-override"
+        assert result["user_config"]["corp_secret"] == "real-secret"
+
+    def test_loads_without_corp_subtree_present(self, monkeypatch, tmp_path):
+        """A community-only build has no corp/ dir at all — that is not an error.
+
+        The corp search dirs are built before any overlay is read, so a failure to
+        resolve them breaks *every* config load rather than skipping the optional
+        corp layer.
+        """
+        overlay_name = "application-test.yaml"
+        agentclaw_root = tmp_path / "agentclaw"
+        community_configs = agentclaw_root / "community" / "configs"
+        community_configs.mkdir(parents=True)
+        (community_configs / "application.yaml").write_text("user_config:\n  base: base-val\n")
+        (community_configs / overlay_name).write_text("user_config:\n  overlay: overlay-val\n")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            yaml_provider,
+            "__file__",
+            str(agentclaw_root / "community" / "core" / "config" / "yaml_provider.py"),
+        )
+
+        result = _load_yaml_configs(overlay_name)
+        assert result["user_config"]["base"] == "base-val"
+        assert result["user_config"]["overlay"] == "overlay-val"
+        assert "corp_secret" not in result["user_config"]
+
 
 @pytest.fixture(autouse=True)
 def _community_database_url(monkeypatch):
@@ -133,7 +232,7 @@ class TestCommunityOverlaySelection:
         # bcs 块只在 community overlay 里（不在 base application.yaml）。
         bcs = user_config.get("bcs", {})
         assert bcs.get("user_path") == "/auth/user"
-        assert bcs.get("base_url", "").startswith("http")
+        assert bcs.get("base_url", "") == ""  # ${BCS_URL:-} defaults to empty
         # 证明基座确实被合并进来了：一个只在中性 base 里的块（device_provider）出现。
         assert user_config.get("device_provider") == "local"
         assert cfg.get("app_name") == "agentclaw"
@@ -233,7 +332,7 @@ class TestCommunityOverlaySelection:
         storage = user_config.get("object_storage", {})
         assert storage.get("backend") == "fs"
         assert storage.get("s3", {}).get("region") == "us-east-1"
-        assert user_config.get("secret", {}).get("env_prefix") == "AGENTCLAW_SECRET_"
+        assert user_config.get("secret", {}).get("env_prefix") == ""
 
     def test_base_application_yaml_has_no_data_infra_blocks(self):
         # 这四块必须只在 community overlay，不能泄漏进 corp/test 路径。

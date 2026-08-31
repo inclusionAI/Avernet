@@ -16,6 +16,9 @@ from agentclaw.community.core.models.skill import (
     SkillSet,
     SkillSetSkill,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
+    skill_mcp_dependency_codes,
+)
 from agentclaw.community.core.repository.implementations.skill_center.tables import (
     skill_installations,
 )
@@ -29,6 +32,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
     is_set_managed,
 )
+from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -58,6 +62,7 @@ class DirectInstallationCommands:
                 and skill.bolt_id != bot_id
             ):
                 raise SkillSetControlPlaneNotFoundError()
+            require_skill_online(skill)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             self._require_not_set_managed(
                 session,
@@ -83,7 +88,13 @@ class DirectInstallationCommands:
                 skill_id=int(skill.id),
             )
             session.flush()
-            return DesiredStateMutation({}, True, old)
+            # The Skill's MCP dependencies join the Bot's projected MCP set
+            # along with the Skill, so the command cannot scope its projection
+            # without them. Read under the lock this transaction already
+            # holds, as ``add_skill`` does.
+            return DesiredStateMutation(
+                {}, True, old, mcp_codes=skill_mcp_dependency_codes(skill)
+            )
 
     def uninstall_skill(
         self,
@@ -126,7 +137,18 @@ class DirectInstallationCommands:
                 > 0
             )
             session.flush()
-            return DesiredStateMutation({}, changed, old)
+            # Candidates for release, not a verdict — the projector subtracts
+            # the projected set, so a dependency something else still supplies
+            # survives. ``skill`` may legitimately be gone here, in which case
+            # there are no dependencies left to name.
+            return DesiredStateMutation(
+                {},
+                changed,
+                old,
+                mcp_codes=(
+                    skill_mcp_dependency_codes(skill) if changed else frozenset()
+                ),
+            )
 
     def _skill_referencing_set_ids(
         self, session, *, skill_id: int, skill_uuid: str | None

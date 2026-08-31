@@ -33,8 +33,10 @@ class RecordingDeviceSync:
     def __init__(self) -> None:
         self.calls: list[_CallRecord] = []
 
-    def sync_symlinks(self, symlinks):  # type: ignore[no-untyped-def]
-        self.calls.append(_CallRecord("sync_symlinks", (symlinks,), {}))
+    def sync_symlinks(self, symlinks, **kwargs):  # type: ignore[no-untyped-def]
+        # ``**kwargs`` so the double records the optional whole-artifact
+        # ``effective_mcps`` hint rather than rejecting it.
+        self.calls.append(_CallRecord("sync_symlinks", (symlinks,), kwargs))
         return {"success": True}
 
     def sync_bot_config(self, *args, **kwargs):  # type: ignore[no-untyped-def]

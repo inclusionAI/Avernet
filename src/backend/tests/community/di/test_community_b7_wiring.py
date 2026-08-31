@@ -15,6 +15,7 @@ from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
@@ -23,6 +24,9 @@ from agentclaw.community.plugins.community.mcp_auth import CommunityMCPAuthPlugi
 from agentclaw.community.plugins.community.mcp_center import CommunityMCPCenter
 from agentclaw.community.plugins.community.skill_center_client import (
     CommunitySkillCenterClient,
+)
+from agentclaw.community.plugins.community.skill_center_gateway import (
+    CommunitySkillCenterGateway,
 )
 from agentclaw.community.plugins.community.skill_repo_sync import CommunitySkillRepoSync
 from agentclaw.community.plugins.community.skill_scanner import NoopSkillScanner
@@ -51,6 +55,12 @@ def test_community_binds_mcp_auth(community_injector):
 def test_community_binds_skill_center_client(community_injector):
     resolved = community_injector.get(SkillCenterClient)
     assert isinstance(resolved, CommunitySkillCenterClient)
+    assert not isinstance(resolved, MockSeam)
+
+
+def test_community_binds_independent_skill_center_gateway(community_injector):
+    resolved = community_injector.get(SkillCenterGateway)
+    assert isinstance(resolved, CommunitySkillCenterGateway)
     assert not isinstance(resolved, MockSeam)
 
 

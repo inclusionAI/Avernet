@@ -36,11 +36,25 @@ class DeviceSync(Protocol):
     def sync_symlinks(
         self,
         symlinks: list[dict[str, str]],
+        *,
+        effective_mcps: Optional[list[dict[str, Any]]] = None,
+        desired_skills: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         """Sync symlink mappings to the device.
 
         Args:
             symlinks: List of ``{"source": ..., "target": ...}`` mappings.
+            effective_mcps: The bot's already-resolved effective MCP set, when
+                the caller has one. Only a whole-artifact device reads it —
+                such a device ignores ``symlinks`` and recomposes the bot's
+                whole configuration from the database, and this spares that
+                compose a re-read of a set the caller just resolved. An
+                implementation that consumes ``symlinks`` directly composes
+                nothing and ignores it. Callers pass it only when they have
+                it, so an implementation is never *required* to accept it.
+            desired_skills: Reader-resolved Skill assets. Whole-artifact
+                consumers use exact Center identity; symlink consumers ignore
+                this because ``symlinks`` already carries their mapping.
 
         Returns:
             Result dict with at least ``{"success": bool, "message": str}``.

@@ -467,6 +467,9 @@
       "properties": {
         "definition_id": { "$ref": "#/$defs/OpaqueId" },
         "definition_version": { "$ref": "#/$defs/NonNegativeInteger" },
+        "root_run_id": { "$ref": "#/$defs/OpaqueId" },
+        "rerun_of": { "$ref": "#/$defs/OpaqueId" },
+        "session_activation_count": { "$ref": "#/$defs/NonNegativeInteger" },
         "run_mode": { "$ref": "#/$defs/RunMode" },
         "status": { "const": "running" }
       }

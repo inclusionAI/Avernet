@@ -291,10 +291,21 @@ _NO_USER_DIMENSION = {
     # measures a dependency the path does not have.
     ("get", f"{PUBLIC_API_PREFIX}/bots/loadtest/hello"),
     # Task public surface: execute submits (owner in body), dashboard reads by
-    # task_id — neither scopes to a caller-supplied user_id. list does, so it
-    # is NOT here.
+    # task_id — neither scopes to a caller-supplied user_id. grant/revoke
+    # identify the operator from the verified principal (Cookie/Referer relayed
+    # to secbaas, the api-key held server-side), not a caller-supplied user_id.
+    # list does take a caller-supplied user_id filter, so it is NOT here.
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/execute"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/grant"),
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/revoke"),
+}
+
+# Read-only operations that accept a user_id as a caller-selected filter rather
+# than as the authenticated user's acting scope. They still require the query
+# parameter, but must not advertise the owner-mismatch 403.
+_USER_ID_FILTER_ONLY = {
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/list"),
 }
 
 #: Operations whose ``user_id`` is a directory filter, not the self-confirm
@@ -314,6 +325,9 @@ _DIRECTORY_USER_ID = {("get", f"{PUBLIC_API_PREFIX}/org/user")}
 # (the Join Request operation is mounted with the Space authorization errors).
 _AUTHENTICATED_SELF = {
     ("post", f"{PUBLIC_API_PREFIX}/bots/spaces/{{space_id}}/join-requests"),
+    # README resolves the acting user from the verified principal; callers do
+    # not get a second, steerable user_id query parameter.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/skills/{{skill_id}}/readme"),
 }
 
 #: Bot Logs is excluded for a different reason and must stay that way — see the
@@ -391,7 +405,15 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: publish-to-users route moved from /bots/{bot_id}/public-bcs to the external
 #: /collaboration/bots/{bot_uuid}/public, so one path-addressed {bot_id}
 #: operation became a {bot_uuid}-named one: path -1, none +1.
-_BOT_ID_PLACEMENT = {"path": 141, "query": 1, "none": 62}
+#:
+#: ``none`` then moved 62 → 63 with the owner-level routines aggregate
+#: (``GET /openapi/v1/bots/routines/all``): it lists the named user's whole
+#: fleet, so it addresses no single bot.
+#:
+#: The task grant/revoke operations also carry the target in ``bcs_bot_id``
+#: request-body fields rather than a ``bot_id`` parameter, adding two more
+#: operations without changing the path/query counts.
+_BOT_ID_PLACEMENT = {"path": 146, "query": 1, "none": 97}
 
 
 def _schema() -> dict:
@@ -435,6 +457,7 @@ def _user_scoped(path: str, method: str) -> bool:
         not path.startswith(_LOGS_PREFIX)
         and (method, path) not in _NO_USER_DIMENSION
         and (method, path) not in _AUTHENTICATED_SELF
+        and (method, path) not in _USER_ID_FILTER_ONLY
         and (method, path) not in _DIRECTORY_USER_ID
     )
 
@@ -449,6 +472,18 @@ def test_every_user_scoped_operation_requires_user_id_in_the_query():
         if parameter is None or parameter["in"] != "query" or not parameter["required"]:
             offenders.append(f"{method.upper()} {path} -> {parameter}")
     assert not offenders, f"operations not naming their user in the query: {offenders}"
+
+
+def test_filter_only_operations_require_user_id_without_owner_scope_403():
+    """Caller-selected filters remain required query parameters, not owner scopes."""
+    schema = _schema()
+    for method, path in _USER_ID_FILTER_ONLY:
+        operation = schema["paths"][path][method]
+        parameter = _param(operation, USER_ID_QUERY)
+        assert parameter is not None, f"{method.upper()} {path}"
+        assert parameter["in"] == "query", f"{method.upper()} {path}"
+        assert parameter["required"] is True, f"{method.upper()} {path}"
+        assert "403" not in operation["responses"], f"{method.upper()} {path}"
 
 
 def test_the_pinned_number_of_operations_take_it():
@@ -469,7 +504,8 @@ def test_the_pinned_number_of_operations_take_it():
     version reads/actions and edit-lock operations all act for an explicit user.
     The five bot-first Editors operations bring the total to 119, and the four
     render-screen operations bring the total to 123, and the read-only Node
-    inventory brings the current total to 124.
+    inventory brings the current total to 124. Caller identity context and MCP
+    call-type configuration add two more Bot-addressed, user-scoped operations.
     """
     taking = [
         1
@@ -493,10 +529,25 @@ def test_the_pinned_number_of_operations_take_it():
     # Bot editor requests add one. The BCS publish-to-users route moved from the
     # internal /bots/{bot_id}/public-bcs path to the external contract path
     # /collaboration/bots/{bot_uuid}/public (same op count, {bot_uuid} not {bot_id}).
-    # The task public surface adds one more: GET .../collaboration/tasks/list
-    # (execute/dashboard have no user dimension — see _NO_USER_DIMENSION).
     # Service publication version upgrade adds one Bot-addressed operation.
-    assert len(taking) == 182
+    # GET .../collaboration/tasks/list briefly counted here; it now takes
+    # ``user_id`` as a caller-selected filter with no owner-mismatch 403, so it
+    # moved to _USER_ID_FILTER_ONLY (asserted by its own test) and left this
+    # count: 182 → 181. execute/dashboard take no user_id at all — see
+    # _NO_USER_DIMENSION.
+    # Caller identity context and call-type update add two operations.
+    # Space Skill Grant management adds four Space-addressed operations,
+    # editor-request command adds one, and permanent Draft Edit Lease adds four.
+    # The owner-level routines aggregate (GET /bots/routines/all) adds one
+    # account-level operation. Phase 2 Group 1 adds fourteen Space-addressed
+    # creation/detail/Draft/Published-Version operations; none addresses a Bot,
+    # and each carries the explicit user dimension. The merged surface contains
+    # 207 operations. Phase 2 Group 3 Publication adds five Space-addressed
+    # operations, Group 4 adds three Bot-addressed Reference operations plus
+    # one account-level manual SC Public Sync operation, and Group 5 adds the
+    # Offline impact and command operations. All twelve are user-scoped,
+    # bringing the combined surface to 218.
+    assert len(taking) == 218
 
 
 def test_the_exempt_operations_take_none():

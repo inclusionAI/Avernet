@@ -4,9 +4,9 @@ use std::sync::{Arc, OnceLock};
 use async_trait::async_trait;
 use bcs_domain::{Attachment, NewMessage, SenderType};
 use bcs_protocol::{
-    Attachment as WireAttachment, BcsFrame, RequestFrame, build_chat_inject_frame,
-    build_chat_send_frame, build_direct_chat_inject_frame, build_direct_chat_send_frame,
-    build_session_key, now_ms,
+    Attachment as WireAttachment, BcsFrame, ChannelInfo, ChannelSource, RequestFrame,
+    apply_channel_info, build_chat_inject_frame, build_chat_send_frame,
+    build_direct_chat_inject_frame, build_direct_chat_send_frame, build_session_key, now_ms,
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
@@ -24,10 +24,9 @@ use bcs_service_api::{
     PersistentGroupSendCommand, PersistentGroupSendOutcome, ProviderStreamGrayList,
     RouteParticipantOverlay, RoutingCoreService, RoutingDecision, RoutingTarget, ServiceError,
     ServiceResult, SessionManagementService, SessionStatus, SystemMessageEvent,
-    SystemMessageService,
-    TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
-    TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration, WebSendCommand,
-    WebSendOutcome, backfill_bot_names,
+    SystemMessageService, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
+    TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
+    WebSendCommand, WebSendOutcome, backfill_bot_names,
     interceptor::{
         BlockReason, InterceptorChain, InterceptorDecision, MessageInterceptor, OutboundMessage,
     },
@@ -311,18 +310,17 @@ pub(crate) async fn try_persist_group_message(
         return Ok(None);
     };
     let created_at = now_ms();
-    let strategy_supports_message_event = if flow.event_record_factory.is_some()
-        && message_type == "chat"
-    {
-        flow.group.try_get(group_id).await?.is_some_and(|group| {
-            matches!(
-                group.group_strategy,
-                GroupStrategy::Chat | GroupStrategy::ManagerWorker
-            )
-        })
-    } else {
-        false
-    };
+    let strategy_supports_message_event =
+        if flow.event_record_factory.is_some() && message_type == "chat" {
+            flow.group.try_get(group_id).await?.is_some_and(|group| {
+                matches!(
+                    group.group_strategy,
+                    GroupStrategy::Chat | GroupStrategy::ManagerWorker
+                )
+            })
+        } else {
+            false
+        };
     let effective_session_id = if strategy_supports_message_event {
         match session_id.filter(|session_id| !session_id.is_empty()) {
             Some(session_id) => session_id.to_string(),
@@ -543,11 +541,8 @@ mod attachment_persistence_tests {
 
     #[test]
     fn mention_text_is_persisted_verbatim_with_structured_mentions() {
-        let persisted = persisted_inbound_content(
-            "@Driver please review",
-            None,
-            &["bot-driver".to_string()],
-        );
+        let persisted =
+            persisted_inbound_content("@Driver please review", None, &["bot-driver".to_string()]);
 
         assert_eq!(persisted["text"], "@Driver please review");
         assert_eq!(persisted["mentions"][0], "bot-driver");
@@ -558,7 +553,10 @@ mod attachment_persistence_tests {
     fn plain_text_without_attachments_or_mentions_stays_a_string() {
         let persisted = persisted_inbound_content("plain chat", None, &[]);
 
-        assert_eq!(persisted, serde_json::Value::String("plain chat".to_string()));
+        assert_eq!(
+            persisted,
+            serde_json::Value::String("plain chat".to_string())
+        );
     }
 }
 
@@ -570,7 +568,9 @@ pub(crate) async fn manager_worker_self_owner(
 ) -> Option<String> {
     let group = flow.group.get(group_id).await?;
     if group.group_strategy == GroupStrategy::ManagerWorker {
-        if let (Some(session_id), Some(session_mgmt)) = (session_id, flow.session_management.as_ref()) {
+        if let (Some(session_id), Some(session_mgmt)) =
+            (session_id, flow.session_management.as_ref())
+        {
             if let Ok(Some(session)) = session_mgmt.get(session_id).await {
                 if session.group_id == group_id {
                     if let Some(participant) = session
@@ -578,7 +578,8 @@ pub(crate) async fn manager_worker_self_owner(
                         .iter()
                         .find(|participant| participant.bot_uuid == sender_id)
                     {
-                        return (participant.is_bot() && participant.role == ParticipantRole::Worker)
+                        return (participant.is_bot()
+                            && participant.role == ParticipantRole::Worker)
                             .then(|| sender_id.to_string());
                     }
                 }
@@ -681,7 +682,12 @@ pub async fn handle_web_send(
         build_explicit_mention_decision(&group, &cmd.mentions, &cmd.message, &overlay)
     };
 
-    log_routing_digest(&cmd, &decision, MessageLogMode::FreeChat, route_source_for_web_send(&group, &cmd));
+    log_routing_digest(
+        &cmd,
+        &decision,
+        MessageLogMode::FreeChat,
+        route_source_for_web_send(&group, &cmd),
+    );
 
     let sender_display_name = preferred_sender_display_name(flow, &cmd).await;
     let from_bot_owner = from_bot_owner(flow, &cmd.from_actor_id).await;
@@ -724,40 +730,36 @@ pub async fn handle_web_send(
             metadata: None,
             attachments: None,
         };
-        let outbound_message = match apply_outbound_interceptors(
-            flow,
-            &cmd.group_id,
-            &outbound_candidate,
-            target,
-        )
-        .await
-        {
-            Ok(message) => message,
-            Err(reason) => {
-                log_bot_deliver_result(
-                    &cmd.group_id,
-                    cmd.session_id.as_deref(),
-                    &run_id,
-                    &target_bot_id,
-                    delivery_type,
-                    false,
-                    Some(reason.message.as_str()),
-                    Some("interceptor"),
-                );
-                delivery_results.push(delivery_result_summary(
-                    &target_bot_id,
-                    delivery_type,
-                    false,
-                    Some(reason.message.clone()),
-                ));
-                bot_deliveries.push(BotDeliveryResult {
-                    target_bot_id,
-                    delivered: false,
-                    error: Some(ServiceError::Unauthorized(reason.message)),
-                });
-                continue;
-            }
-        };
+        let outbound_message =
+            match apply_outbound_interceptors(flow, &cmd.group_id, &outbound_candidate, target)
+                .await
+            {
+                Ok(message) => message,
+                Err(reason) => {
+                    log_bot_deliver_result(
+                        &cmd.group_id,
+                        cmd.session_id.as_deref(),
+                        &run_id,
+                        &target_bot_id,
+                        delivery_type,
+                        false,
+                        Some(reason.message.as_str()),
+                        Some("interceptor"),
+                    );
+                    delivery_results.push(delivery_result_summary(
+                        &target_bot_id,
+                        delivery_type,
+                        false,
+                        Some(reason.message.clone()),
+                    ));
+                    bot_deliveries.push(BotDeliveryResult {
+                        target_bot_id,
+                        delivered: false,
+                        error: Some(ServiceError::Unauthorized(reason.message)),
+                    });
+                    continue;
+                }
+            };
         let delivery_target = match flow.registry.resolve_delivery_target(&target_bot_id).await {
             Ok(target) => target,
             Err(error) => {
@@ -805,12 +807,9 @@ pub async fn handle_web_send(
         // in the Phase-5 follow-up list (Modify semantics completeness).
 
         let delivery_kind = bot_delivery_kind(delivery_type);
-        let source_im_message_id = cmd
-            .source_im_message_id
-            .as_deref()
-            .filter(|message_id| {
-                delivery_type == DeliveryType::Send && !message_id.trim().is_empty()
-            });
+        let source_im_message_id = cmd.source_im_message_id.as_deref().filter(|message_id| {
+            delivery_type == DeliveryType::Send && !message_id.trim().is_empty()
+        });
         if let Some(message_id) = source_im_message_id {
             // Cache before delivery: a fast bot may emit its first response
             // before the delivery call itself has returned.
@@ -995,8 +994,7 @@ pub async fn handle_web_send(
             .targets
             .iter()
             .filter(|t| {
-                t.delivery_type == DeliveryType::Inject
-                    && decision.mentions.contains(&t.bot_uuid)
+                t.delivery_type == DeliveryType::Inject && decision.mentions.contains(&t.bot_uuid)
             })
             .filter_map(|t| {
                 overlay
@@ -1104,6 +1102,7 @@ pub async fn handle_group_chat(
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
+            channel_sender_identity: None,
             sender_conn_id: None,
             provider_bypass_headers: cmd.provider_bypass_headers,
         },
@@ -1231,28 +1230,33 @@ pub async fn handle_persistent_group_send(
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     };
     for target in &decision.targets {
-        let outbound = match apply_outbound_interceptors(flow, &cmd.group_id, &message, target).await
-        {
-            Ok(message) => message,
-            Err(reason) => {
-                warn!(
-                    session_id = %cmd.group_id,
-                    bot_uuid = %target.bot_uuid,
-                    interceptor = %reason.interceptor_id,
-                    code = %reason.code,
-                    "outbound message blocked by interceptor"
-                );
-                continue;
-            }
-        };
+        let outbound =
+            match apply_outbound_interceptors(flow, &cmd.group_id, &message, target).await {
+                Ok(message) => message,
+                Err(reason) => {
+                    warn!(
+                        session_id = %cmd.group_id,
+                        bot_uuid = %target.bot_uuid,
+                        interceptor = %reason.interceptor_id,
+                        code = %reason.code,
+                        "outbound message blocked by interceptor"
+                    );
+                    continue;
+                }
+            };
         routed_to.push(target.bot_uuid.clone());
 
         let run_id = uuid::Uuid::new_v4().to_string();
-        let delivery_target = match flow.registry.resolve_delivery_target(&target.bot_uuid).await {
+        let delivery_target = match flow
+            .registry
+            .resolve_delivery_target(&target.bot_uuid)
+            .await
+        {
             Ok(delivery_target) => delivery_target,
             Err(error) => {
                 warn!(
@@ -1597,6 +1601,7 @@ pub async fn handle_group_callback(
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
+        channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
     };
@@ -1623,32 +1628,37 @@ pub async fn handle_group_callback(
             metadata: cmd.metadata.clone(),
             attachments: None,
         };
-        let outbound_message =
-            match apply_outbound_interceptors(flow, &cmd.group_id, &synthetic_message, target).await
-            {
-                Ok(message) => message,
-                Err(reason) => {
-                    warn!(
-                        group_id = %cmd.group_id,
-                        target_bot_id = %target_bot_id,
-                        interceptor = %reason.interceptor_id,
-                        code = %reason.code,
-                        "group callback delivery blocked by interceptor chain"
-                    );
-                    delivery_results.push(delivery_result_summary(
-                        &target_bot_id,
-                        delivery_type,
-                        false,
-                        Some(reason.message.clone()),
-                    ));
-                    bot_deliveries.push(BotDeliveryResult {
-                        target_bot_id,
-                        delivered: false,
-                        error: Some(ServiceError::Forbidden(reason.message)),
-                    });
-                    continue;
-                }
-            };
+        let outbound_message = match apply_outbound_interceptors(
+            flow,
+            &cmd.group_id,
+            &synthetic_message,
+            target,
+        )
+        .await
+        {
+            Ok(message) => message,
+            Err(reason) => {
+                warn!(
+                    group_id = %cmd.group_id,
+                    target_bot_id = %target_bot_id,
+                    interceptor = %reason.interceptor_id,
+                    code = %reason.code,
+                    "group callback delivery blocked by interceptor chain"
+                );
+                delivery_results.push(delivery_result_summary(
+                    &target_bot_id,
+                    delivery_type,
+                    false,
+                    Some(reason.message.clone()),
+                ));
+                bot_deliveries.push(BotDeliveryResult {
+                    target_bot_id,
+                    delivered: false,
+                    error: Some(ServiceError::Forbidden(reason.message)),
+                });
+                continue;
+            }
+        };
 
         let delivery_target = match flow.registry.resolve_delivery_target(&target_bot_id).await {
             Ok(target) => target,
@@ -2145,10 +2155,8 @@ fn build_explicit_mention_decision(
     message: &str,
     overlay: &[RouteParticipantOverlay],
 ) -> RoutingDecision {
-    let overlay_map: std::collections::HashMap<&str, &RouteParticipantOverlay> = overlay
-        .iter()
-        .map(|o| (o.bot_uuid.as_str(), o))
-        .collect();
+    let overlay_map: std::collections::HashMap<&str, &RouteParticipantOverlay> =
+        overlay.iter().map(|o| (o.bot_uuid.as_str(), o)).collect();
 
     let mut valid_mentions: Vec<String> = Vec::new();
     let mut hidden_mentions: Vec<HiddenMentionInfo> = Vec::new();
@@ -2312,7 +2320,10 @@ pub(crate) fn apply_overlay_to_decision(
                 if target.delivery_type == DeliveryType::Send && forced_inject {
                     target.delivery_type = DeliveryType::Inject;
                     if row.status == ActorStatus::Hidden {
-                        let bot_name = row.bot_name.clone().unwrap_or_else(|| target.bot_uuid.clone());
+                        let bot_name = row
+                            .bot_name
+                            .clone()
+                            .unwrap_or_else(|| target.bot_uuid.clone());
                         decision.hidden_mentions.push(HiddenMentionInfo {
                             hidden_bot_id: target.bot_uuid.clone(),
                             hidden_bot_name: bot_name,
@@ -2324,7 +2335,12 @@ pub(crate) fn apply_overlay_to_decision(
         })
         .collect();
 
-    decision.mentions.retain(|m| !decision.hidden_mentions.iter().any(|h| h.hidden_bot_id == *m));
+    decision.mentions.retain(|m| {
+        !decision
+            .hidden_mentions
+            .iter()
+            .any(|h| h.hidden_bot_id == *m)
+    });
 
     decision
 }
@@ -2414,10 +2430,10 @@ async fn frame_for_target(
     } else {
         &[]
     };
-    match target.delivery_type {
+    let mut frame = match target.delivery_type {
         DeliveryType::Send => {
             if context_projection == ContextProjection::DirectBot {
-                return build_direct_chat_send_frame(
+                build_direct_chat_send_frame(
                     run_id,
                     &cmd.group_id,
                     content,
@@ -2429,31 +2445,32 @@ async fn frame_for_target(
                     &cmd.thinking,
                     protocol_version,
                     cmd.session_id.as_deref(),
-                );
+                )
+            } else {
+                let protocol_group = group_context_input(group);
+                build_chat_send_frame(
+                    run_id,
+                    &cmd.group_id,
+                    &protocol_group,
+                    content,
+                    &cmd.from_actor_id,
+                    sender_display_name,
+                    &decision.mentions,
+                    &target.bot_uuid,
+                    provider_tags,
+                    &wire_attachments,
+                    &cmd.thinking,
+                    is_self,
+                    protocol_version,
+                    from_bot_owner,
+                    group_type_wire(group.group_strategy),
+                    cmd.session_id.as_deref(),
+                )
             }
-            let protocol_group = group_context_input(group);
-            build_chat_send_frame(
-                run_id,
-                &cmd.group_id,
-                &protocol_group,
-                content,
-                &cmd.from_actor_id,
-                sender_display_name,
-                &decision.mentions,
-                &target.bot_uuid,
-                provider_tags,
-                &wire_attachments,
-                &cmd.thinking,
-                is_self,
-                protocol_version,
-                from_bot_owner,
-                group_type_wire(group.group_strategy),
-                cmd.session_id.as_deref(),
-            )
         }
         DeliveryType::Inject => {
             if context_projection == ContextProjection::DirectBot {
-                return build_direct_chat_inject_frame(
+                build_direct_chat_inject_frame(
                     run_id,
                     &cmd.group_id,
                     content,
@@ -2464,28 +2481,48 @@ async fn frame_for_target(
                     &wire_attachments,
                     protocol_version,
                     cmd.session_id.as_deref(),
-                );
+                )
+            } else {
+                let protocol_group = group_context_input(group);
+                build_chat_inject_frame(
+                    run_id,
+                    &cmd.group_id,
+                    &protocol_group,
+                    content,
+                    &cmd.from_actor_id,
+                    sender_display_name,
+                    &decision.mentions,
+                    &target.bot_uuid,
+                    provider_tags,
+                    &wire_attachments,
+                    is_self,
+                    protocol_version,
+                    from_bot_owner,
+                    group_type_wire(group.group_strategy),
+                    cmd.session_id.as_deref(),
+                )
             }
-            let protocol_group = group_context_input(group);
-            build_chat_inject_frame(
-                run_id,
-                &cmd.group_id,
-                &protocol_group,
-                content,
-                &cmd.from_actor_id,
-                sender_display_name,
-                &decision.mentions,
-                &target.bot_uuid,
-                provider_tags,
-                &wire_attachments,
-                is_self,
-                protocol_version,
-                from_bot_owner,
-                group_type_wire(group.group_strategy),
-                cmd.session_id.as_deref(),
-            )
         }
+    };
+    if let Some(identity) = cmd.channel_sender_identity.as_ref() {
+        let source = match identity.channel_type.as_str() {
+            "dingtalk" => ChannelSource::DingTalk,
+            "webui" => ChannelSource::WebUi,
+            _ => ChannelSource::Api,
+        };
+        apply_channel_info(
+            &mut frame,
+            ChannelInfo {
+                source,
+                user_id: Some(identity.user_id.clone()),
+                actor_id: Some(identity.actor_id.clone()),
+                actor_name: Some(identity.display_name.clone()),
+                thread_id: Some(cmd.group_id.clone()),
+                identity_forwarding: Some(true),
+            },
+        );
     }
+    frame
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2756,7 +2793,9 @@ fn echo_event_attachments(attachments: Option<&[Attachment]>) -> Option<Value> {
 }
 
 fn effective_message_log_session_id<'a>(group_id: &'a str, session_id: Option<&'a str>) -> &'a str {
-    session_id.filter(|value| !value.is_empty()).unwrap_or(group_id)
+    session_id
+        .filter(|value| !value.is_empty())
+        .unwrap_or(group_id)
 }
 
 fn delivery_type_slug(delivery_type: DeliveryType) -> &'static str {
@@ -2810,9 +2849,11 @@ fn log_routing_digest(
     let targets_summary: Vec<MessageLogTargetSummary> = decision
         .targets
         .iter()
-        .map(|target| MessageLogTargetSummary::new(&target.bot_uuid)
-            .with_delivery_type(delivery_type_slug(target.delivery_type))
-            .with_route_source(route_source))
+        .map(|target| {
+            MessageLogTargetSummary::new(&target.bot_uuid)
+                .with_delivery_type(delivery_type_slug(target.delivery_type))
+                .with_route_source(route_source)
+        })
         .collect();
 
     info!(

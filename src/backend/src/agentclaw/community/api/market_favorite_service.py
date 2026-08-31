@@ -1,62 +1,17 @@
-"""Service API contract for space-scoped market favorites."""
+"""Service API contract for space-scoped market favorites.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/market_favorites/market_favorite_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from abc import abstractmethod
-from typing import Protocol, TYPE_CHECKING, runtime_checkable
+from agentclaw.community.core.market_favorites.market_favorite_service_protocol import (
+    MarketFavoriteServiceProtocol,
+)
 
-if TYPE_CHECKING:
-    from agentclaw.community.core.market_favorites.models import (
-        FavoriteTargetType,
-        MarketSource,
-        MarketFavoriteRecord,
-    )
-
-
-@runtime_checkable
-class MarketFavoriteServiceProtocol(Protocol):
-    @abstractmethod
-    def add(
-        self,
-        *,
-        space_id: int,
-        actor_id: str,
-        market_source: MarketSource,
-        target_type: FavoriteTargetType,
-        target_code: str,
-    ) -> tuple[MarketFavoriteRecord, bool]: ...
-
-    @abstractmethod
-    def cancel(
-        self,
-        *,
-        space_id: int,
-        actor_id: str,
-        market_source: MarketSource,
-        target_type: FavoriteTargetType,
-        target_code: str,
-    ) -> bool: ...
-
-    @abstractmethod
-    def search(
-        self,
-        *,
-        space_id: int,
-        actor_id: str,
-        market_source: MarketSource | None,
-        target_type: FavoriteTargetType | None,
-        keyword: str | None,
-        page_no: int,
-        page_size: int,
-    ) -> tuple[int, list[MarketFavoriteRecord]]: ...
-
-    @abstractmethod
-    def find_favorited_codes(
-        self,
-        *,
-        space_id: int,
-        actor_id: str,
-        market_source: MarketSource,
-        target_type: FavoriteTargetType,
-        target_codes: list[str],
-    ) -> list[str]: ...
+__all__ = [
+    "MarketFavoriteServiceProtocol",
+]

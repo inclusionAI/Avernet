@@ -168,6 +168,9 @@ class ServiceLifecycleView(ServiceLifecyclePort):
         for bot_id, bot in bots_by_id.items():
             bot_pk = bot.get("id")
             records = records_by_pk[bot_pk] if isinstance(bot_pk, int) else []
+            has_draft = any(
+                record.status == PublishStatus.DRAFT.value for record in records
+            )
             live = max(
                 (
                     record
@@ -186,6 +189,7 @@ class ServiceLifecycleView(ServiceLifecyclePort):
                     internal_status=record.status,
                     actions=self._record_actions(record, records),
                     live_version=live.version if live else None,
+                    has_draft=has_draft,
                 )
                 for record in self._visible(records)
             )

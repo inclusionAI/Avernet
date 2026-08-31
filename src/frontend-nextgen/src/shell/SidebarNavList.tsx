@@ -1,0 +1,77 @@
+import { Button, IconButton } from '@/components/ui';
+import { cn } from '@/utils/cn';
+import type { NavigationArea, NavigationItem } from './navigation';
+import { SpaceSwitcher } from './SpaceSwitcher';
+
+interface SidebarNavListProps {
+  area: NavigationArea;
+  activePath: string;
+  items: NavigationItem[];
+  onNavigate: (path: string) => void;
+  /** true=仅图标列（用于 ≥lg 的折叠态）；false=带标题/文案的完整列表（用于 ≥lg 展开态与 <lg 抽屉）。 */
+  collapsed?: boolean;
+}
+
+/** 一级导航的内容本体（不含 `<aside>` 外壳）。由 AppSidebar 的内流外壳与 <lg 抽屉复用，保证两处一致。 */
+export function SidebarNavList({ area, activePath, items, onNavigate, collapsed = false }: SidebarNavListProps) {
+  const areaItems = items.filter((item) => item.area === area);
+
+  if (collapsed) {
+    return (
+      <div className="flex w-full flex-col items-center gap-2 pt-2">
+        {areaItems.map((item) => {
+          const Icon = item.icon;
+          const active = activePath.startsWith(item.path);
+          return (
+            <IconButton
+              key={item.id}
+              label={item.label}
+              className={cn(active && 'bg-[var(--color-primary-soft)] text-[var(--color-primary)]')}
+              icon={<Icon className="h-4 w-4" />}
+              onClick={() => onNavigate(item.path)}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <nav
+        aria-label={area === 'work' ? '工作导航' : '管理导航'}
+        className="app-scrollbar flex-1 overflow-y-auto px-3 py-3"
+      >
+        <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
+          {area === 'work' ? '工作' : '管理'}
+        </p>
+        <div className="space-y-1">
+          {areaItems.map((item) => {
+            const Icon = item.icon;
+            const active = activePath.startsWith(item.path);
+            return (
+              <Button
+                key={item.id}
+                variant="ghost"
+                className={cn(
+                  'h-11 w-full justify-start px-3 text-sm',
+                  active &&
+                    'bg-[var(--color-primary-soft)] text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]',
+                )}
+                leftIcon={<Icon className="h-[18px] w-[18px]" />}
+                onClick={() => onNavigate(item.path)}
+              >
+                {item.label}
+              </Button>
+            );
+          })}
+        </div>
+      </nav>
+      {area === 'manage' && (
+        <div className="mt-auto border-t border-[var(--color-border)] px-3 pb-3 pt-2">
+          <SpaceSwitcher />
+        </div>
+      )}
+    </>
+  );
+}

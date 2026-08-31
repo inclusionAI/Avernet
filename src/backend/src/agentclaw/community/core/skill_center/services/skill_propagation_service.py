@@ -2,11 +2,11 @@
 
 发布侧（七桃）完成状态机变更后调用此处即可，内部负责：
   1. 计算影响 Bot 范围（Phase 2：依赖 skill_uuid schema 落地后补全）
-  2. 触发 SkillCenterSyncService 拉取/清理 NAS 产物（upgrade 时调用 _sync_nas_artifact，异常仅记录不阻塞）
-  3. 对每个受影响 Bot 刷软链（已实装）
-  4. 幂等 + 写 propagation_log + 失败不阻塞发布事务
+  2. 对每个受影响 Bot 刷软链（已实装）
+  3. 幂等 + 写 propagation_log + 失败不阻塞发布事务
 
-NAS 拉取与软链下发已实装。Phase 2 补全影响 Bot 计算，依赖七桃的 skill_uuid / status schema 改动。
+SC Public exact-version materialization belongs to the G4 Reference/Sync seam;
+this legacy Service publication path must not trigger it.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
     from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.core.repository.protocols.skill_center import SkillPropagationLogRepository
+from agentclaw.community.core.skill_center.skill_propagation_service_protocol import SkillPropagationServiceProtocol
 
 logger = get_logger()
 
@@ -40,7 +41,7 @@ class PropagationResult:
     propagation_log_id: str | None = None
 
 
-class SkillPropagationService:
+class SkillPropagationService(SkillPropagationServiceProtocol):
     """发布态变更的运行时传播服务 —— 发布侧统一对外接口。
 
     七桃侧完成状态机变更后调用此处即可，不需要关心：
@@ -145,10 +146,6 @@ class SkillPropagationService:
             # Phase 1 骨架：返回空列表。
             # Phase 2 将补全：依赖七桃的 skill_uuid schema 落地（合约 §6.1 / §6.2）。
             affected_bots: list[dict] = self._find_affected_bots(skill_uuid, env)
-
-            # 3.5 触发 NAS 同步（仅 upgrade）
-            if action == "upgrade":
-                self._sync_nas_artifact(skill_uuid, env)
 
             # 4. 逐 Bot 刷软链（Phase 1 跳过，affected_bots 为空）
             failed_bot_ids: list[str] = []
@@ -267,27 +264,6 @@ class SkillPropagationService:
                 bot_id, skill_uuid, exc,
             )
             return False
-
-    def _sync_nas_artifact(self, skill_uuid: str, env: str) -> None:
-        """触发 NAS 产物同步（仅 upgrade 时调用）。失败仅记录，不阻塞软链刷新。"""
-        if self._sync_service is None:
-            logger.info(
-                "[SkillPropagation] sync_service unavailable, skip NAS sync: "
-                "skill_uuid=%s env=%s", skill_uuid, env,
-            )
-            return
-        try:
-            self._sync_service.force_sync(skill_uuid=skill_uuid, env=env)
-            logger.info(
-                "[SkillPropagation] NAS sync ok: skill_uuid=%s env=%s",
-                skill_uuid, env,
-            )
-        except Exception as exc:
-            logger.exception(
-                "[SkillPropagation] NAS sync failed (non-blocking): "
-                "skill_uuid=%s env=%s exc=%s",
-                skill_uuid, env, exc,
-            )
 
     def _notify_hot_reload(self, bot_id: str, skill_uuid: str) -> None:
         """通知 OpenClaw 热重载。

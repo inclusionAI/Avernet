@@ -6,6 +6,7 @@
 
 注册 TaskServiceProtocol / TaskLoopCallbackProtocol 供 http adapter 注入(Rule 14:DI composition root)。
 """
+
 from __future__ import annotations
 
 import os
@@ -15,11 +16,21 @@ from urllib.parse import urlparse
 from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.adapters.http.task.auth import (
-    CallbackAuthenticator, NoopCallbackAuthenticator,
+    CallbackAuthenticator,
+    NoopCallbackAuthenticator,
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+    TaskClaimJoinGate,
+    TaskClaimJoinGateProtocol,
+)
+from agentclaw.community.api.task.task_grant_service import (
+    TaskClaimGrantServiceProtocol,
+)
+from agentclaw.community.core.task.services.task_grant_service import TaskClaimGrantService
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.repository.protocols.task import (
@@ -34,14 +45,17 @@ from agentclaw.community.core.task.task_center.recovery_lifecycle import (
     TaskRecoveryLifecycle,
 )
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.callback_correlation import (
-    CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
+    CallbackCorrelationRegistry,
+    InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.task_runner.integration.ports import (
-    BcsClientPort, OpenApiBotPort,
+    BcsClientPort,
+    OpenApiBotPort,
 )
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.di.config import EconomyGovernanceConfig
 from agentclaw.community.di.profile import DeployProfile
 
@@ -58,9 +72,14 @@ class TaskModule(Module):
         binder.bind(TaskGraphService, to=TaskGraphService, scope=singleton)
         # task_loop inbound callback 服务的进程内可信默认绑定(社区分布)。
         # CORP/prod 的 HmacCallbackAuthenticator + 真实密钥由 corp adapter 覆写(经模块替换/子类)。
-        binder.bind(InMemoryCallbackCorrelationRegistry,
-                    to=InMemoryCallbackCorrelationRegistry, scope=singleton)
-        binder.bind(NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton)
+        binder.bind(
+            InMemoryCallbackCorrelationRegistry,
+            to=InMemoryCallbackCorrelationRegistry,
+            scope=singleton,
+        )
+        binder.bind(
+            NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
+        )
 
     @singleton
     @provider
@@ -68,7 +87,6 @@ class TaskModule(Module):
     def task_service(
         self,
         graph: TaskGraphService,
-        discover: BotDiscoverServiceProtocol,
         bot_public: BotPublicServiceProtocol,
         injector: Injector,
     ) -> TaskService:
@@ -80,8 +98,9 @@ class TaskModule(Module):
         - 其它(corp/prod)→ 不内联 BaaS/BCS 密钥;``_resolve_ports`` 返 ``(None,None)`` 后由
           ``injector.get(OpenApiBotPort)``/``injector.get(BcsClientPort)`` 取 corp overlay 经 DI 绑定的
           真实端口实现(community 未绑 → None,纯内核/HTTP-contract 路径退化为 stub)。
-        - discover(``BotDiscoverServiceProtocol``,来自 BotPublicModule)始终传入:
-          singlebox profile 换 ``SingleboxKeywordBotDiscover``(本地关键字搜索),其余用注入的 BCSFuse。
+        - discover: every profile reuses ``SingleboxKeywordBotDiscover`` over the local
+          public-Bot catalogue (name/owner-name LIKE). Task dispatch intentionally does
+          not invoke BCSFuse recommendation, whose availability must not decide routing.
         """
         try:
             graph.bind_repository(injector.get(TaskGraphRepositoryProtocol))
@@ -99,20 +118,30 @@ class TaskModule(Module):
         if bot is None:
             try:
                 bot = injector.get(OpenApiBotPort)
-                logger.info("[task][task-module] OpenApiBotPort DI 注入=%s",
-                            type(bot).__name__ if bot is not None else "None(provider 返 None)")
+                logger.info(
+                    "[task][task-module] OpenApiBotPort DI 注入=%s",
+                    type(bot).__name__ if bot is not None else "None(provider 返 None)",
+                )
             except Exception as exc:  # noqa: BLE001 未绑定 → 单 bot 派发端口缺省(打 WARNING 暴露)
-                logger.warning("[task][task-module] OpenApiBotPort DI 未绑定/解析失败 → 单 bot 端口缺省:%s: %s",
-                               type(exc).__name__, exc)
+                logger.warning(
+                    "[task][task-module] OpenApiBotPort DI 未绑定/解析失败 → 单 bot 端口缺省:%s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
                 bot = None
         if bcs is None:
             try:
                 bcs = injector.get(BcsClientPort)
-                logger.info("[task][task-module] BcsClientPort DI 注入=%s",
-                            type(bcs).__name__ if bcs is not None else "None(provider 返 None)")
+                logger.info(
+                    "[task][task-module] BcsClientPort DI 注入=%s",
+                    type(bcs).__name__ if bcs is not None else "None(provider 返 None)",
+                )
             except Exception as exc:  # noqa: BLE001 未绑定 → 协作群协调端口缺省(打 WARNING 暴露)
-                logger.warning("[task][task-module] BcsClientPort DI 未绑定/解析失败 → 协作群端口缺省:%s: %s",
-                               type(exc).__name__, exc)
+                logger.warning(
+                    "[task][task-module] BcsClientPort DI 未绑定/解析失败 → 协作群端口缺省:%s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
                 bcs = None
         logger.info(
             "[task][task-module] 端口装配结果 bot=%s bcs=%s → execution_backend 将%s真装配",
@@ -120,7 +149,7 @@ class TaskModule(Module):
             type(bcs).__name__ if bcs is not None else "None",
             "" if (bot is not None and bcs is not None) else "不(全退 Avernet 桩)",
         )
-        discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
+        discover_port = self._resolve_discover(bot_public=bot_public)
         # BBS 候选查询复用 BcnService 的统一 provider 身份(BcnConfig prod/pre,与 register/switch
         # provider-bot 同源)。任务模块作为普通消费方经 DI 注入 BcnService;纯内核/未装 BotManagement 的
         # DI 测试路径取不到 → None(BBS 按可恢复态跳过;singlebox 无凭据亦走 not-configured 静默)。
@@ -133,6 +162,7 @@ class TaskModule(Module):
             from agentclaw.community.core.task.task_runner.integration.bcs_bot_identity_resolver import (
                 BotServiceBcsBotIdentityResolver,
             )
+
             # BCS 建群时才需要跨模块解析 owner；纯内核/HTTP contract 测试不强制装配 Bot 模块。
             bcs_identity = BotServiceBcsBotIdentityResolver(
                 injector.get(BotServiceProtocol)
@@ -149,6 +179,8 @@ class TaskModule(Module):
             task_info_repo = None
         # 回投落库:TaskPersistenceModule 装了即取到(与 task_info_repo 同模块绑定);测试/纯内核
         # fixture 若未装则取不到 → 跳过回投落库(与 task_info_repo 缺省同语义,不阻断编排核推进)。
+        if task_info_repo is not None:
+            graph.bind_task_info_repository(task_info_repo)
         try:
             callback_repo = injector.get(TaskCallbackRepositoryProtocol)
         except Exception:  # noqa: BLE101 未绑定 → 跳过回投落库
@@ -168,6 +200,22 @@ class TaskModule(Module):
             bot_service = injector.get(BotServiceProtocol)
         except Exception:  # noqa: BLE101 未绑定 → dashboard 不附加 assignee 的 bot 归属/名
             bot_service = None
+        try:
+            staff_dept = injector.get(StaffDeptPlugin)
+        except Exception:  # noqa: BLE101 未绑定 → list 不附加 owner_user_name
+            staff_dept = None
+        # claim_on JOIN 灰度开关(默认关闭,HTTP 显式开启):经 task_claim_join_gate provider 解析
+        # (系统配置 KV,跨副本共享);未绑(纯内核/轻量测试)→ None → gate 关 → 派发不做 claim_on 交集(不回归)。
+        try:
+            task_auth_gate = injector.get(TaskClaimJoinGateProtocol)
+        except Exception as exc:  # noqa: BLE101 未绑 → gate None(fail-open 关)
+            logger.info(
+                "[task][task-module] TaskClaimJoinGateProtocol 未绑定 → claim_on JOIN 开关缺省(关):%s:"
+                " %s",
+                type(exc).__name__,
+                exc,
+            )
+            task_auth_gate = None
         # 回投 origin 复用 economy_governance.iframe_callback_url[_pre]:已在 ocb 按环境配成卡片回投
         # 完整 URL(形如 <backend-host>/api/economy/governance/card-callback),由 EconomyGovernanceConfig
         # 构造期按 env 选好 _pre/base(_is_pre)。取其 scheme://netloc 作 backend 自身访问 URL——既不内联
@@ -178,13 +226,32 @@ class TaskModule(Module):
             gov = injector.get(EconomyGovernanceConfig)
         except Exception:  # noqa: BLE101 EconomyGovernanceModule 未装(纯内核/轻量测试列) → 取不到
             gov = None
+        from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
+            BcsBotTokenProvider, NullBcsBotTokenProvider,
+        )
+        try:
+            bot_token_provider = injector.get(BcsBotTokenProvider)
+        except Exception:  # noqa: BLE101 未绑定时降级为无 token provider
+            bot_token_provider = NullBcsBotTokenProvider()
         return TaskService(
-            graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
-            bcn=bcn, bcs_identity=bcs_identity, task_info_repo=task_info_repo,
-            callback_repo=callback_repo, task_node_repo=task_node_repo,
+            graph,
+            harness=harness,
+            bot=bot,
+            bcs=bcs,
+            discover=discover_port,
+            bcn=bcn,
+            bcs_identity=bcs_identity,
+            task_info_repo=task_info_repo,
+            callback_repo=callback_repo,
+            task_node_repo=task_node_repo,
             task_node_run_info_repo=task_node_run_info_repo,
             bot_service=bot_service,
-            api_base_url=self._resolve_api_base_url(gov.iframe_callback_url if gov else ""),
+            staff_dept=staff_dept,
+            task_auth_gate=task_auth_gate,
+            api_base_url=self._resolve_api_base_url(
+                gov.iframe_callback_url if gov else ""
+            ),
+            bot_token_provider=bot_token_provider,
         )
 
     @singleton
@@ -192,6 +259,51 @@ class TaskModule(Module):
     @inject
     def task_service_protocol(self, svc: TaskService) -> TaskServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def task_claim_grant_service(
+        self, injector: Injector
+    ) -> TaskClaimGrantServiceProtocol:
+        """任务认领 Bot 授权服务:复用 corp overlay 绑定的 OpenApiBotPort(api_key/prefix/base_url,服务端持有)。
+
+        OpenApiBotPort 仅 corp/prod 经 overlay 绑定(community/singlebox 无 secbaas api-key)→ 未绑时
+        bot=None,grant/revoke 显式报错(本地路径本就不调 grant 端点)。cookie/referer 取自入站请求头(不在 DI)。
+        stateless:不落本地表,api-key 不暴露前端。"""
+        try:
+            bot = injector.get(OpenApiBotPort)
+            logger.info(
+                "[task][task-module] grant service OpenApiBotPort 注入=%s",
+                type(bot).__name__ if bot is not None else "None",
+            )
+        except Exception as exc:  # noqa: BLE101 community/singlebox 无 secbaas 绑定 → bot=None
+            logger.info(
+                "[task][task-module] grant service OpenApiBotPort 未绑定 → bot=None(%s)",
+                exc,
+            )
+            bot = None
+        return TaskClaimGrantService(bot=bot)
+
+    @singleton
+    @provider
+    def task_claim_join_gate(
+        self, injector: Injector
+    ) -> TaskClaimJoinGateProtocol:
+        """claim_on JOIN 灰度开关(默认关闭,HTTP 显式开启):复用 SystemConfigServiceProtocol KV(category=task)。
+
+        线上现有 OOB 预授权 bot 不依赖本开关(直按 assignee 派发);人工确认 claim_on 名单后再经 HTTP 开启。
+        SystemConfigServiceProtocol 经 system_config_module 全 profile 绑定;未绑(纯内核/轻量测试)→
+        config=None → gate.is_enabled() 恒 False(fail-open,不回归现有派发)。"""
+        try:
+            config = injector.get(SystemConfigServiceProtocol)
+        except Exception as exc:  # noqa: BLE101 system_config_module 未装 → config=None → gate 恒关
+            logger.info(
+                "[task][task-module] claim_on JOIN 开关 SystemConfigServiceProtocol 未绑定 → gate 恒关闭:%s",
+                exc,
+            )
+            config = None
+        return TaskClaimJoinGate(config=config)
 
     @singleton
     @provider
@@ -242,7 +354,10 @@ class TaskModule(Module):
         - singlebox(``DEPLOY_PROFILE``) → ``SINGLEBOX_BACKEND_URL``/localhost(本地直连);
         - 其余 → 解析 ``iframe_callback_url`` 的 origin;
         - 空值/非法(社区/dev/未配 economy_governance 或 EconomyGovernanceModule 未装)→ 回退 localhost:8888。"""
-        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() == DeployProfile.SINGLEBOX.value:
+        if (
+            os.environ.get("DEPLOY_PROFILE", "").strip().lower()
+            == DeployProfile.SINGLEBOX.value
+        ):
             return os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
         if not iframe_callback_url:
             return "http://localhost:8888"
@@ -261,7 +376,10 @@ class TaskModule(Module):
         - 其它(corp/prod 由 overlay 覆写)→ 不内联 BaaS/BCS(社区不发 corp 密钥),真实端口由 corp adapter
           完成装配。
         """
-        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
+        if (
+            os.environ.get("DEPLOY_PROFILE", "").strip().lower()
+            != DeployProfile.SINGLEBOX.value
+        ):
             return None, None
         from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
             LocalBcsTokenProvider,
@@ -272,6 +390,7 @@ class TaskModule(Module):
         from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
             SingleboxEngineAdapter,
         )
+
         backend = os.environ.get("SINGLEBOX_BACKEND_URL", "http://localhost:8888")
         user_id = os.environ.get("SINGLEBOX_USER_ID", "146836")
         bot = SingleboxEngineAdapter(backend_base_url=backend, user_id=user_id)
@@ -284,11 +403,15 @@ class TaskModule(Module):
             from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import (
                 _DoubleBcsClient,
             )
+
             _coop_pass_output = '{"success": true, "data": "coop_group_done"}'
             bcs = _DoubleBcsClient(
-                session_status="completed", session_output=_coop_pass_output,
-                sm_status="completed", sm_output=_coop_pass_output,
-                poll_once_then_terminal=True, terminal_after=1,
+                session_status="completed",
+                session_output=_coop_pass_output,
+                sm_status="completed",
+                sm_output=_coop_pass_output,
+                poll_once_then_terminal=True,
+                terminal_after=1,
             )
             # double 不连接真实 BCS，任务模式候选固定返回空列表。
         else:
@@ -298,19 +421,16 @@ class TaskModule(Module):
 
     @staticmethod
     def _resolve_discover(
-        *,
-        default: BotDiscoverServiceProtocol,
-        bot_public: BotPublicServiceProtocol,
+        *, bot_public: BotPublicServiceProtocol
     ) -> BotDiscoverServiceProtocol:
-        """选 bot 搜推端口(组合根按 ``DEPLOY_PROFILE`` 选实现)。
+        """Reuse the existing public-Bot LIKE candidate adapter for every profile.
 
-        - ``DEPLOY_PROFILE=singlebox`` → ``SingleboxKeywordBotDiscover``:本地关键字搜索(DB LIKE bot_name/
-          owner_name,``/api/v1/bot-public/search``);singlebox 无 BCSFuse 索引服务,本地新建 bot 上不了 recommend。
-        - 其它(corp/prod)→ 注入的 BCSFuse ``BotDiscoverService``(语义 recommend)。
+        ``SearchBasedDispatchStrategy`` performs jieba tokenization and calls this
+        port once per token. BCSFuse remains available to the separate public
+        Bot-discovery API, but is not a task dispatch dependency.
         """
-        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
-            return default
         from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
             SingleboxKeywordBotDiscover,
         )
+
         return SingleboxKeywordBotDiscover(bot_public)  # type: ignore[arg-type]

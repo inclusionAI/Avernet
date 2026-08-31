@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
 
 from injector import inject
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.repository.implementations.work_orders.bot_editor import (
@@ -13,6 +13,12 @@ from agentclaw.community.core.repository.implementations.work_orders.bot_editor 
 )
 from agentclaw.community.core.repository.implementations.work_orders.creation import (
     _WorkOrderCreationRepository,
+)
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillEditorRequestRepositoryProtocol,
+)
+from agentclaw.community.core.repository.implementations.work_orders.notification import (
+    _WorkOrderNotificationRepository,
 )
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
@@ -30,11 +36,12 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalContext,
+    WorkOrderApproverRecord,
     WorkOrderBizType,
     WorkOrderDetail,
     WorkOrderItemType,
     WorkOrderListItem,
-    WorkOrderNotificationDetail,
     WorkOrderNotificationBadgeSummary,
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
@@ -44,6 +51,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision,
     WorkOrderApproverStatus,
     WorkOrderEventCreatedResult,
+    reviewed_event_type_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
@@ -58,7 +66,11 @@ _ADMINISTRATOR_ROLES = ("ADMIN", "ADMINISTRATOR")
 
 class WorkOrderRepository(WorkOrderRepositoryProtocol):
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(
+        self,
+        db: DatabasePlugin,
+        skill_editor_requests: SkillEditorRequestRepositoryProtocol,
+    ) -> None:
         self._db = db
         self._WorkOrder = WorkOrderModel
         self._Notification = WorkOrderNotificationModel
@@ -66,7 +78,9 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         self._Space = SpaceModel
         self._Member = SpaceMemberModel
         self._bot_editor = _BotEditorWorkOrderRepository(db)
+        self._skill_editor = skill_editor_requests
         self._creation = _WorkOrderCreationRepository(db)
+        self._notifications = _WorkOrderNotificationRepository(db)
 
     @staticmethod
     def _new_no() -> str:
@@ -126,6 +140,56 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             env=env,
         )
 
+    def get_approval_context(
+        self, *, work_order_id: int, reviewer_user_id: str, env: str
+    ) -> WorkOrderApprovalContext:
+        with self._db.orm_session() as db:
+            order = (
+                db.query(self._WorkOrder)
+                .filter(self._WorkOrder.id == work_order_id, self._WorkOrder.env == env)
+                .one_or_none()
+            )
+            if order is None:
+                raise WorkOrderNotFoundError("work order not found")
+            approver = (
+                db.query(self._Approver)
+                .filter(
+                    self._Approver.work_order_id == work_order_id,
+                    self._Approver.approver_user_id == reviewer_user_id,
+                    self._Approver.env == env,
+                )
+                .one_or_none()
+            )
+            if approver is None:
+                raise WorkOrderAccessDeniedError("current user is not an approver")
+            source_event = (
+                db.query(self._Notification.event_type)
+                .filter(
+                    self._Notification.work_order_id == work_order_id,
+                    self._Notification.notification_category
+                    == NotificationCategory.APPROVAL.value,
+                    self._Notification.env == env,
+                )
+                .order_by(self._Notification.id.asc())
+                .first()
+            )
+            source_event_type = source_event[0] if source_event is not None else None
+            return WorkOrderApprovalContext(
+                work_order=order.to_record(),
+                approver=WorkOrderApproverRecord(
+                    id=approver.id,
+                    work_order_id=approver.work_order_id,
+                    approver_user_id=approver.approver_user_id,
+                    status=approver.status,
+                    review_remark=approver.review_remark,
+                    reviewed_at=approver.reviewed_at,
+                    env=approver.env,
+                    gmt_created=approver.gmt_created,
+                    gmt_modified=approver.gmt_modified,
+                ),
+                source_event_type=source_event_type,
+            )
+
     def process_approval(
         self,
         *,
@@ -135,8 +199,8 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         review_remark: str | None,
         env: str,
     ):
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
         with self._db.transactional_orm_session() as db:
+            now = db.execute(select(func.now())).scalar_one()
             order = (
                 db.query(self._WorkOrder)
                 .filter(self._WorkOrder.id == work_order_id, self._WorkOrder.env == env)
@@ -239,6 +303,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     self._Member(
                         space_id=space_id,
                         user_id=order.applicant_user_id,
+                        user_name=order.applicant_user_id,
                         role=SpaceRole.MEMBER.value,
                         status="ACTIVE",
                         env=env,
@@ -257,12 +322,28 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 },
                 synchronize_session=False,
             )
+            source_event = (
+                db.query(self._Notification.event_type)
+                .filter(
+                    self._Notification.work_order_id == work_order_id,
+                    self._Notification.notification_category
+                    == NotificationCategory.APPROVAL.value,
+                    self._Notification.env == env,
+                )
+                .order_by(self._Notification.id.asc())
+                .first()
+            )
+            source_event_type = source_event[0] if source_event is not None else None
+            reviewed_event_type = reviewed_event_type_for(
+                source_event_type=source_event_type,
+                biz_type=order.biz_type,
+            )
             db.add(
                 self._Notification(
                     work_order_id=work_order_id,
                     recipient_user_id=order.applicant_user_id,
                     notification_category=NotificationCategory.NOTICE.value,
-                    event_type=f"{order.biz_type}_REVIEWED",
+                    event_type=reviewed_event_type,
                     biz_type=order.biz_type,
                     biz_id=order.biz_id,
                     title=(
@@ -320,6 +401,25 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             bot_name=bot_name,
             owner_id=owner_id,
             space_id=space_id,
+            applicant_user_id=applicant_user_id,
+            applicant_name=applicant_name,
+            apply_reason=apply_reason,
+            env=env,
+        )
+
+    def create_skill_editor_request(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        applicant_user_id: str,
+        applicant_name: str,
+        apply_reason: str,
+        env: str,
+    ):
+        return self._skill_editor.create_skill_editor_request(
+            space_id=space_id,
+            skill_id=skill_id,
             applicant_user_id=applicant_user_id,
             applicant_name=applicant_name,
             apply_reason=apply_reason,
@@ -510,11 +610,19 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
             ):
                 return None
             space = None
+            space_reference = work_order.biz_id
+            if work_order.biz_type == WorkOrderBizType.SKILL_COLLABORATOR.value:
+                try:
+                    space_reference = str(
+                        int(json.loads(work_order.biz_data or "{}")["space_id"])
+                    )
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    space_reference = ""
             try:
                 space = (
                     db.query(self._Space)
                     .filter(
-                        self._Space.id == int(work_order.biz_id), self._Space.env == env
+                        self._Space.id == int(space_reference), self._Space.env == env
                     )
                     .one_or_none()
                 )
@@ -552,7 +660,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 can_approve=can_approve,
             )
 
-    def review_space_join(
+    def review_skill_editor_request(
         self,
         *,
         work_order_id: int,
@@ -562,8 +670,28 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         notification: WorkOrderNotificationDraft,
         env: str,
     ):
-        reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        return self._skill_editor.review_skill_editor_request(
+            work_order_id=work_order_id,
+            reviewer_user_id=reviewer_user_id,
+            review_remark=review_remark,
+            target_status=target_status,
+            notification=notification,
+            env=env,
+        )
+
+    def review_space_join(
+        self,
+        *,
+        work_order_id: int,
+        reviewer_user_id: str,
+        review_remark: str | None,
+        target_status: WorkOrderStatus,
+        notification: WorkOrderNotificationDraft,
+        applicant_user_name: str | None,
+        env: str,
+    ):
         with self._db.transactional_orm_session() as db:
+            reviewed_at = db.execute(select(func.now())).scalar_one()
             work_order = (
                 db.query(self._WorkOrder)
                 .filter(self._WorkOrder.id == work_order_id, self._WorkOrder.env == env)
@@ -675,6 +803,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     self._Member(
                         space_id=space_id,
                         user_id=work_order.applicant_user_id,
+                        user_name=applicant_user_name,
                         role=SpaceRole.MEMBER.value,
                         env=env,
                         created_by=reviewer_user_id,
@@ -749,182 +878,35 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
         env: str,
         mark_read: bool,
     ):
-        with self._db.orm_session() as db:
-            row = (
-                db.query(self._Notification)
-                .filter(
-                    self._Notification.id == notification_id,
-                    self._Notification.recipient_user_id == recipient_user_id,
-                    self._Notification.env == env,
-                )
-                .one_or_none()
-            )
-            if row is None:
-                return None
-            if mark_read and not row.is_read:
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
-                row.is_read = True
-                row.read_at = now
-                row.gmt_modified = now
-                db.flush()
-                db.refresh(row)
-            status = None
-            can_approve = False
-            if row.work_order_id is not None:
-                work_order = (
-                    db.query(self._WorkOrder)
-                    .filter(
-                        self._WorkOrder.id == row.work_order_id,
-                        self._WorkOrder.env == env,
-                    )
-                    .one_or_none()
-                )
-                if work_order is not None:
-                    status = WorkOrderStatus(work_order.status)
-                    is_approver = (
-                        db.query(self._Approver.id)
-                        .filter(
-                            self._Approver.work_order_id == work_order.id,
-                            self._Approver.approver_user_id == recipient_user_id,
-                            self._Approver.status
-                            == WorkOrderApproverStatus.PENDING.value,
-                            self._Approver.env == env,
-                        )
-                        .first()
-                        is not None
-                    )
-                    # Legacy Space-join rows created before the approver table
-                    # existed have no approver record. Keep their notification
-                    # detail usable until they are reviewed and backfilled.
-                    if (
-                        not is_approver
-                        and work_order.biz_type == WorkOrderBizType.SPACE_JOIN.value
-                    ):
-                        try:
-                            is_approver = (
-                                db.query(self._Member.id)
-                                .filter(
-                                    self._Member.space_id == int(work_order.biz_id),
-                                    self._Member.user_id == recipient_user_id,
-                                    self._Member.role.in_(_ADMINISTRATOR_ROLES),
-                                    self._Member.env == env,
-                                    self._Member.status == "ACTIVE",
-                                )
-                                .first()
-                                is not None
-                            )
-                        except (TypeError, ValueError):
-                            is_approver = False
-                    can_approve = bool(
-                        row.notification_category == NotificationCategory.APPROVAL.value
-                        and status is WorkOrderStatus.PENDING
-                        and is_approver
-                    )
-            return WorkOrderNotificationDetail(
-                notification=row.to_record(),
-                work_order_status=status,
-                can_approve=can_approve,
-            )
+        return self._notifications.get_notification(
+            notification_id=notification_id,
+            recipient_user_id=recipient_user_id,
+            env=env,
+            mark_read=mark_read,
+        )
 
     def count_unread(self, *, recipient_user_id: str, env: str) -> int:
-        with self._db.orm_session() as db:
-            return (
-                db.query(func.count(self._Notification.id))
-                .filter(
-                    self._Notification.recipient_user_id == recipient_user_id,
-                    self._Notification.is_read.is_(False),
-                    self._Notification.env == env,
-                )
-                .scalar()
-                or 0
-            )
+        return self._notifications.count_unread(
+            recipient_user_id=recipient_user_id, env=env
+        )
 
     def get_notification_badge_summary(
         self, *, recipient_user_id: str, env: str
     ) -> WorkOrderNotificationBadgeSummary:
-        with self._db.orm_session() as db:
-            unread_count = (
-                db.query(func.count(self._Notification.id))
-                .filter(
-                    self._Notification.recipient_user_id == recipient_user_id,
-                    self._Notification.is_read.is_(False),
-                    self._Notification.env == env,
-                )
-                .scalar()
-                or 0
-            )
-            unread_notice_count = (
-                db.query(func.count(self._Notification.id))
-                .filter(
-                    self._Notification.recipient_user_id == recipient_user_id,
-                    self._Notification.notification_category
-                    == NotificationCategory.NOTICE.value,
-                    self._Notification.is_read.is_(False),
-                    self._Notification.env == env,
-                )
-                .scalar()
-                or 0
-            )
-            pending_approval_count = (
-                db.query(func.count(func.distinct(self._WorkOrder.id)))
-                .join(
-                    self._Notification,
-                    self._Notification.work_order_id == self._WorkOrder.id,
-                )
-                .join(
-                    self._Approver,
-                    and_(
-                        self._Approver.work_order_id == self._WorkOrder.id,
-                        self._Approver.approver_user_id == recipient_user_id,
-                        self._Approver.status == WorkOrderApproverStatus.PENDING.value,
-                        self._Approver.env == env,
-                    ),
-                )
-                .filter(
-                    self._Notification.recipient_user_id == recipient_user_id,
-                    self._Notification.notification_category
-                    == NotificationCategory.APPROVAL.value,
-                    self._Notification.env == env,
-                    self._WorkOrder.status == WorkOrderStatus.PENDING.value,
-                    self._WorkOrder.env == env,
-                )
-                .scalar()
-                or 0
-            )
-            return WorkOrderNotificationBadgeSummary(
-                unread_count=unread_count,
-                pending_approval_count=pending_approval_count,
-                unread_notice_count=unread_notice_count,
-                badge_count=pending_approval_count + unread_notice_count,
-            )
+        return self._notifications.get_notification_badge_summary(
+            recipient_user_id=recipient_user_id, env=env
+        )
 
     def mark_notification_read(
         self, *, notification_id: int, recipient_user_id: str, env: str
     ):
-        result = self.get_notification(
+        return self._notifications.mark_notification_read(
             notification_id=notification_id,
             recipient_user_id=recipient_user_id,
             env=env,
-            mark_read=True,
         )
-        return result.notification if result is not None else None
 
     def mark_all_notifications_read(self, *, recipient_user_id: str, env: str) -> int:
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        with self._db.orm_session() as db:
-            return (
-                db.query(self._Notification)
-                .filter(
-                    self._Notification.recipient_user_id == recipient_user_id,
-                    self._Notification.is_read.is_(False),
-                    self._Notification.env == env,
-                )
-                .update(
-                    {
-                        self._Notification.is_read: True,
-                        self._Notification.read_at: now,
-                        self._Notification.gmt_modified: now,
-                    },
-                    synchronize_session=False,
-                )
-            )
+        return self._notifications.mark_all_notifications_read(
+            recipient_user_id=recipient_user_id, env=env
+        )

@@ -53,6 +53,7 @@ from agentclaw.community.core.economy.governance.services.notify_render_service 
     NotifyRenderService,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.economy.governance_service_protocol import GovernanceAdminServiceProtocol
 
 
 if TYPE_CHECKING:
@@ -130,7 +131,7 @@ class BulkOperationResult:
         return d
 
 
-class GovernanceAdminService:
+class GovernanceAdminService(GovernanceAdminServiceProtocol):
     """Backend admin operations — admin, bulk ops, review (§7.5)."""
 
     @inject

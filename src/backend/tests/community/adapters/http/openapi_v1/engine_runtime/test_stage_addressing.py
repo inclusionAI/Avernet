@@ -72,6 +72,7 @@ def _is_engine_runtime(path: str) -> bool:
 #: assertion below is what proves.
 _STAGE_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
+    ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
     ("get", "/openapi/v1/bots/{bot_id}/engine/config"),
     ("put", "/openapi/v1/bots/{bot_id}/engine/config"),
     ("get", "/openapi/v1/bots/{bot_id}/identity"),
@@ -86,6 +87,8 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 #: **not** take ``stage``: there is no runtime in question when you are
 #: recording who may reach a bot, or listing a bot's stored skills.
 _OWNER_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
+    ("patch", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("delete", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"),
@@ -95,6 +98,18 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/skills"),
     ("post", "/openapi/v1/bots/{bot_id}/skills"),
     ("post", "/openapi/v1/bots/{bot_id}/skills/upload-folder"),
+    (
+        "post",
+        "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    ),
+    (
+        "get",
+        "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    ),
+    (
+        "get",
+        "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}",
+    ),
     # The product chat reads address a bot that may be shared with the acting
     # user, so they take the owner half of ``(owner, bot_id)`` for the same
     # reason and with the same default — the caller's own bot.

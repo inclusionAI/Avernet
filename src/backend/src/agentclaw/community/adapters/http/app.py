@@ -107,6 +107,7 @@ from agentclaw.community.adapters.http.devices.router import router as device_ro
 from agentclaw.community.adapters.http.access.router import access_router as whitelist_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_list_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_router  # noqa: E402
+from agentclaw.community.adapters.http.org.router import router as org_user_router  # noqa: E402
 from agentclaw.community.adapters.http.expert_chat import router as expert_chats_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat import router as bot_chat_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat.otel_router import router as bot_chat_otel_router  # noqa: E402
@@ -124,11 +125,8 @@ from agentclaw.community.adapters.http.quality.router import router as quality_r
 # configuration routes and secures (tests/community/contracts/gateway/
 # test_public_namespace.py), so ``openapi_v1/task`` stays unmounted until that
 # configuration declares the collaboration domain.
-from agentclaw.community.adapters.http.task import (  # noqa: E402
-    task_callback_router,
-    task_internal_router,
-)
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router  # noqa: E402
+from agentclaw.community.adapters.http.work_orders.router import router as work_orders_http_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_render_screen.router import router as render_screen_router  # noqa: E402
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
@@ -147,10 +145,7 @@ from agentclaw.community.adapters.http.aicoding.data_proxy_router import router 
 from agentclaw.community.adapters.http.aicoding.workitem_noauth_router import router as workitem_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.enums.router import router as enums_router  # noqa: E402
 from agentclaw.community.adapters.http.resources import router as resources_router  # noqa: E402
-from agentclaw.community.adapters.http.session_resources import (  # noqa: E402
-    internal_router as session_resources_internal_router,
-    router as session_resources_router,
-)
+from agentclaw.community.adapters.http.session_resources import internal_router as session_resources_internal_router, router as session_resources_router  # noqa: E402
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
@@ -166,7 +161,7 @@ from agentclaw.community.adapters.http.service_bot.router_publish import router 
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
 # skills / skillsets / skill_scan / skill_auth 全部切换到新架构 (core/skill_center + device plugin 抽象)
-from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync  # noqa: E402
+from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync, installations_internal  # noqa: E402
 
 from fastapi_injector import attach_injector  # noqa: E402
 
@@ -363,6 +358,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpSyncError,
 )
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
+    McpPermissionDeniedError,
     LocalSkillNotReadyError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
@@ -401,6 +397,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # decides the wire, exactly as every other domain error already works.
     SkillSetControlPlaneNotFoundError: 404,
     SkillSetAccessDeniedError: 403,
+    McpPermissionDeniedError: 403,
     # 400, not 409: the published wire echoes the reason code as a rejected
     # request and clients already parse it that way. Kept as-is deliberately.
     SkillSetControlPlaneConflictError: 400,
@@ -429,12 +426,13 @@ def _trace_headers(request: Request) -> dict[str, str]:
     trace_id = getattr(request.state, "trace_id", None)
     return {"X-Trace-ID": trace_id} if trace_id else {}
 
-
 def _is_public_api(request: Request) -> bool:
-    """Whether this request belongs to the public surface's envelope contract."""
+    """Whether this request belongs to the public OpenAPI surface."""
     from agentclaw.community.adapters.http.openapi_v1.responses import is_public_api
-
     return is_public_api(request)
+
+def _uses_envelope_contract(request: Request) -> bool:
+    return _is_public_api(request) or request.url.path.rstrip("/") == "/api/v1/work-orders/events"
 
 
 def _public_error_envelope(
@@ -454,7 +452,7 @@ def _public_mapped_error(request: Request, exc: Exception) -> JSONResponse | Non
     ``None`` for every internal ``/api`` request too: those keep the
     ``{"detail": ...}`` shape their existing clients parse.
     """
-    if not _is_public_api(request):
+    if not _uses_envelope_contract(request):
         return None
     from agentclaw.community.adapters.http.openapi_v1.responses import (
         mapped_error_response,
@@ -503,7 +501,7 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
             exc.detail, params_suffix(request),
             exc_info=exc,
         )
-    if _is_public_api(request):
+    if _uses_envelope_contract(request):
         return _public_error_envelope(status, request)
     return JSONResponse(
         status_code=status,
@@ -559,7 +557,7 @@ async def _http_exception_handler(
     carry the actionable part: a 405 without its ``Allow`` list tells the caller
     they got it wrong but not what would be right.
     """
-    if _is_public_api(request):
+    if _uses_envelope_contract(request):
         # The public response is the bare reason phrase — ``exc.detail`` is
         # replaced, not returned — so this line is the only place the raised
         # detail survives. It also covers an ``HTTPException`` raised *inside* a
@@ -611,10 +609,9 @@ async def _validation_error_handler(
     Scoped by path: internal ``/api`` routes keep FastAPI's default shape, so
     existing clients are unaffected.
     """
-    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
     from agentclaw.community.adapters.http.openapi_v1.responses import error_response
 
-    if request.url.path.startswith(PUBLIC_API_PREFIX):
+    if _uses_envelope_contract(request):
         # "Invalid request" is all the caller gets, so which field failed is
         # only knowable from here. ``loc``/``type``/``msg`` only — the ``input``
         # each error carries is the caller's raw value, which is exactly the
@@ -885,7 +882,7 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
     # transport failures (httpx, socket) are not domain errors at all. This
     # backstop closes the class: a specific mapping still gives a precise
     # status, and anything else at least stays in the contract.
-    if _is_public_api(request):
+    if _uses_envelope_contract(request):
         return _public_error_envelope(500, request)
     return JSONResponse(
         status_code=500,
@@ -917,6 +914,7 @@ app.include_router(bot_chat_relation_router)  # bot-chat 业务任务关系写�
 app.include_router(whitelist_router)
 app.include_router(user_list_router)
 app.include_router(user_router)
+app.include_router(org_user_router)  # GET /api/v1/org/user?user_id=<work_no>: directory identity, signed-principal auth
 app.include_router(system_config_router)
 app.include_router(common_config_router)
 app.include_router(skills_pool_ops_router)
@@ -926,6 +924,7 @@ app.include_router(quality_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
+app.include_router(work_orders_http_router)
 try:
     app.include_router(render_screen_router)
     logger.info("[RenderScreen] Router registered successfully: prefix=%s", render_screen_router.prefix)
@@ -973,6 +972,7 @@ app.include_router(skill_category.router)
 app.include_router(verify.router)
 app.include_router(sync.router)
 app.include_router(batch_sync.router)
+app.include_router(installations_internal.internal_router)
 app.include_router(cron_router)
 app.include_router(cron_noauth_router)
 app.include_router(notify_router)

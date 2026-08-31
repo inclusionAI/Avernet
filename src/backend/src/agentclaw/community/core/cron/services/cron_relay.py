@@ -47,13 +47,14 @@ from agentclaw.community.core.cron.services.cron_runtime_operations import (
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.cron.cron_relay_service_protocol import CronRelayServiceProtocol
 
 logger = get_logger()
 
 _CRON_UNSUPPORTED_ENGINES = frozenset({"hermes"})
 
 
-class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
+class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin, CronRelayServiceProtocol):
     """Cron 中继服务 — 转发请求到各 Bot 的 Adapter"""
 
     @inject

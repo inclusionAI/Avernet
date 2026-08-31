@@ -15,7 +15,9 @@ from agentclaw.community.api.local_skill_upload_service import (
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import (
+    BotCollabLogRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.factories import (
     LocalSkillPackageStorage,
@@ -25,8 +27,11 @@ from agentclaw.community.core.skill_center.services.local_skill_upload_service i
     LocalSkillUploadService,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillSetRepository,
+)
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
@@ -80,7 +85,7 @@ class _RuntimeFactory:
     def create(self, **_kwargs):
         return self
 
-    def sync_runtime(self):
+    def project_skills(self):
         return True
 
     async def project(self, **_kwargs):
@@ -212,7 +217,7 @@ def _seed_uploadable_bot(world) -> None:
             world.get(SkillsPoolEditGuard),
             lambda: _DeviceContextResolverStub(),
             _RuntimeFactory(),
-            SkillParser(),
+            SkillPackageValidator(SkillParser()),
         ),
         scope=None,
     )
@@ -280,7 +285,12 @@ def multipart_upload_is_an_explicit_error_case():
         query_params={"user_id": _OWNER},
         headers={PRINCIPAL_HEADER: _principal()},
         form_data={"file_paths": '["SKILL.md"]'},
-        files=[("files", ("SKILL.md", b"name: folder-upload\ndescription: folder coverage\n"))],
+        files=[
+            (
+                "files",
+                ("SKILL.md", b"name: folder-upload\ndescription: folder coverage\n"),
+            )
+        ],
     ),
     seed=_seed_uploadable_bot,
     extra_assertions=(_assert_created_inactive_without_default_membership,),

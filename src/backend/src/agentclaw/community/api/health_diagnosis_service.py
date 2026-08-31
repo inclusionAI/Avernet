@@ -1,36 +1,17 @@
-"""Service API for Bot health diagnosis."""
+"""Service API for Bot health diagnosis.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/harness/health_diagnosis_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.harness.health_diagnosis_service_protocol import (
+    HealthDiagnosisServiceProtocol,
+)
 
-
-@runtime_checkable
-class HealthDiagnosisServiceProtocol(Protocol):
-    """Start and query persisted Bot health diagnoses."""
-
-    async def start(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        operator_id: str,
-    ) -> dict[str, Any]: ...
-
-    async def get_recent(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-    ) -> dict[str, Any] | None: ...
-
-    async def get_by_id(
-        self,
-        *,
-        scan_id: int,
-        bot_id: str,
-        owner_id: str,
-    ) -> dict[str, Any]: ...
-
-
-__all__ = ["HealthDiagnosisServiceProtocol"]
+__all__ = [
+    "HealthDiagnosisServiceProtocol",
+]

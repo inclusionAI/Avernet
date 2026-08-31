@@ -7,6 +7,7 @@ same ACL, desired-state UoW, and router seam as a real request.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import time
 
 import jwt
@@ -17,6 +18,14 @@ from agentclaw.community.api.direct_activation_service import (
 )
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
+)
+from agentclaw.community.api.skill_center_reference_service import (
+    ReferenceNotFoundError,
+    SkillCenterReferenceBatch,
+    SkillCenterReferenceItem,
+    SkillCenterReferencePage,
+    SkillCenterReferenceServiceProtocol,
+    SkillCenterReferenceStatus,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -80,9 +89,7 @@ class _Runtime:
     async def snapshot_skill_mappings(self, **_kwargs):
         return ()
 
-    async def project(
-        self, *, bot_id: str, owner_id: str, retired_mappings=()
-    ) -> None:
+    async def project(self, *, bot_id: str, owner_id: str, **_kwargs) -> None:
         self.calls.append((bot_id, owner_id))
 
 
@@ -214,10 +221,74 @@ def _seed_active(world) -> None:
         )
 
 
+def _seed_inactive(world) -> None:
+    """Seed a Set and switch it off — the only shape DELETE accepts.
+
+    ``create_set`` persists ``is_active=True``, and an active Set cannot be
+    deleted (that is ``rejects_active_set``, the error case next door). So the
+    happy path deactivates first rather than relying on how a Set is born.
+    """
+    _seed(world)
+    with avernet_tenant_scope(_TENANT):
+        world.get(CapabilityDesiredStateRepositoryProtocol).set_skill_set_active(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            set_id="1",
+            active=False,
+            engine_type="openclaw",
+        )
+
+
 def _assert_reconciled(_response, world) -> None:
     assert world.get(SkillSetManagementServiceProtocol)._runtime.calls == [
         (_BOT_ID, _OWNER)
     ]
+
+
+class _ReferenceService:
+    @staticmethod
+    def _item() -> SkillCenterReferenceItem:
+        now = datetime(2026, 8, 30, tzinfo=UTC)
+        return SkillCenterReferenceItem(
+            reference_id="reference-1",
+            request_id="request-1",
+            skill_set_id="1",
+            skill_code="public-skill",
+            sc_version_number=None,
+            status=SkillCenterReferenceStatus.QUEUED,
+            skill_id=None,
+            error_code=None,
+            error_message=None,
+            gmt_created=now,
+            gmt_modified=now,
+        )
+
+    def create(self, **kwargs) -> SkillCenterReferenceBatch:
+        return SkillCenterReferenceBatch(
+            request_id="request-1",
+            bot_id=kwargs["bot_id"],
+            owner_id=kwargs["owner_id"],
+            skill_set_id=kwargs["skill_set_id"],
+            actor_id=kwargs["actor_id"],
+            items=(self._item(),),
+        )
+
+    def list(self, **_kwargs) -> SkillCenterReferencePage:
+        return SkillCenterReferencePage(total=1, items=(self._item(),))
+
+    def get(self, **kwargs) -> SkillCenterReferenceItem:
+        if kwargs["reference_id"] != "reference-1":
+            raise ReferenceNotFoundError("not found")
+        return self._item()
+
+
+def _seed_reference(world) -> None:
+    _seed(world)
+    world.injector.binder.bind(
+        SkillCenterReferenceServiceProtocol,
+        to=_ReferenceService(),
+        scope=None,
+    )
 
 
 def _case(
@@ -250,6 +321,112 @@ def _case(
 
 
 @_case(
+    "POST",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    "accepts_reference_batch",
+    ExpectSuccess(
+        status=202,
+        json_contains={
+            "code": 202000,
+            "data": {
+                "request_id": "request-1",
+                "reference_ids": ["reference-1"],
+            },
+        },
+    ),
+    seed=_seed_reference,
+    headers={**_HEADERS, "Idempotency-Key": "reference-command"},
+    json_body={"skill_codes": ["public-skill"]},
+)
+def create_references_happy():
+    pass
+
+
+@_case(
+    "POST",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    "missing_idempotency_key",
+    ExpectError(status=422),
+    seed=_seed_reference,
+    json_body={"skill_codes": ["public-skill"]},
+)
+def create_references_error():
+    pass
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    "lists_persisted_references",
+    ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "total": 1,
+                "items": [
+                    {"reference_id": "reference-1", "status": "QUEUED"}
+                ],
+            },
+        },
+    ),
+    seed=_seed_reference,
+)
+def list_references_happy():
+    pass
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    "unauthenticated",
+    ExpectError(status=401),
+    seed=_seed_reference,
+    headers={},
+)
+def list_references_error():
+    pass
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}",
+    "gets_persisted_reference",
+    ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"reference_id": "reference-1", "skill_code": "public-skill"},
+        },
+    ),
+    seed=_seed_reference,
+    path_params={
+        "bot_id": _BOT_ID,
+        "set_id": "1",
+        "reference_id": "reference-1",
+    },
+)
+def get_reference_happy():
+    pass
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}",
+    "missing_reference",
+    ExpectError(status=404),
+    seed=_seed_reference,
+    path_params={
+        "bot_id": _BOT_ID,
+        "set_id": "1",
+        "reference_id": "missing",
+    },
+)
+def get_reference_error():
+    pass
+
+
+@_case(
     "GET",
     "/openapi/v1/bots/{bot_id}/skill-sets",
     "lists_sets",
@@ -275,8 +452,8 @@ def list_sets_error():
 @_case(
     "POST",
     "/openapi/v1/bots/{bot_id}/skill-sets",
-    "creates_inactive_set",
-    ExpectSuccess(status=201, json_contains={"data": {"is_active": False}}),
+    "creates_active_set",
+    ExpectSuccess(status=201, json_contains={"data": {"is_active": True}}),
     json_body={"name": "Created"},
     headers={**_HEADERS, "Idempotency-Key": "create-set"},
 )
@@ -373,6 +550,7 @@ def update_set_error():
     "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}",
     "deletes_inactive_set",
     ExpectSuccess(status=200, json_contains={"data": {"deleted": True}}),
+    seed=_seed_inactive,
 )
 def delete_set_happy():
     pass
@@ -508,8 +686,55 @@ def _seed_mcp_member(world) -> None:
             owner_id=_OWNER,
             set_id="1",
             server_code="mcp.test",
+            name="Test MCP",
+            description=None,
+            icon=None,
             engine_type="openclaw",
         )
+
+
+def _seed_mcp_catalog(world) -> None:
+    world.get(MCPCenterPlugin).set_override(
+        "get_mcp_detail",
+        lambda server_code: {
+            "serverCode": server_code,
+            "name": "Dima MCP",
+            "description": "Dima workflow tools",
+            "icon": "https://example.test/dima.png",
+        },
+    )
+    _seed(world)
+
+
+def _assert_mcp_catalog_metadata_persisted(_response, world) -> None:
+    # Read through the control-plane service, whose list_mcps hands back the
+    # membership rows verbatim — so this asserts what was persisted, not what
+    # the request echoed back.
+    with avernet_tenant_scope(_TENANT):
+        assert world.get(SkillSetManagementServiceProtocol).list_mcps(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            user_id=_OWNER,
+            set_id="1",
+        ) == [
+            {
+                "id": "1",
+                "server_code": "mcp.test",
+                "name": "Dima MCP",
+                "description": "Dima workflow tools",
+                "icon": "https://example.test/dima.png",
+            }
+        ]
+
+
+def _assert_no_mcp_membership(_response, world) -> None:
+    with avernet_tenant_scope(_TENANT):
+        assert world.get(SkillSetManagementServiceProtocol).list_mcps(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            user_id=_OWNER,
+            set_id="1",
+        ) == []
 
 
 @_case("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps", "lists_mcps", ExpectSuccess(status=200, json_contains={"data": []}))
@@ -522,8 +747,31 @@ def list_mcps_error():
     pass
 
 
-@_case("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}", "adds_mcp", ExpectSuccess(status=200, json_contains={"data": {"changed": True}}))
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "adds_mcp_with_catalog_metadata",
+    ExpectSuccess(status=200, json_contains={"data": {"changed": True}}),
+    seed=_seed_mcp_catalog,
+    extra=(_assert_mcp_catalog_metadata_persisted,),
+)
 def add_mcp_happy():
+    pass
+
+
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "rejects_missing_mcp_catalog_entry",
+    ExpectError(status=404),
+    path_params={
+        "bot_id": _BOT_ID,
+        "set_id": "1",
+        "server_code": "mcp.unknown",
+    },
+    extra=(_assert_no_mcp_membership,),
+)
+def add_missing_mcp_error():
     pass
 
 

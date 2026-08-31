@@ -13,15 +13,15 @@ Covers lines not exercised by test_task_discovery_unit.py:
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
-    DISCOVERY_LOCK_TTL_SECONDS,
+)
+from agentclaw.community.core.task.task_discovery.discovered_task_models import (
+    DiscoveredTaskModel,
 )
 from agentclaw.community.core.task.task_discovery.lock_models import (
     TaskDiscoveryLockRecord,
@@ -34,15 +34,16 @@ from agentclaw.community.core.task.task_discovery.session_initiator import (
     CronRelaySessionInitiator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
-    SqliteTaskReader,
-    init_discovered_tasks_db,
+    OrmTaskReader,
 )
 from agentclaw.community.plugin_api.notify_sender import (
     NotifyMessage,
 )
 from agentclaw.community.plugins.community.notify_sender import (
     CommunityNotifySender,
+    DingTalkCredentialHolder,
     DingTalkNotifySender,
+    DingTalkYamlHolder,
     _env,
 )
 
@@ -153,6 +154,57 @@ class TestDingTalkNotifySender:
         dt = DingTalkNotifySender(CommunityNotifySender())
         msg = NotifyMessage(title="t", body="b", recipient="r")  # no extra
         assert dt._send_dingtalk_card(msg) is None
+
+    def test_resolve_prefers_api_holder(self):
+        """_resolve returns from DingTalkCredentialHolder when set (line 169)."""
+        DingTalkCredentialHolder.set("ak", "sk", "rc", "tpl")
+        try:
+            assert DingTalkNotifySender._resolve("ak_id", "NOPE_AK", "NOPE_AK2") == "ak"
+        finally:
+            DingTalkCredentialHolder.clear()
+
+    def test_resolve_prefers_yaml_holder_over_env(self, monkeypatch):
+        """_resolve returns from DingTalkYamlHolder when API holder is empty."""
+        DingTalkCredentialHolder.clear()
+        DingTalkYamlHolder.set({"ak_id": "yaml-ak", "empty_val": ""})
+        try:
+            assert DingTalkYamlHolder.get("ak_id") == "yaml-ak"
+            assert DingTalkYamlHolder.get("empty_val") == ""
+            assert DingTalkNotifySender._resolve(
+                "ak_id", "TASK_DISCOVERY_DINGTALK_AK_ID", "SINGLEBOX_DINGTALK_AK_ID"
+            ) == "yaml-ak"
+        finally:
+            DingTalkYamlHolder.clear()
+
+
+# ===========================================================================
+# DingTalkYamlHolder + DingTalkCredentialHolder
+# ===========================================================================
+
+class TestDingTalkHolders:
+    """Cover holder set/get/clear paths."""
+
+    def test_yaml_holder_set_filters_empty_values(self):
+        """DingTalkYamlHolder.set() filters out empty-string values (line 66-68)."""
+        DingTalkYamlHolder.set({"ak_id": "val", "empty": "", "none_val": None})
+        assert DingTalkYamlHolder.get("ak_id") == "val"
+        assert DingTalkYamlHolder.get("empty") == ""
+        assert DingTalkYamlHolder.get("none_val") == ""
+        DingTalkYamlHolder.clear()
+
+    def test_yaml_holder_clear_resets_creds(self):
+        """DingTalkYamlHolder.clear() resets to empty (line 79)."""
+        DingTalkYamlHolder.set({"ak_id": "val"})
+        assert DingTalkYamlHolder.get("ak_id") == "val"
+        DingTalkYamlHolder.clear()
+        assert DingTalkYamlHolder.get("ak_id") == ""
+
+    def test_credential_holder_clear_resets_creds(self):
+        """DingTalkCredentialHolder.clear() resets to empty."""
+        DingTalkCredentialHolder.set("ak", "sk", "rc", "tpl")
+        assert DingTalkCredentialHolder.get("ak_id") == "ak"
+        DingTalkCredentialHolder.clear()
+        assert DingTalkCredentialHolder.get("ak_id") == ""
 
 
 # ===========================================================================
@@ -299,26 +351,52 @@ def test_build_discovery_prompt_empty_acceptances():
 
 
 # ===========================================================================
-# _row_to_task with invalid JSON acceptances
+# DiscoveredTaskModel.to_domain with invalid JSON acceptances
 # ===========================================================================
 
-def test_row_to_task_invalid_acceptances_json(tmp_path):
-    """_row_to_task falls back to [] when acceptances is not valid JSON."""
-    db_path = str(tmp_path / "test_bad_acceptances.db")
-    init_discovered_tasks_db(db_path, [
-        {
-            "task_id": "t-bad",
-            "bot_id": "bot-1",
-            "owner_id": "owner-1",
-            "dt": _DT,
-            "title": "BadTask",
-            "instruction": "desc",
-            "background": "bg",
-            "discovery_basis": "basis",
-            "acceptances": "not-valid-json{{",
-        }
-    ])
-    reader = SqliteTaskReader(db_path)
+def test_orm_reader_invalid_acceptances_json():
+    """to_domain falls back to [] when acceptances column has non-JSON text."""
+    from contextlib import contextmanager
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from agentclaw.community.core.base import Base
+    from agentclaw.community.core.task.task_discovery.discovered_task_models import (  # noqa: F401
+        DiscoveredTaskModel,
+    )
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False)
+
+    # Insert a row with invalid JSON in acceptances column directly
+    db_session = factory()
+    row = DiscoveredTaskModel(
+        task_id="t-bad",
+        bot_id="bot-1",
+        owner_id="owner-1",
+        dt=_DT,
+        title="BadTask",
+        instruction="desc",
+        background="bg",
+        discovery_basis="basis",
+        acceptances="not-valid-json{{",
+    )
+    db_session.add(row)
+    db_session.commit()
+    db_session.close()
+
+    class _TestDB:
+        @contextmanager
+        def orm_session(self):
+            s = factory()
+            try:
+                yield s
+                s.commit()
+            finally:
+                s.close()
+
+    reader = OrmTaskReader(_TestDB())
     tasks = reader.read_pending_tasks_for_bot("bot-1", "owner-1", _DT)
     assert len(tasks) == 1
     assert tasks[0].acceptances == []
@@ -364,6 +442,78 @@ class TestCommunityNotifyModule:
         )
         DingTalkCredentialHolder.clear()
         assert DingTalkNotifySender._configured() is False
+
+    def test_notify_sender_loads_yaml_creds_and_frontend_url(self, monkeypatch):
+        """DI reads task_discovery_dingtalk block from YAML config and sets
+        DingTalkYamlHolder + FrontendUrlHolder (notify.py lines 40-47)."""
+        from agentclaw.community.di.modules.infrastructure.community.notify import (
+            CommunityNotifyModule,
+        )
+        from agentclaw.community.di.modules import config_module
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
+        )
+
+        DingTalkYamlHolder.clear()
+        FrontendUrlHolder.set("")
+
+        fake_cfg = {
+            "ak_id": "yaml-ak",
+            "ak_secret": "yaml-sk",
+            "frontend_url": "http://fe.example.com",
+        }
+        with patch.object(config_module, "_block", return_value=fake_cfg):
+            mod = CommunityNotifyModule()
+            sender = mod._notify_sender()
+
+        assert isinstance(sender, DingTalkNotifySender)
+        assert DingTalkYamlHolder.get("ak_id") == "yaml-ak"
+        assert DingTalkYamlHolder.get("ak_secret") == "yaml-sk"
+        assert FrontendUrlHolder.get() == "http://fe.example.com"
+
+        DingTalkYamlHolder.clear()
+        FrontendUrlHolder.set("")
+
+    def test_notify_sender_skips_frontend_url_when_absent(self, monkeypatch):
+        """DI sets DingTalkYamlHolder but skips FrontendUrlHolder when
+        frontend_url is absent (notify.py line 43 if-branch not taken)."""
+        from agentclaw.community.di.modules.infrastructure.community.notify import (
+            CommunityNotifyModule,
+        )
+        from agentclaw.community.di.modules import config_module
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
+        )
+
+        DingTalkYamlHolder.clear()
+        FrontendUrlHolder.set("")
+
+        fake_cfg = {"ak_id": "yaml-ak"}
+        with patch.object(config_module, "_block", return_value=fake_cfg):
+            mod = CommunityNotifyModule()
+            sender = mod._notify_sender()
+
+        assert isinstance(sender, DingTalkNotifySender)
+        assert DingTalkYamlHolder.get("ak_id") == "yaml-ak"
+        assert FrontendUrlHolder.get() == ""
+
+        DingTalkYamlHolder.clear()
+
+    def test_notify_sender_skips_yaml_when_block_empty(self, monkeypatch):
+        """DI skips DingTalkYamlHolder.set when _block returns empty (line 39
+        if-branch not taken)."""
+        from agentclaw.community.di.modules.infrastructure.community.notify import (
+            CommunityNotifyModule,
+        )
+        from agentclaw.community.di.modules import config_module
+
+        DingTalkYamlHolder.clear()
+        with patch.object(config_module, "_block", return_value={}):
+            mod = CommunityNotifyModule()
+            sender = mod._notify_sender()
+
+        assert isinstance(sender, DingTalkNotifySender)
+        assert DingTalkYamlHolder.get("ak_id") == ""
 
 
 # ===========================================================================
@@ -411,3 +561,21 @@ class TestRescheduleEndpoint:
         result = asyncio.run(reschedule_cron(cron="0 12 * * *", timezone="UTC", scheduler=scheduler))
         assert result["success"] is True
         assert result["next_run_time"] is None
+
+
+def test_discovered_task_model_invalid_acceptances_falls_back_to_empty_list():
+    """ORM-backed discovery reads must tolerate corrupt legacy acceptance JSON."""
+    row = DiscoveredTaskModel(
+        task_id="invalid-acceptances",
+        bot_id="bot-1",
+        owner_id="owner-1",
+        dt="2026-08-27",
+        title="Corrupt acceptance payload",
+        acceptances="not-json",
+    )
+
+    task = row.to_domain()
+
+    assert task.acceptances == []
+    assert task.instruction == ""
+    assert task.priority == "medium"

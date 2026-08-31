@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from injector import inject
@@ -35,16 +35,30 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.repository.capability_desired_state_types import (
+    DesiredStateMutation,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+)
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
+    mcp_claim_scope,
+    mcp_release_scope,
+    skill_claim_scope,
+    skill_release_scope,
+)
+from agentclaw.community.core.skill_center.skill_set_batch import (
+    SkillSetSkillOutcome,
 )
 from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.core.skill_center.skill_set_management_service_protocol import SkillSetManagementServiceProtocol
 
 
-class SkillSetManagementService:
+class SkillSetManagementService(SkillSetManagementServiceProtocol):
     @inject
     def __init__(
         self,
@@ -142,9 +156,10 @@ class SkillSetManagementService:
         description: str | None,
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        # Creating an inactive SkillSet is metadata-only: it neither changes
-        # the effective capability projection nor has a compensating runtime
-        # action, so it does not enter the Pool edit boundary.
+        # A newly created empty SkillSet is active by default, matching the
+        # legacy create semantics. With no members it does not change the
+        # effective capability projection, so it does not enter the Pool edit
+        # boundary or require a runtime action.
         item = self._repository.create_set(
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
@@ -163,7 +178,9 @@ class SkillSetManagementService:
     def get_set(self, *, bot_id: str, owner_id: str, user_id: str, set_id: str) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.get_set(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
@@ -224,7 +241,9 @@ class SkillSetManagementService:
     ) -> None:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         self._repository.delete_set(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
@@ -240,7 +259,9 @@ class SkillSetManagementService:
     ) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_skills(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
@@ -258,9 +279,7 @@ class SkillSetManagementService:
         requests never call this method and therefore never create assets from
         a name/path.
         """
-        bot = self._legacy_bot(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
-        )
+        bot = self._legacy_bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         try:
             return self._repository.resolve_legacy_skill_id(
                 bot_id=bot_id, identifier=identifier
@@ -282,105 +301,243 @@ class SkillSetManagementService:
         except ValueError as exc:
             raise SkillSetControlPlaneNotFoundError() from exc
 
-    async def add_skill(
+    async def add_skills(
         self,
         *,
         bot_id: str,
         owner_id: str,
         user_id: str,
         set_id: str,
-        skill_id: str,
-    ) -> dict:
+        skill_ids: Sequence[str],
+    ) -> list[SkillSetSkillOutcome]:
+        """Add one or more members, then project their final combined state.
+
+        The BFF's published body has always accepted ``skill_ids`` and permits
+        per-member conflicts to be reported as partial success.  The canonical
+        Gateway single-member route is the batch-of-one consumer.  One command
+        owns the batch so an active Set has exactly one runtime projection,
+        never one complete Artifact delivery per member.
+        """
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
-        if target["is_default"]:
-            # Adding to the Default Set is the restored opt-out's other half:
-            # it can only remove an existing exclusion. The membership itself
-            # stays immutable.
-            self._require_excluded_default_skill(
-                owner_id=str(bot["owner_id"]), bot_id=bot_id,
-                set_id=str(target["id"]), skill_id=skill_id,
-            )
-            return await self._mutate(
-                bot=bot,
-                bot_id=bot_id,
-                actor_id=user_id,
-                action="default_set_unexclude_skill",
-                mutation=lambda: self._repository.unexclude_default_skill(
-                    bot_id=bot_id,
-                    owner_id=str(bot["owner_id"]),
-                    set_id=set_id,
-                    skill_id=skill_id,
-                    engine_type=self._engine(bot),
-                    default_engine_types=self._default_engine_types(bot),
-                ),
-            )
-        return await self._mutate(
+        if not skill_ids:
+            return []
+
+        return await self._mutate_skills_batch(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
+            target=target,
+            skill_ids=skill_ids,
             action="skill_set_add_skill",
-            runtime_required=bool(target.get("is_active")),
-            mutation=lambda: self._repository.add_skill(
+            runtime_required=bool(target.get("is_active") or target["is_default"]),
+            scope_from_result=skill_claim_scope,
+            partial_conflict_codes=frozenset(
+                {
+                    "RESOURCE_DIRECT_ACTIVE",
+                    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+                }
+            ),
+            mutation_for_skill=lambda skill_id: self._add_skill_membership(
+                bot=bot,
                 bot_id=bot_id,
-                owner_id=str(bot["owner_id"]),
+                target=target,
                 set_id=set_id,
                 skill_id=skill_id,
-                engine_type=self._engine(bot),
-                default_engine_types=self._default_engine_types(bot),
             ),
         )
 
-    async def remove_skill(
+    async def remove_skills(
         self,
         *,
         bot_id: str,
         owner_id: str,
         user_id: str,
         set_id: str,
-        skill_id: str,
-    ) -> dict:
+        skill_ids: Sequence[str],
+    ) -> list[SkillSetSkillOutcome]:
+        """Remove one or more members, then project their final combined state."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
-        if target["is_default"]:
-            # A Default Set is always active and its membership immutable:
-            # removing a member is the per-Bot exclusion (spec E.11).
-            return await self._mutate(
-                bot=bot,
-                bot_id=bot_id,
-                actor_id=user_id,
-                action="default_set_exclude_skill",
-                mutation=lambda: self._repository.exclude_default_skill(
-                    bot_id=bot_id,
-                    owner_id=str(bot["owner_id"]),
-                    set_id=set_id,
-                    skill_id=skill_id,
-                    engine_type=self._engine(bot),
-                    default_engine_types=self._default_engine_types(bot),
-                ),
-            )
-        return await self._mutate(
+        return await self._mutate_skills_batch(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
-            action="skill_set_remove_skill",
-            runtime_required=bool(target.get("is_active")),
-            mutation=lambda: self._repository.remove_skill(
+            target=target,
+            skill_ids=skill_ids,
+            action=(
+                "default_set_exclude_skill"
+                if target["is_default"]
+                else "skill_set_remove_skill"
+            ),
+            runtime_required=bool(target.get("is_active") or target["is_default"]),
+            scope_from_result=skill_release_scope,
+            partial_conflict_codes=frozenset(),
+            mutation_for_skill=lambda skill_id: self._remove_skill_membership(
+                bot=bot,
+                bot_id=bot_id,
+                target=target,
+                set_id=set_id,
+                skill_id=skill_id,
+            ),
+        )
+
+    def _add_skill_membership(
+        self,
+        *,
+        bot: dict,
+        bot_id: str,
+        target: dict,
+        set_id: str,
+        skill_id: str,
+    ) -> DesiredStateMutation:
+        if target["is_default"]:
+            self._require_excluded_default_skill(
+                owner_id=str(bot["owner_id"]),
+                bot_id=bot_id,
+                set_id=str(target["id"]),
+                skill_id=skill_id,
+            )
+            return self._repository.unexclude_default_skill(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 skill_id=skill_id,
                 engine_type=self._engine(bot),
                 default_engine_types=self._default_engine_types(bot),
-            ),
+            )
+        return self._repository.add_skill(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
+            skill_id=skill_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
         )
+
+    def _remove_skill_membership(
+        self,
+        *,
+        bot: dict,
+        bot_id: str,
+        target: dict,
+        set_id: str,
+        skill_id: str,
+    ) -> DesiredStateMutation:
+        if target["is_default"]:
+            return self._repository.exclude_default_skill(
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
+                set_id=set_id,
+                skill_id=skill_id,
+                engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
+            )
+        return self._repository.remove_skill(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
+            skill_id=skill_id,
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
+        )
+
+    async def _mutate_skills_batch(
+        self,
+        *,
+        bot: dict,
+        bot_id: str,
+        actor_id: str,
+        target: dict,
+        skill_ids: Sequence[str],
+        action: str,
+        runtime_required: bool,
+        scope_from_result: Callable[[DesiredStateMutation], ProjectionScope],
+        partial_conflict_codes: frozenset[str],
+        mutation_for_skill: Callable[[str], DesiredStateMutation],
+    ) -> list[SkillSetSkillOutcome]:
+        if not skill_ids:
+            return []
+
+        outcomes: list[SkillSetSkillOutcome] = []
+        previous_state = None
+        affected_mcp_codes: set[str] = set()
+
+        def mutation() -> DesiredStateMutation:
+            nonlocal previous_state
+            try:
+                for skill_id in skill_ids:
+                    try:
+                        result = mutation_for_skill(skill_id)
+                    except SkillSetControlPlaneNotFoundError as error:
+                        outcomes.append(
+                            SkillSetSkillOutcome(skill_id=skill_id, error=error)
+                        )
+                        continue
+                    except SkillSetControlPlaneConflictError as error:
+                        if str(error) not in partial_conflict_codes:
+                            raise
+                        outcomes.append(
+                            SkillSetSkillOutcome(skill_id=skill_id, error=error)
+                        )
+                        continue
+
+                    if previous_state is None:
+                        previous_state = result.previous_state
+                    if result.changed:
+                        affected_mcp_codes.update(result.mcp_codes)
+                    outcomes.append(
+                        SkillSetSkillOutcome(skill_id=skill_id, changed=result.changed)
+                    )
+            except Exception:
+                # Individual repository writes commit desired state before the
+                # batch reaches its single projection.  A later infrastructure
+                # failure is therefore still pre-projection, but must restore
+                # every earlier successful member before surfacing the error.
+                if previous_state is not None:
+                    self._repository.restore_desired_state(
+                        bot_id=bot_id,
+                        owner_id=str(bot["owner_id"]),
+                        state=previous_state,
+                        engine_type=self._engine(bot),
+                    )
+                raise
+
+            return DesiredStateMutation(
+                item=target,
+                changed=any(outcome.changed for outcome in outcomes),
+                previous_state=(
+                    previous_state
+                    if previous_state is not None
+                    else self._repository.snapshot_desired_state(
+                        bot_id=bot_id,
+                        owner_id=str(bot["owner_id"]),
+                        engine_type=self._engine(bot),
+                    )
+                ),
+                mcp_codes=frozenset(affected_mcp_codes),
+            )
+
+        await self._mutate(
+            bot=bot,
+            bot_id=bot_id,
+            actor_id=actor_id,
+            action=action,
+            runtime_required=runtime_required,
+            scope_from_result=scope_from_result,
+            mutation=mutation,
+            skip_projection_when_unchanged=True,
+        )
+        return outcomes
 
     def list_mcps(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         return self._repository.list_mcps(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
@@ -449,7 +606,8 @@ class SkillSetManagementService:
             # The MCP twin of add_skill's opt-out half: only an existing
             # exclusion can be removed; the membership stays immutable.
             codes = self._repository.excluded_default_mcp_codes(
-                bot_id=bot_id, owner_id=str(bot["owner_id"]),
+                bot_id=bot_id,
+                owner_id=str(bot["owner_id"]),
                 set_id=str(target["id"]),
             )
             if server_code not in codes:
@@ -459,6 +617,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_unexclude_mcp",
+                scope_from_result=mcp_claim_scope,
                 mutation=lambda: self._repository.unexclude_default_mcp(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -468,17 +627,22 @@ class SkillSetManagementService:
                     default_engine_types=self._default_engine_types(bot),
                 ),
             )
+        catalog = self._mcp_catalog_entry(server_code)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_add_mcp",
             runtime_required=bool(target.get("is_active")),
+            scope_from_result=mcp_claim_scope,
             mutation=lambda: self._repository.add_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
                 set_id=set_id,
                 server_code=server_code,
+                name=catalog["name"],
+                description=catalog["description"],
+                icon=catalog["icon"],
                 engine_type=self._engine(bot),
                 default_engine_types=self._default_engine_types(bot),
             ),
@@ -501,6 +665,7 @@ class SkillSetManagementService:
                 bot_id=bot_id,
                 actor_id=user_id,
                 action="default_set_exclude_mcp",
+                scope_from_result=mcp_release_scope,
                 mutation=lambda: self._repository.exclude_default_mcp(
                     bot_id=bot_id,
                     owner_id=str(bot["owner_id"]),
@@ -519,6 +684,7 @@ class SkillSetManagementService:
             actor_id=user_id,
             action="skill_set_remove_mcp",
             runtime_required=bool(target.get("is_active")),
+            scope_from_result=mcp_release_scope,
             mutation=lambda: self._repository.remove_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -534,7 +700,9 @@ class SkillSetManagementService:
     ) -> dict:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         target = self._repository.get_set(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
@@ -547,6 +715,9 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_activate",
+            scope_from_result=lambda result: ProjectionScope(
+                skills=True, mcp=True, claimed_mcp=result.mcp_codes
+            ),
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -566,6 +737,10 @@ class SkillSetManagementService:
             bot_id=bot_id,
             actor_id=user_id,
             action="skill_set_deactivate",
+            # Deactivation withdraws callable state but keeps the Set and its
+            # configuration. Re-project both inventories without claiming or
+            # physically releasing MCP details.
+            scope=ProjectionScope(skills=True, mcp=True),
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -580,14 +755,15 @@ class SkillSetManagementService:
         self, *, bot_id: str, owner_id: str, actor_id: str, set_id: str
     ) -> dict:
         """Compatibility command that adds this Set without disabling peers."""
-        bot = self._legacy_bot(
-            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
-        )
+        bot = self._legacy_bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=actor_id,
             action="skill_set_sync",
+            scope_from_result=lambda result: ProjectionScope(
+                skills=True, mcp=True, claimed_mcp=result.mcp_codes
+            ),
             mutation=lambda: self._repository.set_skill_set_active(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -665,6 +841,10 @@ class SkillSetManagementService:
         action: str,
         mutation,
         runtime_required: bool = True,
+        scope: ProjectionScope | None = None,
+        scope_from_result: Callable[[DesiredStateMutation], ProjectionScope]
+        | None = None,
+        skip_projection_when_unchanged: bool = False,
     ) -> dict:
         """Apply one desired-state mutation and synchronously reconcile runtime.
 
@@ -672,6 +852,11 @@ class SkillSetManagementService:
         contract: an inactive-set membership change has no runtime projection
         to apply. The mutate-project-compensate orchestration itself is the
         shared :class:`MutationProjectionFlow`.
+
+        Both scope arguments stay optional *here* only because each command
+        supplies whichever one it can — every one of the eleven call sites
+        below passes exactly one. The flow enforces that; neither is a
+        "forgot to say" default.
         """
         result = await self._flow.apply(
             bot=bot,
@@ -679,6 +864,9 @@ class SkillSetManagementService:
             engine_type=self._engine(bot),
             mutation=mutation,
             runtime_required=runtime_required,
+            scope=scope,
+            scope_from_result=scope_from_result,
+            skip_projection_when_unchanged=skip_projection_when_unchanged,
         )
         self._audit(
             bot_id=bot_id,
@@ -711,11 +899,35 @@ class SkillSetManagementService:
         detail = self._mcp_center.get_mcp_detail(server_code)
         return bool(detail and detail.get("accessLevel") == "PUBLIC")
 
+    def _mcp_catalog_entry(self, server_code: str) -> dict[str, Any]:
+        """The catalogue metadata a new membership row carries.
+
+        The row is what every read-side answer renders, so it holds the
+        catalogue's own name/description/icon rather than the server code
+        standing in for all three. Resolved before the mutation opens: a code
+        the catalogue does not know is a 404 at the boundary, not a membership
+        row persisted under a placeholder name.
+
+        A known entry that simply carries no display name still installs — the
+        server code is a usable label, and refusing there would reject an
+        install over a cosmetic gap in someone else's catalogue.
+        """
+        detail = self._mcp_center.get_mcp_detail(server_code)
+        if not detail:
+            raise SkillSetControlPlaneNotFoundError("MCP server not found")
+        return {
+            "name": str(detail.get("name") or server_code),
+            "description": detail.get("description"),
+            "icon": detail.get("icon"),
+        }
+
     def _require_set_mcp_permissions(
         self, *, bot_id: str, actor_id: str, set_id: str, bot: dict
     ) -> None:
         for mcp in self._repository.list_mcps(
-            bot_id=bot_id, owner_id=str(bot["owner_id"]), set_id=set_id,
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=set_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         ):

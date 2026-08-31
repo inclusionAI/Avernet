@@ -4,8 +4,17 @@ from __future__ import annotations
 from datetime import datetime
 from types import SimpleNamespace
 
-from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.api.task.task_grant_service import (
+    GRANTED,
+    REVOKED,
+    GrantResult,
+    RevokeResult,
+    TaskClaimGrantServiceProtocol,
+)
+from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+    TaskClaimJoinGateProtocol,
+)
 from agentclaw.community.core.task.domain.models import (
     NodeOpResult,
     Status,
@@ -60,7 +69,7 @@ class _CallbackTaskService:
         self.callback = _CallbackSink()
 
 
-def _seed_task_service(world) -> None:
+def _seed_task_service(world, *, expected_owner=None) -> None:
     async def execute(_self, _task_info):
         return TaskOpResult(
             task_id="task-endpoint-1",
@@ -73,7 +82,7 @@ def _seed_task_service(world) -> None:
         return TaskExecutionGraph(run_id=1, loop_round=0, status=Status.PENDING)
 
     def list_tasks(_self, _status=None, owner_user_id=None):
-        assert owner_user_id is None
+        assert owner_user_id == expected_owner
         return [
             TaskInfoRecord(
                 id=1,
@@ -88,6 +97,10 @@ def _seed_task_service(world) -> None:
                 gmt_modified=datetime(2026, 8, 22, 10, 0, 0),
             )
         ]
+
+    def list_tasks_page(_self, status=None, owner_user_id=None, page=1, page_size=20):
+        items = list_tasks(_self, status, owner_user_id=owner_user_id)
+        return items[:page_size], len(items)
 
     def claim(_self, task_id, _bot_id):
         return NodeOpResult(task_id=task_id, node_id="root", success=True)
@@ -105,6 +118,7 @@ def _seed_task_service(world) -> None:
             "execute": execute,
             "get_task_dashboard": dashboard,
             "list_tasks": list_tasks,
+            "list_tasks_page": list_tasks_page,
             "claim_bbs_task": claim,
             "attach_bbs_node": attach,
             "report_bbs_result": result,
@@ -219,6 +233,50 @@ def list_happy():
 )
 def list_error():
     pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="scoped_by_user_id",
+    seed=lambda w: _seed_task_service(w, expected_owner="user-endpoint-1"),
+    input=CaseInput(query_params={"user_id": "user-endpoint-1"}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": [{"task_id": "task-endpoint-1"}]},
+    ),
+)
+def list_scoped_by_user_id():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="pagination_requires_page_and_page_size_together",
+    input=CaseInput(query_params={"page": 1}),
+    expect=ExpectError(status=400),
+)
+def list_pagination_requires_both_arguments():
+    """A partial pagination request is rejected instead of silently changing shape."""
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="paginated_ok",
+    seed=_seed_task_service,
+    input=CaseInput(query_params={"page": 1, "page_size": 20}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"total": 1, "items": [{"task_id": "task-endpoint-1"}]},
+        },
+    ),
+)
+def list_paginated():
+    """A complete pagination request returns the Page envelope."""
 
 
 # Legacy callback/report adapter.
@@ -386,4 +444,123 @@ def scheduled_trigger_happy():
     expect=ExpectError(status=200, json_contains={"success": False, "total_discovered": 0, "results": []}),
 )
 def scheduled_trigger_error():
+    pass
+
+
+# ── 任务认领 grant/revoke + claim_on JOIN 灰度开关(internal /api/v1 face)─────────
+_GRANT_BODY = {"bcs_bot_id": "bot-endpoint-1:ent"}
+_STAFF_COOKIE = {"cookie": "staff_id=user-endpoint-1"}
+
+
+def _seed_grant_service(world) -> None:
+    async def grant(_self, *, bcs_bot_id, cookie, referer, operator):
+        return GrantResult(bcs_bot_id=bcs_bot_id, api_key_prefix="ep", grant_status=GRANTED, operator=operator)
+
+    async def revoke(_self, *, bcs_bot_id, cookie, referer, operator):
+        return RevokeResult(bcs_bot_id=bcs_bot_id, grant_status=REVOKED)
+
+    bind_overrides(world, TaskClaimGrantServiceProtocol, {"grant": grant, "revoke": revoke})
+
+
+def _seed_claim_join_gate(world) -> None:
+    bind_overrides(
+        world,
+        TaskClaimJoinGateProtocol,
+        {
+            "is_enabled": lambda _self: False,
+            "get_enabled": lambda _self, *, env: False,
+            "set_enabled": lambda _self, *, enabled, env, operator=None: bool(enabled),
+        },
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/grant",
+    scenario="happy_ok",
+    seed=_seed_grant_service,
+    input=CaseInput(headers=_STAFF_COOKIE, json_body=_GRANT_BODY),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"grant_status": "granted"}}),
+)
+def internal_grant_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/grant",
+    scenario="err_unauthenticated",
+    input=CaseInput(json_body=_GRANT_BODY),
+    expect=ExpectError(status=401),
+)
+def internal_grant_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/revoke",
+    scenario="happy_ok",
+    seed=_seed_grant_service,
+    input=CaseInput(headers=_STAFF_COOKIE, json_body=_GRANT_BODY),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"grant_status": "revoked"}}),
+)
+def internal_revoke_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/revoke",
+    scenario="err_unauthenticated",
+    input=CaseInput(json_body=_GRANT_BODY),
+    expect=ExpectError(status=401),
+)
+def internal_revoke_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/claim-join-filter",
+    scenario="happy_ok",
+    seed=_seed_claim_join_gate,
+    input=CaseInput(headers=_STAFF_COOKIE),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"enabled": False}}),
+)
+def internal_claim_join_filter_get_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/claim-join-filter",
+    scenario="err_unauthenticated",
+    input=CaseInput(),
+    expect=ExpectError(status=401),
+)
+def internal_claim_join_filter_get_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/claim-join-filter",
+    scenario="happy_ok",
+    seed=_seed_claim_join_gate,
+    input=CaseInput(headers=_STAFF_COOKIE, json_body={"enabled": True}),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"enabled": True}}),
+)
+def internal_claim_join_filter_post_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/claim-join-filter",
+    scenario="err_unauthenticated",
+    input=CaseInput(json_body={"enabled": True}),
+    expect=ExpectError(status=401),
+)
+def internal_claim_join_filter_post_unauthenticated():
     pass

@@ -17,6 +17,7 @@ from agentclaw.community.core.mcp.services.passport_scope import (
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.core.bot_management.default_bot_passport_repair_service_protocol import DefaultBotPassportRepairServiceProtocol
 
 
 class _TargetLockEntry:
@@ -27,7 +28,7 @@ class _TargetLockEntry:
         self.users = 0
 
 
-class DefaultBotPassportRepairService:
+class DefaultBotPassportRepairService(DefaultBotPassportRepairServiceProtocol):
     """Repair Passport and owner authorization without touching bot runtime."""
 
     def __init__(

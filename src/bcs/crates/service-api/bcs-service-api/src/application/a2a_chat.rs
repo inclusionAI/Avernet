@@ -54,35 +54,6 @@ pub struct A2aChatOutcome {
 }
 
 #[derive(Debug, Clone)]
-pub struct BlockingA2aChatCommand {
-    pub caller: CallerContext,
-    pub target_bot_id: String,
-    pub message: String,
-    pub from_actor_id: Option<String>,
-    /// Metadata used only when registering the response event channel.
-    /// Legacy HTTP chat defaults the delivered frame sender to "user" when
-    /// omitted, but leaves this channel metadata absent.
-    pub run_channel_from: Option<String>,
-    pub authenticated_staff_id: Option<String>,
-    pub run_id: String,
-    pub session_key: String,
-    pub timeout_ms: u64,
-    pub client: Option<String>,
-    pub tags: Vec<String>,
-    pub response_mode: ChatResponseMode,
-    pub organization_code: Option<String>,
-    pub provider_bypass_headers: Vec<(String, String)>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BlockingA2aChatOutcome {
-    pub delivered: bool,
-    pub bot_uuid: String,
-    pub session_id: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct AsyncA2aChatCommand {
     pub caller: CallerContext,
     pub target_bot_id: String,
@@ -150,11 +121,6 @@ pub trait A2aChatService: Send + Sync {
 
 #[async_trait]
 pub trait A2aChatRunService: Send + Sync {
-    async fn run_blocking_chat(
-        &self,
-        cmd: BlockingA2aChatCommand,
-    ) -> ServiceResult<BlockingA2aChatOutcome>;
-
     async fn start_async_chat(
         &self,
         cmd: AsyncA2aChatCommand,

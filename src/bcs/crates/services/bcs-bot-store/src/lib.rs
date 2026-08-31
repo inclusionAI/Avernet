@@ -29,6 +29,7 @@ use bcs_db_api::{
 };
 use bcs_service_api::{
     BindingChannels, BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotSearchCandidateQuery, BotSearchFriendshipFilter,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
     BotDynamicStatus, BotMetricCount,
@@ -3058,14 +3059,14 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             .map(str::trim)
             .filter(|value| !value.is_empty());
         let name_filter = name.unwrap_or_default().to_lowercase();
-        let mut friend_ids = query.friend_ids.iter().cloned().collect::<Vec<_>>();
-        friend_ids.sort_unstable();
         let visibility_filter = match query.visibility {
             BotCandidateVisibility::Discovery => "b.visibility IN ('public', 'protected')",
             BotCandidateVisibility::Collaboration => {
                 "b.visibility = 'public' OR f.bot_uuid IS NOT NULL"
             }
         };
+        let mut friend_ids = query.friend_ids.iter().cloned().collect::<Vec<_>>();
+        friend_ids.sort_unstable();
         let friend_rows = if friend_ids.is_empty() {
             "SELECT NULL AS bot_uuid WHERE 1 = 0".to_string()
         } else {
@@ -3089,8 +3090,8 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                     b.actor_kind, b.env, b.created_by, b.agent_code, \
                     b.task_claim_mode, b.task_dream_mode, b.user_visibility, b.friend_ext, \
                     b.friend_check_in_strategy, \
-                    ({} ) * 1000 AS gmt_create_ms, \
-                    ({} ) * 1000 AS gmt_modified_ms, \
+                    ({}) * 1000 AS gmt_create_ms, \
+                    ({}) * 1000 AS gmt_modified_ms, \
                     CASE WHEN f.bot_uuid IS NULL THEN 0 ELSE 1 END AS is_friend \
              FROM bcs_bots b \
              LEFT JOIN friend_uuids f ON b.bot_uuid = f.bot_uuid \
@@ -3149,12 +3150,197 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             .map(|row| db_get_column::<i64>(row, "total"))
             .transpose()
             .map_err(|error| ServiceError::InternalError(error.to_string()))?
-            .unwrap_or(0)
+            .unwrap_or(0) as u64;
+        Ok((records, total))
+    }
+
+    async fn search_control_plane_candidates(
+        &self,
+        query: BotSearchCandidateQuery,
+    ) -> ServiceResult<(Vec<BotCandidateReadRecord>, u64)> {
+        let search_text = query
+            .q
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                query
+                    .name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+            })
+            .map(str::to_lowercase);
+        let visibility_filter = match query.visibility_filter.as_ref() {
+            Some(values) if values.is_empty() => return Ok((Vec::new(), 0)),
+            Some(values) => Some(
+                values
+                    .iter()
+                    .map(|value| value.trim().to_lowercase())
+                    .collect::<Vec<_>>(),
+            ),
+            None => None,
+        };
+        let user_visibility_filter = match query.user_visibility.as_ref() {
+            Some(values) if values.is_empty() => return Ok((Vec::new(), 0)),
+            Some(values) => Some(
+                values
+                    .iter()
+                    .map(|value| value.trim().to_lowercase())
+                    .collect::<Vec<_>>(),
+            ),
+            None => None,
+        };
+        let friendship = query.friendship.unwrap_or_default();
+        if matches!(friendship, BotSearchFriendshipFilter::Friends)
+            && query.friend_ids.is_empty()
+        {
+            return Ok((Vec::new(), 0));
+        }
+        let mut friend_ids = query.friend_ids.iter().cloned().collect::<Vec<_>>();
+        friend_ids.sort_unstable();
+        friend_ids.dedup();
+        let friend_rows = if friend_ids.is_empty() {
+            "SELECT NULL AS bot_uuid WHERE 1 = 0".to_string()
+        } else {
+            friend_ids
+                .iter()
+                .enumerate()
+                .map(|(index, _)| {
+                    if index == 0 {
+                        "SELECT ? AS bot_uuid"
+                    } else {
+                        "SELECT ?"
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" UNION ALL ")
+        };
+        let common = format!("WITH friend_uuids AS ({friend_rows}) ");
+        let mut predicates = vec![
+            "b.env = ?".to_string(),
+            "COALESCE(b.is_deleted, 0) = 0".to_string(),
+            "COALESCE(b.actor_kind, 'bot') = 'bot'".to_string(),
+            "b.bot_uuid != ?".to_string(),
+        ];
+        let mut params = friend_ids
+            .iter()
+            .map(|friend_id| Value::from(friend_id.as_str()))
+            .collect::<Vec<_>>();
+        params.push(Value::from(query.env.as_str()));
+        params.push(Value::from(query.acting_bot_id.as_str()));
+        if let Some(search_text) = search_text.as_ref() {
+            predicates.push(
+                "(INSTR(LOWER(COALESCE(b.name, '')), ?) > 0 OR INSTR(LOWER(COALESCE(b.bot_info, '')), ?) > 0 OR INSTR(LOWER(b.bot_uuid), ?) > 0)"
+                    .to_string(),
+            );
+            params.push(Value::from(search_text.as_str()));
+            params.push(Value::from(search_text.as_str()));
+            params.push(Value::from(search_text.as_str()));
+        }
+        if let Some(values) = visibility_filter.as_ref() {
+            predicates.push(format!(
+                "b.visibility IN ({})",
+                vec!["?"; values.len()].join(", ")
+            ));
+            params.extend(values.iter().map(|value| Value::from(value.as_str())));
+        } else {
+            match query.visibility {
+                BotCandidateVisibility::Discovery => {
+                    predicates.push("b.visibility IN ('public', 'protected')".to_string());
+                }
+                BotCandidateVisibility::Collaboration => {
+                    predicates.push("(b.visibility = 'public' OR f.bot_uuid IS NOT NULL)".to_string());
+                }
+            }
+        }
+        if let Some(values) = user_visibility_filter.as_ref() {
+            predicates.push(format!(
+                "b.user_visibility IN ({})",
+                vec!["?"; values.len()].join(", ")
+            ));
+            params.extend(values.iter().map(|value| Value::from(value.as_str())));
+        }
+        match friendship {
+            BotSearchFriendshipFilter::All => {}
+            BotSearchFriendshipFilter::Friends => {
+                predicates.push("f.bot_uuid IS NOT NULL".to_string());
+            }
+            BotSearchFriendshipFilter::NonFriends => {
+                predicates.push("f.bot_uuid IS NULL".to_string());
+            }
+        }
+        if let Some(want_tc) = query.tc_bot {
+            if want_tc {
+                predicates.push(
+                    "b.created_by IS NOT NULL AND INSTR(b.bot_uuid, ':') > 0 AND SUBSTR(b.bot_uuid, INSTR(b.bot_uuid, ':') + 1) = b.created_by"
+                        .to_string(),
+                );
+            } else {
+                predicates.push(
+                    "(b.created_by IS NULL OR INSTR(b.bot_uuid, ':') = 0 OR SUBSTR(b.bot_uuid, INSTR(b.bot_uuid, ':') + 1) != b.created_by)"
+                        .to_string(),
+                );
+            }
+        }
+        let where_clause = predicates.join(" AND ");
+        let page_sql = format!(
+            "{common}\
+             SELECT b.bot_uuid, b.name, b.bot_info, b.visibility, b.status, \
+                    b.actor_kind, b.env, b.created_by, b.agent_code, \
+                    b.task_claim_mode, b.task_dream_mode, b.user_visibility, b.friend_ext, \
+                    b.friend_check_in_strategy, \
+                    ({}) * 1000 AS gmt_create_ms, \
+                    ({}) * 1000 AS gmt_modified_ms, \
+                    CASE WHEN f.bot_uuid IS NULL THEN 0 ELSE 1 END AS is_friend \
+             FROM bcs_bots b \
+             LEFT JOIN friend_uuids f ON b.bot_uuid = f.bot_uuid \
+             WHERE {where_clause} \
+             ORDER BY b.gmt_create DESC, b.bot_uuid ASC \
+             LIMIT ? OFFSET ?",
+            self.flavor.unix_ts("b.gmt_create"),
+            self.flavor.unix_ts("b.gmt_modified"),
+        );
+        let mut page_params = params.clone();
+        page_params.push(Value::from(query.limit as i64));
+        page_params.push(Value::from(query.offset as i64));
+        let rows = self
+            .db_query(&page_sql, page_params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        let mut records = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let is_friend = db_get_column::<i64>(row, "is_friend")
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?
+                != 0;
+            records.push(BotCandidateReadRecord {
+                bot: control_plane_record_from_row(row)?,
+                is_friend,
+            });
+        }
+
+        let count_sql = format!(
+            "{common}\
+             SELECT COUNT(*) AS total \
+             FROM bcs_bots b \
+             LEFT JOIN friend_uuids f ON b.bot_uuid = f.bot_uuid \
+             WHERE {where_clause}"
+        );
+        let count_rows = self
+            .db_query(&count_sql, params)
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        let total = count_rows
+            .first()
+            .and_then(|row| row.get("total"))
+            .and_then(|value| value.as_i64())
+            .unwrap_or_default()
             .max(0) as u64;
         Ok((records, total))
     }
 
     async fn list_control_plane_by_creator(
+
         &self,
         query: BotControlPlaneOwnedQuery,
     ) -> ServiceResult<Vec<BotControlPlaneRecord>> {

@@ -60,6 +60,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.core.bot_public.bot_public_service_protocol import BotPublicServiceProtocol
 
 logger = get_logger()
 
@@ -131,7 +132,7 @@ class BotPermissionError(BotPublicServiceError):
     pass
 
 
-class BotPublicService:
+class BotPublicService(BotPublicServiceProtocol):
     """Bot public service for managing friend request approval flow.
 
     通过依赖注入接收 bot_friend_repo、bot_repository、process_service、bot_service。
@@ -1577,9 +1578,10 @@ class BotPublicService:
             }
             if filters is not None:
                 metadata_kwargs["filters"] = filters
-            metadata = self._catalog_metadata_service.search_public_bot_metadata(
+            metadata_page = self._catalog_metadata_service.search_public_bot_metadata(
                 **metadata_kwargs
             )
+            metadata = metadata_page.items
             addresses = self._validated_catalog_addresses(metadata)
             metadata_by_address = {item.address: item for item in metadata}
         except BotCatalogMetadataUnavailableError as exc:
@@ -1647,12 +1649,13 @@ class BotPublicService:
                     if key in ext:
                         ext[key] = None
                 bot["ext"] = ext
-        total = len(items)
+        total = metadata_page.total
         logger.info(
             "[BotPublicService.catalog_search] request_id=%s bcs_count=%s "
-            "joined_count=%s",
+            "joined_count=%s total=%s",
             request_id,
             len(addresses),
+            len(items),
             total,
         )
         return {"total": total, "items": items}

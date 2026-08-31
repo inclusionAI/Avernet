@@ -13,12 +13,13 @@ from agentclaw.community.core.repository.protocols.bot import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.bot_management.render_screen_service_protocol import RenderScreenServiceProtocol
 
 
 logger = get_logger()
 
 
-class RenderScreenService:
+class RenderScreenService(RenderScreenServiceProtocol):
     """第四屏 CDN 配置业务逻辑。"""
 
     @inject
@@ -66,7 +67,9 @@ class RenderScreenService:
         return collaborator is not None
 
     def _resolve_scope(self, bot_id: str) -> str:
-        return resolve_render_screen_scope(self._require_bot(bot_id))
+        # Bots externally onboarded through BCN may not have an ac_bot record.
+        # Keep their historical behavior by falling back to owner scope.
+        return resolve_render_screen_scope(self._bot_repo.get_by_id(bot_id))
 
     def authorize_render_screen_bot(self, *, bot_id: str, user_id: str) -> str:
         """Resolve the scope and enforce collaborative access for coding bots."""
@@ -102,16 +105,14 @@ class RenderScreenService:
         current_user_id: str | None = None,
     ) -> list[RenderScreenRecord]:
         """查询某 Bot 下所有 CDN 配置（未删除）。"""
-        try:
-            bot = self._require_bot(bot_id)
-        except PermissionError as exc:
-            raise PermissionError(f"无权查看此 Bot 的 CDN 配置: {bot_id}") from exc
-
+        bot = self._bot_repo.get_by_id(bot_id)
         scope = resolve_render_screen_scope(bot)
         if scope == "bot":
-            user_id = current_user_id or owner_id or ""
-            if not user_id or not self._bot_has_collaborative_access(bot_id, user_id):
-                raise PermissionError(f"无权查看此 Bot 的 CDN 配置: {bot_id}")
+            # 读放开：副屏 CDN 配置（库名 → CDN URL 映射）是非敏感渲染资源。
+            # 群聊/分享页/协作场景的查看者并非 Bot 归属者或协作者，但都需要
+            # 这份映射来渲染副屏面板，否则前端会报「组件库不存在」。
+            # 写操作（create/update/delete）仍走 authorize_* 严格校验，
+            # 读放开不影响写权限。
             return self._repo.list_by_bot_id(bot_id=bot_id, owner_id=None)
 
         effective_owner_id = owner_id or current_user_id or ""
@@ -142,9 +143,9 @@ class RenderScreenService:
         if any(r.cdn_url == cdn_url for r in existing):
             raise ValueError(f"Duplicate cdn_url '{cdn_url}' for bot_id={bot_id}")
 
-        bot = self._require_bot(bot_id)
         record_owner_id = owner_id or creator_id
         if scope == "bot":
+            bot = self._require_bot(bot_id)
             record_owner_id = str(bot.get("owner_id") or record_owner_id)
 
         record_id = self._repo.insert(

@@ -49,9 +49,23 @@ class WorkOrderBotEditorRequestNotAllowedError(WorkOrderError):
     pass
 
 
+class WorkOrderSkillEditorRequestNotAllowedError(WorkOrderError):
+    pass
+
+
+class WorkOrderSkillApplicantAlreadyEditorError(WorkOrderError):
+    pass
+
+
 class WorkOrderNoReviewerError(WorkOrderError):
     pass
 
 
 class WorkOrderInvalidEventError(WorkOrderError):
+    pass
+
+
+class WorkOrderCallbackError(WorkOrderError):
+    """A required upstream business callback failed or reported failure."""
+
     pass

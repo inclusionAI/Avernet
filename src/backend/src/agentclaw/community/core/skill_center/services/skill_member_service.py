@@ -18,11 +18,12 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.skill_center import SkillMemberRepository
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.skill_center.skill_member_service_protocol import SkillMemberServiceProtocol
 
 logger = get_logger()
 
 
-class SkillMemberService:
+class SkillMemberService(SkillMemberServiceProtocol):
     """技能成员管理服务
 
     通过注入 SkillMemberRepository 实现数据库操作，

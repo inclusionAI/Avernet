@@ -12,7 +12,7 @@ use bcs_http::{
 };
 use bcs_service_api::{
     A2aChatCommand, A2aChatOutcome, A2aChatRunService, A2aChatService, A2aRunStatus,
-    AsyncA2aChatAccepted, AsyncA2aChatCommand, BlockingA2aChatCommand, BlockingA2aChatOutcome,
+    AsyncA2aChatAccepted, AsyncA2aChatCommand,
     BotCapabilities, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
     BotDeliveryTarget, BotRegistryCoreService, CallerContext, ChatResponseMode, ChatRunCancelCommand,
     ChatRunQueryCommand, ServiceError, ServiceResult,
@@ -39,8 +39,6 @@ struct RecordingA2aChat {
     not_connected_bot_id: Mutex<Option<String>>,
     not_friends_bot_ids: Mutex<Option<Vec<String>>>,
     blocking_content: Mutex<String>,
-    blocking_failure: Mutex<Option<String>>,
-    blocking_returns_error: Mutex<bool>,
     async_unauthorized: Mutex<bool>,
     async_forbidden: Mutex<bool>,
 }
@@ -198,56 +196,6 @@ impl A2aChatService for RecordingA2aChat {
 
 #[async_trait::async_trait]
 impl A2aChatRunService for RecordingA2aChat {
-    async fn run_blocking_chat(
-        &self,
-        cmd: BlockingA2aChatCommand,
-    ) -> ServiceResult<BlockingA2aChatOutcome> {
-        if let Some(bot_id) = self.not_connected_bot_id.lock().await.clone() {
-            return Err(ServiceError::BotNotConnected(bot_id));
-        }
-        if let Some(bot_ids) = self.not_friends_bot_ids.lock().await.clone() {
-            return Err(ServiceError::NotFriends(bot_ids));
-        }
-        self.commands.lock().await.push(A2aChatCommand {
-            caller: cmd.caller,
-            target_bot_id: cmd.target_bot_id.clone(),
-            message: cmd.message,
-            from_actor_id: cmd.from_actor_id,
-            authenticated_staff_id: cmd.authenticated_staff_id,
-            run_id: Some(cmd.run_id.clone()),
-            async_mode: false,
-            session_key: Some(cmd.session_key.clone()),
-            timeout_ms: Some(cmd.timeout_ms),
-            client: cmd.client,
-            tags: cmd.tags,
-            response_mode: cmd.response_mode,
-            caller_wait_mode: None,
-            organization_code: cmd.organization_code,
-            provider_bypass_headers: cmd.provider_bypass_headers,
-        });
-        self.run_channel_froms
-            .lock()
-            .await
-            .push(cmd.run_channel_from);
-
-        if let Some(error) = self.blocking_failure.lock().await.clone() {
-            self.failed_runs
-                .lock()
-                .await
-                .push((cmd.run_id.clone(), error.clone()));
-            if *self.blocking_returns_error.lock().await {
-                return Err(ServiceError::InternalError(error));
-            }
-        }
-
-        Ok(BlockingA2aChatOutcome {
-            delivered: true,
-            bot_uuid: cmd.target_bot_id,
-            session_id: cmd.session_key,
-            content: self.blocking_content.lock().await.clone(),
-        })
-    }
-
     async fn start_async_chat(
         &self,
         cmd: AsyncA2aChatCommand,
@@ -448,11 +396,7 @@ async fn build_chat_app_with_events_and_bypass(
         .unwrap();
 
     let a2a = Arc::new(RecordingA2aChat::default());
-    let (blocking_content, blocking_failure, blocking_returns_error) =
-        blocking_mode_from_events(&events, keep_open_after_send);
-    *a2a.blocking_content.lock().await = blocking_content;
-    *a2a.blocking_failure.lock().await = blocking_failure;
-    *a2a.blocking_returns_error.lock().await = blocking_returns_error;
+    *a2a.blocking_content.lock().await = blocking_content_from_events(&events);
     let run_events = Arc::new(RecordingChatRunEvents {
         events,
         keep_open_after_send,
@@ -476,30 +420,11 @@ async fn build_chat_app_with_events_and_bypass(
     (app, a2a, run_events)
 }
 
-fn blocking_mode_from_events(
-    events: &[String],
-    keep_open_after_send: bool,
-) -> (String, Option<String>, bool) {
-    if events.is_empty() && !keep_open_after_send {
-        return (
-            String::new(),
-            Some("Bot channel closed without response".to_string()),
-            true,
-        );
-    }
-    let content = events
+fn blocking_content_from_events(events: &[String]) -> String {
+    events
         .iter()
         .filter_map(|event| content_text(event))
-        .collect::<String>();
-    if keep_open_after_send {
-        (
-            content,
-            Some("Timeout waiting for bot response".to_string()),
-            false,
-        )
-    } else {
-        (content, None, false)
-    }
+        .collect()
 }
 
 fn final_event(text: &str) -> String {

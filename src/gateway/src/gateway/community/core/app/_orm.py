@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, String, text
+from sqlalchemy import JSON, BigInteger, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.community.spi.app import RegisteredApp
@@ -54,7 +54,7 @@ class AppRow(Base):  # type: ignore[misc]
     __tablename__ = "avernet_application"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    app_name: Mapped[str] = mapped_column(String(256), index=True)
+    app_name: Mapped[str] = mapped_column(String(256))
     app_type: Mapped[str] = mapped_column(String(64))
     api_key_hash: Mapped[str | None] = mapped_column(String(256), nullable=True)
     api_key_prefix: Mapped[str | None] = mapped_column(
@@ -74,6 +74,27 @@ class AppRow(Base):  # type: ignore[misc]
     )
     gmt_modified: Mapped[datetime] = mapped_column(
         server_default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP")
+    )
+
+    __table_args__ = (
+        # An app is named once per environment. ``app_name`` is how a human
+        # picks their application out of a listing, and two rows sharing one in
+        # the same ``env`` make every such listing ambiguous — including the one
+        # a migrating caller reads to confirm their key landed.
+        #
+        # ``env`` is in the key and not merely alongside it: one database backs
+        # several environments, and the same application legitimately exists in
+        # each. Keyed on ``app_name`` alone, registering "billing" in dev would
+        # lock the name out of prod.
+        #
+        # 1280 bytes at utf8mb4 (256x4 + 64x4), comfortably inside InnoDB's
+        # 3072-byte cap, so neither column is squeezed by it.
+        #
+        # This key REPLACES the plain ``idx_avernet_application_app_name`` that
+        # stood here (``index=True`` on the column above). ``app_name`` leads the
+        # key, so a B-tree prefix scan serves every lookup that index served;
+        # keeping both would maintain two structures for one access path.
+        UniqueConstraint("app_name", "env", name="uk_avernet_application_app_name_env"),
     )
 
     def to_record(self) -> RegisteredApp:

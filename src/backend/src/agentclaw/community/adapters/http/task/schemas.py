@@ -3,6 +3,7 @@
 纯 pydantic.BaseModel 序列化,不含业务逻辑(Rule 22:HTTP adapter 只转协议)。
 对齐 domain/models.py 的 TaskInfo/TaskCallbackData/TaskExecutionGraph/TaskOpResult/TaskNode 字段。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -30,7 +31,9 @@ class ContextDTO(BaseModel):
     """任务执行上下文(背景 + 扩展属性)。"""
 
     background: str = Field("", description="任务背景信息")
-    extend_props: dict[str, Any] = Field(default_factory=dict, description="上下文扩展属性")
+    extend_props: dict[str, Any] = Field(
+        default_factory=dict, description="上下文扩展属性"
+    )
 
 
 class AcceptanceCriteriaDTO(BaseModel):
@@ -44,14 +47,18 @@ class GoalDTO(BaseModel):
     """任务目标(目标描述 + 验收标准列表)。"""
 
     objective: str = Field("", description="任务目标描述")
-    acceptances: list[AcceptanceCriteriaDTO] = Field(default_factory=list, description="验收标准列表")
+    acceptances: list[AcceptanceCriteriaDTO] = Field(
+        default_factory=list, description="验收标准列表"
+    )
 
 
 class TaskSpecDTO(BaseModel):
     """任务规格(元数据 + 上下文 + 目标);response 面与 Request* 同构。"""
 
     metadata: MetadataDTO = Field(..., description="任务元数据(标识/标题/指令)")
-    context: ContextDTO = Field(default_factory=ContextDTO, description="任务执行上下文")
+    context: ContextDTO = Field(
+        default_factory=ContextDTO, description="任务执行上下文"
+    )
     goal: GoalDTO = Field(default_factory=GoalDTO, description="任务目标与验收标准")
 
 
@@ -73,22 +80,30 @@ class RequestGoalDTO(BaseModel):
     """提交任务目标(目标描述 + 验收标准列表)。"""
 
     objective: str = Field("", description="任务目标描述")
-    acceptances: list[RequestAcceptanceDTO] = Field(default_factory=list, description="验收标准列表")
+    acceptances: list[RequestAcceptanceDTO] = Field(
+        default_factory=list, description="验收标准列表"
+    )
 
 
 class RequestTaskSpecDTO(BaseModel):
     """提交任务规格(元数据 + 上下文 + 目标)。"""
 
     metadata: RequestMetadataDTO = Field(..., description="任务元数据(标题/指令)")
-    context: ContextDTO = Field(default_factory=ContextDTO, description="任务执行上下文")
-    goal: RequestGoalDTO = Field(default_factory=GoalDTO, description="任务目标与验收标准")
+    context: ContextDTO = Field(
+        default_factory=ContextDTO, description="任务执行上下文"
+    )
+    goal: RequestGoalDTO = Field(
+        default_factory=GoalDTO, description="任务目标与验收标准"
+    )
 
 
 class ExecutionConfigDTO(BaseModel):
-    """执行配置(task_type 必填;yaml/workflow_id 可选;其余键允许透传)。"""
+    """执行配置(task_type 必填;静态单工作流/静态组工作流/workflow_id 可选;其余键允许透传)。"""
 
     model_config = ConfigDict(extra="allow")
-    task_type: Literal["yaml", "workflow", "dynamic"] = Field(..., description="任务类型")
+    task_type: Literal["yaml", "workflow", "dynamic"] = Field(
+        ..., description="任务类型"
+    )
     yaml: str | dict[str, Any] | None = Field(None, description="yaml 内联或引用")
     workflow_id: str | None = Field(None, description="workflow id")
 
@@ -96,8 +111,12 @@ class ExecutionConfigDTO(BaseModel):
 class TaskInfoRequestDTO(BaseModel):
     """POST .../collaboration/tasks/execute 请求体(对外扁平契约;task_id 服务端生成)。"""
 
-    task_spec: RequestTaskSpecDTO = Field(..., description="任务规格(元数据/上下文/目标)")
-    source_type: Literal["bot", "coop_group", "api"] = Field("bot", description="触发渠道类型")
+    task_spec: RequestTaskSpecDTO = Field(
+        ..., description="任务规格(元数据/上下文/目标)"
+    )
+    source_type: Literal["bot", "coop_group", "api"] = Field(
+        "bot", description="触发渠道类型"
+    )
     owner_user_id: str = Field(..., description="userId")
     owner_bot_id: str = Field(..., description="botId")
     execution_config: ExecutionConfigDTO = Field(
@@ -132,15 +151,22 @@ class BbsResultDTO(BaseModel):
     task_id: str = Field(..., description="任务ID")
     node_id: str = Field(..., description="scoped 子节点ID(attach 返回的 bbs- 节点)")
     bot_id: str = Field(..., description="回投 bot id(须为当前 bbs_owner)")
-    acceptance_result: AcceptanceResultDTO | None = Field(None, description="验收结论(PASS/FAIL)")
-    output_patch: dict[str, Any] | None = Field(None, description="checkpoint fold 增量输出")
+    acceptance_result: AcceptanceResultDTO | None = Field(
+        None, description="验收结论(PASS/FAIL)"
+    )
+    output_patch: dict[str, Any] | None = Field(
+        None, description="checkpoint fold 增量输出"
+    )
     exec_error: str | None = Field(None, description="执行报错(fold 进节点)")
 
 
 class TaskCallbackDataDTO(BaseModel):
     """POST /api/v1/collaboration/tasks/callback/report 请求体(执行实体回投)。"""
+
     loop_task_id: str = Field(..., description="回投标识 f'{task_id}::{node_id}'")
-    workflow_type: str = Field("single_bot", description="执行模态 single_bot / bcn_coop_group")
+    workflow_type: str = Field(
+        "single_bot", description="执行模态 single_bot / bcn_coop_group"
+    )
     workflow_id: int = Field(0, description="workflow id(占位)")
     instance_id: int = Field(0, description="instance id(占位)")
     result: dict[str, Any] = Field(
@@ -158,16 +184,24 @@ class TaskOpResultDTO(BaseModel):
     task_id: str = Field(..., description="任务ID(服务端生成)")
     success: bool = Field(..., description="操作是否成功")
     run_id: int = Field(0, description="图运行实例ID")
-    message: str | None = Field(None, description="失败原因(success=false 时透出 error,便于排查)")
-    extend_props: dict[str, Any] = Field(default_factory=dict, description="操作结果扩展属性")
+    message: str | None = Field(
+        None, description="失败原因(success=false 时透出 error,便于排查)"
+    )
+    extend_props: dict[str, Any] = Field(
+        default_factory=dict, description="操作结果扩展属性"
+    )
 
 
 class AcceptanceResultDTO(BaseModel):
     """验收结论(PASS/FAIL + 通过项与缺口)。"""
 
     verdict: str = Field(..., description="PASS / FAIL")
-    acceptances_metric: list[str] = Field(default_factory=list, description="通过的验收项标识列表")
-    gaps: list[str] = Field(default_factory=list, description="未通过的验收项标识列表(gap)")
+    acceptances_metric: list[str] = Field(
+        default_factory=list, description="通过的验收项标识列表"
+    )
+    gaps: list[str] = Field(
+        default_factory=list, description="未通过的验收项标识列表(gap)"
+    )
 
 
 class NodeActionEventDTO(BaseModel):
@@ -175,12 +209,16 @@ class NodeActionEventDTO(BaseModel):
 
     seq: int = Field(..., description="动作序号(同节点内单调递增)")
     ts: int = Field(..., description="动作发生时间戳(毫秒)")
-    action: str = Field(..., description="动作类型(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/TRANSITION)")
+    action: str = Field(
+        ..., description="动作类型(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/TRANSITION)"
+    )
     loop_round: int = Field(0, description="所属 loop 轮次")
     attempt: int = Field(0, description="本动作的重试次数")
     status_from: str | None = Field(None, description="动作前的节点状态")
     status_to: str | None = Field(None, description="动作后的节点状态")
-    payload: dict[str, Any] = Field(default_factory=dict, description="动作 payload(全量)")
+    payload: dict[str, Any] = Field(
+        default_factory=dict, description="动作 payload(全量)"
+    )
 
 
 class RuntimeInfoDTO(BaseModel):
@@ -190,10 +228,16 @@ class RuntimeInfoDTO(BaseModel):
     assignee: str | None = Field(None, description="当前承接节点执行的 bot id")
     start_time: int | None = Field(None, description="执行开始时间戳(毫秒)")
     end_time: int | None = Field(None, description="执行结束时间戳(毫秒)")
-    output: dict[str, Any] = Field(default_factory=dict, description="节点输出(checkpoint fold)")
+    output: dict[str, Any] = Field(
+        default_factory=dict, description="节点输出(checkpoint fold)"
+    )
     acceptance_result: AcceptanceResultDTO | None = Field(None, description="验收结论")
-    extend_props: dict[str, Any] = Field(default_factory=dict, description="运行时扩展属性")
-    action_log: list[NodeActionEventDTO] = Field(default_factory=list, description="节点动作历史(include_action_log=true 时填充)")
+    extend_props: dict[str, Any] = Field(
+        default_factory=dict, description="运行时扩展属性"
+    )
+    action_log: list[NodeActionEventDTO] = Field(
+        default_factory=list, description="节点动作历史(include_action_log=true 时填充)"
+    )
 
 
 class TaskNodeDTO(BaseModel):
@@ -201,9 +245,14 @@ class TaskNodeDTO(BaseModel):
 
     node_id: str = Field(..., description="节点ID(分解树内唯一)")
     task_id: str = Field(..., description="所属任务ID")
-    status: str = Field(..., description="节点状态(product 态:DEFINED/EXECUTING/REVIEWING/DONE/FAILED/CANCELLED)")
+    status: str = Field(
+        ...,
+        description="节点状态(product 态:DEFINED/EXECUTING/REVIEWING/DONE/FAILED/CANCELLED)",
+    )
     task_spec: TaskSpecDTO = Field(..., description="节点任务规格")
-    run_info: RuntimeInfoDTO = Field(default_factory=RuntimeInfoDTO, description="节点运行时信息")
+    run_info: RuntimeInfoDTO = Field(
+        default_factory=RuntimeInfoDTO, description="节点运行时信息"
+    )
 
 
 class TaskInfoRecordDTO(BaseModel):
@@ -213,8 +262,12 @@ class TaskInfoRecordDTO(BaseModel):
     task_id: str = Field(..., description="任务ID")
     source_type: str = Field(..., description="触发渠道类型(bot/coop_group/api)")
     owner_user_id: str = Field(..., description="归属 userId")
+    owner_user_name: str | None = Field(None, description="归属用户名称")
     owner_bot_id: str = Field(..., description="归属 botId")
-    execution_config: dict[str, Any] | None = Field(None, description="执行配置(task_type/yaml/workflow_id + 透传键)")
+    owner_bot_name: str | None = Field(None, description="归属 Bot 名称")
+    execution_config: dict[str, Any] | None = Field(
+        None, description="执行配置(task_type/yaml/workflow_id + 透传键)"
+    )
     task_spec: dict[str, Any] = Field(..., description="任务规格(元数据/上下文/目标)")
     status: str = Field(..., description="任务状态(product 态)")
     gmt_create: datetime | None = Field(None, description="记录创建时间")
@@ -227,7 +280,9 @@ class TaskRelationDTO(BaseModel):
     src_id: str = Field(..., description="结构父(分解源/被依赖)")
     dst_id: str = Field(..., description="结构子(分解产物/依赖方)")
     type: str = Field("DEPENDENCY", description="关系类型")
-    extend_props: dict[str, Any] = Field(default_factory=dict, description="关系扩展属性")
+    extend_props: dict[str, Any] = Field(
+        default_factory=dict, description="关系扩展属性"
+    )
 
 
 class TaskExecutionGraphDTO(BaseModel):
@@ -238,8 +293,12 @@ class TaskExecutionGraphDTO(BaseModel):
     status: str = Field(..., description="图状态(product 态)")
     output: dict[str, Any] = Field(default_factory=dict, description="图级输出")
     tasks: list[TaskNodeDTO] = Field(default_factory=list, description="分解树节点列表")
-    relations: list[TaskRelationDTO] = Field(default_factory=list, description="依赖关系(分解树)")
-    extend_props: dict[str, Any] = Field(default_factory=dict, description="图级扩展属性")
+    relations: list[TaskRelationDTO] = Field(
+        default_factory=list, description="依赖关系(分解树)"
+    )
+    extend_props: dict[str, Any] = Field(
+        default_factory=dict, description="图级扩展属性"
+    )
     execution_graph: dict[str, Any] | None = Field(
         None,
         description="回调审计 DAG 快照(按 root session_id 从 task_callback 反查挂图级)",
@@ -270,17 +329,30 @@ def runtime_status_to_product_status(status: Any) -> str:
 def task_spec_from_dto(dto: TaskSpecDTO):
     """TaskSpecDTO → domain TaskSpec(Rule 22:adapter 唯一写翻译位;task_info_from_dto / bbs_attach 复用)。"""
     from agentclaw.community.core.task.domain.models import (
-        AcceptanceCriteria, Context, Goal, Metadata, TaskSpec,
+        AcceptanceCriteria,
+        Context,
+        Goal,
+        Metadata,
+        TaskSpec,
     )
+
     return TaskSpec(
-        metadata=Metadata(task_id=dto.metadata.task_id,
-                          title=dto.metadata.title,
-                          instruction=dto.metadata.instruction),
-        context=Context(background=dto.context.background,
-                        extend_props=dict(dto.context.extend_props)),
-        goal=Goal(objective=dto.goal.objective,
-                  acceptances=[AcceptanceCriteria(id=a.id, description=a.description)
-                               for a in dto.goal.acceptances]),
+        metadata=Metadata(
+            task_id=dto.metadata.task_id,
+            title=dto.metadata.title,
+            instruction=dto.metadata.instruction,
+        ),
+        context=Context(
+            background=dto.context.background,
+            extend_props=dict(dto.context.extend_props),
+        ),
+        goal=Goal(
+            objective=dto.goal.objective,
+            acceptances=[
+                AcceptanceCriteria(id=a.id, description=a.description)
+                for a in dto.goal.acceptances
+            ],
+        ),
     )
 
 
@@ -288,21 +360,34 @@ def task_info_request_from_dto(dto: TaskInfoRequestDTO):
     """TaskInfoRequestDTO → domain TaskInfoRequest(Rule 22:adapter 唯一写翻译位)。"""
     from agentclaw.community.core.task.domain.models import TaskSourceType, TaskType
     from agentclaw.community.core.task.domain.requests import (
-        RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
-        RequestTaskSpec, TaskInfoRequest,
+        RequestAcceptance,
+        RequestContext,
+        RequestGoal,
+        RequestMetadata,
+        RequestTaskSpec,
+        TaskInfoRequest,
     )
+
     ec = dto.execution_config
     execution_config: dict[str, Any] = dict(ec.model_dump(exclude_none=True))
     execution_config["task_type"] = TaskType(ec.task_type)
     return TaskInfoRequest(
         task_spec=RequestTaskSpec(
-            metadata=RequestMetadata(title=dto.task_spec.metadata.title,
-                                     instruction=dto.task_spec.metadata.instruction),
-            context=RequestContext(background=dto.task_spec.context.background,
-                                   extend_props=dict(dto.task_spec.context.extend_props)),
-            goal=RequestGoal(objective=dto.task_spec.goal.objective,
-                             acceptances=[RequestAcceptance(id=a.id, acceptance=a.acceptance)
-                                          for a in dto.task_spec.goal.acceptances]),
+            metadata=RequestMetadata(
+                title=dto.task_spec.metadata.title,
+                instruction=dto.task_spec.metadata.instruction,
+            ),
+            context=RequestContext(
+                background=dto.task_spec.context.background,
+                extend_props=dict(dto.task_spec.context.extend_props),
+            ),
+            goal=RequestGoal(
+                objective=dto.task_spec.goal.objective,
+                acceptances=[
+                    RequestAcceptance(id=a.id, acceptance=a.acceptance)
+                    for a in dto.task_spec.goal.acceptances
+                ],
+            ),
         ),
         source_type=TaskSourceType(dto.source_type),
         owner_user_id=dto.owner_user_id,
@@ -313,18 +398,25 @@ def task_info_request_from_dto(dto: TaskInfoRequestDTO):
 
 def callback_from_dto(dto: TaskCallbackDataDTO):
     from agentclaw.community.core.task.domain.models import TaskCallbackData
-    return TaskCallbackData(data={
-        "loop_task_id": dto.loop_task_id,
-        "workflow_type": dto.workflow_type,
-        "workflow_id": dto.workflow_id,
-        "instance_id": dto.instance_id,
-        "result": dict(dto.result),
-    })
+
+    return TaskCallbackData(
+        data={
+            "loop_task_id": dto.loop_task_id,
+            "workflow_type": dto.workflow_type,
+            "workflow_id": dto.workflow_id,
+            "instance_id": dto.instance_id,
+            "result": dict(dto.result),
+        }
+    )
 
 
 def acceptance_result_from_dto(dto: AcceptanceResultDTO):
     """AcceptanceResultDTO → domain AcceptanceResult(Rule 22:adapter 唯一写翻译位;bbs/result 路由复用)。"""
-    from agentclaw.community.core.task.domain.models import AcceptanceResult, AcceptanceVerdict
+    from agentclaw.community.core.task.domain.models import (
+        AcceptanceResult,
+        AcceptanceVerdict,
+    )
+
     return AcceptanceResult(
         verdict=AcceptanceVerdict(dto.verdict),
         acceptances_metric=list(dto.acceptances_metric),
@@ -336,52 +428,87 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
     nodes: list[TaskNodeDTO] = []
     for n in graph.tasks:
         ar = n.run_info.acceptance_result
-        ar_dto = (AcceptanceResultDTO(verdict=ar.verdict.value,
-                                      acceptances_metric=list(ar.acceptances_metric),
-                                      gaps=list(ar.gaps))
-                  if ar is not None else None)
-        nodes.append(TaskNodeDTO(
-            node_id=n.node_id, task_id=n.task_id,
-            status=runtime_status_to_product_status(n.status),
-            task_spec=TaskSpecDTO(
-                metadata=MetadataDTO(task_id=n.task_spec.metadata.task_id,
-                                     title=n.task_spec.metadata.title,
-                                     instruction=n.task_spec.metadata.instruction),
-                context=ContextDTO(background=n.task_spec.context.background,
-                                   extend_props=dict(n.task_spec.context.extend_props)),
-                goal=GoalDTO(objective=n.task_spec.goal.objective,
-                             acceptances=[AcceptanceCriteriaDTO(id=a.id, description=a.description)
-                                          for a in n.task_spec.goal.acceptances]),
-            ),
-            run_info=RuntimeInfoDTO(run_mode=n.run_info.run_mode,
-                                    assignee=n.run_info.assignee,
-                                    start_time=n.run_info.start_time,
-                                    end_time=n.run_info.end_time,
-                                    output=dict(n.run_info.output),
-                                    acceptance_result=ar_dto,
-                                    extend_props=dict(n.run_info.extend_props),
-                                    action_log=([NodeActionEventDTO(
-                                        seq=e.seq, ts=e.ts, action=e.action.value,
-                                        loop_round=e.loop_round, attempt=e.attempt,
-                                        status_from=e.status_from.value if e.status_from else None,
-                                        status_to=e.status_to.value if e.status_to else None,
-                                        payload=dict(e.payload),
-                                    ) for e in n.run_info.action_log]
-                                    if include_action_log else [])),
-        ))
+        ar_dto = (
+            AcceptanceResultDTO(
+                verdict=ar.verdict.value,
+                acceptances_metric=list(ar.acceptances_metric),
+                gaps=list(ar.gaps),
+            )
+            if ar is not None
+            else None
+        )
+        nodes.append(
+            TaskNodeDTO(
+                node_id=n.node_id,
+                task_id=n.task_id,
+                status=runtime_status_to_product_status(n.status),
+                task_spec=TaskSpecDTO(
+                    metadata=MetadataDTO(
+                        task_id=n.task_spec.metadata.task_id,
+                        title=n.task_spec.metadata.title,
+                        instruction=n.task_spec.metadata.instruction,
+                    ),
+                    context=ContextDTO(
+                        background=n.task_spec.context.background,
+                        extend_props=dict(n.task_spec.context.extend_props),
+                    ),
+                    goal=GoalDTO(
+                        objective=n.task_spec.goal.objective,
+                        acceptances=[
+                            AcceptanceCriteriaDTO(id=a.id, description=a.description)
+                            for a in n.task_spec.goal.acceptances
+                        ],
+                    ),
+                ),
+                run_info=RuntimeInfoDTO(
+                    run_mode=n.run_info.run_mode,
+                    assignee=n.run_info.assignee,
+                    start_time=n.run_info.start_time,
+                    end_time=n.run_info.end_time,
+                    output=dict(n.run_info.output),
+                    acceptance_result=ar_dto,
+                    extend_props=dict(n.run_info.extend_props),
+                    action_log=(
+                        [
+                            NodeActionEventDTO(
+                                seq=e.seq,
+                                ts=e.ts,
+                                action=e.action.value,
+                                loop_round=e.loop_round,
+                                attempt=e.attempt,
+                                status_from=e.status_from.value
+                                if e.status_from
+                                else None,
+                                status_to=e.status_to.value if e.status_to else None,
+                                payload=dict(e.payload),
+                            )
+                            for e in n.run_info.action_log
+                        ]
+                        if include_action_log
+                        else []
+                    ),
+                ),
+            )
+        )
     relations = [
-        TaskRelationDTO(src_id=r.src_id, dst_id=r.dst_id, type=r.type.value,
-                        extend_props=dict(r.extend_props))
+        TaskRelationDTO(
+            src_id=r.src_id,
+            dst_id=r.dst_id,
+            type=r.type.value,
+            extend_props=dict(r.extend_props),
+        )
         for r in graph.relations
     ]
     return TaskExecutionGraphDTO(
-        run_id=graph.run_id, loop_round=graph.loop_round,
+        run_id=graph.run_id,
+        loop_round=graph.loop_round,
         status=runtime_status_to_product_status(graph.status),
-        output=dict(graph.output), tasks=nodes, relations=relations,
+        output=dict(graph.output),
+        tasks=nodes,
+        relations=relations,
         extend_props=dict(graph.extend_props),
         execution_graph=graph.execution_graph,
     )
-
 
 
 def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
@@ -391,21 +518,31 @@ def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
         task_id=record.task_id,
         source_type=record.source_type,
         owner_user_id=record.owner_user_id,
+        owner_user_name=getattr(record, "owner_user_name", None),
         owner_bot_id=record.owner_bot_id,
-        execution_config=(dict(record.execution_config)
-                          if record.execution_config is not None else None),
+        owner_bot_name=getattr(record, "owner_bot_name", None),
+        execution_config=(
+            dict(record.execution_config)
+            if record.execution_config is not None
+            else None
+        ),
         task_spec=dict(record.task_spec),
         status=runtime_status_to_product_status(record.status),
         gmt_create=record.gmt_create,
         gmt_modified=record.gmt_modified,
     )
 
+
 def op_result_to_dto(result) -> TaskOpResultDTO:
     # TaskOpResult 持 error(失败原因),无 message 字段;将 error 透出到 DTO.message,
     # 否则 failure 时 HTTP 响应只剩 success=false、原因被吞掉,无法排查。
-    return TaskOpResultDTO(task_id=result.task_id, success=result.success, run_id=result.run_id,
-                           message=getattr(result, "error", None),
-                           extend_props=dict(result.extend_props or {}))
+    return TaskOpResultDTO(
+        task_id=result.task_id,
+        success=result.success,
+        run_id=result.run_id,
+        message=getattr(result, "error", None),
+        extend_props=dict(result.extend_props or {}),
+    )
 
 
 # ===== task_loop inbound callback schemas(PUSH 回调,对齐羽雀 TaskCallbackData/TaskNodeCallbackData)=====
@@ -427,10 +564,76 @@ class TaskCallbackRequest(BaseModel):
     output: dict[str, Any] | None = None
     failed_info: str | None = None
     ext_info: dict[str, Any] | None = None
-    loop_task_id: str | None = None    # 回声字段:派发期透传,引擎原样回带(可选)
+    loop_task_id: str | None = None  # 回声字段:派发期透传,引擎原样回带(可选)
 
 
 class TaskNodeCallbackRequest(TaskCallbackRequest):
     """node 级回调载荷(node_id 即 Avernet 子节点 id,统一领域对象 1:1 映射)。"""
 
     node_id: str
+
+
+# ===== 任务认领 Bot 授权(grant/revoke)DTO =====
+# 对齐 api-contract §1:`bcs_bot_id` = real:entity(bot_id:owner_user_id);
+# cookie/referer 取自请求头(schema 内不承载,router 注入),operator = 登录态用户(staffId)。
+# stateless:api-key 服务端持有,不落本地表;/grant、/revoke 端点对外在 openapi v1 task router。
+
+
+class TaskGrantRequestDTO(BaseModel):
+    """前端开启「任务认领」grant 公共 api-key 给某 Bot 的请求体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bcs_bot_id: str = Field(
+        ...,
+        description="被授权 Bot的 real:entity(bot_id:owner_user_id,即 /mine 的 bot.id 原值);"
+        "遗留无 ':' 由后端用登录态 operator 补 owner 段",
+    )
+
+
+class TaskGrantResultDTO(BaseModel):
+    """grant 成功回包。"""
+
+    bcs_bot_id: str = Field(..., description="被授权 Bot 的 real:entity")
+    api_key_prefix: str = Field(..., description="授权所用 api-key 前缀(secbaas 主键)")
+    grant_status: str = Field(..., description="授权状态(granted)")
+    operator: str = Field(..., description="执行 grant 的用户 id")
+
+
+class TaskRevokeRequestDTO(BaseModel):
+    """关闭「任务认领」撤销授权的请求体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bcs_bot_id: str = Field(..., description="撤销授权 Bot 的 real:entity")
+
+
+class TaskRevokeResultDTO(BaseModel):
+    """revoke 成功回包。"""
+
+    bcs_bot_id: str = Field(..., description="撤销授权 Bot 的 real:entity")
+    grant_status: str = Field(..., description="授权状态(revoked)")
+
+
+# ===== claim_on JOIN 灰度开关 DTO =====
+# 默认关闭;开启后派发「搜推候选 ∩ task_claim_mode-on 名单」JOIN。详
+# ``core/task/task_dispatch/claim_join_gate.py``。
+
+
+class TaskClaimJoinFilterRequestDTO(BaseModel):
+    """设置 claim_on JOIN 开关的请求体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        ...,
+        description="claim_on JOIN 开关:true=启用「搜推候选 ∩ claim_on 名单」JOIN 过滤(未命中降 MISS/降级);"
+        "false=关闭(直按 assignee 派发,即当前线上行为)",
+    )
+
+
+class TaskClaimJoinFilterStateDTO(BaseModel):
+    """开关当前状态回包(GET 读 / POST 写后回显)。"""
+
+    enabled: bool = Field(..., description="当前开关状态(true=已启用 claim_on JOIN)")
+    env: str = Field(..., description="生效环境(prod/pre/dev)")

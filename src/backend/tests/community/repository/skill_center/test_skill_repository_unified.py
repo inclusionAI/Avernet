@@ -11,6 +11,7 @@ upsert (add_default_mcp_exclusion idempotent on
 uk_user_bot_skillset_mcp).
 """
 from contextlib import contextmanager
+from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -18,7 +19,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models import BotSkillInstallation, Skill, SkillSet, SkillSetSkill
-from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
+from agentclaw.community.core.skill_center.errors import (
+    ActiveSkillSetReferenceError,
+    SkillOfflineError,
+)
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import AcSkillMember
 from agentclaw.community.plugin_api.models import BotModel
@@ -105,6 +109,22 @@ def test_skill_create_get_update_delete(skills):
     assert skills.delete(sid) is True
     assert skills.get_by_id(sid) is None  # hard delete
     assert skills.delete(sid) is False
+
+
+def test_legacy_add_refuses_offline_skill_before_membership_write(skills, sets, db):
+    skill = skills.create({"name": "offline", "git_path": "center://offline"})
+    skill_set = sets.create({"name": "set", "is_active": False})
+    with db.orm_session() as session:
+        session.query(Skill).filter_by(id=int(skill["id"])).update(
+            {Skill.offline_at: datetime(2026, 8, 30)},
+            synchronize_session=False,
+        )
+
+    with pytest.raises(SkillOfflineError, match="SKILL_OFFLINE"):
+        sets.add_skill_to_set(skill_set["id"], skill["id"])
+
+    with db.orm_session() as session:
+        assert session.query(SkillSetSkill).count() == 0
 
 
 def test_delete_removes_all_associations_for_active_and_inactive_local_skills(

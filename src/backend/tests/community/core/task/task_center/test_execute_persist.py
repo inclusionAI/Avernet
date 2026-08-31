@@ -13,13 +13,16 @@ import agentclaw.community.core.task_queue.repository.models  # noqa: F401  idx_
 from agentclaw.community.core.repository.implementations.task.task_info_repository import (
     TaskInfoRepository,
 )
-from agentclaw.community.core.task.domain.models import Status, TaskSourceType, TaskType
+from agentclaw.community.core.task.domain.models import (
+    Status, TaskNodePatch, TaskSourceType, TaskType,
+)
 from agentclaw.community.core.task.domain.requests import (
     RequestAcceptance, RequestContext, RequestGoal, RequestMetadata,
     RequestTaskSpec, TaskInfoRequest,
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.repository.types import TaskInfoRecord
 
 
 class _SqliteDB:
@@ -90,6 +93,24 @@ def test_execute_persists_task_info_row(repo):
     assert row.owner_user_id == "U1" and row.owner_bot_id == "B1"
     assert row.task_spec["metadata"]["task_id"] == "persist-tid"
     assert row.task_spec["goal"]["acceptances"] == [{"id": "ac1", "description": "acc"}]
+
+
+
+def test_task_info_status_follows_root_status(repo):
+    task_id = "status-sync-tid"
+    repo.insert(TaskInfoRecord(
+        id=0, task_id=task_id, source_type="api", owner_user_id="U1", owner_bot_id="B1",
+        execution_config={"task_type": "dynamic"},
+        task_spec={"metadata": {"task_id": task_id}}, status=Status.PENDING,
+    ))
+    graph = TaskGraphService(task_info_repo=repo)
+    graph.initialize_graph(_request().to_task_info(task_id))
+
+    graph.update_task_node_info(
+        TaskNodePatch(task_id=task_id, node_id=task_id, status=Status.PLANNING)
+    )
+
+    assert repo.get(task_id).status is Status.PLANNING
 
 
 def test_execute_persist_failure_returns_failure(repo):

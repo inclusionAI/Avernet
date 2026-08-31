@@ -12,9 +12,10 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.resources.service import ResourceService
+from agentclaw.community.core.resources.resource_service_protocol import ResourceServiceFactoryProtocol
 
 
-class ResourceServiceFactory:
+class ResourceServiceFactory(ResourceServiceFactoryProtocol):
     """Mints :class:`ResourceService` instances bound to a specific bot.
 
     Constructs the slim ``core/resources/service.py`` ``ResourceService``

@@ -44,6 +44,9 @@ from agentclaw.community.core.repository.implementations.skill_center.direct_ins
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
+    skill_mcp_dependency_codes,
+)
 from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import LegacySkillSetScopeQueries
 from agentclaw.community.core.repository.capability_desired_state_types import (
     CapabilityDesiredState,
@@ -58,6 +61,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
+from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
     require_can_join_set,
 )
@@ -155,7 +159,7 @@ class CapabilityDesiredStateRepository(
                 user_id=owner_id,
                 is_default=False,
                 is_builtin=False,
-                is_active=False,
+                is_active=True,
                 env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
                 engine_type=engine_type,
@@ -324,6 +328,7 @@ class CapabilityDesiredStateRepository(
                 and skill.bolt_id != bot_id
             ):
                 raise SkillSetControlPlaneNotFoundError()
+            require_skill_online(skill)
             old = self._snapshot(
                 session, bot_id, owner_id, engine_type=engine_type
             )
@@ -391,7 +396,17 @@ class CapabilityDesiredStateRepository(
                     skill_id=int(skill.id),
                 )
             session.flush()
-            return DesiredStateMutation(_item(row), True, old)
+            # This Skill's MCP dependencies are the MCPs the projection is
+            # about to add to the Bot's set. Read under the lock this
+            # transaction already holds, for the same reason the activate
+            # command reads its member codes here: a second, unlocked query
+            # could disagree with what was actually installed.
+            return DesiredStateMutation(
+                _item(row),
+                True,
+                old,
+                mcp_codes=skill_mcp_dependency_codes(skill),
+            )
 
     def remove_skill(
         self,
@@ -427,6 +442,13 @@ class CapabilityDesiredStateRepository(
             )
             if membership is None:
                 return DesiredStateMutation(_item(row), False, old)
+            # Read before the delete: after it, nothing links this Set to the
+            # Skill whose dependencies the projection is about to drop.
+            skill = (
+                self._scope(session.query(Skill), Skill)
+                .filter(Skill.id == int(skill_id))
+                .one_or_none()
+            )
             # The difference is what this membership was providing.
             before = self._teardown_ids(session, {int(row.id)})
             session.delete(membership)
@@ -441,7 +463,15 @@ class CapabilityDesiredStateRepository(
                     skill_ids=retired,
                 )
             session.flush()
-            return DesiredStateMutation(_item(row), True, old)
+            # Candidates for release, not a verdict: another Skill or the
+            # default policy may still supply the same code, and the projector
+            # subtracts the projected set before deleting anything.
+            return DesiredStateMutation(
+                _item(row),
+                True,
+                old,
+                mcp_codes=skill_mcp_dependency_codes(skill),
+            )
 
     def set_skill_set_active(
         self,
@@ -529,7 +559,17 @@ class CapabilityDesiredStateRepository(
                     server_codes=mcp_codes,
                 )
             session.flush()
-            return DesiredStateMutation(_item(row), changed, old)
+            # The projection needs to know which MCPs this Set just claimed
+            # or released, and they are only knowable under the row lock this
+            # transaction already holds. Returning them here keeps the
+            # command from issuing a second, unlocked query that could
+            # disagree with what was actually installed.
+            return DesiredStateMutation(
+                _item(row),
+                changed,
+                old,
+                mcp_codes=frozenset(mcp_codes),
+            )
 
     def restore_desired_state(
         self,
@@ -549,6 +589,26 @@ class CapabilityDesiredStateRepository(
             if engine_type is not None:
                 query = query.filter(SkillSet.engine_type == engine_type)
             current_sets = query.with_for_update().all()
+            restored_skill_ids = set(state.installations)
+            restored_skill_ids.update(
+                skill_id
+                for members in state.memberships.values()
+                for skill_id, _user_id, _skill_uuid in members
+            )
+            # Compensation is another consumption writer: projection failure
+            # must not resurrect a Membership/Installation after Offline won.
+            # Match every forward writer's lock and take multiple Skills in
+            # immutable id order before the first desired-state mutation.
+            for skill_id in sorted(restored_skill_ids):
+                skill = (
+                    self._scope(session.query(Skill), Skill)
+                    .filter(Skill.id == skill_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if skill is None:
+                    raise SkillSetControlPlaneNotFoundError()
+                require_skill_online(skill)
             current_ids = {int(row.id) for row in current_sets}
             if current_ids:
                 self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(

@@ -569,6 +569,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                         resources=result.resources,
                         ttl_in_minutes=result.ttl_in_minutes,
                         ttl_expiration_time=result.ttl_expiration_time,
+                        ttl_expiration_timestamp=result.ttl_expiration_timestamp,
                         envs=result.envs,
                         snapshot_id=result.snapshot_id,
                         metadata=result.metadata,

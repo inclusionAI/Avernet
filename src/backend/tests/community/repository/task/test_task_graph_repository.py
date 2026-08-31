@@ -120,7 +120,7 @@ def test_graph_version_rejects_stale_writer(db):
 
 
 def test_second_graph_service_hydrates_from_shared_store(db):
-    from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+    from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
     task_id = "T-CROSS-INSTANCE"
     TaskInfoRepository(db).insert(
@@ -182,3 +182,56 @@ def test_bbs_claim_db_cas_one_winner(db):
     assert repo.release_bbs_owner(task_id, "bot-A") is True
     # after release another bot can claim
     assert repo.claim_bbs_owner(task_id, "bot-B") is True
+
+
+
+def test_group_formation_round_trips_through_shared_store(db):
+    """A live GroupFormation carried on run_info.extend_props (HIT_MULTI_BOTS,
+    dispatcher -> _drain) must not crash json.dumps on save_graph and must
+    survive a DB round-trip so a cross-instance _prepare_into/_drain can still
+    do attribute access (gf.collab_mode / bot_ids / extend_props / form_coop_group)."""
+    from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+
+    task_id = "T-GF"
+    TaskInfoRepository(db).insert(
+        TaskInfoRecord(
+            id=0,
+            task_id=task_id,
+            source_type="bot",
+            owner_user_id="U-1",
+            owner_bot_id="B-1",
+            execution_config={},
+            task_spec={"metadata": {"task_id": task_id}},
+            status=Status.PENDING,
+        )
+    )
+    repo = TaskGraphRepository(db)
+    graph = _graph(task_id)
+    assert repo.create_graph(graph, runtime_status=Status.PENDING) == 1
+
+    gf = GroupFormation(
+        bot_ids=["B-1", "B-2"],
+        collab_mode="manager_worker",
+        group_name="arch-review",
+        members_info=[{"bot_id": "B-1", "role": "manager", "responsibility": "drive"}],
+        extend_props={"definition_yaml": "yaml...", "manager_bot_id": "B-1"},
+    )
+    graph.tasks[0].run_info.extend_props["pending_group_formation"] = gf
+
+    # save_graph must not raise: GroupFormation serialized to a dict for the row.
+    assert repo.save_graph(
+        graph, expected_version=1, runtime_status=Status.PENDING, action_events=[]
+    ) == 2
+    # Persistence conversion must not mutate the live in-memory node.
+    assert graph.tasks[0].run_info.extend_props["pending_group_formation"] is gf
+
+    restored = repo.load_graph(task_id)
+    assert restored is not None
+    rgf = restored.tasks[0].run_info.extend_props["pending_group_formation"]
+    assert isinstance(rgf, GroupFormation)
+    assert rgf.bot_ids == ["B-1", "B-2"]
+    assert rgf.collab_mode == "manager_worker"
+    assert rgf.group_name == "arch-review"
+    assert rgf.members_info == [{"bot_id": "B-1", "role": "manager", "responsibility": "drive"}]
+    assert rgf.extend_props["definition_yaml"] == "yaml..."
+    assert rgf.extend_props["manager_bot_id"] == "B-1"

@@ -231,25 +231,17 @@ class EngineProvisioningStrategy(ABC):
         bot: Dict[str, Any],
         extra_configs: Dict[str, Any] | None,
         *,
-        passport_plugin: Any,
-        skill_set_factory: Any,
-        template_service: Any,
-    ) -> None:
-        """Re-sync engine-owned external authorization on restart.
+        mcp_sync: Any = None,
+        skill_set_factory: Any = None,
+        template_service: Any = None,
+    ) -> bool:
+        """Optionally refresh engine-owned restart authorization/runtime state.
 
-        Engines that mint/provision external credentials at create time (e.g.
-        the AICoding Passport MCP/CLI grants from ``create_flow._apply_passport``)
-        recompute and push the same grants here so a restart does not silently
-        drop the authorization scope the bot was created with. Engines without
-        such external authorization should no-op.
-
-        ``extra_configs`` is the restart extension envelope from the caller; a
-        strategy may require an opt-in flag (e.g. ``confirmed_template_update``)
-        before performing any side effect so a plain restart never silently
-        rewrites authorization.
-
-        Failures must not block the restart: the call site wraps this in the
-        same try/except as the restart extension envelope.
+        Engines own their opt-in keys and side effects. Implementations must be
+        best-effort: failures should be logged/swallowed so restart success is
+        not blocked. ``template_service`` is optional and lets strategies consume
+        persisted, engine-owned restart intents after async lifecycle events.
+        Return value only records whether the engine opted in.
         """
 
     @abstractmethod

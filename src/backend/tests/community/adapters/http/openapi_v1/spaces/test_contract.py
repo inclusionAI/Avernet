@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import importlib
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
+from starlette.concurrency import run_in_threadpool as actual_run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.spaces.router import router
+from agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes import (
+    router as skill_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     MarketFavoriteItem,
     SpaceMemberItem,
@@ -26,13 +31,53 @@ from agentclaw.community.api.space_service import (
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
+)
+from agentclaw.community.api.space_skill_application_service import (
+    DraftDeleteOutcome,
+    DraftFileContent,
+    DraftFileItem,
+    DraftFileTree,
+    DraftMutationResult,
+    SpaceSkillApplicationServiceProtocol,
+    SpaceSkillCreationOutcome,
+)
+from agentclaw.community.plugin_api.space_skill_source import (
+    ExactSkillPackageFetchError,
+)
+from agentclaw.community.api.space_skill_version_query_service import (
+    SpaceSkillVersionQueryServiceProtocol,
+)
+from agentclaw.community.api.space_skill_offline_service import (
+    OfflineBlockerKind,
+    OfflineDraft,
+    OfflineImpact,
+    OfflineImpactItem,
+    SpaceSkillOfflineResult,
+    SpaceSkillOfflineServiceProtocol,
+)
+from agentclaw.community.api.space_skill_editor_request_service import (
+    SpaceSkillEditorRequestServiceProtocol,
+)
+from agentclaw.community.core.work_orders.models import WorkOrderRecord, WorkOrderStatus
+from agentclaw.community.api.draft_edit_lease_service import (
+    DraftEditLeaseServiceProtocol,
+)
 from agentclaw.community.core.market_favorites.models import (
     FavoriteTargetType,
     MarketFavoriteRecord,
     MarketSource,
 )
+from agentclaw.community.core.skill_center.skill_package import (
+    MAX_FILE_BYTES,
+    SkillManifestMissingError,
+    SkillManifestMultipleError,
+    SkillPathInvalidError,
+)
 from agentclaw.community.core.spaces.models import (
     SpaceJoinStatus,
+    SpaceListScope as DomainSpaceListScope,
     SpaceMemberRecord,
     SpaceMemberSummaryRecord,
     SpaceRecord,
@@ -43,6 +88,20 @@ from agentclaw.community.core.spaces.models import (
 from agentclaw.community.core.spaces.errors import (
     SpaceAccessDeniedError,
     SpaceNotFoundError,
+)
+from agentclaw.community.core.skill_center.errors import (
+    SpaceSkillGrantConflictError,
+    SpaceSkillGrantForbiddenError,
+    SpaceSkillGrantMemberRequiredError,
+    SpaceSkillGrantNotFoundError,
+    SpaceSkillGrantReasonRequiredError,
+    SpaceSkillIdempotencyConflictError,
+    DraftEditLeaseConflictError,
+    DraftEditLeaseForbiddenError,
+    DraftEditLeaseNotFoundError,
+    DraftEditLeaseTokenRejectedError,
+    DraftSourceNotRefreshableError,
+    SkillOfflineBlockedError,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
@@ -83,20 +142,301 @@ def skill_query_service():
 
 
 @pytest.fixture
-def client(member_service, space_service, favorite_service, skill_query_service):
+def skill_grant_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def skill_application_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def skill_version_query_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def skill_editor_request_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def draft_edit_lease_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def skill_offline_service():
+    return MagicMock()
+
+
+@pytest.fixture
+def client(
+    member_service,
+    space_service,
+    favorite_service,
+    skill_query_service,
+    skill_grant_service,
+    skill_application_service,
+    skill_version_query_service,
+    skill_editor_request_service,
+    draft_edit_lease_service,
+    skill_offline_service,
+):
     class _Bindings(Module):
         def configure(self, binder):
             binder.bind(SpaceMemberServiceProtocol, to=member_service)
             binder.bind(SpaceServiceProtocol, to=space_service)
             binder.bind(MarketFavoriteServiceProtocol, to=favorite_service)
             binder.bind(SpaceSkillQueryServiceProtocol, to=skill_query_service)
+            binder.bind(SpaceSkillGrantServiceProtocol, to=skill_grant_service)
+            binder.bind(
+                SpaceSkillApplicationServiceProtocol, to=skill_application_service
+            )
+            binder.bind(
+                SpaceSkillVersionQueryServiceProtocol,
+                to=skill_version_query_service,
+            )
+            binder.bind(
+                SpaceSkillEditorRequestServiceProtocol,
+                to=skill_editor_request_service,
+            )
+            binder.bind(DraftEditLeaseServiceProtocol, to=draft_edit_lease_service)
+            binder.bind(SpaceSkillOfflineServiceProtocol, to=skill_offline_service)
 
     app = FastAPI()
     app.include_router(router)
+    app.include_router(skill_router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "owner-1"}
     attach_injector(app, Injector([_Bindings()]))
     mount_public_error_handlers(app)
     return user_scoped_client(app, "owner-1")
+
+
+def test_skill_editor_request_publishes_stable_wire_and_uses_current_user(
+    client, skill_editor_request_service
+):
+    now = datetime(2026, 8, 26, 8, 0, 0)
+    skill_editor_request_service.create_request.return_value = WorkOrderRecord(
+        id=91,
+        work_order_no="WO-91",
+        biz_type="SKILL_COLLABORATOR",
+        biz_id="9",
+        applicant_user_id="owner-1",
+        apply_reason="共同维护",
+        status=WorkOrderStatus.PENDING,
+        reviewer_user_id=None,
+        review_remark=None,
+        reviewed_at=None,
+        env="test",
+        gmt_created=now,
+        gmt_modified=now,
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/editor-requests",
+        json={"reason": "共同维护"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"] == {
+        "work_order_id": 91,
+        "work_order_no": "WO-91",
+        "status": "PENDING",
+    }
+    skill_editor_request_service.create_request.assert_called_once_with(
+        space_id=7,
+        skill_id=9,
+        applicant_user_id="owner-1",
+        reason="共同维护",
+    )
+
+
+def test_draft_edit_lease_endpoints_publish_fenced_resource_contract(
+    client, draft_edit_lease_service
+):
+    draft_edit_lease_service.get_lease.return_value = {
+        "required": True,
+        "state": "HELD_BY_OTHER",
+        "holder_user_id": "manager-1",
+        "fencing_token": None,
+    }
+    draft_edit_lease_service.acquire.return_value = {
+        "required": True,
+        "state": "HELD_BY_ME",
+        "holder_user_id": "owner-1",
+        "fencing_token": 41,
+    }
+    draft_edit_lease_service.release.return_value = {
+        "required": True,
+        "state": "FREE",
+        "holder_user_id": None,
+        "fencing_token": None,
+    }
+    draft_edit_lease_service.takeover.return_value = {
+        "required": True,
+        "state": "HELD_BY_ME",
+        "holder_user_id": "owner-1",
+        "fencing_token": 42,
+    }
+
+    read = client.get("/openapi/v1/bots/spaces/7/skills/9/draft/lease")
+    acquired = client.put("/openapi/v1/bots/spaces/7/skills/9/draft/lease")
+    released = client.delete(
+        "/openapi/v1/bots/spaces/7/skills/9/draft/lease?fencing_token=41"
+    )
+    taken = client.post("/openapi/v1/bots/spaces/7/skills/9/draft/lease/takeover")
+
+    assert read.json()["data"]["fencing_token"] is None
+    assert acquired.json()["data"]["fencing_token"] == 41
+    assert released.json()["data"]["state"] == "FREE"
+    assert taken.json()["data"]["fencing_token"] == 42
+    draft_edit_lease_service.release.assert_called_once_with(
+        space_id=7, skill_id=9, actor_id="owner-1", fencing_token=41
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code", "message"),
+    [
+        (DraftEditLeaseForbiddenError(), 403, 403204, "Forbidden"),
+        (DraftEditLeaseNotFoundError(), 404, 404202, "Not found"),
+        (
+            DraftEditLeaseConflictError(),
+            409,
+            409303,
+            "Draft edit Lease is already held",
+        ),
+        (
+            DraftEditLeaseTokenRejectedError(),
+            409,
+            409304,
+            "Draft edit Lease fencing token was rejected",
+        ),
+    ],
+)
+def test_draft_edit_lease_returns_stable_error_codes(
+    client, draft_edit_lease_service, error, status, code, message
+):
+    draft_edit_lease_service.acquire.side_effect = error
+
+    response = client.put("/openapi/v1/bots/spaces/7/skills/9/draft/lease")
+
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    assert response.json()["message"] == message
+
+
+def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
+    client, skill_grant_service
+):
+    skill_grant_service.list_grants.return_value = {
+        "owner": {"user_id": "owner-1", "role": "OWNER"},
+        "managers": [{"user_id": "manager-1", "role": "MANAGER"}],
+        "actor": {
+            "skill_role": "OWNER",
+            "permissions": {
+                "edit_draft": True,
+                "publish_draft": True,
+                "delete_draft": True,
+                "create_upgrade_draft": True,
+                "offline_skill": True,
+                "manage_grants": True,
+                "transfer_owner": True,
+                "request_edit_access": False,
+                "takeover_lease": True,
+            },
+        },
+    }
+    skill_grant_service.add_manager.return_value = {
+        "user_id": "manager-2",
+        "role": "MANAGER",
+    }
+    skill_grant_service.remove_manager.return_value = {
+        "user_id": "manager-2",
+        "role": "MANAGER",
+    }
+    skill_grant_service.transfer_owner.return_value = {
+        "owner": {"user_id": "manager-1", "role": "OWNER"},
+        "managers": [],
+        "actor": {
+            "skill_role": None,
+            "permissions": {
+                "edit_draft": False,
+                "publish_draft": False,
+                "delete_draft": False,
+                "create_upgrade_draft": False,
+                "offline_skill": False,
+                "manage_grants": False,
+                "transfer_owner": False,
+                "request_edit_access": True,
+                "takeover_lease": False,
+            },
+        },
+    }
+
+    grants = client.get("/openapi/v1/bots/spaces/7/skills/9/grants")
+    added = client.put("/openapi/v1/bots/spaces/7/skills/9/managers/manager-2")
+    removed = client.delete("/openapi/v1/bots/spaces/7/skills/9/managers/manager-2")
+    transferred = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/owner-transfer",
+        json={"new_owner_user_id": "manager-1"},
+    )
+
+    assert grants.status_code == 200
+    assert grants.json()["data"]["actor"]["permissions"]["manage_grants"] is True
+    assert added.json()["data"] == {"user_id": "manager-2", "role": "MANAGER"}
+    assert removed.json()["data"] == {"user_id": "manager-2", "role": "MANAGER"}
+    assert transferred.json()["data"]["owner"]["user_id"] == "manager-1"
+    skill_grant_service.list_grants.assert_called_once_with(
+        space_id=7, skill_id=9, actor_id="owner-1"
+    )
+    skill_grant_service.transfer_owner.assert_called_once_with(
+        space_id=7,
+        skill_id=9,
+        actor_id="owner-1",
+        new_owner_user_id="manager-1",
+        reason=None,
+        retain_previous_owner_as_manager=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "status", "code", "message"),
+    [
+        (SpaceSkillGrantForbiddenError(), 403, 403203, "Forbidden"),
+        (SpaceSkillGrantNotFoundError(), 404, 404201, "Not found"),
+        (
+            SpaceSkillGrantMemberRequiredError(),
+            409,
+            409301,
+            "Active Space membership required",
+        ),
+        (
+            SpaceSkillGrantConflictError(),
+            409,
+            409302,
+            "Skill Grant state conflicts with this operation",
+        ),
+        (
+            SpaceSkillGrantReasonRequiredError(),
+            422,
+            422201,
+            "Owner transfer reason is required",
+        ),
+    ],
+)
+def test_grant_endpoints_return_stable_error_codes(
+    client, skill_grant_service, error, status, code, message
+):
+    skill_grant_service.list_grants.side_effect = error
+
+    response = client.get("/openapi/v1/bots/spaces/7/skills/9/grants")
+
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    assert response.json()["message"] == message
 
 
 def test_endpoint_serializes_persisted_datetime_with_utc_marker(client, space_service):
@@ -267,13 +607,37 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                 "skill_uuid": "0b1b5f8f-demo",
                 "name": "Smart Form Parser",
                 "description": "Parse complex forms",
-                "status": "DEVELOPING",
-                "draft_status": "EDITING",
+                "lifecycle_status": "DRAFT_ONLY",
                 "space_type": "TEAM",
-                "current_user_skill_role": None,
-                "can_edit": False,
-                "can_grant": False,
-                "can_apply_edit": True,
+                "owner": {"user_id": "owner-1", "display_name": "Owner One"},
+                "latest_published_version": None,
+                "draft": {
+                    "target_version": 1,
+                    "status": "EDITING",
+                    "revision_id": "22222222-2222-4222-8222-222222222222",
+                },
+                "active_publication": None,
+                "actor": {
+                    "skill_role": None,
+                    "permissions": {
+                        "edit_draft": False,
+                        "publish_draft": False,
+                        "delete_draft": False,
+                        "create_upgrade_draft": False,
+                        "offline_skill": False,
+                        "manage_grants": False,
+                        "transfer_owner": False,
+                        "request_edit_access": True,
+                        "takeover_lease": False,
+                    },
+                    "pending_editor_request": None,
+                },
+                "lease_summary": {
+                    "required": True,
+                    "state": "FREE",
+                    "holder_user_id": None,
+                    "holder_display_name": None,
+                },
                 "gmt_created": timestamp,
                 "gmt_modified": timestamp,
             }
@@ -282,7 +646,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
 
     response = client.get(
         "/openapi/v1/bots/spaces/7/skills",
-        params={"keyword": "form", "page_no": 2, "page_size": 5},
+        params={"keyword": "form", "page": 2, "page_size": 5},
     )
 
     assert response.status_code == 200
@@ -294,13 +658,37 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                 "skill_uuid": "0b1b5f8f-demo",
                 "name": "Smart Form Parser",
                 "description": "Parse complex forms",
-                "status": "DEVELOPING",
-                "draft_status": "EDITING",
+                "lifecycle_status": "DRAFT_ONLY",
                 "space_type": "TEAM",
-                "current_user_skill_role": None,
-                "can_edit": False,
-                "can_grant": False,
-                "can_apply_edit": True,
+                "owner": {"user_id": "owner-1", "display_name": "Owner One"},
+                "latest_published_version": None,
+                "draft": {
+                    "target_version": 1,
+                    "status": "EDITING",
+                    "revision_id": "22222222-2222-4222-8222-222222222222",
+                },
+                "active_publication": None,
+                "actor": {
+                    "skill_role": None,
+                    "permissions": {
+                        "edit_draft": False,
+                        "publish_draft": False,
+                        "delete_draft": False,
+                        "create_upgrade_draft": False,
+                        "offline_skill": False,
+                        "manage_grants": False,
+                        "transfer_owner": False,
+                        "request_edit_access": True,
+                        "takeover_lease": False,
+                    },
+                    "pending_editor_request": None,
+                },
+                "lease_summary": {
+                    "required": True,
+                    "state": "FREE",
+                    "holder_user_id": None,
+                    "holder_display_name": None,
+                },
                 "gmt_created": "2026-08-20T03:40:00Z",
                 "gmt_modified": "2026-08-20T03:40:00Z",
             }
@@ -310,7 +698,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
         space_id=7,
         actor_id="owner-1",
         keyword="form",
-        page_no=2,
+        page=2,
         page_size=5,
     )
 
@@ -318,7 +706,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
 @pytest.mark.parametrize(
     ("params", "expected_status"),
     [
-        ({"page_no": 0}, 422),
+        ({"page": 0}, 422),
         ({"page_size": 101}, 422),
         ({"keyword": "x" * 129}, 422),
     ],
@@ -328,6 +716,729 @@ def test_list_space_skills_validates_query_contract(client, params, expected_sta
 
     assert response.status_code == expected_status
     assert response.json()["code"] == 422000
+
+
+def _skill_detail_record():
+    timestamp = datetime(2026, 8, 30, 8)
+    return {
+        "id": 51,
+        "skill_uuid": "11111111-1111-4111-8111-111111111111",
+        "name": "draft-skill",
+        "description": "Draft description",
+        "lifecycle_status": "DRAFT_ONLY",
+        "space_type": "TEAM",
+        "owner": {"user_id": "owner-1", "display_name": "Owner One"},
+        "latest_published_version": None,
+        "draft": {
+            "target_version": 1,
+            "status": "EDITING",
+            "revision_id": "22222222-2222-4222-8222-222222222222",
+            "name": "draft-skill",
+            "description": "Draft description",
+            "source_kind": "FOLDER",
+            "source_repo_url": None,
+            "source_branch": None,
+            "source_commit_sha": None,
+            "source_subdir": None,
+        },
+        "active_publication": None,
+        "actor": {
+            "skill_role": "OWNER",
+            "permissions": {
+                "edit_draft": True,
+                "publish_draft": True,
+                "delete_draft": True,
+                "create_upgrade_draft": True,
+                "offline_skill": True,
+                "manage_grants": True,
+                "transfer_owner": True,
+                "request_edit_access": False,
+                "takeover_lease": True,
+            },
+            "pending_editor_request": None,
+        },
+        "lease_summary": {
+            "required": True,
+            "state": "FREE",
+            "holder_user_id": None,
+            "holder_display_name": None,
+        },
+        "source": "FOLDER",
+        "offline_at": None,
+        "offline_by": None,
+        "gmt_created": timestamp,
+        "gmt_modified": timestamp,
+    }
+
+
+def test_folder_and_git_creation_publish_real_idempotent_routes(
+    client, skill_application_service, skill_query_service, monkeypatch
+):
+    offload = AsyncMock(side_effect=actual_run_in_threadpool)
+    monkeypatch.setattr(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes.run_in_threadpool",
+        offload,
+    )
+    skill_application_service.create_from_folder.return_value = (
+        SpaceSkillCreationOutcome(skill_id=51, created=True)
+    )
+    skill_application_service.create_from_git.return_value = SpaceSkillCreationOutcome(
+        skill_id=51, created=True
+    )
+    skill_query_service.get_space_skill.return_value = _skill_detail_record()
+
+    folder = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-1"},
+        files=[
+            ("files", ("SKILL.md", b"manifest", "text/markdown")),
+            ("files", ("example.md", b"example", "text/markdown")),
+        ],
+        data={"file_paths": '["draft-skill/SKILL.md","draft-skill/example.md"]'},
+    )
+    imported = client.post(
+        "/openapi/v1/bots/spaces/7/skills/import-from-git",
+        headers={"Idempotency-Key": "git-1"},
+        json={"git_url": "https://example.com/team/skills.git"},
+    )
+
+    assert folder.status_code == imported.status_code == 201
+    assert folder.json()["data"]["draft"]["revision_id"].endswith("222222222222")
+    skill_application_service.create_from_folder.assert_called_once_with(
+        space_id=7,
+        actor_id="owner-1",
+        request_id="create-1",
+        files=[
+            ("draft-skill/SKILL.md", b"manifest"),
+            ("draft-skill/example.md", b"example"),
+        ],
+    )
+    skill_application_service.create_from_git.assert_called_once_with(
+        space_id=7,
+        actor_id="owner-1",
+        request_id="git-1",
+        git_url="https://example.com/team/skills.git",
+        branch=None,
+        subdir=None,
+    )
+    assert [call.args[0] for call in offload.await_args_list] == [
+        skill_application_service.create_from_folder,
+        skill_query_service.get_space_skill,
+        skill_application_service.create_from_git,
+        skill_query_service.get_space_skill,
+    ]
+
+
+def test_folder_creation_rejects_oversized_upload_before_application_service(
+    client, skill_application_service
+):
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-too-large"},
+        files=[
+            (
+                "files",
+                ("SKILL.md", b"x" * (MAX_FILE_BYTES + 1), "application/octet-stream"),
+            )
+        ],
+        data={"file_paths": '["SKILL.md"]'},
+    )
+
+    assert response.status_code == 422
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+def test_folder_creation_caps_each_file_before_multipart_spooling(
+    client, skill_application_service, monkeypatch
+):
+    """The transport rejects a file before Starlette writes past its limit."""
+    import starlette.formparsers
+
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
+    )
+    real_spooled_file = starlette.formparsers.SpooledTemporaryFile
+    file_limit = 8
+
+    class _DiskCap:
+        def __init__(self, *args, **kwargs):
+            self._file = real_spooled_file(*args, **kwargs)
+
+        def write(self, content):
+            if self._file.tell() + len(content) > file_limit:
+                raise AssertionError("multipart parser wrote past the file limit")
+            return self._file.write(content)
+
+        def __getattr__(self, name):
+            return getattr(self._file, name)
+
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILE_BYTES", file_limit)
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", _DiskCap)
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-spool-limit"},
+        files=[
+            (
+                "files",
+                ("SKILL.md", b"x" * (file_limit + 1), "application/octet-stream"),
+            )
+        ],
+        data={"file_paths": '["SKILL.md"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+def test_folder_creation_caps_aggregate_files_before_multipart_spooling(
+    client, skill_application_service, monkeypatch
+):
+    """The transport stops aggregate writes even when each file is small."""
+    import starlette.formparsers
+
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
+    )
+    real_spooled_file = starlette.formparsers.SpooledTemporaryFile
+    aggregate_limit = 8
+    written = 0
+
+    class _AggregateDiskCap:
+        def __init__(self, *args, **kwargs):
+            self._file = real_spooled_file(*args, **kwargs)
+
+        def write(self, content):
+            nonlocal written
+            if written + len(content) > aggregate_limit:
+                raise AssertionError("multipart parser wrote past the aggregate limit")
+            written += len(content)
+            return self._file.write(content)
+
+        def __getattr__(self, name):
+            return getattr(self._file, name)
+
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILE_BYTES", aggregate_limit)
+    monkeypatch.setattr(multipart_limits_module, "MAX_EXPANDED_BYTES", aggregate_limit)
+    monkeypatch.setattr(
+        starlette.formparsers, "SpooledTemporaryFile", _AggregateDiskCap
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-aggregate-limit"},
+        files=[
+            ("files", ("SKILL.md", b"12345", "text/markdown")),
+            ("files", ("README.md", b"67890", "text/markdown")),
+        ],
+        data={"file_paths": '["SKILL.md","README.md"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+def test_folder_creation_caps_file_count_during_multipart_parsing(
+    client, skill_application_service, monkeypatch
+):
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
+    )
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILES", 1)
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-file-count-limit"},
+        files=[
+            ("files", ("SKILL.md", b"manifest", "text/markdown")),
+            ("files", ("README.md", b"readme", "text/markdown")),
+        ],
+        data={"file_paths": '["SKILL.md","README.md"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+def test_folder_creation_rejects_oversized_multipart_body_before_spooling(
+    client, skill_application_service, monkeypatch
+):
+    import starlette.formparsers
+
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
+    )
+
+    class _NoSpool:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("oversized multipart body reached temporary storage")
+
+    monkeypatch.setattr(multipart_limits_module, "MAX_EXPANDED_BYTES", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILES", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_PATH_LENGTH", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_MULTIPART_OVERHEAD_BYTES", 0)
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", _NoSpool)
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-body-limit"},
+        files=[("files", ("S", b"x", "application/octet-stream"))],
+        data={"file_paths": '["S"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+def test_folder_creation_caps_streamed_body_without_content_length(
+    client, skill_application_service, monkeypatch
+):
+    import starlette.formparsers
+
+    multipart_limits_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
+    )
+
+    class _NoSpool:
+        def __init__(self, *_args, **_kwargs):
+            raise AssertionError("streamed oversized body reached temporary storage")
+
+    monkeypatch.setattr(multipart_limits_module, "MAX_EXPANDED_BYTES", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_FILES", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_PATH_LENGTH", 1)
+    monkeypatch.setattr(multipart_limits_module, "MAX_MULTIPART_OVERHEAD_BYTES", 0)
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", _NoSpool)
+    boundary = "space-skill-boundary"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="file_paths"\r\n\r\n'
+        '["S"]\r\n'
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="files"; filename="S"\r\n'
+        "Content-Type: application/octet-stream\r\n\r\n"
+        "x\r\n"
+        f"--{boundary}--\r\n"
+    ).encode()
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={
+            "Idempotency-Key": "create-stream-limit",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        content=iter((body,)),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.create_from_folder.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (SkillManifestMissingError(), 422205),
+        (SkillManifestMultipleError(), 422206),
+        (SkillPathInvalidError(), 422207),
+    ],
+)
+def test_folder_creation_publishes_specific_package_error_codes(
+    client, skill_application_service, error, code
+):
+    skill_application_service.create_from_folder.side_effect = error
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills",
+        headers={"Idempotency-Key": "create-invalid"},
+        files=[("files", ("SKILL.md", b"manifest", "text/markdown"))],
+        data={"file_paths": '["SKILL.md"]'},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == code
+
+
+def test_draft_file_routes_preserve_revision_and_fencing_contract(
+    client, skill_application_service, monkeypatch
+):
+    offload = AsyncMock(side_effect=actual_run_in_threadpool)
+    spaces_router_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.router"
+    )
+    monkeypatch.setattr(spaces_router_module, "run_in_threadpool", offload)
+    skill_application_service.get_draft_file_tree.return_value = DraftFileTree(
+        revision_id="rev-1", files=(DraftFileItem(path="SKILL.md", size=10),)
+    )
+    skill_application_service.read_draft_file.return_value = DraftFileContent(
+        path="SKILL.md", content="# Skill", revision_id="rev-1"
+    )
+    skill_application_service.save_draft_file.return_value = DraftMutationResult(
+        target_version=1,
+        status="EDITING",
+        revision_id="rev-2",
+        name="draft-skill",
+        description="Draft description",
+        source_kind="FOLDER",
+        source_repo_url=None,
+        source_branch=None,
+        source_commit_sha=None,
+        source_subdir=None,
+    )
+
+    tree = client.get("/openapi/v1/bots/spaces/7/skills/51/draft/files")
+    file = client.get("/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md")
+    saved = client.put(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md",
+        json={
+            "content": "# Updated",
+            "expected_revision_id": "rev-1",
+            "fencing_token": 7,
+        },
+    )
+
+    assert tree.json()["data"] == {
+        "revision_id": "rev-1",
+        "files": [{"path": "SKILL.md", "size": 10}],
+    }
+    assert file.json()["data"]["content"] == "# Skill"
+    assert saved.json()["data"]["revision_id"] == "rev-2"
+    skill_application_service.save_draft_file.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        path="SKILL.md",
+        content="# Updated",
+        expected_revision_id="rev-1",
+        fencing_token=7,
+    )
+    assert [call.args[0] for call in offload.await_args_list] == [
+        skill_application_service.get_draft_file_tree,
+        skill_application_service.read_draft_file,
+        skill_application_service.save_draft_file,
+    ]
+
+
+def test_draft_file_save_caps_streamed_json_before_fastapi_parsing(
+    client, skill_application_service, monkeypatch
+):
+    request_limits = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.multipart_limits"
+    )
+    monkeypatch.setattr(request_limits, "MAX_FILE_BYTES", 1)
+    monkeypatch.setattr(request_limits, "MAX_DRAFT_JSON_OVERHEAD_BYTES", 0)
+    body = b'{"content":"oversized","expected_revision_id":"rev-1","fencing_token":7}'
+
+    response = client.put(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md",
+        headers={"Content-Type": "application/json"},
+        content=iter((body,)),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.save_draft_file.assert_not_called()
+
+
+def test_draft_file_save_rejects_decoded_utf8_content_without_full_copy(
+    client, skill_application_service, monkeypatch
+):
+    spaces_router_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.router"
+    )
+    monkeypatch.setattr(spaces_router_module, "MAX_FILE_BYTES", 4, raising=False)
+
+    response = client.put(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md",
+        json={
+            "content": "ééé",
+            "expected_revision_id": "rev-1",
+            "fencing_token": 7,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.save_draft_file.assert_not_called()
+
+
+def test_draft_file_save_rejects_json_lone_surrogate_as_invalid_utf8(
+    client, skill_application_service
+):
+    body = b'{"content":"\\ud800","expected_revision_id":"rev-1","fencing_token":7}'
+
+    response = client.put(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/files/SKILL.md",
+        headers={"Content-Type": "application/json"},
+        content=body,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422202
+    skill_application_service.save_draft_file.assert_not_called()
+
+
+def test_upgrade_refresh_and_delete_routes_publish_command_contracts(
+    client, skill_application_service, monkeypatch
+):
+    offload = AsyncMock(side_effect=actual_run_in_threadpool)
+    spaces_router_module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.router"
+    )
+    monkeypatch.setattr(spaces_router_module, "run_in_threadpool", offload)
+    mutation = DraftMutationResult(
+        target_version=2,
+        status="EDITING",
+        revision_id="rev-2",
+        name="draft-skill",
+        description="Draft description",
+        source_kind="PUBLISHED_VERSION",
+        source_repo_url=None,
+        source_branch=None,
+        source_commit_sha=None,
+        source_subdir=None,
+    )
+    skill_application_service.create_upgrade_draft.return_value = mutation
+    skill_application_service.refresh_draft_from_git.return_value = mutation
+    skill_application_service.delete_draft.return_value = DraftDeleteOutcome(
+        changed=True, deleted_scope="DRAFT"
+    )
+
+    upgraded = client.post(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/upgrade",
+        headers={"Idempotency-Key": "upgrade-2"},
+    )
+    refreshed = client.post(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/refresh-from-git",
+        json={"expected_revision_id": "rev-1", "fencing_token": 7},
+    )
+    deleted = client.delete(
+        "/openapi/v1/bots/spaces/7/skills/51/draft",
+        params={"expected_revision_id": "rev-2", "fencing_token": 7},
+    )
+
+    assert upgraded.status_code == 201
+    assert refreshed.json()["data"]["revision_id"] == "rev-2"
+    assert deleted.json()["data"] == {"changed": True, "deleted_scope": "DRAFT"}
+    skill_application_service.create_upgrade_draft.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        request_id="upgrade-2",
+    )
+    skill_application_service.refresh_draft_from_git.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        expected_revision_id="rev-1",
+        fencing_token=7,
+    )
+    skill_application_service.delete_draft.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        expected_revision_id="rev-2",
+        fencing_token=7,
+    )
+    assert [call.args[0] for call in offload.await_args_list] == [
+        skill_application_service.create_upgrade_draft,
+        skill_application_service.refresh_draft_from_git,
+        skill_application_service.delete_draft,
+    ]
+
+
+def test_offline_impact_and_command_publish_stable_contracts(
+    client, skill_offline_service
+):
+    impact = OfflineImpact(
+        blocked=True,
+        total=1,
+        counts={"MEMBERSHIP": 1},
+        items=(
+            OfflineImpactItem(
+                kind=OfflineBlockerKind.MEMBERSHIP,
+                resource_id="1115804",
+                display_name="基础能力集",
+            ),
+        ),
+    )
+    skill_offline_service.impact.return_value = impact
+    skill_offline_service.offline.return_value = SpaceSkillOfflineResult(
+        changed=True,
+        lifecycle_status="OFFLINE",
+        draft=OfflineDraft(
+            target_version=3,
+            status="EDITING",
+            revision_id="33333333-3333-4333-8333-333333333333",
+        ),
+    )
+
+    preview = client.get(
+        "/openapi/v1/bots/spaces/7/skills/51/offline-impact",
+        params={"page": 1, "page_size": 20},
+    )
+    executed = client.post("/openapi/v1/bots/spaces/7/skills/51/offline")
+
+    assert preview.status_code == 200
+    assert preview.json()["data"] == {
+        "blocked": True,
+        "total": 1,
+        "counts": {"MEMBERSHIP": 1},
+        "items": [
+            {
+                "kind": "MEMBERSHIP",
+                "resource_id": "1115804",
+                "display_name": "基础能力集",
+            }
+        ],
+    }
+    assert executed.status_code == 200
+    assert executed.json()["data"]["changed"] is True
+    assert executed.json()["data"]["draft"]["target_version"] == 3
+    skill_offline_service.impact.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        page=1,
+        page_size=20,
+    )
+    skill_offline_service.offline.assert_called_once_with(
+        space_id=7, skill_id=51, actor_id="owner-1"
+    )
+
+
+def test_offline_blocked_returns_latest_impact_in_409_data(
+    client, skill_offline_service
+):
+    impact = OfflineImpact(
+        blocked=True,
+        total=1,
+        counts={"UNKNOWN_ARTIFACT": 1},
+        items=(
+            OfflineImpactItem(
+                kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
+                resource_id="artifact-scan",
+                display_name="scan incomplete",
+            ),
+        ),
+    )
+    skill_offline_service.offline.side_effect = SkillOfflineBlockedError(impact)
+
+    response = client.post("/openapi/v1/bots/spaces/7/skills/51/offline")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409313
+    assert response.json()["data"]["counts"] == {"UNKNOWN_ARTIFACT": 1}
+
+
+def test_upgrade_maps_exact_source_failure_to_sc_unavailable(
+    client, skill_application_service
+):
+    skill_application_service.create_upgrade_draft.side_effect = (
+        ExactSkillPackageFetchError("download failed")
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/51/draft/upgrade",
+        headers={"Idempotency-Key": "upgrade-failed"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["code"] == 502000
+
+
+def test_deleted_upgrade_request_returns_stable_idempotency_conflict(
+    client, skill_application_service
+):
+    skill_application_service.create_upgrade_draft.side_effect = (
+        SpaceSkillIdempotencyConflictError("upgrade request is spent")
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/draft/upgrade",
+        headers={"Idempotency-Key": "upgrade-deleted"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409305
+
+
+def test_non_git_refresh_returns_stable_client_error(client, skill_application_service):
+    skill_application_service.refresh_draft_from_git.side_effect = (
+        DraftSourceNotRefreshableError()
+    )
+
+    response = client.post(
+        "/openapi/v1/bots/spaces/7/skills/9/draft/refresh-from-git",
+        json={"expected_revision_id": "rev-1", "fencing_token": 7},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == 422208
+
+
+def test_published_version_and_consumable_routes_use_business_ordinals(
+    client, skill_version_query_service, monkeypatch
+):
+    offload = AsyncMock(side_effect=actual_run_in_threadpool)
+    monkeypatch.setattr(
+        "agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes.run_in_threadpool",
+        offload,
+    )
+    published_at = datetime(2026, 8, 30, 8)
+    version = {
+        "version": 2,
+        "sc_version_number": "2.0.0",
+        "name": "risk-review",
+        "description": "Published",
+        "mcp_dependencies": ["mcp.a"],
+        "published_at": published_at,
+    }
+    skill_version_query_service.list_versions.return_value = (1, [version])
+    skill_version_query_service.get_version.return_value = version
+    skill_version_query_service.get_version_file_tree.return_value = {
+        "version": 2,
+        "files": [{"path": "SKILL.md", "size": 10}],
+    }
+    skill_version_query_service.read_version_file.return_value = {
+        "version": 2,
+        "path": "SKILL.md",
+        "content": "# Published",
+    }
+    skill_version_query_service.list_consumable.return_value = (
+        1,
+        [
+            {
+                "skill_id": "51",
+                "name": "risk-review",
+                "description": "Published",
+                "latest_published_version": {
+                    "version": 2,
+                    "sc_version_number": "2.0.0",
+                    "published_at": published_at,
+                },
+            }
+        ],
+    )
+
+    versions = client.get("/openapi/v1/bots/spaces/7/skills/51/versions")
+    detail = client.get("/openapi/v1/bots/spaces/7/skills/51/versions/2")
+    tree = client.get("/openapi/v1/bots/spaces/7/skills/51/versions/2/files")
+    file = client.get("/openapi/v1/bots/spaces/7/skills/51/versions/2/files/SKILL.md")
+    consumable = client.get("/openapi/v1/bots/spaces/7/skills/consumable")
+
+    assert versions.json()["data"]["items"][0]["version"] == 2
+    assert detail.json()["data"]["mcp_dependencies"] == ["mcp.a"]
+    assert tree.json()["data"]["files"][0]["path"] == "SKILL.md"
+    assert file.json()["data"]["content"] == "# Published"
+    assert consumable.json()["data"]["items"][0]["skill_id"] == "51"
+    assert [call.args[0] for call in offload.await_args_list] == [
+        skill_version_query_service.get_version_file_tree,
+        skill_version_query_service.read_version_file,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -433,7 +1544,26 @@ def test_list_spaces_forwards_filters_and_maps_page(client, space_service):
         space_type=SpaceType.TEAM,
         page_no=2,
         page_size=5,
+        scope=DomainSpaceListScope.ALL,
     )
+
+
+def test_list_spaces_forwards_accessible_scope(client, space_service):
+    space_service.list_spaces.return_value = (0, [])
+
+    response = client.get("/openapi/v1/bots/spaces", params={"scope": "accessible"})
+
+    assert response.status_code == 200
+    assert (
+        space_service.list_spaces.call_args.kwargs["scope"]
+        is DomainSpaceListScope.ACCESSIBLE
+    )
+
+
+def test_list_spaces_rejects_unknown_scope(client):
+    response = client.get("/openapi/v1/bots/spaces", params={"scope": "joined"})
+
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize("was_created", [True, False])

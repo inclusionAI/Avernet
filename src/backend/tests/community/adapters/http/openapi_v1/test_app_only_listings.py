@@ -32,14 +32,23 @@ from agentclaw.community.adapters.http.openapi_v1.authorized_apps import (
 )
 from agentclaw.community.adapters.http.openapi_v1.bots import router as bots_router
 from agentclaw.community.adapters.http.openapi_v1.local import router as local_router
+from agentclaw.community.adapters.http.openapi_v1.routines.owner_router import (
+    router as routines_owner_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.spaces import router as spaces_router
+from agentclaw.community.adapters.http.openapi_v1.spaces.skill_routes import (
+    router as space_skill_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.work_orders import (
     router as work_orders_router,
 )
 from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
+from agentclaw.community.api.cron_relay_service import (
+    CronRelayServiceProtocol,
+)
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
@@ -53,6 +62,15 @@ from agentclaw.community.api.space_service import (
 )
 from agentclaw.community.api.space_skill_query_service import (
     SpaceSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.space_skill_application_service import (
+    SpaceSkillApplicationServiceProtocol,
+)
+from agentclaw.community.api.space_skill_version_query_service import (
+    SpaceSkillVersionQueryServiceProtocol,
+)
+from agentclaw.community.api.space_skill_grant_service import (
+    SpaceSkillGrantServiceProtocol,
 )
 from agentclaw.community.api.work_order_service import (
     WorkOrderNotificationServiceProtocol,
@@ -70,6 +88,7 @@ from agentclaw.community.core.bot_inventory.types import (
     BotInventoryKind,
     DeployMode,
     DisplayState,
+    ServiceEditLockState,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -217,9 +236,13 @@ def make_client(bots):
                 binder.bind(BotServiceProtocol, to=bots)
                 binder.bind(BotAppGrantServiceProtocol, to=_Grants(*grant_ids))
                 unexpected = _UnexpectedService()
+                binder.bind(CronRelayServiceProtocol, to=unexpected)
                 binder.bind(SpaceServiceProtocol, to=unexpected)
                 binder.bind(SpaceMemberServiceProtocol, to=unexpected)
                 binder.bind(SpaceSkillQueryServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillApplicationServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillVersionQueryServiceProtocol, to=unexpected)
+                binder.bind(SpaceSkillGrantServiceProtocol, to=unexpected)
                 binder.bind(MarketFavoriteServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderServiceProtocol, to=unexpected)
                 binder.bind(WorkOrderNotificationServiceProtocol, to=unexpected)
@@ -241,9 +264,12 @@ def make_client(bots):
         # mounts them: ``/openapi/v1/bots/{bot_id}`` would otherwise claim
         # ``/openapi/v1/bots/authorized`` as "the bot named authorized".
         app.include_router(app_view_router)
+        # Same rule for the owner-routines literal: ``routines`` is not a bot id.
+        app.include_router(routines_owner_router)
         app.include_router(local_router)
         app.include_router(bots_router)
         app.include_router(spaces_router)
+        app.include_router(space_skill_router)
         app.include_router(work_orders_router)
         app.dependency_overrides[require_principal] = lambda: _caller(
             with_user=with_user
@@ -265,7 +291,10 @@ def _data(response):
 
 def test_the_listing_is_narrowed_to_the_delegated_bots(make_client):
     """Two bots owned, one delegated: one returned."""
-    client = make_client(GRANTED)
+    # The bots listing now resolves each row's owner-view space (Noop models
+    # the personal space with zero service calls), so it needs a serving
+    # space context rather than the unexpected-service guard.
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     listed = _data(client.get("/openapi/v1/bots"))
 
@@ -278,7 +307,7 @@ def test_the_count_describes_the_narrowed_set(make_client):
     A caller could subtract and learn exactly how many of the user's bots it was
     not granted — a number nobody agreed to share.
     """
-    client = make_client(GRANTED)
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     assert _data(client.get("/openapi/v1/bots"))["total"] == 1
 
@@ -290,7 +319,7 @@ def test_the_narrowing_happens_before_pagination(make_client, bots):
     — a page of 20 that returns 3 — is the kind of thing that looks like an
     off-by-one rather than a scoping failure.
     """
-    client = make_client(GRANTED)
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     client.get("/openapi/v1/bots")
 
@@ -309,7 +338,9 @@ def test_an_application_granted_nothing_gets_an_empty_page(make_client, bots):
 
 def test_a_human_caller_sees_everything_they_own(make_client, bots):
     """The narrowing applies to applications, not to people."""
-    client = make_client(GRANTED, with_user=True)
+    client = make_client(
+        GRANTED, with_user=True, space_context=NoopBusinessSpaceContext()
+    )
 
     listed = _data(client.get("/openapi/v1/bots"))
 
@@ -371,6 +402,54 @@ def test_workshop_inventory_does_not_widen_from_a_shared_bot_grant(make_client):
 
     assert listed["items"] == [] and listed["total"] == 0
     inventory.list_items.assert_not_called()
+
+
+def test_workshop_inventory_serializes_batched_edit_lock(make_client):
+    inventory = MagicMock()
+    inventory.list_items.return_value = (
+        [
+            BotInventoryItem(
+                bot_id=GRANTED,
+                bot_name="service",
+                bot_desc="",
+                engine="openclaw",
+                bot_type="service",
+                kind=BotInventoryKind.SERVICE,
+                deploy_mode=DeployMode.CLOUD,
+                display_state=DisplayState.SERVICE_DRAFT,
+                status="draft",
+                owner_entity_id=USER,
+                space=None,
+                card_id=f"service:{GRANTED}:1",
+                edit_lock=ServiceEditLockState(
+                    locked=True,
+                    holder_user_id="editor-1",
+                    holder_name="Editor One",
+                    has_collaborators=True,
+                    is_owner_holder=False,
+                    need_lock=True,
+                ),
+            )
+        ],
+        1,
+    )
+    client = make_client(
+        GRANTED,
+        inventory_service=inventory,
+        space_context=NoopBusinessSpaceContext(),
+    )
+
+    item = _data(client.get("/openapi/v1/bots/all"))["items"][0]
+
+    assert item["edit_lock"] == {
+        "locked": True,
+        "acquired": None,
+        "holder_user_id": "editor-1",
+        "holder_name": "Editor One",
+        "has_collaborators": True,
+        "is_owner_holder": False,
+        "need_lock": True,
+    }
 
 
 def test_local_listing_passes_owned_grants_before_pagination(make_client):
@@ -469,6 +548,10 @@ def cross_owner_client(bots):
             def configure(self, binder):
                 binder.bind(BotServiceProtocol, to=bots)
                 binder.bind(BotAppGrantServiceProtocol, to=_CrossOwnerGrants())
+                binder.bind(
+                    BusinessSpaceContextProtocol,
+                    to=NoopBusinessSpaceContext(),
+                )
 
         app = FastAPI()
         app.include_router(app_view_router)
@@ -603,9 +686,19 @@ _UNGRANTED_APP_CASES = {
         "request": lambda client: client.get("/openapi/v1/bots/skills/repository/1"),
         "assert_starved": lambda response: response.status_code == 404,
     },
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): {
+        "request": lambda client: client.get("/openapi/v1/bots/skills/1/readme"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("POST", "/openapi/v1/bots/skills/repository/sync"): {
         "request": lambda client: client.post(
             "/openapi/v1/bots/skills/repository/sync"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("POST", "/openapi/v1/bots/market/skill-center/sync"): {
+        "request": lambda client: client.post(
+            "/openapi/v1/bots/market/skill-center/sync"
         ),
         "assert_starved": lambda response: response.status_code == 404,
     },
@@ -649,6 +742,15 @@ _UNGRANTED_APP_CASES = {
         # a stranger app cannot read a person's quota by naming them.
         "assert_starved": lambda response: response.status_code == 404,
     },
+    ("GET", "/openapi/v1/bots/routines/all"): {
+        "request": lambda client: client.get("/openapi/v1/bots/routines/all"),
+        # USER_GATED, the ceiling's exact shape: the aggregate reads the named
+        # user's whole routine fleet, so an app with no delegation from them is
+        # answered as if the user did not exist. The cron service stays
+        # untouched — it is bound to `_UnexpectedService` in the fixture, so a
+        # regression that asks it anyway fails here rather than leaking rows.
+        "assert_starved": lambda response: response.status_code == 404,
+    },
     ("GET", "/openapi/v1/bots/spaces"): {
         "request": lambda client: client.get("/openapi/v1/bots/spaces"),
         "assert_starved": lambda response: response.status_code == 404,
@@ -659,6 +761,70 @@ _UNGRANTED_APP_CASES = {
     },
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): {
         "request": lambda client: client.get("/openapi/v1/bots/spaces/1/skills"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/consumable"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/consumable"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"): {
+        "request": lambda client: client.get("/openapi/v1/bots/spaces/1/skills/1"),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/draft/files"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}",
+    ): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/draft/files/SKILL.md"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/versions"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}",
+    ): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/versions/1"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files",
+    ): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/versions/1/files"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}",
+    ): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/versions/1/files/SKILL.md"
+        ),
+        "assert_starved": lambda response: response.status_code == 404,
+    },
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"): {
+        "request": lambda client: client.get(
+            "/openapi/v1/bots/spaces/1/skills/1/grants"
+        ),
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("POST", "/openapi/v1/bots/spaces/{space_id}/market-favorites"): {

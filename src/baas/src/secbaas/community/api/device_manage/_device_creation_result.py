@@ -38,9 +38,19 @@ class ArcaCreationResult(DeviceCreationResult):
     ttl_in_minutes: float | None = Field(
         default=None, description="沙箱空闲超时时间(分钟)"
     )
-    ttl_expiration_time: int | None = Field(
+    ttl_expiration_time: str | None = Field(
         default=None,
-        description="沙箱到期时间戳（毫秒 epoch，与 info.ttl_timestamp 同单位）",
+        description=(
+            "Sandbox expiration time string"
+            " (formatted '%Y-%m-%d %H:%M:%S' in fixed Asia/Shanghai)"
+        ),
+    )
+    ttl_expiration_timestamp: int | None = Field(
+        default=None,
+        description=(
+            "Sandbox expiration timestamp"
+            " (epoch milliseconds, same unit as info.ttl_timestamp)"
+        ),
     )
     envs: dict[str, str] | None = Field(default=None, description="环境变量")
     snapshot_id: str | None = Field(default=None, description="快照/镜像ID")

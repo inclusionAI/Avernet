@@ -2,14 +2,20 @@
 
 import json
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceRecord, SpaceType
+from agentclaw.community.core.work_orders.callbacks import (
+    WorkOrderCallbackCredential,
+    WorkOrderDecisionCallbackDispatcher,
+)
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderAccessDeniedError,
+    WorkOrderAlreadyProcessedError,
+    WorkOrderCallbackError,
     WorkOrderApplicantAlreadyEditorError,
     WorkOrderApplicantAlreadyMemberError,
     WorkOrderInvalidReasonError,
@@ -21,6 +27,9 @@ from agentclaw.community.core.work_orders.errors import (
 )
 from agentclaw.community.core.work_orders.models import (
     NotificationCategory,
+    WorkOrderApprovalContext,
+    WorkOrderApproverRecord,
+    WorkOrderApproverStatus,
     WorkOrderBizType,
     WorkOrderDetail,
     WorkOrderDecision,
@@ -98,6 +107,37 @@ def _detail() -> WorkOrderDetail:
     )
 
 
+def _friend_context(
+    *,
+    event_type: WorkOrderEventType = WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED,
+    order_status: WorkOrderStatus = WorkOrderStatus.PENDING,
+    approver_status: WorkOrderApproverStatus = WorkOrderApproverStatus.PENDING,
+) -> WorkOrderApprovalContext:
+    order = _work_order().model_copy(
+        update={
+            "biz_type": WorkOrderBizType.BOT_FRIEND,
+            "biz_id": "friend-request",
+            "biz_data": json.dumps({"request_ids": ["request-77"]}),
+            "status": order_status,
+        }
+    )
+    return WorkOrderApprovalContext(
+        work_order=order,
+        approver=WorkOrderApproverRecord(
+            id=31,
+            work_order_id=order.id,
+            approver_user_id="owner-1",
+            status=approver_status,
+            review_remark=None,
+            reviewed_at=None,
+            env="dev",
+            gmt_created=NOW,
+            gmt_modified=NOW,
+        ),
+        source_event_type=event_type.value,
+    )
+
+
 def _notification() -> WorkOrderNotificationRecord:
     return WorkOrderNotificationRecord(
         id=21,
@@ -117,7 +157,11 @@ def _notification() -> WorkOrderNotificationRecord:
     )
 
 
-def _service(*, staff_dept: StaffDeptPlugin | None = None):
+def _service(
+    *,
+    staff_dept: StaffDeptPlugin | None = None,
+    decision_callbacks: WorkOrderDecisionCallbackDispatcher | None = None,
+):
     repository = MagicMock()
     spaces = MagicMock()
     access = MagicMock()
@@ -126,12 +170,16 @@ def _service(*, staff_dept: StaffDeptPlugin | None = None):
     collaborator_repository = MagicMock()
     collaborators = MagicMock()
     member_management = MagicMock()
+    skill_handler = MagicMock()
     if staff_dept is None:
         staff_dept = MagicMock(spec=StaffDeptPlugin)
         staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
             work_no="applicant-1",
             nick_name=None,
         )
+    if decision_callbacks is None:
+        decision_callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
+        decision_callbacks.requires_callback.return_value = False
     return (
         WorkOrderService(
             repository,
@@ -143,6 +191,8 @@ def _service(*, staff_dept: StaffDeptPlugin | None = None):
             collaborators,
             member_management,
             staff_dept,
+            skill_handler,
+            decision_callbacks,
         ),
         repository,
         spaces,
@@ -161,6 +211,9 @@ def _bot_editor_service():
     collaborators = MagicMock()
     member_management = MagicMock()
     staff_dept = MagicMock(spec=StaffDeptPlugin)
+    skill_handler = MagicMock()
+    decision_callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
+    decision_callbacks.requires_callback.return_value = False
     service = WorkOrderService(
         repository,
         spaces,
@@ -171,6 +224,8 @@ def _bot_editor_service():
         collaborators,
         member_management,
         staff_dept,
+        skill_handler,
+        decision_callbacks,
     )
     return (
         service,
@@ -295,6 +350,7 @@ def test_unified_approval_dispatches_bot_editor_side_effect() -> None:
         actor_id="owner-1",
         decision=WorkOrderDecision.APPROVED,
         review_remark=None,
+        callback_credential=WorkOrderCallbackCredential(headers={}),
     )
 
     assert result == expected
@@ -309,6 +365,179 @@ def test_unified_approval_dispatches_bot_editor_side_effect() -> None:
     collaborators.on_collaboration_changed.assert_called_once_with(
         "bot-17", "owner-1", "dev"
     )
+
+
+def test_friend_approval_calls_callback_before_local_persistence() -> None:
+    callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
+    callbacks.requires_callback.return_value = True
+    service, repository, _, _, _ = _service(decision_callbacks=callbacks)
+    context = _friend_context()
+    repository.get_detail.return_value = _detail().model_copy(
+        update={"work_order": context.work_order}
+    )
+    repository.get_approval_context.return_value = context
+    expected = WorkOrderReviewResult(
+        work_order_id=11,
+        status=WorkOrderStatus.APPROVED,
+        decision=WorkOrderDecision.APPROVED,
+        reviewer_user_id="owner-1",
+        review_remark=None,
+        reviewed_at=NOW,
+    )
+    repository.process_approval.return_value = expected
+    calls = MagicMock()
+    calls.attach_mock(callbacks, "callbacks")
+    calls.attach_mock(repository, "repository")
+    credential = WorkOrderCallbackCredential(headers={"Authorization": "Bearer token"})
+
+    result = service.process_approval(
+        work_order_id=11,
+        actor_id="owner-1",
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        callback_credential=credential,
+    )
+
+    assert result == expected
+    callbacks.dispatch.assert_called_once_with(
+        context=context,
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        credential=credential,
+    )
+    assert calls.mock_calls.index(
+        call.callbacks.dispatch(
+            context=context,
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            credential=credential,
+        )
+    ) < calls.mock_calls.index(
+        call.repository.process_approval(
+            work_order_id=11,
+            reviewer_user_id="owner-1",
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            env="dev",
+        )
+    )
+
+
+def test_friend_callback_failure_keeps_local_approval_pending() -> None:
+    callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
+    callbacks.requires_callback.return_value = True
+    callbacks.dispatch.side_effect = WorkOrderCallbackError("BCN failed")
+    service, repository, _, _, _ = _service(decision_callbacks=callbacks)
+    context = _friend_context()
+    repository.get_detail.return_value = _detail().model_copy(
+        update={"work_order": context.work_order}
+    )
+    repository.get_approval_context.return_value = context
+
+    with pytest.raises(WorkOrderCallbackError):
+        service.process_approval(
+            work_order_id=11,
+            actor_id="owner-1",
+            decision=WorkOrderDecision.REJECTED,
+            review_remark="no",
+            callback_credential=WorkOrderCallbackCredential(headers={}),
+        )
+
+    repository.process_approval.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("order_status", "approver_status"),
+    [
+        (WorkOrderStatus.APPROVED, WorkOrderApproverStatus.APPROVED),
+        (WorkOrderStatus.PENDING, WorkOrderApproverStatus.CANCELLED),
+    ],
+)
+def test_friend_approval_does_not_repeat_callback_after_processing(
+    order_status: WorkOrderStatus,
+    approver_status: WorkOrderApproverStatus,
+) -> None:
+    callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
+    callbacks.requires_callback.return_value = True
+    service, repository, _, _, _ = _service(decision_callbacks=callbacks)
+    context = _friend_context(
+        order_status=order_status,
+        approver_status=approver_status,
+    )
+    repository.get_detail.return_value = _detail().model_copy(
+        update={"work_order": context.work_order}
+    )
+    repository.get_approval_context.return_value = context
+
+    with pytest.raises(WorkOrderAlreadyProcessedError):
+        service.process_approval(
+            work_order_id=11,
+            actor_id="owner-1",
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            callback_credential=WorkOrderCallbackCredential(headers={}),
+        )
+
+    callbacks.dispatch.assert_not_called()
+    repository.process_approval.assert_not_called()
+
+
+def test_generic_approval_without_handler_preserves_existing_path() -> None:
+    callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
+    callbacks.requires_callback.return_value = False
+    service, repository, _, _, _ = _service(decision_callbacks=callbacks)
+    context = _friend_context().model_copy(
+        update={
+            "work_order": _work_order().model_copy(
+                    update={"biz_type": "GENERIC_APPROVAL", "biz_id": "generic-1"}
+            ),
+            "source_event_type": WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
+        }
+    )
+    repository.get_detail.return_value = _detail().model_copy(
+        update={"work_order": context.work_order}
+    )
+    repository.get_approval_context.return_value = context
+    repository.process_approval.return_value = MagicMock()
+
+    service.process_approval(
+        work_order_id=11,
+        actor_id="owner-1",
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        callback_credential=WorkOrderCallbackCredential(headers={}),
+    )
+
+    callbacks.dispatch.assert_not_called()
+    repository.process_approval.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "biz_data",
+    [None, {}, {"request_ids": []}, {"request_ids": [""]}, {"request_ids": [7]}],
+)
+def test_create_friend_event_requires_callback_contract(
+    biz_data: dict[str, object] | None,
+) -> None:
+    service, repository, _, _, _ = _service()
+
+    with pytest.raises(WorkOrderInvalidEventError):
+        service.create_work_order_event(
+            event_category=NotificationCategory.APPROVAL,
+            biz_type=WorkOrderBizType.BOT_FRIEND.value,
+            biz_id="friend-request",
+            event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
+            applicant_user_id="actor-1",
+            approver_user_ids=["approver-1"],
+            recipient_user_ids=[],
+            title="friend request",
+            content=None,
+            apply_reason=None,
+            biz_data=biz_data,
+            actor_id="actor-1",
+        )
+
+    repository.create_work_order_event.assert_not_called()
 
 
 @pytest.mark.parametrize("value", ["x" * 513])
@@ -381,10 +610,10 @@ def test_create_space_join_request_uses_staff_nickname() -> None:
     repository.create_space_join_request.return_value = _work_order()
 
     service.create_space_join_request(
-        space_id=7, applicant_user_id="applicant-1", reason="join"
+        space_id=7, applicant_user_id="1234", reason="join"
     )
 
-    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="applicant-1")
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="001234")
     assert (
         repository.create_space_join_request.call_args.kwargs["applicant_name"]
         == "花花"
@@ -445,9 +674,10 @@ def test_create_space_join_request_truncates_staff_nickname() -> None:
         space_id=7, applicant_user_id="applicant-1", reason="join"
     )
 
-    assert repository.create_space_join_request.call_args.kwargs[
-        "applicant_name"
-    ] == "花" * 128
+    assert (
+        repository.create_space_join_request.call_args.kwargs["applicant_name"]
+        == "花" * 128
+    )
 
 
 def test_create_rejects_personal_space() -> None:
@@ -557,6 +787,7 @@ def test_review_requires_owner_and_delegates(
         review_remark="ok",
         target_status=status,
         notification=notification,
+        applicant_user_name=("applicant-1" if status is WorkOrderStatus.APPROVED else None),
         env="dev",
     )
 
@@ -595,6 +826,7 @@ def test_approve_accepts_missing_or_blank_remark(value: str | None) -> None:
         review_remark=None,
         target_status=WorkOrderStatus.APPROVED,
         notification=notification,
+        applicant_user_name="applicant-1",
         env="dev",
     )
 
@@ -834,6 +1066,13 @@ def test_create_work_order_event_normalizes_and_delegates(
         ),
         ({"applicant_user_id": "other-user"}, "applicant must be"),
         ({"apply_reason": "x" * 513}, "no more than 512"),
+        (
+            {
+                "biz_type": "SKILL_COLLABORATOR",
+                "event_type": "SKILL_COLLABORATOR_APPLIED",
+            },
+            "must use the Skill endpoint",
+        ),
     ],
 )
 def test_create_work_order_event_rejects_invalid_input(
@@ -862,3 +1101,33 @@ def test_create_work_order_event_rejects_invalid_input(
         service.create_work_order_event(**payload)  # type: ignore[arg-type]
 
     repository.create_work_order_event.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "source_event_type",
+    [None, WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value],
+)
+def test_friend_approval_rejects_missing_or_unsupported_source_event(
+    source_event_type: str | None,
+) -> None:
+    callbacks = MagicMock(spec=WorkOrderDecisionCallbackDispatcher)
+    service, repository, _, _, _ = _service(decision_callbacks=callbacks)
+    context = _friend_context().model_copy(
+        update={"source_event_type": source_event_type}
+    )
+    repository.get_detail.return_value = _detail().model_copy(
+        update={"work_order": context.work_order}
+    )
+    repository.get_approval_context.return_value = context
+
+    with pytest.raises(WorkOrderInvalidEventError):
+        service.process_approval(
+            work_order_id=11,
+            actor_id="owner-1",
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            callback_credential=WorkOrderCallbackCredential(headers={}),
+        )
+
+    callbacks.dispatch.assert_not_called()
+    repository.process_approval.assert_not_called()

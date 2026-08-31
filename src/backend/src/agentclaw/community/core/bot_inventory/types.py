@@ -83,6 +83,19 @@ class ServiceLifecycleCard:
     actions: tuple[BotAction, ...]
     internal_status: str | None = None
     live_version: int | None = None
+    has_draft: bool = False
+
+
+@dataclass(frozen=True)
+class ServiceEditLockState:
+    """Bot-level collaborative edit-lock state used by inventory cards."""
+
+    locked: bool
+    holder_user_id: str | None
+    holder_name: str | None
+    has_collaborators: bool
+    is_owner_holder: bool
+    need_lock: bool = False
 
 
 @dataclass(frozen=True)
@@ -109,6 +122,11 @@ class BotInventoryItem:
     publication_version: int | None = None
     live_version: int | None = None
     internal_status: str | None = None
+    edit_lock: ServiceEditLockState | None = None
+    # Template identity (engine stays the engine vocabulary; coding identity
+    # lives in template_type + the public projection of template_config).
+    template_type: str | None = None
+    template_config: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)

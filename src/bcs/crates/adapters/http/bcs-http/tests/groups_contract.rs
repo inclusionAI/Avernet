@@ -28,7 +28,8 @@ use bcs_service_api::{
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanResponseSource,
     ListPendingHumanNodesCommand, Participant, ParticipantKind, ParticipantMode, ParticipantRole,
     PendingHumanNodeView, RespondHumanNodeCommand, RespondHumanNodeOutcome, RoutingMode,
-    RoutingPolicy, SessionHistoryResult, SessionStateMachinePermissionCommand,
+    RerunStateMachineCommand, RerunStateMachineOutcome, RoutingPolicy, SessionHistoryResult,
+    SessionStateMachinePermissionCommand,
     SessionStateMachinePermissionView, Skill, StartSessionStateMachineRunCommand,
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
     StateMachineAssignee, StateMachineGraphMode, StateMachineNodeKind, StateMachineNodeRun,
@@ -101,6 +102,7 @@ struct RecordingCollaborationRuntime {
     validation_calls: Mutex<Vec<ValidateCollaborationDefinitionYamlCommand>>,
     pending_human_commands: Mutex<Vec<ListPendingHumanNodesCommand>>,
     respond_human_commands: Mutex<Vec<RespondHumanNodeCommand>>,
+    rerun_commands: Mutex<Vec<RerunStateMachineCommand>>,
     upsert_error: Mutex<Option<CollaborationRuntimeError>>,
 }
 
@@ -184,11 +186,14 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
             view: StateMachineRunView {
                 run: StateMachineRun {
                     run_id: "run-one-shot".to_string(),
+                    root_run_id: Some("run-one-shot".to_string()),
+                    rerun_of: None,
                     definition_id: "definition-one-shot".to_string(),
                     definition_version: 1,
                     group_id: "group-1".to_string(),
                     group_version: 1,
                     session_id: cmd.session_id,
+                    session_activation_count: None,
                     created_by: Some(cmd.caller_bot_id),
                     status: StateMachineRunStatus::Running,
                     input: cmd.input,
@@ -209,6 +214,39 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         _run_id: &str,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         Ok(None)
+    }
+
+    async fn rerun_state_machine_run(
+        &self,
+        cmd: RerunStateMachineCommand,
+    ) -> Result<RerunStateMachineOutcome, CollaborationRuntimeError> {
+        self.rerun_commands.lock().await.push(cmd.clone());
+        Ok(RerunStateMachineOutcome {
+            view: StateMachineRunView {
+                run: StateMachineRun {
+                    run_id: "run-2".to_string(),
+                    root_run_id: Some(cmd.source_run_id.clone()),
+                    rerun_of: Some(cmd.source_run_id),
+                    definition_id: "definition-1".to_string(),
+                    definition_version: 1,
+                    group_id: "group-1".to_string(),
+                    group_version: 1,
+                    session_id: "session-1".to_string(),
+                    session_activation_count: None,
+                    created_by: Some("human_alice".to_string()),
+                    status: StateMachineRunStatus::Running,
+                    input: Value::Null,
+                    output: None,
+                    error: None,
+                    created_at: 2,
+                    updated_at: 2,
+                    completed_at: None,
+                },
+                nodes: Vec::new(),
+                judge_outputs: Vec::new(),
+            },
+            created: true,
+        })
     }
 
     async fn list_pending_human_nodes(
@@ -252,12 +290,15 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                 completed_at: Some(2),
             },
             run: StateMachineRun {
+                root_run_id: Some(cmd.run_id.clone()),
                 run_id: cmd.run_id,
+                rerun_of: None,
                 definition_id: "definition-1".to_string(),
                 definition_version: 1,
                 group_id: "group-1".to_string(),
                 group_version: 1,
                 session_id: "session-1".to_string(),
+                session_activation_count: None,
                 created_by: Some("human_alice".to_string()),
                 status: StateMachineRunStatus::Completed,
                 input: Value::Null,
@@ -1466,6 +1507,61 @@ async fn human_state_machine_routes_forward_authenticated_actor_and_output() {
     assert_eq!(respond_commands[0].caller_actor_id, "human_alice");
     assert_eq!(respond_commands[0].content, "looks good");
     assert_eq!(respond_commands[0].source, HumanResponseSource::Http);
+}
+
+#[tokio::test]
+async fn rerun_state_machine_route_uses_path_run_as_source_and_returns_created_child() {
+    let (app, _recorder, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime_and_human_identity().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/state-machine-runs/run-1/reruns")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["run"]["run_id"], "run-2");
+    assert_eq!(body["run"]["rerun_of"], "run-1");
+    assert_eq!(body["idempotent_replay"], false);
+    let commands = collaboration_runtime.rerun_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].source_run_id, "run-1");
+    assert_eq!(
+        commands[0]
+            .authenticated_human
+            .as_ref()
+            .map(|human| human.actor_id.as_str()),
+        Some("human_alice")
+    );
+}
+
+#[tokio::test]
+async fn rerun_state_machine_route_rejects_a_request_body() {
+    let (app, _recorder, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime_and_human_identity().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/state-machine-runs/run-1/reruns")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"input":{"replacement":true}}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(collaboration_runtime.rerun_commands.lock().await.is_empty());
 }
 
 #[tokio::test]

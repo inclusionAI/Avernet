@@ -16,6 +16,14 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
         pkg-config libssl-dev libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Aliyun crates.io mirror (sparse index) so `cargo fetch` / `cargo build` are
+# not blocked pulling the crates.io index from the public internet. Written to
+# $CARGO_HOME/config.toml in its own layer before the source COPY so it survives
+# across source changes. The sparse+ URL keeps the fast sparse protocol.
+RUN mkdir -p /usr/local/cargo \
+    && printf '[source.crates-io]\nreplace-with="aliyun"\n[source.aliyun]\nregistry="sparse+https://mirrors.aliyun.com/crates.io-index/"\n' \
+       > /usr/local/cargo/config.toml
+
 # "Pull code": the BCS Rust workspace is brought in from the build context
 # (repo root). docker/build-image.sh sends the repo root as the context, so
 # this COPY is the code-fetch step — there is no in-image git clone. The

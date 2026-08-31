@@ -14,6 +14,9 @@ provides:
   - "BotProcessRegistry"
   - "BotPublishService"
   - "BaasService"
+  - "ServiceSkillsManifestBuilder"
+  - "ResolvedSharedCorpusDelivery"
+  - "ServiceArtifactLineageReader"
   - "ServiceBot SQLAlchemy models"
 consumes:
   - "BotManagement"
@@ -26,7 +29,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # repository contracts consumed by this module
-  - agentclaw.community.core.skill_center.capability_state_contract    # installation flush before a new artifact build
+  - agentclaw.community.core.skill_center    # full Draft projection and exact Center facts frozen into a service artifact
   - agentclaw.community.core.common_config
   - agentclaw.community.core.bot_collaborator    # collaborator permission and edit-lock enforcement for public lifecycle operations
   - agentclaw.community.core.bot_inventory.policies    # shared engine/deploy-mode combination policy for service upgrades
@@ -61,6 +64,7 @@ internal_dependencies:
   - agentclaw.community.api.publish_approval        # API Protocol for publish approval service
   - agentclaw.community.utils
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.core.channel.channel_service_protocol  # Service API Protocol consumed by this module
 ```
 
 ### Change impact

@@ -13,10 +13,9 @@
 //!    updates `Session.callback_status` to one of `succeeded` /
 //!    `partial_failed` / `failed` based on the aggregate result.
 //!
-//! Idempotency: the dispatcher is keyed by `(session_id,
-//! activation_seq)`; each activation produces at most one terminal
-//! `callback_status` update. Callers must not invoke
-//! [`dispatch::dispatch_callback`] more than once per activation.
+//! Concurrency: normal dispatch and recovery both claim an activation-aware
+//! Session lease before sending. Duplicate invocations are safe; only the
+//! current fencing token may write the terminal `callback_status`.
 
 pub mod antding;
 pub mod baas;
@@ -25,7 +24,7 @@ pub mod legacy;
 
 pub use dispatch::{
     aggregate_results, dispatch_callback, dispatch_callback_with_url_guard,
-    maybe_dispatch_for_session, maybe_dispatch_for_session_with_url_guard, AggregateStatus,
-    SessionCallbackDispatcher,
+    dispatch_for_session_with_url_guard, maybe_dispatch_for_session,
+    maybe_dispatch_for_session_with_url_guard, AggregateStatus, SessionCallbackDispatcher,
 };
 pub use legacy::{execute_callback, recover_pending_callbacks};

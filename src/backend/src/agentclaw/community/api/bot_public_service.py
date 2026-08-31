@@ -1,27 +1,17 @@
-"""Service API Protocol for public-bot lifecycle + friend approvals."""
+"""Service API Protocol for public-bot lifecycle + friend approvals.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/bot_public/bot_public_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Dict, Protocol, runtime_checkable
+from agentclaw.community.core.bot_public.bot_public_service_protocol import (
+    BotPublicServiceProtocol,
+)
 
-
-@runtime_checkable
-class BotPublicServiceProtocol(Protocol):
-    """Service API for bot publishing + friend-request workflow."""
-
-    def public_bot(self, *args: Any, **kwargs: Any) -> Dict[str, Any]: ...
-
-    def public_bcs_bot(self, *args: Any, **kwargs: Any) -> Dict[str, Any]: ...
-
-    def handle_public_approval_callback(self, *args: Any, **kwargs: Any) -> Dict[str, Any]: ...
-
-    def create_friend_request_approval(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def handle_friend_request_approval_callback(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def search_public_bots_by_keyword(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def search_catalog_public_bots_by_keyword(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def list_my_bot_friends(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_friend_record(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "BotPublicServiceProtocol",
+]

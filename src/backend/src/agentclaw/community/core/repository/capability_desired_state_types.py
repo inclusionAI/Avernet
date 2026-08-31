@@ -32,6 +32,28 @@ class DesiredStateMutation:
     changed: bool
     previous_state: CapabilityDesiredState
     details: dict = field(default_factory=dict)
+    mcp_codes: frozenset[str] = frozenset()
+    """MCP codes this mutation claimed or released, if it touched any.
+
+    Commands fill it when the committed mutation actually moves MCP state.
+    Explicit MCP and Direct commands name their changed code; activation learns
+    the Set's member codes; a Skill mutation learns the Skill's
+    ``mcp_dependencies``. No-op mutations leave it empty, so callers do not
+    synthesize a runtime delta from request parameters alone. The values are
+    resolved under the row lock the transaction already holds, so the scope
+    names what was actually installed rather than what a second, unlocked
+    query saw.
+
+    Candidates, not a verdict — the projector intersects them with the set it
+    resolved, so a claim that does not survive projection is never delivered
+    and a release still supplied by something else is never deleted.
+
+    Deliberately not part of ``details``: the flow spreads ``details`` into
+    the command's return value and thence the HTTP response body, so putting
+    runtime-projection facts there would leak them into the public API. This
+    field is read by the command to build its ``ProjectionScope`` and goes no
+    further.
+    """
 
 
 @dataclass(frozen=True)

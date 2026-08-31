@@ -1,23 +1,17 @@
-"""Service API Protocol for skill scanning."""
+"""Service API Protocol for skill scanning.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_scan_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.skill_scan_service_protocol import (
+    SkillScanServiceProtocol,
+)
 
-
-@runtime_checkable
-class SkillScanServiceProtocol(Protocol):
-    """Service API for scanning skill repositories."""
-
-    def exec_task(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def exec_center_task(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def start(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def stop(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def is_running(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def start_daily_task(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def stop_daily_task(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "SkillScanServiceProtocol",
+]

@@ -88,6 +88,7 @@
     "workspace": {
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
+      "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     },
     "yuque": {
@@ -104,6 +105,7 @@
       "default_ttl_minutes": 10080,
       "desktop_template_uuid": "",
       "desktop_ttl_minutes": 0,
+      "eval_template_uuid": "",
       "personal_bot_template_uuid": "",
       "teclaw_template_uuid": "",
       "template_uuid": "",
@@ -171,6 +173,15 @@
       "base_url": "",
       "base_url_pre": ""
     },
+    "http_client_pool": {
+      "defaults": {
+        "http2": false,
+        "keepalive_expiry": 5.0,
+        "max_connections": 100,
+        "max_keepalive_connections": 20
+      },
+      "overrides": {}
+    },
     "kb": {
       "base_url": "",
       "function_name": "",
@@ -194,7 +205,8 @@
       "aicoding_theta_master_key": "",
       "aiworkbench_repo_url": "",
       "dormant_internal_token": "",
-      "gateway_principal_signing_key": "gateway_principal_signing_key"
+      "gateway_principal_signing_key": "gateway_principal_signing_key",
+      "skill_center_internal_token": ""
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",
@@ -209,6 +221,9 @@
       "scan_interval_hours": 1,
       "scan_interval_minutes": 0,
       "storage_dir": "./data/skills_scan"
+    },
+    "task_queue": {
+      "app": "agentclaw"
     },
     "task_queue_worker": {
       "batch_size": 10,
@@ -227,6 +242,7 @@
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
       "claude_code_session_root": "/home/admin/.claude",
+      "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     },
     "workspace_hosting": {

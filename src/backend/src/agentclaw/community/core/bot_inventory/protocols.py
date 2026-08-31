@@ -9,6 +9,7 @@ from agentclaw.community.core.bot_inventory.types import (
     BotAction,
     BusinessSpaceRef,
     DisplayState,
+    ServiceEditLockState,
     ServiceLifecycleCard,
 )
 
@@ -36,6 +37,9 @@ class BotInventoryBotPort(Protocol):
         page: int = 1,
         page_size: int = 20,
         bot_ids: list[str] | None = None,
+        # Inventory cards never surface template_config, so inventory pulls
+        # opt out of the batched template read.
+        attach_templates: bool = True,
     ) -> Mapping[str, Any]: ...
 
 
@@ -106,6 +110,20 @@ class BotInventoryAccessPort(Protocol):
 
 
 @runtime_checkable
+class BotInventoryTemplatePort(Protocol):
+    """Page-slice template-config reader for the inventory read model.
+
+    The listing fan-out deliberately skips template attachment (cost); this
+    port is called with ONLY the returned page's template-backed bot ids and
+    answers with the stored ``ac_templates.ext`` snapshot per bot.
+    """
+
+    def list_template_configs_by_bot_ids(
+        self, bot_ids: list[str]
+    ) -> dict[str, dict[str, Any]]: ...
+
+
+@runtime_checkable
 class BusinessSpaceContextProtocol(Protocol):
     """Minimal consumer-side business-space context API.
 
@@ -142,3 +160,12 @@ class ServiceLifecyclePort(Protocol):
     def cards_for_bots(
         self, *, bots: Sequence[Mapping[str, Any]]
     ) -> Mapping[str, Sequence[ServiceLifecycleCard]]: ...
+
+
+@runtime_checkable
+class ServiceEditLockPort(Protocol):
+    """Batch service-Bot edit-lock projection consumed by inventory."""
+
+    def states_for_bots(
+        self, *, bots: Sequence[Mapping[str, Any]]
+    ) -> Mapping[tuple[str, str], ServiceEditLockState]: ...

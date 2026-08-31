@@ -34,6 +34,11 @@
 
 The crate owns stable wire contract objects only. It does not own application commands, core business models, or runtime clients.
 
+`ChannelInfo.identity_forwarding` is an optional compatibility field. When it
+is `true`, `user_id` and `actor_name` carry an opted-in Human Channel sender for
+model attribution. Consumers must not use these fields for authentication or
+authorization. Absence preserves the legacy sender resolver.
+
 ## Tests
 
 - `cargo test --package bcs-protocol --manifest-path src/bcs/Cargo.toml`

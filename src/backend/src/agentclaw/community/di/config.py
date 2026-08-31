@@ -13,9 +13,11 @@ forward without blocking on every nested field.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentclaw.community.core.task_queue.types import DEFAULT_APP
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
 
@@ -179,6 +181,7 @@ class SecretNamesConfig:
     """
 
     dormant_internal_token: str = ""
+    skill_center_internal_token: str = ""
     aiworkbench_repo_url: str = ""
     gateway_principal_signing_key: str = "gateway_principal_signing_key"
     aicoding_theta_master_key: str = ""
@@ -212,6 +215,70 @@ class CorsConfig:
 # NOTE: community-only config types (BcsAuthConfig + the data-plane Community*Config
 # classes) live in ``di/config_community.py`` — kept physically separate from the
 # corp config so the open-source distribution ships only the community surface.
+
+
+# ── Outbound HTTP transport ─────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class HttpClientPoolPolicy:
+    """Connection-pool + HTTP/2 settings for **one** ``HttpClient`` binding.
+
+    ``max_connections``
+        Hard ceiling on simultaneously open connections. It is **per binding and
+        pool-wide** — not process-wide, and not per origin: the ``general``
+        binding has ``base_url=""`` and its callers pass absolute URLs, so this
+        one budget is shared across every host it addresses. Past the ceiling a
+        request waits for a free connection and fails with
+        ``HttpClientTimeoutError`` (``httpx.PoolTimeout``) once the per-call
+        ``timeout`` elapses — the backpressure that keeps a burst of parallel
+        callers from opening an unbounded number of sockets.
+    ``max_keepalive_connections``
+        How many of those stay open for reuse once idle (httpx clamps it to
+        ``max_connections``).
+    ``keepalive_expiry``
+        Seconds an idle connection is kept. Keep this **below** the upstream's
+        own idle timeout: a connection the server has already closed but the pool
+        still believes is live surfaces as ``httpx.RemoteProtocolError`` on the
+        next request to pick it up, and nothing retries that.
+    ``http2``
+        Negotiate HTTP/2 (request multiplexing over one connection) where the
+        upstream offers it. Negotiation is via TLS ALPN, so it engages only on
+        ``https://`` upstreams and stays on HTTP/1.1 for ``http://`` ones —
+        httpx performs no cleartext h2c upgrade. Defaults off so it can be
+        enabled per environment and per binding after the wire change has been
+        watched somewhere safe.
+    """
+
+    max_connections: int = 100
+    max_keepalive_connections: int = 20
+    keepalive_expiry: float = 5.0
+    http2: bool = False
+
+
+@dataclass(frozen=True)
+class HttpClientPoolConfig:
+    """Shared transport defaults plus sparse per-qualifier overrides.
+
+    The four ``HttpClient`` bindings front different upstreams with different
+    traffic shapes — ``general`` alone carries LLM SSE streams and container
+    calls to many origins — so each resolves its own policy rather than all four
+    sharing one.
+
+    ``for_qualifier`` resolves **whole-policy**: a qualifier either has an
+    override or gets ``defaults``, with no field-level merging at the call site.
+    The provider is what makes a sparse override total, by building each one
+    starting from the resolved defaults. Merging at read time instead would let a
+    half-specified override drift silently as the shared defaults change, which
+    is not what someone reading the YAML would predict.
+    """
+
+    defaults: HttpClientPoolPolicy = field(default_factory=HttpClientPoolPolicy)
+    overrides: Mapping[str, HttpClientPoolPolicy] = field(default_factory=dict)
+
+    def for_qualifier(self, qualifier: str) -> HttpClientPoolPolicy:
+        """Effective policy for one binding: its override, else the defaults."""
+        return self.overrides.get(qualifier, self.defaults)
 
 
 # ── Object storage ──────────────────────────────────────────────────────
@@ -332,6 +399,8 @@ class BaasConfig:
     default_ttl_minutes: int = 10080
     # Teclaw (pull-based external container) template uuid — deploy supplies it.
     teclaw_template_uuid: str = ""
+    # Eval (sandbox) ARCA template uuid for evaluation environment — deploy supplies it.
+    eval_template_uuid: str = ""
     # Personal bot via BaaS (poolab template) — deploy supplies it.
     personal_bot_template_uuid: str = ""
 
@@ -487,12 +556,14 @@ class WorkspaceConfig:
             block in ``application.yaml``.
         claude_code_root: Same shape, for Claude Code bots.
         aicoding_root: Same shape, for AICoding bots.
+        hermes_root: Same shape, for Hermes bots.
     """
 
     openclaw_root: str = "/home/admin/.openclaw"
     claude_code_root: str = "/home/admin/.claude_code"
     claude_code_session_root: str = "/home/admin/.claude"
     aicoding_root: str = "/home/admin/.aicoding"
+    hermes_root: str = "/home/admin/.hermes"
 
 
 # ── Dormant bot recycle ──────────────────────────────────────────────────
@@ -543,6 +614,24 @@ class DormantInternalToken:
 
 
 @dataclass(frozen=True)
+class SkillCenterInternalToken:
+    """Resolved bearer token for ``/api/internal/skill-center/*`` endpoints.
+
+    Produced by ``SkillCenterInternalTokenBindings._resolved_internal_token``,
+    with the same
+    resolution rules and the same failure-closed empty default as
+    ``DormantInternalToken``: an empty ``value`` makes the auth Depends 401
+    every request rather than authorize an unverified caller.
+
+    Separate from the dormant token on purpose — these endpoints converge
+    capability state for whole pages of Bots, so the two operations are
+    granted independently.
+    """
+
+    value: str = ""
+
+
+@dataclass(frozen=True)
 class DormantNotifyConfig:
     """Dormant-bot notification content config (``dormant`` yaml block).
 
@@ -553,6 +642,30 @@ class DormantNotifyConfig:
     """
 
     action_link_pattern: str = ""
+
+
+@dataclass(frozen=True)
+class TaskQueueConfig:
+    """Which application owns this deployment's ``ac_task_queue`` rows.
+
+    Sourced from the **top-level** ``app_name`` — the deployment's own identity.
+
+    One table is shared by more than one independent backend, so a row carries
+    an ``app`` naming its owner: enqueue stamps it, and every query that selects
+    work matches it. Without that, each fleet claims the other's tasks and fails
+    them for an unregistered ``task_type``.
+
+    It is deliberately *not* part of ``TaskQueueWorkerConfig``: the same value
+    has to be used by the enqueue path, which has nothing to do with worker
+    policy, and turning the worker off must not stop enqueued rows from being
+    stamped with their owner.
+
+    ``app`` is validated where it is read (see ``ConfigModule.task_queue``) —
+    it is a scope column, and a value the column cannot hold faithfully would
+    file rows under a name the claim filter never matches.
+    """
+
+    app: str = DEFAULT_APP
 
 
 @dataclass(frozen=True)

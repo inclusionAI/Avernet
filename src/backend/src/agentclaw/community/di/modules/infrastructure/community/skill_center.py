@@ -6,13 +6,16 @@ B7 bypasses the Skill Center marketplace (unused in production) with a real
 ``GitSyncService`` stays corp-only — in community it is bound but inert (no repo
 URL configured).
 """
+
 from __future__ import annotations
 
 from injector import Module, provider, singleton
 
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
+from agentclaw.community.plugin_api.space_skill_source import SpaceSkillSourcePlugin
 
 
 class CommunitySkillCenterClientModule(Module):
@@ -26,6 +29,15 @@ class CommunitySkillCenterClientModule(Module):
         )
 
         return CommunitySkillCenterClient()
+
+    @singleton
+    @provider
+    def skill_center_gateway(self) -> SkillCenterGateway:
+        from agentclaw.community.plugins.community.skill_center_gateway import (
+            CommunitySkillCenterGateway,
+        )
+
+        return CommunitySkillCenterGateway()
 
     @singleton
     @provider
@@ -45,3 +57,12 @@ class CommunitySkillCenterClientModule(Module):
         from agentclaw.community.plugins.community.skill_scanner import NoopSkillScanner
 
         return NoopSkillScanner()
+
+    @singleton
+    @provider
+    def space_skill_source(self) -> SpaceSkillSourcePlugin:
+        from agentclaw.community.plugins.community.space_skill_source import (
+            CommunitySpaceSkillSource,
+        )
+
+        return CommunitySpaceSkillSource()

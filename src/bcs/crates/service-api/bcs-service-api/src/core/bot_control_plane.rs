@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::types::{
     BotCandidateReadQuery, BotControlPlaneOwnedQuery, BotControlPlanePatch,
-    BotControlPlaneRecord, BotTaskModesQuery, ServiceResult,
+    BotControlPlaneRecord, BotSearchCandidateQuery, BotTaskModesQuery, ServiceResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +49,17 @@ pub trait BotControlPlaneCoreService: Send + Sync {
         &self,
         query: BotCandidateReadQuery,
     ) -> ServiceResult<(Vec<BotControlPlaneCandidate>, u64)>;
+
+    async fn search_candidates(
+        &self,
+        query: BotSearchCandidateQuery,
+    ) -> ServiceResult<(Vec<BotControlPlaneCandidate>, u64)> {
+        let _ = query;
+        Err(crate::types::ServiceError::InvalidOperation {
+            message: "BotControlPlaneCoreService::search_candidates is not configured".to_string(),
+            request_id: None,
+        })
+    }
 
     async fn list_by_creator(
         &self,

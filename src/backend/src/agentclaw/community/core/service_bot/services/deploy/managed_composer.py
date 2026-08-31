@@ -43,12 +43,16 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     Storage,
     StorageType,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    frozen_shared_corpus_deliveries_from_ext,
+)
 from agentclaw.community.core.service_bot.types import PublishStage, is_editable_bot
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.workspace.engine_sandbox import (
     EngineSandboxProvider,
     EngineSandboxRegistry,
 )
+from agentclaw.community.core.workspace.skill_layout import FILESYSTEM_POOL_ENGINES
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.log import get_logger
 
@@ -123,6 +127,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             engine_type=ctx.engine,
             mount_path=ctx.mount_path,
             mount_home_dir_storage=ctx.mount_home_dir_storage,
+            ext_info=ctx.ext_info,
         )
 
     def build_storage(self, ctx: BotDeployContext) -> Storage | None:
@@ -237,6 +242,8 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         try:
             return self._sandbox_registry.resolve(engine_type)
         except Exception as e:
+            if engine_type in FILESYSTEM_POOL_ENGINES:
+                raise
             logger.warning(
                 "[_resolve_sandbox_provider] resolve failed for engine=%s, fallback to default: %s",
                 engine_type,
@@ -377,6 +384,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         engine_type: str = DEFAULT_ENGINE_TYPE,
         mount_path: Optional[str] = None,
         mount_home_dir_storage: bool = False,
+        ext_info: Optional[Dict[str, Any]] = None,
     ) -> list[MountPointEntry]:
         """使用 OSS 创建用户目录结构，返回 Arca MountPoint 配置。
 
@@ -399,6 +407,12 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         base_path = provider.get_base_path()
         build_plan = provider.get_build_plan()
         skills_local_dir = f"{base_path}/{build_plan.skill_target_relpath}/skills-repo"
+        shared_corpora = frozen_shared_corpus_deliveries_from_ext(
+            ext_info, {"active_engine": engine_type or DEFAULT_ENGINE_TYPE}
+        )
+        has_frozen_repo = any(
+            delivery.corpus == "repo" for delivery in shared_corpora
+        )
 
         # OSS 挂载点必须位于 /home/admin/nfs/ 下；引擎专用目录
         # （/home/admin/.{engine}、/home/admin/.config/{engine}）由
@@ -424,19 +438,29 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
                 ),
             )
         else:
-            mount_points.extend(
-                [
-                    MountPointEntry(
-                        remote_dir=f"/{bolt_data}",
-                        local_dir="/home/admin/nfs/bot-data",
-                        permission=MountPermission.READ_WRITE,
-                    ),
+            mount_points.append(
+                MountPointEntry(
+                    remote_dir=f"/{bolt_data}",
+                    local_dir="/home/admin/nfs/bot-data",
+                    permission=MountPermission.READ_WRITE,
+                )
+            )
+            if not has_frozen_repo:
+                mount_points.append(
                     MountPointEntry(
                         remote_dir=f"/{skill_repo}",
                         local_dir=skills_local_dir,
                         permission=MountPermission.READ_ONLY,
-                    ),
-                ]
+                    )
+                )
+
+        for delivery in shared_corpora:
+            mount_points.append(
+                MountPointEntry(
+                    remote_dir=f"/{delivery.store_prefix}",
+                    local_dir=delivery.runtime_path,
+                    permission=MountPermission.READ_ONLY,
+                )
             )
 
         # 用户自定义挂载路径

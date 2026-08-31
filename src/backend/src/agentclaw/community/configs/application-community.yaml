@@ -22,6 +22,7 @@ user_config:
     openclaw_root: "./data/workspace/openclaw"
     claude_code_root: "./data/workspace/claude_code"
     aicoding_root: "./data/workspace/aicoding"
+    hermes_root: "./data/workspace/hermes"
 
   # Operator whitelist gating admin endpoints. Empty = no privileged operators
   # by default; a community deployment lists its own admin subject ids.
@@ -35,6 +36,12 @@ user_config:
   #   cors:
   #     allow_origins:
   #       - "https://your-frontend.example.com"
+
+  # Skill scan — community build has no scanner SDK, so disable it to avoid
+  # SkillScanService.start() returning False and start_center_daily_task()
+  # raising RuntimeError("not started").
+  skill_scan:
+    enabled: false
 
   # Per-owner device allocation policy (neutral knobs only).
   device_allocation:
@@ -54,27 +61,65 @@ user_config:
     endpoint: ""
     bucket_name: "agentclaw"
 
+  # Outbound HTTP transport policy for the HttpClient plugins.
+  # Omit the whole block to take the defaults shown below.
+  # http_client:
+  #   # Shared defaults — apply to every binding that has no override.
+  #   max_connections: 100            # hard ceiling on open connections, PER
+  #                                   # BINDING and pool-wide (not per origin).
+  #                                   # Past it a request waits, then fails with
+  #                                   # HttpClientTimeoutError (httpx.PoolTimeout).
+  #   max_keepalive_connections: 20   # how many of those stay open once idle
+  #   keepalive_expiry: 5.0           # seconds an idle connection is kept. Keep
+  #                                   # BELOW the upstream's own idle timeout, or
+  #                                   # a connection it already closed surfaces as
+  #                                   # RemoteProtocolError on the next request.
+  #   http2: false                    # negotiated via TLS ALPN only: engages on
+  #                                   # https:// upstreams offering h2, and stays
+  #                                   # on HTTP/1.1 for http:// ones (there is no
+  #                                   # cleartext h2c upgrade).
+  #
+  #   # Optional per-binding overrides. Valid keys are exactly the four
+  #   # HttpClient qualifiers: baas, bcn, general, masa_agent_eval. An override
+  #   # names only the keys it changes and inherits the rest from the defaults
+  #   # above. An unrecognised key FAILS STARTUP, naming the typo and the
+  #   # valid set: it cannot be honoured by any binding, so accepting it would
+  #   # mean the ceiling you set silently never applied. The per-binding
+  #   # "HttpClient[<qualifier>]: ..." boot log line shows what resolved.
+  #   overrides:
+  #     baas:
+  #       http2: true                 # single origin, plain request/response —
+  #                                   # the safest binding to enable h2 on first
+  #     general:
+  #       max_connections: 200        # base_url="" — this one pool is shared
+  #                                   # across the agentclaw proxy, LLM endpoints
+  #                                   # and container IPs, and its SSE streams
+  #                                   # each hold a slot for the whole response
+
   # Device backend (BaaS) the community runtime talks to. The container runtime
   # itself is owned/operated separately; point api_base_url at that backend.
   # tenant/template are neutral placeholders — set per deployment.
   baas:
-    api_base_url: "http://localhost:8890"
+    api_base_url: "${BASS_URL:-}"
     tenant: "community"
-    template_uuid: ""
+    template_uuid: "${BAAS_TEMPLATE_ID:-}"
+    # ACK/ECI deployment — run the open-source engine image on managed
+    # Kubernetes via AckDeployConfigComposer, not the managed bot image.
+    deploy_runtime: "ack"
 
   # Bot-discovery backend URL (empty = discovery inert).
   bcsfuse:
-    base_url: ""
+    base_url: "${BCS_FUSE_URL:-}"
 
   # ECB downstream-sync URL (empty = the ECB sync leg is inert).
   ecb:
-    base_url: ""
+    base_url: "${ECB_URL:-}"
 
   # Public API gateway host, published to tenants by the connection endpoint
   # (empty = this deployment fronts no gateway, so that endpoint reports so).
   gateway:
-    base_url: ""
-    base_url_pre: ""
+    base_url: "${GATEWAY_URL:-}"
+    base_url_pre: "${GATEWAY_URL_PRE:-}"
 
   # Dormant-bot recycle: dry-run by default (never mutates without opt-in).
   dormant:
@@ -100,7 +145,7 @@ user_config:
   # Prerequisite: BCS must have OAuth configured ([auth.oauth] with jwt_secret,
   # a valid base_url, and >=1 provider); otherwise /auth/user returns 404.
   bcs:
-    base_url: "http://127.0.0.1:21000"
+    base_url: "${BCS_URL:-}"
     user_path: "/auth/user"
     timeout: 10
     operator_subjects: []
@@ -132,7 +177,7 @@ user_config:
   database:
     backend: "mysql"
     url: "${DATABASE_URL}"
-    create_schema: true
+    create_schema: false
 
   # Cache + distributed lock — consumed by the community CommunityCache.
   # Set redis_url to a Redis endpoint for a multi-worker deploy (KV + SET NX
@@ -140,7 +185,7 @@ user_config:
   # in-process lock is unsafe across workers). The REDIS_URL env var, if set,
   # takes precedence.
   cache:
-    redis_url: ""
+    redis_url: "${REDIS_URL:-}"
 
   # Object storage — consumed by the community object-storage impls.
   # backend = "fs" (local filesystem under fs_root, the zero-dependency default)
@@ -160,7 +205,7 @@ user_config:
   # get_secret(name) reads "{env_prefix}{NAME}_USER" / "{env_prefix}{NAME}_VALUE"
   # from the environment (NAME upper-cased, '-' → '_').
   secret:
-    env_prefix: "AGENTCLAW_SECRET_"
+    env_prefix: ""
 
   # Secret-registry key NAMES the app resolves via SecretResolver. Left unset:
   # the dormant-token feature uses a local fallback and git-sync degrades to its
@@ -173,10 +218,12 @@ user_config:
   #
   #   secret_names:
   #     dormant_internal_token: "dormant_internal_token"   # gates /api/internal/dormant/*
+  #     skill_center_internal_token: "skill_center_internal_token"  # gates /api/internal/skill-center/*
   #     aiworkbench_repo_url: "aiworkbench_repo_url"       # skills source repo URL
   #
   # ...each read from "{env_prefix}{NAME}_VALUE", so with the prefix above:
   #     AGENTCLAW_SECRET_DORMANT_INTERNAL_TOKEN_VALUE
+  #     AGENTCLAW_SECRET_SKILL_CENTER_INTERNAL_TOKEN_VALUE
   #     AGENTCLAW_SECRET_AIWORKBENCH_REPO_URL_VALUE
   #
   # The gateway principal signing key needs NO entry here — its name already
@@ -206,6 +253,29 @@ user_config:
   # MCP servers (configured per user) still work, and permission is allow-all.
   mcp:
     registry_config_path: ""
+
+  # Outbound-header egress rules — consumed by the community
+  # CommunityOutboundRuleProvider. Each entry maps to one HeaderOperationRule
+  # applied to a bot's egress traffic. An empty header_rules list (the default)
+  # means no egress mutation. Set per-deployment to inject auth headers or route
+  # to internal gateways.
+  #
+  # Example:
+  #   outbound_rules:
+  #     header_rules:
+  #       - domains: ["*.example.com"]
+  #         action: "set"            # "set" or "replace"
+  #         header_name: "X-Custom-Header"
+  #         value: "my-value"
+  #         # placeholder: "old"     # only for "replace": substring replaced by value
+  #         # separator: "; "        # only for "replace": join separator
+  outbound_rules:
+    header_rules:
+      - domains: ["${MODEL_API:-}"]
+        action: "replace"
+        header_name: "Authorization"
+        value: "${MODEL_KEY:-}"
+        placeholder: "${API-KEY}"
 
   # Harness-internal LLM utility. Left unset = disabled (feature-off). The
   # harness is an internal dev/diagnostic tool; a community deployment that wants

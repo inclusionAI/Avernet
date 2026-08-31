@@ -12,9 +12,15 @@ import {
 import { formatAllowFromLowercase } from 'openclaw/plugin-sdk/allow-from';
 import { DEFAULT_ACCOUNT_ID } from './api.js';
 import { listAccountIds, resolveAccount } from './accounts.js';
+import { resolveBotDataDir } from './bot-data-dir.js';
 import { BcsWsClient, sanitizeBcsUrlForLog } from './bcs-ws-client.js';
 import { handleChatSend, handleChatInject, handleChatHistory, handleSessionDelete, abortAllStreams, initAgentEventsSubscription, cleanupAgentEventsSubscription, resolveGroupIdFromSessionKey } from './inbound-handler.js';
 import { getBcsRuntime } from './runtime.js';
+import {
+  ensureServiceBotSession,
+  isServiceBot,
+  resolveServiceBotCredentialsBotId,
+} from './service-bot-session.js';
 import { resolveBcsSessionCleanupConfig, startBcsSessionCleanup } from './session-cleanup.js';
 import type { ResolvedBcsAccount } from './types.js';
 
@@ -205,8 +211,23 @@ export function createBcsPlugin(options: BcsChannelPluginOptions = {}) {
           return waitUntilAbort(ctx.abortSignal);
         }
 
-        if (await options.shouldSkipConnection?.(ctx, account)) {
-          log?.info?.(`BCS account ${accountId ?? 'default'} skipped by runtime hook`);
+        const rt = getBcsRuntime();
+        await ensureServiceBotSession({
+          runtime: rt,
+          cfg,
+          accountId,
+          log,
+          resolveAccount: resolveBcsAccount,
+        });
+
+        const serviceBot = isServiceBot(undefined, log);
+        const skippedByRuntimeHook = await options.shouldSkipConnection?.(ctx, account) ?? false;
+        if (serviceBot || skippedByRuntimeHook) {
+          log?.info?.(
+            serviceBot
+              ? `BCS account ${accountId ?? 'default'} is a service bot; skipping WebSocket connection`
+              : `BCS account ${accountId ?? 'default'} skipped by runtime hook`,
+          );
           return waitUntilAbort(ctx.abortSignal);
         }
 
@@ -223,25 +244,12 @@ export function createBcsPlugin(options: BcsChannelPluginOptions = {}) {
         }
 
         // Get the correct data directory using runtime
-        let dataDir: string | undefined;
+        const dataDir = await resolveBotDataDir(rt, log);
         let currentCfg: Record<string, unknown> | undefined;
         try {
-          const rt = getBcsRuntime();
           currentCfg = await rt.config.loadConfig() as Record<string, unknown>;
-          const sessionCfg = currentCfg.session && typeof currentCfg.session === 'object'
-            ? currentCfg.session as { store?: unknown }
-            : undefined;
-          // Resolve store path - this will use the correct profile data dir
-          const storePath = rt.channel.session.resolveStorePath(sessionCfg?.store, {
-            agentId: 'main',
-          });
-          // Extract data directory from store path (go up from agents/main/sessions)
-          // storePath is like /path/to/profile/agents/main/sessions/sessions.json
-          const path = await import('node:path');
-          dataDir = path.dirname(path.dirname(path.dirname(path.dirname(storePath))));
-          log?.info?.(`[DEBUG] Resolved dataDir from storePath: ${dataDir}`);
         } catch (err) {
-          log?.warn?.(`Failed to resolve dataDir from runtime: ${err}`);
+          log?.warn?.(`Failed to load BCS runtime config: ${err}`);
         }
 
         if (currentCfg) {
@@ -252,7 +260,11 @@ export function createBcsPlugin(options: BcsChannelPluginOptions = {}) {
           account,
           dataDir,
           log,
-          resolveConnectBotId: () => options.resolveConnectBotId?.(ctx, account),
+          resolveConnectBotId: () => {
+            return options.resolveConnectBotId
+              ? options.resolveConnectBotId(ctx, account)
+              : resolveServiceBotCredentialsBotId(undefined, log);
+          },
         });
 
         // Register request handlers

@@ -107,6 +107,37 @@ def test_client_4xx_raises():
         _run(_adapter(h).get_group("g1"))
 
 
+# ===== BCS 建群参考 ocb:可选带 driver-bot Bearer(Authorization)做 caller 身份;HMAC X-ECB-* 照常 =====
+def test_create_group_forwards_caller_bot_token_as_bearer():
+    seen = {}
+
+    def h(req):
+        seen["auth"] = req.headers.get("authorization")
+        seen["token"] = req.headers.get("X-ECB-Token")
+        seen["sig"] = req.headers.get("X-ECB-Signature")
+        return httpx.Response(200, json={"group_id": "g_bearer"})
+
+    req = BcsCreateGroupRequest(driver_bot="drv", participants=[{"bot_uuid": "drv"}],
+                                caller_bot_token="drv-session-token")
+    res = _run(_adapter(h).create_group(req))
+    assert res.group_id == "g_bearer"
+    assert seen["auth"] == "Bearer drv-session-token"
+    assert seen["token"] == "drv"          # HMAC X-ECB-* 照常签发
+    assert seen["sig"] is not None
+
+
+def test_create_group_omits_bearer_when_no_caller_bot_token():
+    seen = {}
+
+    def h(req):
+        seen["auth"] = req.headers.get("authorization")
+        return httpx.Response(200, json={"group_id": "g_no_bearer"})
+
+    req = BcsCreateGroupRequest(driver_bot="drv", participants=[{"bot_uuid": "drv"}])
+    _run(_adapter(h).create_group(req))
+    assert seen["auth"] is None             # 无 token 不发 Authorization
+
+
 def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
     import agentclaw.community.core.task.task_runner.integration.bcs_http_adapter as module
 

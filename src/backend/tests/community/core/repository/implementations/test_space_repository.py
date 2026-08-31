@@ -14,12 +14,20 @@ from agentclaw.community.core.repository.implementations.spaces.space import (
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
+    SkillEditorRequestRepository,
+)
 from agentclaw.community.core.spaces.errors import (
     SpaceAlreadyExistsError,
     SpaceMemberAlreadyExistsError,
     SpaceNotFoundError,
 )
-from agentclaw.community.core.spaces.models import SpaceJoinStatus, SpaceRole, SpaceType
+from agentclaw.community.core.spaces.models import (
+    SpaceJoinStatus,
+    SpaceListScope,
+    SpaceRole,
+    SpaceType,
+)
 from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
     SpaceModel,
@@ -83,7 +91,9 @@ def test_initialize_personal_recovers_after_concurrent_unique_race() -> None:
     repository.get_personal_space = MagicMock(side_effect=[None, winner])
 
     @contextmanager
-    def conflicting_transaction(*, user_id: str, creator_user_name: str | None, env: str):
+    def conflicting_transaction(
+        *, user_id: str, creator_user_name: str | None, env: str
+    ):
         raise SpaceAlreadyExistsError("personal space already exists")
         yield  # pragma: no cover - contextmanager requires a generator
 
@@ -100,7 +110,9 @@ def test_initialize_personal_reraises_race_when_winner_is_not_visible() -> None:
     repository.get_personal_space = MagicMock(side_effect=[None, None])
 
     @contextmanager
-    def conflicting_transaction(*, user_id: str, creator_user_name: str | None, env: str):
+    def conflicting_transaction(
+        *, user_id: str, creator_user_name: str | None, env: str
+    ):
         raise SpaceAlreadyExistsError("personal space already exists")
         yield  # pragma: no cover - contextmanager requires a generator
 
@@ -125,24 +137,43 @@ def test_space_creation_persists_creator_user_name_and_lists_it(db) -> None:
     ) as personal:
         personal.sc_team_id = "sc-personal"
     with repository.create_team_transaction(
-        name="Team", creator_id="team-owner", creator_user_name="Team Creator", env="dev"
+        name="Team",
+        creator_id="team-owner",
+        creator_user_name="Team Creator",
+        env="dev",
     ) as team:
         team.sc_team_id = "sc-team"
 
-    assert repository.get_member(
-        space_id=personal.id, user_id="personal-1", env="dev"
-    ).user_name == "Personal Creator"
-    assert repository.get_member(
-        space_id=team.id, user_id="team-owner", env="dev"
-    ).user_name == "Team Creator"
+    assert (
+        repository.get_member(
+            space_id=personal.id, user_id="personal-1", env="dev"
+        ).user_name
+        == "Personal Creator"
+    )
+    assert (
+        repository.get_member(
+            space_id=team.id, user_id="team-owner", env="dev"
+        ).user_name
+        == "Team Creator"
+    )
 
     _, summaries = repository.list_spaces(
-        user_id="team-owner", env="dev", keyword=None, space_type=None, offset=0, limit=20
+        user_id="team-owner",
+        env="dev",
+        keyword=None,
+        space_type=None,
+        offset=0,
+        limit=20,
     )
-    assert next(item for item in summaries if item.space.id == team.id).creator_user_name == "Team Creator"
+    assert (
+        next(item for item in summaries if item.space.id == team.id).creator_user_name
+        == "Team Creator"
+    )
 
 
-def test_get_team_space_by_name_filters_creator_environment_type_and_deleted_rows(db) -> None:
+def test_get_team_space_by_name_filters_creator_environment_type_and_deleted_rows(
+    db,
+) -> None:
     repository = SpaceRepository(db)
     matching = _team(repository, name="Same", creator="owner-1")
     _team(repository, name="Same", creator="owner-2")
@@ -170,15 +201,22 @@ def test_get_team_space_by_name_filters_creator_environment_type_and_deleted_row
     assert result.created_by == "owner-1"
     assert result.name == "Same"
     assert result.space_type is SpaceType.TEAM
-    assert repository.get_team_space_by_name(
-        creator_id="owner-1", name="Same", env="pre"
-    ).id == other_env.id
-    assert repository.get_team_space_by_name(
-        creator_id="missing", name="Same", env="dev"
-    ) is None
-    assert repository.get_team_space_by_name(
-        creator_id="owner-1", name="个人空间", env="dev"
-    ) is None
+    assert (
+        repository.get_team_space_by_name(
+            creator_id="owner-1", name="Same", env="pre"
+        ).id
+        == other_env.id
+    )
+    assert (
+        repository.get_team_space_by_name(creator_id="missing", name="Same", env="dev")
+        is None
+    )
+    assert (
+        repository.get_team_space_by_name(
+            creator_id="owner-1", name="个人空间", env="dev"
+        )
+        is None
+    )
 
 
 def test_space_repository_full_member_lifecycle(db) -> None:
@@ -209,9 +247,11 @@ def test_space_repository_full_member_lifecycle(db) -> None:
         == "sc-Team-owner-1"
     )
     assert repository.get_space(space_id=999, env="dev") is None
-    assert repository.get_space_by_code(space_code=team.space_code, env="dev").model_dump(
+    assert repository.get_space_by_code(
+        space_code=team.space_code, env="dev"
+    ).model_dump(exclude={"gmt_created", "gmt_modified"}) == team.model_dump(
         exclude={"gmt_created", "gmt_modified"}
-    ) == team.model_dump(exclude={"gmt_created", "gmt_modified"})
+    )
     assert repository.get_space_by_code(space_code="missing", env="dev") is None
 
     other_env_personal, _ = repository.initialize_personal(
@@ -314,9 +354,52 @@ def test_space_repository_full_member_lifecycle(db) -> None:
     assert readded.user_name is None
 
 
+def test_space_repository_accessible_scope_filters_by_active_membership_and_paginates(db) -> None:
+    spaces = SpaceRepository(db)
+    personal, _ = spaces.initialize_personal(user_id="user-1", env="dev")
+    joined = _team(spaces, name="Joined", creator="owner-1")
+    pending = _team(spaces, name="Pending", creator="owner-2")
+    inactive = _team(spaces, name="Inactive", creator="owner-3")
+    other_env = _team(spaces, name="Other Env", creator="owner-4")
+    spaces.add_member(
+        space_id=joined.id, user_id="user-1", role=SpaceRole.MEMBER,
+        creator_id="owner-1", env="dev"
+    )
+    spaces.add_member(
+        space_id=inactive.id, user_id="user-1", role=SpaceRole.MEMBER,
+        creator_id="owner-3", env="dev"
+    )
+    with db.transactional_orm_session() as session:
+        session.query(SpaceMemberModel).filter(
+            SpaceMemberModel.space_id == inactive.id,
+            SpaceMemberModel.user_id == "user-1",
+        ).update({SpaceMemberModel.status: "INACTIVE"})
+    spaces.add_member(
+        space_id=other_env.id, user_id="user-1", role=SpaceRole.MEMBER,
+        creator_id="owner-4", env="pre"
+    )
+
+    total, first_page = spaces.list_spaces(
+        user_id="user-1", env="dev", keyword=None, space_type=None,
+        offset=0, limit=2, scope=SpaceListScope.ACCESSIBLE
+    )
+    assert total == 2
+    assert {item.space.id for item in first_page} <= {personal.id, joined.id}
+
+    _, second_page = spaces.list_spaces(
+        user_id="user-1", env="dev", keyword=None, space_type=None,
+        offset=1, limit=2, scope=SpaceListScope.ACCESSIBLE
+    )
+    assert len(second_page) == 1
+    assert {item.space.id for item in first_page + second_page} == {personal.id, joined.id}
+    assert pending.id not in {item.space.id for item in first_page + second_page}
+    assert inactive.id not in {item.space.id for item in first_page + second_page}
+    assert other_env.id not in {item.space.id for item in first_page + second_page}
+
+
 def test_space_repository_marks_pending_join_request_as_applying(db) -> None:
     spaces = SpaceRepository(db)
-    work_orders = WorkOrderRepository(db)
+    work_orders = WorkOrderRepository(db, SkillEditorRequestRepository(db))
     team = _team(spaces)
     other_team = _team(spaces, name="Other Team", creator="owner-2")
 

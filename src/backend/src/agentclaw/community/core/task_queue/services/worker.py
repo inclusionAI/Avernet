@@ -4,7 +4,9 @@ A ``Lifecycle`` singleton: ``startup()`` launches an asyncio loop,
 ``shutdown()`` cancels it (same shape as ``DesktopBotLifecycle``). The loop:
 
 1. claims a small batch of due tasks (``repo.claim_batch`` — the DB-level
-   single-winner CAS), off the event loop via ``asyncio.to_thread``;
+   single-winner CAS), off the event loop via ``asyncio.to_thread``. The claim
+   is scoped to this deployment's ``app`` as well as its ``env``, so a second
+   backend sharing the table is invisible to this worker;
 2. runs each claimed task's handler concurrently, bounded by a semaphore;
 3. maps the handler's :class:`TaskOutcome` back to a repository transition;
 4. **greedy re-poll** when the batch came back full (a backlog likely exists)
@@ -47,7 +49,7 @@ from agentclaw.community.core.task_queue.types import (
     Retry,
     TaskRecord,
 )
-from agentclaw.community.di.config import TaskQueueWorkerConfig
+from agentclaw.community.di.config import TaskQueueConfig, TaskQueueWorkerConfig
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -71,6 +73,7 @@ class TaskWorker(LifecycleBase):
         registry: HandlerRegistry,
         config: TaskQueueWorkerConfig,
         wakeup: WorkerWakeup,
+        queue_config: TaskQueueConfig,
     ) -> None:
         self._repo = repo
         self._registry = registry
@@ -78,6 +81,10 @@ class TaskWorker(LifecycleBase):
         self._wakeup = wakeup
         self._worker_id = _make_worker_id()
         self._env = get_current_env()
+        # The owning app, from deployment config — the same value the enqueue
+        # side stamps. Read once here rather than per poll: a mid-life change
+        # would orphan everything this worker had already claimed.
+        self._app = queue_config.app
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._sem = asyncio.Semaphore(max(1, config.max_concurrency))
@@ -103,9 +110,10 @@ class TaskWorker(LifecycleBase):
         self._wakeup.bind(asyncio.get_running_loop())
         self._task = asyncio.create_task(self._loop())
         logger.info(
-            "[TaskWorker] started worker_id=%s env=%s batch=%d poll=%.1fs lease=%ds",
+            "[TaskWorker] started worker_id=%s env=%s app=%s batch=%d poll=%.1fs lease=%ds",
             self._worker_id,
             self._env,
+            self._app,
             self._config.batch_size,
             self._config.poll_interval_seconds,
             self._config.lease_seconds,
@@ -183,6 +191,7 @@ class TaskWorker(LifecycleBase):
             self._repo.claim_batch,
             worker_id=self._worker_id,
             env=self._env,
+            app=self._app,
             limit=self._config.batch_size,
             lease_seconds=self._config.lease_seconds,
         )

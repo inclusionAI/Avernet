@@ -19,9 +19,16 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
-from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
+from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, bind_overrides, endpoint_test
+from agentclaw.community.api.task.task_grant_service import (
+    GRANTED,
+    REVOKED,
+    GrantResult,
+    RevokeResult,
+    TaskClaimGrantServiceProtocol,
+)
 
 _BASE = "/openapi/v1/collaboration/tasks"
 _CALLER = "public-task-owner"
@@ -167,4 +174,66 @@ def list_authenticated():
     expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
 )
 def list_unauthenticated():
+    pass
+
+
+# ── 任务认领 grant/revoke(public openapi face)─────────────────────────────────
+_GRANT_BODY = {"bcs_bot_id": "public-task-bot:146836"}
+
+
+def _seed_grant_service(world) -> None:
+    async def grant(_self, *, bcs_bot_id, cookie, referer, operator):
+        return GrantResult(bcs_bot_id=bcs_bot_id, api_key_prefix="pub", grant_status=GRANTED, operator=operator)
+
+    async def revoke(_self, *, bcs_bot_id, cookie, referer, operator):
+        return RevokeResult(bcs_bot_id=bcs_bot_id, grant_status=REVOKED)
+
+    bind_overrides(world, TaskClaimGrantServiceProtocol, {"grant": grant, "revoke": revoke})
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/grant",
+    scenario="happy_ok",
+    seed=lambda w: (_boot_verifier(w), _seed_grant_service(w)),
+    input=CaseInput(headers=_headers(), json_body=_GRANT_BODY),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"grant_status": "granted"}}),
+)
+def grant_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/grant",
+    scenario="unauthenticated",
+    input=CaseInput(json_body=_GRANT_BODY),
+    seed=_boot_verifier,
+    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+)
+def grant_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/revoke",
+    scenario="happy_ok",
+    seed=lambda w: (_boot_verifier(w), _seed_grant_service(w)),
+    input=CaseInput(headers=_headers(), json_body=_GRANT_BODY),
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"grant_status": "revoked"}}),
+)
+def revoke_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/revoke",
+    scenario="unauthenticated",
+    input=CaseInput(json_body=_GRANT_BODY),
+    seed=_boot_verifier,
+    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+)
+def revoke_unauthenticated():
     pass

@@ -28,6 +28,7 @@ from agentclaw.community.core.bot_inventory.types import (
     BusinessSpaceRef,
     DeployMode,
     DisplayState,
+    ServiceEditLockState,
     ServiceLifecycleCard,
 )
 
@@ -54,6 +55,27 @@ LOCAL = {
 }
 
 
+def _no_edit_locks():
+    view = MagicMock()
+    view.states_for_bots.return_value = {}
+    return view
+
+
+class _StubTemplatePort:
+    """Recording stub: answers ``ac_templates.ext`` snapshots per bot id."""
+
+    def __init__(self, ext_by_bot_id: dict[str, dict] | None = None) -> None:
+        self.calls: list[list[str]] = []
+        self.ext_by_bot_id = ext_by_bot_id or {}
+
+    def list_template_configs_by_bot_ids(self, bot_ids: list[str]) -> dict[str, dict]:
+        self.calls.append(list(bot_ids))
+        wanted = set(bot_ids)
+        return {
+            bot_id: ext for bot_id, ext in self.ext_by_bot_id.items() if bot_id in wanted
+        }
+
+
 @pytest.fixture
 def service():
     bot = MagicMock()
@@ -72,6 +94,8 @@ def service():
             access_service=access,
             business_space=NoopBusinessSpaceContext(),
             lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
+            edit_lock_view=_no_edit_locks(),
+            template_port=_StubTemplatePort(),
         ),
         bot,
         desktop,
@@ -96,6 +120,30 @@ def test_list_items_combines_filters_and_paginates(service) -> None:
 
     assert total == 2
     assert {item.bot_id for item in items} == {"c1", "l1"}
+
+
+@pytest.mark.unit
+def test_cloud_pull_opts_out_of_template_attach(service) -> None:
+    # The fan-out still pulls without template attachment: snapshots enter the
+    # read model only through the page-slice enrichment (see the
+    # test_page_slice_* cases below), so every pulled page keeps skipping the
+    # batched template read.
+    inventory, bot, _ = service
+
+    inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        is_service=None,
+        page=1,
+        page_size=10,
+    )
+
+    assert bot.list_bots_by_conditions.call_args.kwargs["attach_templates"] is False
 
 
 @pytest.mark.unit
@@ -161,7 +209,9 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
                 display_state=DisplayState.SERVICE_DRAFT,
                 status="draft",
                 actions=(BotAction.VIEW, BotAction.PUBLISH_STAGING),
+                internal_status="draft",
                 live_version=3,
+                has_draft=True,
             ),
             ServiceLifecycleCard(
                 publication_id=3,
@@ -169,6 +219,7 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
                 display_state=DisplayState.SERVICE_OFFLINE,
                 status="released",
                 actions=(BotAction.VIEW,),
+                internal_status="released",
                 live_version=3,
             ),
         )
@@ -178,12 +229,24 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
         1: PermissionLevel.OWNER,
         10: PermissionLevel.OWNER,
     }
+    edit_lock_view = MagicMock()
+    edit_lock_view.states_for_bots.return_value = {
+        ("s1", "u1"): ServiceEditLockState(
+            locked=True,
+            holder_user_id="editor-1",
+            holder_name="Editor One",
+            has_collaborators=True,
+            is_owner_holder=False,
+        )
+    }
     inventory = BotInventoryService(
         bot_service=bot,
         desktop_service=desktop,
         access_service=access,
         business_space=NoopBusinessSpaceContext(),
         lifecycle_view=BotLifecycleView(lifecycle_port),
+        edit_lock_view=edit_lock_view,
+        template_port=_StubTemplatePort(),
     )
 
     items, total = inventory.list_items(
@@ -204,7 +267,90 @@ def test_service_bot_expands_to_publication_cards_before_pagination() -> None:
     service_items = [item for item in items if item.bot_id == "s1"]
     assert [item.publication_id for item in service_items] == [4, 3]
     assert [item.card_id for item in service_items] == ["service:s1:4", "service:s1:3"]
+    assert [item.edit_lock.need_lock for item in service_items] == [True, True]
+    assert [item.edit_lock.holder_name for item in service_items] == [
+        "Editor One",
+        "Editor One",
+    ]
+    edit_lock_view.states_for_bots.assert_called_once_with(bots=[service_row])
     lifecycle_port.cards_for_bots.assert_called_once_with(bots=[service_row])
+
+
+@pytest.mark.unit
+def test_edit_lock_batch_reads_only_service_bots_on_current_page() -> None:
+    first = {
+        **CLOUD,
+        "id": 10,
+        "bot_id": "service-1",
+        "bot_name": "A Service",
+        "bot_type": "service",
+    }
+    second = {
+        **first,
+        "id": 11,
+        "bot_id": "service-2",
+        "bot_name": "B Service",
+    }
+    bot = MagicMock()
+    bot.list_bots_by_conditions.return_value = {
+        "total": 2,
+        "items": [first, second],
+    }
+    desktop = MagicMock()
+    desktop.list_user_bots.return_value = []
+    access = MagicMock()
+    access.get_operable_permission_levels.return_value = {
+        10: PermissionLevel.OWNER,
+        11: PermissionLevel.OWNER,
+    }
+    lifecycle_port = MagicMock()
+    lifecycle_port.cards_for_bots.return_value = {
+        row["bot_id"]: (
+            ServiceLifecycleCard(
+                publication_id=row["id"],
+                version=1,
+                display_state=DisplayState.SERVICE_ONLINE,
+                status="running",
+                actions=(BotAction.VIEW,),
+            ),
+        )
+        for row in (first, second)
+    }
+    edit_lock_view = MagicMock()
+    edit_lock_view.states_for_bots.return_value = {
+        ("service-1", "u1"): ServiceEditLockState(
+            locked=False,
+            holder_user_id=None,
+            holder_name=None,
+            has_collaborators=False,
+            is_owner_holder=False,
+        )
+    }
+    inventory = BotInventoryService(
+        bot_service=bot,
+        desktop_service=desktop,
+        access_service=access,
+        business_space=NoopBusinessSpaceContext(),
+        lifecycle_view=BotLifecycleView(lifecycle_port),
+        edit_lock_view=edit_lock_view,
+        template_port=_StubTemplatePort(),
+    )
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=1,
+    )
+
+    assert total == 2
+    assert [item.bot_id for item in items] == ["service-1"]
+    edit_lock_view.states_for_bots.assert_called_once_with(bots=[first])
 
 
 @pytest.mark.unit
@@ -388,12 +534,31 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         )
         for row in rows
     }
+    edit_lock_view = MagicMock()
+    edit_lock_view.states_for_bots.return_value = {
+        ("service-owner", "u1"): ServiceEditLockState(
+            locked=False,
+            holder_user_id=None,
+            holder_name=None,
+            has_collaborators=False,
+            is_owner_holder=False,
+        ),
+        ("service-editor", "other-owner"): ServiceEditLockState(
+            locked=True,
+            holder_user_id="u1",
+            holder_name="Current User",
+            has_collaborators=True,
+            is_owner_holder=False,
+        ),
+    }
     inventory = BotInventoryService(
         bot_service=bot,
         desktop_service=desktop,
         access_service=access,
         business_space=business_space,
         lifecycle_view=BotLifecycleView(lifecycle_port),
+        edit_lock_view=edit_lock_view,
+        template_port=_StubTemplatePort(),
     )
 
     items, total = inventory.list_items(
@@ -419,6 +584,7 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         engine=None,
         status=None,
         bot_ids=None,
+        attach_templates=False,
         page=1,
         page_size=200,
     )
@@ -441,6 +607,10 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
         "edit": "Bot editor permission required",
         "delete": "Bot editor permission required",
     }
+    assert by_id["service-owner"].edit_lock is not None
+    assert by_id["service-editor"].edit_lock is not None
+    assert by_id["service-viewer"].edit_lock is None
+    edit_lock_view.states_for_bots.assert_called_once_with(bots=[editor_bot, owner_bot])
     assert all(item.space == team_space for item in items)
 
 
@@ -510,3 +680,113 @@ def test_service_upgrade_action_requires_admin() -> None:
     )
     assert admin_actions == (BotAction.VIEW, BotAction.UPGRADE)
     assert admin_disabled == {"delete": "Bot Owner permission required"}
+
+
+def _inventory_with(bot_rows: list[dict], stub: _StubTemplatePort) -> BotInventoryService:
+    bot = MagicMock()
+    bot.list_bots_by_conditions.return_value = {"total": len(bot_rows), "items": bot_rows}
+    desktop = MagicMock()
+    desktop.list_user_bots.return_value = []
+    access = MagicMock()
+    access.get_operable_permission_levels.side_effect = lambda **kwargs: {
+        int(row["id"]): PermissionLevel.OWNER for row in kwargs["bots"]
+    }
+    return BotInventoryService(
+        bot_service=bot,
+        desktop_service=desktop,
+        access_service=access,
+        business_space=NoopBusinessSpaceContext(),
+        lifecycle_view=BotLifecycleView(NoopServiceLifecyclePort()),
+        edit_lock_view=_no_edit_locks(),
+        template_port=stub,
+    )
+
+
+def _template_bot(bot_id: str, row_id: int) -> dict:
+    return {
+        **CLOUD,
+        "id": row_id,
+        "bot_id": bot_id,
+        "bot_name": f"Bot {bot_id}",
+        "template_type": "applicationCoding",
+    }
+
+
+@pytest.mark.unit
+def test_page_slice_attaches_projected_template_config() -> None:
+    # Three template-backed bots, page_size=2 -> the port sees only the
+    # returned page's template-backed ids, and the stored ext is projected
+    # (token stripped) before it reaches the read model.
+    stub = _StubTemplatePort(
+        {
+            "b1": {"devflow_workflow": "w1", "token": "raw-secret"},
+            "b2": {"template_key": "normalCC", "runtime": "codefuse"},
+            "b3": {"devflow_workflow": "w3"},
+        }
+    )
+    inventory = _inventory_with(
+        [_template_bot("b1", 11), _template_bot("b2", 12), _template_bot("b3", 13)],
+        stub,
+    )
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=2,
+    )
+
+    assert total == 3
+    assert len(items) == 2
+    assert len(stub.calls) == 1
+    assert set(stub.calls[0]) == {"b1", "b2"}
+    assert items[0].template_type == "applicationCoding"
+    assert items[0].template_config == {"devflow_workflow": "w1"}
+    assert items[1].template_config == {"template_key": "normalCC"}
+
+
+@pytest.mark.unit
+def test_page_slice_without_template_bots_skips_the_port() -> None:
+    stub = _StubTemplatePort()
+    inventory = _inventory_with([CLOUD], stub)
+
+    items, _ = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=20,
+    )
+
+    assert items
+    assert stub.calls == []
+
+
+@pytest.mark.unit
+def test_page_slice_missing_template_row_leaves_config_none() -> None:
+    stub = _StubTemplatePort({})  # template row absent for the bot
+    inventory = _inventory_with([_template_bot("b1", 11)], stub)
+
+    items, _ = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=None,
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=20,
+    )
+
+    assert items[0].template_type == "applicationCoding"
+    assert items[0].template_config is None

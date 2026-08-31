@@ -1,11 +1,17 @@
-"""Service API Protocol for the harness patch planner."""
+"""Service API Protocol for the harness patch planner.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/harness/patch_planner_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.harness.patch_planner_service_protocol import (
+    PatchPlannerProtocol,
+)
 
-
-@runtime_checkable
-class PatchPlannerProtocol(Protocol):
-    """Service API for generating + persisting patch plans from scan findings."""
-
-    async def generate_and_save_patches(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "PatchPlannerProtocol",
+]

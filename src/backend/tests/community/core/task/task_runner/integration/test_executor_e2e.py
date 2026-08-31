@@ -18,7 +18,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskInfo, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import _DoubleBcsClient
 from agentclaw.community.core.task.task_runner.integration.double.double_open_api_bot import _DoubleOpenApiBot
 from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
@@ -191,6 +191,50 @@ class TestCoopGroupManagerWorkerE2E:
                   timeout=10.0)
         n_group = next(n for n in svc.query_task_dashboard("t_phase").tasks if n.node_id == "N_group")
         assert n_group.status == Status.DONE, f"coop_group poll 回投未翻 DONE, status={n_group.status}"
+        _stop_poller(eng)
+
+
+# ===== Test 2b: manager_worker 群建群内联挂 §4 event_subscriptions(execute→engine→form_coop_group→create_group) =====
+class _RecordingDoubleBcsClient(_DoubleBcsClient):
+    """记录所有 create_group 请求(供断言 manager_worker 群挂了 §4 订阅)。"""
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.created_reqs: list = []
+
+    async def create_group(self, req):
+        self.created_reqs.append(req)
+        return await super().create_group(req)
+
+
+class TestManagerWorkerEventSubscriptionsE2E:
+    def test_execute_manager_worker_group_attaches_event_subscriptions(self):
+        """execute(on_execute)→动态派发 manager_worker 群→form_coop_group→create_group 内联挂 §4 订阅。
+        鉴权走既有 Bearer(+HMAC),无 cookie(见 spec §4.3);sink.url 用 api_base_url 拼 Avernet 回调路由。"""
+        svc = TaskGraphService()
+        svc.initialize_graph(_task_info())
+        bcs = _RecordingDoubleBcsClient(poll_once_then_terminal=False)   # 建群即可断言,不靠终态
+        eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
+                              bcs_identity=_DoubleBcsBotIdentityResolver(),
+                              api_base_url="https://api.example.com")
+        _run(eng.on_execute("t_phase"))
+        _wait_for(lambda: any(r.group_strategy == "manager_worker" for r in bcs.created_reqs),
+                  timeout=10.0)
+        mw = next(r for r in bcs.created_reqs if r.group_strategy == "manager_worker")
+        subs = mw.event_subscriptions
+        assert subs and len(subs) == 1
+        s = subs[0]
+        assert s["name"] == "avernet-manager-worker"
+        assert s["payload"] == {"mode": "full"}
+        assert set(s["event_filters"]) == {
+            "group.created", "session.created",
+            "task.assigned", "task.completed", "session.completed",   # §4
+        }
+        assert s["sink"]["type"] == "webhook"
+        assert s["sink"]["url"] == "https://api.example.com/api/v1/collaboration/tasks/callback/report"
+        assert s["sink"]["request_timeout_ms"] == 10000
+        # 同批 state_machine 群不挂订阅(只有 manager_worker 挂)
+        sm_reqs = [r for r in bcs.created_reqs if r.group_strategy == "state_machine"]
+        assert sm_reqs and all(not r.event_subscriptions for r in sm_reqs)
         _stop_poller(eng)
 
 

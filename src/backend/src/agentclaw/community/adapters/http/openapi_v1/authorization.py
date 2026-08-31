@@ -71,6 +71,18 @@ from fastapi.routing import APIRoute
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 
+class _EditLock:
+    """Require the caller to hold the Bot edit lock after authorization."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
+        return "EDIT_LOCK"
+
+
+EDIT_LOCK = _EditLock()
+
+
 @dataclass(frozen=True)
 class Check:
     """**The seam enforces this**, at ``level`` or above; OWNER always passes.
@@ -81,6 +93,7 @@ class Check:
     """
 
     level: PermissionLevel
+    edit_lock: _EditLock | None = None
 
     def __post_init__(self) -> None:
         """Refuse ``NONE``, which would be a gate that never refuses.
@@ -98,6 +111,11 @@ class Check:
                 "Check(PermissionLevel.NONE) is not a bar — it admits every "
                 "caller the gate would otherwise refuse. Name the level the "
                 "operation actually requires."
+            )
+        if self.edit_lock not in (None, EDIT_LOCK):
+            raise ValueError(
+                "Check's second argument must be EDIT_LOCK when the operation "
+                "requires the Bot edit lock."
             )
 
 
@@ -188,11 +206,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN),
+    ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.MEMBER),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN),
-    ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(PermissionLevel.ADMIN),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/caller-context"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/chats"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.bot_chat.service"),
     ("GET", "/openapi/v1/bots/{bot_id}/chats/{trace_id}"):
@@ -204,7 +223,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/diagnostics/health"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
@@ -235,17 +254,17 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/identity"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.OWNER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.OWNER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle/approval"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"): Check(PermissionLevel.OWNER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"): Check(PermissionLevel.OWNER),
-    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"): Check(PermissionLevel.ADMIN),
+    ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"): Check(PermissionLevel.OWNER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/cancel-staging"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/offline"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/restart"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/retry"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"): Check(PermissionLevel.OWNER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): OWNER_SCOPED,
@@ -254,6 +273,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/mcps"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(PermissionLevel.MEMBER),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"): Check(PermissionLevel.OWNER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/nodes"): Check(PermissionLevel.MEMBER),
@@ -318,34 +338,37 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.MEMBER,
                        "…openapi_v1.engine_runtime.sessions.router"),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/resources"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/deactivate"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permissions"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.skill_query_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/upload-folder"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.skill_center.services.local_skill_upload_service"),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER),
-    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("PUT", "/openapi/v1/bots/{bot_id}/space"): OWNER_SCOPED,
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
@@ -360,6 +383,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/all"): NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/authorized"):
+        NoCheck("a collection, not one addressed bot"),
+    ("GET", "/openapi/v1/bots/routines/all"):
         NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/catalog/discover"): NoCheck("tenant-identical catalogue"),
     ("GET", "/openapi/v1/bots/catalog/search"): NoCheck("tenant-identical catalogue"),
@@ -390,6 +415,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("tenant-identical marketplace"),
     ("POST", "/openapi/v1/bots/market/skill-center/skills"):
         NoCheck("tenant-identical marketplace"),
+    ("POST", "/openapi/v1/bots/market/skill-center/sync"):
+        NoCheck("tenant-identical materialized Skill Center synchronization"),
     ("GET", "/openapi/v1/bots/market/skill-center/tags"):
         NoCheck("tenant-identical marketplace"),
     ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),
@@ -415,6 +442,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the shared skill repository, owned by no bot"),
     ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"):
         NoCheck("Skill Center publish status, keyed by skill code not by bot"),
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"):
+        NoCheck("Skill README access is adjudicated by the Skill query service"),
     ("GET", "/openapi/v1/bots/spaces"):
         NoCheck("Space membership, adjudicated by the Space service"),
     ("POST", "/openapi/v1/bots/spaces/create"):
@@ -443,6 +472,66 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Space membership, adjudicated by the Space service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"):
         NoCheck("Space membership, adjudicated by the Space service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills"):
+        NoCheck("Space membership and immutable Draft creation, adjudicated by the Skill service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/import-from-git"):
+        NoCheck("Space membership and Git snapshot creation, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"):
+        NoCheck("Space membership and Skill visibility, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/consumable"):
+        NoCheck("Space membership and Canonical Ready state, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions"):
+        NoCheck("Space membership and Published Version visibility, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}"):
+        NoCheck("Space membership and exact Published Version visibility, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files"):
+        NoCheck("Space membership and exact Canonical Version visibility, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}"):
+        NoCheck("Space membership and exact Canonical file visibility, adjudicated by the Version service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"):
+        NoCheck("Space membership and Draft visibility, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):
+        NoCheck("Space membership and Draft file visibility, adjudicated by the Skill service"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):
+        NoCheck("Skill Grant, revision CAS and Lease fencing, adjudicated by the Skill service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/upgrade"):
+        NoCheck("Skill Grant, exact Published Version and idempotency, adjudicated by the Skill service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git"):
+        NoCheck("Skill Grant, frozen Git source and revision CAS, adjudicated by the Skill service"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"):
+        NoCheck("Skill Grant, revision CAS, Lease fencing and aggregate history, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact"):
+        NoCheck("Skill Owner or Manager Grant and fail-closed lineage, adjudicated by the Offline service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline"):
+        NoCheck("Skill Owner or Manager Grant and transactional blocker recheck, adjudicated by the Offline service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"):
+        NoCheck("Space membership and Skill Grants, adjudicated by the Grant service"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"):
+        NoCheck("Skill Owner Grant, adjudicated by the Grant service"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"):
+        NoCheck("Skill Owner Grant, adjudicated by the Grant service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer"):
+        NoCheck("Skill Owner or Space administrator, adjudicated by the Grant service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests"):
+        NoCheck("Team membership and Skill Grant eligibility, adjudicated by the Skill service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("Space membership and Skill Grants, adjudicated by the Lease service"),
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("Skill Owner or Manager Grant, adjudicated by the Lease service"),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease"):
+        NoCheck("Lease holder and fencing token, adjudicated by the Lease service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover"):
+        NoCheck("Skill Owner or Manager Grant, adjudicated by the Lease service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publication-impact"):
+        NoCheck("Skill Owner or Manager Grant and current Installation state, adjudicated by the Publication service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"):
+        NoCheck("Skill Grant, Draft, Lease, idempotency and task recovery, adjudicated by the Publication service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications"):
+        NoCheck("Space membership and Publication history, adjudicated by the Publication service"),
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}"):
+        NoCheck("Space membership and exact Publication Attempt scope, adjudicated by the Publication service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}/retry"):
+        NoCheck("Skill Grant and Attempt recovery state, adjudicated by the Publication service"),
     ("POST", "/openapi/v1/bots/work-order-notifications/read-all"):
         NoCheck("the named user's own work orders and notifications"),
     ("GET", "/openapi/v1/bots/work-order-notifications/unread-count"):
@@ -463,18 +552,22 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the named user's own work orders and notifications"),
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/reject"):
         NoCheck("the named user's own work orders and notifications"),
-    # ── Task public surface (execute/dashboard/list; mounted via the gateway
+    # ── Task public surface (execute/dashboard/list + grant/revoke stateless relay; mounted via the gateway
     # ── `collaboration-tasks` domain → backend). Tasks address no bot, so the
     # ── bot-level `Check` does not apply; the caller identity is resolved by
-    # ── the gateway spanner + `_PUBLIC_AUTH`, and `list` is scoped by
-    # ── `UserIdDep` (owner_user_id). `NoCheck` is the settled mode here, not a
+    # ── the gateway spanner + `_PUBLIC_AUTH`; `list` uses caller-selected
+    # ── user_id only as a task-record filter. `NoCheck` is the settled mode here, not a
     # ── placeholder — see `admission.py` for the machine-caller decision.
     ("POST", "/openapi/v1/collaboration/tasks/execute"):
         NoCheck("a task, not a bot; the submitter is the task owner"),
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"):
         NoCheck("a task, not a bot; read-only task graph by task_id"),
     ("GET", "/openapi/v1/collaboration/tasks/list"):
-        NoCheck("a task, not a bot; scoped to the named user's own tasks"),
+        NoCheck("a task, not a bot; filters records by the named user"),
+    ("POST", "/openapi/v1/collaboration/tasks/grant"):
+        NoCheck("a stateless relay to secbaas; the human Cookie/Referer authorizes the grant, not a bot permission"),
+    ("POST", "/openapi/v1/collaboration/tasks/revoke"):
+        NoCheck("a stateless relay to secbaas; the human Cookie/Referer authorizes the revoke, not a bot permission"),
 
     # ── Retiring addresses in ``deprecated/`` ─────────────────────────────
     ("GET", "/openapi/v1/bots/approvals/{bot_id}/mode"): Check(PermissionLevel.MEMBER),
@@ -561,6 +654,7 @@ __all__ = [
     "AUTHORIZATION",
     "Authorization",
     "Check",
+    "EDIT_LOCK",
     "INHERITED",
     "NoCheck",
     "OWNER_SCOPED",
@@ -607,6 +701,25 @@ class PublicAPIRoute(APIRoute):
                 *(kwargs.get("dependencies") or []),
                 Depends(require_check(rule)),
             ]
+        if isinstance(rule, Check) and rule.edit_lock is EDIT_LOCK:
+            from agentclaw.community.adapters.http.openapi_v1.contracts import (
+                ErrorEnvelope,
+                error_example,
+            )
+
+            responses = dict(kwargs.get("responses") or {})
+            responses.setdefault(
+                423,
+                {
+                    "model": ErrorEnvelope,
+                    "description": (
+                        "A Bot with collaborators requires the caller to "
+                        "hold its edit lock."
+                    ),
+                    **error_example(423, "Edit lock required"),
+                },
+            )
+            kwargs["responses"] = responses
         super().__init__(path, endpoint, **kwargs)
 
 

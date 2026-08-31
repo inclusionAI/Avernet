@@ -9,7 +9,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, Status, TaskInfo, TaskNodePatch, TaskSpec,
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
-from agentclaw.community.core.task.task_graph.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
 
 def _task_info(task_id: str = "t1") -> TaskInfo:

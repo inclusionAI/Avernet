@@ -32,13 +32,14 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterStreamResponse,
     DeviceAdapterTransport,
 )
+from agentclaw.community.core.session_resources.session_resource_service_protocol import SessionResourceServiceProtocol
 
 log = logging.getLogger("session_resource.service")
 _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
 _MAX_FILENAME_UTF8_BYTES = 255
 
 
-class SessionResourceService:
+class SessionResourceService(SessionResourceServiceProtocol):
     def __init__(
         self,
         *,

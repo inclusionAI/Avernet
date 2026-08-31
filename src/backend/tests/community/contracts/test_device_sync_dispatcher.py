@@ -22,7 +22,20 @@ def test_dispatch_returns_factory_service_for_context() -> None:
     factory.assert_called_once_with(ctx)
 
 
-def test_dispatch_rejects_non_baas_provider() -> None:
+def test_dispatch_routes_teclaw_through_the_same_factory() -> None:
+    """teclaw shares the BaaS runtime transport but delivers the whole
+    artifact; the factory picks the concrete service, the dispatcher only
+    guards the provider set."""
+    service = MagicMock(spec=DeviceSync)
+    factory = MagicMock(return_value=service)
+    dispatcher: DeviceSyncDispatcher = CommunityDeviceSyncDispatcher(factory)
+    ctx = SimpleNamespace(bot_id="b1", provider="teclaw")
+
+    assert dispatcher.dispatch(ctx) is service
+    factory.assert_called_once_with(ctx)
+
+
+def test_dispatch_rejects_unrouted_provider() -> None:
     factory = MagicMock()
     dispatcher: DeviceSyncDispatcher = CommunityDeviceSyncDispatcher(factory)
     ctx = SimpleNamespace(bot_id="b1", provider="arca")

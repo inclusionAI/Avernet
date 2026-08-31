@@ -26,6 +26,8 @@ paths:
     $ref: ./openapi/state-machine-runs.yaml#/StateMachineRunPath
   /api/v1/collaboration/state-machine-runs/{run_id}/graph:
     $ref: ./openapi/state-machine-runs.yaml#/StateMachineRunGraphPath
+  /api/v1/collaboration/state-machine-runs/{run_id}/reruns:
+    $ref: ./openapi/state-machine-runs.yaml#/RerunStateMachineRunPath
   /api/v1/collaboration/state-machine-runs/{run_id}/nodes/{node_id}:
     $ref: ./openapi/state-machine-runs.yaml#/StateMachineNodeRunPath
   /api/v1/collaboration/state-machine-runs/{run_id}/nodes/{node_id}/respond:

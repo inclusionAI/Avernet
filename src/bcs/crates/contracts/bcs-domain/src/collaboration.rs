@@ -422,12 +422,18 @@ pub struct JudgePolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateMachineRun {
     pub run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rerun_of: Option<String>,
     pub definition_id: String,
     pub definition_version: i32,
     pub group_id: String,
     #[serde(default = "default_group_version")]
     pub group_version: i32,
     pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_activation_count: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
     pub status: StateMachineRunStatus,

@@ -1,55 +1,37 @@
+//! Direct Chat async run state-machine engine.
+//!
+//! `ChatRunStore` owns the run lifecycle rules (terminal guard, allowed
+//! transitions, version bumps, content truncation) and delegates persistence
+//! + compare-and-set + scan to a [`ChatRunRepoPort`] impl. The default
+//! constructor wires [`MemoryChatRunRepo`] (behavior-equivalent to the
+//! pre-#1546 in-process store); a [`ChatRunStore::with_repo`] constructor lets
+//! bootstrap select a persistent (MySQL + Redis) implementation.
+//!
+//! The node-local `Notify` registry is a latency optimization for `wait_update`
+//! only — correctness comes from re-reading the repo. See
+//! `docs/superpowers/specs/2026-08-27-bcs-run-governance-design.md`.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
 use tokio::sync::{Notify, RwLock};
+use tracing::error;
 
-use bcs_service_api::{
-    ChatResponseMode, ChatRunMetricCount, DirectChatClientKind, DirectChatRunReason,
-    DirectChatRunState,
+use bcs_chat_run_store::MemoryChatRunRepo;
+use bcs_service_api::port::repo::{CasOutcome, ChatRunRepoError, ChatRunRepoPort};
+use bcs_service_api::{ChatRunMetricCount, DirectChatClientKind, DirectChatRunReason};
+
+pub use bcs_service_api::port::repo::{
+    ChatRunCompletionPolicy, ChatRunRecord, ChatRunState, MAX_CONTENT_BYTES,
 };
 
-pub const MAX_CONTENT_BYTES: usize = 1_024 * 1_024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ChatRunState {
-    Pending,
-    Submitted,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-impl ChatRunState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Submitted => "submitted",
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChatRunCompletionPolicy {
-    WaitForFinal,
-    DetachDeliveryAck,
-}
-
+/// Run-specific completion policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatRunStoreError {
     CapacityExceeded { max_entries: usize },
     DuplicateRunId { run_id: String },
+    Backend(String),
 }
 
 impl ChatRunStoreError {
@@ -57,6 +39,7 @@ impl ChatRunStoreError {
         match self {
             ChatRunStoreError::CapacityExceeded { .. } => DirectChatRunReason::StoreCapacity,
             ChatRunStoreError::DuplicateRunId { .. } => DirectChatRunReason::InternalError,
+            ChatRunStoreError::Backend(_) => DirectChatRunReason::InternalError,
         }
     }
 }
@@ -70,79 +53,25 @@ impl std::fmt::Display for ChatRunStoreError {
             ChatRunStoreError::DuplicateRunId { run_id } => {
                 write!(f, "run_id {run_id} already exists")
             }
+            ChatRunStoreError::Backend(msg) => {
+                write!(f, "chat run store backend error: {msg}")
+            }
         }
     }
 }
 
 impl std::error::Error for ChatRunStoreError {}
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ChatRunRecord {
-    pub run_id: String,
-    pub bot_uuid: String,
-    pub from_bot_id: String,
-    pub session_key: String,
-    pub state: ChatRunState,
-    pub accumulated_content: String,
-    pub error_message: Option<String>,
-    pub created_at_ms: u64,
-    pub updated_at_ms: u64,
-    pub completed_at_ms: Option<u64>,
-    pub expires_at_ms: u64,
-    pub version: u64,
-    pub content_truncated: bool,
-    pub client: Option<String>,
-    pub response_mode: ChatResponseMode,
-    #[serde(skip_serializing)]
-    pub completion_policy: ChatRunCompletionPolicy,
-    #[serde(skip_serializing)]
-    pub delivery_ack_at_ms: Option<u64>,
-}
-
-impl ChatRunRecord {
-    pub fn new(
-        run_id: String,
-        bot_uuid: String,
-        from_bot_id: String,
-        session_key: String,
-        now_ms: u64,
-        expires_at_ms: u64,
-        client: Option<String>,
-        response_mode: ChatResponseMode,
-        completion_policy: ChatRunCompletionPolicy,
-    ) -> Self {
-        Self {
-            run_id,
-            bot_uuid,
-            from_bot_id,
-            session_key,
-            state: ChatRunState::Pending,
-            accumulated_content: String::new(),
-            error_message: None,
-            created_at_ms: now_ms,
-            updated_at_ms: now_ms,
-            completed_at_ms: None,
-            expires_at_ms,
-            version: 1,
-            content_truncated: false,
-            client,
-            response_mode,
-            completion_policy,
-            delivery_ack_at_ms: None,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Slot {
-    record: RwLock<ChatRunRecord>,
-    notify: Notify,
-}
-
-#[derive(Debug)]
 pub struct ChatRunStore {
-    slots: RwLock<HashMap<String, Arc<Slot>>>,
-    max_entries: usize,
+    repo: Arc<dyn ChatRunRepoPort>,
+    #[allow(dead_code)]
+    notifiers: Arc<RwLock<HashMap<String, Arc<Notify>>>>,
+}
+
+impl std::fmt::Debug for ChatRunStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChatRunStore").finish_non_exhaustive()
+    }
 }
 
 impl Default for ChatRunStore {
@@ -164,231 +93,341 @@ impl ChatRunStore {
     }
 
     pub fn with_capacity(max_entries: usize) -> Self {
+        Self::with_repo(Arc::new(MemoryChatRunRepo::with_capacity(max_entries)))
+    }
+
+    /// Build the engine over an explicit repository implementation. Used by
+    /// bootstrap to select a persistent (MySQL + Redis) store via config.
+    pub fn with_repo(repo: Arc<dyn ChatRunRepoPort>) -> Self {
         Self {
-            slots: RwLock::new(HashMap::new()),
-            max_entries,
+            repo,
+            notifiers: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    async fn notifier(&self, run_id: &str) -> Arc<Notify> {
+        if let Some(existing) = self.notifiers.read().await.get(run_id) {
+            return existing.clone();
+        }
+        let mut guard = self.notifiers.write().await;
+        guard
+            .entry(run_id.to_string())
+            .or_insert_with(|| Arc::new(Notify::new()))
+            .clone()
+    }
+
+    async fn notify_waiters(&self, run_id: &str) {
+        if let Some(notify) = self.notifiers.read().await.get(run_id) {
+            notify.notify_waiters();
+        }
+    }
+
+    async fn drop_notifier(&self, run_id: &str) {
+        self.notifiers.write().await.remove(run_id);
+    }
+
+    /// Reclaim node-local notifier entries that have no parked long-poll waiter.
+    ///
+    /// The `Notify` registry is a latency-only optimization for `wait_update`
+    /// — correctness comes from re-reading the repo, and [`Self::notifier`]
+    /// rebuilds an entry on demand — so evicting an idle entry is always safe.
+    /// This is the only reclaim path for runs that retire without a terminal
+    /// CAS (acknowledged detached-delivery runs, which are excluded from the
+    /// timeout sweep and retire as `Dropped`), since [`Self::drop_notifier`]
+    /// is only reached on a terminal transition. It is independent of the repo
+    /// retirement path, so it also covers MySQL production, where detached
+    /// retirement is delegated to platform cleanup and `drop_detached_expired`
+    /// is a no-op that returns no retired rows.
+    ///
+    /// An entry is idle iff the map is its sole owner (`Arc::strong_count == 1`),
+    /// i.e. no `wait_update` call currently holds a clone. Every clone is taken
+    /// while holding the map's `RwLock` (in [`Self::notifier`]), and the
+    /// re-check below runs under the write lock, so the count is precise at the
+    /// decision point and a parked waiter can never be evicted.
+    async fn sweep_idle_notifiers(&self) {
+        let candidates: Vec<String> = {
+            let map = self.notifiers.read().await;
+            map.iter()
+                .filter(|(_, notify)| Arc::strong_count(notify) == 1)
+                .map(|(run_id, _)| run_id.clone())
+                .collect()
+        };
+        if candidates.is_empty() {
+            return;
+        }
+        let mut map = self.notifiers.write().await;
+        for run_id in candidates {
+            // Re-check under the write lock: a waiter may have cloned the entry
+            // between the read and write phases. Only remove if still idle.
+            if let Some(notify) = map.get(&run_id) {
+                if Arc::strong_count(notify) == 1 {
+                    map.remove(&run_id);
+                }
+            }
         }
     }
 
     pub async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunStoreError> {
-        let mut slots = self.slots.write().await;
-        if self.max_entries > 0 && slots.len() >= self.max_entries {
-            return Err(ChatRunStoreError::CapacityExceeded {
-                max_entries: self.max_entries,
-            });
-        }
-        if slots.contains_key(&record.run_id) {
-            return Err(ChatRunStoreError::DuplicateRunId {
-                run_id: record.run_id,
-            });
-        }
-        slots.insert(record.run_id.clone(), Arc::new(Slot {
-            record: RwLock::new(record),
-            notify: Notify::new(),
-        }));
-        Ok(())
-    }
-
-    async fn with_slot(&self, run_id: &str) -> Option<Arc<Slot>> {
-        self.slots.read().await.get(run_id).cloned()
+        self.repo.create(record).await.map_err(|err| match err {
+            ChatRunRepoError::Capacity { max_entries } => {
+                ChatRunStoreError::CapacityExceeded { max_entries }
+            }
+            ChatRunRepoError::DuplicateRunId(run_id) => ChatRunStoreError::DuplicateRunId { run_id },
+            other => ChatRunStoreError::Backend(other.to_string()),
+        })
     }
 
     pub async fn get(&self, run_id: &str) -> Option<ChatRunRecord> {
-        let slot = self.with_slot(run_id).await?;
-        Some(slot.record.read().await.clone())
+        match self.repo.get(run_id).await {
+            Ok(option) => option,
+            Err(err) => {
+                error!(run_id, error = %err, "chat run get failed");
+                None
+            }
+        }
     }
 
     pub(crate) async fn metric_counts(&self) -> Vec<ChatRunMetricCount> {
-        let slots_snapshot: Vec<Arc<Slot>> = {
-            let slots = self.slots.read().await;
-            slots.values().cloned().collect()
-        };
-        let mut counts: Vec<ChatRunMetricCount> = Vec::new();
-        for slot in slots_snapshot {
-            let rec = slot.record.read().await;
-            let state = direct_chat_metric_state(rec.state);
-            let client_kind = direct_chat_client_kind(rec.client.as_deref());
-            if let Some(existing) = counts
-                .iter_mut()
-                .find(|count| count.state == state && count.client_kind == client_kind)
-            {
-                existing.count = existing.count.saturating_add(1);
-            } else {
-                counts.push(ChatRunMetricCount {
-                    state,
-                    client_kind,
-                    count: 1,
-                });
-            }
-        }
-        counts
+        self.repo
+            .metric_counts()
+            .await
+            .unwrap_or_else(|err| {
+                error!(error = %err, "chat run metric_counts failed");
+                Vec::new()
+            })
     }
 
-    pub(crate) async fn metric_client_kinds(&self) -> HashMap<String, DirectChatClientKind> {
-        let slots_snapshot: Vec<(String, Arc<Slot>)> = {
-            let slots = self.slots.read().await;
-            slots.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-        };
-        let mut client_kinds = HashMap::new();
-        for (run_id, slot) in slots_snapshot {
-            let rec = slot.record.read().await;
-            client_kinds.insert(run_id, direct_chat_client_kind(rec.client.as_deref()));
-        }
-        client_kinds
-    }
-
-    async fn mutate(
+    /// Apply a state transition under version CAS. Returns false on conflict,
+    /// terminal, missing, or backend error (logged). Single attempt — mirrors
+    /// the pre-refactor single-lock mutate semantics.
+    async fn apply_state_cas(
         &self,
         run_id: &str,
-        f: impl FnOnce(&mut ChatRunRecord) -> bool,
+        expected_version: u64,
+        new: ChatRunRecord,
     ) -> bool {
-        let Some(slot) = self.with_slot(run_id).await else {
-            return false;
-        };
-        let mut rec = slot.record.write().await;
-        if rec.state.is_terminal() {
-            return false;
+        match self.repo.compare_and_set_state(run_id, expected_version, new).await {
+            Ok(CasOutcome::Applied(_)) => {
+                self.notify_waiters(run_id).await;
+                true
+            }
+            Ok(_) => false,
+            Err(err) => {
+                error!(run_id, error = %err, "chat run state cas failed");
+                false
+            }
         }
-        let changed = f(&mut rec);
-        if changed {
-            rec.version = rec.version.saturating_add(1);
-            rec.updated_at_ms = now_ms();
-            slot.notify.notify_waiters();
+    }
+
+    /// Apply a terminal transition under version CAS. Clears the node-local
+    /// notifier since the run will not change again.
+    async fn apply_terminal_cas(
+        &self,
+        run_id: &str,
+        expected_version: u64,
+        new: ChatRunRecord,
+    ) -> bool {
+        match self
+            .repo
+            .compare_and_set_terminal(run_id, expected_version, new)
+            .await
+        {
+            Ok(CasOutcome::Applied(_)) => {
+                self.notify_waiters(run_id).await;
+                self.drop_notifier(run_id).await;
+                true
+            }
+            Ok(_) => false,
+            Err(err) => {
+                error!(run_id, error = %err, "chat run terminal cas failed");
+                false
+            }
         }
-        changed
     }
 
     pub async fn mark_running(&self, run_id: &str) -> bool {
-        self.mutate(run_id, |rec| {
-            if rec.state == ChatRunState::Pending {
-                rec.state = ChatRunState::Running;
-                true
-            } else {
-                false
-            }
-        })
-        .await
+        let Some(current) = self.get(run_id).await else {
+            return false;
+        };
+        if current.state.is_terminal() || current.state != ChatRunState::Pending {
+            return false;
+        }
+        let mut new = current.clone();
+        new.state = ChatRunState::Running;
+        self.apply_state_cas(run_id, current.version, new).await
     }
 
     pub async fn mark_submitted(&self, run_id: &str) -> bool {
-        self.mutate(run_id, |rec| {
-            if rec.state == ChatRunState::Pending {
-                rec.state = ChatRunState::Submitted;
-                true
-            } else {
-                false
-            }
-        })
-        .await
+        let Some(current) = self.get(run_id).await else {
+            return false;
+        };
+        if current.state.is_terminal() || current.state != ChatRunState::Pending {
+            return false;
+        }
+        let mut new = current.clone();
+        new.state = ChatRunState::Submitted;
+        self.apply_state_cas(run_id, current.version, new).await
     }
 
     pub async fn mark_detach_delivery_acknowledged(&self, run_id: &str) -> bool {
-        self.mutate(run_id, |rec| {
-            if rec.completion_policy != ChatRunCompletionPolicy::DetachDeliveryAck {
-                return false;
-            }
-            let mut changed = false;
-            if matches!(rec.state, ChatRunState::Pending | ChatRunState::Submitted) {
-                rec.state = ChatRunState::Running;
-                changed = true;
-            }
-            if rec.delivery_ack_at_ms.is_none() {
-                rec.delivery_ack_at_ms = Some(now_ms());
-                changed = true;
-            }
-            changed
-        })
-        .await
+        let Some(current) = self.get(run_id).await else {
+            return false;
+        };
+        if current.state.is_terminal() {
+            return false;
+        }
+        if current.completion_policy != ChatRunCompletionPolicy::DetachDeliveryAck {
+            return false;
+        }
+        let mut new = current.clone();
+        let mut changed = false;
+        if matches!(new.state, ChatRunState::Pending | ChatRunState::Submitted) {
+            new.state = ChatRunState::Running;
+            changed = true;
+        }
+        if new.delivery_ack_at_ms.is_none() {
+            new.delivery_ack_at_ms = Some(now_ms());
+            changed = true;
+        }
+        if !changed {
+            return false;
+        }
+        self.apply_state_cas(run_id, current.version, new).await
     }
 
     pub async fn append_delta(&self, run_id: &str, chunk: &str) -> bool {
         if chunk.is_empty() {
             return false;
         }
-        self.mutate(run_id, |rec| {
-            if rec.state == ChatRunState::Pending {
-                rec.state = ChatRunState::Running;
+        let Some(current) = self.get(run_id).await else {
+            return false;
+        };
+        if current.state.is_terminal() {
+            return false;
+        }
+
+        let mut accumulated = current.accumulated_content.clone();
+        let mut truncated = current.content_truncated;
+        let remaining = MAX_CONTENT_BYTES.saturating_sub(accumulated.len());
+        if remaining == 0 {
+            truncated = true;
+        } else if chunk.len() <= remaining {
+            accumulated.push_str(chunk);
+        } else {
+            let mut boundary = remaining;
+            while boundary > 0 && !chunk.is_char_boundary(boundary) {
+                boundary -= 1;
             }
-            let remaining = MAX_CONTENT_BYTES.saturating_sub(rec.accumulated_content.len());
-            if remaining == 0 {
-                rec.content_truncated = true;
-                return true;
+            accumulated.push_str(&chunk[..boundary]);
+            truncated = true;
+        }
+
+        match self
+            .repo
+            .append_streaming_content(run_id, current.version, accumulated, truncated)
+            .await
+        {
+            Ok(true) => {
+                self.notify_waiters(run_id).await;
+                true
             }
-            if chunk.len() <= remaining {
-                rec.accumulated_content.push_str(chunk);
-            } else {
-                let mut boundary = remaining;
-                while boundary > 0 && !chunk.is_char_boundary(boundary) {
-                    boundary -= 1;
-                }
-                rec.accumulated_content.push_str(&chunk[..boundary]);
-                rec.content_truncated = true;
+            Ok(false) => false,
+            Err(err) => {
+                error!(run_id, error = %err, "chat run append_delta failed");
+                false
             }
-            true
-        })
-        .await
+        }
     }
 
     pub async fn replace_content(&self, run_id: &str, content: &str) -> bool {
-        self.mutate(run_id, |rec| {
-            let was_pending = rec.state == ChatRunState::Pending;
-            if was_pending {
-                rec.state = ChatRunState::Running;
-            }
+        let Some(current) = self.get(run_id).await else {
+            return false;
+        };
+        if current.state.is_terminal() {
+            return false;
+        }
+        let was_pending = current.state == ChatRunState::Pending;
 
-            let mut next = String::new();
-            let mut truncated = false;
-            if content.len() <= MAX_CONTENT_BYTES {
-                next.push_str(content);
-            } else {
-                let mut boundary = MAX_CONTENT_BYTES;
-                while boundary > 0 && !content.is_char_boundary(boundary) {
-                    boundary -= 1;
-                }
-                next.push_str(&content[..boundary]);
-                truncated = true;
+        let mut next = String::new();
+        let mut truncated = false;
+        if content.len() <= MAX_CONTENT_BYTES {
+            next.push_str(content);
+        } else {
+            let mut boundary = MAX_CONTENT_BYTES;
+            while boundary > 0 && !content.is_char_boundary(boundary) {
+                boundary -= 1;
             }
+            next.push_str(&content[..boundary]);
+            truncated = true;
+        }
 
-            let changed = rec.accumulated_content != next || rec.content_truncated != truncated;
-            rec.accumulated_content = next;
-            rec.content_truncated = truncated;
-            changed || was_pending
-        })
-        .await
+        let changed =
+            current.accumulated_content != next || current.content_truncated != truncated || was_pending;
+        if !changed {
+            return false;
+        }
+
+        match self
+            .repo
+            .append_streaming_content(run_id, current.version, next, truncated)
+            .await
+        {
+            Ok(true) => {
+                self.notify_waiters(run_id).await;
+                true
+            }
+            Ok(false) => false,
+            Err(err) => {
+                error!(run_id, error = %err, "chat run replace_content failed");
+                false
+            }
+        }
     }
 
     pub async fn mark_completed(&self, run_id: &str, final_text: Option<&str>) -> bool {
-        self.mutate(run_id, |rec| {
-            if let Some(text) = final_text {
-                if !text.is_empty() && rec.accumulated_content.is_empty() {
-                    rec.accumulated_content.push_str(text);
-                }
+        let Some(current) = self.get(run_id).await else {
+            return false;
+        };
+        if current.state.is_terminal() {
+            return false;
+        }
+        let mut new = current.clone();
+        if let Some(text) = final_text {
+            if !text.is_empty() && new.accumulated_content.is_empty() {
+                new.accumulated_content.push_str(text);
             }
-            rec.state = ChatRunState::Completed;
-            rec.completed_at_ms = Some(now_ms());
-            true
-        })
-        .await
+        }
+        new.state = ChatRunState::Completed;
+        new.completed_at_ms = Some(now_ms());
+        self.apply_terminal_cas(run_id, current.version, new).await
     }
 
     pub async fn mark_failed(&self, run_id: &str, error: impl Into<String>) -> bool {
-        let error = error.into();
-        self.mutate(run_id, |rec| {
-            rec.state = ChatRunState::Failed;
-            rec.error_message = Some(error);
-            rec.completed_at_ms = Some(now_ms());
-            true
-        })
-        .await
+        let message = error.into();
+        let Some(current) = self.get(run_id).await else {
+            return false;
+        };
+        if current.state.is_terminal() {
+            return false;
+        }
+        let mut new = current.clone();
+        new.state = ChatRunState::Failed;
+        new.error_message = Some(message);
+        new.completed_at_ms = Some(now_ms());
+        self.apply_terminal_cas(run_id, current.version, new).await
     }
 
     pub async fn mark_cancelled(&self, run_id: &str) -> bool {
-        self.mutate(run_id, |rec| {
-            rec.state = ChatRunState::Cancelled;
-            rec.completed_at_ms = Some(now_ms());
-            true
-        })
-        .await
+        let Some(current) = self.get(run_id).await else {
+            return false;
+        };
+        if current.state.is_terminal() {
+            return false;
+        }
+        let mut new = current.clone();
+        new.state = ChatRunState::Cancelled;
+        new.completed_at_ms = Some(now_ms());
+        self.apply_terminal_cas(run_id, current.version, new).await
     }
 
     pub async fn wait_update(
@@ -397,85 +436,119 @@ impl ChatRunStore {
         since_version: u64,
         timeout: Duration,
     ) -> Option<ChatRunRecord> {
-        let slot = self.with_slot(run_id).await?;
+        let notify = self.notifier(run_id).await;
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            {
-                let rec = slot.record.read().await;
-                if rec.version > since_version || rec.state.is_terminal() {
-                    return Some(rec.clone());
-                }
+            let current = self.get(run_id).await?;
+            if current.version > since_version || current.state.is_terminal() {
+                return Some(current);
             }
-            let notified = slot.notify.notified();
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                return Some(slot.record.read().await.clone());
+                return self.get(run_id).await;
             }
-            if tokio::time::timeout(remaining, notified).await.is_err() {
-                return Some(slot.record.read().await.clone());
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            match tokio::time::timeout(remaining, notified).await {
+                Ok(()) => continue,
+                Err(_) => return self.get(run_id).await,
             }
         }
+    }
+
+    /// Mark an overdue non-terminal run failed, retrying through version
+    /// conflicts so a concurrent delta on another replica cannot foil the
+    /// timeout transition. Returns true only if this call applied the failure.
+    async fn force_fail(&self, run_id: &str, error: &str) -> bool {
+        for _ in 0..4 {
+            let Some(current) = self.get(run_id).await else {
+                return false;
+            };
+            if current.state.is_terminal() {
+                return false;
+            }
+            let mut new = current.clone();
+            new.state = ChatRunState::Failed;
+            new.error_message = Some(error.to_string());
+            new.completed_at_ms = Some(now_ms());
+            match self
+                .repo
+                .compare_and_set_terminal(run_id, current.version, new)
+                .await
+            {
+                Ok(CasOutcome::Applied(_)) => {
+                    self.notify_waiters(run_id).await;
+                    self.drop_notifier(run_id).await;
+                    return true;
+                }
+                Ok(_) => continue,
+                Err(err) => {
+                    error!(run_id, error = %err, "chat run force_fail failed");
+                    return false;
+                }
+            }
+        }
+        false
     }
 
     pub async fn cleanup_expired(
         &self,
         now_ms_v: u64,
         retention_ms: u64,
-    ) -> (Vec<String>, Vec<String>) {
-        let slots_snapshot: Vec<(String, Arc<Slot>)> = {
-            let slots = self.slots.read().await;
-            slots.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-        };
-
-        let mut to_fail = Vec::new();
-        let mut to_drop = Vec::new();
-        for (run_id, slot) in &slots_snapshot {
-            let rec = slot.record.read().await;
-            if rec.state.is_terminal() {
-                if let Some(completed) = rec.completed_at_ms {
-                    if now_ms_v.saturating_sub(completed) >= retention_ms {
-                        to_drop.push(run_id.clone());
-                    }
-                }
-            } else if rec.completion_policy == ChatRunCompletionPolicy::DetachDeliveryAck
-                && rec.state == ChatRunState::Running
-            {
-                if let Some(ack_at) = rec.delivery_ack_at_ms {
-                    if now_ms_v.saturating_sub(ack_at) >= retention_ms {
-                        to_drop.push(run_id.clone());
-                    }
-                }
-            } else if now_ms_v >= rec.expires_at_ms {
-                to_fail.push(run_id.clone());
-            }
-        }
+    ) -> (
+        Vec<(String, DirectChatClientKind)>,
+        Vec<(String, DirectChatClientKind)>,
+    ) {
+        // Reclaim idle notifier entries every tick. This runs before the repo
+        // sweeps so it always fires (even if a repo call below errors) and is
+        // the only reclaim path for detached runs that retire without a CAS.
+        self.sweep_idle_notifiers().await;
 
         let mut expired = Vec::new();
-        for run_id in to_fail {
-            if self.mark_failed(&run_id, "timeout").await {
-                expired.push(run_id);
+        let active = match self.repo.list_active(now_ms_v).await {
+            Ok(active) => active,
+            Err(err) => {
+                error!(error = %err, "chat run list_active failed");
+                Vec::new()
+            }
+        };
+        for record in active {
+            if self.force_fail(&record.run_id, "timeout").await {
+                expired.push((
+                    record.run_id.clone(),
+                    direct_chat_client_kind(record.client.as_deref()),
+                ));
             }
         }
 
-        if !to_drop.is_empty() {
-            let mut slots = self.slots.write().await;
-            for run_id in &to_drop {
-                slots.remove(run_id);
+        let mut dropped = match self.repo.delete_expired_terminal(now_ms_v, retention_ms).await {
+            Ok(records) => records
+                .into_iter()
+                .map(|record| {
+                    (
+                        record.run_id.clone(),
+                        direct_chat_client_kind(record.client.as_deref()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            Err(err) => {
+                error!(error = %err, "chat run delete_expired_terminal failed");
+                Vec::new()
             }
+        };
+        // Acknowledged detached-delivery runs are retired silently (Dropped),
+        // never failed on timeout — they were successfully delivered.
+        match self.repo.drop_detached_expired(now_ms_v, retention_ms).await {
+            Ok(records) => dropped.extend(records.into_iter().map(|record| {
+                (
+                    record.run_id.clone(),
+                    direct_chat_client_kind(record.client.as_deref()),
+                )
+            })),
+            Err(err) => error!(error = %err, "chat run drop_detached_expired failed"),
         }
 
-        (expired, to_drop)
-    }
-}
-
-fn direct_chat_metric_state(state: ChatRunState) -> DirectChatRunState {
-    match state {
-        ChatRunState::Pending => DirectChatRunState::Pending,
-        ChatRunState::Submitted => DirectChatRunState::Submitted,
-        ChatRunState::Running => DirectChatRunState::Running,
-        ChatRunState::Completed => DirectChatRunState::Completed,
-        ChatRunState::Failed => DirectChatRunState::Failed,
-        ChatRunState::Cancelled => DirectChatRunState::Cancelled,
+        (expired, dropped)
     }
 }
 
@@ -492,6 +565,21 @@ pub(crate) fn direct_chat_client_kind(client: Option<&str>) -> DirectChatClientK
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bcs_service_api::ChatResponseMode;
+
+    fn record(run_id: &str) -> ChatRunRecord {
+        ChatRunRecord::new(
+            run_id.to_string(),
+            "bot".to_string(),
+            "from".to_string(),
+            "sk".to_string(),
+            0,
+            u64::MAX,
+            Some("http-chat-async".to_string()),
+            ChatResponseMode::Full,
+            ChatRunCompletionPolicy::WaitForFinal,
+        )
+    }
 
     #[test]
     fn direct_chat_client_kind_uses_closed_low_cardinality_mapping() {
@@ -513,5 +601,112 @@ mod tests {
             direct_chat_client_kind(Some("custom-client")),
             DirectChatClientKind::Unknown
         );
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_reclaims_idle_notifier_for_retired_detached_run() {
+        let store = ChatRunStore::new();
+        // Acked detached-delivery run, eligible for retirement (ack far in past).
+        let mut rec = record("detached");
+        rec.completion_policy = ChatRunCompletionPolicy::DetachDeliveryAck;
+        rec.state = ChatRunState::Running;
+        rec.delivery_ack_at_ms = Some(0);
+        store.create(rec).await.unwrap();
+
+        // A status long-poll registers a node-local notifier entry; the poller
+        // then returns (no parked waiter) leaving the entry idle.
+        let _ = store
+            .wait_update("detached", 1, Duration::from_millis(20))
+            .await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            1,
+            "wait_update poll should register a notifier entry"
+        );
+
+        // The 10s cleanup retires the acked detached run and must also reclaim
+        // its now-idle notifier. Without the sweep this entry leaks, because the
+        // run retires as Dropped without a terminal CAS, so drop_notifier is
+        // never called for it.
+        let _ = store.cleanup_expired(5_000_000, 5_000_000).await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            0,
+            "idle notifier for a retired detached run must be swept"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_reclaims_idle_notifier_independent_of_retirement() {
+        // The run stays alive in the repo (nothing is overdue or past
+        // retention), yet its notifier must be reclaimed once the poller has
+        // left — idleness alone is the criterion. This independence from the
+        // retirement path is what makes the sweep effective in MySQL production,
+        // where detached retirement is delegated to platform cleanup.
+        let store = ChatRunStore::new();
+        store.create(record("alive")).await.unwrap();
+        let _ = store
+            .wait_update("alive", 1, Duration::from_millis(20))
+            .await;
+        assert_eq!(store.notifiers.read().await.len(), 1);
+        // now=0, retention=max: nothing expires, nothing retires — only the sweep runs.
+        let _ = store.cleanup_expired(0, u64::MAX).await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            0,
+            "idle notifier must be reclaimed even when the run still exists"
+        );
+        assert!(
+            store.get("alive").await.is_some(),
+            "the run itself must be untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_keeps_notifier_for_parked_waiter() {
+        // A parked long-poll holds a clone of the notifier, so strong_count > 1
+        // and the sweep must not evict it. We verify by waking the parked
+        // waiter via notify_waiters and asserting it resolves promptly rather
+        // than waiting out its timeout (which would mean the entry was evicted
+        // and the wake became a no-op).
+        let store = Arc::new(ChatRunStore::new());
+        store.create(record("parked")).await.unwrap();
+        let s = store.clone();
+        let waiter = tokio::spawn(async move {
+            s.wait_update("parked", 1, Duration::from_secs(2)).await
+        });
+        // Let the poller reach the `notified().await` park point.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let _ = store.cleanup_expired(0, u64::MAX).await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            1,
+            "notifier for a parked waiter must survive the sweep"
+        );
+
+        store.mark_completed("parked", Some("done")).await;
+        let resolved = tokio::time::timeout(Duration::from_millis(300), waiter)
+            .await
+            .expect("parked waiter should wake via notify, not wait for timeout");
+        assert_eq!(resolved.unwrap().unwrap().state, ChatRunState::Completed);
+    }
+
+    #[tokio::test]
+    async fn sweep_coexists_with_terminal_cas_drop() {
+        // A terminal CAS already drops the notifier via apply_terminal_cas; the
+        // sweep must be an idempotent no-op on the already-empty map.
+        let store = ChatRunStore::new();
+        store.create(record("term")).await.unwrap();
+        let _ = store.wait_update("term", 1, Duration::from_millis(10)).await;
+        assert_eq!(store.notifiers.read().await.len(), 1);
+        assert!(store.mark_completed("term", Some("done")).await);
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            0,
+            "terminal CAS drops the notifier"
+        );
+        let _ = store.cleanup_expired(0, u64::MAX).await;
+        assert_eq!(store.notifiers.read().await.len(), 0);
     }
 }

@@ -14,6 +14,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
 from agentclaw.community.adapters.http.openapi_v1.contracts import EXAMPLE_TRACE_ID
@@ -254,6 +255,7 @@ def test_upload_replacement_returns_200_and_updated_operation():
             binder.bind(SkillQueryServiceProtocol, to=_Query())
             binder.bind(LocalSkillUploadServiceProtocol, to=_UpdatedUpload())
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            bind_bot_access_seam(binder)
 
     app = FastAPI()
     app.include_router(router)
@@ -291,6 +293,7 @@ def test_upload_folder_preserves_legacy_file_paths_and_returns_created_skill():
             binder.bind(SkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=upload)
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            bind_bot_access_seam(binder)
 
     app = FastAPI()
     app.include_router(router)
@@ -328,6 +331,7 @@ def test_upload_folder_rejects_misaligned_paths_before_service_call():
             binder.bind(SkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=upload)
             binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            bind_bot_access_seam(binder)
 
     app = FastAPI()
     app.include_router(router)
@@ -623,7 +627,10 @@ def _real_query_service(db, bots, skills) -> SkillQueryService:
     parameters is read, so nothing ever calls them.
     """
     reader = BotCapabilityStateReader(
-        CapabilityDesiredStateRepository(db), bots, skills
+        CapabilityDesiredStateRepository(db),
+        bots,
+        skills,
+        PassthroughSkillVersionResolver(),
     )
     return SkillQueryService(
         skills, bots, object(), reader, object(), object(), lambda: object()
@@ -981,7 +988,7 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
     class _Runtime:
         calls = 0
 
-        def sync_runtime(self):
+        def project_skills(self):
             self.calls += 1
             return True
 

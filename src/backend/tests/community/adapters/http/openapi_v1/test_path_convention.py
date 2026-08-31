@@ -106,6 +106,11 @@ _BOT_FREE = frozenset(
         "market",
         "metadata",
         "mcp",
+        # `routines/all` is the owner-level aggregate: it lists the named
+        # user's fleet across every bot, so the first segment names the
+        # component namespace, not one bot — the same literal the retiring
+        # routines shim already keeps there.
+        "routines",
         "spaces",
         # Repo catalog is tenant-wide but follows the Skill namespace as
         # requested by its public contract: /bots/skills/repository/... .

@@ -10,9 +10,7 @@ from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter impo
     BcsCreateGroupResult, BcsHttpAdapter,
 )
 from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
-from agentclaw.community.core.task.task_runner.integration.task_executor import (
-    TaskExecutor, _BCN_EVENT_CALLBACK_PATH,
-)
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
 from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
@@ -188,8 +186,10 @@ def test_get_group_session_reads_latest_running_session_id_not_create():
     assert not bcs.create_called
 
 
-def test_form_coop_group_subscribes_bcn_event_callback_with_api_base_url():
-    """form_coop_group 用 api_base_url + task 回调路径订阅 BCN 事件 webhook(event_subscriptions.sink.url)。"""
+def test_form_coop_group_does_not_attach_event_subscriptions():
+    """event_subscriptions 触发 BCS require_human(拒 Bot/HMAC-only → 401/403),故不再内联挂 BCN webhook;
+    建群走 no-sub 分支(HMAC/Bearer 匿名或 driver-bot caller),终结态收敛交 result poller。
+    即便 extend_props 带 api_base_url,也不得挂 event_subscriptions。"""
     bcs = _Bcs()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
                        poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
@@ -199,16 +199,148 @@ def test_form_coop_group_subscribes_bcn_event_callback_with_api_base_url():
         extend_props={"collaboration_definition_yaml": "kind: collab",
                       "api_base_url": "https://cb.example.com/"},
     )))
+    assert not bcs.created_req.event_subscriptions
+
+
+def test_form_coop_group_compares_referenced_bots_by_pure_bot_id():
+    """owner 切分补全丢 ``:owner`` 后 ``bot_ids[0]`` 为纯 bot_id,而 ``participant_bindings`` 透传全 ``bot:owner`` 串;
+    校验须按纯 bot_id 归一化比对,否则 owner 同时被 ``bot_ids``(纯)与 bindings(全串)引用时被假性判"不在
+    GroupFormation.bot_ids"(回归:预发 e2e owner=20260825_bohtfhe6:35983 兼 binding writer,被报
+    ``group bindings reference bots outside GroupFormation.bot_ids: [..bohtfhe6:35983]``)。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["b1", "e1:35983"], collab_mode="state_machine",
+        extend_props={"collaboration_definition_yaml": "kind: collab",
+                      "participant_bindings": {"writer": ["b1:35983"], "editor": ["e1:35983"]}},
+    )))
+    req = bcs.created_req
+    assert req is not None
+    assert set(req.participant_bindings) == {"writer", "editor"}
+    # double resolver 对每个 id 拼 :double-owner(全串 b1:35983 → b1:35983:double-owner),证明流程确实到 resolve
+    assert req.participant_bindings["writer"]["bot_ids"] == ["b1:35983:double-owner"]
+    assert req.participant_bindings["editor"]["bot_ids"] == ["e1:35983:double-owner"]
+
+
+def test_form_coop_group_manager_worker_attaches_event_subscriptions():
+    """manager_worker 群内联挂 §4 event_subscriptions(BCS 主动推回 /callback/report,激活既有
+    apply_manager_worker_event → execution_graph audit 快照 + converge_by_session)。鉴权用既有
+    caller_bot_token(Bearer)+ HMAC,无 cookie(见 spec §4.3)。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       api_base_url="https://api.example.com")
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"],
+        collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}, {"bot_id": "worker", "role": "worker"}],
+    )))
     subs = bcs.created_req.event_subscriptions
     assert subs and len(subs) == 1
-    sub = subs[0]
-    assert sub["name"] == "group-webhook"
-    assert sub["sink"]["type"] == "webhook"
-    # api_base_url 去尾斜杠 + 回调路径
-    assert sub["sink"]["url"] == "https://cb.example.com" + _BCN_EVENT_CALLBACK_PATH
-    assert sub["sink"]["url"].endswith("/api/v1/collaboration/tasks/callback/report")
-    assert sub["payload"] == {"mode": "metadata_only"}
-    assert "state_machine.*" in sub["event_filters"]
+    s = subs[0]
+    assert s["name"] == "avernet-manager-worker"
+    assert s["payload"] == {"mode": "full"}
+    assert set(s["event_filters"]) == {
+        "group.created", "session.created",
+        "task.assigned", "task.completed", "session.completed",   # §4
+    }
+    assert s["sink"]["type"] == "webhook"
+    assert s["sink"]["url"] == "https://api.example.com/api/v1/collaboration/tasks/callback/report"
+    assert s["sink"]["request_timeout_ms"] == 10000
+    # manager/worker 参与者照常
+    assert sorted(p["role"] for p in bcs.created_req.participants) == ["manager", "worker"]
+
+
+def test_form_coop_group_manager_worker_without_api_base_url_skips_subscriptions():
+    """_api_base_url 未配(sink.url 不能空/相对)→ 跳过 event_subscriptions + warn;manager_worker 群照常建,poller 兜底。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())  # api_base_url 缺省 ""
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"], collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}, {"bot_id": "worker", "role": "worker"}],
+    )))
+    assert not bcs.created_req.event_subscriptions
+
+
+def test_form_coop_group_chat_does_not_attach_event_subscriptions():
+    """chat 群不挂订阅(本次不给 chat 事件流);既有 state_machine 否定测试 + chat 不挂,确保只有 manager_worker 挂。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       api_base_url="https://api.example.com")
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["b1", "b2"], collab_mode="chat", members_info=[],
+    )))
+    assert not bcs.created_req.event_subscriptions
+
+
+def test_form_coop_group_passes_caller_bot_token_from_provider():
+    """注入 BcsBotTokenProvider 时,form_coop_group 取 driver_bot(BCS uuid)的 token 填 caller_bot_token(参考 ocb Bearer)。"""
+    captured = {}
+
+    class _TokProvider:
+        def get_token(self, bcs_bot_uuid):
+            captured["queried"] = bcs_bot_uuid
+            return f"tok-for-{bcs_bot_uuid}"
+
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       bot_token_provider=_TokProvider())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["drv"], collab_mode="state_machine",
+        members_info=[{"bot_id": "drv", "role": "manager"}],
+        extend_props={"collaboration_definition_yaml": "kind: collab"},
+    )))
+    # driver_bot 经 _DoubleBcsBotIdentityResolver 解析为 BCS uuid `drv:double-owner`
+    assert captured["queried"] == "drv:double-owner"
+    assert bcs.created_req.caller_bot_token == "tok-for-drv:double-owner"
+
+
+def test_form_coop_group_without_provider_omits_caller_bot_token():
+    """未注入 provider(默认)→ caller_bot_token=None(去订阅后 HMAC 匿名建群亦成,不依赖 token)。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["drv"], collab_mode="state_machine",
+        members_info=[{"bot_id": "drv", "role": "manager"}],
+        extend_props={"collaboration_definition_yaml": "kind: collab"},
+    )))
+    assert bcs.created_req.caller_bot_token is None
+
+
+def test_form_coop_group_opening_message_params_is_object():
+    """state_machine 群带 task_id 时,opening_message.params 必须是 JSON object,不能字符串化。
+
+    BCS 契约(ocb-public/src/bcs/docs/custom-collaboration-opening-message-integration-guide.md §4):
+    params 是传给业务组件的 JSON object。字符串化会被真实 BCS 的 untagged enum ``OpeningMessage``
+    422("data did not match any variant of untagged enum OpeningMessage");singlebox double 不校验
+    opening_message,故此断言守住真实 BCS 契约、防 params 被错字符串化回退。
+    """
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["drv"], collab_mode="state_machine",
+        members_info=[{"bot_id": "drv", "role": "manager"}],
+        extend_props={"collaboration_definition_yaml": "kind: collab",
+                      "task_id": "sm_task_1",
+                      "api_base_url": "https://cb.example.com/"},
+    )))
+    om = bcs.created_req.opening_message
+    assert om is not None, "state_machine + task_id 应构造 opening_message"
+    assert om["type"] == "panel"
+    assert om["component"] == "partnerPanel.CollaborationRunView"
+    # 契约核心:params 必须是 JSON object(dict),不是字符串(否则真实 BCS 422)
+    assert isinstance(om["params"], dict), f"opening_message.params 必须是 object,实际 {type(om['params'])!r}"
+    assert om["params"]["taskId"] == "sm_task_1"
+    assert om["params"]["apiBaseUrl"] == "https://cb.example.com/"
+    assert om["params"]["groupId"] == "{{bcs.group_id}}"
+    assert om["params"]["runId"] == "{{bcs.run_id}}"
+    assert om["params"]["businessScene"] == "release_review"
 
 
 def test_form_coop_group_sets_group_context_from_task_context():
@@ -221,4 +353,6 @@ def test_form_coop_group_sets_group_context_from_task_context():
         members_info=[{"bot_id": "drv", "role": "manager"}],
         extend_props={"task_context": "写一篇关于远程办公协作工具趋势的短文"},
     )))
-    assert bcs.created_req.context == "写一篇关于远程办公协作工具趋势的短文"
+    assert "写一篇关于远程办公协作工具趋势的短文" in bcs.created_req.context
+    assert "reporter_bot_id=drv" in bcs.created_req.context
+    assert "execution_mode=coop_group" in bcs.created_req.context

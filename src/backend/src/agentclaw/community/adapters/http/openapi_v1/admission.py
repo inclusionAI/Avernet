@@ -6,35 +6,6 @@ follows from its **shape** — which identities it takes, and how it resolves th
 bot it acts on — not from taste. ``test_principal_seam.py`` fails if the surface
 and this table disagree in either direction, so a route added tomorrow is
 refused until someone puts it in a group on purpose.
-
-Two id models, and both spell their parameter ``user_id``
---------------------------------------------------------
-
-Missing this is the mistake this module exists to prevent.
-
-**User-scoped groups** (``bots``, ``resources``, ``routines``, ``skills``,
-``identity``, ``mcp``) resolve the bot with ``get_by_id_and_owner(bot_id,
-user_id)``. Caller and owner are necessarily the same person; a non-owner gets a
-masked ``404``. A bot merely *shared* with the caller is unreachable here **for
-a human too**, so an application acting as that human inherits the same limit
-without anything being written to enforce it.
-
-**Engine-runtime groups** (``sessions``, ``engine``, ``models``, ``nodes``,
-``approvals``, ``connection``) take ``user_id`` as the *caller* and a second
-``owner_id`` naming the *addressed bot's owner*, then adjudicate through the
-collaborator gate. This is where a shared bot is reachable, and therefore where
-a delegation actually pays off. For an app-only caller the addressed owner comes from the
-**grant record**, never from the request — see ``engine_runtime/params.py``.
-
-The invariant every mode below serves
--------------------------------------
-
-    An application's reach is exactly its granting user's reach, and never more.
-
-Not a copy taken at consent time — the live thing. The grant says only "this
-application may act as this person"; whether that person may still operate that
-bot is asked again on every request, by the same gate they would face
-themselves.
 """
 
 from __future__ import annotations
@@ -50,11 +21,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.log import get_logger
-
-
 logger = get_logger()
-
-
+_SPACE_SKILL_BASE = "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"
+_SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: Every public operation, keyed by ``(method, path)`` exactly as FastAPI
 #: reports it. Grouped by mode, with the reason each group has the mode it has.
 #:
@@ -192,9 +161,20 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcp-permission-requests",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/mcps",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/caller-context",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PATCH",
+        "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
@@ -249,6 +229,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # path, so the shared dependency checks it like every other operation.
     ("GET", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # The owner-level aggregate lists the named user's fleet, not one bot —
+    # gated on a live delegation like the ceiling (see owner_router).
+    ("GET", "/openapi/v1/bots/routines/all"): AdmissionMode.USER_GATED,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/routines/{routine_id}",
@@ -518,43 +501,34 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/diagnostics/health-check",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/available"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/capabilities"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/models"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/connection"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # harness — bot-scoped diagnostics and patching under the addressed bot.
-    # These operations are intentionally user-only for now: harness access is
-    # checked against the verified user's owner/collaborator relationship, and
-    # app-only delegation is not part of this public contract.
+    # These operations now go through the addressed-bot grant seam so that both
+    # human collaborators and delegated application callers can reach the bot,
+    # with the owner resolved by the harness access dependency itself.
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/diagnose",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/preview",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/apply",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/harness/rollback",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/harness/dim-report",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/harness/dim-history",
-    ): AdmissionMode.REFUSED,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # ── B: returns a set of bots, narrowed to the granted ones ───────────────
     ("GET", "/openapi/v1/bots"): AdmissionMode.GRANT_FILTERED,
     # The application's own view, and the **complete** one: a granted bot the
@@ -589,11 +563,17 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/collaboration/tasks/execute"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,
+    # Grant/revoke are stateless relays to secbaas (api-key server-side; the
+    # human Cookie/Referer authorizes the action) — OPEN at the gate, secbaas
+    # authorizes. Same shape as the other task public operations.
+    ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skill-center/skills"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/bots/market/skill-center/sync"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/catalog/search"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/catalog/discover"): AdmissionMode.OPEN,
     # ── Space and work-order APIs ───────────────────────────────────────────
@@ -610,6 +590,54 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # concrete space membership; this is deliberately not OPEN or
     # GRANT_FILTERED because the result is scoped by the path's space_id.
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.USER_GATED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/import-from-git"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/consumable"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"): AdmissionMode.USER_GATED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"): AdmissionMode.USER_GATED,
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/upgrade"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/refresh-from-git"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/grants"): AdmissionMode.USER_GATED,
+    ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/managers/{manager_user_id}"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/owner-transfer",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/editor-requests",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    ): AdmissionMode.REFUSED,
+    (
+        "PUT",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    ): AdmissionMode.REFUSED,
+    (
+        "DELETE",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/lease/takeover",
+    ): AdmissionMode.REFUSED,
+    ("GET", f"{_SPACE_SKILL_BASE}/publication-impact"): AdmissionMode.REFUSED,
+    ("POST", _SPACE_SKILL_PUBLICATION): AdmissionMode.REFUSED,
+    ("GET", _SPACE_SKILL_PUBLICATION): AdmissionMode.REFUSED,
+    ("GET", f"{_SPACE_SKILL_PUBLICATION}/{{attempt_id}}"): AdmissionMode.REFUSED,
+    ("POST", f"{_SPACE_SKILL_PUBLICATION}/{{attempt_id}}/retry"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.REFUSED,
     (
         "DELETE",
@@ -644,6 +672,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/editor-requests",
     ): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/market/skill-center/tags"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/work-orders/events"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/work-orders"): AdmissionMode.USER_GATED,
@@ -794,15 +823,19 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
 #: make any future handler-level grant exception visible in review.
 SKILL_SCOPED_OPERATIONS = frozenset()
 
-#: No current harness operation self-checks an app-only grant. Harness is a
-#: user-only surface for now, so app-only callers are refused before the
-#: harness owner/collaborator access dependency runs.
-HARNESS_SCOPED_OPERATIONS = frozenset()
-
-#: No current harness operation self-checks an app-only grant. Harness is a
-#: user-only surface for now, so app-only callers are refused before the
-#: harness owner/collaborator access dependency runs.
-HARNESS_SCOPED_OPERATIONS = frozenset()
+#: Harness operations resolve the bot owner from the repository record rather
+#: than from an ``owner_id`` query parameter. This preserves the existing wire
+#: contract (``bot_id`` on the path, ``user_id`` in the query) while still
+#: running an addressed-bot grant check for application callers inside the
+#: handler's own ``require_harness_bot_access`` dependency.
+HARNESS_SCOPED_OPERATIONS = frozenset({
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/diagnose"),
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/preview"),
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"),
+    ("POST", "/openapi/v1/bots/{bot_id}/harness/rollback"),
+    ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-report"),
+    ("GET", "/openapi/v1/bots/{bot_id}/harness/dim-history"),
+})
 
 #: The modes that admit a caller naming no end user. Everything else refuses at
 #: ``require_principal``, which is what a route inherits by saying nothing.
@@ -959,6 +992,7 @@ class ActingCaller:
 __all__ = [
     "ADMISSION",
     "ADMITTING_MODES",
+    "HARNESS_SCOPED_OPERATIONS",
     "SKILL_SCOPED_OPERATIONS",
     "ActingCaller",
     "AdmissionMode",

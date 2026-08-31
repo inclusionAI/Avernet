@@ -1,13 +1,13 @@
 # `agentclaw.community.core.work_orders`
 
 Owns work-order lifecycle, recipient-scoped notifications, fixed event-to-message
-mapping, conditional approval transitions, and the atomic Space-join approval
-unit of work.
+mapping, conditional approval transitions, required pre-decision business callbacks,
+and the atomic Space-join approval unit of work.
 
 ## Context Boundary
 
 ```yaml
-purpose: "Own approval work orders, recipient notifications, and transactional Space-join decisions."
+purpose: "Own approval work orders, notifications, dispatch to business-owned approval handlers, required decision callbacks, and transactional Space-join decisions."
 provides:
   - WorkOrderService
   - WorkOrderNotificationService
@@ -26,18 +26,25 @@ provides:
   - WorkOrderMessageContent
   - WorkOrderNotificationDetail
   - WorkOrderNotificationBadgeSummary
+  - SkillCollaboratorApprovalHandlerProtocol
+  - WorkOrderDecisionCallbackDispatcher
+  - WorkOrderCallbackCredential
 consumes:
   - "WorkOrderRepositoryProtocol (core.repository) — persistence and transactional state changes"
   - "SpaceRepositoryProtocol and SpaceAccessService — Space existence, membership, and OWNER authorization"
+  - "SkillCollaboratorApprovalHandlerProtocol — Skill-owned approval policy and atomic Grant transition"
+  - "Qualified BCN HttpClient Plugin API — required friend-request approval callbacks"
 consumed_by:
   - "adapters/http/openapi_v1/work_orders — public work-order and notification operations"
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.repository
   - agentclaw.community.core.spaces
-  - agentclaw.community.plugin_api.models
+  - agentclaw.community.plugin_api
+  - agentclaw.community.log
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.work_no
 ```
 
 ### Change impact
@@ -45,9 +52,10 @@ internal_dependencies:
 Event values, statuses, titles, and content templates are persisted public
 semantics. Rename or wording changes require coordinated client and data
 compatibility review. Approval state and result-notification creation are one transaction and
-must not be split across best-effort writes. The unified Service API does not
-perform business-object mutation; the owning business module handles that
-step according to its own transaction boundary.
+must not be split across best-effort writes. Registered external decision callbacks run before
+that transaction; a transport error, non-success HTTP response, malformed response, or response
+without an exact `success: true` aborts local processing and leaves the work order pending.
+Unregistered event types keep the existing local-only approval behavior.
 
 ## Stable enum contract
 
@@ -62,7 +70,7 @@ and client compatibility plan.
 | Persisted notification category | `APPROVAL`, `NOTICE` |
 | List category filter | `ALL`, `APPROVAL`, `NOTICE` |
 | List query type | `PENDING_FOR_ME`, `INITIATED_BY_ME`, `PROCESSED_BY_ME` |
-| Supported business type | `SPACE_JOIN` for the currently implemented Space handler; the unified Service API accepts business-module-defined `biz_type` values. |
+| Supported business type | `SPACE_JOIN`, `BOT_COLLABORATOR`, `SKILL_COLLABORATOR`, and `BOT_FRIEND`; Skill policy uses its business-owned handler, while callback-backed types use decision callbacks. |
 
 `ALL` is a query-only filter and must never be persisted as a notification
 category. `WorkOrderEventType` is also a persisted whitelist. Approval events are
@@ -70,9 +78,9 @@ classified centrally in `APPROVAL_EVENT_TYPES` and currently include
 `SPACE_JOIN_APPLIED`, `BOT_COLLABORATOR_APPLIED`,
 `SKILL_COLLABORATOR_APPLIED`, `HUMAN2BOT_FRIEND_APPLIED`, and
 `BOT2BOT_FRIEND_APPLIED`; all reviewed/member-added/public-order events are
-classified as `NOTICE`. This phase implements only the `SPACE_JOIN` handler;
-the remaining event values reserve the names defined by the system design for
-later business handlers.
+classified as `NOTICE`. `HUMAN2BOT_FRIEND_APPLIED` and
+`BOT2BOT_FRIEND_APPLIED` opt into the BCN friend-decision callback; other
+generic approval events remain local-only until explicitly registered.
 
 ## Space-join message templates
 
@@ -137,6 +145,9 @@ from an absent notification.
 | `409203` | 409 | `WorkOrderApplicantAlreadyMemberError` | `Applicant is already a space member` |
 | `409204` | 409 | `WorkOrderNoReviewerError` | `The space has no available approver` |
 | `409205` | 409 | `WorkOrderJoinNotAllowedError` | `The space does not accept join requests` |
+| `409208` | 409 | `WorkOrderSkillEditorRequestNotAllowedError` | `The Skill does not accept editor requests` |
+| `409209` | 409 | `WorkOrderSkillApplicantAlreadyEditorError` | `Applicant already has Skill editor access` |
+| `502201` | 502 | `WorkOrderCallbackError` | `Upstream work-order callback failed` |
 
 The numeric codes and fixed messages are enums in
 `adapters/http/openapi_v1/errors_work_order.py`; the centralized

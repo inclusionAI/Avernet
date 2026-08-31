@@ -33,7 +33,7 @@ use crate::config::{
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
 use crate::plugins::{
-    DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
+    CachePluginKind, DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
     build_registered_channel_provider, build_registered_leader_election,
     build_registered_llm_provider, build_registered_security_gateway,
     build_registered_user_directory,
@@ -513,6 +513,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                 thinking: None,
                 idempotency_key: Some(idempotency_key),
                 source_im_message_id: None,
+                channel_sender_identity: None,
                 sender_conn_id: None,
                 provider_bypass_headers: Vec::new(),
             })
@@ -1819,7 +1820,7 @@ impl Default for BcsServerState {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 outbound_url_guard.clone(),
-                provider_control_plane,
+                provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
@@ -2048,8 +2049,11 @@ impl Default for BcsServerState {
             config.async_chat_run_retention_ms,
         );
         interaction_terminal_observer.set_service(interactions.clone());
-        let collaboration_store =
-            Arc::new(MemoryCollaborationStore::new().with_event_store(event_repo.clone()));
+        let collaboration_store = Arc::new(
+            MemoryCollaborationStore::new()
+                .with_event_store(event_repo.clone())
+                .with_session_repo(session_repo.clone()),
+        );
         let judge_evaluator: Arc<dyn JudgeEvaluatorPort> = Arc::new(NoopJudgeEvaluator::default());
         let (session_channel_outbound_slot, session_channel_outbound) =
             deferred_session_channel_outbound();
@@ -2217,6 +2221,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             .collaboration_templates(collaboration_templates)
             .actor_directory(actor_directory)
             .bot_query(bot_use_cases.clone())
+            
             .bot_management(bot_use_cases.clone())
             .bot_runtime(bot_use_cases.clone())
             .bot_discovery(bot_use_cases)
@@ -2532,6 +2537,8 @@ fn build_use_case_bundle(
     friend: Arc<dyn bcs_service_api::FriendCoreService>,
     friend_request: Arc<dyn bcs_service_api::FriendRequestCoreService>,
     relation: Arc<dyn bcs_service_api::RelationCoreService>,
+    provider_control_plane: Arc<dyn BotControlPlaneCoreService>,
+    edge_grants: Option<Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>>,
     fuse_client: Option<Arc<FuseClient>>,
     fusion: Arc<dyn bcs_service_api::FusionCoreService>,
     bot_delivery: Arc<dyn BotDeliveryPort>,
@@ -2558,9 +2565,13 @@ fn build_use_case_bundle(
 
     let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend.clone())
         .with_bot_core(bot_core.clone())
+        .with_control_plane(provider_control_plane.clone())
         .with_organization(organization_core.clone())
         .with_relation(relation.clone())
         .with_connection_control(bot_connection_control.clone());
+    if let Some(edge_grants) = edge_grants {
+        bot_use_cases = bot_use_cases.with_edge_grants(edge_grants);
+    }
     if let Some(user_directory) = user_directory {
         bot_use_cases = bot_use_cases.with_user_directory(user_directory);
     }
@@ -3357,7 +3368,7 @@ impl BcsServer {
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
                 user_directory.clone(),
                 provider_webhook_url_guard,
-                provider_control_plane,
+                provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = memory_organization_services(
@@ -3507,6 +3518,8 @@ impl BcsServer {
             friend_store.clone(),
             friend_request_store.clone(),
             relation_store.clone(),
+            provider_control_plane.clone(),
+            None,
             fuse_client.clone(),
             fusion.clone(),
             bot_delivery.clone(),
@@ -3551,8 +3564,11 @@ impl BcsServer {
             crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
         );
 
-        let collaboration_store =
-            Arc::new(MemoryCollaborationStore::new().with_event_store(event_repo.clone()));
+        let collaboration_store = Arc::new(
+            MemoryCollaborationStore::new()
+                .with_event_store(event_repo.clone())
+                .with_session_repo(session_repo.clone()),
+        );
         let extensions = BcsServerExtensions::default();
         let judge_evaluator: Arc<dyn JudgeEvaluatorPort> =
             create_judge_evaluator(&config, &extensions).unwrap_or_else(|error| {
@@ -3726,6 +3742,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             .human_actors(use_cases.human_actors)
             .bot_onboarding(use_cases.bot_onboarding)
             .bot_query(use_cases.bot_query)
+            
             .bot_management(use_cases.bot_management)
             .bot_runtime(use_cases.bot_runtime)
             .bot_discovery(use_cases.bot_discovery)
@@ -3894,10 +3911,10 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
         let cache_key_prefix = config.cache.redis.effective_key_prefix();
         info!(db_plugin = %db_kind, "Initializing DB-backed bot registry");
         let bot_repo = Arc::new(PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
-            cache_plugin,
+            cache_plugin.clone(),
             db_plugin.clone(),
             db_flavor,
-            cache_key_prefix,
+            cache_key_prefix.clone(),
         ));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
@@ -3984,7 +4001,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                 relation_svc.clone(),
                 user_directory.clone(),
                 outbound_url_guard.clone(),
-                provider_control_plane,
+                provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
             );
         let (organization_core, organization_management) = db_organization_services(
@@ -4225,8 +4242,26 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                 message_repo,
             )
         };
+        if config.bot_run_context_store == "redis"
+            && infrastructure_plugins.cache_kind() != CachePluginKind::Redis
+        {
+            return Err(crate::BcsError::InvalidConfig(
+                "bot_run_context_store='redis' requires a Redis cache backend \
+                 ([cache.redis]); the resolved cache is not Redis — refusing to \
+                 start with silently process-local run context"
+                    .to_string(),
+            ));
+        }
         let bot_run_context: Arc<dyn BotRunContextPort> =
-            Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
+            if config.bot_run_context_store == "redis" {
+                Arc::new(bcs_message_flow::RedisBotRunContextStore::new(
+                    cache_plugin.clone(),
+                    cache_key_prefix.clone(),
+                    config.async_chat_run_retention_ms,
+                ))
+            } else {
+                Arc::new(bcs_message_flow::MemoryBotRunContextStore::new())
+            };
         let session_file_service = build_session_files_service(
             &config,
             crate::env::resolve_env(),
@@ -4251,9 +4286,23 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             session_file_service.clone(),
             config.session_files.share.history_attachment_ttl_seconds,
         );
-        let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
-            config.async_chat_run_max_entries,
-        ));
+        let a2a_run_store: Arc<bcs_message_flow::a2a_chat::ChatRunStore> =
+            if config.async_chat_run_store == "persistent" {
+                let chat_run_repo: Arc<dyn bcs_service_api::port::repo::ChatRunRepoPort> =
+                    Arc::new(bcs_chat_run_store::SqlChatRunRepo::new(
+                        db_plugin.clone(),
+                        db_flavor,
+                        cache_plugin.clone(),
+                        cache_key_prefix.clone(),
+                        config.async_chat_run_retention_ms,
+                        crate::env::resolve_env(),
+                    ));
+                Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_repo(chat_run_repo))
+            } else {
+                Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
+                    config.async_chat_run_max_entries,
+                ))
+            };
         let a2a_run_port = Arc::new(crate::http_adapter::BootstrapRunChannelPort {
             run_channels: run_channels.clone(),
         });
@@ -4288,6 +4337,8 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             friend_svc.clone(),
             friend_request_svc.clone(),
             relation_svc.clone(),
+            provider_control_plane.clone(),
+            Some(edge_grant_store.clone()),
             fuse_client.clone(),
             fusion.clone(),
             bot_delivery.clone(),
@@ -4534,6 +4585,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             .human_actors(use_cases.human_actors)
             .bot_onboarding(use_cases.bot_onboarding)
             .bot_query(use_cases.bot_query)
+            
             .bot_management(use_cases.bot_management)
             .bot_runtime(use_cases.bot_runtime)
             .bot_discovery(use_cases.bot_discovery)
@@ -4828,6 +4880,17 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
         )
     }
 
+    fn spawn_callback_recovery_scanner(&self) -> tokio::task::JoinHandle<()> {
+        crate::callback_recovery_scanner::spawn(
+            self.state.leader_election.clone(),
+            self.state.services.session_management.clone(),
+            self.state.services.group.clone(),
+            crate::callback_recovery_scanner::DEFAULT_SCAN_INTERVAL,
+            crate::callback_recovery_scanner::DEFAULT_BATCH_SIZE,
+            self.state.outbound_url_guard.clone(),
+        )
+    }
+
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
         let addr: SocketAddr = format!("{}:{}", self.config.bind, self.config.port)
@@ -4836,6 +4899,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
 
         self.initialize_lifecycle().await?;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
+        let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         // Spawn async chat-run TTL cleanup loop.
         {
@@ -4955,6 +5019,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
 
         self.initialize_lifecycle().await?;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
+        let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         let app = self.build_router().await?;
 
@@ -5249,7 +5314,7 @@ mod tests {
                 relation,
                 None,
                 OutboundUrlGuard::allowing_private_networks_for_tests(),
-                provider_control_plane,
+                provider_control_plane.clone(),
                 cleanup.clone(),
             );
 
@@ -5603,13 +5668,6 @@ mod tests {
 
     #[async_trait]
     impl A2aChatRunService for AdminRunTestA2aRuns {
-        async fn run_blocking_chat(
-            &self,
-            _cmd: bcs_service_api::BlockingA2aChatCommand,
-        ) -> bcs_service_api::ServiceResult<bcs_service_api::BlockingA2aChatOutcome> {
-            unreachable!("admin run test only uses async chat")
-        }
-
         async fn start_async_chat(
             &self,
             cmd: bcs_service_api::AsyncA2aChatCommand,

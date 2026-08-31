@@ -2,8 +2,8 @@
 //!
 //! Fires after a service-invocation [`Session`] completes. Iterates every
 //! channel in the group's `service_spec.callback_config.channels`
-//! concurrently and updates [`Session::callback_status`] via
-//! [`SessionRepoPort::update_callback_status`].
+//! concurrently and confirms [`Session::callback_status`] through an
+//! activation-aware callback claim.
 //!
 //! Ported from legacy `bcs/src/callback/mod.rs` and adapted to the
 //! new architecture — uses `SessionRepoPort` instead of the old
@@ -11,13 +11,24 @@
 
 use crate::{antding, baas};
 use bcs_route_security::OutboundUrlGuard;
-use bcs_service_api::application::session::SessionManagementService;
+use bcs_service_api::application::session::{
+    ClaimSessionCallbackCommand, CompleteSessionCallbackCommand, SessionManagementService,
+};
 use bcs_service_api::{
     CallbackChannelConfig, CallbackConfig, GroupCoreService, Session, SessionKind,
 };
 use futures::future::join_all;
 use std::sync::Arc;
 use tracing::{info, warn};
+
+const CALLBACK_LEASE_MS: u64 = 30_000;
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// Aggregate channel result mapped to `Session.callback_status` per
 /// spec §9.5.
@@ -197,11 +208,9 @@ fn log_channel_failures(
 /// - Concurrently fan out to every entry in `config.channels`.
 /// - Aggregate the results into one of `succeeded` / `partial_failed`
 ///   / `failed`.
-/// - Update `Session.callback_status` via
-///   [`SessionRepoPort::update_callback_status`].
+/// - Confirm `Session.callback_status` with the activation and lease token.
 ///
-/// Empty channel list is a no-op (callback_status remains as the caller
-/// left it — typically `pending` from `Session::create`).
+/// Empty channel list completes the callback activation as `not_applicable`.
 pub async fn dispatch_callback(
     session: Session,
     config: CallbackConfig,
@@ -217,13 +226,60 @@ pub async fn dispatch_callback_with_url_guard(
     session_mgmt: Arc<dyn SessionManagementService>,
     url_guard: OutboundUrlGuard,
 ) {
+    let lease_owner = format!("callback:{}", uuid::Uuid::new_v4());
+    let claim_now_ms = now_ms();
+    let claim = match session_mgmt
+        .claim_callback(ClaimSessionCallbackCommand {
+            session_id: session.id.clone(),
+            expected_activation_count: session.activation_count,
+            lease_owner: lease_owner.clone(),
+            now_ms: claim_now_ms,
+            lease_until_ms: claim_now_ms.saturating_add(CALLBACK_LEASE_MS),
+        })
+        .await
+    {
+        Ok(Some(claim)) => claim,
+        Ok(None) => {
+            info!(
+                target: "callback",
+                event = "callback.claim_skipped",
+                session_id = %session.id,
+                activation_seq = session.activation_count,
+                "callback activation is terminal, legacy, or already claimed",
+            );
+            return;
+        }
+        Err(error) => {
+            warn!(
+                target: "callback",
+                event = "callback.claim_failed",
+                session_id = %session.id,
+                activation_seq = session.activation_count,
+                error = %error,
+            );
+            return;
+        }
+    };
+    info!(
+        target: "callback",
+        event = "callback.claimed",
+        session_id = %session.id,
+        group_id = %session.group_id,
+        activation_seq = session.activation_count,
+        lease_owner = %lease_owner,
+        lease_token = claim.lease_token,
+        recovery_action = "dispatch_callback",
+    );
+
     if config.channels.is_empty() {
-        info!(
-            target: "callback",
-            event = "callback.skipped",
-            session_id = %session.id,
-            reason = "no channels configured",
-        );
+        complete_callback_claim(
+            &session,
+            session_mgmt,
+            lease_owner,
+            claim.lease_token,
+            "not_applicable",
+        )
+        .await;
         return;
     }
 
@@ -278,29 +334,56 @@ pub async fn dispatch_callback_with_url_guard(
         }
     };
 
-    let status_str = status.as_status_string();
-    if let Err(e) = session_mgmt
-        .update_callback_status(&session.id, status_str)
+    complete_callback_claim(
+        &session,
+        session_mgmt,
+        lease_owner,
+        claim.lease_token,
+        status.as_status_string(),
+    )
+    .await;
+}
+
+async fn complete_callback_claim(
+    session: &Session,
+    session_mgmt: Arc<dyn SessionManagementService>,
+    lease_owner: String,
+    lease_token: i64,
+    terminal_status: &str,
+) {
+    match session_mgmt
+        .complete_callback(CompleteSessionCallbackCommand {
+            session_id: session.id.clone(),
+            expected_activation_count: session.activation_count,
+            lease_owner,
+            lease_token,
+            terminal_status: terminal_status.to_string(),
+        })
         .await
     {
-        warn!(
+        Ok(true) => info!(
+            target: "callback",
+            event = "callback.dispatched",
+            session_id = %session.id,
+            activation_seq = session.activation_count,
+            status = terminal_status,
+        ),
+        Ok(false) => warn!(
+            target: "callback",
+            event = "callback.confirm_stale",
+            session_id = %session.id,
+            activation_seq = session.activation_count,
+            attempted_status = terminal_status,
+        ),
+        Err(error) => warn!(
             target: "callback",
             event = "callback.update_failed",
             session_id = %session.id,
-            error = %e,
-            attempted_status = status_str,
-        );
-        return;
+            activation_seq = session.activation_count,
+            error = %error,
+            attempted_status = terminal_status,
+        ),
     }
-
-    info!(
-        target: "callback",
-        event = "callback.dispatched",
-        session_id = %session.id,
-        activation_seq = session.activation_count,
-        status = status_str,
-        channels = config.channels.len(),
-    );
 }
 
 async fn send_one_channel(
@@ -319,9 +402,60 @@ async fn send_one_channel(
     }
 }
 
-/// Convenience: spawn [`dispatch_callback`] if the group has a
-/// `service_spec.callback_config`. Skips when no callback is configured
-/// or the session is not a service invocation.
+/// Resolve the current Group callback configuration and run the shared
+/// activation-aware callback use case. Recovery callers await this function;
+/// the existing completion path keeps using the spawning wrapper below.
+pub async fn dispatch_for_session_with_url_guard(
+    session: Session,
+    group_svc: Arc<dyn GroupCoreService>,
+    session_mgmt: Arc<dyn SessionManagementService>,
+    url_guard: OutboundUrlGuard,
+) {
+    if !matches!(session.session_kind, SessionKind::ServiceInvocation) {
+        return;
+    }
+
+    info!(
+        target: "callback",
+        event = "callback.maybe_dispatch",
+        session_id = %session.id,
+        group_id = %session.group_id,
+        "dispatching post-completion callback",
+    );
+
+    let group = match group_svc.get(&session.group_id).await {
+        Some(group) => group,
+        None => {
+            warn!(
+                target: "callback",
+                event = "callback.skipped",
+                session_id = %session.id,
+                reason = "group not found",
+            );
+            return;
+        }
+    };
+    let config = match group
+        .service_spec
+        .as_ref()
+        .and_then(|service_spec| service_spec.callback_config.clone())
+    {
+        Some(config) => config,
+        None => {
+            info!(
+                target: "callback",
+                event = "callback.skipped",
+                session_id = %session.id,
+                reason = "no callback_config",
+            );
+            CallbackConfig::default()
+        }
+    };
+    dispatch_callback_with_url_guard(session, config, session_mgmt, url_guard).await;
+}
+
+/// Convenience wrapper preserving the existing asynchronous first-dispatch
+/// behavior after Session completion.
 pub fn maybe_dispatch_for_session(
     session: Session,
     group_svc: Arc<dyn GroupCoreService>,
@@ -341,48 +475,8 @@ pub fn maybe_dispatch_for_session_with_url_guard(
     session_mgmt: Arc<dyn SessionManagementService>,
     url_guard: OutboundUrlGuard,
 ) {
-    if !matches!(session.session_kind, SessionKind::ServiceInvocation) {
-        return;
-    }
-
-    info!(
-        target: "callback",
-        event = "callback.maybe_dispatch",
-        session_id = %session.id,
-        group_id = %session.group_id,
-        "dispatching post-completion callback",
-    );
-
     tokio::spawn(async move {
-        let group = match group_svc.get(&session.group_id).await {
-            Some(g) => g,
-            None => {
-                warn!(
-                    target: "callback",
-                    event = "callback.skipped",
-                    session_id = %session.id,
-                    reason = "group not found",
-                );
-                return;
-            }
-        };
-        let cb = match group
-            .service_spec
-            .as_ref()
-            .and_then(|s| s.callback_config.clone())
-        {
-            Some(cb) => cb,
-            None => {
-                info!(
-                    target: "callback",
-                    event = "callback.skipped",
-                    session_id = %session.id,
-                    reason = "no callback_config",
-                );
-                return;
-            }
-        };
-        dispatch_callback_with_url_guard(session, cb, session_mgmt, url_guard).await;
+        dispatch_for_session_with_url_guard(session, group_svc, session_mgmt, url_guard).await;
     });
 }
 

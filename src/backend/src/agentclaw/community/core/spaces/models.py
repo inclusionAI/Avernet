@@ -13,6 +13,13 @@ class SpaceType(StrEnum):
     TEAM = "TEAM"
 
 
+class SpaceListScope(StrEnum):
+    """Controls whether the space listing includes all or accessible spaces."""
+
+    ALL = "all"
+    ACCESSIBLE = "accessible"
+
+
 class SpaceRole(StrEnum):
     # Canonical role used by all new business logic and persisted writes.
     ADMIN = "ADMIN"

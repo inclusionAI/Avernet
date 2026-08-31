@@ -1,0 +1,16 @@
+{
+  "contract_version": "hermes-service-build-layout-v1",
+  "engine": "hermes",
+  "engine_root": "/home/admin/.hermes",
+  "sessions_root": "/home/admin/.hermes/sessions",
+  "mcp_config": "/home/admin/.hermes/workspace/config/mcporter.json",
+  "active_skills": "/home/admin/.hermes/skills",
+  "pool_repo": "/home/admin/.hermes/workspace/skills-pool/skills-repo",
+  "pool_center": "/home/admin/.hermes/workspace/skills-pool/skill-center",
+  "read_only_roots": [
+    "/home/admin/.hermes/config.yaml",
+    "/home/admin/.hermes/workspace/config/mcporter.json",
+    "/home/admin/.hermes/workspace/*.md",
+    "/home/admin/.hermes/workspace/skills/skills-local"
+  ]
+}

@@ -13,9 +13,15 @@ Task 2.1 of `docs/superpowers/plans/2026-06-15-device-sync-supplier-for-bot-clea
 """
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.skill_center.errors import (
+    SkillSetRuntimeReconcileError,
+)
 
 
 def _make_ctx(bot_id: str = "bot-1", user_id: str = "user-1") -> DeviceContext:
@@ -76,7 +82,50 @@ class TestSkillSetServiceUsesResolver:
         dispatcher.dispatch.assert_called_once_with(ctx)
         sync_plugin.sync_symlinks.assert_called_once_with([])
 
-    def test_sync_runtime_keeps_owner_scope_when_paths_use_bot_entity(self):
+    @pytest.mark.asyncio
+    async def test_whole_artifact_projection_preserves_delivery_failure_detail(self):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx()
+        sync_plugin = MagicMock()
+        sync_plugin.sync_symlinks.return_value = {
+            "success": False,
+            "message": "MCP mcp.test.noendpoint has no endpoint",
+        }
+        dispatcher = MagicMock()
+        dispatcher.dispatch.return_value = sync_plugin
+
+        with patch(
+            "agentclaw.community.core.skill_center.services.skill_set_service."
+            "WorkspacePathFactory"
+        ):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=MagicMock(),
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=MagicMock(),
+                user_id="owner-1",
+                entity_id="owner-1",
+                bot_id="bot-1",
+                resolver=resolver,
+                device_sync_dispatcher=dispatcher,
+                path_factory=MagicMock(),
+            )
+
+        with pytest.raises(
+            SkillSetRuntimeReconcileError,
+            match="mcp.test.noendpoint has no endpoint",
+        ):
+            await svc.project_whole_artifact(
+                desired_skills=[], effective_mcps=[]
+            )
+
+    def test_project_skills_keeps_owner_scope_when_paths_use_bot_entity(self):
         from agentclaw.community.core.skill_center.services.skill_set_service import (
             SkillSetService,
         )
@@ -112,7 +161,10 @@ class TestSkillSetServiceUsesResolver:
 
         svc.get_symlink_mappings = MagicMock(return_value=[])
 
-        assert svc.sync_runtime() is True
+        # ``project_skills`` is async so both halves of the capability
+        # boundary are awaited alike; this test is synchronous, so it bridges
+        # the same way the aicoding restart worker does.
+        assert asyncio.run(svc.project_skills()) is True
         svc.get_symlink_mappings.assert_called_once_with(
             user_id="owner-1", bolt_id="bot-1"
         )

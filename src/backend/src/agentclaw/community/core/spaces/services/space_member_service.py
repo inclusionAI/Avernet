@@ -34,12 +34,14 @@ from agentclaw.community.plugin_api.staff_dept import (
     StaffProfileLookupError,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
+from agentclaw.community.core.spaces.space_service_protocol import SpaceMemberServiceProtocol
 
 
 logger = get_logger()
 
 
-class SpaceMemberService:
+class SpaceMemberService(SpaceMemberServiceProtocol):
     @staticmethod
     def _user_id(value: str) -> str:
         normalized = value.strip()
@@ -62,7 +64,9 @@ class SpaceMemberService:
 
     def _resolve_member_user_name(self, *, user_id: str) -> str:
         try:
-            profile = self._staff_dept.get_profile_by_work_no(work_no=user_id)
+            profile = self._staff_dept.get_profile_by_work_no(
+                work_no=normalize_work_no_for_lookup(user_id)
+            )
         except StaffProfileLookupError:
             logger.warning(
                 "failed to resolve space member nickname; falling back to user id",

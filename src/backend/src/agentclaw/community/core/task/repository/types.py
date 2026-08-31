@@ -9,6 +9,7 @@ deferred — the domain dataclasses have no (de)serialization and the full graph
 state has no persistence home yet (spec §3); the records hold parsed dicts so the
 projection can be added later without a schema change.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -36,6 +37,10 @@ class TaskInfoRecord:
     execution_config: Optional[dict[str, Any]]
     task_spec: dict[str, Any]
     status: Status
+    # Read-side owner display fields. They are enriched from authoritative
+    # Bot/staff services and are not persisted in task_info.
+    owner_bot_name: Optional[str] = None
+    owner_user_name: Optional[str] = None
     graph_run_id: Optional[str] = None
     graph_loop_round: int = 0
     graph_output: Optional[dict[str, Any]] = None
@@ -83,7 +88,9 @@ class TaskNodeRunInfoRecord:
             return None
         return AcceptanceResult(
             verdict=AcceptanceVerdict(self.acceptance_result["verdict"]),
-            acceptances_metric=list(self.acceptance_result.get("acceptances_metric", [])),
+            acceptances_metric=list(
+                self.acceptance_result.get("acceptances_metric", [])
+            ),
             gaps=list(self.acceptance_result.get("gaps", [])),
         )
 
@@ -144,6 +151,7 @@ class TaskCallbackRecord:
     processed_at: Optional[datetime] = None
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
+
 
 @dataclass(frozen=True)
 class TaskActionLogRecord:
