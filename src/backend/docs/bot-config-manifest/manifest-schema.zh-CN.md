@@ -466,33 +466,46 @@ script:
 
 ```yaml
 cli_tools:
-  - name: mycli                              # 单二进制形态：name 即命令名
+  - name: mycli                              # 命令名。一个条目 = 一个命令 = 一个文件
     source: https://my-svc.example.com/tools/mycli-linux-amd64
     digest: "sha256:…"                       # 本类目强制，无 digest 拒绝写入
     version: "1.4.2"                         # 元数据，进 apply report，审计线上版本
-  - name: toolkit                            # 压缩包形态
+  - name: tk                                 # 压缩包形态：用 subpath 指出包内哪个文件是命令
     source: https://my-svc.example.com/tools/toolkit.tar.gz
-    unpack: tar.gz
-    strip_components: 1                      # 可选，同 §3.2
+    subpath: bin/tk                          # 源内路径（§2），此处即包内路径
+    unpack: tar.gz                           # 可选，扩展名不可靠时显式指定
     digest: "sha256:…"
-    entrypoints: [bin/tk, bin/tk-helper]     # 包内哪些文件暴露为命令（必填）
+    version: "0.9.0"
 ```
 
 规则：
-- **v1 只支持静态二进制 / 压缩包**两种形态。需要跑包管理器
-  （npm/pip/apt）的安装属命令式领域，走 script（ARCA-only）——与「机制层
-  操作不进 manifest」同一条原则。
-- **`digest` 强制**：平台代为分发**可执行物**，供应链必须钉死；digest 同时
-  是收敛判断的唯一依据（未变 → `unchanged` 零动作）。
+- **一个条目 = 一个命令 = 一个文件。**`name` 即命令名（同一 bot 内唯一、不含
+  路径分隔符）；平台物化出来的、进入交付通道的也是**那一个文件**。一个压缩包
+  里有两个命令，就写**两个条目**，各自用 `subpath` 指向包内的那个文件。
+  > **没有 `entrypoints` 字段。**早期草案里一个条目是「一个目录 + 一份包内
+  > 要暴露成命令的相对路径清单」，这一层已被摊平。摊平换掉的是一整套只为约束
+  > 它而存在的规则（包内路径穿越、符号链接逃逸、包内 basename 撞名），也顺带
+  > 消掉了「包内被 exec 的辅助程序无法置可执行位」这个已知缺口——见下一条。
+- **v1 交付的是自包含的单个可执行文件**（静态二进制是典型形态）。压缩包只是
+  **传输形态**：平台解包、取出 `subpath` 指定的那个文件，**包内其余文件不下发**。
+  所以**需要同包辅助程序或运行时读同包 `lib/` 的工具，v1 不支持**——请打成
+  自包含二进制。需要跑包管理器（npm/pip/apt）的安装属命令式领域，走 script
+  （ARCA-only）——与「机制层操作不进 manifest」同一条原则。
+- **`digest` 强制**：平台代为分发**可执行物**，供应链必须钉死。它算的是**取回来
+  的源对象**（单二进制即该二进制，压缩包形态即整个包），同时是收敛判断的依据
+  （连同 `subpath`：同一个包换取另一个文件是真实变更）。
+- **`md5` 由平台补，不是用户字段**：物化之后，平台对最终那一个文件计算 MD5 并
+  写进交付契约，供引擎在落地前校验字节完整性（teclaw 侧的字段定义见
+  `teclaw-cli-contract.zh-CN.md` §3.2/§3.3.1）。用户侧的钉扎手段仍然只有
+  `digest`（sha256）。
 - **落点与 PATH**：平台定义引擎无关的逻辑「工具目录」，工具落入其中并由
   平台保证其在 agent 进程的 PATH 上——用户不感知物理路径。
 - **用法认知不归本类目**：安装只保证「命令在 PATH 上」；模型如何知道并
   正确使用它，走用户自己声明的 identity（`TOOLS.md` 是合法类型）或配套
   skill——`bcs-cli` 的「二进制 + SKILL.md」双件套即推荐姿势。
 - **能力门控**：ARCA 系支持（PATH 注入点见 engine-requirements A2）；
-  **teclaw 待确认（T4）**——可执行位、PATH 注入、以及对用户提供二进制的
-  沙箱策略（其能力面与 script 相邻，须由 teclaw 表态）；其余形态见能力
-  矩阵。
+  **teclaw 按 `teclaw-cli-contract.zh-CN.md` 实现**（artifact 新增
+  `cli_tools`，`schema_version` 4 → 5）；其余形态见能力矩阵。
 
 ## 4. 变量替换
 
