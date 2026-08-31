@@ -274,6 +274,29 @@ class SpaceSkillPublicationTaskHandler:
                 )
             )
         except SkillCenterGatewayError as exc:
+            diagnostics = {
+                "attempt_id": work.attempt.attempt_id,
+                "space_id": work.space_id,
+                "skill_id": work.attempt.skill_id,
+                "skill_uuid": work.skill_uuid,
+                "team_id": work.sc_team_id,
+                "sc_version_number": work.attempt.sc_version_number,
+                "gateway_error_code": exc.code.value,
+                "upstream_code": exc.upstream_code,
+                "upstream_trace_id": exc.trace_id,
+                "env": env,
+            }
+            logger.warning(
+                "[skill_center.publication.submit] failed "
+                "attempt_id=%(attempt_id)s space_id=%(space_id)s "
+                "skill_id=%(skill_id)s skill_uuid=%(skill_uuid)s "
+                "team_id=%(team_id)s sc_version_number=%(sc_version_number)s "
+                "gateway_error_code=%(gateway_error_code)s "
+                "upstream_code=%(upstream_code)s "
+                "upstream_trace_id=%(upstream_trace_id)s env=%(env)s",
+                diagnostics,
+                extra=diagnostics,
+            )
             if exc.code in (
                 SkillCenterGatewayErrorCode.BUSINESS,
                 SkillCenterGatewayErrorCode.TEAM_NOT_FOUND,
