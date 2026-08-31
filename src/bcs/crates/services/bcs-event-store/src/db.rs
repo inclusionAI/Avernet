@@ -26,6 +26,7 @@ use bcs_service_api::types::{
 };
 use chrono::{SecondsFormat, TimeZone, Utc};
 use sha2::{Digest, Sha256};
+use tracing::warn;
 
 use crate::transaction_plan::EventAppendTransactionPlan;
 use crate::timestamp::{
@@ -752,7 +753,7 @@ impl EventRepoPort for DbEventStore {
                 claim_fanout_targets_sql(self.flavor),
                 vec![
                     DbValue::from(lease_owner.as_str()),
-                    lease_until.clone(),
+                    lease_until,
                     DbValue::from(command.env.as_str()),
                     now.clone(),
                     DbValue::from(command.limit),
@@ -761,25 +762,25 @@ impl EventRepoPort for DbEventStore {
                 ],
             )),
             DbTransactionStep::Query(DbStatement::with_params(
-                sql_with_timestamp_params(self.flavor, &self.target_select_sql(
-                    "WHERE env = ? AND status = 'pending' AND lease_owner = ? \
-                     AND lease_until = __bcs_timestamp_ms__ ORDER BY created_at, \
-                     (SELECT event.stream_key FROM bcs_events event \
-                       WHERE event.env = bcs_event_fanout_targets.env \
-                         AND event.event_id = bcs_event_fanout_targets.event_id), \
-                     (SELECT event.sequence FROM bcs_events event \
-                       WHERE event.env = bcs_event_fanout_targets.env \
-                         AND event.event_id = bcs_event_fanout_targets.event_id), target_id",
-                )),
+                self.target_select_sql(claimed_fanout_targets_clause()),
                 vec![
                     DbValue::from(command.env.as_str()),
                     DbValue::from(lease_owner.as_str()),
-                    lease_until,
                 ],
             )),
         ];
         let results = self.db.transaction(steps).await.map_err(storage_error)?;
-        transaction_rows(&results, 1)?
+        let claimed_count = transaction_affected_rows(&results, 0)?;
+        let claimed_rows = transaction_rows(&results, 1)?;
+        let returned_count = u64::try_from(claimed_rows.len())
+            .map_err(|_| EventRepoError::Storage("fanout claim result is too large".into()))?;
+        if claimed_count != returned_count {
+            return Err(EventRepoError::Storage(format!(
+                "fanout claim returned {} rows after updating {claimed_count}",
+                claimed_rows.len()
+            )));
+        }
+        claimed_rows
             .iter()
             .map(target_from_row)
             .collect()
@@ -921,7 +922,7 @@ impl EventRepoPort for DbEventStore {
                 claim_deliveries_sql(self.flavor),
                 vec![
                     DbValue::from(lease_owner.as_str()),
-                    lease_until.clone(),
+                    lease_until,
                     now.clone(),
                     now.clone(),
                     DbValue::from(command.env.as_str()),
@@ -934,58 +935,78 @@ impl EventRepoPort for DbEventStore {
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
-                sql_with_timestamp_params(self.flavor, "UPDATE bcs_event_delivery_attempts SET \
-                 completed_at = __bcs_timestamp_ms__, result = 'retryable', \
-                 error_category = 'lease_expired', \
-                 error_summary = 'Delivery lease expired before completion; remote outcome is unknown', \
-                 response_bytes_observed = 0 \
-                 WHERE completed_at IS NULL AND EXISTS (\
-                   SELECT 1 FROM bcs_event_deliveries delivery \
-                   WHERE delivery.delivery_id = bcs_event_delivery_attempts.delivery_id \
-                     AND delivery.env = ? AND delivery.status = 'in_flight' \
-                     AND delivery.lease_owner = ? \
-                     AND delivery.lease_until = __bcs_timestamp_ms__ \
-                     AND delivery.attempt_count = bcs_event_delivery_attempts.attempt_no + 1\
-                 )"),
+                recover_reclaimed_delivery_attempts_sql(self.flavor),
                 vec![
                     timestamp_value_from_ms(self.flavor, command.now_ms)?,
                     DbValue::from(command.env.as_str()),
                     DbValue::from(lease_owner.as_str()),
-                    timestamp_value_from_ms(self.flavor, command.lease_until_ms)?,
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
-                sql_with_timestamp_params(self.flavor, "INSERT INTO \
-                 bcs_event_delivery_attempts (delivery_id, attempt_no, started_at, \
-                 completed_at, latency_ms, result, http_status, error_category, error_summary, \
-                 response_bytes_observed, worker_id) \
-                 SELECT delivery_id, attempt_count, __bcs_timestamp_ms__, NULL, NULL, NULL, \
-                        NULL, NULL, NULL, NULL, ? \
-                 FROM bcs_event_deliveries WHERE env = ? AND status = 'in_flight' \
-                   AND lease_owner = ? AND lease_until = __bcs_timestamp_ms__"),
+                insert_claimed_delivery_attempts_sql(self.flavor),
                 vec![
                     timestamp_value_from_ms(self.flavor, command.now_ms)?,
                     DbValue::from(command.worker_id.as_str()),
                     DbValue::from(command.env.as_str()),
                     DbValue::from(lease_owner.as_str()),
-                    timestamp_value_from_ms(self.flavor, command.lease_until_ms)?,
                 ],
             )),
             DbTransactionStep::Query(DbStatement::with_params(
-                sql_with_timestamp_params(self.flavor, &self.delivery_select_sql(
-                    "WHERE d.env = ? AND d.status = 'in_flight' AND d.lease_owner = ? \
-                     AND d.lease_until = __bcs_timestamp_ms__ \
-                     ORDER BY d.created_at, d.sequence, d.delivery_id",
-                )),
+                recovered_delivery_attempts_sql(self.flavor),
                 vec![
                     DbValue::from(command.env.as_str()),
                     DbValue::from(lease_owner.as_str()),
-                    lease_until,
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_params(
+                clear_claim_recovery_markers_sql(),
+                vec![
+                    DbValue::from(command.env.as_str()),
+                    DbValue::from(lease_owner.as_str()),
+                ],
+            )),
+            DbTransactionStep::Query(DbStatement::with_params(
+                self.delivery_select_sql(claimed_deliveries_clause()),
+                vec![
+                    DbValue::from(command.env.as_str()),
+                    DbValue::from(lease_owner.as_str()),
                 ],
             )),
         ];
         let results = self.db.transaction(steps).await.map_err(storage_error)?;
-        transaction_rows(&results, 3)?
+        let claimed_count = transaction_affected_rows(&results, 0)?;
+        let attempt_count = transaction_affected_rows(&results, 2)?;
+        let recovered_rows = transaction_rows(&results, 3)?;
+        let cleared_recovery_markers = transaction_affected_rows(&results, 4)?;
+        let claimed_rows = transaction_rows(&results, 5)?;
+        let returned_count = u64::try_from(claimed_rows.len())
+            .map_err(|_| EventRepoError::Storage("Delivery claim result is too large".into()))?;
+        if claimed_count != attempt_count || claimed_count != returned_count {
+            return Err(EventRepoError::Storage(format!(
+                "Delivery claim updated {claimed_count} rows, inserted {attempt_count} Attempts, and returned {} rows",
+                claimed_rows.len()
+            )));
+        }
+        let recovered_row_count = u64::try_from(recovered_rows.len()).map_err(|_| {
+            EventRepoError::Storage("Delivery recovery result is too large".into())
+        })?;
+        if recovered_row_count != cleared_recovery_markers {
+            return Err(EventRepoError::Storage(format!(
+                "Delivery claim returned {} recovery rows but cleared {cleared_recovery_markers} recovery markers",
+                recovered_rows.len()
+            )));
+        }
+        for row in recovered_rows {
+            if let Err(error) = log_recovered_delivery_attempt(row) {
+                warn!(
+                    target: "bcs_event_webhook",
+                    component = "delivery",
+                    error = %error,
+                    "failed to decode recovered webhook delivery attempt audit row"
+                );
+            }
+        }
+        claimed_rows
             .iter()
             .map(delivery_from_row)
             .collect()
@@ -1639,11 +1660,17 @@ fn claim_fanout_targets_sql(flavor: DbSqlFlavor) -> String {
 }
 
 fn claim_deliveries_sql(flavor: DbSqlFlavor) -> String {
-    sql_with_timestamp_params(flavor, "UPDATE bcs_event_deliveries SET status = 'in_flight', \
+    // Keep the recovery marker assignment before status and lease_until:
+    // MySQL evaluates single-table UPDATE assignments from left to right. The
+    // marker snapshots an expired in-flight lease for the audit query later in
+    // the same transaction, then clear_claim_recovery_markers_sql removes it.
+    sql_with_timestamp_params(flavor, "UPDATE bcs_event_deliveries SET \
+     next_attempt_at = CASE WHEN status = 'in_flight' THEN lease_until ELSE NULL END, \
+     status = 'in_flight', \
      attempt_count = attempt_count + 1, lease_owner = ?, \
      lease_until = __bcs_timestamp_ms__, \
      first_attempt_at = COALESCE(first_attempt_at, __bcs_timestamp_ms__), \
-     last_attempt_at = __bcs_timestamp_ms__, next_attempt_at = NULL \
+     last_attempt_at = __bcs_timestamp_ms__ \
      WHERE delivery_id IN (SELECT delivery_id FROM (\
        SELECT delivery.delivery_id FROM bcs_event_deliveries delivery \
        JOIN bcs_event_subscription_revisions revision \
@@ -1683,6 +1710,83 @@ fn claim_deliveries_sql(flavor: DbSqlFlavor) -> String {
        AND (status = 'pending' OR (status = 'retry_wait' \
          AND next_attempt_at <= __bcs_timestamp_ms__) OR status = 'in_flight')"
     )
+}
+
+fn claimed_fanout_targets_clause() -> &'static str {
+    // claim_owner() appends a fresh UUID for every claim transaction, so the
+    // owner is a stronger batch fence than lease_until. Do not compare the
+    // stored timestamp with the millisecond input: some MySQL-compatible
+    // deployments persist TIMESTAMP without fractional-second precision.
+    "WHERE env = ? AND status = 'pending' AND lease_owner = ? \
+     ORDER BY created_at, \
+     (SELECT event.stream_key FROM bcs_events event \
+       WHERE event.env = bcs_event_fanout_targets.env \
+         AND event.event_id = bcs_event_fanout_targets.event_id), \
+     (SELECT event.sequence FROM bcs_events event \
+       WHERE event.env = bcs_event_fanout_targets.env \
+         AND event.event_id = bcs_event_fanout_targets.event_id), target_id"
+}
+
+fn recover_reclaimed_delivery_attempts_sql(flavor: DbSqlFlavor) -> String {
+    sql_with_timestamp_params(flavor, "UPDATE bcs_event_delivery_attempts SET \
+     completed_at = __bcs_timestamp_ms__, result = 'retryable', \
+     error_category = 'lease_expired', \
+     error_summary = 'Delivery lease expired before completion; remote outcome is unknown', \
+     response_bytes_observed = 0 \
+     WHERE completed_at IS NULL AND EXISTS (\
+       SELECT 1 FROM bcs_event_deliveries delivery \
+       WHERE delivery.delivery_id = bcs_event_delivery_attempts.delivery_id \
+         AND delivery.env = ? AND delivery.status = 'in_flight' \
+         AND delivery.lease_owner = ? \
+         AND delivery.attempt_count = bcs_event_delivery_attempts.attempt_no + 1\
+     )")
+}
+
+fn insert_claimed_delivery_attempts_sql(flavor: DbSqlFlavor) -> String {
+    sql_with_timestamp_params(flavor, "INSERT INTO bcs_event_delivery_attempts \
+     (delivery_id, attempt_no, started_at, completed_at, latency_ms, result, http_status, \
+      error_category, error_summary, response_bytes_observed, worker_id) \
+     SELECT delivery_id, attempt_count, __bcs_timestamp_ms__, NULL, NULL, NULL, \
+            NULL, NULL, NULL, NULL, ? \
+     FROM bcs_event_deliveries WHERE env = ? AND status = 'in_flight' \
+       AND lease_owner = ?")
+}
+
+fn recovered_delivery_attempts_sql(flavor: DbSqlFlavor) -> String {
+    format!(
+        "SELECT delivery_id, attempt_count - 1 AS recovered_attempt_no, {} \
+         FROM bcs_event_deliveries WHERE env = ? AND status = 'in_flight' \
+           AND lease_owner = ? AND next_attempt_at IS NOT NULL \
+         ORDER BY created_at, sequence, delivery_id",
+        timestamp_ms_expr(
+            flavor,
+            "next_attempt_at",
+            "expired_lease_until_ms"
+        )
+    )
+}
+
+fn clear_claim_recovery_markers_sql() -> &'static str {
+    "UPDATE bcs_event_deliveries SET next_attempt_at = NULL \
+     WHERE env = ? AND status = 'in_flight' AND lease_owner = ? \
+       AND next_attempt_at IS NOT NULL"
+}
+
+fn log_recovered_delivery_attempt(row: &DbRow) -> Result<(), EventRepoError> {
+    warn!(
+        target: "bcs_event_webhook",
+        component = "delivery",
+        delivery_id = %column::<String>(row, "delivery_id")?,
+        old_attempt_no = column::<u32>(row, "recovered_attempt_no")?,
+        expired_lease_until_ms = column::<u64>(row, "expired_lease_until_ms")?,
+        "recovered expired webhook delivery attempt"
+    );
+    Ok(())
+}
+
+fn claimed_deliveries_clause() -> &'static str {
+    "WHERE d.env = ? AND d.status = 'in_flight' AND d.lease_owner = ? \
+     ORDER BY d.created_at, d.sequence, d.delivery_id"
 }
 
 fn causal_replay_insert_sql(flavor: DbSqlFlavor) -> String {
@@ -2555,5 +2659,30 @@ mod tests {
             assert_eq!(replay_delivery_lock_sql(flavor).matches('?').count(), 2);
             assert!(!claim_deliveries_sql(flavor).contains("__bcs_timestamp_ms__"));
         }
+    }
+
+    #[test]
+    fn post_claim_lookup_is_fenced_by_unique_owner_not_timestamp_precision() {
+        for sql in [
+            claimed_fanout_targets_clause().to_string(),
+            recover_reclaimed_delivery_attempts_sql(DbSqlFlavor::Mysql),
+            insert_claimed_delivery_attempts_sql(DbSqlFlavor::Mysql),
+            recovered_delivery_attempts_sql(DbSqlFlavor::Mysql),
+            clear_claim_recovery_markers_sql().to_string(),
+            claimed_deliveries_clause().to_string(),
+        ] {
+            assert!(sql.contains("lease_owner = ?"));
+            assert!(!sql.contains("lease_until ="));
+        }
+
+        let claim_sql = claim_deliveries_sql(DbSqlFlavor::Mysql);
+        assert!(
+            claim_sql
+                .find("next_attempt_at = CASE")
+                .expect("recovery marker assignment")
+                < claim_sql
+                    .find("status = 'in_flight',")
+                    .expect("claim status assignment")
+        );
     }
 }
