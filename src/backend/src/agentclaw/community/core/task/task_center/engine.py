@@ -535,11 +535,23 @@ class ExecutionEngine:
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
         from agentclaw.community.core.task.task_plan.static_plan_runtime import StaticPlanRuntime
         cfg = self._graph._execution_config(task_id)
-        if cfg.get("task_type") != "static_plan":
-            return None
+        # 判据:cfg 含 ``static_plan_id`` 或 ``static_plan_yaml`` 任一即视为预置模板 plan(不依赖 task_type 字符串);
+        # task_type 仍可显式 STATIC_PLAN 兼容旧调用方,但默认 dynamic caller 经 execute 内容路由命中后,
+        # 也会在此处回填 static_plan_id/static_plan_yaml 进入预置 plan runtime。
         template_id = cfg.get("static_plan_id")
+        yaml_text = cfg.get("static_plan_yaml")
+        if not template_id and not yaml_text and cfg.get("task_type") != "static_plan":
+            return None
+        if not yaml_text and template_id:
+            # 显式只传 task_type/static_plan_id 未带 yaml → 从仓库 plans 懒加载
+            from pathlib import Path
+            plans_dir = Path(__file__).resolve().parents[1] / "task_plan" / "plans"
+            plans_path = plans_dir / f"{template_id}.yaml"
+            if not plans_path.exists():
+                return None
+            yaml_text = plans_path.read_text(encoding="utf-8")
         try:
-            definition = StaticPlanDefinition.from_yaml(str(cfg["static_plan_yaml"]))
+            definition = StaticPlanDefinition.from_yaml(str(yaml_text) if yaml_text else "")
             runtime = StaticPlanRuntime(definition, dict(cfg.get("template_input") or {}))
         except Exception:
             logger.exception(
@@ -646,8 +658,9 @@ class ExecutionEngine:
         """演示自驱开关:开启后静态 plan 节点不做真实派发/拉群,转为后台自回投 mock 结果,
         复用同一 on_report 通路推进图态,便于上报/skill 未就绪时也能跑通全链路。
         优先级:按任务 execution_config.static_auto_report(bool) → 服务端 env OCB_TASK_STATIC_AUTO_REPORT。"""
+        # 与 _static_runtime 同判据:预置模板 plan 任务才需要 static_auto_report 开关。
         cfg = self._graph._execution_config(task_id)
-        if cfg.get("task_type") != "static_plan":
+        if not (cfg.get("static_plan_id") or cfg.get("static_plan_yaml") or cfg.get("task_type") == "static_plan"):
             return False
         flag = cfg.get("static_auto_report")
         if isinstance(flag, bool):

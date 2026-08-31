@@ -224,26 +224,28 @@ class TaskService:
     def _materialize_static_plan_if_needed(self, request: "TaskInfoRequest") -> "TaskInfoRequest":
         """Fold static-plan template loading into execute (Rule 22: one public API).
 
-        当 ``execution_config.task_type == STATIC_PLAN`` 时,根据 ``static_plan_id`` 加载仓内置
-        模板 yaml → 校验 input/bindings → 合成 task_spec(title/instruction/objective 取模板 id)
-        → 把 ``static_plan_yaml`` / ``template_input`` 补进 execution_config。yaml 加载或校验失败
-        抛 ``TaskStateError``(HTTP 层 ``@envelope_errors`` 映 422),与原 ``run_template`` 行为一致。
-        调用方已显式传入 ``static_plan_yaml``/``template_input`` 时仅补缺失项,不覆盖已传字段。
+        ``execute`` 入口统一处理 "动态任务 + 预置模板 plan" 两种 plan 源:
+        - 调用方显式传 ``execution_config.static_plan_id`` → 直接加载该模板
+        - 否则按 ``task_spec`` 的 title/instruction/objective 关键字命中已注册模板(``okr-implementation``) → 加载该模板
+        - 命中 → 加载 yaml 校验 input/bindings → 合成 task_spec → 把 ``static_plan_id``/``static_plan_yaml``/
+          ``template_input`` 补进 execution_config,engine 内经 ``_static_runtime`` 走预置 plan runtime(与 LLM planner 路径等价)
+        - 未命中且调用方传 ``task_type=STATIC_PLAN`` 显式要预置模板 → 抛 ``TaskStateError``(→422)
+        - 未命中且非显式(默认 dynamic) → 返回 request 不变,execute 内 ``_static_runtime`` 取不到 yaml,
+          自然走 LLM planner 自发现 plan
 
-        发起者字段(``owner_user_id``/``owner_bot_id``/``static_auto_report``/``owner_account_id``)
-        继续走 execute 既有透传路径;此 helper 只补模板相关缺失项,与动态任务共用同一 execute 入口。
+        这样调用方只需提交一个任务 + 业务语义,无需关心 plan 是预置还是 planner 生成(都是动态任务)。
         """
-        cfg = request.execution_config
-        task_type = cfg.get("task_type")
-        if task_type != TaskType.STATIC_PLAN:
-            return request
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
-        template_id = self._resolve_static_plan_template_id(request)
+        cfg = request.execution_config
+        explicit_id = cfg.get("static_plan_id")
+        template_id = str(explicit_id) if explicit_id else self._resolve_static_plan_template_id(request)
         if not template_id:
-            raise TaskStateError(
-                "static plan template could not be selected: provide execution_config.static_plan_id "
-                "or include an OKR-related task_spec so the content-router matches a registered template"
-            )
+            if cfg.get("task_type") == TaskType.STATIC_PLAN:
+                raise TaskStateError(
+                    "static plan template could not be selected: provide execution_config.static_plan_id "
+                    "or include an OKR-related task_spec so the content-router matches a registered template"
+                )
+            return request  # 未命中且非显式 → 走默认 dynamic planner
         template_dir = Path(__file__).resolve().parents[1] / "task_plan" / "plans"
         inputs = dict(cfg.get("template_input") or {})
         try:
@@ -358,13 +360,6 @@ class TaskService:
             return await self._run_workflow(task_id, request, task_info, graph.run_id)
         if task_type == TaskType.YAML:
             return await self._run_yaml(task_id, request, task_info, graph.run_id)
-        if task_type == TaskType.STATIC_PLAN:
-            if self._harness is not None:
-                self._harness.register(task_id)
-            bg = asyncio.create_task(self._engine.on_execute(task_id))
-            self._bg_tasks.add(bg)
-            bg.add_done_callback(self._on_bg_done)
-            return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
         if task_type == TaskType.BBS:
             return await self._run_bbs(task_id, request, task_info, graph.run_id)
 

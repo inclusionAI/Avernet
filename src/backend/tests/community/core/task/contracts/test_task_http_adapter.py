@@ -225,6 +225,26 @@ def _static_plan_dict_unroutable_content() -> dict:
     }
 
 
+def _static_plan_dict_dynamic_task_type_okr_content() -> dict:
+    """task_type=dynamic 且 OKR 业务语义(不传 static_plan_id),验证 execute 内容路由依然命中预置模板 plan,
+    证明显式 static_plan 与默认 dynamic 对调用方等价——底层都是动态任务,仅 plan 源不同。"""
+    return {
+        "task_spec": {
+            "metadata": {"title": "OKR 实现", "instruction": "为业务提升双十一活动转化率"},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "提升双十一活动转化率", "acceptances": []},
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {
+            "task_type": "dynamic",
+            "template_input": {"okr": "提升双十一活动转化率"},
+            "static_auto_report": True,
+        },
+    }
+
+
 def _execute_and_get_id(c) -> str:
     """POST execute → 返回服务端生成的 task_id(契约:task_id 不在请求体,服务端 uuid4)。"""
     r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
@@ -283,6 +303,19 @@ class TestTaskExecute:
             json=_static_plan_dict_unroutable_content(),
         )
         assert r.status_code >= 400, r.text
+
+    def test_execute_static_plan_routes_when_dynamic_task_type(self, client):
+        # task_type=dynamic + OKR 业务语义(不传 static_plan_id)→ 内容路由命中预置模板,与 task_type=static_plan 等价。
+        c, _ = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_dynamic_task_type_okr_content(),
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["code"] == 200000
+        assert isinstance(body["data"]["task_id"], str) and body["data"]["task_id"]
+        assert body["data"]["success"] is True
 
     def test_execute_returns_op_result(self, client):
         c, _ = client
