@@ -206,6 +206,7 @@ def test_public_wrapper_and_market_display_name_converge_to_manifest_name() -> N
     )
     package = _wrapped_public_package()
 
+    store = LocalCanonicalCenterVersionStore()
     with avernet_tenant_scope("teamclaw"):
         target = references.ensure_public_version(
             env="pre",
@@ -224,7 +225,7 @@ def test_public_wrapper_and_market_display_name_converge_to_manifest_name() -> N
             http=_Http(package),
             validator=SkillPackageValidator(SkillParser()),
             scanner=_Scanner(),
-            store=LocalCanonicalCenterVersionStore(),
+            store=store,
             clock=lambda: datetime(2026, 8, 30, tzinfo=UTC),
         ).materialize(
             SkillVersionMaterializationRequest(
@@ -234,8 +235,37 @@ def test_public_wrapper_and_market_display_name_converge_to_manifest_name() -> N
                 scope=SkillCenterReadScope.PUBLIC,
             )
         )
+        next_target = references.ensure_public_version(
+            env="pre",
+            actor_id="actor",
+            locator=identity.locator,
+            skill_uuid=identity.skill_uuid,
+            skill_name="A newer SC display name",
+            description="SC market V2 description",
+            sc_skill_id=9001,
+            sc_version_number="2.0.0",
+            sc_version_id=10002,
+        )
+        next_published = SkillVersionMaterializer(
+            versions=versions,
+            gateway=_Gateway(package),
+            http=_Http(package),
+            validator=SkillPackageValidator(SkillParser()),
+            scanner=_Scanner(),
+            store=store,
+            clock=lambda: datetime(2026, 8, 31, tzinfo=UTC),
+        ).materialize(
+            SkillVersionMaterializationRequest(
+                env="pre",
+                skill_id=next_target.skill_id,
+                skill_version_id=next_target.skill_version_id,
+                scope=SkillCenterReadScope.PUBLIC,
+            )
+        )
 
     assert published.name == "dima"
+    assert next_published.name == "dima"
+    assert next_published.version_ordinal == 2
     with db.orm_session() as session:
         skill = session.get(Skill, target.skill_id)
         version = session.get(SkillVersion, target.skill_version_id)
@@ -244,3 +274,5 @@ def test_public_wrapper_and_market_display_name_converge_to_manifest_name() -> N
         assert skill.skill_uuid == identity.skill_uuid
         assert skill.name == "dima"
         assert version is not None and version.name == "dima"
+        next_version = session.get(SkillVersion, next_target.skill_version_id)
+        assert next_version is not None and next_version.name == "dima"
