@@ -253,6 +253,45 @@ class TestEg4ThresholdConsistency:
         assert task._config.renew_threshold_hours == 12
         assert task._config.default_ttl_minutes == 1440
 
+    def test_explicit_threshold_without_arca_section_raises(self):
+        """WR-02: an explicit threshold is checked against the effective TTL
+        even when the arca section is absent — 8h vs the 1440-minute
+        fallback (12h half-period) raises instead of silently reverting the
+        tuned threshold to 12h with a dead knob."""
+        container = _container_with("deadline")
+        container.config.from_dict(
+            {
+                "renewal_scheduler": {
+                    "engine": "deadline",
+                    "renew_threshold_hours": 8,
+                },
+            }
+        )
+        set_container(container)
+
+        with pytest.raises(ValueError):
+            container.tasks().deadline_renewal_task()
+
+    def test_explicit_12h_threshold_without_arca_section_resolves(self):
+        """WR-02 boundary: an explicit 12h threshold stays consistent with
+        the 1440-minute fallback when no arca section exists — every
+        in-repo overlay carries renew_threshold_hours: 12 without an arca
+        section, so this quadrant must assemble."""
+        container = _container_with("deadline")
+        container.config.from_dict(
+            {
+                "renewal_scheduler": {
+                    "engine": "deadline",
+                    "renew_threshold_hours": 12,
+                },
+            }
+        )
+        set_container(container)
+
+        task = container.tasks().deadline_renewal_task()
+        assert task._config.renew_threshold_hours == 12
+        assert task._config.default_ttl_minutes == 1440
+
     def test_consistent_renew_threshold_resolves(self):
         """12h vs "1440" (string-coerced) resolves — threshold*60 ==
         default_ttl_minutes//2 holds (WR-03 coercion chain reused)."""
