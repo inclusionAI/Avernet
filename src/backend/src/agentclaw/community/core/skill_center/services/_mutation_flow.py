@@ -10,6 +10,7 @@ the two services cannot drift.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Sequence
 
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
@@ -31,6 +32,10 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     retired_logical_skill_mappings,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+from agentclaw.community.log import get_logger
+
+
+logger = get_logger()
 
 
 def skill_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
@@ -141,11 +146,51 @@ class MutationProjectionFlow:
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
         owner_id = str(bot["owner_id"])
-        previous_mappings = await self._runtime.snapshot_skill_mappings(
+        snapshot_started_at = time.perf_counter()
+        try:
+            previous_mappings = await self._runtime.snapshot_skill_mappings(
+                bot_id=bot_id,
+                owner_id=owner_id,
+            )
+        except Exception:
+            self._log_timing(
+                stage="snapshot_before",
+                bot_id=bot_id,
+                engine_type=engine_type,
+                started_at=snapshot_started_at,
+                outcome="error",
+            )
+            raise
+        self._log_timing(
+            stage="snapshot_before",
             bot_id=bot_id,
-            owner_id=owner_id,
+            engine_type=engine_type,
+            started_at=snapshot_started_at,
+            outcome="success",
+            mapping_count=len(previous_mappings),
         )
-        result = mutation()
+
+        mutation_started_at = time.perf_counter()
+        try:
+            result = mutation()
+        except Exception:
+            self._log_timing(
+                stage="mutation_tx",
+                bot_id=bot_id,
+                engine_type=engine_type,
+                started_at=mutation_started_at,
+                outcome="error",
+            )
+            raise
+        self._log_timing(
+            stage="mutation_tx",
+            bot_id=bot_id,
+            engine_type=engine_type,
+            started_at=mutation_started_at,
+            outcome="success",
+            changed=result.changed,
+            mcp_delta_count=len(result.mcp_codes),
+        )
         if skip_projection_when_unchanged and not result.changed:
             return {**result.item, "changed": False, **result.details}
         effective_scope = (
@@ -174,9 +219,30 @@ class MutationProjectionFlow:
     ) -> None:
         current_mappings: Sequence[PoolSkillMapping] = ()
         try:
-            current_mappings = await self._runtime.snapshot_skill_mappings(
+            snapshot_started_at = time.perf_counter()
+            try:
+                current_mappings = await self._runtime.snapshot_skill_mappings(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                )
+            except Exception:
+                self._log_timing(
+                    stage="snapshot_after",
+                    bot_id=bot_id,
+                    engine_type=engine_type,
+                    started_at=snapshot_started_at,
+                    outcome="error",
+                    scope=scope,
+                )
+                raise
+            self._log_timing(
+                stage="snapshot_after",
                 bot_id=bot_id,
-                owner_id=owner_id,
+                engine_type=engine_type,
+                started_at=snapshot_started_at,
+                outcome="success",
+                mapping_count=len(current_mappings),
+                scope=scope,
             )
             await self._runtime.project(
                 bot_id=bot_id,
@@ -209,3 +275,32 @@ class MutationProjectionFlow:
             except Exception as restore_error:
                 raise SkillSetRuntimeReconcileError() from restore_error
             raise SkillSetRuntimeReconcileError() from exc
+
+    @staticmethod
+    def _log_timing(
+        *,
+        stage: str,
+        bot_id: str,
+        engine_type: str | None,
+        started_at: float,
+        outcome: str,
+        mapping_count: int | None = None,
+        changed: bool | None = None,
+        mcp_delta_count: int | None = None,
+        scope: ProjectionScope | None = None,
+    ) -> None:
+        logger.info(
+            "[MutationProjectionFlow] timing stage=%s bot_id=%s "
+            "engine_type=%s duration_ms=%.3f outcome=%s mapping_count=%s "
+            "changed=%s mcp_delta_count=%s scope_skills=%s scope_mcp=%s",
+            stage,
+            bot_id,
+            engine_type,
+            (time.perf_counter() - started_at) * 1000,
+            outcome,
+            mapping_count,
+            changed,
+            mcp_delta_count,
+            scope.skills if scope is not None else None,
+            scope.mcp if scope is not None else None,
+        )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -22,7 +23,10 @@ from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupResult, RuntimeQuarantineCleanupStatus
+from agentclaw.community.core.skills_pool.quarantine import (
+    RuntimeQuarantineCleanupResult,
+    RuntimeQuarantineCleanupStatus,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
@@ -395,7 +399,9 @@ class SkillsPoolRuntime:
                 body={"items": items},
             )
         except Exception:
-            logger.exception("[skills_pool.runtime] center ensure failed bot_id=%s", bot_id)
+            logger.exception(
+                "[skills_pool.runtime] center ensure failed bot_id=%s", bot_id
+            )
             return False
         data = response.get("data")
         return (
@@ -414,7 +420,25 @@ class SkillsPoolRuntime:
         path: str,
         body: dict[str, Any],
     ) -> dict[str, Any]:
-        context = self._resolver.resolve_for_bot(bot_id, user_id)
+        context_started_at = time.perf_counter()
+        try:
+            context = self._resolver.resolve_for_bot(bot_id, user_id)
+        except Exception:
+            logger.info(
+                "[skills_pool.runtime] timing stage=resolve_device_context "
+                "bot_id=%s path=%s duration_ms=%.3f outcome=error",
+                bot_id,
+                path,
+                (time.perf_counter() - context_started_at) * 1000,
+            )
+            raise
+        logger.info(
+            "[skills_pool.runtime] timing stage=resolve_device_context "
+            "bot_id=%s path=%s duration_ms=%.3f outcome=success",
+            bot_id,
+            path,
+            (time.perf_counter() - context_started_at) * 1000,
+        )
         return await self._transport.invoke(
             context.conn_info,
             "POST",
