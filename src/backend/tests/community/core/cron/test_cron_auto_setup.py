@@ -346,6 +346,8 @@ class TestCronAutoSetupService:
         assert f"space:{dima_space_id}" in body["command"]
         assert "user:user1" in body["command"]
         assert "agent:bot1" in body["command"]
+        assert body["owner_id"] == "user1"
+        assert body["bot_id"] == "bot1"
         assert body["kind"] == "autoInitiate"  # kind 字段应显式设置为 autoInitiate
         assert body["timezone"] == DEFAULT_CRON_TIMEZONE
         assert body["enabled"] is True

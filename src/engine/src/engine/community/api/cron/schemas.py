@@ -23,6 +23,8 @@ class CreateTaskRequest(BaseModel):
     name: str = Field(..., description="任务名称")
     schedule: str = Field(..., description="cron表达式，如 '0 8 * * *'")
     command: str = Field(..., description="要执行的命令")
+    owner_id: Optional[str] = Field(default=None, description="任务所属用户 ID")
+    bot_id: Optional[str] = Field(default=None, description="任务所属 Bot ID")
     timezone: str = Field(default="Asia/Shanghai", description="时区")
     enabled: bool = Field(default=True, description="是否启用")
     timeout_secs: Optional[int] = Field(default=86400, description="任务执行超时时间（秒），默认86400")

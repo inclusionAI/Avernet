@@ -737,6 +737,8 @@ class _FakeCronPort:
             "id": "j1", "name": "Job 1", "enabled": True,
             "schedule": {"kind": "cron", "expr": "* * * * *"},
             "payload": {"kind": "agentTurn", "timeoutSeconds": 30},
+            "owner_id": "owner-1",
+            "bot_id": "bot-1",
             "state": {"running_at_ms": 123},
             "sessionTarget": "isolated", "createdAtMs": 1, "updatedAtMs": 2,
         }]
@@ -745,7 +747,8 @@ class _FakeCronPort:
         if job_id == "missing":
             return None
         return {"id": job_id, "name": "n", "enabled": True,
-                "schedule": {}, "payload": {}, "state": {}, "sessionTarget": "isolated"}
+                "schedule": {}, "payload": {}, "owner_id": "owner-x", "bot_id": "bot-x",
+                "state": {}, "sessionTarget": "isolated"}
 
     async def cron_get_status(self, token=None) -> dict:
         self.calls.append({"method": "cron_get_status", "token": token})
@@ -791,6 +794,8 @@ class TestCronAdapter:
         assert j.schedule == {"kind": "cron", "expr": "* * * * *"}
         # delivery absent → notify None
         assert j.notify is None
+        assert j.owner_id == "owner-1"
+        assert j.bot_id == "bot-1"
 
     async def test_get_job_returns_none_when_missing(self):
         adapter = ClaudeCodeCronAdapter(_FakeCronPort())
@@ -821,6 +826,8 @@ class TestCronAdapter:
             name="N",
             schedule={"kind": "every", "every_ms": 60000},
             payload={"kind": "agentTurn", "timeout_secs": 30},
+            owner_id="owner-2",
+            bot_id="bot-2",
             session_target="isolated", enabled=True,
         )
         job = await adapter.add_job(request, auth=_auth("t"))
@@ -830,6 +837,15 @@ class TestCronAdapter:
         assert call["job"]["payload"]["timeoutSeconds"] == 30
         # schedule every → everyMs
         assert call["job"]["schedule"]["everyMs"] == 60000
+        assert call["job"]["owner_id"] == "owner-2"
+        assert call["job"]["bot_id"] == "bot-2"
+
+    async def test_get_job_preserves_owner_and_bot_ids(self):
+        adapter = ClaudeCodeCronAdapter(_FakeCronPort())
+        job = await adapter.get_job("j1")
+        assert job is not None
+        assert job.owner_id == "owner-x"
+        assert job.bot_id == "bot-x"
 
     async def test_update_job_raises_when_no_patch(self):
         from engine.community.plugin_api.cron.models import UpdateJobRequest

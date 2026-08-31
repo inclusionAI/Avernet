@@ -54,6 +54,8 @@ class TestCronJob:
             name="daily-report",
             schedule={"kind": "cron", "expr": "0 8 * * *", "tz": "Asia/Shanghai"},
             payload={"kind": "agentTurn", "message": "Hello"},
+            owner_id="owner-001",
+            bot_id="bot-001",
             created_at_ms=1_700_000_000_000,
             updated_at_ms=1_700_000_001_000,
         )
@@ -65,6 +67,8 @@ class TestCronJob:
         assert job.id == "job-001"
         assert job.name == "daily-report"
         assert job.enabled is True  # default
+        assert job.owner_id == "owner-001"
+        assert job.bot_id == "bot-001"
         assert job.session_target == "isolated"  # default
         assert job.state == {}  # default_factory
         assert job.notify is None  # optional
@@ -170,7 +174,11 @@ class TestCreateJobRequest:
             name="job",
             schedule={"kind": "cron", "expr": "* * * * *"},
             payload={"kind": "agentTurn"},
+            owner_id="owner-1",
+            bot_id="bot-1",
         )
+        assert req.owner_id == "owner-1"
+        assert req.bot_id == "bot-1"
         assert req.session_target == "isolated"
         assert req.enabled is True
         assert req.notify is None
