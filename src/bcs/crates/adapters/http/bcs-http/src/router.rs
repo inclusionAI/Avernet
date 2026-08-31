@@ -313,7 +313,7 @@ fn build_api_routes() -> Router<HttpAppState> {
         )
         .route(
             "/groups/{id}/messages",
-            get(routes::group_messages::get_messages).post(routes::group_messages::send_message),
+            post(routes::group_messages::send_message),
         )
         .route("/groups/{id}/fuse", post(routes::messages::fuse_context))
         .route(
