@@ -248,9 +248,7 @@ class TestResolveEnvOverlayName:
         monkeypatch.setenv("COMMUNITY_DEPLOY", "community")
         assert _resolve_env_overlay_name() == "community"
 
-    def test_falls_back_to_server_env(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_falls_back_to_server_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
         monkeypatch.setenv("SERVER_ENV", "prepub")
         assert _resolve_env_overlay_name() == "prepub"
@@ -262,9 +260,7 @@ class TestResolveEnvOverlayName:
         monkeypatch.setenv("SERVER_ENV", "dev")
         assert _resolve_env_overlay_name() == "dev"
 
-    def test_blank_values_yield_empty(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_blank_values_yield_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("COMMUNITY_DEPLOY", "")
         monkeypatch.setenv("SERVER_ENV", "")
         assert _resolve_env_overlay_name() == ""

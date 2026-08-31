@@ -11,25 +11,27 @@
 # for the inherited variables.
 #
 # Flow:
-#   1. Validate ANTHROPIC_* model credentials (fail fast)
-#   2. Write .adaptorEnv (claude_code + relay URL/cwd contract) and
-#      .relayEnv for the claude_relay supervisord program (600, admin:
-#      credentials must not leak into supervisord config or image layers)
-#   3. Wait for the supervisord socket
-#   4. Start the claude_relay program via supervisorctl and health-gate
+#   1. Write .adaptorEnv (claude_code + relay URL/cwd contract) and
+#      .relayEnv for the claude_relay supervisord program (600, admin).
+#      No credentials here — see "Provider config" below.
+#   2. Wait for the supervisord socket
+#   3. Start the claude_relay program via supervisorctl and health-gate
 #      it (GET /health → {"ok":true}) before the engine
-#   5. Start the engine program via supervisorctl
-#   6. Wait for engine /health, write the ready marker and print status
+#   4. Start the engine program via supervisorctl
+#   5. Wait for engine /health, write the ready marker and print status
 #
-# Reads (pod env; env contract mirrors scripts/modules/claude_relays.sh
-# — singlebox — against the same vendored gateway):
-#   ANTHROPIC_BASE_URL          required, Anthropic-compatible Messages API URL
-#   ANTHROPIC_AUTH_TOKEN or
-#   ANTHROPIC_API_KEY           required (one of), upstream credential
-#   ANTHROPIC_MODEL             required, model id
-#   ANTHROPIC_SMALL_FAST_MODEL  optional, defaults to ANTHROPIC_MODEL (the
-#                               upstream relay serves one model; without this
-#                               claude requests haiku and the upstream 404s)
+# Provider config is FULLY STATIC (nothing read from pod env): the image
+# stages docker/agent/claude-settings.json at
+# /opt/claude-settings.json.template (NOT under /home/admin — that path is
+# NAS-mounted at pod start and shadows image content) and Step 1 copies it
+# into ~/.claude/settings.json AFTER the mount, mount-wins. Content — URL,
+# model glm-5.2, and the auth token as the literal placeholder
+# "Bearer ${API-KEY}" — mirrors openclaw.json ("apiKey":
+# "Bearer ${API-KEY}"): the gateway on the upstream side replaces the
+# placeholder with the real key. Swap the whole provider scenario by
+# mounting a file at the final path.
+#
+# Reads (pod env):
 #   CLAUDE_RELAY_PORT           optional, defaults 18900
 #   CLAUDE_RELAY_PERMISSION_MODE optional, defaults acceptEdits
 #   CLAUDE_CODE_PATH            optional, defaults /usr/local/bin/claude
@@ -64,26 +66,15 @@ RELAY_GATEWAY_DIR="/opt/engine/src/engine/community/claude_code_gateway"
 
 section "start_claude_code.sh - claude_code engine startup"
 
-# --- Step 1: Validate model provider credentials (fail fast) ---
+# Nothing to validate: every provider field — URL, model, and the auth token
+# (the literal placeholder "Bearer ${API-KEY}") — lives in the STATIC
+# settings.json baked into the image. The gateway on the upstream side
+# replaces the placeholder with the real key, exactly like openclaw.json's
+# "apiKey": "Bearer ${API-KEY}" placeholder.
 
-MISSING_RELAY_ENV=""
-[ -n "${ANTHROPIC_BASE_URL:-}" ] || MISSING_RELAY_ENV="ANTHROPIC_BASE_URL"
-if [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    MISSING_RELAY_ENV="${MISSING_RELAY_ENV} ANTHROPIC_AUTH_TOKEN-or-ANTHROPIC_API_KEY"
-fi
-[ -n "${ANTHROPIC_MODEL:-}" ] || MISSING_RELAY_ENV="${MISSING_RELAY_ENV} ANTHROPIC_MODEL"
-if [ -n "$MISSING_RELAY_ENV" ]; then
-    fail "--engine claude_code requires: ${MISSING_RELAY_ENV}"
-    info "  Claude Code needs an Anthropic-compatible Messages API endpoint."
-    echo "FAILED" > "$MARKER_FILE"
-    exit 1
-fi
+# --- Step 1: Configure engine + relay environment ---
 
-ANTHROPIC_SMALL_FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-$ANTHROPIC_MODEL}"
-
-# --- Step 2: Configure engine + relay environment ---
-
-section "Step 2: Configuring engine + relay environment..."
+section "Step 1: Configuring engine + relay environment..."
 
 ADAPTOR_ENV_FILE="/home/admin/.adaptorEnv"
 cat > "$ADAPTOR_ENV_FILE" <<EOF
@@ -117,23 +108,44 @@ export RELAY_LOG_DIR=$RELAY_STATE_DIR/logs
 export RELAY_CLAUDE_CONFIG_DIR=/home/admin/.claude
 export RELAY_DEFAULT_CWD=/home/admin/.openclaw/workspace
 export RELAY_DEFAULT_PERMISSION_MODE=$CLAUDE_RELAY_PERMISSION_MODE
-export ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL
-export ANTHROPIC_MODEL=$ANTHROPIC_MODEL
-export ANTHROPIC_SMALL_FAST_MODEL=$ANTHROPIC_SMALL_FAST_MODEL
 EOF
-# Credential line: AUTH_TOKEN preferred (bearer), else API_KEY.
-if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
-    echo "export ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN" >> "$RELAY_ENV_FILE"
-else
-    echo "export ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> "$RELAY_ENV_FILE"
-fi
 chown admin:admin "$RELAY_ENV_FILE" 2>/dev/null || true
 chmod 600 "$RELAY_ENV_FILE"
 success "Relay env file written to $RELAY_ENV_FILE (mode 600)"
+# --- settings.json: copy AFTER the NAS mount, like openclaw's config ---
+# /home/admin is NAS-mounted at pod start, which shadows anything baked into
+# the image there — so the image stages the file at
+# /opt/claude-settings.json.template and we copy it in here, at service
+# start, AFTER the mount is live. Mount-wins: a settings.json already
+# present on the NAS (a deployment's own provider scenario) is kept
+# untouched. Content is static (URL + glm-5.2 + placeholder token
+# "Bearer ${API-KEY}" the upstream gateway replaces), so this is a plain cp
+# — no substitution needed (the entrypoint's openclaw.json _sub pattern
+# exists only because that template carries ${...} placeholders).
+CLAUDE_SETTINGS_FILE="/home/admin/.claude/settings.json"
+CLAUDE_SETTINGS_TEMPLATE="/opt/claude-settings.json.template"
+if [ ! -f "$CLAUDE_SETTINGS_FILE" ]; then
+    if [ -f "$CLAUDE_SETTINGS_TEMPLATE" ]; then
+        cp "$CLAUDE_SETTINGS_TEMPLATE" "$CLAUDE_SETTINGS_FILE"
+        chown admin:admin "$CLAUDE_SETTINGS_FILE" 2>/dev/null || true
+        chmod 600 "$CLAUDE_SETTINGS_FILE"
+        success "Claude settings.json staged from template to $CLAUDE_SETTINGS_FILE (mode 600)"
+    else
+        warn "No $CLAUDE_SETTINGS_FILE on the mount and no template in the image; claude/relay fall back to their defaults"
+    fi
+fi
 
-# --- Step 3: Wait for supervisord socket ---
+# Point the gateway's model-provider loader at the settings.json above. The
+# loader's whitelist (model-provider-settings.ts) matches exactly the keys
+# that file carries, and the claude CLI itself picks the same file up
+# natively through CLAUDE_CONFIG_DIR = RELAY_CLAUDE_CONFIG_DIR =
+# /home/admin/.claude.
+if [ -f "$CLAUDE_SETTINGS_FILE" ]; then
+    echo "export RELAY_MODEL_SETTINGS_SOURCE=$CLAUDE_SETTINGS_FILE" >> "$RELAY_ENV_FILE"
+fi
+# --- Step 2: Wait for supervisord socket ---
 
-section "Step 3: Waiting for supervisord..."
+section "Step 2: Waiting for supervisord..."
 
 SUPERVISOR_SOCK="/var/run/supervisor.sock"
 MAX_WAIT=30
@@ -149,9 +161,9 @@ while [ ! -S "$SUPERVISOR_SOCK" ]; do
 done
 success "supervisord ready (waited ${waited}s)"
 
-# --- Step 4: Start claude_relay via supervisorctl and health-gate it ---
+# --- Step 3: Start claude_relay via supervisorctl and health-gate it ---
 
-section "Step 4: Starting claude_relay program (port $CLAUDE_RELAY_PORT)..."
+section "Step 3: Starting claude_relay program (port $CLAUDE_RELAY_PORT)..."
 
 [ -f "$RELAY_GATEWAY_DIR/dist/esm/server.js" ] || {
     fail "claude_code gateway missing: $RELAY_GATEWAY_DIR/dist/esm/server.js"
@@ -198,9 +210,9 @@ if [ "$RELAY_READY" -ne 1 ]; then
 fi
 success "claude_relay health check passed (http://127.0.0.1:${CLAUDE_RELAY_PORT}/health)"
 
-# --- Step 5: Start engine via supervisorctl ---
+# --- Step 4: Start engine via supervisorctl ---
 
-section "Step 5: Starting engine program..."
+section "Step 4: Starting engine program..."
 
 ENGINE_RUNNING=$(sudo /usr/local/bin/supervisorctl status engine 2>/dev/null | grep -c "RUNNING" || true)
 
@@ -217,9 +229,9 @@ else
     fi
 fi
 
-# --- Step 6: Wait for engine /health endpoint ---
+# --- Step 5: Wait for engine /health endpoint ---
 
-section "Step 6: Waiting for engine health (port $ADAPTOR_PORT)..."
+section "Step 5: Waiting for engine health (port $ADAPTOR_PORT)..."
 
 HEALTH_CHECK_TIMEOUT=120
 HEARTBEAT_INTERVAL=10
@@ -244,7 +256,7 @@ else
     success "Engine health check passed"
 fi
 
-# --- Step 7: Write ready marker & print status ---
+# --- Step 6: Write ready marker & print status ---
 
 echo "SUCCEEDED" > "$MARKER_FILE"
 

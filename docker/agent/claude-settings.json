@@ -1,0 +1,12 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "Bearer ${API-KEY}",
+    "ANTHROPIC_MODEL": "glm-5.2",
+    "ANTHROPIC_SMALL_FAST_MODEL": "glm-5.2",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.2",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5.2"
+  }
+}

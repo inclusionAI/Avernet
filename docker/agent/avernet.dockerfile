@@ -228,6 +228,21 @@ COPY docker/agent/avernet-supervisord.conf /etc/supervisor/supervisord.conf
 # OpenClaw default config template (env-var placeholders substituted at runtime).
 COPY docker/agent/openclaw.json /opt/openclaw.json.template
 
+# Claude Code provider settings template — staged like openclaw.json above:
+# /home/admin is NAS-mounted at pod start, which SHADOWS anything baked
+# there, so the file must live in /opt and be copied into ~/.claude AFTER
+# the mount (start_claude_code.sh does the copy; mount-wins: a file already
+# on the NAS is kept). Content is FULLY STATIC, mirroring openclaw.json's
+# hardcoded config: URL, model (glm-5.2), and the auth token as the literal
+# placeholder "Bearer ${API-KEY}" — the gateway on the upstream side
+# replaces the placeholder with the real key (same pattern as openclaw.json's
+# "apiKey": "Bearer ${API-KEY}"). No credentials are injected into the pod
+# at runtime for this engine. The claude CLI reads the file natively via
+# CLAUDE_CONFIG_DIR; the relay gateway's model-provider loader via
+# RELAY_MODEL_SETTINGS_SOURCE (set in start_claude_code.sh). A deployment
+# with a different provider scenario mounts its own file at the final path.
+COPY docker/agent/claude-settings.json /opt/claude-settings.json.template
+
 # Shared utility functions (logging, helpers).
 COPY docker/agent/util.sh /usr/local/bin/util.sh
 
