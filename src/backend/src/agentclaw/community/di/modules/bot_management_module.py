@@ -147,6 +147,9 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
 )
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
+)
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
@@ -285,12 +288,14 @@ class BotManagementModule(Module):
         template_service: TemplateService,
         mcp_sync_service: MCPSyncService,
         skill_set_factory: SkillSetServiceFactory,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> AicodingRestartAuthorizationBaasPublishListener:
         return AicodingRestartAuthorizationBaasPublishListener(
             bot_repo=repository,
             template_service=template_service,
             mcp_sync=mcp_sync_service,
             skill_set_factory=skill_set_factory,
+            runtime_reconciler=runtime_reconciler,
         )
 
     @singleton
@@ -350,6 +355,7 @@ class BotManagementModule(Module):
         workspace_hosting_config: cfg.WorkspaceHostingConfig,
         device_binding_repo: DeviceBindingRepository,
         skill_set_factory: SkillSetServiceFactory,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
         cleanup_service: BotCleanupService,
         bcn_service: BcnService,
         bot_publish_repo: BotPublishRepositoryProtocol,
@@ -416,6 +422,7 @@ class BotManagementModule(Module):
             common_config_service=common_config_service,
             caller_identity_repo=caller_identity_repo,
             mcp_sync=cast(McpSyncProtocol, mcp_sync_service),
+            runtime_reconciler=runtime_reconciler,
         )
 
     @singleton

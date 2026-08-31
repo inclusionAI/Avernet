@@ -19,6 +19,9 @@ import pytest
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AicodingProvisioningStrategy,
 )
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+)
 from agentclaw.community.core.bot_management.engines.default import (
     DefaultProvisioningStrategy,
 )
@@ -99,9 +102,9 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
     factory = MagicMock()
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
     skill_set_service = MagicMock()
-    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a", "mcp-b"]
-    skill_set_service.project_mcps = AsyncMock(return_value=True)
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
@@ -112,6 +115,7 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
             {"confirmed_template_update": flag},
             mcp_sync=mcp_sync,
             skill_set_factory=factory,
+            runtime_reconciler=runtime_reconciler,
         ) is True
 
     mcp_sync.refresh_mcp_scope.assert_awaited_once()
@@ -122,17 +126,10 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     assert scope_kwargs["entity_type"] == "staff"
     assert scope_kwargs["engine_type"] == "aicoding"
     assert "extra_cli_items" not in scope_kwargs
-    skill_set_service.get_bot_mcp_codes.assert_called_once_with(
-        "ent-9",
-        "bot-1",
-        "ent-9",
-        "staff",
-        "aicoding",
-    )
-    skill_set_service.project_mcps.assert_awaited_once_with(
-        claimed=frozenset({"mcp-a", "mcp-b"}),
-        released=frozenset(),
-        declared={"mcp-a", "mcp-b"},
+    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+        bot_id="bot-1",
+        owner_id="ent-9",
+        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
     )
     factory.create.assert_called_once_with(
         user_id="ent-9",
@@ -149,6 +146,8 @@ def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_mcp_error() -> 
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(side_effect=RuntimeError("scope down"))
     factory = MagicMock()
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
@@ -160,6 +159,7 @@ def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_mcp_error() -> 
             {"confirmed_template_update": True},
             mcp_sync=mcp_sync,
             skill_set_factory=factory,
+            runtime_reconciler=runtime_reconciler,
         ) is True
     factory.create.assert_called_once()
     skill_set_service.project_skills.assert_awaited_once_with()
@@ -173,8 +173,9 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
         return_value={"success": False, "error": "scope denied"}
     )
     factory = MagicMock()
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
     skill_set_service = MagicMock()
-    skill_set_service.project_mcps = AsyncMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
@@ -185,9 +186,10 @@ def test_aicoding_refresh_logs_scope_failure_and_still_syncs_skills() -> None:
             {"confirmed_template_update": True},
             mcp_sync=mcp_sync,
             skill_set_factory=factory,
+            runtime_reconciler=runtime_reconciler,
         ) is True
 
-    skill_set_service.project_mcps.assert_not_called()
+    runtime_reconciler.project_mcp_and_cli.assert_not_called()
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
@@ -197,8 +199,8 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
-    skill_set_service.project_mcps = AsyncMock(return_value=False)
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
     skill_set_service.project_skills = AsyncMock(return_value=False)
     factory.create.return_value = skill_set_service
 
@@ -209,12 +211,13 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
             {"confirmed_template_update": True},
             mcp_sync=mcp_sync,
             skill_set_factory=factory,
+            runtime_reconciler=runtime_reconciler,
         ) is True
 
-    skill_set_service.project_mcps.assert_awaited_once_with(
-        claimed=frozenset({"mcp-a"}),
-        released=frozenset(),
-        declared={"mcp-a"},
+    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+        bot_id="bot-1",
+        owner_id="ent-1",
+        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
     )
     skill_set_service.project_skills.assert_awaited_once_with()
 
@@ -225,10 +228,8 @@ def test_aicoding_refresh_does_not_retry_mcp_projection_when_runtime_not_ready()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
     factory = MagicMock()
     skill_set_service = MagicMock()
-    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
-    skill_set_service.project_mcps = AsyncMock(
-        side_effect=[False, True]
-    )
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
@@ -241,11 +242,7 @@ def test_aicoding_refresh_does_not_retry_mcp_projection_when_runtime_not_ready()
             skill_set_factory=factory,
         ) is True
 
-    skill_set_service.project_mcps.assert_awaited_once_with(
-        claimed=frozenset({"mcp-a"}),
-        released=frozenset(),
-        declared={"mcp-a"},
-    )
+    runtime_reconciler.project_mcp_and_cli.assert_not_called()
     skill_set_service.project_skills.assert_awaited_once_with()
 
 
@@ -254,11 +251,9 @@ def test_aicoding_refresh_does_not_retry_mcp_projection_exception() -> None:
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
     factory = MagicMock()
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
     skill_set_service = MagicMock()
-    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
-    skill_set_service.project_mcps = AsyncMock(
-        side_effect=RuntimeError("BaaS API error: NO_ACTIVE_DEVICES")
-    )
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
 
@@ -269,12 +264,13 @@ def test_aicoding_refresh_does_not_retry_mcp_projection_exception() -> None:
             {"confirmed_template_update": True},
             mcp_sync=mcp_sync,
             skill_set_factory=factory,
+            runtime_reconciler=runtime_reconciler,
         ) is True
 
-    skill_set_service.project_mcps.assert_awaited_once_with(
-        claimed=frozenset({"mcp-a"}),
-        released=frozenset(),
-        declared={"mcp-a"},
+    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+        bot_id="bot-1",
+        owner_id="ent-1",
+        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
     )
     skill_set_service.project_skills.assert_awaited_once_with()
 
@@ -324,9 +320,9 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
     factory = MagicMock()
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(side_effect=RuntimeError("detail down"))
     skill_set_service = MagicMock()
-    skill_set_service.get_bot_mcp_codes.return_value = ["mcp-a"]
-    skill_set_service.project_mcps = AsyncMock(side_effect=RuntimeError("detail down"))
     skill_set_service.project_skills = AsyncMock(side_effect=RuntimeError("skill down"))
     factory.create.return_value = skill_set_service
 
@@ -337,12 +333,13 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
             {"confirmed_template_update": True},
             mcp_sync=mcp_sync,
             skill_set_factory=factory,
+            runtime_reconciler=runtime_reconciler,
         ) is True
 
-    skill_set_service.project_mcps.assert_awaited_once_with(
-        claimed=frozenset({"mcp-a"}),
-        released=frozenset(),
-        declared={"mcp-a"},
+    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+        bot_id="bot-1",
+        owner_id="ent-1",
+        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
     )
     skill_set_service.project_skills.assert_awaited_once_with()
 
@@ -371,6 +368,7 @@ def test_default_strategy_always_returns_false() -> None:
             _ctx(), _bot(), {"confirmed_template_update": True},
             mcp_sync=MagicMock(),
             skill_set_factory=MagicMock(),
+            runtime_reconciler=MagicMock(),
         )
         is False
     )
@@ -388,6 +386,8 @@ def test_aicoding_refresh_clears_persisted_marker_after_confirmed_extra_success(
     }
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
     template_service = MagicMock()
     template_service.get_template_config.return_value = stored_template_config
 
@@ -398,10 +398,16 @@ def test_aicoding_refresh_clears_persisted_marker_after_confirmed_extra_success(
             {"confirmed_template_update": True},
             mcp_sync=mcp_sync,
             skill_set_factory=None,
+            runtime_reconciler=runtime_reconciler,
             template_service=template_service,
         ) is True
 
     template_service.update_template.assert_called_once()
+    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+        bot_id="bot-1",
+        owner_id="ent-1",
+        scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+    )
     cleared = template_service.update_template.call_args.kwargs["template_config"]
     assert "_aicoding_restart" not in cleared
     assert cleared["template_version_id"] == 101
@@ -426,6 +432,8 @@ def test_aicoding_refresh_uses_persisted_template_marker_and_clears_after_succes
     )
     mcp_sync = MagicMock()
     mcp_sync.refresh_mcp_scope = AsyncMock(return_value={"success": True})
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
     template_service = MagicMock()
     template_service.get_template_config.return_value = template_config
 
@@ -436,6 +444,7 @@ def test_aicoding_refresh_uses_persisted_template_marker_and_clears_after_succes
             None,
             mcp_sync=mcp_sync,
             skill_set_factory=None,
+            runtime_reconciler=runtime_reconciler,
             template_service=template_service,
         ) is True
 
@@ -462,6 +471,7 @@ def test_baas_restart_publish_listener_dispatches_strategy_after_restart_event()
     template_service = MagicMock()
     template_service.get_template_config.return_value = template_config
     mcp_sync = object()
+    runtime_reconciler = object()
     factory = object()
     strategy = MagicMock()
     strategy.engine_type = "claude_code"
@@ -472,6 +482,7 @@ def test_baas_restart_publish_listener_dispatches_strategy_after_restart_event()
         template_service=template_service,
         mcp_sync=mcp_sync,
         skill_set_factory=factory,
+        runtime_reconciler=runtime_reconciler,
     )
 
     with patch(
@@ -502,6 +513,7 @@ def test_baas_restart_publish_listener_dispatches_strategy_after_restart_event()
         None,
         mcp_sync=mcp_sync,
         skill_set_factory=factory,
+        runtime_reconciler=runtime_reconciler,
         template_service=template_service,
     )
 

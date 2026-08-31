@@ -11,7 +11,7 @@ import json
 from copy import deepcopy
 import threading
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
@@ -58,6 +58,14 @@ _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
 _AICODING_RESTART_MARKER_KEY = "_aicoding_restart"
 _AICODING_RESTART_RESYNC_KEY = "resync_authorization"
 logger = get_logger()
+
+
+
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        BotRuntimeProjectorProtocol,
+    )
 
 
 def _validate_application_coding_config(
@@ -655,6 +663,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         *,
         mcp_sync: Any = None,
         skill_set_factory: Any = None,
+        runtime_reconciler: "BotRuntimeProjectorProtocol | None" = None,
         template_service: Any = None,
     ) -> bool:
         """Refresh AICoding restart authorization and runtime skill symlinks.
@@ -712,7 +721,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
 
             if mcp_sync is not None:
                 try:
-                    async def _do_mcp_sync() -> tuple[dict, bool | None]:
+                    async def _do_mcp_sync() -> dict:
                         scope_result = await mcp_sync.refresh_mcp_scope(
                             user_id=effective_entity_id,
                             entity_id=effective_entity_id,
@@ -721,28 +730,21 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                             engine_type=effective_engine,
                         )
                         if not scope_result.get("success"):
-                            return scope_result, None
+                            return scope_result
 
-                        detail_synced = None
-                        if skill_set_service is not None:
-                            declared_server_codes = set(
-                                await asyncio.to_thread(
-                                    skill_set_service.get_bot_mcp_codes,
-                                    effective_entity_id,
-                                    ctx.bot_id,
-                                    effective_entity_id,
-                                    effective_entity_type,
-                                    effective_engine,
-                                )
+                        if runtime_reconciler is not None:
+                            from agentclaw.community.core.skill_center.runtime_projection_contract import (
+                                ProjectionScope,
                             )
-                            detail_synced = await skill_set_service.project_mcps(
-                                claimed=frozenset(declared_server_codes),
-                                released=frozenset(),
-                                declared=declared_server_codes,
-                            )
-                        return scope_result, detail_synced
 
-                    scope_result, detail_synced = asyncio.run(_do_mcp_sync())
+                            await runtime_reconciler.project_mcp_and_cli(
+                                bot_id=ctx.bot_id,
+                                owner_id=effective_entity_id,
+                                scope=ProjectionScope(mcp=True, claim_all_mcp=True),
+                            )
+                        return scope_result
+
+                    scope_result = asyncio.run(_do_mcp_sync())
                     if not scope_result.get("success"):
                         refresh_succeeded = False
                         logger.error(
@@ -750,19 +752,19 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                             "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
                             ctx.bot_id, effective_engine, scope_result.get("error"),
                         )
-                    elif detail_synced is False:
-                        refresh_succeeded = False
-                        logger.error(
-                            "[aicoding.restart] MCP projection resync failed: "
-                            "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
-                            ctx.bot_id, effective_engine,
-                            "projection returned false",
-                        )
-                    else:
+                    elif runtime_reconciler is not None:
                         logger.info(
                             "[aicoding.restart] MCP resync succeeded: "
                             "bot_id=%s, engine_type=%s",
                             ctx.bot_id, effective_engine,
+                        )
+                    else:
+                        refresh_succeeded = False
+                        logger.error(
+                            "[aicoding.restart] MCP projection resync skipped: "
+                            "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
+                            ctx.bot_id, effective_engine,
+                            "runtime reconciler unavailable",
                         )
                 except Exception as mcp_error:
                     refresh_succeeded = False

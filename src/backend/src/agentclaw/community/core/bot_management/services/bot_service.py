@@ -51,6 +51,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.core.common_config.service import CommonConfigService
     from agentclaw.community.core.devices.protocols import McpSyncProtocol
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
+    )
     from agentclaw.community.core.bot_app_grant.protocols import (
         BotAppGrantSweepProtocol,
     )
@@ -337,6 +340,7 @@ class BotService:
         task_queue_service: "TaskQueueService | None" = None,
         common_config_service: "CommonConfigService | None" = None,
         mcp_sync: "McpSyncProtocol | None" = None,
+        runtime_reconciler: "CoreBotRuntimeProjectorProtocol | None" = None,
     ) -> None:
         self._repository = repository
         self._allocation_config = allocation_config
@@ -400,6 +404,7 @@ class BotService:
         self._task_queue_service = task_queue_service
         self._common_config_service = common_config_service
         self._mcp_sync = mcp_sync
+        self._runtime_reconciler = runtime_reconciler
 
     def _service_bot_image_policy_enabled(self) -> bool:
         """Whether draft create/restart should opt into image policy."""
@@ -1942,6 +1947,7 @@ class BotService:
                             extra_configs,
                             mcp_sync=self._mcp_sync,
                             skill_set_factory=self._skill_set_factory,
+                            runtime_reconciler=self._runtime_reconciler,
                             template_service=self._template_service,
                         )
                     except Exception as exc:
