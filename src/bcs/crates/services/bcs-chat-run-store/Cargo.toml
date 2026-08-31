@@ -18,6 +18,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
+bcs-cache-api = { workspace = true }
 bcs-cache-local = { workspace = true }
 bcs-db-local = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
