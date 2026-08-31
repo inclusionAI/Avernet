@@ -115,6 +115,28 @@ class TestDeadlineEngineAssembly:
         task = container.tasks().deadline_renewal_task()
         assert task._config.default_ttl_minutes == 1440
 
+    def test_post_extend_tol_wired_from_renewal_scheduler_config(self):
+        """WR-01: a YAML-set post_extend_consistency_tol_minutes reaches the
+        scheduler config — a non-default value (2) must land on the
+        dataclass (silent-config-drift guard on the D-01 tolerance knob)."""
+        container = _container_with("deadline")
+        container.config.from_dict(
+            {"renewal_scheduler": {"post_extend_consistency_tol_minutes": 2}}
+        )
+        set_container(container)
+
+        task = container.tasks().deadline_renewal_task()
+        assert task._config.post_extend_consistency_tol_minutes == 2
+
+    def test_post_extend_tol_defaults_to_5_without_key(self):
+        """WR-01: without the YAML key the tolerance keeps the locked
+        5-minute default (D-01 code-only default remains intact)."""
+        container = _container_with("deadline")
+        set_container(container)
+
+        task = container.tasks().deadline_renewal_task()
+        assert task._config.post_extend_consistency_tol_minutes == 5
+
     def test_device_service_overridden_with_schedule_aware_wrapper(self):
         """services.device_service resolves to the schedule-aware wrapper."""
         container = _container_with("deadline")
