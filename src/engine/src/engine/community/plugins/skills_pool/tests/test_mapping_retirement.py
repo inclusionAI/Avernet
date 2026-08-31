@@ -8,12 +8,55 @@ from engine.community.plugins.claude_code.layout_pool import (
     claude_code_retirement_active_roots,
 )
 from engine.community.plugins.skills_pool.layout_activation import (
+    MappingApplyMode,
     MappingSourceLayout,
     SkillMapping,
     _Layout,
     publish_pool_mappings,
     verify_skill_mappings,
 )
+
+
+def test_best_effort_keeps_unmanaged_directory_and_publishes_safe_entries(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    layout = _Layout.for_engine("openclaw", home)
+    layout.active_root.mkdir(parents=True)
+    ready_source = layout.pool_local / "ready"
+    ready_source.mkdir(parents=True)
+    missing_source = layout.pool_local / "missing"
+    blocked = layout.active_root / "blocked"
+    blocked.mkdir()
+
+    result = publish_pool_mappings(
+        mappings=[
+            SkillMapping(str(ready_source), str(layout.active_root / "ready")),
+            SkillMapping(str(missing_source), str(layout.active_root / "missing")),
+            SkillMapping(str(ready_source), str(blocked)),
+        ],
+        home=home,
+        engine="openclaw",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+    verified = verify_skill_mappings(
+        mappings=[
+            SkillMapping(str(ready_source), str(layout.active_root / "ready")),
+            SkillMapping(str(missing_source), str(layout.active_root / "missing")),
+            SkillMapping(str(ready_source), str(blocked)),
+        ],
+        home=home,
+        engine="openclaw",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert result.published
+    assert (layout.active_root / "ready").readlink() == ready_source
+    assert (layout.active_root / "missing").is_symlink()
+    assert (layout.active_root / "missing").readlink() == missing_source
+    assert blocked.is_dir() and not blocked.is_symlink()
+    assert verified.valid
+    assert any(item["reason"] == "source_missing" for item in verified.evidence["pending"])
 
 
 @pytest.mark.parametrize("engine", ["openclaw", "claude_code", "aicoding", "hermes"])

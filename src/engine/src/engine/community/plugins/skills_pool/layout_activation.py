@@ -59,6 +59,13 @@ class MappingSourceLayout(StrEnum):
     LEGACY = "legacy"
 
 
+class MappingApplyMode(StrEnum):
+    """How a complete mapping snapshot treats per-entry runtime drift."""
+
+    STRICT = "STRICT"
+    BEST_EFFORT = "BEST_EFFORT"
+
+
 class ActiveRepoRetirementError(RuntimeError):
     """A runtime-owned active-root corpus could not be safely retired."""
 
@@ -2293,6 +2300,7 @@ def verify_skill_mappings(
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     additional_retirement_roots: Sequence[Path] = (),
+    apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
 ) -> MappingVerificationResult:
     """验证受管激活入口精确解析到声明 layout 的 source。"""
 
@@ -2311,15 +2319,29 @@ def verify_skill_mappings(
         retired_targets=frozenset(Path(item.target) for item in retired_mappings),
     )
     failures: list[dict[str, str]] = []
+    pending: list[dict[str, str]] = []
     failures.extend(retirement.failures)
     for target in retirement.remove:
         failures.append(
             {"target": str(target), "reason": "retired_target_still_present"}
         )
-    failures.extend(plan.failures)
+    for failure in plan.failures:
+        if apply_mode is MappingApplyMode.BEST_EFFORT and failure["reason"].endswith(
+            "source_missing"
+        ):
+            pending.append(failure)
+        else:
+            failures.append(failure)
+    conflict_targets = {Path(item["target"]) for item in plan.conflicts}
     for conflict in plan.conflicts:
-        failures.append({**conflict, "reason": "managed_source_conflict"})
+        issue = {**conflict, "reason": "managed_source_conflict"}
+        if apply_mode is MappingApplyMode.BEST_EFFORT:
+            pending.append(issue)
+        else:
+            failures.append(issue)
     for target, source in plan.managed.items():
+        if apply_mode is MappingApplyMode.BEST_EFFORT and target in conflict_targets:
+            continue
         reason = ""
         if not target.is_symlink():
             reason = "target_not_symlink"
@@ -2338,6 +2360,7 @@ def verify_skill_mappings(
             "retired_checked": len(retired_mappings),
             "retired_external_ignored": len(retirement.external),
             "failures": failures,
+            "pending": pending,
         },
     )
 
@@ -2350,6 +2373,7 @@ def publish_pool_mappings(
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     additional_retirement_roots: Sequence[Path] = (),
+    apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
 ) -> MappingPublishResult:
     """按声明 layout 对齐全部受管 mapping，并保留外部入口。"""
 
@@ -2367,7 +2391,9 @@ def publish_pool_mappings(
         source_layout=source_layout,
         retired_targets=frozenset(Path(item.target) for item in retired_mappings),
     )
-    if plan.conflicts:
+    best_effort = apply_mode is MappingApplyMode.BEST_EFFORT
+    issues: list[dict[str, str]] = []
+    if plan.conflicts and not best_effort:
         return MappingPublishResult(
             published=False,
             evidence={
@@ -2375,7 +2401,7 @@ def publish_pool_mappings(
                 "conflicts": list(plan.conflicts),
             },
         )
-    if retirement.failures:
+    if retirement.failures and not best_effort:
         return MappingPublishResult(
             published=False,
             evidence={
@@ -2383,7 +2409,7 @@ def publish_pool_mappings(
                 "failures": list(retirement.failures),
             },
         )
-    if plan.failures:
+    if plan.failures and not best_effort:
         return MappingPublishResult(
             published=False,
             evidence={
@@ -2392,15 +2418,37 @@ def publish_pool_mappings(
             },
         )
 
+    if best_effort:
+        issues.extend({**item, "reason": "managed_active_entry_conflict"} for item in plan.conflicts)
+        issues.extend(retirement.failures)
+        issues.extend(plan.failures)
+    conflict_targets = {Path(item["target"]) for item in plan.conflicts}
+    managed = {
+        target: source
+        for target, source in plan.managed.items()
+        if target not in conflict_targets
+    }
+    # ``_mapping_plan`` leaves a missing source out of ``managed`` under
+    # strict validation.  Best-effort product projection deliberately owns a
+    # dangling symlink to that same safe source so the next projection can
+    # converge without rewriting desired state.
+    if best_effort:
+        for item in plan.failures:
+            if item["reason"] != "source_missing":
+                continue
+            source = Path(item["source"])
+            target = Path(item["target"])
+            if target not in conflict_targets and target not in plan.external:
+                managed[target] = source
     created: list[str] = []
     updated: list[str] = []
     kept: list[str] = []
     removed: list[str] = []
     try:
-        for target in retirement.remove:
+        for target in (() if retirement.failures and best_effort else retirement.remove):
             target.unlink()
             removed.append(str(target))
-        for target, source in plan.managed.items():
+        for target, source in managed.items():
             if target.is_symlink():
                 if _lexical_target(target) == Path(os.path.abspath(source)):
                     kept.append(str(target))
@@ -2408,6 +2456,9 @@ def publish_pool_mappings(
                 target.unlink()
                 updated.append(str(target))
             elif target.exists():
+                if best_effort:
+                    issues.append({"target": str(target), "reason": "managed_target_occupied"})
+                    continue
                 return MappingPublishResult(
                     published=False,
                     evidence={
@@ -2431,7 +2482,7 @@ def publish_pool_mappings(
     return MappingPublishResult(
         published=True,
         evidence={
-            "total": len(plan.managed),
+            "total": len(managed),
             "created": created,
             "updated": updated,
             "kept": kept,
@@ -2440,6 +2491,7 @@ def publish_pool_mappings(
             "retired_absent": [str(path) for path in retirement.absent],
             "retired_replaced": [str(path) for path in retirement.replaced],
             "retired_external_ignored": [str(path) for path in retirement.external],
+            "issues": issues,
         },
     )
 
