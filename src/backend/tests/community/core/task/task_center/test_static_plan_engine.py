@@ -173,3 +173,14 @@ def test_static_plan_default_real_report_with_fallback_timeout(monkeypatch):
     )
     gs2.initialize_graph(ti2)
     assert _engine(gs2, _Runner())._static_fallback_delay("t2") == 15.0
+
+
+def test_static_plan_invalid_fallback_timeout_uses_default(monkeypatch):
+    monkeypatch.delenv("OCB_TASK_STATIC_FALLBACK_TIMEOUT", raising=False)
+
+    graph_service = TaskGraphService()
+    task_info = _task_info()
+    task_info.execution_config["static_fallback_timeout"] = "not-a-number"
+    graph_service.initialize_graph(task_info)
+
+    assert _engine(graph_service, _Runner())._static_fallback_delay("t1") == 80.0
