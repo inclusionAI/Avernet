@@ -431,21 +431,44 @@ impl A2aChatService for A2aChat {
             ChatRunCompletionPolicy::WaitForFinal
         };
 
-        if let Err(err) = self
-            .run_store
-            .create(ChatRunRecord::new(
-                run_id.clone(),
-                cmd.target_bot_id.clone(),
-                from_bot_id.clone(),
-                session_key.clone(),
-                now_ms,
-                expires_at_ms,
-                cmd.client.clone(),
-                cmd.response_mode,
-                completion_policy,
-            ))
-            .await
-        {
+        let from_bot_name = self.sender_display_name(&from_bot_id).await;
+        let frame = build_chat_send_frame(
+            &run_id,
+            &session_key,
+            &cmd.target_bot_id,
+            &from_bot_id,
+            &from_bot_name,
+            cmd.from_actor_id.as_deref().unwrap_or(&from_bot_id),
+            &cmd.message,
+            &cmd.tags,
+            cmd.caller_wait_mode.as_deref(),
+        )?;
+        // Audit snapshot of the request actually sent to the target bot: the
+        // whole `chat.send` frame serialized as {"method","params"}. Written
+        // once at create; no UPDATE path touches it, it is never SELECTed back
+        // nor exposed over the API — inspect it by querying the
+        // `original_request` column directly.
+        let original_request = match &frame {
+            BcsFrame::Request(req) => serde_json::to_string(&serde_json::json!({
+                "method": req.method.clone(),
+                "params": req.params.clone(),
+            }))
+            .unwrap_or_default(),
+            _ => String::new(),
+        };
+        let mut record = ChatRunRecord::new(
+            run_id.clone(),
+            cmd.target_bot_id.clone(),
+            from_bot_id.clone(),
+            session_key.clone(),
+            now_ms,
+            expires_at_ms,
+            cmd.client.clone(),
+            cmd.response_mode,
+            completion_policy,
+        );
+        record.original_request = original_request;
+        if let Err(err) = self.run_store.create(record).await {
             let reason = err.direct_chat_reason();
             let event = if reason == DirectChatRunReason::StoreCapacity {
                 DirectChatRunEvent::CapacityRejected
@@ -463,19 +486,6 @@ impl A2aChatService for A2aChat {
             DirectChatRunReason::None,
         )
         .await;
-
-        let from_bot_name = self.sender_display_name(&from_bot_id).await;
-        let frame = build_chat_send_frame(
-            &run_id,
-            &session_key,
-            &cmd.target_bot_id,
-            &from_bot_id,
-            &from_bot_name,
-            cmd.from_actor_id.as_deref().unwrap_or(&from_bot_id),
-            &cmd.message,
-            &cmd.tags,
-            cmd.caller_wait_mode.as_deref(),
-        )?;
 
         // Outbound interceptor chain (security gateway etc.). Block here is a
         // hard refusal — the run is marked failed and the error surfaces to

@@ -301,6 +301,7 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         state TEXT NOT NULL,
         accumulated_content TEXT,
         error_message TEXT,
+        original_request TEXT,
         created_at_ms INTEGER NOT NULL,
         updated_at_ms INTEGER NOT NULL,
         completed_at_ms INTEGER,

@@ -172,6 +172,7 @@ impl SqlChatRunRepo {
             state TEXT NOT NULL,\
             accumulated_content TEXT,\
             error_message TEXT,\
+            original_request TEXT,\
             created_at_ms INTEGER NOT NULL,\
             updated_at_ms INTEGER NOT NULL,\
             completed_at_ms INTEGER,\
@@ -469,6 +470,9 @@ fn row_to_record(row: &bcs_db_api::DbRow) -> Result<ChatRunRecord, ChatRunRepoEr
         state: parse_state(&state).unwrap_or(ChatRunState::Pending),
         accumulated_content: accumulated_content.unwrap_or_default(),
         error_message,
+        // original_request is a write-once audit column never read back by the
+        // port (absent from every SELECT), so it stays empty here.
+        original_request: String::new(),
         created_at_ms,
         updated_at_ms,
         completed_at_ms,
@@ -540,9 +544,10 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         self.ensure_schema().await?;
         let stmt = DbStatement::with_params(
             "INSERT INTO bcs_chat_runs (env, run_id, bot_uuid, from_bot_id, session_key, state, \
-             accumulated_content, error_message, created_at_ms, updated_at_ms, completed_at_ms, \
-             expires_at_ms, version, content_truncated, client, response_mode, completion_policy, \
-             delivery_ack_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             accumulated_content, error_message, original_request, created_at_ms, updated_at_ms, \
+             completed_at_ms, expires_at_ms, version, content_truncated, client, response_mode, \
+             completion_policy, delivery_ack_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+             ?, ?, ?, ?, ?, ?, ?)",
             vec![
                 DbValue::from(self.env.clone()),
                 DbValue::from(record.run_id.clone()),
@@ -552,6 +557,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                 DbValue::from(state_str(record.state)),
                 DbValue::from(record.accumulated_content.clone()),
                 record.error_message.clone().map(DbValue::from).unwrap_or(DbValue::Null),
+                DbValue::from(record.original_request.clone()),
                 DbValue::from(record.created_at_ms as i64),
                 DbValue::from(record.updated_at_ms as i64),
                 record.completed_at_ms.map(|v| DbValue::from(v as i64)).unwrap_or(DbValue::Null),
