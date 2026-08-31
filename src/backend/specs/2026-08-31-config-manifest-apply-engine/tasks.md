@@ -323,42 +323,42 @@ than something to work around:
 
 ## Group D — Proof
 
-## [ ] Task 12: Convergence, all-or-nothing, and the overwrite rules
+## [x] Task 12: Convergence, all-or-nothing, and the overwrite rules
 - **Files:** `src/backend/tests/community/core/bot_config_manifest/test_apply_engine.py`
 - **Done when:**
-  - [ ] **Convergence by absence of writes.** Two applies of an unchanged
+  - [x] **Convergence by absence of writes.** Two applies of an unchanged
         document: every entry `unchanged`, and the startup-script and activation
         services not called on the second.
-  - [ ] **The transient-failure test.** `mcp` declaring `{A, B}` with B failing
+  - [x] **The transient-failure test.** `mcp` declaring `{A, B}` with B failing
         leaves A exactly as it was, B `failed`, A `skipped`, and neither
         `activate_mcp` nor `deactivate_mcp` called.
-  - [ ] **`[]` and `DELETE` in one test.** `skills: []` empties its area;
+  - [x] **`[]` and `DELETE` in one test.** `skills: []` empties its area;
         deleting the manifest empties nothing. One rule, one test.
-  - [ ] **Per-category area.** Applying a document declaring only `mcp` leaves
+  - [x] **Per-category area.** Applying a document declaring only `mcp` leaves
         skills, identity files and the workspace untouched.
-  - [ ] **Reserved identity files** are unreachable from apply — asserted here
+  - [x] **Reserved identity files** are unreachable from apply — asserted here
         as well as refused at `PUT`, so the guarantee rests on two layers.
-  - [ ] **No materialiser.** A document declaring `skills` and `script`
+  - [x] **No materialiser.** A document declaring `skills` and `script`
         delivers the script, fails every `skills` entry, reports `PARTIAL`.
-  - [ ] **`dry_run` writes nothing**, proven by counting rows in both new tables
+  - [x] **`dry_run` writes nothing**, proven by counting rows in both new tables
         before and after — and it mints no `apply_id`.
-  - [ ] **Serialization.** Two concurrent applies: one proceeds, one 409s
+  - [x] **Serialization.** Two concurrent applies: one proceeds, one 409s
         **before minting an id**.
-  - [ ] **Async lifecycle.** `start_apply` returns while the work is still
+  - [x] **Async lifecycle.** `start_apply` returns while the work is still
         running; the report reads `RUNNING`, then reaches a terminal status. A
         raising orchestrator still terminates the report; a report left
         `RUNNING` past the lock's TTL reads as `FAILED`.
-  - [ ] **The record never over-claims.** A failure between two categories
+  - [x] **The record never over-claims.** A failure between two categories
         leaves nothing recorded as materialised that was not.
 - **Depends on:** Tasks 7, 8, 9
 
-## [ ] Task 13: The two-phase proof — W13's call pattern, before W13
+## [x] Task 13: The two-phase proof — W13's call pattern, before W13
 - **Files:** same test module as Task 12
 - **Done when:**
-  - [ ] Phase A alone applies `script` and nothing else.
-  - [ ] Phase B alone applies `mcp` and not `script`.
-  - [ ] Both together preserve `APPLY_ORDER`'s order and produce one report.
-  - [ ] The phase-A call reaches no device context and no container — the
+  - [x] Phase A alone applies `script` and nothing else.
+  - [x] Phase B alone applies `mcp` and not `script`.
+  - [x] Both together preserve `APPLY_ORDER`'s order and produce one report.
+  - [x] The phase-A call reaches no device context and no container — the
         property that makes it callable before provisioning, pinned rather than
         assumed. This is the same discipline W10 used for its uncalled
         `from_spec`.
