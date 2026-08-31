@@ -196,15 +196,21 @@ Settled here rather than left open:
    answer is that there was no fork, because apply is an HTTP operation like the
    rest.
 
-2. **The collaborator level check is not re-implemented here, and must not be.**
-   It is already declared once, in `authorization.py`, and enforced by
-   `PublicAPIRoute` for every operation including apply's. A per-category
-   re-check inside the seam would be a second adjudication of a question that
-   already has one home — the precise defect this whole line of work exists to
-   remove. What moves into the seam is the *ownership and addressing* guard the
-   category handlers perform on top of it (`bot_service.get_bot(bot_id,
-   owner_id)` and the entity-coordinate resolution), which the collaborator seam
-   does not perform and never has.
+2. **The collaborator level check is not re-implemented here, and must not be —
+   because the manifest rows are set at the maximum bar.** It is already
+   declared once, in `authorization.py`, and enforced by `PublicAPIRoute` for
+   every operation including apply's. A per-category re-check inside the seam
+   would be a second adjudication of a question that already has one home — the
+   precise defect this whole line of work exists to remove. What moves into the
+   seam is the *ownership and addressing* guard the category handlers perform on
+   top of it (`bot_service.get_bot(bot_id, owner_id)` and the entity-coordinate
+   resolution), which the collaborator seam does not perform and never has.
+
+   This is only sound given the constraint in *The Maximum-Bar Constraint*
+   below. If a manifest row were ever set below the maximum, per-category level
+   adjudication would become a real requirement of this seam, and this decision
+   would have to be reopened. Stated so that the dependency is visible rather
+   than implicit.
 
 3. **The four divergent target resolutions are preserved, not unified.** They
    really do differ — `resources` performs no ownership guard, `engine_config`
@@ -251,6 +257,55 @@ Settled here rather than left open:
    thing). What is shared is the *table* that names them and the guarantee that
    the router and apply hold the same object, which is where the value is.
 
+## The Maximum-Bar Constraint
+
+Not implemented here — this feature writes no `AUTHORIZATION` or `ADMISSION`
+row. It is recorded here because it was found while specifying this seam, it is
+what makes *Decisions* 2 sound, and the rows that must honour it are written in
+three **other** sessions. Losing it between them is the failure this section
+exists to prevent.
+
+**A manifest operation is one door onto operations whose bars are not uniform.**
+Measured, not assumed:
+
+| Category | Admission | Authorization |
+| --- | --- | --- |
+| `identity` | `GRANT_CHECKED_OWN_BOT` | `OWNER_SCOPED` |
+| `resources` | `GRANT_CHECKED_OWN_BOT` | `OWNER_SCOPED` |
+| `engine_config` | `GRANT_CHECKED_OWN_BOT` | `OWNER_SCOPED` |
+| `script` (`/startup-script`) | `GRANT_CHECKED_OWN_BOT` | `OWNER_SCOPED` |
+| `mcp` | `GRANT_CHECKED_ADDRESSED_BOT` | `Check(MEMBER)`; `…/call-type` is `Check(OWNER, EDIT_LOCK)` |
+| `skills` | `GRANT_CHECKED_ADDRESSED_BOT` | `Check(MEMBER)`, several with `EDIT_LOCK` |
+
+Two admission modes, three authorization bars. **So a manifest row picked by
+analogy with `mcp` or `skills` — the two categories whose endpoints are most
+obviously "the same kind of thing" — is a privilege escalation.** A caller at
+`MEMBER` would apply a manifest declaring `identity` and overwrite a bot's
+`SOUL.md`, which `PUT /openapi/v1/bots/{bot_id}/identity/{file_type}` refuses
+them because it is `OWNER_SCOPED`. Three of the six categories are owner-only
+today, and the manifest must not be a way around that.
+
+**The rule: every manifest operation carries the maximum of the bars it can
+reach** — `GRANT_CHECKED_OWN_BOT` and `Check(PermissionLevel.OWNER, EDIT_LOCK)`.
+
+**Why maximum rather than per-category adjudication.** `AUTHORIZATION` is keyed
+on `(method, path)`; a manifest's categories are in the request **body**. A bar
+that varied with the declared categories is therefore not merely harder — it is
+inexpressible in the table, and a bar that cannot be read off the table is one
+no reviewer can audit. Static maximum is the only shape the seam admits, and it
+errs in the safe direction.
+
+**Three rows, three sessions:**
+
+| Row | Whose | Note |
+| --- | --- | --- |
+| `PUT /openapi/v1/bots/{bot_id}/config-manifest` | W1 | §2.6 makes `PUT` take effect immediately, so `PUT` **is** an apply trigger and needs apply's bar. Easy to miss, because it reads like an ordinary document write |
+| `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` | W4 | The obvious row to get wrong, per above |
+| W13's create endpoint | W13 | Inherently owner — the caller is creating their own bot — so the constraint is satisfied by construction rather than by a bar |
+
+`DELETE` of the manifest materializes nothing (W4: *删除 manifest 什么都不删*), so
+it is the one manifest operation with no lower bound from this constraint.
+
 ## In Scope
 
 - One `core` module per category holding the checks that category's public
@@ -279,7 +334,9 @@ Settled here rather than left open:
   preflight; building the endpoint is not this change's work, and `create_flow.py`
   is not touched here.
 - **The collaborator authorization seam**, `AUTHORIZATION`, `ADMISSION`, and the
-  app-grant dependencies. Untouched, per *Decisions* 2.
+  app-grant dependencies. Untouched, per *Decisions* 2. In particular this
+  feature writes **no** manifest rows — *The Maximum-Bar Constraint* records what
+  they must be, for W1, W4 and W13 to honour; it does not implement them.
 - **The other router groups.** Only the five categories apply touches.
 - **The internal API and the console routers.** Nothing on those surfaces
   changes, including `adapters/http/resources/file_router.py`, whose
