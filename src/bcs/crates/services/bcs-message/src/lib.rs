@@ -546,6 +546,8 @@ impl GroupMessageHistoryService for MessageService {
                 cmd.view_bot_id.as_deref(),
                 self.new_participant_visible_limit,
             )?;
+            let merge_public_opening_message = !hide_opening_message
+                && matches!(&owner_filter, MessageOwnerFilter::Eq(_));
 
             info!(
                 session_id = %session_id,
@@ -556,7 +558,7 @@ impl GroupMessageHistoryService for MessageService {
             );
 
             let query = MessageQuery {
-                group_id: cmd.group_id,
+                group_id: cmd.group_id.clone(),
                 session_id: session_id.clone(),
                 cursor: cmd.before,
                 limit: self.effective_limit(cmd.limit),
@@ -567,12 +569,53 @@ impl GroupMessageHistoryService for MessageService {
                 time_range: None,
                 visible_from_seq,
             };
-            let page = self.message_repo.query_messages(query).await.map_err(|e| {
+            let mut page = self.message_repo.query_messages(query).await.map_err(|e| {
                 GroupUseCaseError::Service(ServiceError::InternalError(format!(
                     "message repo error: {}",
                     e
                 )))
             })?;
+            if merge_public_opening_message {
+                let opening_page = self
+                    .message_repo
+                    .query_messages(MessageQuery {
+                        group_id: cmd.group_id.clone(),
+                        session_id: session_id.clone(),
+                        cursor: cmd.before,
+                        limit,
+                        keyword: None,
+                        sender_id: None,
+                        message_type: Some(SESSION_OPENING_MESSAGE_TYPE.to_string()),
+                        owner_filter: MessageOwnerFilter::IsNull,
+                        time_range: None,
+                        visible_from_seq: None,
+                    })
+                    .await
+                    .map_err(|error| {
+                        GroupUseCaseError::Service(ServiceError::InternalError(format!(
+                            "message repo opening-message error: {error}"
+                        )))
+                    })?;
+                let source_has_more = page.has_more || opening_page.has_more;
+                page.messages.extend(opening_page.messages);
+                page.messages.sort_by(|left, right| {
+                    right
+                        .created_at
+                        .cmp(&left.created_at)
+                        .then_with(|| right.session_seq.cmp(&left.session_seq))
+                });
+                let combined_has_more = page.messages.len() > limit as usize;
+                page.messages.truncate(limit as usize);
+                page.has_more = source_has_more || combined_has_more;
+                page.next_cursor = page
+                    .has_more
+                    .then(|| {
+                        page.messages
+                            .last()
+                            .map(|message| (message.created_at, message.session_seq))
+                    })
+                    .flatten();
+            }
             let mut bot_names: std::collections::HashMap<String, Option<String>> =
                 std::collections::HashMap::new();
             let messages: Vec<GroupMessage> = {
@@ -681,7 +724,7 @@ impl GroupMessageHistoryService for MessageService {
                         keyword: None,
                         sender_id: None,
                         message_type: Some(SESSION_OPENING_MESSAGE_TYPE.to_string()),
-                        owner_filter,
+                        owner_filter: MessageOwnerFilter::IsNull,
                         time_range: None,
                         visible_from_seq: None,
                     })
@@ -1403,7 +1446,7 @@ mod tests {
         .await
         .expect("append opening message");
 
-        let mut human_command = session_cmd("group-1", &session_id, None);
+        let mut human_command = session_cmd("group-1", &session_id, Some("worker-a"));
         human_command.caller = CallerContext::Human(HumanActor {
             actor_id: "human-1".to_string(),
             staff_no: "human-1".to_string(),
@@ -1523,6 +1566,79 @@ mod tests {
         assert_eq!(fallback.session_calls().await, 0);
         assert_eq!(result.messages.len(), 1);
         assert_eq!(result.messages[0].content, "a-only");
+    }
+
+    #[tokio::test]
+    async fn manager_worker_human_worker_view_keeps_public_opening_message_after_cutoff() {
+        let (service, repo, _sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
+        let stable_message_id = format!("{session_id}:000-opening");
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: bcs_domain::BCS_SESSION_OPENING_MESSAGE_SENDER.to_string(),
+            sender_type: SenderType::Bot,
+            message_type: SESSION_OPENING_MESSAGE_TYPE.to_string(),
+            content: serde_json::json!({
+                "text": "任务协作群开场消息",
+                "bot_name": BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
+                "metadata": {
+                    "opening_message": {
+                        "scope": "session",
+                        "strategy": "manager_worker",
+                    }
+                }
+            }),
+            client_msg_id: Some(stable_message_id.clone()),
+            created_at: 1,
+            run_id: format!("{session_id}:opening"),
+            owner_bot_id: None,
+        })
+        .await
+        .expect("append opening message");
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-a",
+            "a-only",
+            Some("worker-a"),
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-b",
+            "b-only",
+            Some("worker-b"),
+        )
+        .await;
+
+        let mut command = session_cmd("group-1", &session_id, Some("worker-a"));
+        command.caller = CallerContext::Human(HumanActor {
+            actor_id: "human-1".to_string(),
+            staff_no: "human-1".to_string(),
+        });
+        let result = service
+            .get_session_history(command)
+            .await
+            .expect("manager worker human worker view history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        let message_ids = result
+            .messages
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<Vec<_>>();
+        let contents = result
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect::<Vec<_>>();
+        assert!(message_ids.contains(&stable_message_id.as_str()));
+        assert!(contents.contains(&"a-only"));
+        assert!(!contents.contains(&"b-only"));
     }
 
     #[tokio::test]
