@@ -8,7 +8,9 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, AcceptanceVerdict, Context, Goal, Metadata, RuntimeInfo, Status,
     TaskExecutionGraph, TaskNode, TaskNodePatch, TaskSpec,
 )
-from agentclaw.community.core.task.task_runner.integration.bbs_runner import notify
+from agentclaw.community.core.task.task_runner.integration.bbs_runner import (
+    _bid_prompt, _parse_bid, notify,
+)
 
 
 def _run(coro):
@@ -41,8 +43,9 @@ class _FakeBot:
     ``dispatch_raises``: 若为真,dispatch 抛异常 → 走 notify except 收口分支(释放 claim)。
     """
 
-    def __init__(self, rates, *, dispatch_raises: bool = False):
+    def __init__(self, rates, *, dispatch_raises: bool = False, reasons=None):
         self._rates = rates
+        self._reasons = reasons or {}
         self.dispatch_raises = dispatch_raises
         self.sent_messages: list[tuple] = []   # dispatch 消息(给胜出 bot)
         self.bid_prompts: list[str] = []        # bid prompt
@@ -54,8 +57,9 @@ class _FakeBot:
             rate = self._rates.get(bot_id)
             if rate is None:
                 raise RuntimeError("bot error")
+            reason = self._reasons.get(bot_id, f"reason-{bot_id}")
             return {"status": "COMPLETED",
-                    "result": {"content": json.dumps({"completion_rate": rate})}}
+                    "result": {"content": json.dumps({"completion_rate": rate, "relay_reason": reason})}}
         # Phase 2: dispatch(给胜出 bot 发任务,等结果)
         self.sent_messages.append((bot_id, message, metadata))
         if self.dispatch_raises:
@@ -304,3 +308,51 @@ def test_notify_without_callback_never_writes_root_output():
     # _bbs_output = task_result["result"] = {"content": "dispatched-task-result"}(FakeBot dispatch 返回结构)
     assert len(scoped) == 1 and scoped[0].output_patch == {"output": {"content": "dispatched-task-result"}}
     assert graph.claimed == "W"  # bid→select→claim 链路完整
+
+
+def test_bid_prompt_asks_for_relay_reason():
+    """bid prompt 除 completion_rate 外,还要求 bot 输出 relay_reason(为什么觉得自己能完成 + 依据)。"""
+    prompt = _bid_prompt(_execution_graph("t1", _GOAL), "B")
+    assert "completion_rate" in prompt
+    assert "relay_reason" in prompt
+
+
+def test_parse_bid_extracts_relay_reason():
+    """_parse_bid 从 bot 回复 JSON 解析 completion_rate + relay_reason。"""
+    bid = _parse_bid({
+        "bot_id": "B",
+        "run": {"status": "COMPLETED",
+                "result": {"content": json.dumps({"completion_rate": 90, "relay_reason": "已有相关产出,可补完剩余 gap"})}},
+    })
+    assert bid == {"bot_id": "B", "completion_rate": 90, "relay_reason": "已有相关产出,可补完剩余 gap"}
+
+
+def test_parse_bid_relay_reason_defaults_empty_when_missing():
+    """bot 未输出 relay_reason → 默认空串(bid 仍有效,只要 completion_rate>0;选优键仍是完成率)。"""
+    bid = _parse_bid({
+        "bot_id": "A",
+        "run": {"status": "COMPLETED",
+                "result": {"content": json.dumps({"completion_rate": 50})}},
+    })
+    assert bid == {"bot_id": "A", "completion_rate": 50, "relay_reason": ""}
+
+
+def test_notify_records_winner_relay_reason_in_scoped_extend_props():
+    """胜出 bot 的 relay_reason 落到 scoped bbs 接力节点 run_info.extend_props(与 assignee_bot_id/output/session_id 同处)。"""
+    roster = _roster("A", "B", "C")
+    bot = _FakeBot(
+        rates={"A": 50, "B": 90, "C": 70},
+        reasons={"A": "A 可做", "B": "已产出相关交付,可补完剩余 gap", "C": "C 可做"},
+    )
+    bcn = _FakeBcn(roster)
+    graph = _FakeGraph()
+    g = _execution_graph("t1", _GOAL)
+    on_bbs_report = _FakeOnBbsReport(graph)
+
+    _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://localhost:8888",
+                skill_name="bbs-relay-single-task", on_bbs_report=on_bbs_report))
+
+    assert graph.claimed == "B"  # 最高 completion_rate 胜出(选优键未变)
+    assert len(on_bbs_report.calls) == 1
+    patch = on_bbs_report.calls[0]
+    assert patch.extend_props_patch["relay_reason"] == "已产出相关交付,可补完剩余 gap"

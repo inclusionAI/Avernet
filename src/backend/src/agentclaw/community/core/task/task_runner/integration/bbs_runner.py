@@ -141,6 +141,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                 "output": _bbs_output,
                 "assignee_bot_id": winner_bot_id,
                 "session_id": _bbs_session,
+                "relay_reason": winner.get("relay_reason", ""),
             },
         )
         if on_bbs_report is not None:
@@ -223,7 +224,7 @@ async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
 
 
 async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
-    """一发一收:发给 bot 评估 prompt,取回复 content JSON {completion_rate}。"""
+    """一发一收:发给 bot 评估 prompt,取回复 content JSON {completion_rate, relay_reason}。"""
     task_id = execution_graph.task_id
     bot_id = rost_entry["bot_id"]
     prompt = _bid_prompt(execution_graph, bot_id)
@@ -240,7 +241,7 @@ async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
 
 
 def _parse_bid(bid_result: Any) -> dict | None:
-    """从 _bid_one 返回 {bot_id, run} 中解析 completion_rate。"""
+    """从 _bid_one 返回 {bot_id, run} 中解析 completion_rate + relay_reason(bot 未给则空串)。"""
     if not isinstance(bid_result, dict):
         return None
     run = bid_result.get("run")
@@ -265,8 +266,10 @@ def _parse_bid(bid_result: Any) -> dict | None:
     rate = obj.get("completion_rate")
     if not isinstance(rate, (int, float)) or rate <= 0:
         return None
+    reason = obj.get("relay_reason")
+    reason = reason if isinstance(reason, str) else ""
     bot_id = bid_result.get("bot_id", "")
-    return {"bot_id": bot_id, "completion_rate": int(rate)}
+    return {"bot_id": bot_id, "completion_rate": int(rate), "relay_reason": reason}
 
 
 def _build_task_snapshot(execution_graph) -> dict:
@@ -323,16 +326,17 @@ def _bid_prompt(execution_graph, bot_id: str) -> str:
     """让 bot 据内联任务快照自评能完成多少剩余事项,输出 JSON。
 
     snapshot 内联(参考 task_plan._compose_planning_prompt),免 bot 再读 dashboard;``task_id`` 仅作引用,
-    可选深读 dashboard URL。返回格式 ``{"completion_rate": <0-100整数>}``。
+    可选深读 dashboard URL。返回格式 ``{"completion_rate": <0-100整数>, "relay_reason": "<可完成理由与依据>"}``。
     """
     task_id = getattr(execution_graph, "task_id", "") or ""
     snapshot = _build_task_snapshot(execution_graph)
     return (
-        "[bbs-bid] 请基于以下任务快照自评:你能完成该任务**剩余事项的百分比**(0-100)。\n"
+        "[bbs-bid] 请基于以下任务快照自评:你能完成该任务**剩余事项的百分比**(0-100),"
+        "并给出 relay_reason(你为什么觉得自己能完成该任务、依据是什么)。\n"
         f"你自身 bot_id={bot_id};task_id={task_id}(仅作引用)。\n"
         "快照含根 goal/验收项/已 DONE 子节点产出/gaps;据 goal 与已完成产出算剩余 gap,"
-        "基于自身能力(不联网)自评能补完的剩余事项占比,输出 JSON: "
-        '{"completion_rate": <0-100整数>}\n'
+        "基于自身能力(不联网)自评能补完的剩余事项占比,并说明判断依据(可完成理由 + 对应 snapshot 字段),输出 JSON: "
+        '{"completion_rate": <0-100整数>, "relay_reason": "<可完成理由与依据>"}\n'
         f"任务态快照\n{json.dumps(snapshot, ensure_ascii=False)}\n"
     )
 
@@ -342,7 +346,6 @@ def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str) -
 
     task_id/backend_url/bot_id 仍保留供步骤② attach / 步骤④ result 的 API 调用;dashboard 仅作可选兜底深读。
     """
-    task_id = getattr(execution_graph, "task_id", "") or ""
     snapshot = _build_task_snapshot(execution_graph)
     return (
         f"请为我执行一下任务。\n"
