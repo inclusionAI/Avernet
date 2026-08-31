@@ -13,6 +13,7 @@ from agentclaw.community.core.repository.skill_center_reference_types import (
     SkillCenterReferenceWorkItem,
 )
 from agentclaw.community.core.skill_center.errors import (
+    SkillOfflineError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
@@ -285,9 +286,18 @@ class SkillCenterReferenceProcessor:
                 owner_id=batch.owner_id,
                 user_id=batch.actor_id,
                 set_id=batch.skill_set_id,
-                skill_ids=tuple(str(item.resolved_skill_id) for item in ready),
+                # Materialization runs concurrently, so local IDs may become
+                # ready in a different order on each replay. The batch has set
+                # semantics, but sorting its numeric IDs keeps the wire and
+                # idempotent observability stable.
+                skill_ids=tuple(
+                    sorted(
+                        (str(item.resolved_skill_id) for item in ready), key=int
+                    )
+                ),
             )
         except (
+            SkillOfflineError,
             SkillSetAccessDeniedError,
             SkillSetControlPlaneConflictError,
             SkillSetControlPlaneNotFoundError,
@@ -382,10 +392,7 @@ def _positive_int(value: object, field: str) -> int:
 def _final_add_error_code(error: Exception | None) -> str:
     if error is None:
         return "SKILL_SET_UPDATE_FAILED"
-    if (
-        isinstance(error, SkillSetControlPlaneConflictError)
-        and error.detail == "SKILL_OFFLINE"
-    ):
+    if isinstance(error, SkillOfflineError):
         return "SKILL_OFFLINE"
     if isinstance(error, SkillSetControlPlaneNotFoundError):
         return "SKILL_SET_NOT_FOUND"

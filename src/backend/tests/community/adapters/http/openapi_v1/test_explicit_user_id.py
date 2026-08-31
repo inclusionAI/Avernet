@@ -413,7 +413,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The task grant/revoke operations also carry the target in ``bcs_bot_id``
 #: request-body fields rather than a ``bot_id`` parameter, adding two more
 #: operations without changing the path/query counts.
-_BOT_ID_PLACEMENT = {"path": 146, "query": 1, "none": 95}
+_BOT_ID_PLACEMENT = {"path": 146, "query": 1, "none": 97}
 
 
 def _schema() -> dict:

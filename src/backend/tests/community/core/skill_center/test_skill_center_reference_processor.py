@@ -13,7 +13,7 @@ from agentclaw.community.core.repository.skill_center_reference_types import (
     SkillCenterReferenceWorkItem,
 )
 from agentclaw.community.core.skill_center.errors import (
-    SkillSetControlPlaneConflictError,
+    SkillOfflineError,
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
@@ -91,6 +91,18 @@ class _References:
         )
 
 
+class _OutOfOrderReferences(_References):
+    """Force the concurrent materialization completion order seen in CI."""
+
+    def ensure_public_version(self, **kwargs):
+        skill_id = 11 if kwargs["locator"] == "center://public-a" else 10
+        return PublicCenterVersionTarget(
+            skill_id=skill_id,
+            skill_version_id=100 + skill_id,
+            status=self.target_status,
+        )
+
+
 class _Gateway:
     def get_public_skill(self, request):
         return SkillCenterSkill(
@@ -148,7 +160,7 @@ class _SkillSets:
     async def add_skills(self, **kwargs):
         self.add_calls.append(kwargs)
         if self.offline:
-            raise SkillSetControlPlaneConflictError("SKILL_OFFLINE")
+            raise SkillOfflineError("SKILL_OFFLINE")
         if self.infrastructure_failure:
             raise RuntimeError("database unavailable")
         self.membership_ids.update(kwargs["skill_ids"])
@@ -214,6 +226,22 @@ def test_successful_items_are_added_in_one_batch_after_materialization() -> None
     assert {item.status for item in references.batch.items} == {
         SkillCenterReferenceStatus.COMPLETED
     }
+
+
+def test_final_add_sorts_concurrently_materialized_skill_ids_for_replay() -> None:
+    references = _OutOfOrderReferences()
+    skill_sets = _SkillSets()
+
+    outcome = asyncio.run(
+        _processor(
+            references=references,
+            skill_sets=skill_sets,
+            materializer=_Materializer(),
+        ).process("request-a")
+    )
+
+    assert isinstance(outcome, Complete)
+    assert skill_sets.add_calls[0]["skill_ids"] == ("10", "11")
 
 
 def test_concurrent_offline_after_materialization_fails_items_and_keeps_asset() -> None:
