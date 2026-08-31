@@ -1072,6 +1072,28 @@ async def _dispatch(
     try:
         dto = TaskCallbackDataDTO.model_validate(_raw_obj)
     except Exception as exc:
+        # A syntactically valid JSON object that carries no callback-shaped
+        # fields is an unrelated probe/notification. Acknowledge it without
+        # invoking authentication or advancing the task graph. Objects that
+        # claim to be callback payloads remain validation errors, preserving
+        # the endpoint contract for malformed callback requests.
+        callback_markers = {
+            "loop_task_id",
+            "workflow_type",
+            "result",
+            "task_id",
+            "workflow_source",
+            "workflow_id",
+            "workflow_instance_id",
+            "node_id",
+            "status",
+            "is_success",
+            "output",
+            "failed_info",
+            "acceptance_result",
+        }
+        if _raw_obj and not any(key in _raw_obj for key in callback_markers):
+            return envelope({"ok": True}, request, message="ignored")
         raise HTTPException(status_code=422, detail="invalid callback body") from exc
     auth.verify(
         source=(dto.workflow_type or "single_bot"),

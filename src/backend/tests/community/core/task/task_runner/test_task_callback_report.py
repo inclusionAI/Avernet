@@ -963,15 +963,14 @@ class TestDispatchSelectionAndAuth:
         assert repo.calls[0].invoker == "bcn"  # state-machine 走 translate_bcn+ingest
 
     def test_common_task_route_does_not_invoke_auth(self):
-        # common_task 分流不经 auth.verify(仅 claw_mind/bcn 鉴权);body 缺 node_id → 不路由 → 200 ack
-        body = {"task_id": "t1", "workflow_source": "claw_mind", "workflow_id": "w7",
-                "workflow_instance_id": "i1", "status": "DONE", "is_success": True,
-                "loop_task_id": "t1::c1", "output": {"r": 1}}
+        # common_task 分流不经 auth.verify(仅 claw_mind/bcn 鉴权)。
+        body = {"task_id": "t1", "node_id": "c1", "status": "DONE",
+                "output": {"r": 1}}
         svc, engine, _repo, _ri = _make_svc()
         auth = _RecordingAuth()
         _run(_dispatch_call(_req(body), svc, auth, InMemoryCallbackCorrelationRegistry()))
-        assert auth.sources == []  # common_task/未路由 均不鉴权(非 claw_mind/bcn)
-        assert len(engine.reports) == 0
+        assert auth.sources == []
+        assert len(engine.reports) == 1
 
     def test_callback_report_never_calls_start_run(self, monkeypatch):
         # /callback/report 固定 disposition="result";所有形态均不应触发 start_run。
