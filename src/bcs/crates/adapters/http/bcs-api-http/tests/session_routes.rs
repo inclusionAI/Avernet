@@ -600,6 +600,8 @@ fn session_summary() -> SessionSummary {
         status: SessionStatus::Running,
         title: Some("Planning".into()),
         participant_count: Some(1),
+        caller_principal: None,
+        created_by: None,
         created_at: 1,
         updated_at: 2,
         collected: None,

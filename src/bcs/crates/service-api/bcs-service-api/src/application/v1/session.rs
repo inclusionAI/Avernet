@@ -40,6 +40,12 @@ pub struct SessionSummary {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub participant_count: Option<usize>,
+    /// Stable identity of the session creator (e.g. `svc-key:{sha256_hex[:16]}`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caller_principal: Option<String>,
+    /// Actor id of the session creator, when recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
     /// Whether the view actor (`view_bot_id`) has collected this session.
