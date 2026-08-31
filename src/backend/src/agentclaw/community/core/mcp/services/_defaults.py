@@ -185,11 +185,28 @@ _DEFAULT_CLI_RESOLVER = _EngineCliDefaultsResolver()
 def _resolve_default_mcp_engine_bucket(
     engine_type: Optional[str],
     template_type: Any = None,
+    *,
+    ext_info: Optional[Mapping[str, Any]] = None,
 ) -> str:
     return resolve_default_capabilities_engine_type(
         engine_type,
         template_type,
+        _ext_template_config(ext_info),
     )
+
+
+def _ext_template_config(ext_info: Optional[Mapping[str, Any]]) -> Any:
+    """Pull the template snapshot out of an ``ext_info`` bag, if present.
+
+    ``ext_info`` callers (e.g. the create flow) pack ``{"template_config": ...}``;
+    its server-managed ``engine_form`` marker routes form-marked ``claude_code``
+    bots to the aicoding defaults bucket.
+    """
+    if isinstance(ext_info, Mapping):
+        template_config = ext_info.get("template_config")
+        if isinstance(template_config, Mapping):
+            return template_config
+    return None
 
 
 def _mcp_defaults_resolver(engine_bucket: str):
@@ -214,7 +231,8 @@ def get_default_mcp_servers(
     engine_bucket = _resolve_default_mcp_engine_bucket(
         engine_type,
         template_type,
-    ) 
+        ext_info=ext_info,
+    )
     resolver = _mcp_defaults_resolver(engine_bucket)
     servers = resolver.resolve(
         _DEFAULT_MCP_SERVERS_BY_ENGINE.get(engine_bucket, []),
@@ -310,6 +328,7 @@ def get_default_cli_items(
     key = resolve_default_capabilities_engine_type(
         engine_type,
         template_type,
+        _ext_template_config(ext_info),
     )
     resolver = _cli_defaults_resolver(key)
     return resolver.resolve(

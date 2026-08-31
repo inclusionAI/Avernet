@@ -510,7 +510,7 @@
             "type": "string"
           },
           "engine": {
-            "description": "Engine that powers the bot, fixed at creation. The valid set is deployment-configured — read it from the engine group's available-engines endpoint; an unlisted engine is refused (400).",
+            "description": "Engine that powers the bot, fixed at creation. The valid set is deployment-configured — read it from the engine group's available-engines endpoint; an unlisted engine is refused (400). Internal implementation engines (e.g. 'aicoding', the internal runtime behind 'claude_code') are not accepted; runtime forms travel on the template, not the engine.",
             "title": "Engine",
             "type": "string"
           },
@@ -545,7 +545,7 @@
                 "type": "null"
               }
             ],
-            "description": "Server-projected template snapshot (display-safe subset; secrets never returned). Null without a template.",
+            "description": "Server-projected template snapshot (display-safe subset; secrets never returned). Null without a template. Includes the server-managed 'engine_form' marker for bots whose runtime form differs from the engine (e.g. engine_form='aicoding').",
             "title": "Template Config"
           },
           "template_type": {
@@ -836,7 +836,7 @@
             "type": "string"
           },
           "engine": {
-            "description": "Engine that powers the bot, fixed at creation. The valid set is deployment-configured — read it from the engine group's available-engines endpoint; an unlisted engine is refused (400).",
+            "description": "Engine that powers the bot, fixed at creation. The valid set is deployment-configured — read it from the engine group's available-engines endpoint; an unlisted engine is refused (400). Internal implementation engines (e.g. 'aicoding', the internal runtime behind 'claude_code') are not accepted; runtime forms travel on the template, not the engine.",
             "title": "Engine",
             "type": "string"
           },
@@ -1306,7 +1306,7 @@
                 "type": "null"
               }
             ],
-            "description": "Server-projected template snapshot (display-safe subset; secrets never returned). Null without a template.",
+            "description": "Server-projected template snapshot (display-safe subset; secrets never returned). Null without a template. Includes the server-managed 'engine_form' marker for bots whose runtime form differs from the engine (e.g. engine_form='aicoding').",
             "title": "Template Config"
           },
           "template_type": {

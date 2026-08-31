@@ -718,9 +718,13 @@ class BotService(BotServiceProtocol):
 
         active_engine = normalize_engine_type(bot.get("active_engine"), default="")
         template_type = bot.get("template_type")
+        template_config = bot.get("template_config")
         engine_bucket = resolve_baas_engine_bucket(
             engine_type=active_engine,
             template_type=template_type,
+            template_config=template_config
+            if isinstance(template_config, dict)
+            else None,
         )
         if active_engine not in {"openclaw", "hermes", "claude_code"}:
             return source_provider

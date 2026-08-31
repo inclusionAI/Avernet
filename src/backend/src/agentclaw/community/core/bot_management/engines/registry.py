@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import Any, Mapping, Protocol, TYPE_CHECKING
 
 from .aicoding.strategy import (
     AICODING_ENGINE_TYPE,
@@ -37,7 +37,9 @@ class BaasEngineBucketResolver(Protocol):
 
     Return ``None`` when the resolver does not own the input.  The routing
     registry continues with the next resolver and eventually falls back to the
-    normalized engine type.
+    normalized engine type.  ``template_config`` is optional: call sites that
+    hold the bot's template snapshot pass it so the resolver can read the
+    server-managed ``engine_form`` marker.
     """
 
     def resolve_baas_engine_bucket(
@@ -45,6 +47,7 @@ class BaasEngineBucketResolver(Protocol):
         *,
         normalized_engine_type: str,
         template_type: str | None,
+        template_config: Mapping[str, Any] | None = None,
     ) -> str | None:
         """Return a bucket override, or ``None`` when not applicable."""
 
@@ -63,12 +66,14 @@ class BaasEngineBucketResolverRegistry:
         *,
         engine_type: str | None,
         template_type: str | None,
+        template_config: Mapping[str, Any] | None = None,
     ) -> str:
         normalized_engine = normalize_engine_type(engine_type)
         for resolver in self._resolvers:
             engine_bucket = resolver.resolve_baas_engine_bucket(
                 normalized_engine_type=normalized_engine,
                 template_type=template_type,
+                template_config=template_config,
             )
             if engine_bucket is not None:
                 return engine_bucket
@@ -83,6 +88,7 @@ class DefaultCapabilitiesEngineBucketResolver(Protocol):
         *,
         normalized_engine_type: str,
         template_type: str | None,
+        template_config: Mapping[str, Any] | None = None,
     ) -> str | None:
         """Return a bucket override, or ``None`` when not applicable."""
 
@@ -101,12 +107,14 @@ class DefaultCapabilitiesEngineBucketResolverRegistry:
         *,
         engine_type: str | None,
         template_type: str | None,
+        template_config: Mapping[str, Any] | None = None,
     ) -> str:
         normalized_engine = normalize_engine_type(engine_type)
         for resolver in self._resolvers:
             engine_bucket = resolver.resolve_default_capabilities_engine_bucket(
                 normalized_engine_type=normalized_engine,
                 template_type=template_type,
+                template_config=template_config,
             )
             if engine_bucket is not None:
                 return engine_bucket
@@ -283,16 +291,21 @@ def resolve_baas_engine_bucket(
     *,
     engine_type: str | None,
     template_type: str | None,
+    template_config: Mapping[str, Any] | None = None,
 ) -> str:
     """Resolve the engine bucket used by BaaS template/rollout routing.
 
     This public entrypoint delegates to the bucket resolver registry. Concrete
     engine-specific overrides are contributed by registered resolvers; unclaimed
-    inputs fall back to the normalized engine type.
+    inputs fall back to the normalized engine type. ``template_config``, when
+    the caller holds it, carries the server-managed ``engine_form`` marker so
+    resolvers can route form-marked ``claude_code`` bots to their runtime
+    bucket.
     """
     return get_baas_engine_bucket_resolver_registry().resolve(
         engine_type=engine_type,
         template_type=template_type,
+        template_config=template_config,
     )
 
 
@@ -321,11 +334,13 @@ def resolve_default_capabilities_engine_bucket(
     *,
     engine_type: str | None,
     template_type: str | None,
+    template_config: Mapping[str, Any] | None = None,
 ) -> str:
     """Resolve the engine bucket used by default MCP/CLI capability routing."""
     return get_default_capabilities_engine_bucket_resolver_registry().resolve(
         engine_type=engine_type,
         template_type=template_type,
+        template_config=template_config,
     )
 
 

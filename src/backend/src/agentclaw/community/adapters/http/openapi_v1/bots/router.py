@@ -89,6 +89,7 @@ from agentclaw.community.api.bot_startup_script_service import (
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
+    INTERNAL_ENGINE_TYPES,
     _get_engine_types,
 )
 from agentclaw.community.di import Injected
@@ -418,6 +419,19 @@ def _sync_passport_identity(
         raise PassportError(f"Passport metadata update failed: {exc}") from exc
 
 
+def _require_publicly_creatable_engine(engine: str) -> None:
+    """Refuse engines this surface cannot create on or switch to (→ 400).
+
+    Two gates in one: the value must be in the deployment-configured registry
+    (``_get_engine_types`` — the same check switch/engine completion uses), and
+    it must not be an internal implementation engine (``aicoding`` is the
+    internal runtime behind ``claude_code``, not a product engine; its form
+    travels on the template snapshot's ``engine_form`` marker instead).
+    """
+    if engine not in _get_engine_types() or engine in INTERNAL_ENGINE_TYPES:
+        raise UnsupportedEngineError(engine)
+
+
 def _engine_properties_from_body(
     body: BotCreate | BotAuthStatusPoll,
 ) -> dict[str, Any]:
@@ -495,8 +509,7 @@ async def create_bot(
     # below treats every non-teclaw value as ACRA, so an unknown engine would
     # otherwise sail through, allocate an id, apply for a Passport, and only fail
     # later at device provisioning — with those side effects already committed.
-    if body.engine not in _get_engine_types():
-        raise UnsupportedEngineError(body.engine)
+    _require_publicly_creatable_engine(body.engine)
     # The engine/cluster pair must obey the bijection (ANDC⟺teclaw, ACRA⟺else).
     validate_engine_cluster(body.engine, body.cluster_name)
     _require_service_capable_engine(body.bot_type, body.engine)
@@ -1110,8 +1123,7 @@ def _complete_auth_status(
     # configured registry, that bot's active_engine would be absent from its own
     # enabled-engine list. Runs before Passport is queried, so nothing external
     # happens for a request that cannot succeed.
-    if effective_engine not in _get_engine_types():
-        raise UnsupportedEngineError(effective_engine)
+    _require_publicly_creatable_engine(effective_engine)
     if cluster_name is not None:
         validate_engine_cluster(effective_engine, cluster_name)
     _require_service_capable_engine(bot_type or "personal", effective_engine)

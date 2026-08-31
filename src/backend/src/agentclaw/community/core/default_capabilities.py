@@ -7,7 +7,7 @@ than branching here on engine-name literals.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.bot_management.engines.registry import (
@@ -40,21 +40,32 @@ def normalize_template_type(template_type: Any) -> str:
 def normalize_engine_type(
     engine_type: Any,
     template_type: Any = None,
+    template_config: Any = None,
     *,
     default: str = DEFAULT_ENGINE_TYPE,
 ) -> str:
-    """Normalize to the engine bucket used by default MCP/CLI capabilities."""
+    """Normalize to the engine bucket used by default MCP/CLI capabilities.
+
+    ``template_config``, when the caller holds it, carries the server-managed
+    ``engine_form`` marker so form-marked ``claude_code`` bots resolve to their
+    runtime bucket (legacy ``aicoding`` engine folded into ``claude_code``).
+    """
     normalized_engine = normalize_raw_engine_type(engine_type, default=default)
     normalized_template_type = normalize_template_type(template_type) or None
+    normalized_template_config = (
+        template_config if isinstance(template_config, Mapping) else None
+    )
     return resolve_default_capabilities_engine_bucket(
         engine_type=normalized_engine,
         template_type=normalized_template_type,
+        template_config=normalized_template_config,
     )
 
 
 def resolve_default_capabilities_engine_type(
     engine_type: Any,
     template_type: Any = None,
+    template_config: Any = None,
 ) -> str:
     """Resolve the engine bucket used by default MCP/CLI capability lists."""
-    return normalize_engine_type(engine_type, template_type)
+    return normalize_engine_type(engine_type, template_type, template_config)
