@@ -32,6 +32,20 @@ logger = get_logger()
 _RESPONSE_BODY_LOG_LIMIT = 16 * 1024
 
 
+def _is_successful_bcn_response(payload: dict[str, object] | None) -> bool:
+    """Accept the legacy and OpenAPI BCN success envelopes.
+
+    The legacy friend-connections route returns ``{"success": true, ...}``,
+    while the OpenAPI route returns the common envelope with ``code=20000``.
+    Both are valid responses for this callback during the route migration.
+    """
+    if payload is None:
+        return False
+    if payload.get("success") is True:
+        return True
+    return payload.get("code") == 20_000
+
+
 @dataclass(frozen=True)
 class WorkOrderCallbackCredential:
     """Caller credentials explicitly allowed across the Backend-to-BCN boundary."""
@@ -110,7 +124,7 @@ class FriendDecisionCallbackHandler:
         request_id = friend_request_id(biz_data)
         action = "accept" if decision is WorkOrderDecision.APPROVED else "reject"
         path = (
-            "/collaboration/friend-connections/requests/"
+            "/openapi/v1/collaboration/friend-connections/requests/"
             f"{quote(request_id, safe='')}/{action}"
         )
         body = (
@@ -120,6 +134,13 @@ class FriendDecisionCallbackHandler:
         )
         callback_headers = dict(credential.headers)
         lowered_headers = {key.lower(): value for key, value in callback_headers.items()}
+        has_principal = "x-avernet-principal" in lowered_headers
+        has_authorization = "authorization" in lowered_headers
+        logger.info(
+            "BCN callback auth headers: has_principal=%s has_authorization=%s",
+            has_principal,
+            has_authorization,
+        )
         logger.info(
             "friend work-order BCN callback request",
             extra={
@@ -129,8 +150,8 @@ class FriendDecisionCallbackHandler:
                 "action": action,
                 "callback_path": path,
                 "request_body": body,
-                "has_authorization": "authorization" in lowered_headers,
-                "has_x_avernet_principal": "x-avernet-principal" in lowered_headers,
+                "has_authorization": has_authorization,
+                "has_x_avernet_principal": has_principal,
                 "x_request_id": lowered_headers.get("x-request-id"),
                 "x_trace_id": lowered_headers.get("x-trace-id"),
             },
@@ -178,7 +199,7 @@ class FriendDecisionCallbackHandler:
                 },
             )
             response.raise_for_status()
-            if response_payload is None or response_payload.get("success") is not True:
+            if not _is_successful_bcn_response(response_payload):
                 raise ValueError("BCN callback did not report success")
         except Exception as exc:
             logger.warning(
