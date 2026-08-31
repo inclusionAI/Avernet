@@ -51,6 +51,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodePatch,
     TaskNodeQueryCriteria,
 )
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 
@@ -1098,17 +1099,41 @@ class ExecutionEngine:
                     extend_props_patch={"bbs_owner": rnd_bot_id, "bbs_handed_to": rnd_bot_id},
                 )
             )
-        # ② start_run([node]) 走(bbs 模式 dispatch no-op 取派发态),不真发消息
+        # ② 真发研发 bot:喂入不可实现任务 → 拿真实 run_id+session_id 落 bbs 节点 extend_props,
+        #    dashboard 可点击进入研发 bot 会话;保留 run_mode=bbs(不变 single_bot)。
+        #    无 bot 传输(stub/纯内核路径)时退化为原 no-op(ok=True、session_id=None),不破坏契约测试。
+        run_id: str | None = None
+        session_id: str | None = None
         ok = False
-        try:
-            results = await self._runner.start_run([node])
-            ok = bool(results[0]) if results else False
-        except Exception as ex:  # noqa: BLE001
-            logger.warning(
-                "[task][static-plan] bbs_handoff start_run 异常 task=%s node=%s rnd_bot=%s: %s",
-                task_id, node_id, rnd_bot_id, ex,
-            )
-            ok = False
+        if self._bot is not None and hasattr(self._bot, "send_message"):
+            try:
+                _lines = []
+                if isinstance(items, list):
+                    for _it in items:
+                        if isinstance(_it, dict):
+                            _lines.append(f"- {_it.get('title', '')}: {_it.get('reason', '')}")
+                _msg = "不可实现任务转交(来自风险评估),请评估并尝试实现:" + (" | ".join(_lines) if _lines else "(无)")
+                _owner = node.run_info.extend_props.get("assignee_owner_id")
+                _openapi_bot = compose_bot_identity(rnd_bot_id, _owner)
+                sent = await self._bot.send_message(
+                    bot_id=_openapi_bot,
+                    message=_msg,
+                    metadata={"biz_task_id": task_id},
+                )
+                run_id = getattr(sent, "run_id", None)
+                session_id = getattr(sent, "session_id", None)
+                ok = True
+            except Exception as ex:  # noqa: BLE001
+                logger.warning(
+                    "[task][static-plan] bbs_handoff send 异常 task=%s node=%s rnd_bot=%s: %s",
+                    task_id, node_id, rnd_bot_id, ex,
+                )
+                run_id = None
+                session_id = None
+                ok = False
+        else:
+            # 无 bot 传输(stub 路径):保持原 no-op,节点仍靠 80s 兜底收敛
+            ok = True
         if not ok:
             with self._lock_for(task_id):
                 self._graph.update_task_node_info(
@@ -1117,25 +1142,32 @@ class ExecutionEngine:
                         run_mode="bbs", assignee="",
                         extend_props_patch={
                             "dispatching": None,
-                            "dispatch_error": "bbs_handoff_start_run_failed",
+                            "dispatch_error": "bbs_handoff_send_failed",
                             "bbs_status": "post_failed",
                         },
                     )
                 )
             return
-        # ② 被接成功:翻 RUNNING + bbs_status=claimed(此时 dashboard 展示研发 bot)
+        # ③ 被接成功:翻 RUNNING + bbs_status=claimed_by_rnd(此时 dashboard 展示研发 bot 可点);
+        #    session_id/run_id 同段落入 extend_props 供 dashboard 点击导航进研发 bot 会话。
+        _succ = {"dispatching": None, "bbs_status": "claimed_by_rnd"}
+        if session_id is not None:
+            _succ["session_id"] = session_id
+        if run_id is not None:
+            _succ["run_id"] = run_id
         with self._lock_for(task_id):
             self._graph.update_task_node_info(
                 TaskNodePatch(
                     task_id=task_id, node_id=node_id,
                     status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
-                    extend_props_patch={"dispatching": None, "bbs_status": "claimed_by_rnd"},
+                    extend_props_patch=_succ,
                 )
             )
         logger.info(
-            "[task][static-plan] bbs_handoff claimed task=%s node=%s rnd_bot=%s items=%s",
+            "[task][static-plan] bbs_handoff claimed task=%s node=%s rnd_bot=%s items=%s run_id=%s session_id=%s",
             task_id, node_id, rnd_bot_id,
             items if isinstance(items, list) else type(items).__name__,
+            run_id, session_id,
         )
         # 交接完成:固定流程 bbs_handoff 始终调度兜底上报——真实 poller 在 timeout 内闭环则自跳过;
         # 否则超时后 mock PASS→DONE,避免旁路节点长挂致整个固定流程永不终态。
