@@ -225,29 +225,18 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "DELETE",
         "/openapi/v1/bots/{bot_id}/config-manifest",
     ): Check(PermissionLevel.ADMIN),
-    # Applying is a different act from writing the document, and takes its own
-    # bar rather than inheriting the group's (W10's spec, *Apply Declares Its
-    # Own Bars*). Decided on apply's own shape, NOT derived as a maximum over
-    # the categories it touches: a derived bar would need recomputing every time
-    # a category moved, and a bar nobody recomputes is a bar that rots.
-    #
-    # Check(OWNER) — applying rewrites a bot's whole configuration: its MCP
-    # servers, startup script, and (from W5/W6) its skills, identity files and
-    # resources. That is an owner-level act on its own terms. Three of the six
-    # categories are owner-only through their own endpoints, and a manifest must
-    # not become the way around them — which the dominance test in
-    # ``test_config_manifest_apply_bars.py`` holds, per category, forever.
-    #
-    # EDIT_LOCK — a broad mutation, like every comparable one here (channel
-    # writes, lifecycle/advance, skill-set activate). Applying over another
-    # collaborator's in-flight edits is the exact collision the lock exists to
-    # stop. Bots with no collaborators pass without one.
+    # Apply takes its own bar rather than the document group's: it rewrites a
+    # bot's whole configuration, which is owner-level on its own terms, and it
+    # is a broad mutation so it carries the lock. Decided on apply's shape, not
+    # derived from the categories it touches. Three of the six are owner-only
+    # through their own endpoints and a manifest must not be the way around
+    # them — held per category by the dominance test in
+    # ``test_config_manifest_apply_bars.py``, which is also where the full
+    # reasoning lives (W10's spec, *Apply Declares Its Own Bars*).
     ("POST", "/openapi/v1/bots/{bot_id}/config-manifest/apply"):
         Check(PermissionLevel.OWNER, EDIT_LOCK),
-    # The two reads sit at MEMBER beside GET .../config-manifest, which the same
-    # argument covers: reading how a bot is configured is part of working on it.
-    # A report carries no secret — credentials appear by name only, and in this
-    # release it has no source section at all.
+    # The reads sit at MEMBER beside GET .../config-manifest: reading how a bot
+    # is configured is part of working on it, and a report carries no secret.
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}",

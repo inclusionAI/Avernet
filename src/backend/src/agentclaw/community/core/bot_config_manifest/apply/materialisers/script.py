@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
-from agentclaw.community.api.bot_startup_script_service import (
+from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
     BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext

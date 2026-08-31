@@ -376,13 +376,18 @@ consumed_by:
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base
+  - agentclaw.community.core.bot_config_surface.coords  # W10's seam: the coordinate type
+  - agentclaw.community.core.bot_config_surface.table  # W10's seam: imported lazily — it indexes six core packages, one of which reaches the DI container
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_management.token_vault
+  - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults
   - agentclaw.community.core.repository
   - agentclaw.community.core.services.identity
+  - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the `mcp` materialiser's per-bot activation writes
   - agentclaw.community.core.workspace.constants
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database
+  - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils
 ```
