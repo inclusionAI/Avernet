@@ -26,6 +26,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
 )
+from agentclaw.community.api.service_edit_lock_service import (
+    ServiceEditLockServiceProtocol,
+)
 from agentclaw.community.di import Injected
 
 from .schemas import (
@@ -290,11 +293,11 @@ async def get_edit_lock(
     request: Request,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
-    facade: ServicePublicationFacadeProtocol = Injected(
-        ServicePublicationFacadeProtocol
+    locks: ServiceEditLockServiceProtocol = Injected(
+        ServiceEditLockServiceProtocol
     ),
 ) -> Envelope[EditLock]:
-    info = facade.get_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
+    info = locks.get_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
     return envelope(_lock_payload(info), request)
 
 
@@ -305,12 +308,12 @@ async def acquire_edit_lock(
     request: Request,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
-    facade: ServicePublicationFacadeProtocol = Injected(
-        ServicePublicationFacadeProtocol
+    locks: ServiceEditLockServiceProtocol = Injected(
+        ServiceEditLockServiceProtocol
     ),
 ) -> Envelope[EditLock]:
-    lock = facade.acquire_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
-    info = facade.get_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
+    lock = locks.acquire_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
+    info = locks.get_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
     return envelope(_lock_payload(info, acquired=lock is not None), request)
 
 
@@ -321,11 +324,11 @@ async def release_edit_lock(
     request: Request,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
-    facade: ServicePublicationFacadeProtocol = Injected(
-        ServicePublicationFacadeProtocol
+    locks: ServiceEditLockServiceProtocol = Injected(
+        ServiceEditLockServiceProtocol
     ),
 ) -> Envelope[EditLockRelease]:
-    released = facade.release_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
+    released = locks.release_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
     return envelope(EditLockRelease(released=released), request)
 
 
@@ -336,10 +339,10 @@ async def steal_edit_lock(
     request: Request,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
-    facade: ServicePublicationFacadeProtocol = Injected(
-        ServicePublicationFacadeProtocol
+    locks: ServiceEditLockServiceProtocol = Injected(
+        ServiceEditLockServiceProtocol
     ),
 ) -> Envelope[EditLock]:
-    lock = facade.steal_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
-    info = facade.get_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
+    lock = locks.steal_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
+    info = locks.get_lock(bot_id, actor_id=actor_id, owner_id=owner_id)
     return envelope(_lock_payload(info, acquired=lock is not None), request)

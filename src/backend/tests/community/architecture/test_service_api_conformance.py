@@ -116,6 +116,9 @@ from agentclaw.community.api.repository_catalog_service import (
 from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
 )
+from agentclaw.community.api.service_edit_lock_service import (
+    ServiceEditLockServiceProtocol,
+)
 from agentclaw.community.api.service_artifact_lineage import (
     ServiceArtifactLineageReaderProtocol,
 )
@@ -230,6 +233,9 @@ from agentclaw.community.core.market_favorites.services import MarketFavoriteSer
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
+from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
+    ServiceEditLockService,
+)
 from agentclaw.community.core.service_bot.services.service_artifact_lineage_reader import (
     ServiceArtifactLineageReader,
 )
@@ -282,6 +288,7 @@ _PAIRS = [
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),
     (ServicePublicationFacadeProtocol, ServicePublicationFacade),
+    (ServiceEditLockServiceProtocol, ServiceEditLockService),
     (ServiceArtifactLineageReaderProtocol, ServiceArtifactLineageReader),
     (SpaceSkillOfflineServiceProtocol, SpaceSkillOfflineService),
 ]
