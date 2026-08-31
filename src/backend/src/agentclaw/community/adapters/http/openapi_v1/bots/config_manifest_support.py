@@ -20,7 +20,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
 
-from .config_manifest_apply_schemas import (
+from .schemas_config_manifest_apply import (
     ConfigManifestApply,
     ConfigManifestApplyCategory,
     ConfigManifestApplyEntry,

@@ -46,7 +46,7 @@ from .config_manifest_support import (
     empty_apply_payload,
     manifest_target,
 )
-from .config_manifest_apply_schemas import (
+from .schemas_config_manifest_apply import (
     ConfigManifestApply,
     ConfigManifestApplyAccepted,
 )

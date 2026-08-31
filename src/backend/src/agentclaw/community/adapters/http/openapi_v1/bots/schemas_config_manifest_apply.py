@@ -1,5 +1,9 @@
 """Response shapes for applying a bot's configuration manifest (W4, #1472).
 
+Named ``schemas_*`` rather than ``*_schemas``: that prefix is what the adapter
+layer's "this file is not a router" exemption matches, and it is the
+convention ``service_bot/schemas_publish.py`` already follows.
+
 Split out of ``bots/schemas.py`` rather than added to it: the apply report is
 four nested models with a worked example, and the module it came from is one
 file away from the size cap. Their own file keeps the report's shape readable
