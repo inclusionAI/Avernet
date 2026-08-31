@@ -180,6 +180,7 @@ from .collaboration_bots import public_router as collaboration_public_router
 from .task import task_router
 from .bots.engine_config import router as engine_config_router
 from .bots.config_manifest import router as config_manifest_router
+from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
 from .channels import router as channels_router
@@ -342,6 +343,7 @@ _ADDRESSED_BOT_SUBGROUPS = [
     # write), so it may address a shared bot and takes the addressed-owner
     # grant rather than the own-bot one.
     config_manifest_router,
+    config_manifest_apply_router,
     # Bot grants lend the delegating user's live Bot permissions. Editors and
     # render screens therefore use the same addressed-owner grant boundary as
     # the other shared-Bot configuration groups; their services still enforce

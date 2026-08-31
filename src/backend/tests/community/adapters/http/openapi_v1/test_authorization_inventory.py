@@ -510,6 +510,7 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
+        ("POST", "/openapi/v1/bots/{bot_id}/config-manifest/apply"),
         ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),

@@ -76,10 +76,24 @@ from agentclaw.community.api.bot_config_manifest_service import (
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
 )
+from agentclaw.community.api.bot_config_manifest_apply_service import (
+    BotConfigManifestApplyServiceProtocol,
+)
+from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
+from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
+    DirectActivationServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
+    BotConfigManifestApplyService,
+)
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManifestApplyLockRepositoryProtocol,
+    BotConfigManifestApplyRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -190,6 +204,10 @@ from agentclaw.community.core.bot_config_manifest.credentials.service import (
     SourceCredentialService,
 )
 
+from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
+    BotConfigManifestApplyLockRepository,
+    BotConfigManifestApplyRepository,
+)
 from agentclaw.community.core.repository.implementations.bot.render_screen import (
     RenderScreenRepository as UnifiedRenderScreenRepository,
 )
@@ -307,6 +325,30 @@ class BotManagementModule(Module):
         binder.bind(
             BotConfigManifestServiceProtocol,
             to=BotConfigManifestService,
+            scope=singleton,
+        )
+        # The apply engine's two tables, and the service over them. Bound here
+        # rather than in a module of their own for the reason the manifest
+        # service above is: they are the same feature's storage, and the apply
+        # service depends on the document service directly.
+        binder.bind(
+            BotConfigManifestApplyRepositoryProtocol,
+            to=BotConfigManifestApplyRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            BotConfigManifestApplyLockRepositoryProtocol,
+            to=BotConfigManifestApplyLockRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            BotConfigManifestApplyService,
+            to=BotConfigManifestApplyService,
+            scope=singleton,
+        )
+        binder.bind(
+            BotConfigManifestApplyServiceProtocol,
+            to=BotConfigManifestApplyService,
             scope=singleton,
         )
         # TemplateService: constructed with injected TemplateRepository.
@@ -589,6 +631,45 @@ class BotManagementModule(Module):
         where the concrete class and the narrow contract meet.
         """
         return lambda: injector.get(TeclawProvisionService)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_script_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], BotStartupScriptServiceProtocol]:
+        """The startup-script service the ``script`` materialiser writes through.
+
+        Lazy, and the three factories below share one reason: the apply service
+        is constructed inside this module's graph, while the services its
+        materialisers write through reach back through the bot-configuration
+        graph. Resolving them at call time keeps that from closing a cycle at
+        construction — the same shape ``teclaw_engine_test_factory`` above uses.
+        """
+        return lambda: injector.get(BotStartupScriptServiceProtocol)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_activation_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], DirectActivationServiceProtocol]:
+        """The per-bot activation service the ``mcp`` materialiser converges through."""
+        return lambda: injector.get(DirectActivationServiceProtocol)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_mcp_auth_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], MCPAuthServiceProtocol]:
+        """The permission service the ``mcp`` materialiser asks before writing.
+
+        The *same* service ``DirectActivationService`` consults, so apply's
+        up-front check cannot give a different answer from the one the write
+        would get.
+        """
+        return lambda: injector.get(MCPAuthServiceProtocol)
 
     @singleton
     @provider

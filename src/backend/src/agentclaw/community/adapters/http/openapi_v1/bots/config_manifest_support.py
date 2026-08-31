@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Optional, Sequence
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+from agentclaw.community.api.bot_config_manifest_apply_service import ApplyReport
 from agentclaw.community.api.bot_config_manifest_service import ManifestCapabilities
 from agentclaw.community.core.bot_config_manifest.repository.models import (
     BotConfigManifestRecord,
@@ -21,6 +22,9 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 
 from .schemas import (
     ConfigManifest,
+    ConfigManifestApply,
+    ConfigManifestApplyCategory,
+    ConfigManifestApplyEntry,
     ConfigManifestCapabilities,
     ManifestConstruct,
 )
@@ -92,4 +96,50 @@ def capabilities_payload(
         # pair of plain strings. Reading it here rather than unpacking the enum
         # keeps one definition of how a construct serialises.
         constructs=[ManifestConstruct(**item.as_dict()) for item in capabilities.constructs],
+    )
+
+
+def apply_payload(report: ApplyReport) -> ConfigManifestApply:
+    """Shape one apply's report as the response model.
+
+    Reads ``as_payload`` rather than the report's fields directly: that method
+    is the one place the wire shape is defined, and it names every field
+    explicitly — which is what makes it structurally unable to emit a credential
+    value. Rebuilding the shape here would be a second definition, and the one
+    that drifted would be the one nobody was reading.
+    """
+    payload = report.as_payload()
+    return ConfigManifestApply(
+        apply_id=payload["apply_id"],
+        bot_id=payload["bot_id"],
+        trigger=payload["trigger"],
+        result=payload["result"],
+        started_at=report.started_at,
+        finished_at=report.finished_at,
+        sources=payload["sources"],
+        categories=[
+            ConfigManifestApplyCategory(**category)
+            for category in payload["categories"]
+        ],
+        entries=[ConfigManifestApplyEntry(**entry) for entry in payload["entries"]],
+    )
+
+
+def empty_apply_payload(bot_id: str) -> ConfigManifestApply:
+    """What a bot with no apply reads as.
+
+    An empty report, not a 404 — the same rule that makes a bot with no manifest
+    read as an empty document: a 404 would make "has never applied"
+    indistinguishable from "no such bot".
+    """
+    return ConfigManifestApply(
+        apply_id="",
+        bot_id=bot_id,
+        trigger="",
+        result="",
+        started_at=None,
+        finished_at=None,
+        sources=[],
+        categories=[],
+        entries=[],
     )

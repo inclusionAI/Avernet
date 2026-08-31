@@ -232,90 +232,90 @@ than something to work around:
 
 ## Group C — The service and the public surface
 
-## [ ] Task 9: The Service API contract and its implementation
+## [x] Task 9: The Service API contract and its implementation
 - **Files:** `.../core/bot_config_manifest/bot_config_manifest_apply_service_protocol.py`,
   `.../core/bot_config_manifest/services/config_manifest_apply_service.py`,
   `.../api/bot_config_manifest_apply_service.py`,
   `.../di/modules/bot_management_module.py`,
   `src/backend/tests/community/architecture/test_service_api_conformance.py`
 - **Done when:**
-  - [ ] A **second** contract, not more methods on the document service — the
+  - [x] A **second** contract, not more methods on the document service — the
         docstring gives Rule 9's reason and the different-bars reason.
-  - [ ] It exposes `start_apply(...)` (with `phases`), `dry_run(...)`,
+  - [x] It exposes `start_apply(...)` (with `phases`), `dry_run(...)`,
         `get_apply(...)` and `last_apply(...)`. `phases` is what lets W13 call
         the halves separately.
-  - [ ] **`start_apply` does not wait for the apply.** It takes the lock,
+  - [x] **`start_apply` does not wait for the apply.** It takes the lock,
         re-validates the stored document, records `RUNNING` with a fresh
         `apply_id`, starts the work and returns. A held lock or an invalid
         document raises **before** an id is minted — a caller never gets an id
         for an apply that did not start.
-  - [ ] The background thread is wrapped
+  - [x] The background thread is wrapped
         `threading.Thread(target=bind_current_avernet_tenant(fn), daemon=True)`,
         **inline at the construction site**, matching
         `bot_publish_service.py:1292`. Never as an `@decorator` on a
         module-level function: it captures at wrap-time, so a decorator captures
         at *import*, when there is no request, and binds the default tenant
         forever.
-  - [ ] A test proves the tenant survives into the thread — not by memory. A
+  - [x] A test proves the tenant survives into the thread — not by memory. A
         wrong tenant here substitutes the wrong `${BOT_TENANT}` **and** reads
         and writes the manifest tables under the wrong tenant: an isolation
         failure, not just a correctness one.
-  - [ ] The report reaches a terminal status in a `finally`, so a raising
+  - [x] The report reaches a terminal status in a `finally`, so a raising
         orchestrator still terminates it; a report left `RUNNING` by a killed
         process reads as `FAILED` once its lock is stale, derived at read time
         rather than by a second sweeper mechanism.
-  - [ ] Every member is `@abstractmethod` and the service inherits the Protocol.
-  - [ ] The `(Protocol, ConcreteService)` pair is registered in `_PAIRS`.
-  - [ ] Bound in `bot_management_module.py` beside the document service, with a
+  - [x] Every member is `@abstractmethod` and the service inherits the Protocol.
+  - [x] The `(Protocol, ConcreteService)` pair is registered in `_PAIRS`.
+  - [x] Bound in `bot_management_module.py` beside the document service, with a
         comment saying why it lives there.
-  - [ ] It re-validates the stored document before applying, and the docstring
+  - [x] It re-validates the stored document before applying, and the docstring
         says why that is not paranoia: capabilities resolve from the bot's
         engine, which can change after a document is accepted.
 - **Depends on:** Tasks 6, 7, 8
 
-## [ ] Task 10: The two routes
+## [x] Task 10: The three routes
 - **Files:** `.../adapters/http/openapi_v1/bots/config_manifest_apply.py`,
   `.../bots/schemas.py`, `.../openapi_v1/__init__.py`, `.../responses.py`
 - **Done when:**
-  - [ ] `POST …/config-manifest/apply` answers **202 with the `apply_id`**,
+  - [x] `POST …/config-manifest/apply` answers **202 with the `apply_id`**,
         having started the work rather than done it. It never blocks on device
         I/O.
-  - [ ] `dry_run=true` is a query parameter that **stays synchronous** and
+  - [x] `dry_run=true` is a query parameter that **stays synchronous** and
         returns the plan in the body, minting no id and writing no row.
-  - [ ] `GET …/config-manifest/applies/{apply_id}` returns that apply's report,
+  - [x] `GET …/config-manifest/applies/{apply_id}` returns that apply's report,
         `RUNNING` or terminal. Its query carries the bot key alongside the id,
         so an id from another bot resolves to nothing — the id is not the
         authorization.
-  - [ ] `GET …/config-manifest/last-apply` returns the newest report, and a bot
+  - [x] `GET …/config-manifest/last-apply` returns the newest report, and a bot
         never applied answers with an **empty report, not a 404** — the rule the
         manifest's own `GET` already sets.
-  - [ ] A bot with **no stored manifest** applies nothing and reports nothing
+  - [x] A bot with **no stored manifest** applies nothing and reports nothing
         applied, without erroring.
-  - [ ] `ManifestApplyInProgressError` maps to 409 in both the status map and
+  - [x] `ManifestApplyInProgressError` maps to 409 in both the status map and
         the biz-code map; a failed entry or an aborted category is a **200 with
         a report**, never an error status.
-  - [ ] Routes carry no domain policy: they resolve the bot, call the service,
+  - [x] Routes carry no domain policy: they resolve the bot, call the service,
         shape the result. Rule 7.
-  - [ ] Mounted in `openapi_v1/__init__.py` beside `config_manifest_router`.
+  - [x] Mounted in `openapi_v1/__init__.py` beside `config_manifest_router`.
 - **Depends on:** Task 9
 
-## [ ] Task 11: The bars and the dominance test
+## [x] Task 11: The bars and the dominance test
 - **Files:** `.../openapi_v1/authorization.py`, `.../openapi_v1/admission.py`,
   `src/backend/tests/community/adapters/http/openapi_v1/test_config_manifest_apply_bars.py`
 - **Done when:**
-  - [ ] `POST …/apply` → `GRANT_CHECKED_ADDRESSED_BOT` +
+  - [x] `POST …/apply` → `GRANT_CHECKED_ADDRESSED_BOT` +
         `Check(PermissionLevel.OWNER, EDIT_LOCK)`; `GET …/last-apply` and
         `GET …/applies/{apply_id}` → `GRANT_CHECKED_ADDRESSED_BOT` +
         `Check(PermissionLevel.MEMBER)`.
-  - [ ] The rows carry comments giving W10's reasoning: the bar follows apply's
+  - [x] The rows carry comments giving W10's reasoning: the bar follows apply's
         own shape, not a maximum over categories; the admission mode follows
         from `Check`, not from taste.
-  - [ ] The **dominance test** iterates `MATERIALISERS`, so a category W5
+  - [x] The **dominance test** iterates `MATERIALISERS`, so a category W5
         registers enters it automatically.
-  - [ ] It compares the **admitted set**, not raw enum ordering, and carries the
+  - [x] It compares the **admitted set**, not raw enum ordering, and carries the
         `Check(OWNER)` ≡ `OWNER_SCOPED` equivalence as a comment so the next
         reader does not re-derive it.
-  - [ ] `test_admission_inventory.py` and `test_authorization_inventory.py` pass
+  - [x] `test_admission_inventory.py` and `test_authorization_inventory.py` pass
         with the new rows and are **not edited**.
 - **Depends on:** Task 10
 
