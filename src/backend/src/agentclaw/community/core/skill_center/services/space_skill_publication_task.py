@@ -223,6 +223,7 @@ class SpaceSkillPublicationTaskHandler:
                 error_message="Publication prerequisites are incomplete",
                 env=env,
             )
+        stage = "draft_read"
         try:
             ref = DraftRevisionRef.from_locator(
                 tenant=self._tenant_provider(), env=env, locator=frozen_locator
@@ -237,7 +238,8 @@ class SpaceSkillPublicationTaskHandler:
                     env=env,
                 )
                 return Complete()
-            stage = self._stager.stage(
+            stage = "package_stage"
+            package_stage = self._stager.stage(
                 attempt_id=work.attempt.attempt_id,
                 tenant=self._tenant_provider(),
                 env=env,
@@ -245,10 +247,17 @@ class SpaceSkillPublicationTaskHandler:
             )
             return self._repository.mark_prepared(
                 attempt_id=work.attempt.attempt_id,
-                package_url=stage.package_url,
+                package_url=package_stage.package_url,
                 env=env,
             )
-        except Exception:
+        except Exception as exc:
+            self._log_failure(
+                operation="publication_prepare",
+                stage=stage,
+                work=work,
+                env=env,
+                failure_type=type(exc).__name__,
+            )
             return self._retry_or_available(
                 work,
                 kind=PublicationRecoveryKind.PREPARATION,
@@ -327,7 +336,15 @@ class SpaceSkillPublicationTaskHandler:
                     SkillCenterGatewayErrorCode.UNKNOWN_RESPONSE,
                     "SC status refers to another version",
                 )
-        except SkillCenterGatewayError:
+        except SkillCenterGatewayError as exc:
+            self._log_failure(
+                operation="publication_status",
+                stage="publish_status",
+                work=work,
+                env=env,
+                failure_type=type(exc).__name__,
+                gateway_error=exc,
+            )
             return self._unknown_or_available(work, env=env)
         if status.status is SkillCenterPublishState.PENDING:
             if self._expired(work):
@@ -408,7 +425,15 @@ class SpaceSkillPublicationTaskHandler:
                 env=env,
             )
             return self._materialize(work, env=env)
-        except SkillCenterGatewayError:
+        except SkillCenterGatewayError as exc:
+            self._log_failure(
+                operation="publication_status_or_version_discovery",
+                stage="status_or_version_discovery",
+                work=work,
+                env=env,
+                failure_type=type(exc).__name__,
+                gateway_error=exc,
+            )
             return self._retry_or_available(
                 work,
                 kind=PublicationRecoveryKind.SC_STATUS_CHECK,
@@ -446,7 +471,14 @@ class SpaceSkillPublicationTaskHandler:
                 self._delete_frozen_draft_best_effort(work, env=env)
             get_event_bus().publish(published)
             return Complete()
-        except SkillVersionMaterializationError:
+        except SkillVersionMaterializationError as exc:
+            self._log_failure(
+                operation="publication_materialization",
+                stage=exc.stage or "unknown",
+                work=work,
+                env=env,
+                failure_type=type(exc.__cause__ or exc).__name__,
+            )
             return self._retry_or_available(
                 work,
                 kind=PublicationRecoveryKind.MATERIALIZATION,
@@ -474,6 +506,51 @@ class SpaceSkillPublicationTaskHandler:
                 "failed to clean published Space Skill Draft revision",
                 extra={"attempt_id": work.attempt.attempt_id},
             )
+
+    @staticmethod
+    def _log_failure(
+        *,
+        operation: str,
+        stage: str,
+        work: PublicationWork,
+        env: str,
+        failure_type: str,
+        gateway_error: SkillCenterGatewayError | None = None,
+    ) -> None:
+        """Keep retry semantics unchanged while retaining safe upstream correlation facts."""
+        diagnostics = {
+            "operation": operation,
+            "stage": stage,
+            "env": env,
+            "attempt_id": work.attempt.attempt_id,
+            "space_id": work.space_id,
+            "skill_id": work.attempt.skill_id,
+            "skill_uuid": work.skill_uuid,
+            "team_id": work.sc_team_id,
+            "sc_version_number": work.attempt.sc_version_number,
+            "skill_version_id": work.attempt.skill_version_id,
+            "gateway_error_code": (
+                gateway_error.code.value if gateway_error is not None else None
+            ),
+            "upstream_code": (
+                gateway_error.upstream_code if gateway_error is not None else None
+            ),
+            "upstream_trace_id": (
+                gateway_error.trace_id if gateway_error is not None else None
+            ),
+            "failure_type": failure_type,
+        }
+        logger.warning(
+            "skill_center_publication_failed "
+            "operation=%(operation)s stage=%(stage)s env=%(env)s "
+            "attempt_id=%(attempt_id)s space_id=%(space_id)s "
+            "skill_id=%(skill_id)s skill_uuid=%(skill_uuid)s team_id=%(team_id)s "
+            "sc_version_number=%(sc_version_number)s skill_version_id=%(skill_version_id)s "
+            "gateway_error_code=%(gateway_error_code)s upstream_code=%(upstream_code)s "
+            "upstream_trace_id=%(upstream_trace_id)s failure_type=%(failure_type)s",
+            diagnostics,
+            extra=diagnostics,
+        )
 
     def _unknown_or_available(self, work: PublicationWork, *, env: str) -> TaskOutcome:
         available = self._expired(work)

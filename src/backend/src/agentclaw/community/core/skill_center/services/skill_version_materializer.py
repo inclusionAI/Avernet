@@ -6,9 +6,11 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 import hashlib
 import json
+import logging
 from pathlib import Path
 import tempfile
 from typing import Callable
+from urllib.parse import urlsplit
 
 from injector import inject
 
@@ -46,6 +48,25 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterReadScope,
 )
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
+
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_url_parts(url: object) -> tuple[str | None, str | None]:
+    """Return only host and path; signatures, query values, and userinfo stay secret."""
+    if not isinstance(url, str):
+        return None, None
+    parsed = urlsplit(url)
+    return parsed.hostname or None, parsed.path or None
+
+
+def _response_metadata(response: object) -> tuple[int | None, str | None]:
+    status = getattr(response, "status_code", None)
+    status_code = status if isinstance(status, int) else None
+    headers = getattr(response, "headers", None)
+    content_type = headers.get("content-type") if hasattr(headers, "get") else None
+    return status_code, content_type if isinstance(content_type, str) else None
 
 
 def _json_value(value: object) -> object:
@@ -182,6 +203,10 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         self, request: SkillVersionMaterializationRequest
     ) -> PublishedMaterializedSkillVersion:
         stage = "target_read"
+        target: MaterializingSkillVersion | None = None
+        download_host: str | None = None
+        download_path: str | None = None
+        response: object | None = None
         try:
             target = self._versions.get_materialization_target(
                 env=request.env,
@@ -220,6 +245,7 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 or not exact.download_url
             ):
                 raise ValueError("Skill Center returned a different exact Version")
+            download_host, download_path = _safe_url_parts(exact.download_url)
             expected_digest = exact.sha256.lower()
             stage = "package_download"
             response = self._http.get(exact.download_url, timeout=30.0)
@@ -289,11 +315,77 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 published_at=self._clock(),
             )
         except SkillVersionMaterializationError as exc:
+            self._log_failure(
+                request=request,
+                target=target,
+                stage=exc.stage or stage,
+                failure_type=type(exc.__cause__ or exc).__name__,
+                download_host=download_host,
+                download_path=download_path,
+                response=response,
+            )
             if exc.stage is not None:
                 raise
             raise SkillVersionMaterializationError(str(exc), stage=stage) from exc
         except Exception as exc:
+            self._log_failure(
+                request=request,
+                target=target,
+                stage=stage,
+                failure_type=type(exc).__name__,
+                download_host=download_host,
+                download_path=download_path,
+                response=response,
+            )
             raise SkillVersionMaterializationError(str(exc), stage=stage) from exc
+
+    @staticmethod
+    def _log_failure(
+        *,
+        request: SkillVersionMaterializationRequest,
+        target: MaterializingSkillVersion | None,
+        stage: str,
+        failure_type: str,
+        download_host: str | None,
+        download_path: str | None,
+        response: object | None,
+    ) -> None:
+        """Emit correlation facts without serializing exception text or download URLs."""
+        http_status, http_content_type = _response_metadata(response)
+        diagnostics = {
+            "operation": "skill_version_materialization",
+            "stage": stage,
+            "env": request.env,
+            "scope": request.scope.value,
+            "team_id": request.team_id,
+            "skill_id": request.skill_id,
+            "skill_version_id": request.skill_version_id,
+            "skill_uuid": target.skill_uuid if target is not None else None,
+            "skill_code": target.skill_code if target is not None else None,
+            "sc_version_number": (
+                target.sc_version_number if target is not None else None
+            ),
+            "sc_skill_id": target.sc_skill_id if target is not None else None,
+            "sc_version_id": target.sc_version_id if target is not None else None,
+            "download_host": download_host,
+            "download_path": download_path,
+            "http_status": http_status,
+            "http_content_type": http_content_type,
+            "failure_type": failure_type,
+        }
+        logger.warning(
+            "skill_center_materialization_failed "
+            "operation=%(operation)s stage=%(stage)s env=%(env)s scope=%(scope)s "
+            "team_id=%(team_id)s skill_id=%(skill_id)s "
+            "skill_version_id=%(skill_version_id)s skill_uuid=%(skill_uuid)s "
+            "skill_code=%(skill_code)s sc_version_number=%(sc_version_number)s "
+            "sc_skill_id=%(sc_skill_id)s sc_version_id=%(sc_version_id)s "
+            "download_host=%(download_host)s download_path=%(download_path)s "
+            "http_status=%(http_status)s http_content_type=%(http_content_type)s "
+            "failure_type=%(failure_type)s",
+            diagnostics,
+            extra=diagnostics,
+        )
 
     @staticmethod
     def _published_target(

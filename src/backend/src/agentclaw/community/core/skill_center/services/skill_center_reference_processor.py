@@ -253,8 +253,10 @@ class SkillCenterReferenceProcessor:
             # the failed Ready Gate without exposing credentials.
             cause = exc.__cause__
             logger.warning(
-                "[SkillCenterReference] materialization failure: reference_id=%s "
-                "skill_code=%s skill_version_id=%s failure_stage=%s cause_type=%s",
+                "[SkillCenterReference] materialization failure: operation=reference_materialization "
+                "env=%s scope=public reference_id=%s skill_code=%s skill_version_id=%s "
+                "failure_stage=%s cause_type=%s",
+                batch.env,
                 item.reference_id,
                 item.skill_code,
                 current.skill_version_id,
