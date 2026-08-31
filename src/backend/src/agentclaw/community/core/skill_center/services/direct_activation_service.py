@@ -33,11 +33,9 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
-    LocalSkillRuntimeSyncError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneNotFoundError,
-    SkillSetRuntimeReconcileError,
 )
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
@@ -142,13 +140,16 @@ class DirectActivationService(DirectActivationServiceProtocol):
             )
         except SkillSetControlPlaneNotFoundError as exc:
             raise LocalSkillNotFoundError() from exc
-        except SkillSetRuntimeReconcileError as exc:
-            raise LocalSkillRuntimeSyncError() from exc
         self._audit(
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
             action="skill_direct_activate" if active else "skill_direct_deactivate",
         )
-        return {**skill, "active": active, "changed": result["changed"]}
+        return {
+            **skill,
+            "active": active,
+            "changed": result["changed"],
+            "runtime_projection": result["runtime_projection"],
+        }
 
     def _resolve_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str

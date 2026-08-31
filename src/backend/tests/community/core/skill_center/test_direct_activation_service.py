@@ -15,8 +15,6 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
-    LocalSkillNotReadyError,
-    LocalSkillRuntimeSyncError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
@@ -402,21 +400,24 @@ async def test_skill_wire_masks_authorization_failure_as_not_found():
 
 
 @pytest.mark.asyncio
-async def test_skill_wire_translates_reconcile_failure_and_compensates():
+async def test_skill_wire_keeps_committed_desired_state_when_projection_fails():
     repository = _Repository()
     service = _service(repository=repository, runtime=_FailingRuntime())
 
-    with pytest.raises(LocalSkillRuntimeSyncError):
-        await service.activate_skill(
-            skill_id="7", bot_id="bot-1", owner_id="true-owner",
-            actor_id="true-owner",
-        )
+    result = await service.activate_skill(
+        skill_id="7", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner",
+    )
 
-    assert len(repository.restore_calls) == 1
+    assert repository.restore_calls == []
+    assert result["runtime_projection"]["status"] == "PENDING"
+    assert result["runtime_projection"]["issues"][0]["code"] == (
+        "RUNTIME_PROJECTION_UNAVAILABLE"
+    )
 
 
 @pytest.mark.asyncio
-async def test_a_not_ready_bot_refuses_before_any_write():
+async def test_a_not_ready_bot_commits_and_returns_pending_projection():
     class _PendingBots(_Bots):
         def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict | None:
             bot = super().get_by_id_and_owner(bot_id, owner_id)
@@ -429,12 +430,19 @@ async def test_a_not_ready_bot_refuses_before_any_write():
         _PlatformDefaultMcpPolicy(),
     )
 
-    with pytest.raises(LocalSkillNotReadyError):
-        await service.activate_skill(
-            skill_id="7", bot_id="bot-1", owner_id="true-owner",
-            actor_id="true-owner",
-        )
-    assert repository.install_skill_calls == []
+    result = await service.activate_skill(
+        skill_id="7", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner",
+    )
+    assert len(repository.install_skill_calls) == 1
+    assert result["runtime_projection"] == {
+        "status": "PENDING",
+        "issues": [{
+            "code": "BOT_NOT_READY",
+            "retryable": True,
+            "suggested_action": "Wait for the Bot to become ready.",
+        }],
+    }
 
 
 @pytest.mark.asyncio

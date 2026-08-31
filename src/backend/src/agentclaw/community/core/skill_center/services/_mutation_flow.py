@@ -19,10 +19,6 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
 )
-from agentclaw.community.core.skill_center.errors import (
-    LocalSkillNotReadyError,
-    SkillSetRuntimeReconcileError,
-)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
     ProjectionScope,
@@ -82,11 +78,12 @@ def mcp_release_scope(result: DesiredStateMutation) -> ProjectionScope:
 
 
 class MutationProjectionFlow:
-    """Apply one desired-state mutation and synchronously project the runtime.
+    """Commit desired state, then make a best-effort runtime projection.
 
-    On projection failure the mutation is compensated: desired state is
-    restored from the mutation's snapshot and the runtime is counter-projected
-    before ``SkillSetRuntimeReconcileError`` surfaces.
+    Runtime is an observed delivery result, not a prerequisite for a legal
+    capability mutation.  Repository/UoW failures still surface from
+    ``mutation`` unchanged; once it returns, a device failure must never
+    restore the committed Installation state.
     """
 
     def __init__(
@@ -137,42 +134,82 @@ class MutationProjectionFlow:
             raise ValueError("exactly one of scope / scope_from_result is required")
         if not runtime_required:
             result = mutation()
-            return {**result.item, "changed": result.changed, **result.details}
-        if not is_bot_ready(bot):
-            raise LocalSkillNotReadyError()
+            return {
+                **result.item,
+                "changed": result.changed,
+                **result.details,
+                "runtime_projection": {"status": "SKIPPED", "issues": []},
+            }
         owner_id = str(bot["owner_id"])
-        previous_mappings = await self._runtime.snapshot_skill_mappings(
-            bot_id=bot_id,
-            owner_id=owner_id,
-        )
+        previous_mappings: Sequence[PoolSkillMapping] = ()
+        snapshot_failed = False
+        try:
+            # Retirement is a diff between the committed pre- and post-mutation
+            # snapshots.  A failed runtime read is itself a projection issue,
+            # never a reason to reject the following desired-state write.
+            previous_mappings = await self._runtime.snapshot_skill_mappings(
+                bot_id=bot_id,
+                owner_id=owner_id,
+            )
+        except Exception:
+            snapshot_failed = True
         result = mutation()
         if skip_projection_when_unchanged and not result.changed:
-            return {**result.item, "changed": False, **result.details}
+            return {
+                **result.item,
+                "changed": False,
+                **result.details,
+                "runtime_projection": {"status": "SKIPPED", "issues": []},
+            }
+        if not is_bot_ready(bot):
+            return {
+                **result.item,
+                "changed": result.changed,
+                **result.details,
+                "runtime_projection": {
+                    "status": "PENDING",
+                    "issues": [{
+                        "code": "BOT_NOT_READY",
+                        "retryable": True,
+                        "suggested_action": "Wait for the Bot to become ready.",
+                    }],
+                },
+            }
+        if snapshot_failed:
+            return {
+                **result.item,
+                "changed": result.changed,
+                **result.details,
+                "runtime_projection": self._pending_projection(),
+            }
         effective_scope = (
             scope_from_result(result) if scope_from_result is not None else scope
         )
         assert effective_scope is not None  # guaranteed by the check above
-        await self._project_or_compensate(
+        projection = await self._project_best_effort(
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=engine_type,
-            mutation=result,
             previous_mappings=previous_mappings,
             scope=effective_scope,
         )
-        return {**result.item, "changed": result.changed, **result.details}
+        return {
+            **result.item,
+            "changed": result.changed,
+            **result.details,
+            "runtime_projection": projection,
+        }
 
-    async def _project_or_compensate(
+    async def _project_best_effort(
         self,
         *,
         bot_id: str,
         owner_id: str,
         engine_type: str | None,
-        mutation: DesiredStateMutation,
         previous_mappings: Sequence[PoolSkillMapping],
         scope: ProjectionScope,
-    ) -> None:
-        current_mappings: Sequence[PoolSkillMapping] = ()
+    ) -> dict[str, object]:
+        del engine_type
         try:
             current_mappings = await self._runtime.snapshot_skill_mappings(
                 bot_id=bot_id,
@@ -188,24 +225,19 @@ class MutationProjectionFlow:
                 scope=scope,
             )
         except Exception as exc:
-            self._repository.restore_desired_state(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                state=mutation.previous_state,
-                engine_type=engine_type,
-            )
-            try:
-                await self._runtime.project(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    retired_mappings=retired_logical_skill_mappings(
-                        list(current_mappings),
-                        list(previous_mappings),
-                    ),
-                    # Same swap as the mappings above: what the forward
-                    # projection claimed is what this one releases.
-                    scope=scope.inverted(),
-                )
-            except Exception as restore_error:
-                raise SkillSetRuntimeReconcileError() from restore_error
-            raise SkillSetRuntimeReconcileError() from exc
+            # Do not leak device addresses, paths, or backend exception text
+            # through the product wire.  Structured logs retain the exception
+            # chain while callers receive a stable, retryable outcome.
+            return self._pending_projection()
+        return {"status": "CONVERGED", "issues": []}
+
+    @staticmethod
+    def _pending_projection() -> dict[str, object]:
+        return {
+            "status": "PENDING",
+            "issues": [{
+                "code": "RUNTIME_PROJECTION_UNAVAILABLE",
+                "retryable": True,
+                "suggested_action": "Retry after the runtime is available.",
+            }],
+        }
