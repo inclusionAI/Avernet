@@ -1,7 +1,7 @@
 """Task 内部 HTTP adapter routes —— 不经 gateway spanner(内部 API)。
 
 任务模块内部前缀 ``/api/v1/collaboration/tasks``。本 router 承载:
-- 公开面镜像(run-template/execute/dashboard/list 副本):供内部调用方(bot / 服务间)免 gateway spanner 直调;
+- 公开面镜像(execute/dashboard/list 副本):供内部调用方(bot / 服务间)免 gateway spanner 直调;
   与 ``adapters/http/openapi_v1/task/`` 公开面同一 ``TaskServiceProtocol`` 委托,逻辑保持一致(改其一须同步)。
 - 回投 / BBS 接力 / 任务发现阶段:前端不直面的内部写口/阶段接口。
 前端公开面(经 gateway spanner)见 ``adapters/http/openapi_v1/task/``。本 router 只转协议,不持领域策略(Rule 22)。
@@ -135,7 +135,7 @@ def _validate_status_filter(status: str | None) -> None:
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
 
 
-# ===== 公开面镜像(run-template/execute/dashboard/list;内部 /api/v1 副本,不经 spanner)=====
+# ===== 公开面镜像(execute/dashboard/list;内部 /api/v1 副本,不经 spanner)=====
 # 与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol`` 委托,
 # 逻辑保持一致 —— 内部调用方(bot / 服务间)走此副本免 gateway spanner。改其一须同步。
 

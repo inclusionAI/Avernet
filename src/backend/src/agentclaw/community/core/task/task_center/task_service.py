@@ -56,44 +56,10 @@ from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 logger = logging.getLogger("task.service")
 
 
-def _parse_status_filter(status: str | None) -> list[Status] | None:
-    """逗号分隔的运行时态 ``status`` 字符串 -> ``list[Status]``。
-
-    供 list_tasks / list_tasks_page 把 HTTP query 的多值("PLANNING,RUNNING")解析为运行时态集合，
-    交给 repository 做 SQL IN 过滤。None/空串/全空段 -> None(不过滤)。
-    非法 token 理论上由 router 校验拦截(返回 400)，此处假设已校验，不二次校验。
-    """
-    if not status or not status.strip():
-        return None
-    parts = [t.strip().upper() for t in status.split(",") if t.strip()]
-    if not parts:
-        return None
-    return [Status(p) for p in parts]
-
-
-def _resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
-    """Resolve the BCS collaboration mode from task execution metadata."""
-    if has_yaml:
-        return "state_machine"
-    if group_kind in ("chat", "manager_worker"):
-        return group_kind
-    if group_kind is None:
-        return "manager_worker"
-    if group_kind == "state_machine":
-        raise ValueError("group_kind=state_machine 需要 yaml 定义")
-    raise ValueError(f"未知 group_kind: {group_kind!r}")
-
-
-# TaskService 结构化实现 api.task.task_service.TaskServiceProtocol —— 依 api/README 四层
-# 契约,core/ 不 import api/(见 test_service_api_conformance.py:core 服务不继承 api Protocol,
-# 由 @runtime_checkable 的 isinstance/issubclass 做结构化一致性校验)。此处置空基类即可。
-_STATIC_PLAN_TEMPLATES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    # 注册的静态模板路由表: (template_id, content keywords)
-    # 按 ``task_spec`` 的 title/instruction/objective 命中第一个匹配关键字的模板路由;调用方不感知
-    # ``static_plan_id``/``template_input`` 任何字段(不存在"调用方指定模板"的契约),``static_plan_id``
-    # 仅作 materialize 后写回 ``execution_config`` 的内部落库信号,供 engine 识别走预置 plan runtime。
-    # 新增模板在末尾追加条目即可。
-    ("okr-implementation", ("okr", "转化率", "双十一", "大促")),
+from agentclaw.community.core.task.task_center.task_service_support import (
+    STATIC_PLAN_TEMPLATES,
+    parse_status_filter,
+    resolve_coop_collab_mode,
 )
 
 
@@ -202,7 +168,7 @@ class TaskService:
         调用方不感知"模板/``template_input``"任何字段,也不存在"调用方指定模板"的契约——
         ``static_plan_id`` 仅作 materialize 后写回 ``execution_config`` 的内部落库信号,供 engine 识别走预置
         plan runtime,不是对外选择入口。今天仅 ``okr-implementation`` 一个模板;新增模板在模块顶部
-        ``_STATIC_PLAN_TEMPLATES`` 注册。
+        ``STATIC_PLAN_TEMPLATES`` 注册。
         """
         text_parts = (
             request.task_spec.metadata.title,
@@ -210,7 +176,7 @@ class TaskService:
             request.task_spec.goal.objective,
         )
         text = " ".join(p for p in text_parts if p).lower()
-        for template_id, keywords in _STATIC_PLAN_TEMPLATES:
+        for template_id, keywords in STATIC_PLAN_TEMPLATES:
             if any(keyword.lower() in text for keyword in keywords):
                 return template_id
         return None
@@ -453,7 +419,7 @@ class TaskService:
                 compose_bot_identity(request.owner_bot_id, request.owner_user_id),
                 *ec.get("participant_bot_ids", []),
             ],
-            collab_mode=_resolve_coop_collab_mode(has_yaml, ec.get("group_kind")),
+            collab_mode=resolve_coop_collab_mode(has_yaml, ec.get("group_kind")),
             group_name=ec.get("group_name", f"task-{task_id}"),
             members_info=[],
             extend_props={
@@ -896,7 +862,7 @@ class TaskService:
         """列持久化 ``task_info`` 记录,可选按状态(逗号分隔的运行时态集合)和 owner 过滤。"""
         if self._task_info_repo is None:
             return []
-        statuses = _parse_status_filter(status)
+        statuses = parse_status_filter(status)
         records = self._task_info_repo.list_records(statuses, owner_user_id=owner_user_id)
         return self._enrich_task_owner_display(records)
 
@@ -910,7 +876,7 @@ class TaskService:
         """列持久化 ``task_info`` 记录的一页(1-based),可选按状态(逗号分隔的运行时态集合)和 owner 过滤。"""
         if self._task_info_repo is None:
             return [], 0
-        statuses = _parse_status_filter(status)
+        statuses = parse_status_filter(status)
         records, total = self._task_info_repo.list_records_page(
             statuses, owner_user_id=owner_user_id, page=page, page_size=page_size
         )

@@ -1,6 +1,5 @@
-"""Task 公开 HTTP adapter routes —— 前端公开面(run-template/execute/dashboard/list;Rule 22:只转协议,不持领域策略)。
+"""Task 公开 HTTP adapter routes —— 前端公开面(execute/dashboard/list;Rule 22:只转协议,不持领域策略)。
 
-POST /openapi/v1/collaboration/tasks/run-template
 POST /openapi/v1/collaboration/tasks/execute   — 提交任务(delegate TaskServiceProtocol.execute)
 GET  /openapi/v1/collaboration/tasks/dashboard  — 查任务图(delegate TaskServiceProtocol.get_task_dashboard)
 GET  /openapi/v1/collaboration/tasks/list       — 列持久化任务记录(delegate TaskServiceProtocol.list_tasks)
