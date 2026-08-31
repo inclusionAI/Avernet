@@ -31,7 +31,20 @@ def covered_modules(flows: list[FlowCase]) -> set[str]:
 # and its bodies are exercised by the flows of the modules that consume it. It is
 # excluded here rather than added to SINGLEBOX_E2E_EXEMPT because exempt means
 # "not covered yet" — these ARE covered, just not nameable as a `covers` entry.
-_STRUCTURAL_NON_BUSINESS: frozenset[str] = frozenset({"repository"})
+#
+# ``bot_config_surface`` is the same shape and is here for the same reason. It is
+# an index: it names the checks each bot-config category enforces, every one of
+# which is defined in the package that owns that category's domain and imported
+# by reference. Its README states outright that it must not grow logic, so there
+# is no behaviour of its own for a flow to drive — the resources, mcp and
+# skill-centre flows already exercise every object it names, through the routers
+# that call them. Adding it to SINGLEBOX_E2E_EXEMPT instead would claim it is
+# uncovered, and would need a "drain when…" reason that nothing could ever
+# satisfy: no flow can cover an index directly. If this module ever does grow
+# behaviour of its own, that is the moment it stops belonging here.
+_STRUCTURAL_NON_BUSINESS: frozenset[str] = frozenset(
+    {"repository", "bot_config_surface"}
+)
 
 
 def all_core_modules() -> set[str]:
