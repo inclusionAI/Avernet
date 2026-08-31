@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -195,6 +195,77 @@ fn record(run_id: &str, version: u64) -> ChatRunRecord {
     );
     record.version = version;
     record
+}
+
+struct RecordingDb {
+    executed_sql: Mutex<Vec<String>>,
+}
+
+impl RecordingDb {
+    fn new() -> Self {
+        Self {
+            executed_sql: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn executed_sql(&self) -> Vec<String> {
+        self.executed_sql
+            .lock()
+            .expect("recording db lock")
+            .clone()
+    }
+}
+
+#[async_trait]
+impl DbPlugin for RecordingDb {
+    async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        Ok(Vec::new())
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.executed_sql
+            .lock()
+            .expect("recording db lock")
+            .push(statement.sql().to_string());
+        Ok(DbExecuteResult {
+            affected_rows: 1,
+            last_insert_id: None,
+        })
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        Ok(Vec::new())
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Ok(DbHealth::healthy())
+    }
+}
+
+#[tokio::test]
+async fn mysql_create_does_not_issue_runtime_ddl() {
+    let db = Arc::new(RecordingDb::new());
+    let repo = SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Mysql,
+        Arc::new(InMemoryCachePlugin::new()),
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    );
+
+    repo.create(record("remote", 1)).await.unwrap();
+
+    let sql = db.executed_sql();
+    assert_eq!(sql.len(), 1, "remote create must issue only the INSERT");
+    assert!(sql[0].starts_with("INSERT INTO bcs_chat_runs"));
+    assert!(
+        sql.iter()
+            .all(|statement| !statement.starts_with("CREATE "))
+    );
 }
 
 #[tokio::test]

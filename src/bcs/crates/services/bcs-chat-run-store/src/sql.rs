@@ -163,6 +163,9 @@ impl SqlChatRunRepo {
         if self.schema_ready.load(Ordering::Relaxed) {
             return Ok(());
         }
+        if self.flavor != DbSqlFlavor::Sqlite {
+            return Ok(());
+        }
         let create = "CREATE TABLE IF NOT EXISTS bcs_chat_runs (\
             id INTEGER PRIMARY KEY AUTOINCREMENT,\
             gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\
