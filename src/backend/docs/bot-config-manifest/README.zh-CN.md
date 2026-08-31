@@ -36,7 +36,7 @@
 │    （与 TC Open API 同一套内部服务；GitOps 语义，声明获胜）     │
 ├─────────────────────────────────────────────────────────────┤
 │ ③ 交付（现有机制，零新增）                                    │
-│    teclaw：BotConfigArtifact 整包（现有词汇表，schema 不动）   │
+│    teclaw：BotConfigArtifact 整包（现有词汇表 + cli_tools）    │
 │    ARCA 系：现有 push / NAS 通道；script 走 #935 启动链        │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -47,7 +47,7 @@
   否则目录感知从后门漏回给用户。
 - **manifest apply 落成真实平台实体**（路线 B），而不是 compose 时虚拟合并：
   平台视图 = 容器实况，skills-pool reconcile 天然认识这些实体，UI 可见。
-- **teclaw 的 artifact 契约零改动**：manifest 编译产物落在
+- **teclaw 的 artifact 契约几乎零改动**（唯一例外是 `cli_tools`，见下）：manifest 编译产物落在
   `BotConfigArtifact` 现有词汇表内（`SkillRef` / `FileRef` /
   `McpServerRef`；engine config 走既有的 `config/teclaw.json` 文件通道，
   不新增、不启用任何 artifact 字段），URL 源由平台在组装时物化进 OSS
@@ -70,6 +70,7 @@
 | `engine-requirements.zh-CN.md` | 各引擎的工作量与需确认清单、能力矩阵、开放问题 | 平台 & 引擎团队 |
 | `work-items.md` | **实现工作项拆分**（英文）：W1–W13 每项的范围、依赖、验收标准；已定决策、设计问题与外部确认项；人员分工 | 平台团队 |
 | `work-items.zh-CN.md` | 上一份的中文版，内容对齐 | 平台团队 |
+| `engine-convergence-contract.zh-CN.md` | **跨引擎收敛语义契约**：应用一份 manifest 对已有状态做什么，写成对 applier 的要求（R1–R9）+ 逐类目区域表 + 自查清单 | teclaw 团队 & 引擎团队 |
 | `teclaw-cli-contract.zh-CN.md` | **给 teclaw owner 的实现说明**：下发契约不变，仅新增 `cli_tools` 段。含字段定义、用例与验收清单 | teclaw 团队 |
 
 ## 术语表
@@ -88,7 +89,7 @@
 ## 相关既有契约（本设计的先例与依赖）
 
 - `docs/arch/service-skills-layout-wire-contract.md` — 「引擎无关声明 + 引擎拥有物理映射」先例
-- `src/backend/src/agentclaw/community/kernel/bot_config/artifact.py` — teclaw 的 `BotConfigArtifact` 契约（本设计的编译目标之一，**不改**）
+- `src/backend/src/agentclaw/community/kernel/bot_config/artifact.py` — teclaw 的 `BotConfigArtifact` 契约（本设计的编译目标之一；**除 `cli_tools` 外不改**）
 - `src/backend/src/agentclaw/community/core/bot_startup_script/README.md` — #935 startup script 的设计与安全论证（本设计全盘继承）
 - `src/backend/src/agentclaw/community/core/skills_pool/ports.py` — 意图层原子操作 Protocol 的先例
 - `src/engine/src/engine/community/core/skills/layout_planner.py` — 引擎能力声明 + fail-closed 的先例

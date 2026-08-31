@@ -3,8 +3,9 @@
 This is a **published cross-boundary contract**, not an internal model: an
 external engine consumes it to boot a bot. Field names ARE the external API.
 The language-neutral source of truth is ``artifact.schema.json`` (beside this
-file); contract evolution goes through :data:`SCHEMA_VERSION` — distinct from
-the per-bot content ``version`` carried inside an artifact.
+file). :data:`SCHEMA_VERSION` is distinct from the per-bot content ``version``
+carried inside an artifact — and note it no longer tracks every contract change;
+see the comment on the constant.
 
 Module rules (kernel is the lowest layer):
 
@@ -45,6 +46,17 @@ from typing import Any
 # top-level ``command``/``args``/``env``, the shape MCP clients themselves
 # consume (an early v4 iteration nested it under a ``stdio`` object;
 # ``from_dict`` still re-flattens that form on read).
+#
+# The optional top-level ``cli_tools`` array (command-line tools the model can
+# invoke) was added WITHOUT bumping this constant — a deliberate decision with
+# the teclaw owner, 2026-08-31. The field rides into existing v4 artifacts and
+# compatibility rests on the engine contract's "ignore unknown fields rather
+# than reject" rule, which teclaw has agreed to
+# (``engine-convergence-contract.zh-CN.md`` A5).
+#
+# The cost, stated so nobody rediscovers it: ``schema_version`` no longer tracks
+# this contract's evolution. "Does this artifact carry cli_tools?" is answered by
+# probing for the key, never by the version number.
 SCHEMA_VERSION = 4
 
 
@@ -91,6 +103,33 @@ class ResourceRef:
     name: str
     store: str
     path: str
+
+
+@dataclass(frozen=True)
+class CliToolRef:
+    """One command-line tool the engine should expose to the model.
+
+    **One entry = one command = one file.** ``path`` names the executable file
+    itself, never a directory: the platform does the fetching, the ``sha256``
+    enforcement, the unpacking of an archive form and the selection of the one
+    declared file, so both source forms look identical here. The command the
+    model invokes is ``name`` (uniqueness is enforced at write time, so the
+    engine never arbitrates a clash), and placement — where the file lands and
+    how it reaches the agent's PATH — is the engine owner's decision.
+
+    ``md5`` is computed by the platform over the bytes at ``path`` and serves as
+    the engine's **change test**, not an integrity gate: same ``md5`` as the tool
+    already in the container means skip the re-download and the replace. Supply-
+    chain integrity is settled platform-side by enforcing the user-declared
+    ``sha256`` before delivery. It is **not** the store's ETag — a multipart
+    upload's ETag is not the content MD5.
+    """
+
+    name: str
+    store: str
+    path: str
+    md5: str
+    version: str | None = None  # audit/display metadata; the engine ignores it
 
 
 @dataclass(frozen=True)
@@ -186,6 +225,13 @@ class BotConfigArtifact:
     skills: list[SkillRef] = field(default_factory=list)
     resources: list[ResourceRef] = field(default_factory=list)
     identity_files: list[FileRef] = field(default_factory=list)
+    # ``None`` = this platform build does not produce tools yet, so the key is
+    # left off the wire entirely (see ``to_dict``). It is a TRANSITIONAL state,
+    # not a semantic: once the composer populates ``cli_tools`` it is always
+    # present and always complete, exactly like every other category — an
+    # artifact is a full snapshot of platform state, never a manifest diff. At
+    # that point ``[]`` simply means "this bot has no platform-delivered tools".
+    cli_tools: list[CliToolRef] | None = None
     stores: dict[str, StoreRef] = field(default_factory=dict)
     engine_overrides: dict[str, Any] = field(default_factory=dict)
     engine_ext: dict[str, Any] = field(default_factory=dict)
@@ -201,12 +247,22 @@ class BotConfigArtifact:
         pre-local-form definition (which is ``additionalProperties: false``)
         would reject them. Omitting them keeps those bytes exactly what they
         were, so only artifacts that genuinely carry the local form differ.
+
+        ``cli_tools`` is omitted on the same principle: nothing populates it
+        yet, and ``asdict`` would otherwise put ``"cli_tools": []`` on every
+        artifact — a new key on the wire to every engine, ahead of the feature
+        that gives it meaning. Omitting it keeps today's artifacts byte-identical
+        to those built before the field existed. This is transitional, not a
+        semantic distinction the engine has to honour: once the composer fills
+        the field it is always present and always complete.
         """
         data = asdict(self)
         for server in data.get("mcp", {}).get("servers", []):
             if server.get("command") is None:
                 for key in ("command", "args", "env"):
                     server.pop(key, None)
+        if self.cli_tools is None:
+            data.pop("cli_tools", None)
         return data
 
     @classmethod
@@ -223,6 +279,14 @@ class BotConfigArtifact:
             skills=[SkillRef(**s) for s in data.get("skills", [])],
             resources=[ResourceRef(**r) for r in data.get("resources", [])],
             identity_files=[FileRef(**f) for f in data.get("identity_files", [])],
+            # Absent stays absent: reading a v4 artifact (or any artifact whose
+            # manifest declared no tools) must not manufacture an empty
+            # declaration, which would round-trip back out as a wipe order.
+            cli_tools=(
+                [CliToolRef(**t) for t in data["cli_tools"]]
+                if data.get("cli_tools") is not None
+                else None
+            ),
             stores={k: StoreRef(**v) for k, v in data.get("stores", {}).items()},
             engine_overrides=dict(data.get("engine_overrides", {})),
             engine_ext=dict(data.get("engine_ext", {})),

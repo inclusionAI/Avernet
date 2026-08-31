@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://agentclaw/kernel/bot_config/artifact.schema.json",
   "title": "BotConfigArtifact",
-  "description": "Published, cross-boundary bot-config contract an external engine consumes to boot a bot. Field names are the external API; evolve via schema_version. The language-neutral source of truth for the BotConfigArtifact dataclass.",
+  "description": "Published, cross-boundary bot-config contract an external engine consumes to boot a bot. Field names are the external API. The language-neutral source of truth for the BotConfigArtifact dataclass. Note schema_version does not track every change: cli_tools was added within v4, so probe for a field rather than inferring it from the version.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,7 +20,7 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "description": "Contract version. Distinct from the per-bot content 'version'."
+      "description": "Contract version. Distinct from the per-bot content 'version'. Does not track every contract change - see the top-level description."
     },
     "version": {
       "type": ["integer", "null"],
@@ -58,6 +58,11 @@
       "type": "array",
       "description": "User/platform-authored workspace files (e.g. RULES.md). Engine-generated files are referenced via engine_ext, not here.",
       "items": { "$ref": "#/definitions/fileRef" }
+    },
+    "cli_tools": {
+      "type": "array",
+      "description": "Command-line tools the model can invoke. Added without a schema_version bump; compatibility rests on the engine contract's ignore-unknown-fields rule. NOT in 'required' only because nothing populates it yet - once the composer does, it is always present and always complete, like every other category, and [] simply means the bot has no platform-delivered tools.",
+      "items": { "$ref": "#/definitions/cliToolRef" }
     },
     "stores": {
       "type": "object",
@@ -104,6 +109,19 @@
         "scope": { "type": "string", "enum": ["shared", "user"] },
         "store": { "type": "string", "description": "store_id key into 'stores'." },
         "path": { "type": "string", "description": "Path relative to the store (e.g. 'team/weather'); placement decided by the engine owner." }
+      }
+    },
+    "cliToolRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "store", "path", "md5"],
+      "description": "One command-line tool: one entry = one command = one file. The platform fetches, enforces the declared sha256, unpacks an archive form and selects the one declared file, so 'path' always names a single executable file - never a directory, and never something the engine has to pick from a tree.",
+      "properties": {
+        "name": { "type": "string", "description": "Tool identifier AND the command name the agent invokes (e.g. 'mycli', not an absolute path). Unique per bot and free of path separators, both enforced at write time." },
+        "store": { "type": "string", "description": "store_id key into 'stores'." },
+        "path": { "type": "string", "description": "Path relative to the store, naming the single executable file; physical placement and PATH exposure decided by the engine owner." },
+        "md5": { "type": "string", "description": "Platform-computed MD5 (32 lowercase hex) of the bytes at 'path'. The engine's change test, not an integrity gate: an unchanged md5 means skip the re-download and replace. NOT the store's ETag - a multipart upload's ETag is not the content MD5." },
+        "version": { "type": ["string", "null"], "description": "Optional audit/display metadata; the engine need not interpret it." }
       }
     },
     "mcpServerRef": {
