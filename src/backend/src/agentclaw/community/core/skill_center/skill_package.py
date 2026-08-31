@@ -89,14 +89,41 @@ class SkillPackageValidator:
 
     def validate_zip(self, package: bytes) -> ValidatedSkillPackage:
         """Validate a governed package with mandatory YAML frontmatter."""
-        return self._validate_zip(package, allow_legacy_local_manifest=False)
+        return self._validate_zip(
+            package,
+            allow_legacy_local_manifest=False,
+            require_wrapper_name_match=True,
+        )
+
+    def validate_public_center_zip(self, package: bytes) -> ValidatedSkillPackage:
+        """Validate one SC Public package with an opaque transport wrapper.
+
+        Skill Center's exact download may wrap a valid Skill in its external
+        ``skillCode`` directory.  That transport name is not the manifest or
+        runtime identity.  Every other package invariant remains identical to
+        :meth:`validate_zip`, and the normalized result still has a root-level
+        ``SKILL.md``.
+        """
+        return self._validate_zip(
+            package,
+            allow_legacy_local_manifest=False,
+            require_wrapper_name_match=False,
+        )
 
     def validate_legacy_local_zip(self, package: bytes) -> ValidatedSkillPackage:
         """Validate the historical Local upload wire with explicit fallback."""
-        return self._validate_zip(package, allow_legacy_local_manifest=True)
+        return self._validate_zip(
+            package,
+            allow_legacy_local_manifest=True,
+            require_wrapper_name_match=True,
+        )
 
     def _validate_zip(
-        self, package: bytes, *, allow_legacy_local_manifest: bool
+        self,
+        package: bytes,
+        *,
+        allow_legacy_local_manifest: bool,
+        require_wrapper_name_match: bool,
     ) -> ValidatedSkillPackage:
         if len(package) > MAX_COMPRESSED_BYTES:
             raise SkillPackageTooLargeError()
@@ -138,6 +165,7 @@ class SkillPackageValidator:
         return self._validate_entries(
             entries,
             allow_legacy_local_manifest=allow_legacy_local_manifest,
+            require_wrapper_name_match=require_wrapper_name_match,
         )
 
     def validate_directory(
@@ -197,6 +225,7 @@ class SkillPackageValidator:
         entries: Sequence[tuple[str, bytes]],
         *,
         allow_legacy_local_manifest: bool,
+        require_wrapper_name_match: bool,
     ) -> ValidatedSkillPackage:
         skill_files = [
             entry for entry in entries if entry[0].split("/")[-1] == "SKILL.md"
@@ -248,7 +277,7 @@ class SkillPackageValidator:
             or name.lower() in _RESERVED_SKILL_NAMES
         ):
             raise SkillPackageInvalidError("invalid_metadata")
-        if wrapper and wrapper != name:
+        if require_wrapper_name_match and wrapper and wrapper != name:
             raise SkillPackageInvalidError("wrapper_name_mismatch")
         if wrapper is not None and any(
             not path.startswith(f"{wrapper}/") for path, _content in entries
