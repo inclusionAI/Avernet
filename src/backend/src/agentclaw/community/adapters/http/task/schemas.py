@@ -113,23 +113,23 @@ class ExecutionConfigDTO(BaseModel):
 
 
 class TemplateRunRequestDTO(BaseModel):
-    """Run a repository-owned static template; identity is supplied by the caller context.
+    """运行仓内置静态模板;触发者身份从调用方上下文解析。
 
-    触发者身份对称 dynamic execute: ``caller_bot_id`` 必填(触发执行的 bot id),
-    ``owner_user_id``/``owner_account_id`` 仍由 IAM principal 解析注入。
+    触发者身份对称 dynamic execute:caller_bot_id 必填(触发执行的 bot id),
+    owner_user_id/owner_account_id 由登录态 principal 解析后注入。
     """
 
-    template_id: str = Field(..., min_length=1)
+    template_id: str = Field(..., min_length=1, description="仓内置静态模板标识,如 okr-implementation")
     caller_bot_id: str = Field(
         ..., min_length=1,
         description="触发执行这条静态模板的 caller bot id(必填,对称 dynamic execute.owner_bot_id)",
     )
-    input: dict[str, Any] = Field(default_factory=dict)
+    input: dict[str, Any] = Field(default_factory=dict, description="模板输入键值,按模板 input_schema 规定填入")
     auto_advance: bool | None = Field(
         default=None,
         description=(
             "演示自驱开关:true=跳过真实派发用 mock 结果推进静态 DAG,"
-            "false=强制真实派发,null=由服务端 env OCB_TASK_STATIC_AUTO_REPORT 决定。"
+            "false=强制真实派发,null=由服务端默认开关决定。"
         ),
     )
 
@@ -356,7 +356,7 @@ class TaskExecutionGraphDTO(BaseModel):
     )
     execution_config: dict[str, Any] = Field(
         default_factory=dict,
-        description="执行配置投影(task_type/yaml/workflow_id + 会话/群/父任务上下文扁平;历史记录 teamclaw_context 兼容归一)",
+        description="执行配置投影(task_type/yaml/workflow_id + 会话/群/父任务上下文扁平,扩展上下文兼容归一)",
     )
 
 

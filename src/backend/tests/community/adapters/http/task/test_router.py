@@ -20,6 +20,12 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry, InMemoryCallbackCorrelationRegistry,
 )
+from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+    LocalBcsTokenProvider,
+)
+from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+    CallbackDataEnricher,
+)
 
 
 class _StubCallback:
@@ -90,6 +96,13 @@ class _StubTaskModule(Module):
     @provider
     def reg(self) -> CallbackCorrelationRegistry:
         return InMemoryCallbackCorrelationRegistry()
+
+    @singleton
+    @provider
+    def enricher(self) -> CallbackDataEnricher:
+        # callback router 注入 CallbackDataEnricher 构 execution_graph;纯单测不真连 BCS,
+        # 传 localhost base_url + 短连,fetch 失败由 enrich_bcn 兜底回退事件体建图(不抛)。
+        return CallbackDataEnricher(LocalBcsTokenProvider.from_env(), http_client=None)
 
 
 @pytest.fixture
