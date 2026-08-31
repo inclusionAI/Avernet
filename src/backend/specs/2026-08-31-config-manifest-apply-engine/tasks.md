@@ -18,31 +18,31 @@ than something to work around:
 
 ## Group A — Foundations: the vocabulary, the tables, the schema fix
 
-## [ ] Task 1: Outcome and report vocabulary
+## [x] Task 1: Outcome and report vocabulary
 - **Goal:** The types every later task speaks, in a leaf module that imports
   nothing else from the feature.
 - **Files:** `src/backend/.../core/bot_config_manifest/apply/outcomes.py`,
   `apply/__init__.py`
 - **Done when:**
-  - [ ] `EntryOutcome` is exactly `created` / `updated` / `unchanged` /
+  - [x] `EntryOutcome` is exactly `created` / `updated` / `unchanged` /
         `skipped` / `failed`. Its docstring records that `skipped` means "not
         written because its category was aborted" and that the author-facing
         `on_fetch_failure: skip` it used to mean no longer exists.
-  - [ ] `ApplyStatus` is `RUNNING` plus the three terminal values
+  - [x] `ApplyStatus` is `RUNNING` plus the three terminal values
         `SUCCEEDED` / `PARTIAL` / `FAILED`, with a docstring stating the
         terminal three are derived and that nothing in the engine branches on
         one. `RUNNING` exists because apply is started, not awaited.
-  - [ ] `EntryResult` carries the construct, the entry's identity, its outcome,
+  - [x] `EntryResult` carries the construct, the entry's identity, its outcome,
         and an optional reason. `CategoryResult` carries its entry results **and
         a separate `removals` field** — removals are not `EntryOutcome` values,
         because the five classify declared entries and a removal has none.
-  - [ ] `ApplyReport` matches design §7's shape: `apply_id`, `bot_id`,
+  - [x] `ApplyReport` matches design §7's shape: `apply_id`, `bot_id`,
         `trigger`, `started_at`, `finished_at`, `result`, `sources`, `entries`.
         `sources` is empty in this wave and its docstring says W5 fills it.
-  - [ ] `ApplyReport.as_payload()` is the one place the wire shape is defined,
+  - [x] `ApplyReport.as_payload()` is the one place the wire shape is defined,
         and it is structurally incapable of emitting a credential value: it
         serialises named fields, never a passthrough of a declared entry.
-  - [ ] `apply/__init__.py` holds a docstring only, for the cycle reason
+  - [x] `apply/__init__.py` holds a docstring only, for the cycle reason
         `bot_config_surface/__init__.py` records.
 - **Depends on:** —
 
