@@ -2156,62 +2156,20 @@ shape and produces no content, so it does not depend on W8.)
 
 **The artifact contract genuinely changes, and `artifact.schema.json` is part of
 it.** `kernel/bot_config/artifact.py` and its language-neutral
-`artifact.schema.json` are the published contract; that schema sets top-level
-`"additionalProperties": false`, so a `cli_tools` field is **rejected** until the
-schema file is amended and `SCHEMA_VERSION` goes 4 → 5. This item owns both, plus
-reconciling the "artifact schema unchanged" statements in `README.zh-CN.md` and
-§9 — they are true for every other category and stop being true for this one.
+`artifact.schema.json` are the published contract; that schema set top-level
+`"additionalProperties": false`, so a `cli_tools` field was **rejected** until
+the schema file was amended. **That part is done** (see the progress table
+above), along with reconciling the "artifact schema unchanged" statements in
+`README.zh-CN.md` and §9 — true for every other category, no longer true for
+this one. **`SCHEMA_VERSION` stays put**: see "not being bumped — that is
+settled, not pending" above.
 
-> **Landed early: the shape, not the version.** `cliToolRef` and the optional
-> `cli_tools` array are in the schema, `CliToolRef` is in `artifact.py`, and the
-> three "unchanged" statements in `README.zh-CN.md` are reconciled. That half
-> depends on nothing — it declares a shape without producing content — so it
-> went first, to keep the spec teclaw reviews identical to the code.
->
-> **`SCHEMA_VERSION` is still 4, and that is the rest of this item — with a
-> precondition.** `ConfigComposer` stamps the constant onto *every* artifact, so
-> bumping it hands `"schema_version": 5` to engines running today, which is
-> precisely what `teclaw-cli-contract.zh-CN.md` §6 promises teclaw will not
-> happen. **Bump it in the same change that first populates `cli_tools`**, once
-> teclaw has answered §8's question 4.
->
 > **`cli_tools` is currently off the wire.** Nothing populates it, so `to_dict`
 > omits the key and today's artifacts are byte-identical to those built before
 > the field existed. **This is transitional, not a semantic**: an artifact is a
 > full snapshot of platform state, so once the composer fills the field it is
 > always present and always complete like every other category, and `[]` simply
 > means the bot has no platform-delivered tools.
-
-**Depends on.** W8. (The part that landed is the exception: it only declares a
-shape and produces no content, so it does not depend on W8.)
-
-**The artifact contract genuinely changes, and `artifact.schema.json` is part of
-it.** `kernel/bot_config/artifact.py` and its language-neutral
-`artifact.schema.json` are the published contract; that schema sets top-level
-`"additionalProperties": false`, so a `cli_tools` field is **rejected** until the
-schema file is amended and `SCHEMA_VERSION` goes 4 → 5. This item owns both, plus
-reconciling the "artifact schema unchanged" statements in `README.zh-CN.md` and
-§9 — they are true for every other category and stop being true for this one.
-
-> **Landed early: the shape, not the version.** `cliToolRef` and the optional
-> `cli_tools` array are in the schema, `CliToolRef` is in `artifact.py`, and the
-> three "unchanged" statements in `README.zh-CN.md` are reconciled. That half
-> depends on nothing — it declares a shape without producing content — so it
-> went first, to keep the spec teclaw reviews identical to the code.
->
-> **`SCHEMA_VERSION` is still 4, and that is the rest of this item — with a
-> precondition.** `ConfigComposer` stamps the constant onto *every* artifact, so
-> bumping it hands `"schema_version": 5` to engines running today, which is
-> precisely what `teclaw-cli-contract.zh-CN.md` §6 promises teclaw will not
-> happen. **Bump it in the same change that first populates `cli_tools`**, once
-> teclaw has answered §8's question 4.
->
-> One semantics rule is already pinned by tests: **an absent `cli_tools` key is
-> not `[]`**. `asdict` would emit `"cli_tools": []` on every artifact, which
-> under overwrite semantics is an order to remove every tool — so an unrelated
-> skill edit would wipe commands the bot is using. `to_dict` therefore omits the
-> key entirely when nothing is declared, and `from_dict` never reads an absence
-> as an empty array.
 
 **The teclaw half is written and ready to hand over.**
 `teclaw-cli-contract.zh-CN.md` is the engine-facing specification: the delivery
@@ -2220,7 +2178,8 @@ the fetch, digest check, unpack and file selection so the engine receives **one
 executable file per entry** (`{name, store, path, md5, version}`). What teclaw
 implements is placement, the `md5` check, the executable bit, PATH, and the same
 full-overwrite semantics every other category already has. It carries six worked
-use cases and an acceptance checklist. `schema_version` goes 4 → 5.
+use cases and an acceptance checklist. **`schema_version` is not bumped**
+(decided 2026-08-31).
 
 **Blocked by.** — **X3 is closed** (§4): the ARCA fleet is `linux/amd64`, so a
 single URL per tool suffices. teclaw needs only an artifact protocol from us; the
