@@ -83,7 +83,7 @@ than something to work around:
 
 ## [ ] Task 3: Narrow the `mcp` entry, and fix the schema document
 - **Goal:** Close the account-scoped-config hazard at the vocabulary, so no
-  materialiser has to defend against it (spec *Decisions* 10).
+  materialiser has to defend against it (spec *Decisions* 11).
 - **Files:** `.../core/bot_config_manifest/schema/entries.py`,
   `docs/bot-config-manifest/manifest-schema.zh-CN.md`,
   `docs/bot-config-manifest/work-items.md` + `work-items.zh-CN.md`,
@@ -194,7 +194,11 @@ than something to work around:
   - [ ] `plan` compares against the **substituted** body, never the raw document
         text — the convergence criterion depends on this and nothing else.
   - [ ] `write` calls `BotStartupScriptService.put` / `.delete` and does nothing
-        else. No payload composition, no restart, no start-command touching.
+        else. No payload composition, no restart, no republish, no
+        start-command touching — **apply never triggers the script's
+        execution**, it only delivers the row, and the existing #926 machinery
+        picks it up. A structural test asserts this module reaches no
+        provisioning or restart path.
   - [ ] The result records that the script is **delivered now, executed at the
         bot's next device provisioning** — a field, not something a caller
         infers, and phrased in the terms the mechanism has. It is re-read from

@@ -193,6 +193,12 @@ Grouped by the property each set holds. Every one traces to `work-items.zh-CN.md
 
 - [ ] `script` materialises as a write to the bot's startup script through
       `BotStartupScriptService` and nothing else.
+- [ ] **Apply never triggers the script's execution.** Writing the row is the
+      whole of the materialiser: no restart, no republish, no payload rebuild,
+      no call to anything that would run it. The existing #926 machinery picks
+      the row up on its own. This is §2.7's boundary — apply records *delivery*,
+      the container and the engine answer for execution — and a test asserts the
+      materialiser reaches no provisioning or restart path.
 - [ ] **The response states when it takes effect, in the terms the mechanism
       actually has.** The row is delivered now and executes at the bot's next
       **device provisioning** — not "next start" loosely, and not "only the
@@ -212,7 +218,7 @@ Grouped by the property each set holds. Every one traces to `work-items.zh-CN.md
       and an entry naming a server the tenant may not enable reports `failed`.
 - [ ] **`mcp[].config` is removed from schema v1** and refused by name, with
       `manifest-schema.zh-CN.md` §3.1 corrected in the same change. An `mcp`
-      entry is a bare `server_code`. See *Decisions* 10.
+      entry is a bare `server_code`. See *Decisions* 11.
 - [ ] **No apply path writes account-scoped MCP configuration.** A test pins
       that the `mcp` materialiser cannot reach `update_user_unified_config` or
       `sync_mcp_detail_to_all_bots` — the write that would fan a per-bot apply
@@ -326,13 +332,44 @@ Settled here rather than left open.
    a preview. That holds only while nothing is fetched, so W5 must revisit it —
    said here rather than left for W5 to discover.
 
-4. **The summary is derived and inert.** `SUCCEEDED`/`PARTIAL`/`FAILED` exists for
+4. **An undeclared category is untouched, and this survived being questioned —
+   the reasoning is recorded so it is not re-opened a third time.** The
+   alternative put during review was that absence should *also* declare the set
+   empty, so that teclaw's full-override artifact could be composed without
+   diffing manifest version N against N+1.
+
+   It is not needed, because **the artifact is never composed from the
+   manifest.** `ExternalComposeProducer` → `ConfigComposer.compose()` →
+   `ConfigComposerInputCollector`, whose docstring reads *"Gathers a bot's
+   compose inputs from the source-of-truth services"* — skill sets, MCP config,
+   resources, identity, the bot record. No manifest anywhere in that path, by
+   design: §2.3 makes manifest-materialised entities identical to hand-made
+   ones, in the same tables. So apply converges the declared categories into
+   platform state, and the artifact is then composed from that state — complete
+   by construction, because it holds both manifest-installed and UI-installed
+   entities. An undeclared category contributes its **current** contents, not
+   nothing. Teclaw full-overrides with a complete artifact and no manifest
+   diffing occurs anywhere.
+
+   Had absence declared emptiness, a manifest naming only `mcp` would wipe that
+   bot's skills, identity files and resources, and `DELETE` — which leaves no
+   declared categories — would wipe the bot's entire configuration rather than
+   deleting nothing. The rule as written is what makes `[]`-empties and
+   `DELETE`-does-nothing one rule instead of two contradictory ones.
+
+   A narrower question remains genuinely open and is **not** answered by this
+   rule: a category that *was* declared in v1 and is absent in v2 today means
+   "stop managing it, leave it as it is". If that should instead empty it, it
+   needs a per-category `absent` semantic of its own — not a global rule that
+   would also fire for categories neither version ever mentioned.
+
+5. **The summary is derived and inert.** `SUCCEEDED`/`PARTIAL`/`FAILED` exists for
    a human reading a report. No code branches on it, and nothing propagates it to
    the bot record. The one aggregate that *does* drive a decision is per-category
    and deliberately so: "may this category be written at all", scoped so one
    category's failure never touches another's.
 
-5. **Apply serializes on its own lock, not the restart lock's row.** The pattern
+6. **Apply serializes on its own lock, not the restart lock's row.** The pattern
    is reused — a uniqueness constraint arbitrating concurrent inserts, a token
    compared on release, staleness judged on the database clock — because it is
    proven here and a second mechanism would be a second set of failure modes. The
@@ -340,14 +377,14 @@ Settled here rather than left open.
    different operations and blocking one on the other would be an accident, not a
    design.
 
-6. **Convergence compares materialised values, not document text.** Substitution
+7. **Convergence compares materialised values, not document text.** Substitution
    happens between the document and the write, so a comparison against the raw
    text would report `updated` forever on any document using a placeholder. Each
    materialiser is responsible for comparing what it is about to write against
    what is there — which is also the only comparison that can be right when a
    value was set through the category's own endpoint rather than by a manifest.
 
-7. **`Check(OWNER)` on an addressed bot is not wider than the owner-only
+8. **`Check(OWNER)` on an addressed bot is not wider than the owner-only
    categories, and the dominance test must be written to know that.** Three
    categories (`identity`, `resources`, and today's `startup-script`) are
    `OWNER_SCOPED`, which pins the bot to the caller's own. Apply is
@@ -359,18 +396,18 @@ Settled here rather than left open.
    equivalence is written down here so a future reader does not have to
    re-derive it.
 
-8. **The apply record and the apply report are one thing, not two.** §2.7 is
+9. **The apply record and the apply report are one thing, not two.** §2.7 is
    explicit that the per-entry records *are* the report and are apply's only
    output. One store, written once per apply, read by `last-apply`. `keep_last`
    later reads the materialised content from W11's store, which is a different
    question — what bytes were delivered — and does not make this a second record.
 
-9. **No notifications, no alerting, no push.** Recorded because an earlier
+10. **No notifications, no alerting, no push.** Recorded because an earlier
    revision of §2.7 required a surfaced notification and it was withdrawn: no
    design document ever specified one. The record is pull-only in the first
    phase.
 
-10. **`mcp[].config` leaves schema v1, and the schema document is corrected —
+11. **`mcp[].config` leaves schema v1, and the schema document is corrected —
    this is a defect found while specifying, not a scope cut.** §3.1 defines
    `config` as *"per-bot configuration, the same shape as the existing MCP
    config API"*. Those two halves cannot both be true. The platform's MCP
@@ -408,7 +445,7 @@ Settled here rather than left open.
   `script`.
 - **Narrowing the `mcp` entry to `{server_code}`** — the validator rule, the
   capability reason, and the `manifest-schema.zh-CN.md` §3.1 correction, in one
-  change (*Decisions* 10).
+  change (*Decisions* 11).
 - The apply record: its storage, its per-entry detail, and its guarantee of
   consistency after a mid-way failure.
 - `POST …/config-manifest/apply` with `dry_run`, and `GET …/config-manifest/last-apply`,

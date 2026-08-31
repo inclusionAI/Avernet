@@ -99,7 +99,7 @@ services.
 - `authorization.py`, `admission.py` — three rows each.
 - `responses.py` — the new domain errors in the status map and the biz-code map.
 
-**Changed: the `mcp` entry narrows (spec *Decisions* 10)**
+**Changed: the `mcp` entry narrows (spec *Decisions* 11)**
 
 - `schema/entries.py` — `CATEGORY_ENTRY_KEYS[MCP]` becomes `{"server_code"}`;
   `validate_mcp_entry` drops its `config` branch. `config` is then refused by the
@@ -551,7 +551,7 @@ provenance per entry, `apply_id` is already the key it would join on.
   Declared-absent while a row exists ⇒ a removal.
 - `write`: `put(...)` or `delete(...)`. Nothing else.
 
-Comparing the substituted body is the whole of *Decisions* 6 — comparing the raw
+Comparing the substituted body is the whole of *Decisions* 7 — comparing the raw
 document text would report `updated` on every apply of any document using a
 placeholder.
 
@@ -597,7 +597,7 @@ orchestrator.
 
 Nothing in this materialiser can reach `update_user_unified_config`,
 `write_unified_config` or `sync_mcp_detail_to_all_bots`, and a structural test
-asserts it — that is the account-scoped write whose fan-out spec *Decisions* 10
+asserts it — that is the account-scoped write whose fan-out spec *Decisions* 11
 removed from the schema.
 
 ## Authorization
@@ -633,7 +633,7 @@ operations from `AUTHORIZATION` and asserts apply's level is ≥ theirs, treatin
 ordering, because `Check(OWNER)` + `GRANT_CHECKED_ADDRESSED_BOT` and
 `OWNER_SCOPED` + `GRANT_CHECKED_OWN_BOT` admit the same people: `OWNER` is
 unreachable by a collaborator (the vocabulary is admin/member), so the caller
-must *be* the addressed owner. Spec *Decisions* 7 records that reasoning; the
+must *be* the addressed owner. Spec *Decisions* 8 records that reasoning; the
 test carries it as a comment so the next reader does not re-derive it.
 
 The test iterates `MATERIALISERS`, so W5 registering `skills` brings `skills`
