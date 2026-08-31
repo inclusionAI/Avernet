@@ -154,10 +154,9 @@ class SdkSkillVersionScanner:
                     target = base.joinpath(*relative.split("/"))
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(content)
-                skill_path = base / "SKILL.md"
-                scan_result = sdk.scan(str(skill_path))
+                scan_result = sdk.scan(str(base))
                 dependencies = sdk.get_mcp_dependencies(
-                    skill_path=str(skill_path),
+                    skill_path=str(base),
                     base_dir=str(base),
                     min_confidence=0.8,
                 )
