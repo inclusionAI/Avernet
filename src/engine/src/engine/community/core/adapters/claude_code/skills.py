@@ -34,7 +34,6 @@ from collections.abc import Sequence
 from typing import Any
 
 from engine.community.core.engine.context import AuthContext
-from engine.community.core.skills.layout_planner import MAPPING_V4_CONTRACT_VERSION
 from engine.community.core.skills.models import (
     CenterEnsureFailure,
     CenterEnsureItem,
@@ -470,33 +469,6 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
-        center_items = [
-            CenterEnsureItem(skill_uuid=item.skill_uuid, version=item.sc_version_number)
-            for item in mappings
-            if isinstance(item, PoolSkillMappingIntent)
-            and item.corpus == "center"
-            and item.skill_uuid is not None
-            and item.sc_version_number is not None
-        ]
-        if center_items and mapping_contract_version == MAPPING_V4_CONTRACT_VERSION:
-            ensured = await self.ensure_center_skills(
-                CenterEnsureRequest(items=center_items), auth=auth
-            )
-            if ensured.failed or len(ensured.ok) != len(center_items):
-                return PoolMappingPublishResult(
-                    published=False,
-                    evidence={
-                        "reason": "center_ensure_failed",
-                        "failed": [
-                            {
-                                "skill_uuid": item.skill_uuid,
-                                "version": item.version,
-                                "reason": item.reason,
-                            }
-                            for item in ensured.failed
-                        ],
-                    },
-                )
         payload: dict[str, object] = {
             "mappings": [_serialize_pool_mapping(item) for item in mappings],
             "source_layout": source_layout.value,

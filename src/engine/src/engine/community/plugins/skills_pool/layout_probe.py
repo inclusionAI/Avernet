@@ -18,7 +18,6 @@ from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
     MAPPING_CONTRACT_VERSION,
     MAPPING_V3_CONTRACT_VERSION,
-    MAPPING_V4_CONTRACT_VERSION,
     LayoutIdentity,
     RuntimeLayoutContext,
     resolve_filesystem_skill_layout,
@@ -82,7 +81,6 @@ def _ready_evidence(
                 "supported_mapping_contract_versions": [
                     MAPPING_CONTRACT_VERSION,
                     MAPPING_V3_CONTRACT_VERSION,
-                    MAPPING_V4_CONTRACT_VERSION,
                 ],
                 "resolved_layout": resolved_filesystem_layout_evidence(
                     layout,

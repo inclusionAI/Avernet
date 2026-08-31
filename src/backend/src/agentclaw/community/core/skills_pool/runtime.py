@@ -22,10 +22,7 @@ from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.quarantine import (
-    RuntimeQuarantineCleanupResult,
-    RuntimeQuarantineCleanupStatus,
-)
+from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupResult, RuntimeQuarantineCleanupStatus
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
@@ -149,14 +146,11 @@ class SkillsPoolRuntime:
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
     ) -> bool:
-        if (
-            mapping_contract_version != "skills-pool-mapping-v4"
-            and not await self._ensure_center_mappings(
-                bot_id=bot_id,
-                user_id=user_id,
-                mappings=mappings,
-                mapping_contract_version=mapping_contract_version,
-            )
+        if not await self._ensure_center_mappings(
+            bot_id=bot_id,
+            user_id=user_id,
+            mappings=mappings,
+            mapping_contract_version=mapping_contract_version,
         ):
             return False
         try:
@@ -401,9 +395,7 @@ class SkillsPoolRuntime:
                 body={"items": items},
             )
         except Exception:
-            logger.exception(
-                "[skills_pool.runtime] center ensure failed bot_id=%s", bot_id
-            )
+            logger.exception("[skills_pool.runtime] center ensure failed bot_id=%s", bot_id)
             return False
         data = response.get("data")
         return (
