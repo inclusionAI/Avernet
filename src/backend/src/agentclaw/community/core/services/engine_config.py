@@ -28,7 +28,12 @@ import json
 
 from injector import inject
 
+from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.config_compose.teclaw_paths import (
     CONFIG_NS,
     TECLAW_ENGINE_CONFIG_FILE,
@@ -65,6 +70,89 @@ logger = get_logger()
 # — a smell. Cleaner: make `config` a leaf-less namespace where each provider's mapper
 # owns the full filename, so callers pass no provider-specific name. Solve separately.
 _CONFIG_LOGICAL_PATH = f"{CONFIG_NS}/{TECLAW_ENGINE_CONFIG_FILE}"
+
+
+def engine_config_coords_from_record(
+    bot_id: str, owner_id: str, *, bot_service
+) -> BotConfigCoords:
+    """Where the ``engine_config`` category writes, for a bot that exists.
+
+    **This is the ownership guard as well as the address**, and the two are one
+    call on purpose: ``bot_service.get_bot(bot_id, owner_id)`` resolves the bot
+    only for the named owner, so a bot that is not theirs is indistinguishable
+    from one that does not exist, and the record it returns is the same record
+    the coordinates are read off. Check and address cannot disagree, because
+    there is only one lookup.
+
+    Alone among the five categories this one guards explicitly; ``resources``
+    performs no ownership check at all. That difference is preserved rather than
+    reconciled — closing it changes who the resources endpoints admit, which is
+    a behaviour change and belongs to its own review.
+
+    Raises ``BotNotFoundError`` on both of the paths the router raised it on: an
+    unresolvable bot, and a resolvable bot carrying no ``entity_id``.
+    """
+    return engine_config_coords_from_bot(
+        bot_service.get_bot(bot_id, owner_id), bot_id=bot_id, owner_id=owner_id
+    )
+
+
+def engine_config_coords_from_bot(
+    bot: dict, *, bot_id: str, owner_id: str
+) -> BotConfigCoords:
+    """The record-to-address half, for a caller that already holds the record.
+
+    Split out because there are two such callers and they guard differently:
+    the engine-config operations resolve the bot *as* their guard (above), while
+    the data-init operation fetches it, applies its own bot-type rule, and only
+    then needs the address (``openapi_v1/bots/router.py:1495``). Folding the
+    fetch in would make that second caller resolve the same bot twice, which is
+    a behaviour change dressed as a tidy-up.
+
+    Raises ``BotNotFoundError`` when the record carries no ``entity_id`` — a
+    resolvable bot that cannot be addressed.
+    """
+    entity_id = bot.get("entity_id")
+    if not entity_id:
+        raise BotNotFoundError("bot has no associated entity")
+    return BotConfigCoords(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        entity_type=bot.get("entity_type") or "staff",
+        entity_id=entity_id,
+        engine_type=bot.get("active_engine") or DEFAULT_ENGINE_TYPE,
+    )
+
+
+def engine_config_coords_from_spec(
+    bot_id: str,
+    owner_id: str,
+    *,
+    entity_id: str,
+    entity_type: str | None,
+    engine_type: str | None,
+) -> BotConfigCoords:
+    """The same address, for a bot that does not exist yet.
+
+    Every value comes off the create request, because in the create flow's first
+    phase there is no record to read one from. **No ownership guard, and there
+    cannot be one**: nothing exists to own. Whether the caller may create a bot
+    at all is settled by ``check_create_bot_preflight``
+    (``core/bot_management/create_flow.py:494``), beside which W13 validates the
+    manifest.
+
+    The two defaults match the record path exactly, so a bot validated at
+    preflight and then created resolves to the same coordinates both times.
+
+    No caller until W13 (#1696).
+    """
+    return BotConfigCoords(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        entity_type=entity_type or "staff",
+        entity_id=entity_id,
+        engine_type=engine_type or DEFAULT_ENGINE_TYPE,
+    )
 
 
 def _decode_config(content_bytes: bytes | None) -> dict:

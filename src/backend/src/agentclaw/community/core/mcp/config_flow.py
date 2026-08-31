@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
 from agentclaw.community.core.mcp.errors import (
     McpConfigValueError,
     McpHeadersInvalidError,
@@ -58,6 +59,35 @@ class UnifiedConfig:
     # ``has_config``. Always ``True`` for a write result.
     exists: bool = field(default=True)
     sync_results: list[dict[str, Any]] | None = field(default=None)
+
+
+def mcp_coords_from_record(bot_id: str, owner_id: str) -> BotConfigCoords:
+    """Where the ``mcp`` category writes, for a bot that exists.
+
+    The caller's own identity is both entity id and (staff) entity type for a
+    config push, mirroring the internal route's defaults and how the bots slice
+    threads ``entity_id=owner_id``. The public router spelled this as a private
+    ``_ENTITY_TYPE`` constant; it is a function here so the table can name it
+    and manifest apply can call it.
+
+    ``engine_type`` is ``None`` — MCP configuration is per account and per
+    server, with no engine dimension.
+    """
+    return BotConfigCoords(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        entity_type="staff",
+        entity_id=owner_id,
+        engine_type=None,
+    )
+
+
+def mcp_coords_from_spec(bot_id: str, owner_id: str) -> BotConfigCoords:
+    """The same address, for a bot that does not exist yet.
+
+    No caller until W13 (#1696).
+    """
+    return mcp_coords_from_record(bot_id, owner_id)
 
 
 def _validate_endpoint_env(endpoint_env: str | None) -> None:

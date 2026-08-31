@@ -53,9 +53,11 @@ from agentclaw.community.api.skill_query_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.core.skill_center.services.skill_query_service import (
+    require_addressed_bot,
+)
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillInvalidPackageError,
-    LocalSkillNotFoundError,
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.skill_center_client import (
@@ -192,29 +194,19 @@ def _tags(value: Any) -> list[str]:
     return []
 
 
-def _require_addressed_bot(record: dict[str, Any], bot_id: str) -> None:
-    """The skill must belong to the bot the address names.
-
-    Without this the ``{bot_id}`` segment on the four ``{skill_id}`` operations
-    would be decorative — a client could name any bot and reach a skill on
-    another one, which is the precise defect this addressing change exists to
-    remove. A skill id resolves its own bot, so the two can be compared, and a
-    mismatch is answered as the skill not existing.
-
-    Masked as a 404 rather than reported as a mismatch, for the same reason the
-    rest of the surface masks: a distinguishable "wrong bot" answer confirms the
-    skill exists somewhere, which is an enumeration oracle over other people's
-    bots.
-
-    The legacy addresses take no bot and so cannot make this comparison; they
-    keep exactly the behaviour they have today.
-    """
-    if str(record["bolt_id"]) != bot_id:
-        raise LocalSkillNotFoundError()
+#: "This skill belongs to the bot the address names" — a statement about a
+#: record, so it lives in ``core`` and manifest apply reaches the same one.
+_require_addressed_bot = require_addressed_bot
 
 
 def _require_skills_grant(caller: ActingCaller, record: dict[str, Any]) -> None:
     """Bind the grant to the ``(bot, owner)`` this skill actually belongs to.
+
+    **Stays in the adapter deliberately** (Rule 7: an adapter may interpret
+    auth, it may not own domain policy). It takes an ``ActingCaller``, which is
+    an adapter type, and an application grant is a fact about an HTTP caller —
+    manifest apply arrives as its own operation with its own grant already
+    checked at its own door, so it has nothing to re-ask here.
 
     Both halves come off the record. A skill can belong to another owner's bot
     and still be readable here — the user-scoped read admits a collaborator — so
@@ -254,7 +246,11 @@ def _uploaded_skill_response(
 def _directory_relative_paths(
     raw_paths: str | None, files: list[UploadFile]
 ) -> list[str]:
-    """Preserve the legacy multipart folder wire without trusting filenames."""
+    """Preserve the legacy multipart folder wire without trusting filenames.
+
+    **Stays in the adapter deliberately** (Rule 7): parsing a multipart form is
+    protocol validation, and a manifest has no multipart wire to parse.
+    """
     if raw_paths is None:
         paths = [file.filename or "" for file in files]
     else:

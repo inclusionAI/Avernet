@@ -36,7 +36,11 @@ from agentclaw.community.core.config_compose.teclaw_paths import IDENTITY_NS
 # class, not a Protocol — legacy identity router already does the same. A
 # Protocol would be speculative abstraction today (Rule 19: abstract after two
 # examples; only one IdentityService impl exists).
-from agentclaw.community.core.services.identity import IdentityService
+from agentclaw.community.core.services.identity import (
+    IdentityService,
+    identity_coords_from_record,
+    identity_physical_file_name,
+)
 from agentclaw.community.di import Injected
 
 from .schemas import (
@@ -80,9 +84,11 @@ async def list_bot_identity_files(
     with empty content. Entry order is not guaranteed — key off type.
     """
     # I2: entity_type/entity_id/operator_id come from the authenticated
-    # request's user_id parameter (personal bot owner = the named user).
-    entity_type = "staff"  # personal bot owner is a staff entity
-    entity_id = owner_id
+    # request's user_id parameter (personal bot owner = the named user). The
+    # pair is resolved in ``core`` so manifest apply addresses identity the same
+    # way without a request.
+    coords = identity_coords_from_record(bot_id, owner_id)
+    entity_type, entity_id = coords.entity_type, coords.entity_id
     presence = await identity_service.list_bot_files(
         entity_type,
         entity_id,
@@ -128,9 +134,9 @@ async def get_bot_identity_file(
     # validate_file_type requires the physical <type>.md form
     # (VALID_IDENTITY_FILES carries the suffix), so the enum value is
     # re-suffixed before forwarding.
-    entity_type = "staff"  # personal bot owner is a staff entity
-    entity_id = owner_id
-    file_type_md = f"{file_type.value}.md"
+    coords = identity_coords_from_record(bot_id, owner_id)
+    entity_type, entity_id = coords.entity_type, coords.entity_id
+    file_type_md = identity_physical_file_name(file_type.value)
     resp = await identity_service.get_bot_file(
         entity_type,
         entity_id,
@@ -177,9 +183,9 @@ async def update_bot_identity_file(
     """
     # I2: entity params come from the authenticated principal via UserIdDep
     # as above; validate_file_type requires the <type>.md form.
-    entity_type = "staff"  # personal bot owner is a staff entity
-    entity_id = owner_id
-    file_type_md = f"{file_type.value}.md"
+    coords = identity_coords_from_record(bot_id, owner_id)
+    entity_type, entity_id = coords.entity_type, coords.entity_id
+    file_type_md = identity_physical_file_name(file_type.value)
     resp = await identity_service.update_bot_file(
         entity_type,
         entity_id,

@@ -35,7 +35,12 @@ from typing import Any
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
+from agentclaw.community.core.bot_management.services.engine_resolver import (
+    resolve_runtime_engine_for_bot,
+)
 from agentclaw.community.core.config_compose.teclaw_paths import WORKSPACE_NS
+from agentclaw.community.core.resources.service import InvalidResourcePathError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceContext,
@@ -92,6 +97,132 @@ def is_readonly(path: str) -> bool:
     if "/" not in path and basename in _HIDDEN_BASENAMES:
         return True
     return False
+
+
+def safe_workspace_path(path: str) -> str:
+    """Normalize a caller-supplied workspace-relative path, or reject it.
+
+    Rejects any ``..`` segment outright instead of filtering it out. The console's
+    ``ResourceFileService.upload_file`` drops such segments silently
+    (``core/services/resource_file_service.py:409``) because it has to accept
+    whatever a browser sends for a whole-folder drag-upload; an explicit API has
+    no such caller, and quietly rewriting an address to a *different* valid one is
+    worse than refusing it — the caller is told nothing, and the file lands
+    somewhere they did not name.
+
+    This is the only barrier: neither ``build_workspace_mapper`` (which composes
+    with ``Path.__truediv__``, leaving ``..`` intact) nor the engine's
+    ``_convert_path`` normalizes or asserts containment. Engine-side bounding is
+    tracked in #1002.
+
+    Leading slashes and empty / ``.`` segments are normalized away rather than
+    rejected: they are noise, not an attempt to leave the workspace.
+
+    Lives here rather than in the router that used to own it (as ``_safe_path``)
+    because it is a statement about the workspace, not about HTTP — and because
+    manifest apply enforces the same rule without a request to hang it on.
+    """
+    segments = [s for s in path.split("/") if s and s != "."]
+    if any(s == ".." for s in segments):
+        raise InvalidResourcePathError(f"path escapes the workspace: {path!r}")
+    return "/".join(segments)
+
+
+def require_workspace_path(path: str) -> str:
+    """``safe_workspace_path``, refusing the empty result.
+
+    Every endpoint but the listing addresses one entry, and the workspace root
+    is not one: there is nothing to download, delete or stat about it.
+    """
+    safe = safe_workspace_path(path)
+    if not safe:
+        raise InvalidResourcePathError("path is required")
+    return safe
+
+
+def is_write_forbidden(safe: str) -> bool:
+    """Whether the read-only policy protects this path against creation.
+
+    Applied to **creation** as well as deletion, so that the surface cannot be
+    talked into making something it then refuses to manage: a listing hides
+    dotfiles and the root identity files, and delete refuses them, so an upload
+    or mkdir that accepted one would leave an entry this API can neither show
+    nor remove. Uploading a workspace-root identity file would also overwrite
+    the bot's own configuration through a resource endpoint, which is not what
+    that surface is for.
+
+    Every ancestor is checked, not just the whole path. :func:`is_readonly` looks
+    at the final segment only, so ``.private/file.md`` passes it — the leaf is an
+    ordinary name — while creating it brings a hidden ``.private`` directory into
+    existence along the way. Removing the visible descendant afterwards would
+    then leave a directory this API created and can neither list nor delete.
+
+    Returns a verdict and raises nothing, deliberately. The refusal the public
+    API answers is an ``HTTPException`` with a specific body, and mapping a
+    domain error back onto that body byte-for-byte is harder to be sure of than
+    leaving the ``raise`` where it already is. Core decides; the adapter phrases.
+    """
+    segments = safe.split("/")
+    return any(
+        is_readonly("/".join(segments[: depth + 1]))
+        for depth in range(len(segments))
+    )
+
+
+def resource_coords_from_record(
+    bot_id: str, owner_id: str, bot_repo: BotRepository
+) -> BotConfigCoords:
+    """Where the ``resources`` category writes, for a bot that exists.
+
+    ``ResourceFileService`` addresses a bot's workspace by these three
+    coordinates, and ``DeviceContext`` carries none of them — it holds
+    provider / conn_info / binding only. Mirrors the console router's
+    ``_resolve_params`` (``adapters/http/resources/file_router.py:71``): the
+    entity is the bot owner, and ``engine_type`` defaults to the bot's
+    ``active_engine``. ``entity_type`` is ``"staff"``, matching
+    ``ResourceFileService``'s own default.
+
+    **This performs no ownership guard**, which is a preserved fact rather than
+    an oversight of the move: the router's ``_file_coords`` performed none
+    either, and adding one here would change who the resources endpoints admit.
+    That it differs from ``engine_config``'s equivalent — which does guard — is
+    exactly what putting the five side by side was meant to make visible.
+    """
+    engine_type = resolve_runtime_engine_for_bot(
+        bot_id=bot_id, owner_id=owner_id, override=None, bot_repo=bot_repo
+    )
+    return BotConfigCoords(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        entity_type="staff",
+        entity_id=owner_id,
+        engine_type=engine_type,
+    )
+
+
+def resource_coords_from_spec(
+    bot_id: str, owner_id: str, engine_type: str
+) -> BotConfigCoords:
+    """The same address, for a bot that does not exist yet.
+
+    The engine comes from the create request instead of the bot's
+    ``active_engine``, because in the first phase of the create flow there is no
+    record to read one off. No repository is touched and no ownership is
+    checked: there is nothing yet to own, and whether the caller may create a
+    bot at all is what ``check_create_bot_preflight`` already decides
+    (``core/bot_management/create_flow.py:494``), beside which the manifest is
+    validated.
+
+    No caller until W13 (#1696).
+    """
+    return BotConfigCoords(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        entity_type="staff",
+        entity_id=owner_id,
+        engine_type=engine_type,
+    )
+
 
 
 class ResourceFileService:
