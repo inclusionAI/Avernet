@@ -104,7 +104,14 @@ def _execute_body(claw_mind_bot_id: str) -> dict:
         # 纯 bot_id(预发真 BCS 解析身份,无 singlebox :user_id 透传)。
         "owner_bot_id": claw_mind_bot_id,
         "execution_config": {
-            "task_type": "workflow"
+            "task_type": "workflow",
+            # workflow 路径只从 execution_config 读 workflow_id/args 拼 message
+            # (task_service._run_workflow),不读 task_spec;缺这两项 → message=""
+            # → clawmind /openapi/v1/messages 校验 body.message min_length=1 → 422。
+            # 拼出的 message = "/tech-research-pipeline-simple-pre-2 --topic 大模型",
+            # 与上面 goal.objective 一致(显式契约,便于追踪)。
+            "workflow_id": "tech-research-pipeline-simple-pre-2",
+            "args": ["--topic", "大模型"],
         },
     }
 
