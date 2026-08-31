@@ -226,6 +226,25 @@ impl FriendshipService for NoopFriendshipService {
     }
 }
 
+struct NoopRegisterService;
+
+#[async_trait]
+impl RegisterService for NoopRegisterService {
+    async fn issue_register_token(
+        &self,
+        _command: IssueRegisterToken,
+    ) -> Result<RegisterTokenView, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+
+    async fn register_bot(
+        &self,
+        _command: RegisterBot,
+    ) -> Result<BotRegistration, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+}
+
 #[derive(Default)]
 struct FakeEventSubscriptionService {
     calls: Mutex<Vec<String>>,
@@ -420,6 +439,7 @@ fn test_router(service: Arc<FakeEventSubscriptionService>) -> axum::Router {
             Arc::new(NoopSessionService),
             Arc::new(NoopMessageService),
             Arc::new(NoopInvitationService),
+            Arc::new(NoopRegisterService),
             Arc::new(NoopFriendshipService),
             Arc::new(HeaderVerifier),
         )

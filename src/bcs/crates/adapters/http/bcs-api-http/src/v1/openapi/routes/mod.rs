@@ -5,4 +5,5 @@ pub mod friendship;
 pub mod friend_connection;
 pub mod group;
 pub mod invitation;
+pub mod register;
 pub mod session;

@@ -44,6 +44,7 @@ use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
+use bcs_app_register;
 use bcs_app_collaboration_definition::CollaborationDefinitionServiceImpl as V1CollaborationDefinitionServiceImpl;
 use bcs_app_collaboration_template::CollaborationTemplateServiceImpl as V1CollaborationTemplateServiceImpl;
 use bcs_app_session::{
@@ -1484,6 +1485,8 @@ fn build_openapi_v1_state(
     group_message_history: Arc<dyn GroupMessageHistoryService>,
     session_files: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
     system_message: Arc<dyn SystemMessageService>,
+    bot_management: Arc<dyn bcs_service_api::BotManagementService>,
+    bot_onboarding: Arc<dyn bcs_service_api::BotOnboardingService>,
     collaboration_templates: Arc<dyn CollaborationTemplateService>,
     principal_verifier: Arc<dyn PrincipalVerifier>,
     connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
@@ -1583,13 +1586,19 @@ let invitation_service = Arc::new(
             invitation_sessions,
             registry,
             invite,
-            invite_token_secret,
+            invite_token_secret.clone(),
             InvitationFriendshipServiceConfig {
                 default_ttl_seconds: config.invite.default_ttl_seconds,
             },
         )
         .with_friend_connection_service(connect_service),
     );
+    let register_service: Arc<dyn bcs_service_api::application::v1::RegisterService> =
+        Arc::new(bcs_app_register::RegisterServiceImpl::new(
+            bot_management,
+            bot_onboarding,
+            invite_token_secret.clone(),
+        ));
     let collaboration_template_service: Arc<
         dyn bcs_service_api::application::v1::CollaborationTemplateService,
     > = Arc::new(V1CollaborationTemplateServiceImpl::new(collaboration_templates));
@@ -1606,6 +1615,7 @@ let invitation_service = Arc::new(
             session_service.clone(),
             session_service,
             invitation_service.clone(),
+            register_service,
             invitation_service.clone(),
             principal_verifier,
         )
@@ -2137,6 +2147,13 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             false,
         )
         .expect("default Eventing configuration must initialize");
+        let default_bot_onboarding: Arc<dyn bcs_service_api::BotOnboardingService> =
+            Arc::new(bcs_bot::BotOnboarding::new(
+                bot_registry.clone(),
+                relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>,
+                config.onboard_binding_enabled,
+                config.default_visibility.clone(),
+            ));
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
             invite_token_secret.clone(),
@@ -2157,6 +2174,8 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             group_message_history.clone(),
             session_file_service.clone(),
             system_message.clone(),
+            bot_use_cases.clone() as Arc<dyn bcs_service_api::BotManagementService>,
+            default_bot_onboarding,
             collaboration_templates.clone(),
             gateway_principal_verifier.clone(),
             Arc::new(bcs_test_support::NoopConnectService),
@@ -3665,6 +3684,8 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             group_message_history.clone(),
             session_file_service.clone(),
             use_cases.system_message.clone(),
+            use_cases.bot_management.clone(),
+            use_cases.bot_onboarding.clone(),
             collaboration_templates.clone(),
             gateway_principal_verifier.clone(),
             Arc::new(bcs_test_support::NoopConnectService),
@@ -4503,6 +4524,8 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             group_message_history.clone(),
             session_file_service.clone(),
             use_cases.system_message.clone(),
+            use_cases.bot_management.clone(),
+            use_cases.bot_onboarding.clone(),
             collaboration_templates.clone(),
             gateway_principal_verifier.clone(),
             connect_service.clone(),

@@ -268,6 +268,7 @@ dependencies = [
  "bcs-app-collaboration-template",
  "bcs-app-group",
  "bcs-app-invitation",
+ "bcs-app-register",
  "bcs-app-session",
  "bcs-auth-alipay",
  "bcs-auth-api",
@@ -515,6 +516,17 @@ dependencies = [
  "bcs-test-support",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "bcs-app-register"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-domain",
+ "bcs-service-api",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

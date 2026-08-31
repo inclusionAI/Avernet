@@ -220,6 +220,7 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "Collaboration / Friendships",
         "Collaboration / Groups",
         "Collaboration / Sessions",
+        "Collaboration / Register",
         "Collaboration / Invitations",
         "Collaboration / Channels",
         "Collaboration / Event Subscriptions",

@@ -320,3 +320,54 @@ async fn mounted_eventing_record_only_profile_uses_the_real_application_service(
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn register_routes_have_the_expected_security_boundary() {
+    let bots_dir = helpers::create_temp_bots_dir();
+    let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
+    config.metrics.enabled = false;
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+    let (addr, handle) = server.run_on_random_port().await.expect("start server");
+    let client = reqwest::Client::new();
+
+    // GET /register/token sits on the protected router: missing or invalid
+    // principal is rejected by the boundary before the handler runs.
+    let missing = client
+        .get(format!("http://{addr}/openapi/v1/collaboration/register/token"))
+        .send()
+        .await
+        .expect("missing-principal request");
+    assert_eq!(missing.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let valid = client
+        .get(format!("http://{addr}/openapi/v1/collaboration/register/token"))
+        .header(
+            "x-avernet-principal",
+            user_principal_token(TEST_GATEWAY_PRINCIPAL_SIGNING_KEY),
+        )
+        .send()
+        .await
+        .expect("valid-principal request");
+    assert_eq!(valid.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = valid.json().await.expect("token body");
+    assert_eq!(body["code"], 20_000);
+    assert!(body["data"]["token"].as_str().expect("token data").len() > 16);
+
+    // POST /register sits on the public router: it must NOT be gated by the
+    // principal boundary — an anonymous POST reaches the handler and gets a
+    // 400 (missing params) instead of the boundary's 401.
+    let anonymous = client
+        .post(format!("http://{addr}/openapi/v1/collaboration/register"))
+        .send()
+        .await
+        .expect("anonymous register request");
+    assert_eq!(anonymous.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = anonymous.json().await.expect("error body");
+    assert_eq!(body["code"], 40_000);
+    assert_eq!(
+        body["data"]["error_code"], "invalid_request",
+        "missing token/bot-name validation must produce invalid_request"
+    );
+
+    handle.abort();
+}
