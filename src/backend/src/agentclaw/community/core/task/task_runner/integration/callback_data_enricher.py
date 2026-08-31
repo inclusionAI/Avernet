@@ -65,6 +65,25 @@ def _parse_dict(value: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _parse_dict_strict(value: Any, *, field: str) -> dict[str, Any]:
+    """严格版 _parse_dict(ClawMind 专用):非空字符串若非法 JSON → 抛 ``ValueError``,
+    供 router claw_mind 分支 guard 捕获后打日志、不落库(避免脏 upsert 覆盖已有 task_callback 记录)。
+    dict 原样返回;None/空串/解析为非 dict → ``{}``(类型宽松,只在 json.loads 失败时抛错)。"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"claw_mind 内嵌 JSON 非法 field={field} raw={str(value)[:200]!r}"
+            ) from exc
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def _to_ms(value: Any) -> int | None:
     """ClawMind 秒级时间戳 → 毫秒(对齐 RuntimeInfo.start_time/end_time 约定)。
     探测值 < 1e12 视为秒(×1000)、已毫秒保持;非法/None → None。"""
@@ -120,7 +139,7 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
             continue
         node_id = ne["node_id"]
         status = _claw_mind_status_to_task(ne.get("status") or run_status)
-        input_doc = _parse_dict(ne.get("input_json"))
+        input_doc = _parse_dict_strict(ne.get("input_json"), field="node_executions.input_json")
         ik_raw = input_doc.get("nodeOutputKeys")
         input_keys = ik_raw if isinstance(ik_raw, list) else []
 
@@ -129,12 +148,12 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
             ep["executor_type"] = ne["executor_type"]
         if ne.get("attempt") is not None:
             ep["attempt"] = ne["attempt"]
-        tok = _parse_dict(ne.get("token_usage_json"))
+        tok = _parse_dict_strict(ne.get("token_usage_json"), field="node_executions.token_usage_json")
         if tok:
             ep["token_usage"] = tok
         if input_doc:
             ep["input"] = input_doc
-        sc = _parse_dict(ne.get("system_context_json"))
+        sc = _parse_dict_strict(ne.get("system_context_json"), field="node_executions.system_context_json")
         if sc:
             ep["system_context"] = sc
         if ne.get("duration_ms") is not None:
@@ -169,7 +188,7 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
                 "assignee": None,
                 "start_time": _to_ms(ne.get("started_at")),
                 "end_time": _to_ms(ne.get("completed_at")),
-                "output": _parse_dict(ne.get("output_json")),
+                "output": _parse_dict_strict(ne.get("output_json"), field="node_executions.output_json"),
                 "acceptance_result": None,
                 "extend_props": ep,
             },
@@ -179,9 +198,14 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
     for k in _CLAW_MIND_GRAPH_KEEP:
         if flow_runs.get(k) is not None:
             graph_ep[k] = flow_runs[k]
-    graph_params = _parse_dict(flow_runs.get("params_json"))
+    graph_params = _parse_dict_strict(flow_runs.get("params_json"), field="flow_runs.params_json")
     if graph_params:
         graph_ep["params"] = graph_params
+    # 最终输出(flow_runs.result_json):图级 output 与 extend_props.output 两处都以 `output` 可取;
+    # extend_props 仅在非空时落 key(对齐 graph_ep 白名单/params 只加非空的约定)。
+    _flow_output = _parse_dict_strict(flow_runs.get("result_json"), field="flow_runs.result_json")
+    if _flow_output:
+        graph_ep["output"] = _flow_output
 
     try:
         run_id = int(flow_runs["id"]) if flow_runs.get("id") is not None else 0
@@ -193,7 +217,7 @@ def _build_claw_mind_execution_graph(ext: dict, *, run_status: Any) -> dict[str,
         "task_id": "",
         "loop_round": 0,
         "status": _claw_mind_status_to_task(run_status).value,
-        "output": _parse_dict(flow_runs.get("result_json")),
+        "output": _flow_output,
         "extend_props": graph_ep,
         "tasks": tasks,
         "relations": relations,
