@@ -391,8 +391,10 @@ pub trait GroupEventSubscriptionProvisioner: Send + Sync {
     ) -> Result<(), ApplicationError>;
 
     /// Atomically make the Group available, activate all prepared
-    /// subscriptions, and persist the ordered creation Events. The optional
-    /// Session is the initial Session created by Group management.
+    /// subscriptions, snapshot matching Group Events persisted after prepare
+    /// while those subscriptions were pending, and persist the ordered
+    /// creation Events. The optional Session is the initial Session created by
+    /// Group management.
     async fn finalize(
         &self,
         prepared: &PreparedGroupEventSubscriptions,

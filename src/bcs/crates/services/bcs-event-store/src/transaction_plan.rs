@@ -26,8 +26,9 @@ pub struct EventAppendTransactionPlan {
 /// Event-store-owned half of Group provisioning finalization.
 ///
 /// The Group repository prepends its locked availability transition, then
-/// appends these steps to activate the pending inline subscriptions and write
-/// the ordered creation Events in the same database transaction.
+/// appends these steps to activate the pending inline subscriptions, snapshot
+/// Events produced during the pending provisioning window, and write the
+/// ordered creation Events in the same database transaction.
 #[derive(Debug)]
 pub struct GroupProvisioningEventTransactionPlan {
     pub steps: Vec<DbTransactionStep>,
@@ -241,12 +242,51 @@ impl GroupProvisioningEventTransactionPlan {
                              'group_provisioning_finalized', NULL, __bcs_timestamp_ms__, ?)"),
                     vec![
                         value(uuid::Uuid::new_v4().to_string()),
-                        subscription_binding,
+                        subscription_binding.clone(),
                         value(event_actor_type_name(actor.actor_type)),
                         value(actor.id.as_str()),
                         value(finalized_at.clone()),
                         value(env),
                     ],
+                ),
+            ));
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    provisioning_target_backfill_sql(flavor),
+                    vec![
+                        value(env),
+                        subscription_binding.clone(),
+                        value(group_id),
+                    ],
+                ),
+            ));
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    provisioning_causal_target_backfill_sql(flavor),
+                    vec![
+                        value(env),
+                        subscription_binding.clone(),
+                        value(group_id),
+                    ],
+                ),
+            ));
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    provisioning_causal_dependency_sql(flavor),
+                    vec![
+                        value(env),
+                        subscription_binding.clone(),
+                        value(group_id),
+                    ],
+                ),
+            ));
+            steps.push(DbTransactionStep::Execute(
+                DbStatement::with_transaction_params(
+                    "UPDATE bcs_events SET fanout_status = 'pending' WHERE env = ? \
+                     AND EXISTS (SELECT 1 FROM bcs_event_fanout_targets target \
+                       WHERE target.env = bcs_events.env AND target.event_id = bcs_events.event_id \
+                         AND target.subscription_id = ? AND target.status = 'pending')",
+                    vec![value(env), subscription_binding],
                 ),
             ));
         }
@@ -280,6 +320,188 @@ fn pending_subscription_lock_sql(flavor: DbSqlFlavor) -> &'static str {
             "SELECT subscription_id FROM bcs_event_subscriptions \
              WHERE env = ? AND subscription_id = ? AND scope_type = 'group' \
                AND scope_id = ? AND status = 'pending'"
+        }
+    }
+}
+
+fn provisioning_target_backfill_sql(flavor: DbSqlFlavor) -> &'static str {
+    match flavor {
+        DbSqlFlavor::Mysql => {
+            "INSERT IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
+             subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
+             depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
+             cancelled_at, env) SELECT UUID(), event.event_id, subscription.subscription_id, \
+             subscription.current_revision, 'normal', '', NULL, NULL, 'pending', NULL, NULL, \
+             event.recorded_at, NULL, NULL, event.env FROM bcs_event_subscriptions subscription \
+             JOIN bcs_event_subscription_revisions revision \
+               ON revision.env = subscription.env \
+              AND revision.subscription_id = subscription.subscription_id \
+              AND revision.revision = subscription.current_revision \
+             JOIN bcs_events event ON event.env = subscription.env \
+              AND event.group_id = subscription.scope_id \
+             WHERE subscription.env = ? AND subscription.subscription_id = ? \
+               AND subscription.status = 'active' AND subscription.scope_type = 'group' \
+               AND event.group_id = ? AND event.recorded_at >= subscription.created_at \
+               AND event.recorded_at <= revision.activated_at \
+               AND event.retention_until > revision.activated_at \
+               AND (JSON_CONTAINS(revision.event_filters_json, JSON_QUOTE(event.event_type), '$') \
+                    OR EXISTS (SELECT 1 FROM JSON_TABLE(revision.event_filters_json, '$[*]' \
+                       COLUMNS(filter_value VARCHAR(128) PATH '$')) filters \
+                       WHERE RIGHT(filters.filter_value, 2) = '.*' \
+                         AND BINARY event.event_type LIKE CONCAT(LEFT(BINARY filters.filter_value, \
+                             CHAR_LENGTH(filters.filter_value) - 1), '%'))) \
+               AND NOT EXISTS (SELECT 1 FROM bcs_event_fanout_targets existing \
+                 WHERE existing.env = event.env AND existing.event_id = event.event_id \
+                   AND existing.subscription_id = subscription.subscription_id \
+                   AND existing.subscription_revision = subscription.current_revision \
+                   AND existing.purpose = 'normal') \
+             ORDER BY event.recorded_at, event.stream_key, event.sequence, event.event_id"
+        }
+        DbSqlFlavor::Sqlite => {
+            "INSERT OR IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
+             subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
+             depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
+             cancelled_at, env) SELECT lower(hex(randomblob(16))), event.event_id, \
+             subscription.subscription_id, subscription.current_revision, 'normal', '', NULL, \
+             NULL, 'pending', NULL, NULL, event.recorded_at, NULL, NULL, event.env \
+             FROM bcs_event_subscriptions subscription JOIN bcs_event_subscription_revisions revision \
+               ON revision.env = subscription.env \
+              AND revision.subscription_id = subscription.subscription_id \
+              AND revision.revision = subscription.current_revision \
+             JOIN bcs_events event ON event.env = subscription.env \
+              AND event.group_id = subscription.scope_id \
+             WHERE subscription.env = ? AND subscription.subscription_id = ? \
+               AND subscription.status = 'active' AND subscription.scope_type = 'group' \
+               AND event.group_id = ? AND event.recorded_at >= subscription.created_at \
+               AND event.recorded_at <= revision.activated_at \
+               AND event.retention_until > revision.activated_at \
+               AND EXISTS (SELECT 1 FROM json_each(revision.event_filters_json) filters \
+                 WHERE filters.value = event.event_type OR (substr(filters.value, -2) = '.*' \
+                   AND event.event_type LIKE substr(filters.value, 1, length(filters.value) - 1) || '%')) \
+               AND NOT EXISTS (SELECT 1 FROM bcs_event_fanout_targets existing \
+                 WHERE existing.env = event.env AND existing.event_id = event.event_id \
+                   AND existing.subscription_id = subscription.subscription_id \
+                   AND existing.subscription_revision = subscription.current_revision \
+                   AND existing.purpose = 'normal') \
+             ORDER BY event.recorded_at, event.stream_key, event.sequence, event.event_id"
+        }
+    }
+}
+
+fn provisioning_causal_target_backfill_sql(flavor: DbSqlFlavor) -> &'static str {
+    match flavor {
+        DbSqlFlavor::Mysql => {
+            "INSERT IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
+             subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
+             depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
+             cancelled_at, env) SELECT UUID(), cause.event_id, effect.subscription_id, \
+             effect.subscription_revision, 'causal_prerequisite', '', NULL, NULL, 'pending', \
+             NULL, NULL, effect.created_at, NULL, NULL, effect.env \
+             FROM bcs_event_fanout_targets effect \
+             JOIN bcs_events effect_event ON effect_event.env = effect.env \
+              AND effect_event.event_id = effect.event_id \
+             JOIN bcs_event_subscriptions subscription ON subscription.env = effect.env \
+              AND subscription.subscription_id = effect.subscription_id \
+             JOIN bcs_event_subscription_revisions revision ON revision.env = effect.env \
+              AND revision.subscription_id = effect.subscription_id \
+              AND revision.revision = effect.subscription_revision \
+             JOIN bcs_events cause ON cause.env = effect.env \
+              AND cause.event_id = effect_event.causation_event_id \
+             WHERE effect.env = ? AND effect.subscription_id = ? \
+               AND effect_event.group_id = ? AND effect.purpose = 'normal' \
+               AND effect.status <> 'cancelled' AND subscription.status = 'active' \
+               AND subscription.current_revision = effect.subscription_revision \
+               AND effect_event.recorded_at >= subscription.created_at \
+               AND effect_event.recorded_at <= revision.activated_at \
+               AND (JSON_CONTAINS(revision.event_filters_json, JSON_QUOTE(cause.event_type), '$') \
+                    OR EXISTS (SELECT 1 FROM JSON_TABLE(revision.event_filters_json, '$[*]' \
+                       COLUMNS(filter_value VARCHAR(128) PATH '$')) filters \
+                       WHERE RIGHT(filters.filter_value, 2) = '.*' \
+                         AND BINARY cause.event_type LIKE CONCAT(LEFT(BINARY filters.filter_value, \
+                             CHAR_LENGTH(filters.filter_value) - 1), '%'))) \
+               AND NOT EXISTS (SELECT 1 FROM bcs_event_fanout_targets existing \
+                 WHERE existing.env = effect.env AND existing.event_id = cause.event_id \
+                   AND existing.subscription_id = effect.subscription_id \
+                   AND existing.subscription_revision = effect.subscription_revision \
+                   AND existing.purpose IN ('normal', 'causal_prerequisite') \
+                   AND existing.status <> 'cancelled')"
+        }
+        DbSqlFlavor::Sqlite => {
+            "INSERT OR IGNORE INTO bcs_event_fanout_targets (target_id, event_id, subscription_id, \
+             subscription_revision, purpose, replay_request_id, replay_of_delivery_id, \
+             depends_on_target_id, status, lease_owner, lease_until, created_at, materialized_at, \
+             cancelled_at, env) SELECT lower(hex(randomblob(16))), cause.event_id, \
+             effect.subscription_id, effect.subscription_revision, 'causal_prerequisite', '', \
+             NULL, NULL, 'pending', NULL, NULL, effect.created_at, NULL, NULL, effect.env \
+             FROM bcs_event_fanout_targets effect \
+             JOIN bcs_events effect_event ON effect_event.env = effect.env \
+              AND effect_event.event_id = effect.event_id \
+             JOIN bcs_event_subscriptions subscription ON subscription.env = effect.env \
+              AND subscription.subscription_id = effect.subscription_id \
+             JOIN bcs_event_subscription_revisions revision ON revision.env = effect.env \
+              AND revision.subscription_id = effect.subscription_id \
+              AND revision.revision = effect.subscription_revision \
+             JOIN bcs_events cause ON cause.env = effect.env \
+              AND cause.event_id = effect_event.causation_event_id \
+             WHERE effect.env = ? AND effect.subscription_id = ? \
+               AND effect_event.group_id = ? AND effect.purpose = 'normal' \
+               AND effect.status <> 'cancelled' AND subscription.status = 'active' \
+               AND subscription.current_revision = effect.subscription_revision \
+               AND effect_event.recorded_at >= subscription.created_at \
+               AND effect_event.recorded_at <= revision.activated_at \
+               AND EXISTS (SELECT 1 FROM json_each(revision.event_filters_json) filters \
+                 WHERE filters.value = cause.event_type OR (substr(filters.value, -2) = '.*' \
+                   AND cause.event_type LIKE substr(filters.value, 1, length(filters.value) - 1) || '%')) \
+               AND NOT EXISTS (SELECT 1 FROM bcs_event_fanout_targets existing \
+                 WHERE existing.env = effect.env AND existing.event_id = cause.event_id \
+                   AND existing.subscription_id = effect.subscription_id \
+                   AND existing.subscription_revision = effect.subscription_revision \
+                   AND existing.purpose IN ('normal', 'causal_prerequisite') \
+                   AND existing.status <> 'cancelled')"
+        }
+    }
+}
+
+fn provisioning_causal_dependency_sql(flavor: DbSqlFlavor) -> &'static str {
+    match flavor {
+        DbSqlFlavor::Mysql => {
+            "UPDATE bcs_event_fanout_targets effect \
+             JOIN bcs_events effect_event ON effect_event.env = effect.env \
+              AND effect_event.event_id = effect.event_id \
+             JOIN bcs_event_fanout_targets cause ON cause.env = effect.env \
+              AND cause.event_id = effect_event.causation_event_id \
+              AND cause.subscription_id = effect.subscription_id \
+              AND cause.subscription_revision = effect.subscription_revision \
+              AND cause.purpose IN ('normal', 'causal_prerequisite') \
+              AND cause.status <> 'cancelled' \
+             SET effect.depends_on_target_id = cause.target_id \
+             WHERE effect.env = ? AND effect.subscription_id = ? \
+               AND effect_event.group_id = ? AND effect.purpose = 'normal' \
+               AND effect.depends_on_target_id IS NULL"
+        }
+        DbSqlFlavor::Sqlite => {
+            "UPDATE bcs_event_fanout_targets AS effect SET depends_on_target_id = (\
+               SELECT cause.target_id FROM bcs_events effect_event \
+               JOIN bcs_event_fanout_targets cause ON cause.env = effect.env \
+                AND cause.event_id = effect_event.causation_event_id \
+                AND cause.subscription_id = effect.subscription_id \
+                AND cause.subscription_revision = effect.subscription_revision \
+                AND cause.purpose IN ('normal', 'causal_prerequisite') \
+                AND cause.status <> 'cancelled' \
+               WHERE effect_event.env = effect.env AND effect_event.event_id = effect.event_id \
+               ORDER BY CASE cause.purpose WHEN 'normal' THEN 0 ELSE 1 END \
+               LIMIT 1) \
+             WHERE effect.env = ? AND effect.subscription_id = ? AND effect.purpose = 'normal' \
+               AND effect.depends_on_target_id IS NULL \
+               AND EXISTS (SELECT 1 FROM bcs_events effect_event \
+                 JOIN bcs_event_fanout_targets cause ON cause.env = effect.env \
+                  AND cause.event_id = effect_event.causation_event_id \
+                  AND cause.subscription_id = effect.subscription_id \
+                  AND cause.subscription_revision = effect.subscription_revision \
+                 AND cause.purpose IN ('normal', 'causal_prerequisite') \
+                 AND cause.status <> 'cancelled' \
+                 WHERE effect_event.env = effect.env AND effect_event.event_id = effect.event_id \
+                   AND effect_event.group_id = ?)"
         }
     }
 }
@@ -759,6 +981,42 @@ mod tests {
         let sqlite = causal_dependency_update_sql(DbSqlFlavor::Sqlite);
         assert!(sqlite.contains("SET depends_on_target_id = ("));
         assert!(!sqlite.contains("JOIN bcs_event_fanout_targets AS cause_target"));
+    }
+
+    #[test]
+    fn provisioning_backfill_uses_backend_compatible_idempotent_sql() {
+        let mysql = provisioning_target_backfill_sql(DbSqlFlavor::Mysql);
+        assert!(mysql.starts_with("INSERT IGNORE"));
+        assert!(mysql.contains("event.recorded_at >= subscription.created_at"));
+        assert_eq!(mysql.matches('?').count(), 3);
+
+        let sqlite = provisioning_target_backfill_sql(DbSqlFlavor::Sqlite);
+        assert!(sqlite.starts_with("INSERT OR IGNORE"));
+        assert!(sqlite.contains("event.recorded_at >= subscription.created_at"));
+        assert_eq!(sqlite.matches('?').count(), 3);
+
+        let mysql_causal = provisioning_causal_target_backfill_sql(DbSqlFlavor::Mysql);
+        assert!(mysql_causal.starts_with("INSERT IGNORE"));
+        assert!(mysql_causal.contains("'causal_prerequisite'"));
+        assert_eq!(mysql_causal.matches('?').count(), 3);
+
+        let sqlite_causal = provisioning_causal_target_backfill_sql(DbSqlFlavor::Sqlite);
+        assert!(sqlite_causal.starts_with("INSERT OR IGNORE"));
+        assert!(sqlite_causal.contains("'causal_prerequisite'"));
+        assert_eq!(sqlite_causal.matches('?').count(), 3);
+
+        assert_eq!(
+            provisioning_causal_dependency_sql(DbSqlFlavor::Mysql)
+                .matches('?')
+                .count(),
+            3
+        );
+        assert_eq!(
+            provisioning_causal_dependency_sql(DbSqlFlavor::Sqlite)
+                .matches('?')
+                .count(),
+            3
+        );
     }
 
     fn command() -> AppendEventRecord {

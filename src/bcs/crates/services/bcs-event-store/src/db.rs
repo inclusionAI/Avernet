@@ -763,7 +763,13 @@ impl EventRepoPort for DbEventStore {
             DbTransactionStep::Query(DbStatement::with_params(
                 sql_with_timestamp_params(self.flavor, &self.target_select_sql(
                     "WHERE env = ? AND status = 'pending' AND lease_owner = ? \
-                     AND lease_until = __bcs_timestamp_ms__ ORDER BY created_at, target_id",
+                     AND lease_until = __bcs_timestamp_ms__ ORDER BY created_at, \
+                     (SELECT event.stream_key FROM bcs_events event \
+                       WHERE event.env = bcs_event_fanout_targets.env \
+                         AND event.event_id = bcs_event_fanout_targets.event_id), \
+                     (SELECT event.sequence FROM bcs_events event \
+                       WHERE event.env = bcs_event_fanout_targets.env \
+                         AND event.event_id = bcs_event_fanout_targets.event_id), target_id",
                 )),
                 vec![
                     DbValue::from(command.env.as_str()),
@@ -1622,10 +1628,11 @@ fn claim_fanout_targets_sql(flavor: DbSqlFlavor) -> String {
      lease_until = __bcs_timestamp_ms__ \
      WHERE target_id IN (SELECT target_id FROM (\
        SELECT target.target_id FROM bcs_event_fanout_targets target \
+       JOIN bcs_events event ON event.env = target.env AND event.event_id = target.event_id \
        WHERE target.env = ? AND target.status = 'pending' \
          AND (target.lease_until IS NULL \
            OR target.lease_until <= __bcs_timestamp_ms__) \
-       ORDER BY created_at, target_id LIMIT ?\
+       ORDER BY target.created_at, event.stream_key, event.sequence, target.target_id LIMIT ?\
      ) claimable) AND env = ? AND status = 'pending' \
        AND (lease_until IS NULL OR lease_until <= __bcs_timestamp_ms__)"
     )
