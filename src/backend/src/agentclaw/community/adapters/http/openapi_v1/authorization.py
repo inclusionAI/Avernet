@@ -485,14 +485,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("the named user's own work orders and notifications"),
     ("POST", "/openapi/v1/bots/work-orders/{work_order_id}/reject"):
         NoCheck("the named user's own work orders and notifications"),
-    # ── Task public surface (run-template/execute/dashboard/list + grant/revoke stateless relay; mounted via the gateway
+    # ── Task public surface (execute/dashboard/list + grant/revoke stateless relay; mounted via the gateway
     # ── `collaboration-tasks` domain → backend). Tasks address no bot, so the
     # ── bot-level `Check` does not apply; the caller identity is resolved by
     # ── the gateway spanner + `_PUBLIC_AUTH`; `list` uses caller-selected
     # ── user_id only as a task-record filter. `NoCheck` is the settled mode here, not a
     # ── placeholder — see `admission.py` for the machine-caller decision.
-    ("POST", "/openapi/v1/collaboration/tasks/run-template"):
-        NoCheck("a task template, not a bot; the submitter is the task owner"),
     ("POST", "/openapi/v1/collaboration/tasks/execute"):
         NoCheck("a task, not a bot; the submitter is the task owner"),
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"):

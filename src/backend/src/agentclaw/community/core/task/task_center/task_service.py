@@ -34,7 +34,6 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskNodePatch,
     TaskOpResult,
-    TaskSourceType,
     TaskSpec,
     TaskType,
 )
@@ -45,6 +44,8 @@ from agentclaw.community.core.task.domain.requests import (
     RequestTaskSpec,
     TaskInfoRequest,
 )
+from agentclaw.community.core.task.domain.errors import TaskStateError
+
 from agentclaw.community.core.task.repository.types import (
     TaskInfoRecord,
     TaskNodeRecord,
@@ -191,39 +192,51 @@ class TaskService:
             notify_messages_provider=self._notify_provider,
         )
 
-    async def run_template(self, template_id: str, inputs: dict[str, Any], *,
-                           owner_user_id: str, owner_bot_id: str,
-                           auto_advance: bool | None = None,
-                           owner_account_id: str | None = None) -> TaskOpResult:
-        """Load and validate a static template, then enter the existing execute path."""
+    def _materialize_static_plan_if_needed(self, request: "TaskInfoRequest") -> "TaskInfoRequest":
+        """Fold static-plan template loading into execute (Rule 22: one public API).
+
+        当 ``execution_config.task_type == STATIC_PLAN`` 时,根据 ``static_plan_id`` 加载仓内置
+        模板 yaml → 校验 input/bindings → 合成 task_spec(title/instruction/objective 取模板 id)
+        → 把 ``static_plan_yaml`` / ``template_input`` 补进 execution_config。yaml 加载或校验失败
+        抛 ``TaskStateError``(HTTP 层 ``@envelope_errors`` 映 422),与原 ``run_template`` 行为一致。
+        调用方已显式传入 ``static_plan_yaml``/``template_input`` 时仅补缺失项,不覆盖已传字段。
+
+        发起者字段(``owner_user_id``/``owner_bot_id``/``static_auto_report``/``owner_account_id``)
+        继续走 execute 既有透传路径;此 helper 只补模板相关缺失项,与动态任务共用同一 execute 入口。
+        """
+        cfg = request.execution_config
+        task_type = cfg.get("task_type")
+        if task_type != TaskType.STATIC_PLAN:
+            return request
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
-        logger.info(
-            "[task][template-run] start template=%s owner_bot_id=%s input_keys=%s",
-            template_id,
-            owner_bot_id,
-            sorted(inputs),
-        )
+        template_id = cfg.get("static_plan_id")
+        if not template_id:
+            raise TaskStateError("static_plan_id required with task_type=static_plan")
         template_dir = Path(__file__).resolve().parents[1] / "task_plan" / "plans"
-        template_path = template_dir / f"{template_id}.yaml"
+        inputs = dict(cfg.get("template_input") or {})
         try:
             definition = StaticPlanDefinition.from_file(template_id, template_dir)
             definition.validate_input(inputs)
             definition.validate_bindings()
+        except TaskStateError:
+            raise
         except Exception as exc:
             logger.exception(
                 "[task][template-run] validation failed template=%s exc_type=%s",
-                template_id,
-                type(exc).__name__,
+                template_id, type(exc).__name__,
             )
-            raise
+            raise TaskStateError(f"static plan template validation failed: {exc}") from exc
         logger.info(
             "[task][template-run] validated template=%s nodes=%s entry_bot_id=%s",
             template_id,
-            [node.node_id for node in definition.nodes],
+            [n.node_id for n in definition.nodes],
             definition.entry_bot_id,
         )
-        plan_yaml = template_path.read_text(encoding="utf-8")
-        request = TaskInfoRequest(
+        yaml_path = template_dir / f"{template_id}.yaml"
+        patched_cfg = dict(cfg)
+        patched_cfg.setdefault("static_plan_yaml", yaml_path.read_text(encoding="utf-8"))
+        patched_cfg.setdefault("template_input", inputs)
+        return request.__class__(
             task_spec=RequestTaskSpec(
                 metadata=RequestMetadata(
                     title=template_id,
@@ -231,34 +244,15 @@ class TaskService:
                 ),
                 context=RequestContext(
                     background="",
-                    extend_props={"template_input": dict(inputs)},
+                    extend_props={"template_input": dict(patched_cfg["template_input"])},
                 ),
                 goal=RequestGoal(objective=template_id),
             ),
-            source_type=TaskSourceType.API,
-            owner_user_id=owner_user_id,
-            owner_bot_id=owner_bot_id,
-            execution_config={
-                "task_type": TaskType.STATIC_PLAN,
-                "static_plan_id": template_id,
-                "static_plan_yaml": plan_yaml,
-                "template_input": dict(inputs),
-                "static_auto_report": auto_advance,
-                # 触发者账号(DingTalk account_id);engine notify 终端节点取此处 recipient 发钉钉,
-                # 免去硬编码兜底。内部 /api/v1 路由由 get_current_user→user.operatorName 注入。
-                "owner_account_id": owner_account_id,
-            },
+            source_type=request.source_type,
+            owner_user_id=request.owner_user_id,
+            owner_bot_id=request.owner_bot_id,
+            execution_config=patched_cfg,
         )
-        result = await self.execute(request)
-        logger.info(
-            "[task][template-run] submitted template=%s task=%s success=%s run_id=%s error=%s",
-            template_id,
-            result.task_id,
-            result.success,
-            result.run_id,
-            result.error,
-        )
-        return result
 
     @property
     def callback(self) -> TaskLoopCallback:
@@ -298,6 +292,7 @@ class TaskService:
         调用方经 ``get_task_dashboard`` 轮询观察推进。后台任务异常经 done_callback 记 log
         (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
         request = self._normalize_owner_bot_id(request)
+        request = self._materialize_static_plan_if_needed(request)
         task_id = self._task_id_provider()
         task_info = request.to_task_info(task_id)
         if self._task_info_repo is not None:

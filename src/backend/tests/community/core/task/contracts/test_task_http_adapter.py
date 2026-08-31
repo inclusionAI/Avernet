@@ -147,6 +147,46 @@ def _task_info_dict() -> dict:
     }
 
 
+def _static_plan_dict() -> dict:
+    """execute 一条 task_type=static_plan + okr-implementation 模板入参,验证单一 execute API 也能跑模板。"""
+    return {
+        "task_spec": {
+            "metadata": {"title": "okr-implementation", "instruction": "运营 okr"},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "okr-implementation", "acceptances": []},
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {
+            "task_type": "static_plan",
+            "static_plan_id": "okr-implementation",
+            "template_input": {"okr": "提升双十一活动转化率"},
+            "static_auto_report": True,
+        },
+    }
+
+
+def _static_plan_dict_missing_input() -> dict:
+    """构造静态模板但缺必填输入 okr,验证校验层把 422 暴露给上层。"""
+    return {
+        "task_spec": {
+            "metadata": {"title": "okr-implementation", "instruction": "运营 okr"},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "okr-implementation", "acceptances": []},
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {
+            "task_type": "static_plan",
+            "static_plan_id": "okr-implementation",
+            "template_input": {},
+            "static_auto_report": True,
+        },
+    }
+
+
 def _execute_and_get_id(c) -> str:
     """POST execute → 返回服务端生成的 task_id(契约:task_id 不在请求体,服务端 uuid4)。"""
     r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
@@ -155,16 +195,34 @@ def _execute_and_get_id(c) -> str:
 
 
 class TestTaskExecute:
-    def test_internal_router_exposes_static_template_run_endpoint(self):
+    def test_internal_router_does_not_expose_static_template_run_endpoint(self):
+        # 单一对外 API:静态模板经 execute + task_type=static_plan 提交,无独立 run-template route。
         routes = {
             (route.path, method)
             for route in task_internal_router.routes
             for method in getattr(route, "methods", set())
         }
-        assert (
-            "/api/v1/collaboration/tasks/run-template",
-            "POST",
-        ) in routes
+        assert ("/api/v1/collaboration/tasks/run-template", "POST") not in routes
+
+    def test_execute_runs_static_plan_template(self, client):
+        # execute + task_type=static_plan + 静态模板,落库并立刻返回 task_id。
+        c, _ = client
+        r = c.post("/openapi/v1/collaboration/tasks/execute", json=_static_plan_dict())
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["code"] == 200000
+        task_id = body["data"]["task_id"]
+        assert isinstance(task_id, str) and task_id
+        assert body["data"]["success"] is True
+
+    def test_execute_static_plan_missing_template_input_returns_error(self, client):
+        # 模板 input 校验缺失必填 okr → 上层 HTTPException/内部错误态。
+        c, _ = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_missing_input(),
+        )
+        assert r.status_code >= 400, r.text
 
     def test_execute_returns_op_result(self, client):
         c, _ = client
