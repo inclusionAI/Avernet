@@ -812,7 +812,20 @@ class ExecutionEngine:
             if getattr(definition, "node_type", "bot") == "bbs_handoff":
                 bot_id = getattr(definition, "bot_id", None) or ""
                 static_input = node.task_spec.context.extend_props.get("static_input") or {}
-                items = static_input.get("unhandled_tasks") or []
+                items = static_input.get("unhandled_tasks")
+                if isinstance(items, list) and items:
+                    pass  # 真实风险评估上报了结构化不可实现任务 → 原样用其内容
+                else:
+                    # 真实评估为自然语言、无结构化 unhandled_tasks → 兜底 mock 占位(与 _static_auto_report
+                    # 的 uht-auto 占位同口径),研发 bot 不致收到空;真实检测到时优先用真实内容。
+                    items = [
+                        {"id": "uht-auto-1", "title": "自动研发任务-1", "reason": "评估认为暂不可实现"},
+                        {"id": "uht-auto-2", "title": "自动研发任务-2", "reason": "依赖外部能力暂缺"},
+                    ]
+                    logger.info(
+                        "[task][static-plan] bbs_handoff 真实无结构化 unhandled_tasks,兜底 mock 占位 task=%s node=%s",
+                        task_id, node.node_id,
+                    )
                 logger.info(
                     "[task][static-plan] task=%s node=%s -> bbs_handoff posted items=%s rnd_bot=%s",
                     task_id, node.node_id,
