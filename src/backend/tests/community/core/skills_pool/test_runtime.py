@@ -10,11 +10,10 @@ from agentclaw.community.core.skills_pool.models import (
     PoolCutoverStatus,
     PoolSkillMapping,
 )
-from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupStatus
-from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
-from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
-    MAPPING_V3_CONTRACT_VERSION,
+from agentclaw.community.core.skills_pool.quarantine import (
+    RuntimeQuarantineCleanupStatus,
 )
+from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
 
 
 class FakeResolver:
@@ -74,7 +73,13 @@ class CenterEnsureTransport(FakeTransport):
     async def invoke(self, conn_info, method, path, *, body, timeout):
         if path.endswith("/center/ensure"):
             self.calls.append(
-                {"conn_info": conn_info, "method": method, "path": path, "body": body, "timeout": timeout}
+                {
+                    "conn_info": conn_info,
+                    "method": method,
+                    "path": path,
+                    "body": body,
+                    "timeout": timeout,
+                }
             )
             return {"success": True, "data": {"ok": body["items"], "failed": []}}
         return await super().invoke(conn_info, method, path, body=body, timeout=timeout)
@@ -199,7 +204,9 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["local", "baas"])
-async def test_repo_retirement_projection_reaches_each_device_provider(provider: str) -> None:
+async def test_repo_retirement_projection_reaches_each_device_provider(
+    provider: str,
+) -> None:
     """Repo Direct deactivate clears the old entry for Local and BaaS engines."""
     transport = FakeTransport()
     runtime = OpenClawSkillsPoolRuntime(
@@ -277,7 +284,7 @@ async def test_pool_runtime_returns_typed_quarantine_cleanup_result() -> None:
 
 
 @pytest.mark.asyncio
-async def test_center_mapping_is_ensured_before_full_v3_publish() -> None:
+async def test_center_mapping_uses_fused_v4_publish() -> None:
     transport = CenterEnsureTransport()
     runtime = OpenClawSkillsPoolRuntime(
         resolver=FakeResolver(),
@@ -296,10 +303,9 @@ async def test_center_mapping_is_ensured_before_full_v3_publish() -> None:
         bot_id="bot-1",
         user_id="owner-1",
         mappings=[mapping],
-        mapping_contract_version=MAPPING_V3_CONTRACT_VERSION,
+        mapping_contract_version="skills-pool-mapping-v4",
     )
     assert [call["path"] for call in transport.calls] == [
-        "/api/skills/center/ensure",
         "/api/skills/layout/mappings/publish",
     ]
 

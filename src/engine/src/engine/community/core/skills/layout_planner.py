@@ -16,6 +16,7 @@ from uuid import UUID
 LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
 MAPPING_CONTRACT_VERSION = "skills-pool-mapping-v2"
 MAPPING_V3_CONTRACT_VERSION = "skills-pool-mapping-v3"
+MAPPING_V4_CONTRACT_VERSION = "skills-pool-mapping-v4"
 
 
 class SkillLayoutCapability(StrEnum):
@@ -247,20 +248,26 @@ def resolve_skill_mappings(
         if mapping.corpus is SkillCorpus.LOCAL:
             if mapping.relative_path is None:
                 raise SkillLayoutResolutionError("local mapping requires relative_path")
-            relative_path = _normalize_relative_path(mapping.relative_path, field="relative_path")
+            relative_path = _normalize_relative_path(
+                mapping.relative_path, field="relative_path"
+            )
             source_root = local_root
             locator_scheme = "local"
         elif mapping.corpus is SkillCorpus.REPO:
             if mapping.relative_path is None:
                 raise SkillLayoutResolutionError("repo mapping requires relative_path")
-            relative_path = _normalize_relative_path(mapping.relative_path, field="relative_path")
+            relative_path = _normalize_relative_path(
+                mapping.relative_path, field="relative_path"
+            )
             source_root = repo_root
             locator_scheme = "git"
         elif mapping.corpus is SkillCorpus.CENTER:
             if center_root is None:
                 raise SkillLayoutResolutionError("center mapping requires pool_center")
             if mapping.relative_path is not None:
-                raise SkillLayoutResolutionError("center mapping must not carry relative_path")
+                raise SkillLayoutResolutionError(
+                    "center mapping must not carry relative_path"
+                )
             skill_uuid = _normalize_link_name(mapping.skill_uuid or "")
             sc_version_number = _normalize_link_name(mapping.sc_version_number or "")
             try:
@@ -284,7 +291,9 @@ def resolve_skill_mappings(
                 f"duplicate active Skill target: {link_name}"
             )
         seen_targets.add(target)
-        locator_value = str(source) if mapping.corpus is SkillCorpus.LOCAL else relative_path
+        locator_value = (
+            str(source) if mapping.corpus is SkillCorpus.LOCAL else relative_path
+        )
         resolved.append(
             ResolvedSkillMapping(
                 corpus=mapping.corpus,
@@ -439,6 +448,7 @@ __all__ = [
     "LAYOUT_CONTRACT_VERSION",
     "MAPPING_CONTRACT_VERSION",
     "MAPPING_V3_CONTRACT_VERSION",
+    "MAPPING_V4_CONTRACT_VERSION",
     "EngineSkillLayoutDescriptor",
     "LayoutIdentity",
     "LogicalSkillMapping",

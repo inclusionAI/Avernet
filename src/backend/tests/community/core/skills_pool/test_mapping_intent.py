@@ -94,10 +94,24 @@ def test_center_mapping_requires_explicit_runtime_v3_capability() -> None:
     with pytest.raises(ValueError, match="explicitly support mapping v3"):
         mapping_contract_for(mappings, ["skills-pool-mapping-v2"])
 
-    assert mapping_contract_for(
-        mappings,
-        ["skills-pool-mapping-v2", "skills-pool-mapping-v3"],
-    ) == "skills-pool-mapping-v3"
+    assert (
+        mapping_contract_for(
+            mappings,
+            ["skills-pool-mapping-v2", "skills-pool-mapping-v3"],
+        )
+        == "skills-pool-mapping-v3"
+    )
+    assert (
+        mapping_contract_for(
+            mappings,
+            [
+                "skills-pool-mapping-v2",
+                "skills-pool-mapping-v3",
+                "skills-pool-mapping-v4",
+            ],
+        )
+        == "skills-pool-mapping-v4"
+    )
 
 
 def test_restores_structured_center_retirement_for_retry() -> None:
@@ -183,7 +197,9 @@ def test_repo_runtime_name_uses_skill_name_not_path_tail() -> None:
         )
 
 
-def test_repo_retirement_evidence_round_trips_when_name_differs_from_locator_tail() -> None:
+def test_repo_retirement_evidence_round_trips_when_name_differs_from_locator_tail() -> (
+    None
+):
     current = build_logical_skill_mappings(
         [
             RegisteredSkillAsset(
@@ -194,12 +210,17 @@ def test_repo_retirement_evidence_round_trips_when_name_differs_from_locator_tai
         ]
     )
 
-    assert logical_skill_mappings_from_evidence(
-        {"retired_mappings": [current[0].to_dict()]}
-    ) == current
+    assert (
+        logical_skill_mappings_from_evidence(
+            {"retired_mappings": [current[0].to_dict()]}
+        )
+        == current
+    )
 
 
-def test_retirement_evidence_rejects_same_runtime_name_with_different_identities() -> None:
+def test_retirement_evidence_rejects_same_runtime_name_with_different_identities() -> (
+    None
+):
     with pytest.raises(ValueError, match="ambiguous retired mapping evidence"):
         logical_skill_mappings_from_evidence(
             {

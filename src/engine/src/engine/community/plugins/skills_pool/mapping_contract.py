@@ -13,6 +13,7 @@ from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
     MAPPING_CONTRACT_VERSION,
     MAPPING_V3_CONTRACT_VERSION,
+    MAPPING_V4_CONTRACT_VERSION,
     LayoutIdentity,
     LogicalSkillMapping,
     RuntimeLayoutContext,
@@ -94,6 +95,7 @@ def resolve_mapping_payload(
     if mapping_contract_version not in {
         MAPPING_CONTRACT_VERSION,
         MAPPING_V3_CONTRACT_VERSION,
+        MAPPING_V4_CONTRACT_VERSION,
     }:
         raise InvalidPoolMappingRequestError(
             f"unsupported mapping contract: {mapping_contract_version}"
@@ -102,11 +104,18 @@ def resolve_mapping_payload(
     logical: list[LogicalSkillMapping] = []
     for raw_item in payload:
         if not isinstance(raw_item, dict):
-            raise InvalidPoolMappingRequestError("each logical mapping must be an object")
+            raise InvalidPoolMappingRequestError(
+                "each logical mapping must be an object"
+            )
         fields = frozenset(raw_item)
         is_center = fields == _LOGICAL_V3_CENTER_FIELDS
-        if is_center and mapping_contract_version != MAPPING_V3_CONTRACT_VERSION:
-            raise InvalidPoolMappingRequestError("v2 logical mapping must contain exactly corpus, link_name, relative_path")
+        if is_center and mapping_contract_version not in {
+            MAPPING_V3_CONTRACT_VERSION,
+            MAPPING_V4_CONTRACT_VERSION,
+        }:
+            raise InvalidPoolMappingRequestError(
+                "v2 logical mapping must contain exactly corpus, link_name, relative_path"
+            )
         item = _require_mapping_fields(
             raw_item,
             expected=_LOGICAL_V3_CENTER_FIELDS if is_center else _LOGICAL_V2_FIELDS,
@@ -135,27 +144,28 @@ def resolve_mapping_payload(
                 raise InvalidPoolMappingRequestError(
                     "center mapping requires structured skill_uuid and sc_version_number"
                 )
-            logical.append(LogicalSkillMapping(
-                corpus=resolved_corpus,
-                relative_path=None,
-                link_name=link_name,
-                skill_uuid=skill_uuid,
-                sc_version_number=sc_version_number,
-            ))
+            logical.append(
+                LogicalSkillMapping(
+                    corpus=resolved_corpus,
+                    relative_path=None,
+                    link_name=link_name,
+                    skill_uuid=skill_uuid,
+                    sc_version_number=sc_version_number,
+                )
+            )
             continue
         relative_path = item["relative_path"]
-        if (
-            resolved_corpus is SkillCorpus.CENTER
-            or not isinstance(relative_path, str)
-        ):
+        if resolved_corpus is SkillCorpus.CENTER or not isinstance(relative_path, str):
             raise InvalidPoolMappingRequestError(
                 "logical mapping corpus, relative_path and link_name must be strings"
             )
-        logical.append(LogicalSkillMapping(
-            corpus=resolved_corpus,
-            relative_path=relative_path,
-            link_name=link_name,
-        ))
+        logical.append(
+            LogicalSkillMapping(
+                corpus=resolved_corpus,
+                relative_path=relative_path,
+                link_name=link_name,
+            )
+        )
 
     plan = resolve_filesystem_skill_layout(
         LayoutIdentity(

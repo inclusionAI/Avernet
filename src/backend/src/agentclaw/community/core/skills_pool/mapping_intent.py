@@ -11,6 +11,7 @@ from agentclaw.community.core.skills_pool.models import (
 
 MAPPING_CONTRACT_V2 = "skills-pool-mapping-v2"
 MAPPING_CONTRACT_V3 = "skills-pool-mapping-v3"
+MAPPING_CONTRACT_V4 = "skills-pool-mapping-v4"
 
 
 class RuntimeMappingNameConflictError(ValueError):
@@ -25,9 +26,16 @@ def mapping_contract_for(
 
     if not any(mapping.corpus == "center" for mapping in mappings):
         return MAPPING_CONTRACT_V2
-    if not isinstance(supported_versions, list) or MAPPING_CONTRACT_V3 not in supported_versions:
+    if (
+        not isinstance(supported_versions, list)
+        or MAPPING_CONTRACT_V3 not in supported_versions
+    ):
         raise ValueError("runtime does not explicitly support mapping v3")
-    return MAPPING_CONTRACT_V3
+    return (
+        MAPPING_CONTRACT_V4
+        if MAPPING_CONTRACT_V4 in supported_versions
+        else MAPPING_CONTRACT_V3
+    )
 
 
 def _source_tail(git_path: str, prefix: str) -> PurePosixPath:
@@ -98,7 +106,9 @@ def build_logical_skill_mappings(
                 relative_path=None if relative is None else relative.as_posix(),
                 link_name=link_name,
                 skill_uuid=asset.skill_uuid if corpus == "center" else None,
-                sc_version_number=(asset.sc_version_number if corpus == "center" else None),
+                sc_version_number=(
+                    asset.sc_version_number if corpus == "center" else None
+                ),
             )
         )
     return mappings
