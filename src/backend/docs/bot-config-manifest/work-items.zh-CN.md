@@ -37,10 +37,10 @@
 | **D3** reconcile 校验 — *已解决* | #1468 | **W6** resources | #1474 |
 | **D4** 启动前下发 — *推迟* | #1508 | **W7** 命名源 + git 源 | #1475 |
 | **W1** manifest 文档 | #1469 | **W8** 生命周期 apply 点 | #1476 |
-| **W2** 带防护的 fetcher | #1470 | **W9** `cli_tools`（推迟） | #1477 |
-| **W3** 源凭证 | #1471 | **W10** 服务层缝 | #1509 |
+| **W2** 带防护的 fetcher | #1470 | **W9** `cli_tools`（推迟 — *artifact 形状已落地*） | #1477 |
+| **W3** 源凭证 | #1471 | **W10** 服务层缝 — *已合入* | #1509 |
 | | | **W11** 平台侧物化与留存 | #1510 |
-| | | **W12** 跨引擎语义契约 | #1684 |
+| | | **W12** 跨引擎语义契约 — *书面部分已交付，待 teclaw 评审* | #1684 |
 | | | **W13** 用 manifest 创建 bot | #1696 |
 
 规划 PR：#1465。**十三项全部在 §7 分配完毕**，每一项都带一行 **Owner**，注明
@@ -980,6 +980,12 @@ engine_config）：找出目前住在 `openapi_v1` router 里的检查——归�
 `teclaw-cli-contract.zh-CN.md` 一起构成交给 teclaw 的完整那一份：前者是所有类目的
 收敛语义，后者是唯一需要他们新增实现的 `cli_tools`。
 
+> **进度：书面部分已交付**（PR #1734）。本项**写作那一半已经做完**，剩下的不是
+> 我们的工时，而是**对方的评审**：验收标准的前两条（要求式表述、保留名）已满足，
+> 后两条（teclaw 已评审、分歧写进能力矩阵）要等他们回话才能勾。
+> **下一步是把这两份文档发给 teclaw owner，并追到一个明确答复**——同意，或点名
+> 不会实现的部分；沉默不是答案。
+
 **依赖。**§3.2 已定（已定） · **阻塞于。**—
 
 **验收标准。**
@@ -1710,7 +1716,33 @@ manifest 层，所以 W8 没有「去激活」需要安放。）
 
 **状态。**schema 已定稿（§3.7）；交付在设计中就按业务优先级后置。未排期。
 
-**依赖。**W8。
+> **进度：artifact 形状已提前落地，其余未开工**（PR #1734，与 W12 同一个 PR —— 那次
+> 是顺着 W12 的交付把 `artifact.schema.json` 一起对齐了，属于**有意为之的例外**，不是
+> §8「每项一个 PR」的新惯例）。接手本项的人，从这里开始：
+>
+> | | 状态 |
+> | --- | --- |
+> | `artifact.schema.json` 的 `cliToolRef` + 可选 `cli_tools` | ✅ 已合入 |
+> | `artifact.py` 的 `CliToolRef`；`to_dict` 未声明时省略该键、`from_dict` 不把缺席读成 `[]` | ✅ 已合入，有测试钉住 |
+> | `README.zh-CN.md` 三处「artifact schema 不变」的表述 | ✅ 已调和 |
+> | `SCHEMA_VERSION` 4 → 5 | ❌ **有意不做** —— 见下方「升版有前置条件」 |
+> | manifest schema `cli_tools`（§3.7）的落地、校验、物化器 | ❌ 未开工 |
+> | 拉取 / `sha256` 强校验 / 解包 / 取 `subpath` / 算 `md5` / 写 store | ❌ 未开工 |
+> | ELF 头校验、`${BOT_ARCH}` → `amd64` | ❌ 未开工 |
+> | ARCA 侧的 PATH 方案 + 默认技能集里的用法 skill | ❌ 未开工 |
+> | `bcs-cli` 接进来当第一个消费者 | ❌ 未开工 |
+>
+> **升版有前置条件，别当成收尾的一行改动。**`ConfigComposer` 给**每一份** artifact
+> 盖 `SCHEMA_VERSION`，所以升到 5 会立刻让今天在跑的引擎收到 `"schema_version": 5`
+> —— 正是 `teclaw-cli-contract.zh-CN.md` §6 承诺不会发生的事。**要和「第一次真正填充
+> `cli_tools`」放在同一次改动里**，且要等 teclaw 回答该文档 §8 的第 4 问。
+> `tests/community/kernel/test_bot_config_artifact.py` 里有一条测试把它钉在 4，
+> 连同这条理由 —— 那条测试是**提示**，改它之前先确认前置条件成立。
+>
+> **注意 #1477 的 issue 正文仍是摊平之前的旧描述**（`entrypoints`、「引擎收到一个
+> 已解包的目录」）。以本文档与 `teclaw-cli-contract.zh-CN.md` 为准。
+
+**依赖。**W8。（上面已落地的那部分是例外：它只声明形状、不产出内容，所以不依赖 W8。）
 
 **artifact 契约确实变了，`artifact.schema.json` 也是其中一部分。**
 `kernel/bot_config/artifact.py` 与它语言无关的 `artifact.schema.json` 是已发布的

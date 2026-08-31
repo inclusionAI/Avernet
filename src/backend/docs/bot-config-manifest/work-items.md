@@ -42,10 +42,10 @@ together.
 | **D3** reconcile verification — *resolved* | #1468 | **W6** resources | #1474 |
 | **D4** pre-boot delivery — *deferred* | #1508 | **W7** named + git sources | #1475 |
 | **W1** manifest document | #1469 | **W8** lifecycle apply points | #1476 |
-| **W2** guarded fetcher | #1470 | **W9** `cli_tools` (deferred) | #1477 |
-| **W3** source credentials | #1471 | **W10** service-layer seam | #1509 |
+| **W2** guarded fetcher | #1470 | **W9** `cli_tools` (deferred — *artifact shape landed*) | #1477 |
+| **W3** source credentials | #1471 | **W10** service-layer seam — *merged* | #1509 |
 | | | **W11** platform-side materialisation | #1510 |
-| | | **W12** cross-engine semantics contract | #1684 |
+| | | **W12** cross-engine semantics contract — *written half delivered, awaiting teclaw review* | #1684 |
 | | | **W13** create a bot from a manifest | #1696 |
 
 Planning PR: #1465. **All thirteen items are assigned in §7**, and every item carries an **Owner** line with its day budget and calendar day.
@@ -1198,6 +1198,14 @@ the split of responsibilities, and a self-check list. Together with
 former is the convergence semantics for every category, the latter the one
 addition they have to implement, `cli_tools`.
 
+> **Progress: the written half is delivered** (PR #1734). What remains is not
+> our effort but **their review**: the first two acceptance criteria
+> (requirement-shaped rules, reserved names) are met; the last two (teclaw has
+> reviewed, divergences recorded in the capability matrix) cannot be ticked
+> until they answer. **The next step is sending both documents to the teclaw
+> owner and chasing an explicit reply** — agreement, or the parts they will not
+> implement. Silence is not an answer.
+
 **Depends on.** §3.2 being settled (it is) · **Blocked by.** —
 
 **Done when.**
@@ -2099,7 +2107,39 @@ manifest level, so there is no de-activation for W8 to place.)
 **Status.** Schema is settled (§3.7); delivery is deferred by business priority
 in the design itself. Not scheduled.
 
-**Depends on.** W8.
+> **Progress: the artifact shape landed early, nothing else has started** (PR
+> #1734, the same PR as W12 — the schema was aligned there while delivering
+> W12, a **deliberate exception** rather than a new precedent against §8's
+> one-PR-per-item rule). Whoever picks this up, start here:
+>
+> | | State |
+> | --- | --- |
+> | `cliToolRef` + optional `cli_tools` in `artifact.schema.json` | ✅ merged |
+> | `CliToolRef` in `artifact.py`; `to_dict` omits the key when undeclared, `from_dict` never reads an absence as `[]` | ✅ merged, pinned by tests |
+> | The three "artifact schema unchanged" statements in `README.zh-CN.md` | ✅ reconciled |
+> | `SCHEMA_VERSION` 4 → 5 | ❌ **deliberately not done** — see below |
+> | Manifest-side `cli_tools` (§3.7): storage, validation, materialiser | ❌ not started |
+> | Fetch / `sha256` enforcement / unpack / select `subpath` / compute `md5` / write to store | ❌ not started |
+> | ELF header check, `${BOT_ARCH}` → `amd64` | ❌ not started |
+> | ARCA-side PATH proposal + the usage skill in the default skill set | ❌ not started |
+> | `bcs-cli` adopted as the first consumer | ❌ not started |
+>
+> **The bump has a precondition — it is not a one-line finishing touch.**
+> `ConfigComposer` stamps `SCHEMA_VERSION` onto *every* artifact, so raising it
+> to 5 immediately hands `"schema_version": 5` to engines running today —
+> precisely what `teclaw-cli-contract.zh-CN.md` §6 promises will not happen.
+> **Do it in the same change that first populates `cli_tools`**, once teclaw has
+> answered question 4 in that document's §8. A test in
+> `tests/community/kernel/test_bot_config_artifact.py` pins it at 4 along with
+> this reasoning — that test is a **prompt**: confirm the precondition holds
+> before editing it.
+>
+> **Note that issue #1477's body still describes the pre-flattening shape**
+> (`entrypoints`, "the engine receives an unpacked directory"). This document
+> and `teclaw-cli-contract.zh-CN.md` are authoritative.
+
+**Depends on.** W8. (The part that landed is the exception: it only declares a
+shape and produces no content, so it does not depend on W8.)
 
 **The artifact contract genuinely changes, and `artifact.schema.json` is part of
 it.** `kernel/bot_config/artifact.py` and its language-neutral
