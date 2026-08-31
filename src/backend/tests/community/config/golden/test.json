@@ -30,6 +30,9 @@
     "baas": {
       "deploy_runtime": "managed"
     },
+    "bot_config_manifest": {
+      "fetch_transport_allowlist": []
+    },
     "business": {
       "retry_count": 3,
       "timeout": 30
