@@ -118,6 +118,19 @@ class GitSyncConfig:
             except Exception:
                 pass
 
+        # Whether to sync skills from the git repo into the database at startup.
+        # Community deployments set this to false in the overlay (no corp git repo).
+        self.enable_skill_sync = True
+        try:
+            from agentclaw.community.core.config import sofa
+
+            _uc = sofa.sofa_config.model_dump().get("user_config", {}) or {}
+            self.enable_skill_sync = (_uc.get("git_sync", {}) or {}).get(
+                "enable_skill_sync", True
+            )
+        except Exception:
+            pass
+
         # Subtree configurations
         self.subtrees: list[dict[str, Any]] = [
             {
@@ -180,6 +193,13 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
         ``api/lifecycle.py``. Logs the bootstrap result before the
         periodic task starts. Errors propagate (fail-fast boot).
         """
+        if not self.config.enable_skill_sync:
+            logger.info(
+                "[GitSyncService] Skill sync disabled (enable_skill_sync=false); "
+                "skipping bootstrap, database sync, and periodic sync"
+            )
+            return
+
         if self._repo_url is None:
             seed_result = await self._sync_existing_local_market()
             logger.info(f"GitSyncService local bootstrap: {seed_result}")
