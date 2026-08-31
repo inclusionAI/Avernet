@@ -187,6 +187,44 @@ def _static_plan_dict_missing_input() -> dict:
     }
 
 
+def _static_plan_dict_no_template_id() -> dict:
+    """前端不显式传 static_plan_id,凭 task_spec 内容路由到 okr-implementation 模板。"""
+    return {
+        "task_spec": {
+            "metadata": {"title": "OKR 实现", "instruction": "为业务提升双十一活动转化率"},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "提升双十一活动转化率", "acceptances": []},
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {
+            "task_type": "static_plan",
+            "template_input": {"okr": "提升双十一活动转化率"},
+            "static_auto_report": True,
+        },
+    }
+
+
+def _static_plan_dict_unroutable_content() -> dict:
+    """task_type=static_plan 但 task_spec 内容命不中任何已注册模板关键字的负例。"""
+    return {
+        "task_spec": {
+            "metadata": {"title": "未知需求", "instruction": "做点别的"},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "其它", "acceptances": []},
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {
+            "task_type": "static_plan",
+            "template_input": {"okr": "提升双十一活动转化率"},
+            "static_auto_report": True,
+        },
+    }
+
+
 def _execute_and_get_id(c) -> str:
     """POST execute → 返回服务端生成的 task_id(契约:task_id 不在请求体,服务端 uuid4)。"""
     r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
@@ -221,6 +259,28 @@ class TestTaskExecute:
         r = c.post(
             "/openapi/v1/collaboration/tasks/execute",
             json=_static_plan_dict_missing_input(),
+        )
+        assert r.status_code >= 400, r.text
+
+    def test_execute_static_plan_routes_by_content_without_template_id(self, client):
+        # 不传 static_plan_id,凭 task_spec 命中 OKR 关键字路由到 okr-implementation,与显式传等价。
+        c, _ = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_no_template_id(),
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["code"] == 200000
+        assert isinstance(body["data"]["task_id"], str) and body["data"]["task_id"]
+        assert body["data"]["success"] is True
+
+    def test_execute_static_plan_unroutable_content_returns_error(self, client):
+        # task_type=static_plan 但 task_spec 内容不命中任何模板关键字 → 上层报错。
+        c, _ = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_unroutable_content(),
         )
         assert r.status_code >= 400, r.text
 

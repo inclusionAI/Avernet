@@ -93,6 +93,14 @@ def _resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
 # TaskService 结构化实现 api.task.task_service.TaskServiceProtocol —— 依 api/README 四层
 # 契约,core/ 不 import api/(见 test_service_api_conformance.py:core 服务不继承 api Protocol,
 # 由 @runtime_checkable 的 isinstance/issubclass 做结构化一致性校验)。此处置空基类即可。
+_STATIC_PLAN_TEMPLATES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # 注册的静态模板路由表: (template_id, content keywords)
+    # 调用方传 ``execution_config.static_plan_id`` 则优先显式选择;未传则按 ``task_spec`` 的
+    # title/instruction/objective 命中第一个匹配关键字的模板。新增模板在末尾追加条目即可。
+    ("okr-implementation", ("okr", "转化率", "双十一", "大促")),
+)
+
+
 class TaskService:
     """对外 facade;内部持 ExecutionEngine 编排核 + TaskGraphService + Harness(可选)+ TaskLoopCallback。
 
@@ -192,6 +200,27 @@ class TaskService:
             notify_messages_provider=self._notify_provider,
         )
 
+    def _resolve_static_plan_template_id(self, request: "TaskInfoRequest") -> str | None:
+        """内容路由:当 ``execution_config.static_plan_id`` 未指定时,按 ``task_spec`` 的
+        title/instruction/objective 命中已注册静态模板的关键字 → 返回 template_id;否则返回 ``None``。
+        调用方显式传入 ``static_plan_id`` 仍然优先取该值,保持向后兼容。
+        今天仅 ``okr-implementation`` 一个模板;新增模板在模块顶部 ``_STATIC_PLAN_TEMPLATES`` 注册。
+        """
+        cfg = request.execution_config
+        explicit = cfg.get("static_plan_id")
+        if explicit:
+            return str(explicit)
+        text_parts = (
+            request.task_spec.metadata.title,
+            request.task_spec.metadata.instruction,
+            request.task_spec.goal.objective,
+        )
+        text = " ".join(p for p in text_parts if p).lower()
+        for template_id, keywords in _STATIC_PLAN_TEMPLATES:
+            if any(keyword.lower() in text for keyword in keywords):
+                return template_id
+        return None
+
     def _materialize_static_plan_if_needed(self, request: "TaskInfoRequest") -> "TaskInfoRequest":
         """Fold static-plan template loading into execute (Rule 22: one public API).
 
@@ -209,9 +238,12 @@ class TaskService:
         if task_type != TaskType.STATIC_PLAN:
             return request
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
-        template_id = cfg.get("static_plan_id")
+        template_id = self._resolve_static_plan_template_id(request)
         if not template_id:
-            raise TaskStateError("static_plan_id required with task_type=static_plan")
+            raise TaskStateError(
+                "static plan template could not be selected: provide execution_config.static_plan_id "
+                "or include an OKR-related task_spec so the content-router matches a registered template"
+            )
         template_dir = Path(__file__).resolve().parents[1] / "task_plan" / "plans"
         inputs = dict(cfg.get("template_input") or {})
         try:
@@ -234,6 +266,7 @@ class TaskService:
         )
         yaml_path = template_dir / f"{template_id}.yaml"
         patched_cfg = dict(cfg)
+        patched_cfg.setdefault("static_plan_id", template_id)
         patched_cfg.setdefault("static_plan_yaml", yaml_path.read_text(encoding="utf-8"))
         patched_cfg.setdefault("template_input", inputs)
         return request.__class__(
