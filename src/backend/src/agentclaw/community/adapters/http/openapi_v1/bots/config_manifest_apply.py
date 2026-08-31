@@ -100,9 +100,13 @@ async def apply_bot_config_manifest(
     dry_run: Annotated[
         bool,
         Query(
-            description="Return the plan without performing it. Synchronous, and "
-            "writes nothing at all — no configuration change, and no apply "
-            "record, so a dry run mints no `apply_id` and appears in no history."
+            description="Return the plan without performing it. Synchronous; it "
+            "applies no part of your manifest and writes no apply record, so it "
+            "mints no `apply_id` and appears in no history. One caveat: reading "
+            "a bot's installed MCP set reconciles platform-managed installation "
+            "rows against SkillSet membership, which any read of that state "
+            "does — so a preview is not a guarantee that no row anywhere "
+            "changed. Nothing your manifest declares is applied."
         ),
     ] = False,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -129,17 +133,18 @@ async def apply_bot_config_manifest(
     manifest does not mention is not touched at all, and deleting a manifest
     therefore deletes nothing.
 
-    **A category is written all-or-nothing.** Every refusal that can be foreseen
-    is checked before the first write, so if any declared entry cannot be
-    materialized that whole category is left exactly as it was and its other
-    entries report `skipped` — a momentary failure never deletes something that
-    was working. Categories do not affect each other.
+    **A category is written all-or-nothing.** Permission and platform-default
+    ownership are checked before the first write, so if a declared entry fails
+    either, that whole category is left exactly as it was and its other entries
+    report `skipped` — a momentary failure never deletes something that was
+    working. Categories do not affect each other.
 
-    A write can still fail for a reason no check can foresee: the underlying
-    service is down, or a concurrent change lands. There is no transaction
-    spanning those calls to roll back, so such a category reports
-    `partially_written` and re-applying converges it. That flag is the one case
-    where `aborted` does not mean "nothing changed".
+    A write can still fail for a reason not checked up front — the underlying
+    service is down, a concurrent change lands, or the server is owned by one of
+    the bot's SkillSets, which is refused at write time and not yet preflighted.
+    There is no transaction spanning those calls to roll back, so such a
+    category reports `partially_written` and re-applying converges it. That flag
+    is the one case where `aborted` does not mean "nothing changed".
 
     A bot with no stored manifest applies nothing and reports nothing applied.
     That is not an error.

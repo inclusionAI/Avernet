@@ -518,6 +518,13 @@ def _report_from_payload(
                 entries=tuple(by_category.get(category["category"], ())),
                 removals=tuple(category.get("removed") or ()),
                 aborted=bool(category.get("aborted")),
+                # Load-bearing, and easy to leave out: POST returns only a
+                # handle, so every caller reads its report through here. A
+                # field written by ``as_dict`` but not read back is a field
+                # that does not exist as far as the API is concerned — and this
+                # one is the only signal that an aborted category may already
+                # have changed the bot.
+                partially_written=bool(category.get("partially_written")),
             )
         )
     return ApplyReport(

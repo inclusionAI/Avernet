@@ -380,3 +380,64 @@ def test_the_audit_label_defaults_to_the_principal(world):
 
     row = applies.latest(env="dev", entity_id=_ENTITY, bot_id=_BOT)
     assert row.actor == _ENTITY
+
+
+def test_partially_written_survives_the_storage_round_trip(world):
+    """Review finding: the flag was written but never read back.
+
+    ``POST .../apply`` returns only a handle, so every caller sees its report
+    through ``get_apply``/``last_apply`` — i.e. through the stored JSON. The
+    reconstruction built ``CategoryResult`` without ``partially_written``, so it
+    silently took the dataclass default ``False``: the one signal that an
+    aborted category may already have changed the bot was dropped on the only
+    path anybody uses. A field written by ``as_dict`` but not read back does not
+    exist as far as the API is concerned.
+    """
+    import json
+
+    service, applies, _locks, _scripts, _manifests = world
+    applies.start(
+        env="dev",
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        apply_id="half-written",
+        trigger="explicit",
+        actor=_ENTITY,
+        report="{}",
+    )
+    applies.finish(
+        env="dev",
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        apply_id="half-written",
+        status="FAILED",
+        report=json.dumps(
+            {
+                "apply_id": "half-written",
+                "bot_id": _BOT,
+                "trigger": "explicit",
+                "result": "FAILED",
+                "started_at": None,
+                "finished_at": None,
+                "sources": [],
+                "categories": [
+                    {
+                        "category": "mcp",
+                        "aborted": True,
+                        "partially_written": True,
+                        "removed": [],
+                    }
+                ],
+                "entries": [],
+            }
+        ),
+    )
+
+    report = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id="half-written"
+    )
+    assert report is not None
+    assert report.categories[0].aborted is True
+    assert report.categories[0].partially_written is True, (
+        "the poller was told the area is untouched when it may be half-written"
+    )
