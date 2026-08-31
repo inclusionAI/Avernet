@@ -37,13 +37,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
     TaskType,
 )
-from agentclaw.community.core.task.domain.requests import (
-    RequestContext,
-    RequestGoal,
-    RequestMetadata,
-    RequestTaskSpec,
-    TaskInfoRequest,
-)
+from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.domain.errors import TaskStateError
 
 from agentclaw.community.core.task.repository.types import (
@@ -271,23 +265,11 @@ class TaskService:
         patched_cfg.setdefault("static_plan_id", template_id)
         patched_cfg.setdefault("static_plan_yaml", yaml_path.read_text(encoding="utf-8"))
         patched_cfg.setdefault("template_input", inputs)
-        return request.__class__(
-            task_spec=RequestTaskSpec(
-                metadata=RequestMetadata(
-                    title=template_id,
-                    instruction=f"运行静态模板 {template_id}",
-                ),
-                context=RequestContext(
-                    background="",
-                    extend_props={"template_input": dict(patched_cfg["template_input"])},
-                ),
-                goal=RequestGoal(objective=template_id),
-            ),
-            source_type=request.source_type,
-            owner_user_id=request.owner_user_id,
-            owner_bot_id=request.owner_bot_id,
-            execution_config=patched_cfg,
-        )
+        # 固定 plan 与动态 plan 等价:这里只把"提前固化的 yaml plan"补进 execution_config,
+        # 不自行合成任何占位 task_spec。调用方原始 task_spec(title/instruction/objective/
+        # context.background/acceptances)保留不动,与走 LLM planner 的动态任务在 taskinfo
+        # 封装上完全一致——唯一差别只是 plan 源:yaml 预置 vs planner 自发现。
+        return replace(request, execution_config=patched_cfg)
 
     @property
     def callback(self) -> TaskLoopCallback:

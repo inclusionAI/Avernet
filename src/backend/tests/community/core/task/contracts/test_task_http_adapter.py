@@ -231,8 +231,14 @@ def _static_plan_dict_dynamic_task_type_okr_content() -> dict:
     return {
         "task_spec": {
             "metadata": {"title": "OKR 实现", "instruction": "为业务提升双十一活动转化率"},
-            "context": {"background": "", "extend_props": {}},
-            "goal": {"objective": "提升双十一活动转化率", "acceptances": []},
+            "context": {
+                "background": "活动周期：2026.10.15-2026.11.15；预算约束1000万",
+                "extend_props": {},
+            },
+            "goal": {
+                "objective": "提升双十一活动转化率",
+                "acceptances": [{"id": "acc_risk", "acceptance": "风险评估群需产出可承接下发的结果"}],
+            },
         },
         "source_type": "api",
         "owner_user_id": "owner_user",
@@ -303,6 +309,37 @@ class TestTaskExecute:
             json=_static_plan_dict_unroutable_content(),
         )
         assert r.status_code >= 400, r.text
+
+    def test_execute_static_plan_preserves_caller_task_spec_not_placeholder(self, client):
+        # 固定 plan 与动态 plan 在 taskinfo 封装上等价:内容路由命中预置模板后,materialize 只补
+        # execution_config(static_plan_id/yaml/template_input),绝不替调用方合成占位 task_spec。
+        # 持久化的根 task_spec 必须原样保留调用方真实 OKR(title/instruction/objective/background/
+        # acceptances),不能被 "运行静态模板 okr-implementation" / objective=template_id /
+        # 背景="" / acceptances=[] 覆盖;而 plan 源仍被路由到预置模板(static_plan_id 命中)。
+        c, inj = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_dynamic_task_type_okr_content(),
+        )
+        assert r.status_code == 200, r.text
+        task_id = r.json()["data"]["task_id"]
+        repo = inj.get(TaskInfoRepositoryProtocol)
+        record = repo.get(task_id)
+        assert record is not None
+        spec = record.task_spec
+        assert spec["metadata"]["title"] == "OKR 实现"
+        assert spec["metadata"]["instruction"] == "为业务提升双十一活动转化率"
+        assert spec["goal"]["objective"] == "提升双十一活动转化率"
+        assert spec["context"]["background"] == "活动周期：2026.10.15-2026.11.15；预算约束1000万"
+        assert spec["goal"]["acceptances"] == [
+            {"id": "acc_risk", "description": "风险评估群需产出可承接下发的结果"}
+        ]
+        assert "运行静态模板" not in spec["metadata"]["instruction"]
+        assert spec["metadata"]["title"] != "okr-implementation"
+        assert spec["goal"]["objective"] != "okr-implementation"
+        assert record.execution_config["static_plan_id"] == "okr-implementation"
+        assert record.execution_config["static_plan_yaml"]
+        assert record.execution_config["task_type"] == "dynamic"
 
     def test_execute_static_plan_routes_when_dynamic_task_type(self, client):
         # task_type=dynamic + OKR 业务语义(不传 static_plan_id)→ 内容路由命中预置模板,与 task_type=static_plan 等价。
