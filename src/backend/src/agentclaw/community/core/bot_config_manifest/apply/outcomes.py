@@ -209,6 +209,31 @@ class ApplyReport:
         }
 
 
+#: The entity-key field each category names its entries by, in the order they
+#: are tried. Schema §3 gives each category its own key — ``skills.name``,
+#: ``identity.type``, ``resources.path``, ``mcp.server_code`` — and a report
+#: that could not name an entry would be one a caller cannot act on.
+#:
+#: Lives here rather than in the orchestrator on purpose: which field to *print*
+#: is vocabulary, and the orchestrator is held to naming no category at all.
+_ENTITY_KEY_FIELDS: tuple[str, ...] = ("name", "type", "path", "server_code")
+
+
+def entry_identity(entry: Any, index: int) -> str:
+    """How an entry names itself in a report.
+
+    Falls back to the entry's position, and the fallback is load-bearing: a
+    category can be aborted over a document whose entries are malformed, and
+    those entries still have to appear in the report.
+    """
+    if isinstance(entry, dict):
+        for key in _ENTITY_KEY_FIELDS:
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return f"[{index}]"
+
+
 def derive_status(categories: tuple[CategoryResult, ...]) -> ApplyStatus:
     """The summary, computed once every decision has already been made.
 
@@ -242,4 +267,5 @@ __all__ = [
     "NO_MATERIALISER_REASON",
     "SourceResolution",
     "derive_status",
+    "entry_identity",
 ]

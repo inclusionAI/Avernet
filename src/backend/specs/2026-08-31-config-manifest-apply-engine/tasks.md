@@ -155,30 +155,30 @@ than something to work around:
         this" — a missing call, not a discipline.
 - **Depends on:** Task 4
 
-## [ ] Task 6: The orchestrator
+## [x] Task 6: The orchestrator
 - **Goal:** Every category-level rule, implemented once, for every category.
 - **Files:** `apply/orchestrator.py`
 - **Done when:**
-  - [ ] It walks `APPLY_ORDER` in position order, filtered to the requested
+  - [x] It walks `APPLY_ORDER` in position order, filtered to the requested
         phases, and handles the five cases the plan lists in that order.
-  - [ ] **Undeclared ⇒ untouched and unreported.** Absence is not a
+  - [x] **Undeclared ⇒ untouched and unreported.** Absence is not a
         declaration.
-  - [ ] **Declared with no materialiser ⇒ every entry `failed`** with a reason
+  - [x] **Declared with no materialiser ⇒ every entry `failed`** with a reason
         naming the construct, and the category aborted.
-  - [ ] **Any `resolve` failure ⇒ those entries `failed`, the rest `skipped`,
+  - [x] **Any `resolve` failure ⇒ those entries `failed`, the rest `skipped`,
         no `plan` and no `write` call.** The absence of the calls is what the
         test asserts.
-  - [ ] One category's abort never affects another's.
-  - [ ] `dry_run` returns after `plan` for every category, and writes no report
+  - [x] One category's abort never affects another's.
+  - [x] `dry_run` returns after `plan` for every category, and writes no report
         row.
-  - [ ] `ApplyStatus` is tallied **after** every decision is made.
-  - [ ] The lock is taken once around the whole call and released in a
+  - [x] `ApplyStatus` is tallied **after** every decision is made.
+  - [x] The lock is taken once around the whole call and released in a
         `finally`, `dry_run` included; a held lock raises
         `ManifestApplyInProgressError`.
-  - [ ] **Nothing is written to the bot record on any path** — no status, no
+  - [x] **Nothing is written to the bot record on any path** — no status, no
         activation, no readiness gate — and no code branches on whether this is
         a first boot.
-  - [ ] A structural test asserts the orchestrator module names no category
+  - [x] A structural test asserts the orchestrator module names no category
         (`skills`, `identity`, `resources`) anywhere. If it does, the registry
         has stopped meaning anything.
 - **Depends on:** Tasks 1, 4, 5
