@@ -1,8 +1,18 @@
 # Manifest Schema v1（草案）
 
 > 状态：DRAFT（讨论稿）。设计论证见 `design.zh-CN.md`；每类配置的完整业务
-> 案例见 `examples.zh-CN.md`。本文只定义文档形状、校验规则与到各引擎的
-> 映射。字段名以定稿评审为准。
+> 案例见 `examples.zh-CN.md`；面向用户的操作说明见 `user-manual.zh-CN.md`。
+> 本文只定义文档形状、校验规则与到各引擎的映射。
+>
+> **本文已与 `work-items.zh-CN.md` §2/§3 的已定决策对齐。**那些决策晚于
+> `design.zh-CN.md`，凡两者不一致处**以本文为准**：收敛策略为**类目级覆盖**
+> （§1）、替换变量改名为 `BOT_*`（§4）、`on_fetch_failure` 去掉 `skip`
+> （§2）、源上新增 `mode`（§2.3）、identity 保留名单写入即拒（§3.5）、
+> `script` 的首启顺序（§3.6）。设计文档本身未随之修订，其差异清单见
+> `user-manual.zh-CN.md` 附录 D。
+>
+> **第一期尚未开放的构造见 §7。**它们写得出来但还没有物化器，`PUT` 一律
+> 拒绝——不会被静默忽略，也不会「先存着以后生效」。
 
 ## 1. 顶层结构
 
@@ -31,10 +41,40 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
     …
 ```
 
-三段均可缺省。`manifest` 六个类别均可缺省，缺省的类别不参与 apply
-（不碰任何实体）。**类别存在但为空列表（`skills: []`）含义不同**：声明
-「该类别下不应有 managed 实体」，会把此前 apply 落成的 managed 实体摘除
-标记（不删资产，语义同 DELETE，见 design §6）。
+三段均可缺省。**收敛策略是类目级覆盖**——让清单生效 = 把每个**被声明的
+类别**覆盖到恰好等于声明：
+
+| 写法 | 含义 | apply 做什么 |
+| --- | --- | --- |
+| 类别缺席 | 「不表态」 | **完全不碰**该类别 |
+| 类别存在且非空 | 「这个类别应当恰好是这些」 | 把该类别的**区域**覆盖成声明的样子，区域内其余条目被移除 |
+| 类别存在但为空（`skills: []`） | 「这个集合是空的」——空集合**也是**声明 | **移除该区域内的全部条目** |
+| `DELETE` 整份文档 | 没有任何类别被声明 | **什么都不删**：此前落成的实体原样留在 bot 上 |
+
+后两行不矛盾，是同一条规则的两端：`[]` 是声明，缺席不是声明。
+
+**「区域」逐类别定义，不是全局的**——搞错这一点，一条本意是收敛 skill 列表
+的规则就会删掉 bot 的工作目录：
+
+| 类别 | 被覆盖的区域 |
+| --- | --- |
+| `skills` | **active skill set**：它等于声明，未列出的 skill 被移除 |
+| `identity` | **identity 文件集合**，减去保留名单（§3.5） |
+| `resources` | **仅被声明的 `path` 子树**；声明的 `path` 之外一律不碰——workspace 是 bot 的工作区，不是清单的 |
+| `mcp` | **已启用的 server 集合** |
+| `engine_config` | **被声明的顶层键**（逐键覆盖，§3.4） |
+| `cli_tools` | 平台工具目录中**由清单下发**的工具集合（镜像自带命令不在内） |
+
+**类别是 all-or-nothing 写入的**：被声明的类别里只要有任何一条无法物化，
+该类别**完全不覆盖**（关于它的一切保持原样），逐条结果照常记进 apply
+report；一个类别的失败**不牵连**别的类别。在覆盖语义下，一个不完整的集合
+是**破坏性**的：声明 `{A, B}` 却只写入 `{A}` 就等于删掉了 B——一次瞬时的
+取源失败不能删掉一个正在工作的实体。
+
+**v1 不在实体上盖 `managed by manifest` 标记**：清单落成的实体与手工创建
+的存储完全一样，下游（reconcile / compose / 界面 / 引擎）无从区分，也不
+需要区分。「我当前的配置是什么、上次 apply 做了什么」由
+`GET …/config-manifest` 与 `GET …/last-apply` 回答。
 
 ### 1.1 内容归属：文本进 git，制品进制品库
 
@@ -69,7 +109,7 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 | `subpath` | 无 | **源内路径**：命名源/git 仓库内、或归档内的子目录或文件。缺省 = 源的根 |
 | `digest` | 无 | `sha256:…`。校验 fetch 内容，不匹配按 fetch 失败处理（钉扎可复现）。**仅适用于 URL 源**——git 源以 commit SHA 为天然 digest，写了报错 |
 | `auth` | 无 | 租户级命名凭证的引用（§2.1）；仅对内联 `source` 有效（命名源的凭证声明在源上）。fetch 时注入为请求头 |
-| `on_fetch_failure` | `keep_last` | `keep_last` / `skip` / `fail`（design §4.3） |
+| `on_fetch_failure` | `keep_last` | **只有两个取值**：`keep_last`（用平台上一次为这一条成功物化的副本补全集合）/ `fail`（该类别不写）。**`skip` 已删除**——在类目覆盖语义下它会意味着「把这一条删掉」，与字面相反 |
 | `apply_once` | —— | **v1 保留字，拒绝写入**；v2 语义见 design §3.2 |
 
 ### 2.0 字段命名规范
@@ -120,8 +160,8 @@ PUT /openapi/v1/source-credentials/{name}
 PUT /openapi/v1/source-credentials/corp-git-content
 {
   "type": "header",
-  "header_name": "PRIVATE-TOKEN",                                  # 按托管服务定（O11）
-  "secret": "…",                                                   # 仓库级只读 token / 机器人账号 token
+  "header_name": "Authorization",                                  # 按托管服务定（下方「token 选型」）
+  "secret": "Basic <base64('git:<访问令牌>')>",                     # 机器账号的只读令牌，不用个人 PAT
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
 }
 
@@ -206,9 +246,18 @@ v1 仅支持请求头注入；query 参数型、mTLS 见开放问题 O8。
 
 token 选型（与 `allowed_prefixes` 叠加的纵深防御）：**首选仓库级/桶级
 只读 token**（类 GitLab 的 Project/Deploy Token，天生单仓库有效）；托管
-服务不支持时，**用机器人账号的 token**（账号只授予内容仓库的只读成员
-权限，以成员关系收权）；**不使用个人 PAT**——权限面是个人全量可见仓库，
-且生命周期绑定个人（转岗/离职即断）。托管服务的具体能力见 O11。
+服务不支持时，**用机器账号的 token**（账号只授予内容仓库的只读成员
+权限，以成员关系收权）；**不使用个人 PAT / 个人私有令牌**——权限面是个人
+全量可见仓库，且生命周期绑定个人（转岗/离职即断）；**也不使用带完整读写
+scope 的 API 令牌**——为一件只读的工作换来对一切的写权限。
+
+**Ant Code（本部署的内容源）的口径已定**：它不提供 Deploy Token，且两种
+scope 里只读的那个（`read_repository`）**只有 Git-over-HTTP、没有 API**。
+所以用**专用机器账号 + `read_repository` 访问令牌**，按 HTTP Basic 注入
+（`Authorization: Basic base64("git:<token>")`）——**v1 的凭证模型不需要
+任何改动**。**令牌过期由凭证 owner 自管**，平台不轮换；因此认证失败
+（401/403）在 apply report 里必须报成「凭证 `<name>` 被拒绝」，与通用取源
+错误区分开，否则一次该去轮换的故障会被读成网络问题。
 
 ### 2.2 git 源
 
@@ -229,7 +278,7 @@ identity:
     source:
       git: https://code.example-corp.com/team/content.git
       ref: v1.2.0
-      subpath: bots/${OCB_BOT_ID}/soul.md # 变量替换照常可用
+      subpath: bots/${BOT_ID}/soul.md # 变量替换照常可用
     auth: corp-git-content
 ```
 
@@ -248,13 +297,16 @@ identity:
   形态；zip/HTTP 形态保留给非 git 源。
 - 同一 `{git, ref}` 被多个条目引用时，单次 apply 只拉取一次（按解析后
   SHA 缓存）。
-- 落地后的全部语义（目录级 managed、原子替换、嵌套禁止、权限拍平、
-  teclaw 逐文件展开）与 §3.2 完全一致——git 只是传输形态。
+- 落地后的全部语义（目录级所有权、整树替换及其非原子窗口、嵌套禁止、
+  权限拍平、teclaw 逐文件展开）与 §3.2 完全一致——git 只是传输形态。
 
-实现口径（backend 内部，见 design §10.5）：优先走托管服务的 HTTP API
-（ref 解析 + 按 ref/子目录取归档），把 git 源编译为「一次 HTTPS 归档
-拉取 + 解包」，复用 guarded fetcher 与归档管线；不在后端进程里跑
-`git clone`。API 能力确认见 O11。
+实现口径（backend 内部）：**git over HTTPS 的浅层单 ref fetch**，复用
+guarded fetcher 的大小/超时/并发上限，并对解开后的 checkout 施加与归档
+同样的包含性检查（符号链接逃逸、gitlink/submodule、设备特殊条目）与体积
+上限。**这取代了 design §10.5 的「走托管服务归档 API」方案**：本部署的
+git 宿主没有只读的 **API** scope，只有只读的 **Git-over-HTTP** scope，走
+API 那条路就得把一个「对一切可读写」的凭证放进数据库（§2.1）。契约本身
+与托管方无关——任何经 HTTPS 可达的 git 服务都满足它。
 
 ### 2.3 命名源 `sources` 与 `from`
 
@@ -277,7 +329,7 @@ manifest:
   identity:
     - type: SOUL.md
       from: content
-      subpath: bots/${OCB_BOT_ID}/soul.md
+      subpath: bots/${BOT_ID}/soul.md
   skills:
     - name: quality-check
       from: content
@@ -299,6 +351,22 @@ manifest:
   为仓库内路径。拼接前后均施加路径穿越校验。
 - 内联 `source` 写法**保留**：单条目、跨仓库、一次性来源仍可直接写。
 
+**移动引用与 `mode`**：分支（以及会被重打的 tag）可能在一次没人把它跟配置
+变更联系起来的重启里解析出不同内容。源上的可选字段 `mode` 控制这件事：
+
+| `mode` | 行为 |
+| --- | --- |
+| `non_strict`（**默认**） | 应用新内容，并在 apply report 里对该条目**告警**，写明前后两个 SHA |
+| `strict` | 解析出的 SHA 与上次 apply 记录的不同时，该条目**失败**，bot 继续跑它现在跑的 |
+
+- **写在源上**，不是按 bot、也不是按清单——要描述的性质是「这个 ref 允不允许
+  在我脚下移动」，它属于持有 `ref` 的那个东西。一份清单里同时有一个钉死的
+  外部依赖和一个快速变动的内部仓库是常态。
+- **SHA 形式的 `ref` 忽略这个模式**（它动不了，两个分支都触发不了）——是
+  「接受但无效」，不是报错。
+- 未知取值 `PUT` 时拒绝：拼错的 `mode` 若静默落到默认值，等于什么都没钉住。
+- 内联 git `source` 同样接受 `mode`（它也持有 `ref`）。
+
 ## 3. 类别定义
 
 各类别的映射一览（详见各小节）：
@@ -310,7 +378,7 @@ manifest:
 | skills | 本地 skill 记录（现 skills upload 同源服务） | 现有 skill 交付 / NAS | `skills[]`（`SkillRef, scope=user`） |
 | engine_config | engine config（`EngineConfigServiceProtocol.write_bot_config`） | 现有 provider-blind 写 | 同一条 provider-blind 写（既有 `config/teclaw.json` 文件通道，**非 artifact 字段**；创建时序确认 T3） |
 | identity | identity 文件记录（现 `openapi_v1/identity` 同源服务） | 现有 identity 交付 | `identity_files[]`（`FileRef`） |
-| cli_tools | **新实体**（无现状对应） | 平台工具目录（NAS）+ PATH 注入 | **待确认（T4）**：可执行位 + PATH + 沙箱策略 |
+| cli_tools | **新实体**（无现状对应） | 平台工具目录（NAS）+ PATH 注入 | `cli_tools[]`（`{name, store, path, md5, version}`，artifact `schema_version` 4 → 5；规格见 `teclaw-cli-contract.zh-CN.md`），沙箱策略待 teclaw 表态 |
 | script | script 存储（#935 现状） | `after_create_cmd_hook` 启动链 | **不支持，写入时拒绝** |
 
 ### 3.1 `mcp` — MCP servers
@@ -355,11 +423,19 @@ resources:
 - 校验：白名单字符、禁止路径穿越（`../`、绝对路径）。
 
 **目录条目语义**（HTTP 没有目录语义，归档是把树运过来的约定形态）：
-- **收敛单位是整个归档**：内容 hash 未变 → `unchanged`、零动作（不做
-  逐文件比对）；变化 → 整目录替换。`digest` 仍为可选的钉版手段。
-- **目录级声明获胜**：`path` 下整棵树归 manifest 管辖——归档中不存在的
-  文件在 apply 时被清除（含手工添加的）；temp 目录解包 + 原子 rename，
-  无半新半旧的中间态。目录之外不碰。
+- **收敛单位是整棵树**（归档形态即归档内容 hash，git 形态即 commit SHA），
+  不做逐文件比对。但**「未变」要以已下发的内容为准，不能只看源**：源没变而
+  树发生了漂移（上次 apply 之后有人在 `path` 下加了或改了文件）时，仅凭源
+  报 `unchanged` 会把漂移原样留着，直接击穿下面那条所有权规则。因此 v1 的
+  口径是**每个 apply 点整体替换**；「读并哈希已部署的子树再比对」是可选优化，
+  只有当读这棵树比重写它更便宜时才值得做。
+- **目录级声明获胜**：`path` 下整棵树归 manifest 管辖——源中不存在的
+  文件在 apply 时被清除（含手工添加的）。目录之外不碰。
+- **替换只原子到传输层允许的程度**：平台侧解包到临时位置（保证一次失败的
+  取源或一个坏归档永远到不了 bot），但下发只有 `delete_tree` + 逐文件写
+  ——设备文件系统契约里没有 rename/move。所以 `path` 下的树存在一个真实的
+  中间窗口，下发中途失败会停在那里：该条目记 `failed`，apply report 说明
+  这棵树处于未知状态。**别把 bot 运行期要写的目录声明成资源目录。**
 - **`strip_components` 不做魔法**：只按声明的层数剥，**不**自动探测单一
   顶层目录——同一份声明的行为不取决于归档内部长什么样。
 - **嵌套禁止**：任何条目的 `path` 不得位于另一个目录条目之下（目录归
@@ -405,6 +481,9 @@ skills:
 
 ### 3.4 `engine_config` — 引擎配置
 
+> **第一期不开放**（§7）：跨引擎确认把它移出了第一期，所以现在写了会被
+> `PUT` 拒绝。下面是它回来时的形状。
+
 ```yaml
 engine_config:
   config:                        # 键值对象，形状同现有 engine-config API
@@ -413,7 +492,7 @@ engine_config:
 ```
 
 - **整类别只有一个对象**，不是列表。合并语义：**声明的顶层键获胜**（逐键
-  覆盖），未声明的键不碰——managed 边界按顶层键计。
+  覆盖），未声明的键不碰——本类别的**覆盖区域按顶层键计**（§1）。
 - 明确排除：`engine_ext` 是引擎自有的不透明数据（平台承诺「存储原样、永不
   解释」），**manifest 永远不能触碰它**。
 - 校验：形状校验沿用现有 engine-config 写路径；引擎相关的键合法性由该路径
@@ -424,7 +503,7 @@ engine_config:
 ```yaml
 identity:
   - type: SOUL.md                # 必须属于该引擎的合法 identity 文件集
-    source: https://my-svc.example.com/bots/${OCB_BOT_ID}/soul.md
+    source: https://my-svc.example.com/bots/${BOT_ID}/soul.md
   - type: RULES.md
     content: |                   # 小文件可内联
       # 团队规范
@@ -436,9 +515,14 @@ identity:
   AGENTS/USER/TOOLS/HEARTBEAT/BOOTSTRAP/KNOWLEDGE/CLAUDE/GREETING/README
   .md）；**claude_code 引擎仅允许 `CLAUDE.md`**。写入时按 bot 当前引擎
   校验并明确报错，而不是 apply 时静默跳过。
-- 引擎**生成**的文件（MEMORY.md 等运行期状态）不建议声明——声明获胜语义
-  会在每个 apply 点重置它们；文档如实警示，不做硬禁止（SOUL.md 等人设文件
-  正是主场景）。
+- **保留名单：`MEMORY.md` 与 `IDENTITY.md` 声明即拒。**这两个是引擎生成的
+  运行期状态，apply **永不写入、也永不移除**它们——它们是类目覆盖（§1）
+  唯一的例外。两者都在 `VALID_IDENTITY_FILES` 里，所以上一条会放行，必须
+  在 `PUT` 时单独拒绝：否则用户会得到一份「被接受、却永远收敛不了」的文档。
+  名单**有限且可枚举**，正因如此它才是两个引擎系都能同意并检查的契约。
+- 其余引擎可能写入的文件（运行期会被引擎更新的那些）技术上可声明，但声明
+  获胜语义会在每个 apply 点重置它们——SOUL.md、RULES.md 等人设/规则文件
+  才是本类目的主场景。
 
 ### 3.6 `script` — 启动脚本
 
@@ -453,10 +537,17 @@ script:
 - 即 #935 的 startup script，全部现状约束不变：≤ `MAX_SCRIPT_BYTES`
   （24 KiB）、以 `admin` 身份执行、300s 超时、输出仅在容器日志、
   **体内无密**（下发链路日志可见）、退出码不影响平台就绪判定。
-- 顺序保证：在 manifest 实体交付完成后执行（design §3.4），脚本可以假定
-  声明的 skill / identity 已就位。
-- 能力：ARCA 系支持；teclaw、desktop、LOCAL/singlebox、ARCA-direct 遗留
-  形态写入时拒绝（fail closed，见 `engine-requirements.zh-CN.md` 矩阵）。
+- **生效时机**：`PUT` 之后**立即下发、下次启动时执行**。它是唯一效果被延后
+  的类别——其余类别 `PUT` 后立即生效、且不需要重启。
+- ⚠️ **第一期：`script` 不得依赖同一份清单声明的任何内容。**脚本被烤进启动
+  命令，而 `identity` / `resources` / `skills` 在容器**起来之后**才下发，所以
+  **首启时脚本跑在它们之前**。这**反转了 design §3.4** 的顺序承诺（「脚本
+  可以假定声明的实体已就位」）——那句话要等所有类别都能在启动前下发之后
+  才成立，届时本条限制删除。
+- 能力：ARCA 系支持；**teclaw、desktop 写入时拒绝**（fail closed）。本特性
+  只覆盖**新建 bot**，而生产上新建 bot 只会解析到 `baas` / `teclaw` 两种
+  provider，所以 `engine-requirements.zh-CN.md` 矩阵里 LOCAL/singlebox 与
+  ARCA-direct 那两行属于**范围之外**，不是新增的强制拒绝。
 
 ### 3.7 `cli_tools` — 给模型调用的命令行工具
 
@@ -514,16 +605,25 @@ cli_tools:
 
 | 变量 | 含义 |
 | --- | --- |
-| `OCB_BOT_ID` | bot 标识 |
-| `OCB_ENGINE_TYPE` | 当前引擎类型 |
-| `OCB_ENV` | 环境（dev/prod/…） |
-| `OCB_TENANT` | 租户标识 |
+| `BOT_ID` | bot 标识 |
+| `BOT_ENGINE_TYPE` | 当前引擎类型 |
+| `BOT_ENV` | 环境（dev/prod/…） |
+| `BOT_TENANT` | 租户标识 |
+| `BOT_ARCH` | 目标 CPU 架构；当前解析为常量 `amd64` |
 
-- manifest 中以 `${OCB_*}` 占位、apply 时替换；仅允许白名单变量，未知占位
+> **命名是 `BOT_*`，不是 `OCB_*`。**`OCB` 是内部代号，只出现在内部机件上，
+> 从来不是面向用户的命名空间；写 `${OCB_BOT_ID}` 会被 `PUT` 拒绝。前缀保留
+> 是必要的——它们会作为环境变量注入 `script`，不带前缀的 `${ENV}` 会跟脚本
+> 作者自己的变量撞车。`BOT_ARCH` **现在就实现**（而不只是占个名字）：将来
+> 机群若变成混合的，改的只是这个值从哪来，不改 schema、用户什么都不用重写。
+
+- manifest 中以 `${BOT_*}` 占位、apply 时替换；仅允许白名单变量，未知占位
   报错。
+- **替换发生在取源之前、也在凭证的前缀授权之前**（§2.1），所以替换出来的
+  URL 逃不出 `allowed_prefixes`。
 - script 中以环境变量注入（注意：#935 的 base64 封装保证 BaaS
   `_safe_format_hook` 的 `{token}`/`{client_id}` 替换不会触碰脚本体，
-  `${OCB_*}` 在脚本里就是普通 shell 变量展开）。
+  `${BOT_*}` 在脚本里就是普通 shell 变量展开）。
 
 ## 5. 限额（建议值，评审定稿）
 
@@ -549,7 +649,32 @@ report。
   凭证；私有源鉴权一律走凭证引用（§2.1），secret 只存在于租户凭证存储、
   写后不可读回。
 - **`engine_ext`**：不可经 manifest 读写。
-- **删除资产**：manifest 只管理声明集合与 managed 标记，不级联删除用户
-  资产。
+- **删除**声明 ≠ 删除资产：`DELETE` 整份文档什么都不删（§1）。但要分清
+  ——**被声明的类别，其区域内未被声明的条目会在 apply 时被移除**（§1 的
+  覆盖语义），包括通过界面装上的。清单不做的是「级联删掉未被任何类别覆盖
+  的用户资产」。
+- **`apply_once` 逃生舱**：v1 保留字，写入即拒（§2）。
 - **teclaw 的 script**：不支持，且不承诺未来支持（需 teclaw 侧出现容器内
   执行通道后另行评估）。
+
+## 7. 第一期尚未开放的构造
+
+**规则：这个面绝不接受它 apply 不了的东西。**下面这些在本文里表达得出来，
+但第一期没有对应的物化器/解析器，因此 `PUT` 会明确报 `unsupported` 并拒绝
+——不会被静默忽略，也不会「先存着以后生效」。往词汇里加东西的人，要么在这张
+表里加一行，要么把 apply 它的代码一起加上。
+
+| 构造 | 为什么还不能 apply | 何时解禁 |
+| --- | --- | --- |
+| 类别 `cli_tools`（§3.7） | 交付按业务优先级后置：没有物化器、没有 PATH 下发、artifact 里也还没有对应字段 | 该工作项落地 |
+| 类别 `engine_config`（§3.4） | 按跨引擎确认的结论移出第一期 | 其物化器回来时 |
+| `from` 指向**命名源**（§2.3） | 命名源解析属于 git/命名源工作项 | 该工作项落地 |
+| **git 源**（§2.2，含内联 git `source`） | 同上——git 解析器属于同一工作项 | 该工作项落地 |
+
+命名源与 git 源是本文推荐的主力写法，且在关键路径上、按计划进 v1；在它们
+落地之前，可用的取源形态是**条目内联的 HTTPS `source` URL**，之后迁到命名
+源只是把 `source` 换成 `from` + `subpath`。
+
+**写客户端的人：能力表是唯一的事实来源**——先
+`GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities`，它与 `PUT`
+的判定是同一个函数，不会出现「声称支持而随后拒绝」。

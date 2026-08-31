@@ -6,11 +6,10 @@
 > `manifest-schema.zh-CN.md`，设计论证见 `design.zh-CN.md`，完整业务案例见
 > `examples.zh-CN.md`。
 >
-> **本文按已拍板的口径写**，包含若干条晚于设计文档定下、因而与
-> `manifest-schema.zh-CN.md` 现文不一致的行为（替换变量改名、`on_fetch_failure`
-> 去掉 `skip`、源上新增 `mode`、类目级覆盖）。差异清单见**附录 D**，schema 文档
-> 会在实现 PR 里对齐。第一期尚未开放的写法见**附录 C**——写了会在 `PUT` 时被拒绝，
-> 而不是被静默忽略。
+> **本文按已拍板的口径写**，并与 `manifest-schema.zh-CN.md` 保持一致——两份
+> 用户可见的契约说的是同一件事。`design.zh-CN.md` 早于其中几条决策、未随之
+> 修订，差异清单见**附录 D**。第一期尚未开放的写法见**附录 C**（与 schema §7
+> 同一张表）——写了会在 `PUT` 时被拒绝，而不是被静默忽略。
 
 ## 目录
 
@@ -997,6 +996,8 @@ PUT /openapi/v1/source-credentials/oss-artifacts
 但第一期没有对应的物化器，所以 `PUT` 会明确报 `unsupported` 并拒绝——不会被静默
 忽略，也不会「先存着以后生效」。
 
+> 规范性版本见 `manifest-schema.zh-CN.md` §7，两处内容一致。
+
 | 构造 | 为什么 | 什么时候开放 |
 | --- | --- | --- |
 | 类目 `cli_tools` | 交付按业务优先级后置：没有物化器、没有 PATH 下发 | 该工作项落地后 |
@@ -1012,18 +1013,20 @@ PUT /openapi/v1/source-credentials/oss-artifacts
 
 ---
 
-## 附录 D：与 `manifest-schema.zh-CN.md` 现文的已知差异
+## 附录 D：与设计文档的已知差异
 
-以下几处是设计文档合入**之后**拍板的，schema 文档会在实现 PR 里对齐。在那之前，
-**以本文为准**：
+**`manifest-schema.zh-CN.md` 已与本文对齐**——早先那几处分歧（`OCB_*` 变量、
+`on_fetch_failure` 的 `skip`、缺少 `mode`、`skills: []` 的含义、identity 保留
+名单）都已改进 schema 文档；两份用户可见的契约现在说的是同一件事。
 
-| schema 文档写的 | 实际接受的 | 为什么 |
+仍未修订的是 **`design.zh-CN.md`**：它早于下面这些决策，作为设计论证保留原样。
+凡与本文/schema 不一致处，**以本文与 schema 为准**：
+
+| design 文档写的 | 实际口径 | 在哪儿讲 |
 | --- | --- | --- |
-| §4：替换变量 `OCB_*` | 只接受 `BOT_*`（并新增 `BOT_ARCH`） | `OCB` 是内部代号，不该出现在用户契约里 |
-| `on_fetch_failure`：`keep_last` / `skip` / `fail` | `keep_last` / `fail` | 覆盖语义下 `skip` 会意味着「删掉这一条」，与字面相反 |
-| 源上没有 `mode` 字段 | `mode: strict \| non_strict`，默认 `non_strict` | 移动 ref 的选择器（§6.2） |
-| §1「类别存在但为空 = 摘除 managed 标记，不删」 | `skills: []` = **移除所有 skill** | 收敛策略统一为**类目级覆盖**：空集合也是声明（§3.3） |
-| §3.5 identity：`MEMORY.md` 等「不建议声明」 | `MEMORY.md` / `IDENTITY.md` **写入时拒绝** | 保留名单：apply 永不写、永不删，接受它等于给出一份永远收敛不了的文档（§8） |
-| design §3.1：`PUT` 惰性生效 | `PUT` **立即生效，不需要重启** | 运行中的 bot 永远反映最后被接受的那份清单（§7） |
-| design §3.4：`script` 在其他类目**之后**执行 | 第一期**首启时 `script` 在它们之前** | 脚本被烤进启动命令，其余类目在容器起来后下发（§5.5） |
-| design §3.2：实体上的 `managed by manifest` 标记 | v1 没有这个标记 | 清单装的实体与手工创建的完全一样；「我的配置是什么、上次 apply 做了什么」由 `GET …/config-manifest` 与 `last-apply` 回答 |
+| §3.1：`PUT` 惰性生效（等下次重启） | `PUT` **立即生效，不需要重启**；`script` 例外——立即下发、下次启动执行 | §7 |
+| §3.4：固定顺序 `engine_config → identity → resources → skills → mcp`，`script` 最后、可依赖已就位的实体 | 第一期**反过来**：首启时 `script` 先于其余类目，因此不得依赖它们 | §5.5 |
+| §3.2：实体上有 `managed by manifest` 标记 | v1 **没有**这个标记：清单装的实体与手工创建的完全一样；状态由 `GET …/config-manifest` 与 `last-apply` 回答 | §3.2 |
+| §4.3：`on_fetch_failure` 有 `skip` | 只有 `keep_last` / `fail` | §6.4 |
+| §6：`DELETE` 把实体「摘除 managed 标记」 | `DELETE` **什么都不删**（没有类目被声明 = 没有东西被覆盖）；要清空用 `[]` | §3.3 |
+| §10.5：git 源走托管服务的归档 API | 改为 **git over HTTPS 的浅层单 ref fetch**——本部署的 git 宿主没有只读的 API scope | schema §2.2 |

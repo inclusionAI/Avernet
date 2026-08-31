@@ -1479,16 +1479,21 @@ capability table is fully determined.
       client that follows the published contract gets rejected. The two documents
       cannot disagree. It lands here rather than earlier because the schema doc
       describes an implemented contract, and until this item there is nothing to
-      describe. As of iteration 1 the amendments owed are:
+      describe.
 
-      | Schema doc says | Validator accepts | Why |
-      | --- | --- | --- |
-      | §4: `OCB_*` substitution variables | `BOT_*` only | §2.9 renamed them; leaving it would tell a user to write `${OCB_BOT_ID}` and then refuse it |
-      | `on_fetch_failure`: `keep_last` / `skip` / `fail` | `keep_last` / `fail` | `skip` was removed with the category-overwrite decision (§2.7, W5); the schema still advertises a value that is now rejected |
-      | no `mode` field on a source | `mode: strict \| non_strict`, default `non_strict` | §3.2 settled the moving-ref selector; the field has to be documented before anyone can write it. **This row is the rule catching its own case** — it was found by applying the rule above to a change made in the same round, not by a reviewer |
+      **The amendments owed as of iteration 1 have landed** — the schema doc now
+      states `BOT_*` variables (§4), `on_fetch_failure` without `skip` (§2), the
+      source-level `mode` selector (§2.3), category-level overwrite and what
+      `skills: []` versus a `DELETE` means (§1), the `MEMORY.md` / `IDENTITY.md`
+      reserved list (§3.5), the first-boot `script` ordering (§3.6), the narrowed
+      directory-replacement guarantee (§3.2), the shallow single-ref git fetch
+      (§2.2), and a §7 listing the constructs the first phase rejects at `PUT`.
+      **The rule stays**: this item's validator is what the schema doc must
+      describe, so any further divergence is a schema edit in the same PR, not a
+      note somewhere else.
 
-      Stated as a rule with a table because the divergences arrive one at a time
-      and each one has so far been noticed only after it shipped.
+      Stated as a rule because the divergences arrive one at a time and each one
+      had so far been noticed only after it shipped.
 
 **Notes.** A `PUT` carrying `script` stores it and does nothing else until W4
 materialises it. That is why the feature flag exists.
