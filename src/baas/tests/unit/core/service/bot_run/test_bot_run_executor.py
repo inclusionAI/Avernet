@@ -759,6 +759,182 @@ async def test_executor_stream_engine_type_in_error_with_metadata():
     assert meta["engine_type"] == "dify"
 
 
+# ----------------------------- stream 字节阈值提前 flush（规避 ZDAS 1064） -----------------------------
+
+
+async def test_executor_stream_agent_byte_threshold_splits_chunks():
+    """stream 模式：agent buffer 累积字节 >= 阈值时提前 flush，拆为多条 agent chunk，
+    每条 content 仍是合法 JSON array，回放侧按 seq 顺序 json.loads 拼接后等于原始事件。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-ag-thr",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    # 构造 N 个 agent 事件，使合并 content 字节超过阈值（默认 64KB）。
+    # 每个 metadata 约 100B，N=800 -> ~80KB > 64KB，应触发至少一次字节阈值 flush。
+    per_frame = {"engine_frame": {"stream": "tool", "phase": "x"}, "data": "x" * 80}
+    n_frames = 800
+    chunks = [StreamChunk(type="agent", content="", metadata=per_frame) for _ in range(n_frames)]
+    chunks.append(StreamChunk(type="final", content="done"))
+
+    async def _stream_gen(*a, **kw):
+        for c in chunks:
+            yield c
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stream_gen
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(),
+        stream_flush_max_content_bytes=4096,
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-ag-thr", bot_id="bot-1:ent", session_id="sess-a")
+    )
+
+    insert_calls = chunk_repo.insert_chunk.call_args_list
+    agent_calls = [c for c in insert_calls if c[1]["chunk_type"] == "agent"]
+    final_calls = [c for c in insert_calls if c[1]["chunk_type"] == "final"]
+
+    # 字节阈值触发拆分：agent chunk 数 > 1
+    assert len(agent_calls) > 1, "agent buffer should be split by byte threshold"
+    # final 仍为 1 行
+    assert len(final_calls) == 1
+
+    # 每条 agent chunk content 仍是合法 JSON array
+    all_frames = []
+    for ac in agent_calls:
+        frames = json.loads(ac[1]["content"])
+        assert isinstance(frames, list)
+        all_frames.extend(frames)
+
+    # 按 seq 顺序拼接的帧等于原始事件集合
+    assert len(all_frames) == n_frames
+
+    # seq 严格递增
+    seqs = [ac[1]["seq"] for ac in agent_calls] + [final_calls[0][1]["seq"]]
+    assert seqs == sorted(seqs)
+    assert len(set(seqs)) == len(seqs)
+
+
+async def test_executor_stream_delta_byte_threshold_splits_chunks():
+    """stream 模式：delta buffer 累积字节 >= 阈值时提前 flush，拆为多条 delta chunk。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-dl-thr",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    # 构造连续 delta 事件，累积字节超过阈值。
+    piece = "x" * 1024
+    n_pieces = 10  # 10KB > 4KB 阈值
+    chunks = [StreamChunk(type="delta", content=piece) for _ in range(n_pieces)]
+    chunks.append(StreamChunk(type="final", content="done"))
+
+    async def _stream_gen(*a, **kw):
+        for c in chunks:
+            yield c
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stream_gen
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(),
+        stream_flush_max_content_bytes=4096,
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-dl-thr", bot_id="bot-1:ent", session_id="sess-d")
+    )
+
+    insert_calls = chunk_repo.insert_chunk.call_args_list
+    delta_calls = [c for c in insert_calls if c[1]["chunk_type"] == "delta"]
+    final_calls = [c for c in insert_calls if c[1]["chunk_type"] == "final"]
+
+    # 字节阈值触发拆分：delta chunk 数 > 1
+    assert len(delta_calls) > 1, "delta buffer should be split by byte threshold"
+    assert len(final_calls) == 1
+
+    # 各 delta chunk content 拼接后等于原始 delta 内容
+    merged = "".join(c[1]["content"] for c in delta_calls)
+    assert merged == piece * n_pieces
+
+
+async def test_executor_stream_byte_threshold_not_triggered_preserves_merge():
+    """累积字节 < 阈值时不触发拆分，既有 agent/delta 合并语义不变。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-no-thr",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    chunks = [
+        StreamChunk(
+            type="agent",
+            content="",
+            metadata={"engine_frame": {"stream": "tool", "phase": "start"}},
+        ),
+        StreamChunk(
+            type="agent",
+            content="",
+            metadata={"engine_frame": {"stream": "tool", "phase": "result"}},
+        ),
+        StreamChunk(type="delta", content="hel"),
+        StreamChunk(type="delta", content="lo"),
+        StreamChunk(type="final", content="hello world"),
+    ]
+
+    async def _stream_gen(*a, **kw):
+        for c in chunks:
+            yield c
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stream_gen
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    # 阈值足够大，这批小 payload 不会触发字节 flush
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(),
+        stream_flush_max_content_bytes=1 << 20,
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-no-thr", bot_id="bot-1:ent", session_id="sess-n")
+    )
+
+    insert_calls = chunk_repo.insert_chunk.call_args_list
+    agent_calls = [c for c in insert_calls if c[1]["chunk_type"] == "agent"]
+    delta_calls = [c for c in insert_calls if c[1]["chunk_type"] == "delta"]
+    final_calls = [c for c in insert_calls if c[1]["chunk_type"] == "final"]
+
+    # 与既有 test_executor_stream_agent_merge 行为一致：不拆分
+    assert len(agent_calls) == 1
+    assert len(delta_calls) == 1
+    assert len(final_calls) == 1
+    agent_data = json.loads(agent_calls[0][1]["content"])
+    assert len(agent_data) == 2
+    assert delta_calls[0][1]["content"] == "hello"
+
+
 # ----------------------------- 背压（队列深度 → 429） -----------------------------
 
 
