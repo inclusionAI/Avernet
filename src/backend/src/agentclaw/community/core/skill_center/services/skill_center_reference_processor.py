@@ -235,10 +235,17 @@ class SkillCenterReferenceProcessor:
             self._fail(batch.env, item.reference_id, exc.code)
             return False
         except SkillCenterGatewayError as exc:
-            logger.exception(
-                "[SkillCenterReference] gateway failure: reference_id=%s code=%s",
+            logger.warning(
+                "[SkillCenterReference] gateway failure: operation=reference_resolution "
+                "env=%s scope=public reference_id=%s skill_code=%s skill_version_id=%s "
+                "gateway_error_code=%s upstream_code=%s upstream_trace_id=%s",
+                batch.env,
                 item.reference_id,
+                item.skill_code,
+                current.skill_version_id,
                 exc.code,
+                exc.upstream_code,
+                exc.trace_id,
             )
             if exc.code is SkillCenterGatewayErrorCode.BUSINESS:
                 self._fail(batch.env, item.reference_id, "SC_SKILL_NOT_FOUND")
@@ -253,8 +260,10 @@ class SkillCenterReferenceProcessor:
             # the failed Ready Gate without exposing credentials.
             cause = exc.__cause__
             logger.warning(
-                "[SkillCenterReference] materialization failure: reference_id=%s "
-                "skill_code=%s skill_version_id=%s failure_stage=%s cause_type=%s",
+                "[SkillCenterReference] materialization failure: operation=reference_materialization "
+                "env=%s scope=public reference_id=%s skill_code=%s skill_version_id=%s "
+                "failure_stage=%s cause_type=%s",
+                batch.env,
                 item.reference_id,
                 item.skill_code,
                 current.skill_version_id,
@@ -264,10 +273,16 @@ class SkillCenterReferenceProcessor:
             return self._retry_or_fail(
                 batch.env, current, "MATERIALIZATION_FAILED"
             )
-        except (TypeError, ValueError, RuntimeError):
-            logger.exception(
-                "[SkillCenterReference] invalid materialization facts: reference_id=%s",
+        except (TypeError, ValueError, RuntimeError) as exc:
+            logger.warning(
+                "[SkillCenterReference] invalid materialization facts: "
+                "operation=reference_materialization env=%s scope=public "
+                "reference_id=%s skill_code=%s skill_version_id=%s failure_type=%s",
+                batch.env,
                 item.reference_id,
+                item.skill_code,
+                current.skill_version_id,
+                type(exc).__name__,
             )
             self._fail(batch.env, item.reference_id, "MATERIALIZATION_FAILED")
             return False

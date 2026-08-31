@@ -268,6 +268,54 @@ def test_validation_or_scanner_failure_never_publishes(
     assert versions.published is None
 
 
+def test_download_failure_logs_safe_structured_diagnostics(caplog) -> None:
+    class _FailedResponse:
+        status_code = 502
+        headers = {"content-type": "text/html"}
+        content = b"<html>gateway failure</html>"
+
+        def raise_for_status(self) -> None:
+            raise RuntimeError(
+                "download https://signed.example/package.zip?signature=private-token failed"
+            )
+
+    class _FailedHttp:
+        def get(self, _path: str, **_kwargs) -> _FailedResponse:
+            return _FailedResponse()
+
+    package = _package()
+    versions = _Versions(_target())
+    materializer = SkillVersionMaterializer(
+        versions=versions,
+        gateway=_Gateway(package),
+        http=_FailedHttp(),
+        validator=SkillPackageValidator(SkillParser()),
+        scanner=_Scanner(),
+        store=LocalCanonicalCenterVersionStore(),
+    )
+
+    with pytest.raises(SkillVersionMaterializationError) as failure:
+        materializer.materialize(
+            SkillVersionMaterializationRequest(
+                env="pre",
+                skill_id=10,
+                skill_version_id=101,
+                scope=SkillCenterReadScope.PUBLIC,
+            )
+        )
+
+    assert failure.value.stage == "package_download"
+    assert versions.published is None
+    assert "skill_center_materialization_failed" in caplog.text
+    assert "stage=package_download" in caplog.text
+    assert "download_host=download.example" in caplog.text
+    assert "download_path=/exact.zip" in caplog.text
+    assert "http_status=502" in caplog.text
+    assert "http_content_type=text/html" in caplog.text
+    assert "private-token" not in caplog.text
+    assert "signature=" not in caplog.text
+
+
 def test_team_exact_package_still_rejects_manifest_name_mismatch() -> None:
     versions = _Versions(_target())
     materializer = _materializer(

@@ -1186,7 +1186,7 @@ def test_submit_rejection_logs_safe_upstream_diagnostics(caplog) -> None:
     [record] = [
         record
         for record in caplog.records
-        if record.getMessage().startswith("[skill_center.publication.submit] failed")
+        if record.getMessage().startswith("skill_center_publication_failed")
     ]
     assert record.attempt_id == attempt.attempt_id
     assert record.space_id == space_id
@@ -1198,6 +1198,8 @@ def test_submit_rejection_logs_safe_upstream_diagnostics(caplog) -> None:
     assert record.upstream_code == "ILLEGAL_PERMISSION"
     assert record.upstream_trace_id == "sc-trace-rejected"
     assert record.env == "test"
+    assert record.operation == "publication_submit"
+    assert record.stage == "publish_submit"
     assert f"attempt_id={attempt.attempt_id}" in caplog.text
     assert f"skill_uuid={expected_skill_uuid}" in caplog.text
     assert f"team_id={expected_team_id}" in caplog.text
