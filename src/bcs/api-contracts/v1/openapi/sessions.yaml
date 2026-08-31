@@ -581,6 +581,15 @@ SessionMessagesPath:
           maximum: 100
           default: 50
       - $ref: ../shared.yaml#/ViewBotIdQuery
+      - name: include_pending
+        in: query
+        description: >-
+          When true, merge best-effort in-memory text and tool-call snapshots
+          for active runs into durable history. Defaults to false so clients
+          that predate pending-history hydration retain legacy behavior.
+        schema:
+          type: boolean
+          default: false
     responses:
       "200":
         description: >-
@@ -588,7 +597,11 @@ SessionMessagesPath:
           legacy history semantics. Omitting view_bot_id selects the
           authenticated Human Participant; creator or manager status does
           not create an implicit manager view. The success Envelope data is
-          the same GroupMessage array returned by the legacy API.
+          the same GroupMessage array returned by the legacy API. When
+          include_pending=true and a run is active, the array may also contain
+          best-effort in-memory text or tool-call snapshots marked by
+          metadata.bcs_pending=true. These snapshots are not durable and may
+          disappear when the BCS process restarts.
         content:
           application/json:
             schema:

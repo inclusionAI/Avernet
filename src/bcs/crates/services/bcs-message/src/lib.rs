@@ -17,6 +17,7 @@ use bcs_service_api::{
     application::session_files::SessionFileService, BotRegistryCoreService, CallerContext,
     Group, GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
     GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError, MessageRole,
+    MessageHistoryOptions, PendingGroupMessage, PendingGroupMessageKind, PendingGroupMessagePort,
     ParticipantRole, ServiceError, SessionHistoryCommand, SessionHistoryResult,
     port::repo::{MessageRepoPort, SessionRepoPort},
 };
@@ -32,6 +33,7 @@ pub struct MessageService {
     group: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     session_file: Arc<dyn SessionFileService>,
+    pending_messages: Arc<dyn PendingGroupMessagePort>,
     cutoff_timestamp: u64,
     manager_worker_cutoff_timestamp: u64,
     new_participant_visible_limit: u64,
@@ -53,6 +55,7 @@ impl MessageService {
         group: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         session_file: Arc<dyn SessionFileService>,
+        pending_messages: Arc<dyn PendingGroupMessagePort>,
         cutoff_timestamp: u64,
         manager_worker_cutoff_timestamp: u64,
         new_participant_visible_limit: u64,
@@ -67,6 +70,7 @@ impl MessageService {
             group,
             registry,
             session_file,
+            pending_messages,
             cutoff_timestamp,
             manager_worker_cutoff_timestamp,
             new_participant_visible_limit,
@@ -220,6 +224,147 @@ impl MessageService {
             _ => MessageOwnerFilter::IsNull,
         }
     }
+
+    fn pending_owner(
+        group: &Group,
+        session: Option<&Session>,
+        bot_id: &str,
+    ) -> Option<Option<String>> {
+        if group.group_strategy != GroupStrategy::ManagerWorker {
+            return Some(None);
+        }
+        let participant = session
+            .and_then(|session| {
+                session
+                    .participants
+                    .iter()
+                    .find(|participant| participant.bot_uuid == bot_id)
+            })
+            .or_else(|| group.get_participant(bot_id))?;
+        Some(
+            (participant.role == ParticipantRole::Worker).then(|| bot_id.to_string()),
+        )
+    }
+
+    fn pending_is_visible(
+        owner_filter: &MessageOwnerFilter,
+        owner_bot_id: Option<&str>,
+    ) -> bool {
+        // COSEC: pending in-memory content must follow the same owner isolation
+        // as the durable MessageRepo query; never expose another worker's run.
+        match owner_filter {
+            MessageOwnerFilter::Any => true,
+            MessageOwnerFilter::IsNull => owner_bot_id.is_none(),
+            MessageOwnerFilter::Eq(expected) => owner_bot_id == Some(expected.as_str()),
+            MessageOwnerFilter::PublicOrOwner(expected) => {
+                owner_bot_id.is_none() || owner_bot_id == Some(expected.as_str())
+            }
+        }
+    }
+
+    async fn pending_group_messages(
+        &self,
+        group: &Group,
+        session: Option<&Session>,
+        session_id: Option<&str>,
+        owner_filter: &MessageOwnerFilter,
+        before: Option<u64>,
+    ) -> Vec<GroupMessage> {
+        let snapshots = self
+            .pending_messages
+            .list_pending(&group.id, session_id)
+            .await;
+        let mut bot_names: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::new();
+        let mut messages = Vec::with_capacity(snapshots.len());
+        for snapshot in snapshots {
+            if before.is_some_and(|cursor| snapshot.created_at_ms >= cursor) {
+                continue;
+            }
+            let Some(owner_bot_id) = Self::pending_owner(group, session, &snapshot.bot_id) else {
+                continue;
+            };
+            if !Self::pending_is_visible(owner_filter, owner_bot_id.as_deref()) {
+                continue;
+            }
+            let bot_name = match bot_names.entry(snapshot.bot_id.clone()) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let name = self
+                        .registry
+                        .get(&snapshot.bot_id)
+                        .await
+                        .and_then(|bot| bot.capabilities.name);
+                    entry.insert(name.clone());
+                    name
+                }
+            };
+            messages.push(pending_to_group_message(snapshot, bot_name));
+        }
+        messages
+    }
+}
+
+fn pending_to_group_message(
+    pending: PendingGroupMessage,
+    bot_name: Option<String>,
+) -> GroupMessage {
+    let (content, metadata) = match pending.kind {
+        PendingGroupMessageKind::Chat { text } => (
+            text,
+            serde_json::json!({
+                "bcs_pending": true,
+                "pending_kind": "chat",
+            }),
+        ),
+        PendingGroupMessageKind::ToolCall {
+            tool_call_id,
+            tool_name,
+            tool_args,
+        } => (
+            String::new(),
+            serde_json::json!({
+                "bcs_pending": true,
+                "pending_kind": "tool_call",
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+            }),
+        ),
+    };
+    GroupMessage {
+        id: format!("bcs-run:{}:{}", pending.run_id, pending.bot_id),
+        timestamp: pending.created_at_ms,
+        sender: pending.bot_id,
+        content,
+        message_type: GroupMessageType::Bot,
+        bot_name,
+        role: MessageRole::Assistant,
+        run_id: pending.run_id,
+        history_meta: None,
+        metadata: Some(metadata),
+        attachments: None,
+    }
+}
+
+fn merge_history_window(
+    mut durable: Vec<GroupMessage>,
+    pending: Vec<GroupMessage>,
+    limit: u32,
+    durable_next_before: Option<u64>,
+) -> (Vec<GroupMessage>, Option<u64>) {
+    durable.extend(pending);
+    // Stable sort preserves the repository's established order for durable
+    // rows that share a timestamp; pending rows were appended after them.
+    durable.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+    let truncated = durable.len() > limit as usize;
+    durable.truncate(limit as usize);
+    let next_before = if truncated || durable_next_before.is_some() {
+        durable.last().map(|message| message.timestamp)
+    } else {
+        None
+    };
+    (durable, next_before)
 }
 
 fn build_tool_call_metadata(content: &serde_json::Value) -> Option<serde_json::Value> {
@@ -418,6 +563,15 @@ impl GroupMessageHistoryService for MessageService {
         &self,
         cmd: GroupHistoryCommand,
     ) -> Result<GroupHistoryResult, GroupUseCaseError> {
+        self.get_history_with_options(cmd, MessageHistoryOptions::default())
+            .await
+    }
+
+    async fn get_history_with_options(
+        &self,
+        cmd: GroupHistoryCommand,
+        options: MessageHistoryOptions,
+    ) -> Result<GroupHistoryResult, GroupUseCaseError> {
         let hide_opening_message = matches!(&cmd.caller, CallerContext::Bot(_));
         let group = self
             .group
@@ -450,7 +604,7 @@ impl GroupMessageHistoryService for MessageService {
                 keyword: None,
                 sender_id: None,
                 message_type: None,
-                owner_filter,
+                owner_filter: owner_filter.clone(),
                 time_range: None,
                 visible_from_seq: None,
             };
@@ -462,7 +616,7 @@ impl GroupMessageHistoryService for MessageService {
             })?;
             let mut bot_names: std::collections::HashMap<String, Option<String>> =
                 std::collections::HashMap::new();
-            let messages: Vec<GroupMessage> = {
+            let mut messages: Vec<GroupMessage> = {
                 let mut result = Vec::with_capacity(page.messages.len());
                 for pm in page
                     .messages
@@ -499,19 +653,51 @@ impl GroupMessageHistoryService for MessageService {
                 }
                 result
             };
+            let mut durable_next_before = page.next_cursor.map(|cursor| cursor.0);
             // The message repo only holds messages persisted by BCS. A
             // provider-backed bot keeps its own transcript, so when a specific
-            // bot view is requested and the repo has nothing for it, fall back
-            // to the legacy path that fetches history directly from that bot.
+            // bot view is requested and the repo has nothing for it, first
+            // resolve the durable history through the legacy provider. Pending
+            // tracker content is merged afterwards so an active run does not
+            // hide the provider's older transcript.
             if messages.is_empty() && cmd.view_bot_id.is_some() {
-                return self.fallback.get_history(cmd).await;
+                let fallback_result = self.fallback.get_history(cmd.clone()).await?;
+                if !options.include_pending {
+                    return Ok(fallback_result);
+                }
+                messages = fallback_result.messages;
+                durable_next_before = fallback_result.next_before;
             }
+            if !options.include_pending {
+                return Ok(GroupHistoryResult {
+                    group_id: cmd.group_id,
+                    messages,
+                    limit: cmd.limit,
+                    before: cmd.before,
+                    next_before: durable_next_before,
+                });
+            }
+            let pending = self
+                .pending_group_messages(
+                    &group,
+                    None,
+                    None,
+                    &owner_filter,
+                    cmd.before,
+                )
+                .await;
+            let (messages, next_before) = merge_history_window(
+                messages,
+                pending,
+                limit,
+                durable_next_before,
+            );
             Ok(GroupHistoryResult {
                 group_id: cmd.group_id,
                 messages,
                 limit: cmd.limit,
                 before: cmd.before,
-                next_before: page.next_cursor.map(|c| c.0),
+                next_before,
             })
         } else {
             info!(
@@ -525,6 +711,15 @@ impl GroupMessageHistoryService for MessageService {
     async fn get_session_history(
         &self,
         cmd: SessionHistoryCommand,
+    ) -> Result<SessionHistoryResult, GroupUseCaseError> {
+        self.get_session_history_with_options(cmd, MessageHistoryOptions::default())
+            .await
+    }
+
+    async fn get_session_history_with_options(
+        &self,
+        cmd: SessionHistoryCommand,
+        options: MessageHistoryOptions,
     ) -> Result<SessionHistoryResult, GroupUseCaseError> {
         let hide_opening_message = matches!(&cmd.caller, CallerContext::Bot(_));
         let session_id = cmd.session_id.clone();
@@ -565,7 +760,7 @@ impl GroupMessageHistoryService for MessageService {
                 keyword: None,
                 sender_id: None,
                 message_type: None,
-                owner_filter,
+                owner_filter: owner_filter.clone(),
                 time_range: None,
                 visible_from_seq,
             };
@@ -655,12 +850,37 @@ impl GroupMessageHistoryService for MessageService {
                 }
                 result
             };
+            let durable_next_before = page.next_cursor.map(|cursor| cursor.0);
+            if !options.include_pending {
+                return Ok(SessionHistoryResult {
+                    session_id,
+                    messages,
+                    limit: cmd.limit,
+                    before: cmd.before,
+                    next_before: durable_next_before,
+                });
+            }
+            let pending = self
+                .pending_group_messages(
+                    group_opt.as_ref().unwrap(),
+                    Some(sess),
+                    Some(&session_id),
+                    &owner_filter,
+                    cmd.before,
+                )
+                .await;
+            let (messages, next_before) = merge_history_window(
+                messages,
+                pending,
+                limit,
+                durable_next_before,
+            );
             Ok(SessionHistoryResult {
                 session_id,
                 messages,
                 limit: cmd.limit,
                 before: cmd.before,
-                next_before: page.next_cursor.map(|c| c.0),
+                next_before,
             })
         } else {
             info!(
@@ -790,7 +1010,7 @@ mod tests {
             ShareMintCommand, ShareMintResult,
         },
         BotActor, CallerContext, Group, HumanActor, MessageRole, Participant, ParticipantRole,
-        SessionKind,
+        PendingGroupMessage, PendingGroupMessagePort, SessionKind,
         port::repo::{
             MessageRepoError, NewSessionParams, SessionFileListPage, SessionFileListParams,
             SessionRepoPort,
@@ -799,6 +1019,32 @@ mod tests {
     use bcs_session_store::MemorySessionRepo;
     use bcs_storage_api::ByteStream;
     use tokio::sync::Mutex;
+
+    struct NoopPendingMessages;
+
+    struct StaticPendingMessages(Vec<PendingGroupMessage>);
+
+    #[async_trait]
+    impl PendingGroupMessagePort for NoopPendingMessages {
+        async fn list_pending(
+            &self,
+            _group_id: &str,
+            _session_id: Option<&str>,
+        ) -> Vec<PendingGroupMessage> {
+            Vec::new()
+        }
+    }
+
+    #[async_trait]
+    impl PendingGroupMessagePort for StaticPendingMessages {
+        async fn list_pending(
+            &self,
+            _group_id: &str,
+            _session_id: Option<&str>,
+        ) -> Vec<PendingGroupMessage> {
+            self.0.clone()
+        }
+    }
 
     // Minimal mock: everything errors except share_mint_for_history (configurable).
     struct MintMock {
@@ -1153,6 +1399,7 @@ mod tests {
             group,
             Arc::new(BotCore::memory()),
             Arc::new(MintMock { ok: true }),
+            Arc::new(NoopPendingMessages),
             chat_cutoff,
             manager_worker_cutoff,
             100,
@@ -1186,6 +1433,135 @@ mod tests {
         })
         .await
         .expect("append history");
+    }
+
+    #[tokio::test]
+    async fn manager_worker_pending_history_reuses_durable_owner_visibility() {
+        let (mut service, _repo, _sessions, _fallback, session_id) = service_fixture(
+            GroupStrategy::ManagerWorker,
+            0,
+            0,
+            Vec::new(),
+        )
+        .await;
+        service.pending_messages = Arc::new(StaticPendingMessages(vec![
+            PendingGroupMessage {
+                run_id: "manager-run".to_string(),
+                bot_id: "mgr".to_string(),
+                session_id: Some(session_id.clone()),
+                created_at_ms: 30,
+                kind: PendingGroupMessageKind::Chat {
+                    text: "manager partial".to_string(),
+                },
+            },
+            PendingGroupMessage {
+                run_id: "worker-a-run".to_string(),
+                bot_id: "worker-a".to_string(),
+                session_id: Some(session_id.clone()),
+                created_at_ms: 20,
+                kind: PendingGroupMessageKind::ToolCall {
+                    tool_call_id: "call-1".to_string(),
+                    tool_name: "search".to_string(),
+                    tool_args: serde_json::json!({"q": "secret"}),
+                },
+            },
+            PendingGroupMessage {
+                run_id: "worker-b-run".to_string(),
+                bot_id: "worker-b".to_string(),
+                session_id: Some(session_id.clone()),
+                created_at_ms: 10,
+                kind: PendingGroupMessageKind::Chat {
+                    text: "worker b private".to_string(),
+                },
+            },
+        ]));
+
+        let durable_only = service
+            .get_session_history(session_cmd("group-1", &session_id, None))
+            .await
+            .expect("default durable history");
+        assert!(durable_only.messages.is_empty());
+
+        let human = service
+            .get_session_history_with_options(
+                session_cmd("group-1", &session_id, None),
+                MessageHistoryOptions {
+                    include_pending: true,
+                },
+            )
+            .await
+            .expect("human history");
+        assert_eq!(human.messages.len(), 1);
+        assert_eq!(human.messages[0].run_id, "manager-run");
+        assert_eq!(
+            human.messages[0].id,
+            "bcs-run:manager-run:mgr"
+        );
+
+        let worker = service
+            .get_session_history_with_options(
+                session_cmd("group-1", &session_id, Some("worker-a")),
+                MessageHistoryOptions {
+                    include_pending: true,
+                },
+            )
+            .await
+            .expect("worker history");
+        assert_eq!(worker.messages.len(), 1);
+        assert_eq!(worker.messages[0].run_id, "worker-a-run");
+        assert_eq!(
+            worker.messages[0]
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("tool_call_id"))
+                .and_then(serde_json::Value::as_str),
+            Some("call-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn chat_pending_history_does_not_hide_provider_fallback_history() {
+        let (mut service, _repo, _sessions, fallback, _session_id) = service_fixture(
+            GroupStrategy::Chat,
+            0,
+            u64::MAX,
+            vec![fallback_message("provider durable")],
+        )
+        .await;
+        service.pending_messages = Arc::new(StaticPendingMessages(vec![PendingGroupMessage {
+            run_id: "active-run".to_string(),
+            bot_id: "worker-a".to_string(),
+            session_id: None,
+            created_at_ms: 2,
+            kind: PendingGroupMessageKind::Chat {
+                text: "tracker pending".to_string(),
+            },
+        }]));
+
+        let durable_only = service
+            .get_history(group_cmd("group-1", Some("worker-a")))
+            .await
+            .expect("default durable history");
+        assert_eq!(durable_only.messages.len(), 1);
+        assert_eq!(durable_only.messages[0].content, "provider durable");
+
+        let result = service
+            .get_history_with_options(
+                group_cmd("group-1", Some("worker-a")),
+                MessageHistoryOptions {
+                    include_pending: true,
+                },
+            )
+            .await
+            .expect("provider and pending history");
+
+        assert_eq!(fallback.group_calls().await, 2);
+        let contents = result
+            .messages
+            .iter()
+            .map(|message| message.content.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(contents, vec!["tracker pending", "provider durable"]);
     }
 
     #[tokio::test]

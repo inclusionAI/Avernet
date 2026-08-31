@@ -270,4 +270,7 @@ pub struct ListSessionMessagesQuery {
     /// Optional viewer identity for message history visibility scoping.
     #[serde(default)]
     pub view_bot_id: Option<String>,
+    /// Opt in to best-effort in-memory text/tool snapshots for active runs.
+    #[serde(default)]
+    pub include_pending: bool,
 }

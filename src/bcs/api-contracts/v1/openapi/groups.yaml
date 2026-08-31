@@ -127,7 +127,9 @@ GroupsPath:
         description: >-
           Created group detail. When event_subscriptions were supplied, the
           response includes their redacted active summaries. Their scope is
-          fixed by the server to the newly created Group.
+          fixed by the server to the newly created Group. When creation starts
+          an initial Manager run, initial_session_id identifies its Session and
+          initial_run exposes the run identity and current dispatch state.
         content:
           application/json:
             schema:

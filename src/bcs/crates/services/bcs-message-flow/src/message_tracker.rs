@@ -100,6 +100,19 @@ impl MessageTracker {
         pending.get(tool_call_id).cloned()
     }
 
+    /// Clone all pending tool starts without consuming or mutating tracker state.
+    pub async fn snapshot_tool_call_starts(&self) -> Vec<(String, ToolCallStartInfo)> {
+        let pending = self.tool_call_starts.lock().await;
+        pending
+            .iter()
+            .map(|(tool_call_id, info)| (tool_call_id.clone(), info.clone()))
+            .collect()
+    }
+
+    pub async fn remove_tool_call_start(&self, tool_call_id: &str) {
+        self.tool_call_starts.lock().await.remove(tool_call_id);
+    }
+
     pub async fn mark_coordination_echo_seen(&self, key: String, now_ms: u64, ttl_ms: u64) -> bool {
         let mut seen = self.coordination_echoes.lock().await;
         seen.retain(|_, seen_at| now_ms.saturating_sub(*seen_at) <= ttl_ms);
@@ -265,6 +278,14 @@ impl MessageTracker {
         map.get(run_id).cloned()
     }
 
+    /// Clone every current chat segment without consuming any buffer.
+    pub async fn snapshot_chat_bufs(&self) -> Vec<(String, String)> {
+        let map = self.streaming_chat_buf.lock().await;
+        map.iter()
+            .map(|(run_id, text)| (run_id.clone(), text.clone()))
+            .collect()
+    }
+
     /// Clean up all per-run tracking when a run reaches a terminal state.
     /// Returns any pending chat buffer that was not yet flushed.
     pub async fn cleanup_run(&self, run_id: &str) -> Option<String> {
@@ -346,6 +367,34 @@ mod tests {
             .await;
 
         assert!(tracker.get_tool_call_start("tool-1").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn pending_snapshots_do_not_consume_tracker_state() {
+        let tracker = MessageTracker::new();
+        tracker
+            .buffer_chat_text("run-1", "partial reply".to_string())
+            .await;
+        tracker
+            .cache_tool_call_start(
+                "tool-1".to_string(),
+                ToolCallStartInfo {
+                    run_id: "run-1".to_string(),
+                    session_id: "session-1".to_string(),
+                    name: "search".to_string(),
+                    args: serde_json::json!({"q": "rust"}),
+                    created_at_ms: bcs_protocol::now_ms(),
+                },
+            )
+            .await;
+
+        assert_eq!(
+            tracker.snapshot_chat_bufs().await,
+            vec![("run-1".to_string(), "partial reply".to_string())]
+        );
+        assert_eq!(tracker.snapshot_tool_call_starts().await.len(), 1);
+        assert_eq!(tracker.peek_chat_buf("run-1").await.as_deref(), Some("partial reply"));
+        assert!(tracker.get_tool_call_start("tool-1").await.is_some());
     }
 
     #[tokio::test]

@@ -843,6 +843,11 @@ CollaborationGroupDetail:
         inline Event Subscriptions. Endpoint URLs are redacted.
       items:
         $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
+    initial_session_id:
+      type: string
+      description: Initial Session started as part of Group creation.
+    initial_run:
+      $ref: "#/InitialGroupRun"
 
 DirectMessageGroupDetail:
   type: object
@@ -893,6 +898,38 @@ DirectMessageGroupDetail:
         inline Event Subscriptions. Endpoint URLs are redacted.
       items:
         $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
+    initial_session_id:
+      type: string
+      description: Initial Session started as part of Group creation.
+    initial_run:
+      $ref: "#/InitialGroupRun"
+
+InitialGroupRun:
+  type: object
+  additionalProperties: false
+  required:
+    - run_id
+    - bot_uuid
+    - activity_kind
+    - state
+    - started_at
+  properties:
+    run_id:
+      type: string
+    bot_uuid:
+      type: string
+    activity_kind:
+      type: string
+      enum:
+        - group_bootstrap
+    state:
+      type: string
+      enum:
+        - running
+        - failed
+    started_at:
+      type: string
+      format: date-time
 
 GroupDetail:
   oneOf:
@@ -1543,6 +1580,11 @@ GroupMessage:
     metadata:
       type: object
       additionalProperties: true
+      description: >-
+        Pending in-memory snapshots set bcs_pending=true and pending_kind to
+        chat or tool_call. Tool-call snapshots also carry tool_call_id,
+        tool_name, and tool_args. Consumers should merge them by run_id and
+        treat durable history as the eventual source of truth.
     attachments:
       type: array
       items:

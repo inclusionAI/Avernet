@@ -1,7 +1,7 @@
 //! Core system-message contracts.
 
 use async_trait::async_trait;
-use bcs_domain::{Group, Participant};
+use bcs_domain::{DeliveryType, Group, Participant};
 
 use crate::{BotRegistryCoreService, ServiceError, ServiceResult};
 
@@ -39,6 +39,8 @@ pub trait SystemMessageProducerService: Send + Sync {
 #[derive(Debug)]
 pub struct SystemMessageRecipientResult {
     pub recipient_id: String,
+    pub run_id: String,
+    pub delivery_type: DeliveryType,
     pub delivered: bool,
     pub error: Option<ServiceError>,
 }

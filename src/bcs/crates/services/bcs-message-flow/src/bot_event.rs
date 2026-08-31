@@ -1412,6 +1412,9 @@ async fn persist_tool_result(
         &run_id,
     )
     .await?;
+    flow.message_tracker
+        .remove_tool_call_start(tool_call_id)
+        .await;
     Ok(())
 }
 

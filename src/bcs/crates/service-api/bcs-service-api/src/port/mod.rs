@@ -14,6 +14,7 @@ pub mod interaction;
 pub mod judge;
 pub mod leader_election;
 pub mod metrics;
+pub mod pending_group_message;
 pub mod provider_stream_gray;
 pub mod repo;
 pub mod secret;
@@ -69,6 +70,9 @@ pub use metrics::{
     GroupMetricCount, GroupMetricsSnapshotPort, GroupSessionMetricCount,
     GroupSessionMetricsSnapshotPort, MetricsResult, WsCloseReason, WsErrorKind,
     WsLifecycleInstrumentationHook, WsPeer,
+};
+pub use pending_group_message::{
+    PendingGroupMessage, PendingGroupMessageKind, PendingGroupMessagePort,
 };
 pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{

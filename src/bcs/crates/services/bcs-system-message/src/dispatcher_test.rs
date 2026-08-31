@@ -964,7 +964,7 @@ async fn deprecated_stream_gray_setting_keeps_system_message_send_delivery() {
 }
 
 #[tokio::test]
-async fn dispatch_send_system_message_to_websocket_does_not_record_run_context() {
+async fn dispatch_send_system_message_to_websocket_records_run_context_and_returns_run_id() {
     let group = Group {
         id: "group-ws".into(),
         label: None,
@@ -1025,7 +1025,16 @@ async fn dispatch_send_system_message_to_websocket_does_not_record_run_context()
     let calls = delivery.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     assert!(!calls[0].target.is_http_provider());
-    assert_eq!(run_context.len(), 0);
+    assert_eq!(run_context.len(), 1);
+    let result = outcome.recipient_results.first().expect("recipient result");
+    assert_eq!(result.run_id, calls[0].run_id);
+    assert_eq!(result.delivery_type, DeliveryType::Send);
+    let context = run_context
+        .get(&result.run_id)
+        .expect("websocket chat.send run context");
+    assert_eq!(context.bot_id, "bot-ws");
+    assert_eq!(context.group_id, "group-ws");
+    assert_eq!(context.bcs_session_id.as_deref(), Some("session-ws"));
 }
 
 #[tokio::test]

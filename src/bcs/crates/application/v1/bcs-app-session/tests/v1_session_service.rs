@@ -39,7 +39,7 @@ use bcs_service_api::{
     GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
     GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError,
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanActor, MessageRole,
-    Participant, ParticipantMode, ParticipantRole, ServiceResult, SessionCaller,
+    MessageHistoryOptions, Participant, ParticipantMode, ParticipantRole, ServiceResult, SessionCaller,
     SessionHistoryCommand, SessionHistoryResult, SessionKind, StartStateMachineRunCommand,
     StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
     StateMachineRunStatus, StateMachineRunView, SystemMessageEvent,
@@ -51,6 +51,7 @@ use bcs_test_support::NoopSystemMessageService;
 #[derive(Default)]
 struct RecordingHistoryService {
     session_calls: Mutex<Vec<SessionHistoryCommand>>,
+    session_options: Mutex<Vec<MessageHistoryOptions>>,
     messages: Mutex<Vec<GroupMessage>>,
 }
 
@@ -114,6 +115,18 @@ impl GroupMessageHistoryService for RecordingHistoryService {
             before: cmd.before,
             next_before: None,
         })
+    }
+
+    async fn get_session_history_with_options(
+        &self,
+        cmd: SessionHistoryCommand,
+        options: MessageHistoryOptions,
+    ) -> Result<SessionHistoryResult, GroupUseCaseError> {
+        self.session_options
+            .lock()
+            .expect("history options lock")
+            .push(options);
+        self.get_session_history(cmd).await
     }
 }
 
@@ -1771,6 +1784,43 @@ async fn list_messages_delegates_and_returns_legacy_group_messages_unchanged() {
         CallerContext::Human(HumanActor {
             actor_id: "human_staff-1".into(),
             staff_no: "staff-1".into(),
+        })
+    );
+    drop(calls);
+    assert_eq!(
+        fixture
+            .history
+            .session_options
+            .lock()
+            .expect("history options lock")
+            .last(),
+        Some(&MessageHistoryOptions::default())
+    );
+
+    SessionMessageService::list_with_options(
+        &fixture.service,
+        ListSessionMessages {
+            caller: human_principal("staff-1"),
+            session_id: session.id,
+            before: None,
+            limit: 25,
+            view_bot_id: None,
+        },
+        MessageHistoryOptions {
+            include_pending: true,
+        },
+    )
+    .await
+    .expect("list messages with pending snapshots");
+    assert_eq!(
+        fixture
+            .history
+            .session_options
+            .lock()
+            .expect("history options lock")
+            .last(),
+        Some(&MessageHistoryOptions {
+            include_pending: true,
         })
     );
 }

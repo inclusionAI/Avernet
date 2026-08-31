@@ -108,6 +108,7 @@ fn dm_create_command_and_result_carry_create_or_reuse_semantics() {
             context_injected: 0,
             service_spec: None,
             latest_running_session_id: None,
+            initial_run: None,
             originator: None,
             visibility: "private".to_string(),
         },
@@ -222,6 +223,7 @@ fn group_result_dtos_are_route_friendly_views() {
         context_injected: 1,
         service_spec: None,
         latest_running_session_id: None,
+        initial_run: None,
         originator: None,
         visibility: "private".to_string(),
     };

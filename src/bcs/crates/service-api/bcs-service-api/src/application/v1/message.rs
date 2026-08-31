@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use super::{ApplicationError, AuthenticatedCaller};
+use crate::MessageHistoryOptions;
 use crate::core::GroupMessage;
 
 #[derive(Debug, Clone)]
@@ -27,4 +28,12 @@ pub struct ListSessionMessages {
 pub trait SessionMessageService: Send + Sync {
     async fn list(&self, query: ListSessionMessages)
     -> Result<Vec<GroupMessage>, ApplicationError>;
+
+    async fn list_with_options(
+        &self,
+        query: ListSessionMessages,
+        _options: MessageHistoryOptions,
+    ) -> Result<Vec<GroupMessage>, ApplicationError> {
+        self.list(query).await
+    }
 }

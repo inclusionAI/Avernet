@@ -29,13 +29,23 @@ def test_session_list_and_history_use_the_shared_view_actor_contract() -> None:
     message_queries = _query_parameters(list_messages)
 
     assert set(list_queries) == {"offset", "limit", "status", "view_bot_id"}
-    assert set(message_queries) == {"before", "limit", "view_bot_id"}
+    assert set(message_queries) == {
+        "before",
+        "limit",
+        "view_bot_id",
+        "include_pending",
+    }
     assert list_queries["view_bot_id"] == message_queries["view_bot_id"]
     assert list_queries["view_bot_id"]["schema"] == {
         "type": "string",
         "minLength": 1,
     }
     assert list_queries["view_bot_id"].get("required", False) is False
+    assert message_queries["include_pending"]["schema"] == {
+        "type": "boolean",
+        "default": False,
+    }
+    assert message_queries["include_pending"].get("required", False) is False
 
 
 def test_session_history_uses_legacy_group_message_array_envelope() -> None:

@@ -3,6 +3,7 @@ pub mod bot_event;
 pub mod group_flow;
 pub mod group_fusion;
 pub mod group_history;
+mod pending_message;
 pub(crate) mod protocol_context;
 pub(crate) mod message_tracker;
 pub mod run_context;
