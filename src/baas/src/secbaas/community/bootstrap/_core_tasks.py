@@ -21,6 +21,26 @@ from secbaas.community.core.service.scheduler import (
 from secbaas.community.core.utils.env_utils import get_current_env
 
 
+def _assert_threshold_consistent(thr, ttl) -> int:
+    """Coerce renew_threshold_hours and fail fast on EG-4 drift.
+
+    None-tolerant: when the YAML key is absent (None/empty), the 12-hour
+    default is returned without asserting — minimal test containers carry
+    only the engine key, and odd half-TTL deployments must omit the key and
+    rely on the derived value. When both values are explicitly present, a
+    threshold that is not half the TTL period raises ValueError at assembly
+    (startup failure instead of a silently drifted safety margin).
+    """
+    coerced = int(thr) if thr else 12
+    if thr and ttl and coerced * 60 != int(ttl) // 2:
+        raise ValueError(
+            f"renew_threshold_hours={thr!r} conflicts with "
+            f"arca.default_ttl_minutes={ttl!r} — threshold must equal half "
+            "the TTL period (EG-4)"
+        )
+    return coerced
+
+
 class CoreTaskContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
 
@@ -114,7 +134,13 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         cron_interval_seconds=config.renewal_scheduler.cron_interval_seconds,
         batch_size=config.renewal_scheduler.batch_size,
         max_concurrency=config.renewal_scheduler.max_concurrency,
-        renew_threshold_hours=config.renewal_scheduler.renew_threshold_hours,
+        # EG-4 fail-fast: the explicit threshold must equal half the TTL
+        # period (None-tolerant — a missing key returns 12, no assertion).
+        renew_threshold_hours=providers.Callable(
+            _assert_threshold_consistent,
+            config.renewal_scheduler.renew_threshold_hours,
+            config.arca.default_ttl_minutes,
+        ),
         # Rule 14 (configuration-driven wiring): the TTL period comes from
         # the arca config section, not hardcoded task constants. The
         # fallback keeps overlays without an arca section (minimal test

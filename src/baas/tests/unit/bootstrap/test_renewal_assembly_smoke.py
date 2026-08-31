@@ -191,3 +191,60 @@ class TestLegacyEngineAssembly:
         assert not isinstance(svc, ArcaScheduleAwareDeviceService)
         # Community de-hook: no schedule repository residue on the default
         assert "_schedule_repo" not in type(svc).__dict__
+
+
+class TestEg4ThresholdConsistency:
+    """EG-4 bootstrap fail-fast: renew_threshold_hours vs arca.default_ttl_minutes.
+
+    Three assembly states at DeadlineRenewalSchedulerConfig materialisation:
+    mismatch raises ValueError (startup tripwire), an absent threshold key is
+    tolerated (12-hour default, no assertion), and consistent values resolve.
+    """
+
+    def test_mismatched_renew_threshold_raises_at_resolution(self):
+        """An explicit threshold inconsistent with the TTL period fails at
+        resolution — 12h vs "2880" (24h) must raise ValueError, never a
+        half-wired config (threshold != half the TTL period, EG-4)."""
+        container = _container_with("deadline")
+        container.config.from_dict(
+            {
+                "renewal_scheduler": {
+                    "engine": "deadline",
+                    "renew_threshold_hours": 12,
+                },
+                "arca": {"default_ttl_minutes": "2880"},
+            }
+        )
+        set_container(container)
+
+        with pytest.raises(ValueError):
+            container.tasks().deadline_renewal_task()
+
+    def test_absent_renew_threshold_tolerated_with_default(self):
+        """A missing threshold key resolves with the 12-hour default and the
+        1440-minute TTL fallback — the None-tolerant path keeps minimal
+        containers (only the engine key) assembling."""
+        container = _container_with("deadline")
+        set_container(container)
+
+        task = container.tasks().deadline_renewal_task()
+        assert task._config.renew_threshold_hours == 12
+        assert task._config.default_ttl_minutes == 1440
+
+    def test_consistent_renew_threshold_resolves(self):
+        """12h vs "1440" (string-coerced) resolves — threshold*60 ==
+        default_ttl_minutes//2 holds (WR-03 coercion chain reused)."""
+        container = _container_with("deadline")
+        container.config.from_dict(
+            {
+                "renewal_scheduler": {
+                    "engine": "deadline",
+                    "renew_threshold_hours": 12,
+                },
+                "arca": {"default_ttl_minutes": "1440"},
+            }
+        )
+        set_container(container)
+
+        task = container.tasks().deadline_renewal_task()
+        assert task._config.renew_threshold_hours == 12
