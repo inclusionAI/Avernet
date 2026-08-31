@@ -70,11 +70,37 @@ structurally rather than by convention. This feature is that shape applied to a
 different question, deliberately, so that the surface has two seams and not
 three shapes.
 
+**And there is a third caller, which is why the seam cannot be shaped around a
+bot record.** W13 (#1696) creates a bot *with* a manifest, and its acceptance
+criteria require the manifest to be validated at **preflight** — in
+`create_bot_with_authorization`, beside the quota, name and engine checks, and
+*before* Passport is requested. At that moment there is no bot record: phase 1
+allocates a `bot_id` and mints a Passport identity, and the record is not
+written until phase 2 (`complete_bot_authorization`), after the user clicks the
+authorization link. The code says so itself — *"No token yet → authorization
+pending; nothing is created."*
+
+A seam that resolves everything through `bot_service.get_bot(bot_id, owner_id)`
+is unusable there. W13 would find it unusable, write a second validation copy,
+and reproduce the exact defect this feature exists to prevent — this time on the
+path where being wrong is most expensive, because the alternative to catching it
+at preflight is catching it *after* the user has completed a Passport
+authorization that cannot be un-burned.
+
+The three coordinates every category needs — `entity_type`, `entity_id`,
+`engine_type` — are all available in phase 1. They are on `BotCreateSpec`, as
+request parameters. They are simply not on a record yet. So the seam must take
+them as values rather than fetch them, which is a shape decision, not a feature.
+
 ## User Stories
 
 - As the engineer building apply (W4), I want to call the same check the
   category endpoint calls, so that "apply enforces what the API enforces" is a
   property of the code rather than a claim in a review.
+- As the engineer building create-with-manifest (W13), I want to run every
+  per-category validation at preflight with no bot record in existence, so that
+  an invalid manifest is refused before the user is sent through a Passport
+  authorization that cannot be taken back.
 - As a backend engineer adding a rule to one of these five categories, I want
   one place to add it, so that adding it to the endpoint and forgetting apply is
   not possible.
@@ -108,6 +134,23 @@ These are W10's four criteria from `docs/bot-config-manifest/work-items.zh-CN.md
 - [ ] The declared checks raise domain errors from `core`, never
       `HTTPException`. The routers keep their existing error mapping, which is
       how the status codes stay identical.
+
+### Usable before a bot exists
+
+- [ ] Every category's **validation** runs with no bot record — given the
+      declared values and the coordinates as arguments, it reaches no
+      repository and no `get_bot`. This is what lets W13 validate at preflight.
+- [ ] The coordinates a category needs are produced by **two constructors
+      returning one type**: one reading an existing bot record, one reading the
+      create request's parameters. Not two coordinate types, and not two
+      validation paths — the same rule W1 imposes on the capability resolver
+      (*one function, two entry points; never two implementations*).
+- [ ] A test constructs coordinates from request parameters alone and runs every
+      category's validators against them, with no bot record anywhere in the
+      fixture. If that test needs a record to pass, the split did not happen.
+- [ ] The record-reading constructor keeps today's ownership guard exactly.
+      Splitting the shape must not weaken the existing-bot path, which is the
+      one that ships now.
 
 ### The table, and the guarantee it carries
 
@@ -181,7 +224,26 @@ Settled here rather than left open:
    without the rewire. A seam that both callers do not actually use is a third
    copy, not a seam.
 
-5. **Category checks stay per-category rather than behind one uniform
+5. **Validation is separated from coordinate resolution, because one needs a
+   bot record and the other must not.** The checks split cleanly in two:
+   *validation* (is this path safe, is this file writable, is this file type
+   allowed, does this skill belong to this bot) depends only on declared values,
+   and *coordinate resolution* (`entity_type`, `entity_id`, `engine_type`, and
+   the ownership guard that comes with reading a record) depends on where those
+   values come from. Only the second has two sources — a bot record for an
+   existing bot, a `BotCreateSpec` for one being created — so only the second
+   gets two constructors, and they return the same type.
+
+   This is shaped in now rather than retrofitted for W13, for the reason the
+   whole feature exists: a seam W13 cannot call is a seam W13 will duplicate.
+   Retrofitting it later means changing every call site after they exist instead
+   of before, and the cost today is one extra constructor per category.
+
+   It is worth being precise about what this does *not* claim: creating a bot
+   with a manifest is W13's work, not this feature's. What is in scope here is
+   only that the seam's shape does not make W13 impossible to write against.
+
+6. **Category checks stay per-category rather than behind one uniform
    protocol.** A resources path check, a skills package check and an identity
    file-type check have nothing in common but their category; forcing them
    through one signature would invent an abstraction to fit three unlike things
@@ -193,6 +255,8 @@ Settled here rather than left open:
 
 - One `core` module per category holding the checks that category's public
   endpoints enforce, moved verbatim.
+- The validate / resolve split, and the second coordinate constructor that reads
+  create-request parameters instead of a bot record.
 - The table naming them, and the test that proves router and table share one
   function object.
 - Rewiring the five router groups to call the moved functions.
@@ -208,6 +272,12 @@ Settled here rather than left open:
 - **Any manifest code** — no schema, no storage, no apply, no `core/bot_config_manifest/`.
   Those are W1 and W4. This change is consumed by them and knows nothing about
   them.
+- **Creating a bot with a manifest.** That is W13 (#1696) and it is a large item
+  in its own right — a new async public endpoint, a polling status surface,
+  manifest storage before the bot record exists, and integration with the
+  two-phase Passport flow. What this feature owes W13 is a seam it can call at
+  preflight; building the endpoint is not this change's work, and `create_flow.py`
+  is not touched here.
 - **The collaborator authorization seam**, `AUTHORIZATION`, `ADMISSION`, and the
   app-grant dependencies. Untouched, per *Decisions* 2.
 - **The other router groups.** Only the five categories apply touches.
@@ -229,3 +299,6 @@ None outstanding. The actor question is closed by *Decisions* 1.
 - **W4** consumes this. Its materializers for `mcp` and `script` are the first
   callers; `identity` and `skills` follow in W5, `resources` in W6, and
   `engine_config` whenever X2/T3 lets it back in.
+- **W13** consumes the record-free half at preflight. Nothing here builds its
+  endpoint; this only guarantees the seam is callable from a place where no bot
+  record exists.

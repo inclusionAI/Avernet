@@ -24,8 +24,13 @@ one needs editing, stop and report it — that is a behaviour change, not a fixu
         a verdict and raises nothing.
   - [ ] `_reject_read_only` stays in the router as a two-line mapper over it, so
         the 403 body is bit-identical rather than argued to be equivalent.
-  - [ ] `resource_file_coords` takes `BotRepository` as an argument, not from
-        the DI container, and returns `BotConfigCoords`.
+  - [ ] `resource_coords_from_record` takes `BotRepository` as an argument, not
+        from the DI container, and returns `BotConfigCoords`.
+  - [ ] `resource_coords_from_spec` builds the same type from a create request's
+        `entity_id` / `entity_type` / `engine_type` and an allocated `bot_id`,
+        touching no repository. No caller until W13; pinned by unit test.
+  - [ ] The three path validators take values only — given a `BotConfigCoords`
+        they never reach a repository, so they run identically on both paths.
   - [ ] The router's `_safe_path`, `_require_path`, `_file_coords` names are
         bindings to the core functions — no second body anywhere.
   - [ ] `test_openapi_resources.py` and `test_resources_handlers.py` pass
@@ -39,11 +44,16 @@ one needs editing, stop and report it — that is a behaviour change, not a fixu
 - **Files:** `src/backend/.../core/services/engine_config.py`,
   `.../adapters/http/openapi_v1/bots/engine_config.py`
 - **Done when:**
-  - [ ] `engine_config_coords(bot_id, owner_id, *, bot_service)` performs the
+  - [ ] `engine_config_coords_from_record(bot_id, owner_id, *, bot_service)` performs the
         `get_bot(bot_id, owner_id)` guard and reads `entity_id`, `entity_type`,
         `active_engine` off the record, raising `BotNotFoundError` on both of
         today's paths — an unresolvable bot, and a bot with no `entity_id`.
-  - [ ] Both handlers call it; neither keeps a local `_engine_config_target`.
+  - [ ] `engine_config_coords_from_spec` reads the same three values off the
+        create request and performs **no** ownership guard — there is no record
+        to own in phase 1, and the caller's right to create is what
+        `check_create_bot_preflight` already decides (`create_flow.py:494`).
+  - [ ] Both handlers call the record constructor; neither keeps a local
+        `_engine_config_target`.
   - [ ] The `# ownership/tenant guard` comment moves with the code it annotates.
   - [ ] The engine-config endpoint tests pass **unedited**.
 - **Depends on:** —
@@ -57,9 +67,12 @@ one needs editing, stop and report it — that is a behaviour change, not a fixu
   - [ ] `physical_file_name(file_type)` produces the `<type>.md` form
         `IdentityService.validate_file_type` requires, and is the only place
         that suffix is applied.
-  - [ ] `identity_file_coords` returns `BotConfigCoords` with `engine_type=None`
-        — identity addresses no engine, and a defaulted engine here would be a
-        value it never had.
+  - [ ] `identity_coords_from_record` returns `BotConfigCoords` with
+        `engine_type=None` — identity addresses no engine, and a defaulted engine
+        here would be a value it never had.
+  - [ ] `identity_coords_from_spec` returns the same, from request parameters.
+  - [ ] `physical_file_name` reaches no repository, so the identity file-type
+        rule runs at preflight.
   - [ ] All three handlers call them; no handler re-spells `entity_type =
         "staff"`.
   - [ ] The identity endpoint tests pass **unedited**.
@@ -73,7 +86,10 @@ one needs editing, stop and report it — that is a behaviour change, not a fixu
 - **Done when:**
   - [ ] `require_addressed_bot(record, bot_id)` raises `LocalSkillNotFoundError`
         on mismatch, keeping the 404 mask and the enumeration-oracle reasoning
-        in its docstring.
+        in its docstring. Its `record` is a *skill* record, not a bot record, so
+        it is already record-free in the sense that matters — W13 declares skills
+        that do not exist yet, and has nothing to compare.
+  - [ ] `skill_coords_from_spec` exists alongside the record constructor.
   - [ ] `_require_skills_grant`, `_directory_relative_paths` and the
         `application/zip` header check **stay in the router**, each with a
         comment naming which side of Rule 7's line it is on and why.
@@ -87,7 +103,8 @@ one needs editing, stop and report it — that is a behaviour change, not a fixu
 - **Files:** `src/backend/.../core/mcp/config_flow.py`,
   `.../adapters/http/openapi_v1/mcp/router.py`
 - **Done when:**
-  - [ ] `mcp_config_coords` replaces the router's `_ENTITY_TYPE` constant.
+  - [ ] `mcp_coords_from_record` replaces the router's `_ENTITY_TYPE` constant,
+        and `mcp_coords_from_spec` builds the same type from request parameters.
   - [ ] The catalogue reads, the network-type visibility masking and
         `_REFUSES_APP_ONLY` are untouched — none is a config-category write.
   - [ ] The mcp endpoint tests pass **unedited**.
@@ -108,6 +125,9 @@ one needs editing, stop and report it — that is a behaviour change, not a fixu
         and no default.
   - [ ] `CONFIG_SURFACE` has exactly five rows — including `engine_config`,
         which W4 excludes from phase 1 but which must have its plug ready.
+  - [ ] Each row carries `from_record`, `from_spec` and `validators` as three
+        separate fields, so that "which of these needs a bot record" is answerable
+        by reading the table rather than by reading five implementations.
   - [ ] The module imports nothing from `fastapi` or `adapters`, and defines no
         behaviour of its own — it names functions that live elsewhere.
   - [ ] `README.md` carries a Context Boundary block per
@@ -127,6 +147,15 @@ one needs editing, stop and report it — that is a behaviour change, not a fixu
   - [ ] Each moved function has a direct unit test that calls it with **no
         request, no app, and no DI container** — the capability the whole
         feature exists to deliver, proven rather than assumed.
+  - [ ] **The record-free test:** build coordinates through every row's
+        `from_spec` and run every row's validators against them, with no bot
+        record anywhere in the fixture. This rehearses W13's preflight before
+        W13 exists. If it needs a record to pass, the split did not happen and
+        W13 will be forced to write a second validation copy.
+  - [ ] A validator that reaches a repository fails this test. That is the
+        point: `from_spec` and `from_record` return the same frozen type
+        precisely so a validator cannot tell which path it is on, and this is
+        what catches one that smuggled the dependency back in.
 - **Depends on:** Task 6
 
 ## [ ] Task 8: Guard against a new handler-only check

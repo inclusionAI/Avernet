@@ -94,19 +94,30 @@ the seam is invisible in the document).
 
 @dataclass(frozen=True)
 class CategoryChecks:
-    """Every rule the public surface enforces for one config category."""
+    """Every rule the public surface enforces for one config category.
+
+    Two fields, not one list, because the halves have different requirements:
+    ``validators`` must run with no bot record (W13's preflight), while
+    ``from_record`` by definition reads one.
+    """
     category: str
-    resolve_coords: Callable[..., BotConfigCoords]
-    validators: tuple[Callable[..., Any], ...]
+    from_record: Callable[..., BotConfigCoords]   # existing bot
+    from_spec: Callable[..., BotConfigCoords]     # bot being created
+    validators: tuple[Callable[..., Any], ...]    # record-free, always
 
 CONFIG_SURFACE: dict[str, CategoryChecks] = {
-    "identity": CategoryChecks("identity", identity_file_coords, (physical_file_name,)),
-    "resources": CategoryChecks("resources", resource_file_coords,
+    "identity": CategoryChecks("identity", identity_coords_from_record,
+                               identity_coords_from_spec, (physical_file_name,)),
+    "resources": CategoryChecks("resources", resource_coords_from_record,
+                                resource_coords_from_spec,
                                 (safe_workspace_path, require_workspace_path,
                                  is_write_forbidden)),
-    "skills": CategoryChecks("skills", skill_coords, (require_addressed_bot,)),
-    "mcp": CategoryChecks("mcp", mcp_config_coords, ()),
-    "engine_config": CategoryChecks("engine_config", engine_config_coords, ()),
+    "skills": CategoryChecks("skills", skill_coords_from_record,
+                             skill_coords_from_spec, (require_addressed_bot,)),
+    "mcp": CategoryChecks("mcp", mcp_coords_from_record,
+                          mcp_coords_from_spec, ()),
+    "engine_config": CategoryChecks("engine_config", engine_config_coords_from_record,
+                                    engine_config_coords_from_spec, ()),
 }
 ```
 
@@ -115,9 +126,36 @@ entity_type, entity_id, engine_type)`. `engine_type` is `None` for the two
 categories that do not address an engine — it is **not** defaulted, because a
 default would quietly hand `identity` an engine it never had.
 
-`resolve_coords` differs per row on purpose (spec *Decisions* 3). The table is
+`from_record` differs per row on purpose (spec *Decisions* 3). The table is
 where that finally shows: five rows, four different resolutions, visible in one
 screen for the first time.
+
+## The Two Coordinate Sources
+
+`from_record` is today's behaviour, moved: it reads the bot record and carries
+whatever ownership guard that group performs (`engine_config` calls `get_bot`;
+`resources` performs none). Existing endpoints call this one, so their behaviour
+is unchanged — which is what keeps the change inert.
+
+`from_spec` reads the same three values off the create request instead. They are
+all there in phase 1: `BotCreateSpec` carries `entity_id`, `entity_type` and
+`engine_type`, and `create_bot_with_authorization` already receives an allocated
+`bot_id` (`create_flow.py:446`). It performs **no** ownership guard, and cannot:
+there is no record to own yet, and the caller's right to create a bot at all is
+what `check_create_bot_preflight` (`create_flow.py:494`) already decides, beside
+which W13 will run the manifest validation.
+
+The two return the same frozen type, so **validators cannot tell them apart** —
+which is the property that makes one validation path serve both. A validator
+that needed to know would be a validator that had smuggled a record dependency
+back in, and the record-free test in Task 7 is what catches that.
+
+`from_spec` has no caller until W13. That is deliberate and is the one thing
+this feature ships unused: the alternative is W13 discovering at day 3 that the
+seam's shape excludes it, with W4, W5 and W6 already written against the other
+shape. The precedent for accepting an uncalled path rather than inventing a
+caller for it is #1323 *Decisions* 4; here it is pinned by a direct unit test
+instead of a fixture router.
 
 ## Why the Table Is Load-Bearing and Not Decoration
 
@@ -177,6 +215,10 @@ find it a convenient place to put logic.
 - **New:** direct unit tests on the moved functions called with no request at
   all — this is the thing the feature exists to make possible, so it is proven
   rather than assumed.
+- **New:** a record-free test that builds coordinates via `from_spec` and runs
+  every category's validators against them, with no bot record in the fixture at
+  all. This is W13's preflight rehearsed before W13 exists; if it needs a record
+  to pass, the split did not happen.
 - Three test files carry comments naming `_safe_path`, `_file_coords`,
   `_require_addressed_bot` and `_require_skills_grant`. None *imports* them, so
   none breaks. The names stay bound in the router modules, so the comments stay
