@@ -70,6 +70,7 @@
 | `engine-requirements.zh-CN.md` | 各引擎的工作量与需确认清单、能力矩阵、开放问题 | 平台 & 引擎团队 |
 | `work-items.md` | **实现工作项拆分**（英文）：W1–W13 每项的范围、依赖、验收标准；已定决策、设计问题与外部确认项；人员分工 | 平台团队 |
 | `work-items.zh-CN.md` | 上一份的中文版，内容对齐 | 平台团队 |
+| `engine-convergence-contract.zh-CN.md` | **跨引擎收敛语义契约**：应用一份 manifest 对已有状态做什么，写成对 applier 的要求（R1–R9）+ 逐类目区域表 + 自查清单 | teclaw 团队 & 引擎团队 |
 | `teclaw-cli-contract.zh-CN.md` | **给 teclaw owner 的实现说明**：下发契约不变，仅新增 `cli_tools` 段。含字段定义、用例与验收清单 | teclaw 团队 |
 
 ## 术语表

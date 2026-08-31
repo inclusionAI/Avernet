@@ -1191,6 +1191,13 @@ Record the outcome, including anything they decline.
   sides do, and its remaining calendar cost is their review of the CLI addition
   rather than a semantics negotiation.
 
+**Deliverable.** `engine-convergence-contract.zh-CN.md` — this section's rules
+written as requirements on the applier (R1–R9), the per-category region table,
+the split of responsibilities, and a self-check list. Together with
+`teclaw-cli-contract.zh-CN.md` it is the complete package handed to teclaw: the
+former is the convergence semantics for every category, the latter the one
+addition they have to implement, `cli_tools`.
+
 **Depends on.** §3.2 being settled (it is) · **Blocked by.** —
 
 **Done when.**

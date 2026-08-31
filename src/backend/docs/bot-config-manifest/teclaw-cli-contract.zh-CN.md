@@ -385,6 +385,7 @@ convergent re-delivery 语义一致，此处只是确认它对 `cli_tools` 同�
 
 | 文档 | 内容 |
 | --- | --- |
+| `engine-convergence-contract.zh-CN.md` | **跨引擎收敛语义契约**——本文档是它在 `cli_tools` 上的特化；「全量覆盖」「缺席 ≠ 空数组」「保留名」等通用规则在那里 |
 | `design.zh-CN.md` | Bot Config Manifest 总体设计 |
 | `manifest-schema.zh-CN.md` §3.7 | 用户侧 `cli_tools` 的 schema（本文档是它的引擎侧对应） |
 | `user-manual.zh-CN.md` | 用户手册：清单怎么写、怎么发、怎么排错 |
