@@ -3,17 +3,20 @@ that bot should have — MCP servers, workspace resources, skills, engine config
 identity files, command-line tools — plus the imperative `script` that #926
 already owned.
 
-Three waves of `docs/bot-config-manifest/work-items.zh-CN.md` live in this
+Four waves of `docs/bot-config-manifest/work-items.zh-CN.md` live in this
 module now. W1 **stores, validates and describes** a manifest. W2 (the `fetch/`
 package, #1470) is the guarded transport underneath the fetching wave: the
 fetcher and the unpack pipeline every remote-source byte rides through. W3 (the
 `credentials/` package, #1471) is where a secret may finally live: named
-tenant-level credentials, presented by the platform within stored prefixes.
-No wave applies anything — a document accepted by W1 sits inert until the
-apply engine lands, and bytes fetched by W2 are write-or-hash material, never
-run. A credential never enters a document (W1 refuses it at the boundary); W2
-declares the injector protocol, and W3 binds it.
+tenant-level credentials, presented by the platform within stored prefixes. W4
+(the `apply/` package, #1472) **applies** a stored document to its bot — it
+fetches nothing, so the two materialisers that ship are the two constructs
+needing no fetched bytes, `mcp` and `script`; `skills` and `identity` arrive
+with W5, `resources` with W6.
 
+A credential never enters a document (W1 refuses it at the boundary); W2
+declares the injector protocol, and W3 binds it. Apply holds none either: it
+calls the services that own each area and passes no secret of its own.
 ## The one rule everything here is shaped by
 
 **This surface never accepts something it cannot apply.**
@@ -168,7 +171,7 @@ What it deliberately does not own:
 tenant — legacy `default` bots carry documented residual collision on that
 identifier. Without `avernet_tenant` in this table's key, two such bots share
 one manifest row, and either tenant could overwrite the other's manifest, which
-once apply lands decides what is installed in the other tenant's container. The
+decides what is installed in the other tenant's container. The
 column, the guard registration and the tenant's place in the uniqueness key are
 one mechanism; none of the three works alone.
 
@@ -180,6 +183,51 @@ utf8mb4 bytes and past the cap on its own, while at 256 the four columns come to
 2384 bytes. So the width here is a constraint, not a copied default — see the
 column comment in `repository/models.py` for why 256 and not the 64 that would
 also fit.
+
+## Applying (W4, #1472)
+
+`apply/` holds the engine: an orchestrator, an ordering table, a materialiser
+registry, and the two materialisers this wave ships.
+
+**The ordering table is complete; the registry is sparse.** `APPLY_ORDER` names
+every construct the vocabulary defines, including the ones nothing can act on
+yet; `build_materialisers()` maps only those that some shipped code writes. A
+declared construct with no materialiser is an **expected state**, not a gap —
+its entries fail with a readable reason, its category is aborted so nothing is
+destroyed, and W5/W6 close the window by *registering* rather than by deleting a
+branch.
+
+**The orchestrator must never grow category knowledge.** Every category-level
+rule lives there once — serialization, ordering, phase selection, the abort rule,
+the `skipped` cascade, the outcome tally — and a materialiser knows none of it.
+That is the whole of what W5, W6 and W13 get from this item: adding a category is
+writing a materialiser, not rebuilding the engine. `tests/community/core/bot_config_manifest/apply/test_orchestrator_stays_generic.py`
+asserts the module names no category, because the moment it does the registry
+stops meaning anything and every later work item adds "just one" special case.
+
+**Two phases, and the split is not organisational.** `script` needs no container
+and on the creation path must be written *before*
+`BaasService._build_create_bot_payload` composes the start command; everything
+else resolves a device and raises if unbound. On a running bot the two run back
+to back and the split is invisible; on the creation path they are separated by
+the whole of container provisioning, which is why W13 can call them one at a
+time. **This reverses design §3.4's order** — see work-items §2.12.
+
+**Apply is started, not awaited.** `POST …/apply` answers `202` with an
+`apply_id` and the work continues on a background thread wrapped with
+`bind_current_avernet_tenant`. The lock is taken and the stored document
+re-validated *before* an id is minted, so a caller never holds a handle to an
+apply that did not start. A report stranded at `RUNNING` by a killed process
+reads as `FAILED` once its lock is stale — derived at read time, so there is no
+sweeper to keep alive.
+
+**Apply records delivery, not execution** (§2.7). The `script` materialiser
+writes one `ac_bot_startup_script` row and does nothing else: no restart, no
+republish, no payload rebuild. The row executes at the bot's next **device
+provisioning** — create, restart or republish — because
+`_build_create_bot_payload` re-reads it on every payload it composes; it is never
+re-run inside a container already up. Adding a restart here so a script "takes
+effect now" is the tempting bug, and the one this boundary exists to prevent.
 
 ## Where the HTTP seam is
 
@@ -193,8 +241,9 @@ surface of its own — it is a core transport the apply orchestration (W4) calls
 **There is no feature switch over the group.** An earlier revision hid it until
 apply landed; the surface ships enabled instead, and what keeps it honest is the
 capability resolver above — which had to keep working after any switch was
-removed anyway. Until apply lands, an accepted manifest is stored and read back
-and does nothing else, which is what `GET …/capabilities` and this README say.
+removed anyway. What an accepted manifest actually changes is decided by
+`GET …/capabilities` and by which materialisers are registered — see *Applying*
+below.
 
 ## Known gaps, recorded rather than discovered
 
@@ -243,6 +292,21 @@ and does nothing else, which is what `GET …/capabilities` and this README say.
 ```yaml
 purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, and which constructs a bot can be told to have at all; plus (W2) the guarded fetch + unpack transport that fetches a manifest's remote sources on the platform's behalf.
 provides:
+  - BotConfigManifestApplyService
+  - BotConfigManifestApplyServiceProtocol
+  - BotConfigManifestApplyRecord
+  - BotConfigManifestApplyLockRecord
+  - ApplyOrchestrator
+  - ApplyReport
+  - ApplyStatus
+  - ApplyPhase
+  - ApplyContext
+  - EntryOutcome
+  - EntryResult
+  - CategoryResult
+  - Materialiser
+  - APPLY_ORDER
+  - build_materialisers
   - BotConfigManifestService
   - BotConfigManifestServiceProtocol
   - BotConfigManifestRecord
@@ -296,6 +360,11 @@ provides:
   - validate_prefixes
 consumes:
   - "BotConfigManifestRepositoryProtocol (core.repository) — persistence for the one table"
+  - "BotConfigManifestApplyRepositoryProtocol / BotConfigManifestApplyLockRepositoryProtocol (core.repository) — the apply record and its serialization lock"
+  - "CONFIG_SURFACE (core.bot_config_surface) — W10's seam; apply reaches each category's rules through the same function objects its router calls"
+  - "BotStartupScriptServiceProtocol (api) — the `script` materialiser's only write"
+  - "DirectActivationServiceProtocol (core.skill_center) — the `mcp` materialiser's per-bot activation writes"
+  - "MCPAuthServiceProtocol (api) — the same permission check DirectActivationService consults, asked up front so a category is all-or-nothing"
   - "TeclawEngineTestProtocol (core.bot_startup_script, bound to core.bot_management TeclawProvisionService) — the single definition of 'runs in a teclaw container'"
   - "VALID_IDENTITY_FILES / CLAUDE_CODE_IDENTITY_FILES (core.services.identity) — the identity vocabulary, imported lazily because that module pulls in the device dispatcher"
   - "MAX_SCRIPT_BYTES (core.bot_startup_script) — script.body IS the #926 startup script, so it takes that cap rather than a second one"
@@ -320,11 +389,10 @@ internal_dependencies:
 
 ### Change impact
 
-Once apply lands, a change here changes **what is installed into a customer's
-container**. Today it changes what a caller is allowed to declare — which is the
-same authority one wave earlier — and, on the W2 side, which bytes the platform
-is willing to fetch at all.
-
+A change here changes **what is installed into a customer's container**, and
+since W4 that is immediate rather than prospective. It also changes what a
+caller is allowed to declare, and — on the W2/W3 side — which bytes the platform
+is willing to fetch and under whose credential.
 Two things are close to authorization boundaries already:
 
 - **No secret may enter a document.** A source URL carrying userinfo

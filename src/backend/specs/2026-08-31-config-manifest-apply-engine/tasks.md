@@ -381,24 +381,24 @@ than something to work around:
         **unedited**.
 - **Depends on:** Tasks 10, 11
 
-## [ ] Task 15: Documentation
+## [x] Task 15: Documentation
 - **Files:** `.../core/bot_config_manifest/README.md`,
   `docs/bot-config-manifest/user-manual.zh-CN.md`,
   `docs/bot-config-manifest/design.zh-CN.md`
 - **Done when:**
-  - [ ] The module README's Context Boundary block lists everything the apply
+  - [x] The module README's Context Boundary block lists everything the apply
         subpackage provides and consumes. Its `consumes` names the five bot
         configuration services and W10's seam.
-  - [ ] A README section states the orchestrator must not grow category logic,
+  - [x] A README section states the orchestrator must not grow category logic,
         and names the structural test that enforces it.
-  - [ ] The README's "apply does not exist yet" statements are corrected — W1
+  - [x] The README's "apply does not exist yet" statements are corrected — W1
         wrote several, and leaving them is how a README becomes untrustworthy.
-  - [ ] Design §3.4's ordering is annotated as **reversed** in the first phase,
+  - [x] Design §3.4's ordering is annotated as **reversed** in the first phase,
         pointing at work-items §2.12, so a reader of the design is not misled.
-  - [ ] The user manual documents all three operations, the start-and-poll
+  - [x] The user manual documents all three operations, the start-and-poll
         shape, `dry_run`, the outcome vocabulary, and — plainly — that applying
         a declared category removes what it does not declare.
-  - [ ] It states when a `script` takes effect in the terms the mechanism has:
+  - [x] It states when a `script` takes effect in the terms the mechanism has:
         delivered on apply, executed at the next device provisioning (create,
         restart, republish), never re-run inside a container already up.
 - **Depends on:** Task 14

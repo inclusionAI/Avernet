@@ -162,13 +162,25 @@ GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply
 ### 2.4 想手工触发一次 / 先看看会发生什么
 
 ```text
-POST /openapi/v1/bots/{bot_id}/config-manifest/apply
-POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true   ← 只返回计划，不动手
+POST /openapi/v1/bots/{bot_id}/config-manifest/apply              ← 202 + apply_id，后台执行
+POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true ← 同步返回计划，不动手
+GET  /openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id} ← 轮询这一次
+GET  /openapi/v1/bots/{bot_id}/config-manifest/last-apply         ← 最近一次
 ```
 
-`dry_run` 什么都不写，连报告都不写。**上线前先 dry_run** 是推荐动作，尤其是第一次
-声明 `skills` 或 `resources` 的时候（原因见 §8）。两者都需要 bot 已存在——**路径 A
-的人在创建请求里就完成了同样的校验**（第 2 步）。
+**apply 不阻塞。**它立刻返回 `202` 和一个 `apply_id`，真正的下发在后台进行——因为
+apply 要写设备，将来（W5）还要走网络取源，让调用方举着一条 HTTP 连接等它是不行的。
+拿 `apply_id` 去轮询；`result` 在做完之前是 `RUNNING`，之后才是
+`SUCCEEDED` / `PARTIAL` / `FAILED`。丢了 id 也不要紧，`last-apply` 给你最近的一次。
+
+**能立刻回答的都立刻回答，而且在发 id 之前**：这个 bot 已经有 apply 在跑 → `409`；
+存下来的文档对这个 bot 已经不合法（比如引擎换了）→ `422`。**你永远不会拿到一个
+「其实没跑起来」的 id。**
+
+`dry_run` 是**同步**的，计划直接在响应体里——一个要靠轮询才知道结果的预览不叫预览。
+它什么都不写，连报告行都不写，所以也不发 `apply_id`、不出现在历史里。**上线前先
+dry_run** 是推荐动作，尤其是第一次声明 `skills` 或 `resources` 的时候（原因见 §8）。
+这几个都需要 bot 已存在——**路径 A 的人在创建请求里就完成了同样的校验**（第 2 步）。
 
 ---
 
@@ -411,6 +423,10 @@ POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true
 替代品**：创建请求会在申请授权之前对清单跑同一套校验（§4.5），写错不会浪费一次
 授权；只是「取源会取到什么」要等创建流程里的那次 apply 才知道，看它返回的报告。
 
+**dry_run 是同步的**，和真正的 apply 不一样：计划就在响应体里，不需要轮询。它也
+不写任何东西——不改配置，也不写 apply 记录，所以不发 `apply_id`、不出现在
+`last-apply` 里。
+
 ### 4.5 路径 A：用清单创建 bot（还没有 bot 时）
 
 只靠 `PUT` 补不上一个洞：bot 还不存在时，你没法往 `/bots/{bot_id}/config-manifest`
@@ -495,10 +511,18 @@ APPLYING                 清单 apply 进行中（取源 → 物化 → 下发�
 | `sources[].resolved_sha` | **「这批 bot 线上跑的到底是哪一版内容」**——声明的 `ref` 与解析出的 commit 都记着 |
 | `entries[].action` | 逐条：`created` / `updated` / `unchanged` / `skipped` / `failed` |
 | `entries[].error` | 这一条为什么没成 |
-| `result` | 从逐条结果推导出来的摘要，**给人看的**——没有任何东西读它然后据此行动 |
+| `result` | `RUNNING` 表示还在做；三个终态是从逐条结果推导出来的摘要，**给人看的**——没有任何东西读它然后据此行动 |
+| `categories[].removed` | **覆盖删掉了什么。**它不在 `entries` 里，因为被删的东西根本没有对应的声明条目 |
+
+**`result` 的四个值**：`RUNNING` 是「还没做完」——apply 是启动式的，所以轮询时先
+看到它；然后才是 `SUCCEEDED` / `PARTIAL` / `FAILED`。
 
 **`skipped` 的含义**：「因为所在类目被中止（§3.4）而没写」。它不再来自任何你能
-声明的策略。
+声明的策略。同一个类目里，**把类目搞挂的那一条记 `failed`，其余无辜的记
+`skipped`**——这样你一眼能看出该去改哪一行。
+
+**`note` 字段**：给成功条目用的、你本来得自己推断的事实。今天只有一处：`script`
+用它说明什么时候真正执行（见 §5.5）。
 
 **两条要记住的边界**：
 
@@ -634,15 +658,21 @@ resources:
 
 ```yaml
 mcp:
-  - server_code: mcp.ant.homistudio.meetmcp
-    config: { … }                # 可选，per-bot 配置，形状同现有 MCP config API
+  - server_code: mcp.ant.homistudio.meetmcp   # 就这一个字段
 ```
 
 - **只接受平台 MCP 注册表引用**，不接受任意 URL。
-- **凭证永不进清单**：需要 `api_key` 的 server，配置照旧走现有统一配置存储。必需
-  配置缺失时该条目记 `failed` 并给出明确错误（「server X 需要先配置 api_key」）。
-- apply = 校验注册表存在 + 租户有权限（复用现有权限检查）→ 确保它在这个 bot 的
-  MCP 集合里。
+- **一个条目只有 `server_code`。**早先的草案有一个可选的 `config`，已经删掉并在
+  写入时按名拒绝：它被定义成「per-bot 配置，形状同现有 MCP config API」，而那个
+  API 是**账号级**的（键 `(user_id, server_code)`，写入还会扇出到你名下所有
+  bot），装的又正好是 `api_key` / headers 这类凭证。详见
+  `manifest-schema.zh-CN.md` §3.1。
+- **凭证永不进清单**：需要 `api_key` 的 server，配置照旧走现有统一配置存储——
+  `GET`/`PUT /openapi/v1/bots/mcp/servers/{server_code}/config`，它本来就是账号级的。
+  必需配置缺失时该条目记 `failed` 并给出明确错误。
+- apply = 校验注册表存在 + 租户有权限（复用现有权限检查）→ **把这个 bot 的已启用
+  server 集合收敛到声明**：声明了没启用的启用，启用了不再声明的**停用**（包括你
+  在界面上手工开的），已经一致的记 `unchanged`。
 
 ### 5.5 `script` — 命令式长尾（仅 ARCA 系）
 
@@ -675,6 +705,13 @@ script:
    时脚本跑在它们之前**。别在脚本里假定 `data/kb/` 或某个 skill 已经存在。
    这条限制是临时的，等所有类目能在启动前下发时会被删除（届时顺序反转，设计文档
    §3.4 承诺的「脚本可以假定实体已就位」才成立）。
+
+**什么时候真的会执行**（这是最容易误解的一点）：apply **只负责把脚本写进
+`ac_bot_startup_script` 那一行，绝不触发它执行**——不重启、不重新发布、不重建
+payload。那一行会在这个 bot **下一次开设备**时被执行：创建、重启、重新发布。
+`_build_create_bot_payload` 每次拼装 payload 都会重新读这一行，所以**后来改的
+脚本不会丢**，只是要等下一次开设备。它**不会**在一个已经跑着的容器里被重新执行。
+报告里那一条的 `note` 就是这么说的。
 
 **老端点还能用**：`GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` 继续
 工作。对**有清单**的 bot，它是清单 `script` 字段的**别名视图**（write-through）

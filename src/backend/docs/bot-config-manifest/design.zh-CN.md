@@ -147,9 +147,26 @@ SOUL.md、新实例从 manifest 长出来，同一个 bot 两个实例人设不�
 
 ### 3.4 类别间顺序与并发
 
-- 单次 apply 内固定顺序：`engine_config → identity → resources → skills →
-  mcp`。script（若有）在全部交付完成后、启动链末端执行——**script 可以依赖
-  manifest 声明的实体已经就位**。
+> **⚠️ 第一期已推翻本节的顺序（W4 已实现，见 work-items §2.12）。**
+> 本节把 `script` 放在最后，理由是「script 可以依赖 manifest 声明的实体已经
+> 就位」。**实现里 `script` 排在最前**，而且这不是偷懒：`script` 物化成
+> `ac_bot_startup_script` 的一行，而 `BaasService._build_create_bot_payload`
+> 在拼装启动命令时读这一行——所以在创建路径上，这一行必须在 payload 构造
+> **之前**就存在，否则首启根本不带脚本。其余类目都要解析 `DeviceFileSystem`
+> 或设备上下文（未绑定即抛），只能在容器起来之后下发。
+>
+> 于是编排器是**两阶段**的：A 阶段只有 `script`（不需要容器），B 阶段是
+> `identity → resources → skills → mcp`（需要容器）。在已运行的 bot 上两段
+> 紧挨着跑，切分不可见；在创建路径上它们被整个容器开通过程隔开，这正是 W13
+> 需要这个形状的原因。
+>
+> **代价直说：**首启时 script 在其他类目**之前**运行，所以第一期规定
+> **manifest 的 `script` 不得依赖该 manifest 声明的任何内容**——与本节原文
+> 相反。#1508 在第二期通过启动前下发消除这个限制，届时本节的顺序可以恢复。
+
+- 单次 apply 内固定顺序（**原设计，已被上面的两阶段取代**）：
+  `engine_config → identity → resources → skills → mcp`。script（若有）在全部
+  交付完成后、启动链末端执行。
 - 同一 bot 的 apply 串行化（bot 级锁）；apply 收敛性保证并发触发（如显式
   apply 撞上 republish）最终状态一致。
 - ARCA 系多实例共享 NAS 目录的写入，沿用 skills-pool 的 temp + 原子 rename
