@@ -898,17 +898,19 @@ async def _dispatch(
             method=request.method,
             path=request.url.path,
         )
-        # 解析(translate+构图)+落库任一步出错(如内嵌 JSON 非法)→ 打 error 日志后 ack 返回,
-        # 不落库(ingest 在 enrich 之后;enrich 抛错即未达 ingest),避免脏 upsert 覆盖已有 task_callback。
+        # 解析(translate+构图)+落库任一步出错(如内嵌 JSON 非法)→ 打 error 日志,兜底落错误记录
+        # (exec_error=错误信息、extend_props=原始 body;经 ingest_parse_error→upsert_error 仅改这两列,
+        # 其它已有字段不动),再 ack 返回——不跳过落库,也不全量覆盖污染已有 task_callback。
         try:
             _tc = translate_claw_mind(_raw_obj, disposition)
             enricher.enrich_claw_mind(_tc.data, _raw_obj)
             await svc.callback.ingest(_tc.data)
-        except Exception as exc:  # noqa: BLE001 解析失败不阻断回投应答,但绝不污染已有记录
+        except Exception as exc:  # noqa: BLE001 解析失败不阻断回投应答;兜底落错误记录而非全量覆盖
             logger.error(
-                "[task_callback] claw_mind 回调解析失败,跳过落库避免污染 session_id=%s: %s",
+                "[task_callback] claw_mind 回调解析失败,兜底落错误记录 session_id=%s: %s",
                 _sid, exc, exc_info=True,
             )
+            await svc.callback.ingest_parse_error(_raw_obj, str(exc))
         return envelope({"ok": True}, request)
     if is_bcn_event_payload(_raw_obj):
         logger.info("[task_callback] bcn event received session_id=%s", _sid)
