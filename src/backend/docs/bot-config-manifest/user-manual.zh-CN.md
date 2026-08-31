@@ -377,11 +377,10 @@ script:                    # 命令式部分，能力门控（teclaw 拒绝）
 对它一律非法（写了报错）。
 
 **变量替换**：`source` URL 与源内路径里可以用一小组平台注入变量，`script` 里它们
-是环境变量。**只接受这五个**，未知占位符在 `PUT` 时报错：
+是环境变量。**只接受这四个**，未知占位符在 `PUT` 时报错：
 
 | 变量 | 含义 |
 | --- | --- |
-| `${BOT_ID}` | bot 标识 |
 | `${BOT_ENGINE_TYPE}` | 当前引擎类型 |
 | `${BOT_ENV}` | 环境（dev/prod/…） |
 | `${BOT_TENANT}` | 租户标识 |
@@ -389,6 +388,11 @@ script:                    # 命令式部分，能力门控（teclaw 拒绝）
 
 > 设计文档早期写的是 `OCB_*`。**用 `BOT_*`**——`OCB` 是内部代号，不是面向用户的
 > 命名空间。写 `${OCB_BOT_ID}` 会被 `PUT` 拒绝。
+
+> **没有 `${BOT_ID}`。**这几个变量都是**机群**属性（环境、租户、引擎、架构），
+> 所以一份文档才能给多个 bot 复用。bot 标识不是：它在创建时生成（日期 + 8 位
+> 随机字符），你指定不了，在 git 里准备内容时也无从得知。要按 bot 区分，就在
+> 那个 bot 自己的 manifest 里把路径写成字面量。`${BOT_ID}` 会被 `PUT` 拒绝。
 
 替换发生在**取源之前、也在前缀授权之前**，所以替换出来的 URL 逃不出凭证的
 `allowed_prefixes`。
@@ -534,9 +538,9 @@ SHA 只拉取一次、全程复用。不会出现「identity 升了、skills 没
 
 ```yaml
 identity:
-  - type: SOUL.md                       # 每个 bot 一份，用变量拼源内路径
+  - type: SOUL.md                       # 每个 bot 一份，源内路径写字面量
     from: content
-    subpath: bots/${BOT_ID}/soul.md
+    subpath: bots/support-agent/soul.md
   - type: RULES.md                      # 全体共享一份
     from: content
     subpath: kb/service-rules.md
@@ -829,7 +833,7 @@ teclaw 收下整包 artifact 并替换，ARCA 现在对被声明的类目做同�
 | git 源上写了 `digest` | commit SHA 就是 digest | 删掉 `digest` |
 | 用了 `from` 的条目上写了 `auth` | 凭证声明在**源**上 | 把 `auth` 移到 `sources.<name>` |
 | `content` 条目上写了 `auth`/`digest`/`on_fetch_failure` | 内联条目没有 fetch 环节 | 删掉这些字段 |
-| 未知的 `${…}` 占位符 | 多半是写了 `${OCB_BOT_ID}` | 改成 `${BOT_ID}`（§4.3） |
+| 未知的 `${…}` 占位符 | 多半是写了 `${OCB_*}`，或写了并不存在的 `${BOT_ID}` | 只有 §4.3 那四个可用；按 bot 区分请写字面量 |
 | `on_fetch_failure: skip` | 该取值已删除 | 改 `keep_last` 或 `fail` |
 | 未知的 `mode` 取值 | 拼错 | 只有 `strict` / `non_strict` |
 | `identity.type` 非法 | 不在白名单，或 bot 是 claude_code 引擎（只允许 `CLAUDE.md`） | 见 §5.1 |
@@ -992,7 +996,7 @@ manifest:
   identity:
     - type: SOUL.md
       from: content
-      subpath: bots/${BOT_ID}/soul.md
+      subpath: bots/support-agent/soul.md
     - type: RULES.md
       from: content
       subpath: kb/service-rules.md
@@ -1160,8 +1164,9 @@ PUT /openapi/v1/source-credentials/oss-artifacts
 
 ### 可用变量
 
-`${BOT_ID}` · `${BOT_ENGINE_TYPE}` · `${BOT_ENV}` · `${BOT_TENANT}` ·
-`${BOT_ARCH}`（当前恒为 `amd64`）。**不是 `OCB_*`。**
+`${BOT_ENGINE_TYPE}` · `${BOT_ENV}` · `${BOT_TENANT}` ·
+`${BOT_ARCH}`（当前恒为 `amd64`）。**不是 `OCB_*`，也没有 `${BOT_ID}`**——
+按 bot 区分的路径请直接写字面量（§4.3）。
 
 ### 一眼判断「会不会被拒」
 

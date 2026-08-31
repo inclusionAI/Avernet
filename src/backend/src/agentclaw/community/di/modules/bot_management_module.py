@@ -55,6 +55,7 @@ from agentclaw.community.core.bot_management.render_screen.services.render_scree
     RenderScreenService,
 )
 from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManifestRepositoryProtocol,
     BotRestartLockRepositoryProtocol,
     BotStartupScriptRepositoryProtocol,
 )
@@ -67,6 +68,12 @@ from agentclaw.community.core.bot_startup_script.protocols import (
 )
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
+)
+from agentclaw.community.api.bot_config_manifest_service import (
+    BotConfigManifestServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
+    BotConfigManifestService,
 )
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
@@ -168,6 +175,9 @@ from agentclaw.community.core.repository.implementations.bot.restart_lock import
 from agentclaw.community.core.repository.implementations.bot.startup_script import (
     BotStartupScriptRepository,
 )
+from agentclaw.community.core.repository.implementations.bot.config_manifest import (
+    BotConfigManifestRepository,
+)
 from agentclaw.community.core.repository.implementations.bot.render_screen import (
     RenderScreenRepository as UnifiedRenderScreenRepository,
 )
@@ -260,6 +270,26 @@ class BotManagementModule(Module):
         binder.bind(
             StartupScriptPurgeProtocol,
             to=BotStartupScriptService,
+            scope=singleton,
+        )
+        # BotConfigManifestRepository: single unified ORM impl, same shape as
+        # the startup script above — UNIQUE(avernet_tenant, env, entity_id,
+        # bot_id) on ac_bot_config_manifest, one manifest per bot at most.
+        binder.bind(
+            BotConfigManifestRepositoryProtocol,
+            to=BotConfigManifestRepository,
+            scope=singleton,
+        )
+        # Bound here rather than in a module of its own: the manifest service
+        # shares this module's ``teclaw_engine_test_factory``, which is the one
+        # definition of "runs in a teclaw container" and the only reason either
+        # service needs a lazy provider at all.
+        binder.bind(
+            BotConfigManifestService, to=BotConfigManifestService, scope=singleton
+        )
+        binder.bind(
+            BotConfigManifestServiceProtocol,
+            to=BotConfigManifestService,
             scope=singleton,
         )
         # TemplateService: constructed with injected TemplateRepository.

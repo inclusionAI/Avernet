@@ -186,6 +186,23 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "approval": _EXEMPT_REASON,
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,
+    "bot_config_manifest": (
+        "Blocked on the same missing minter as _GATEWAY_PRINCIPAL_EXEMPT_REASON "
+        "above, and on a second thing of its own. All four routes are "
+        "/openapi/v1 and need a gateway-signed principal, which singlebox has "
+        "no way to produce; and the whole group is behind a feature switch that "
+        "stays off until the apply engine lands (W8), so a flow in a default "
+        "singlebox would assert 404s. Even with both, a manifest applies "
+        "nothing in this wave — the observable effect an end-to-end flow would "
+        "look for does not exist yet. Covered meanwhile by "
+        "tests/community/repository/bot/test_bot_config_manifest_repository.py "
+        "(repository over a real database), "
+        "tests/community/core/bot_config_manifest/ (the schema rules, the "
+        "capability resolver, and the absent-is-empty contract), and "
+        "tests/community/endpoints/test_openapi_config_manifest.py (the four "
+        "routes through the assembled app). Drain this when the switch lifts "
+        "and singlebox fronts the backend with a gateway."
+    ),
     "bot_startup_script": (
         "The script's effect is only observable inside a provisioned container: "
         "it is appended to the start sequence the backend composes and runs "

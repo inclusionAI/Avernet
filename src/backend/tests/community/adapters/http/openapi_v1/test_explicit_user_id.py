@@ -413,7 +413,14 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: The task grant/revoke operations also carry the target in ``bcs_bot_id``
 #: request-body fields rather than a ``bot_id`` parameter, adding two more
 #: operations without changing the path/query counts.
-_BOT_ID_PLACEMENT = {"path": 146, "query": 1, "none": 98}
+#:
+#: ``path`` then moved 146 → 150 with the four config-manifest operations
+#: (``GET``/``PUT``/``DELETE …/{bot_id}/config-manifest`` and
+#: ``GET …/config-manifest/capabilities``). Each addresses one bot and
+#: resolves it as the named user's, so all four are bot-path-addressed like
+#: the rest of the surface. ``none`` is 98 from the public static-template
+#: mirror, which addresses no bot.
+_BOT_ID_PLACEMENT = {"path": 150, "query": 1, "none": 98}
 
 
 def _schema() -> dict:
@@ -547,8 +554,10 @@ def test_the_pinned_number_of_operations_take_it():
     # one account-level manual SC Public Sync operation, and Group 5 adds the
     # Offline impact and command operations. All twelve are user-scoped,
     # bringing the combined surface to 218. The public static-template mirror
-    # adds one more user-scoped operation, bringing the current surface to 219.
-    assert len(taking) == 219
+    # adds one more user-scoped operation, bringing that to 219. The config
+    # manifest adds four Bot-addressed operations — read, replace, clear, and
+    # the capability read — all user-scoped, bringing it to 223.
+    assert len(taking) == 223
 
 
 def test_the_exempt_operations_take_none():

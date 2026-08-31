@@ -342,11 +342,19 @@ the code it appears only on internal machinery — `__OCB_RC`, a private shell
 variable inside the start-command wrapper, and `OCB_AGENT_LOG_PRICE_*`, backend
 config. It has never been a user-facing namespace.
 
-They are renamed to **`BOT_ID`, `BOT_ENGINE_TYPE`, `BOT_ENV`, `BOT_TENANT`,
+They are renamed to **`BOT_ENGINE_TYPE`, `BOT_ENV`, `BOT_TENANT`,
 `BOT_ARCH`**: self-explanatory (the user is configuring a bot), consistent with
 the container environment's existing `BOT_DATA_DIR`, and still prefixed — which
 matters because these are injected as environment variables into `script`, where
 an unprefixed `${ENV}` would collide with the author's own variables.
+
+`OCB_BOT_ID` has no `BOT_ID` counterpart: it is **dropped**, not renamed (W1
+review). The four that remain are all properties of the *fleet*, which is what
+lets one document be reused across bots. A bot id is not: `generate_bot_id()`
+mints it at creation time (a date plus eight random characters), the caller
+cannot choose it, and an author preparing content in a git repository has no way
+to know it. Anything genuinely per-bot belongs in that bot's own manifest,
+written literally.
 
 ### 2.10 Validation and authorisation move to a reusable seam
 
@@ -1354,12 +1362,16 @@ is applied.
 
 - New module `core/bot_config_manifest/` with a `README.md` carrying the
   Context Boundary block required by `docs/arch/context-boundary-format.md`.
-- DDL under `core/bot_config_manifest/sql/`. One row per bot; uniqueness on
-  `(avernet_tenant, manifest_key)` where `manifest_key = sha256(env, entity_id,
-  bot_id)` — the same InnoDB 3072-byte index budget and the same tenancy
-  reasoning as `ac_bot_startup_script`, which documents both.
+- DDL under `core/bot_config_manifest/sql/`. One row per bot; uniqueness on the
+  logical key itself, `(avernet_tenant, env, entity_id, bot_id)`, with no
+  surrogate column. InnoDB's 3072-byte index budget therefore constrains the
+  column widths: `entity_id` is `varchar(256)` rather than `ac_bots`' 1024 (which
+  would be 4096 bytes on its own and over the cap), putting the four columns at
+  2384 bytes. `ac_bot_startup_script` hashes the same logical key into a
+  surrogate; it did not have to, and this table does not copy it. Same tenancy
+  reasoning as that table.
 - Repository contract `core/repository/protocols/bot/config_manifest.py` and
-  implementation `core/repository/implementations/bot/config_manifest/`, the
+  implementation `core/repository/implementations/bot/config_manifest.py`, the
   protocol declared as a base so an omitted member fails at construction.
 - Service API contract `api/bot_config_manifest_service.py`, registered in the
   conformance `_PAIRS`.
@@ -1425,8 +1437,8 @@ capability table is fully determined.
     accepted, defaulting to `non_strict` (§3.2's moving-ref rule). Same shape as
     the `on_fetch_failure` enum check, and refused here for the same reason — a
     typo'd mode would otherwise silently take the default and pin nothing;
-  - an unknown `${...}` placeholder; only `BOT_ID`, `BOT_ENGINE_TYPE`,
-    `BOT_ENV`, `BOT_TENANT` and `BOT_ARCH` are accepted. `BOT_ARCH` resolves to
+  - an unknown `${...}` placeholder; only `BOT_ENGINE_TYPE`, `BOT_ENV`,
+    `BOT_TENANT` and `BOT_ARCH` are accepted (there is no `BOT_ID` — see §2.9). `BOT_ARCH` resolves to
     the constant `amd64` today (§4, X3): implementing it now rather than merely
     reserving the name means a future mixed fleet changes only where the value
     comes from, with no schema change and nothing for users to rewrite;

@@ -97,6 +97,26 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/data-init"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # The config manifest may address a *shared* bot: its collaborator bars are
+    # MEMBER to read and ADMIN to write (authorization.py), so the owner arrives
+    # on the wire rather than being pinned to the caller, and the grant is
+    # checked against that addressed owner.
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PUT",
+        "/openapi/v1/bots/{bot_id}/config-manifest",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/config-manifest",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest/capabilities",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skill-sets",

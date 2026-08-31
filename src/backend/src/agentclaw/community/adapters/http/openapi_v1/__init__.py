@@ -179,6 +179,7 @@ from .bots import router as bots_router
 from .collaboration_bots import public_router as collaboration_public_router
 from .task import task_router
 from .bots.engine_config import router as engine_config_router
+from .bots.config_manifest import router as config_manifest_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
 from .channels import router as channels_router
@@ -336,6 +337,10 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    # The config manifest is collaborator-scoped (MEMBER to read, ADMIN to
+    # write), so it may address a shared bot and takes the addressed-owner
+    # grant rather than the own-bot one.
+    config_manifest_router,
     # Bot grants lend the delegating user's live Bot permissions. Editors and
     # render screens therefore use the same addressed-owner grant boundary as
     # the other shared-Bot configuration groups; their services still enforce
