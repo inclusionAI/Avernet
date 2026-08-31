@@ -167,26 +167,6 @@ def _static_plan_dict() -> dict:
     }
 
 
-def _static_plan_dict_missing_input() -> dict:
-    """构造静态模板但缺必填输入 okr,验证校验层把 422 暴露给上层。"""
-    return {
-        "task_spec": {
-            "metadata": {"title": "okr-implementation", "instruction": "运营 okr"},
-            "context": {"background": "", "extend_props": {}},
-            "goal": {"objective": "okr-implementation", "acceptances": []},
-        },
-        "source_type": "api",
-        "owner_user_id": "owner_user",
-        "owner_bot_id": "owner_bot",
-        "execution_config": {
-            "task_type": "static_plan",
-            "static_plan_id": "okr-implementation",
-            "template_input": {},
-            "static_auto_report": True,
-        },
-    }
-
-
 def _static_plan_dict_no_template_id() -> dict:
     """前端不显式传 static_plan_id,凭 task_spec 内容路由到 okr-implementation 模板。"""
     return {
@@ -301,15 +281,6 @@ class TestTaskExecute:
         task_id = body["data"]["task_id"]
         assert isinstance(task_id, str) and task_id
         assert body["data"]["success"] is True
-
-    def test_execute_static_plan_missing_template_input_returns_error(self, client):
-        # 模板 input 校验缺失必填 okr → 上层 HTTPException/内部错误态。
-        c, _ = client
-        r = c.post(
-            "/openapi/v1/collaboration/tasks/execute",
-            json=_static_plan_dict_missing_input(),
-        )
-        assert r.status_code >= 400, r.text
 
     def test_execute_static_plan_routes_by_content_without_template_id(self, client):
         # 不传 static_plan_id,凭 task_spec 命中 OKR 关键字路由到 okr-implementation,与显式传等价。

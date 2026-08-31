@@ -89,8 +89,10 @@ def _resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
 # 由 @runtime_checkable 的 isinstance/issubclass 做结构化一致性校验)。此处置空基类即可。
 _STATIC_PLAN_TEMPLATES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # 注册的静态模板路由表: (template_id, content keywords)
-    # 调用方传 ``execution_config.static_plan_id`` 则优先显式选择;未传则按 ``task_spec`` 的
-    # title/instruction/objective 命中第一个匹配关键字的模板。新增模板在末尾追加条目即可。
+    # 按 ``task_spec`` 的 title/instruction/objective 命中第一个匹配关键字的模板路由;调用方不感知
+    # ``static_plan_id``/``template_input`` 任何字段(不存在"调用方指定模板"的契约),``static_plan_id``
+    # 仅作 materialize 后写回 ``execution_config`` 的内部落库信号,供 engine 识别走预置 plan runtime。
+    # 新增模板在末尾追加条目即可。
     ("okr-implementation", ("okr", "转化率", "双十一", "大促")),
 )
 
@@ -195,15 +197,13 @@ class TaskService:
         )
 
     def _resolve_static_plan_template_id(self, request: "TaskInfoRequest") -> str | None:
-        """内容路由:当 ``execution_config.static_plan_id`` 未指定时,按 ``task_spec`` 的
-        title/instruction/objective 命中已注册静态模板的关键字 → 返回 template_id;否则返回 ``None``。
-        调用方显式传入 ``static_plan_id`` 仍然优先取该值,保持向后兼容。
-        今天仅 ``okr-implementation`` 一个模板;新增模板在模块顶部 ``_STATIC_PLAN_TEMPLATES`` 注册。
+        """内容路由:按 ``task_spec`` 的 title/instruction/objective 命中已注册静态模板的关键字 →
+        返回 template_id;否则返回 ``None``(跳出内容路由,走默认 dynamic planner,LLM 自发现 plan)。
+        调用方不感知"模板/``template_input``"任何字段,也不存在"调用方指定模板"的契约——
+        ``static_plan_id`` 仅作 materialize 后写回 ``execution_config`` 的内部落库信号,供 engine 识别走预置
+        plan runtime,不是对外选择入口。今天仅 ``okr-implementation`` 一个模板;新增模板在模块顶部
+        ``_STATIC_PLAN_TEMPLATES`` 注册。
         """
-        cfg = request.execution_config
-        explicit = cfg.get("static_plan_id")
-        if explicit:
-            return str(explicit)
         text_parts = (
             request.task_spec.metadata.title,
             request.task_spec.metadata.instruction,
@@ -219,48 +219,47 @@ class TaskService:
         """Fold static-plan template loading into execute (Rule 22: one public API).
 
         ``execute`` 入口统一处理 "动态任务 + 预置模板 plan" 两种 plan 源:
-        - 调用方显式传 ``execution_config.static_plan_id`` → 直接加载该模板
-        - 否则按 ``task_spec`` 的 title/instruction/objective 关键字命中已注册模板(``okr-implementation``) → 加载该模板
-        - 命中 → 加载 yaml 校验 input/bindings → 合成 task_spec → 把 ``static_plan_id``/``static_plan_yaml``/
-          ``template_input`` 补进 execution_config,engine 内经 ``_static_runtime`` 走预置 plan runtime(与 LLM planner 路径等价)
-        - 未命中且调用方传 ``task_type=STATIC_PLAN`` 显式要预置模板 → 抛 ``TaskStateError``(→422)
-        - 未命中且非显式(默认 dynamic) → 返回 request 不变,execute 内 ``_static_runtime`` 取不到 yaml,
+        - 按 ``task_spec`` 的 title/instruction/objective 关键字命中已注册模板(``okr-implementation``) → 加载该模板
+        - 命中 → 加载 yaml 校验 input/bindings → 把 ``static_plan_id``/``static_plan_yaml``/
+          ``template_input`` 补进 execution_config,engine 内经 ``_static_runtime`` 走预置 plan runtime
+          (与 LLM planner 路径等价);调用方原始 task_spec 原样保留,不合成占位
+        - 未命中且 ``task_type=STATIC_PLAN`` 显式要预置模板 → 抛 ``TaskStateError``(→422)
+        - 未命中(默认 dynamic) → 返回 request 不变,execute 内 ``_static_runtime`` 取不到 yaml,
           自然走 LLM planner 自发现 plan
 
-        这样调用方只需提交一个任务 + 业务语义,无需关心 plan 是预置还是 planner 生成(都是动态任务)。
+        调用方不感知"模板/``template_input``"任何字段,也不存在"调用方指定模板"的契约——``static_plan_id``
+        仅作 materialize 后写回 ``execution_config`` 的内部落库信号;调用方只需提交一个任务 + 业务语义,
+        无需关心 plan 是预置还是 planner 生成(都是动态任务)。
         """
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
         cfg = request.execution_config
-        explicit_id = cfg.get("static_plan_id")
-        template_id = str(explicit_id) if explicit_id else self._resolve_static_plan_template_id(request)
+        template_id = self._resolve_static_plan_template_id(request)
         if not template_id:
             if cfg.get("task_type") == TaskType.STATIC_PLAN:
                 raise TaskStateError(
-                    "static plan template could not be selected: provide execution_config.static_plan_id "
-                    "or include an OKR-related task_spec so the content-router matches a registered template"
+                    "static plan template could not be selected: include an OKR-related task_spec "
+                    "so the content-router matches a registered template"
                 )
-            return request  # 未命中且非显式 → 走默认 dynamic planner
+            return request  # 内容未命中任何预置模板 → 走默认 dynamic planner(LLM 自发现 plan)
         template_dir = Path(__file__).resolve().parents[1] / "task_plan" / "plans"
         inputs = dict(cfg.get("template_input") or {})
         try:
             definition = StaticPlanDefinition.from_file(template_id, template_dir)
-            # 仅内容路由命中(调用方未显式指定 static_plan_id,如 source_type=bot 的动态调用)时,
-            # 才用 task_spec 的 objective/instruction/title 兜底补齐缺失必填 input,使"内容命中→走预置模板"
-            # 对调用方透明、无需额外传 template_input;显式 static_plan_id 调用方已明确选模板,仍按严格
-            # 契约——缺必填 input → 422(保留旧契约)。调用方已显式传非空值的 input 不覆盖。
-            if not explicit_id:
-                for _name, _schema in (definition.input_schema or {}).items():
-                    if _schema.get("required") and inputs.get(_name) in (None, ""):
-                        _fallback = next(
-                            (t for t in (
-                                request.task_spec.goal.objective,
-                                request.task_spec.metadata.instruction,
-                                request.task_spec.metadata.title,
-                            ) if t),
-                            "",
-                        )
-                        if _fallback:
-                            inputs[_name] = _fallback
+            # 调用方不感知 template_input——内容路由命中预置模板后,按模板必填 input_schema 用调用方
+            # task_spec 的 objective→instruction→title 兜底补齐缺省值(已显式传非空值的不覆盖)。不存在
+            # "调用方显式指定模板"的契约,故命中即无条件兜底,不再区分 explicit_id 严格契约路径。
+            for _name, _schema in (definition.input_schema or {}).items():
+                if _schema.get("required") and inputs.get(_name) in (None, ""):
+                    _fallback = next(
+                        (t for t in (
+                            request.task_spec.goal.objective,
+                            request.task_spec.metadata.instruction,
+                            request.task_spec.metadata.title,
+                        ) if t),
+                        "",
+                    )
+                    if _fallback:
+                        inputs[_name] = _fallback
             definition.validate_input(inputs)
             definition.validate_bindings()
         except TaskStateError:
