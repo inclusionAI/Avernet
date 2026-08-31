@@ -638,8 +638,8 @@ class DeadlineRenewalScheduler:
             )
             return "skipped"
 
-        # ---- Step 3(g): 12h < remaining <= 24h — not yet due ----
-        if remaining_hours > self._config.renew_threshold_hours:
+        # ---- Step 3(g): derived threshold < remaining <= 24h — not yet due ----
+        if remaining_hours * 60.0 > self._config.renew_threshold_minutes:
             expiration_dt = naive_cst_fromtimestamp(ttl_ms / 1000.0)
             next_renew = expiration_dt - self._renewal_window
             self._schedule_repo.postpone_renewal(
@@ -650,10 +650,11 @@ class DeadlineRenewalScheduler:
             )
             log.info(
                 "[DeadlineRenewalScheduler] sandbox_id=%s remaining=%.1fh "
-                "in (%.1f, 24] — postponed to %s",
+                "in (%.0f, %d]min — postponed to %s",
                 sandbox_id,
                 remaining_hours,
-                self._config.renew_threshold_hours,
+                self._config.renew_threshold_minutes,
+                24 * 60,
                 next_renew.isoformat(),
             )
             self._emit_renew_digest(
@@ -661,12 +662,12 @@ class DeadlineRenewalScheduler:
             )
             return "skipped"
 
-        # ---- Step 3(h): 0 <= remaining <= 12h — renewal window ----
+        # ---- Step 3(h): 0 <= remaining <= derived threshold — renewal window ----
         # TTL period comes from the configured default_ttl_minutes (1440:
         # identical to the former 86400-second constant); the safety margin
         # is subtracted so an extension never lands exactly on the expiry.
         # WR-03: clamp to a 1-minute floor — when the operator configures a
-        # default_ttl_minutes below renew_threshold_hours the raw formula
+        # default_ttl_minutes below the derived threshold the raw formula
         # can go 0/negative, which extend_ttl must never receive.
         ttl_minutes = max(
             1,
@@ -733,15 +734,67 @@ class DeadlineRenewalScheduler:
         except Exception:
             new_expiration_ms = None
 
-        if new_expiration_ms is not None:
-            new_expiration_dt = naive_cst_fromtimestamp(new_expiration_ms / 1000)
-            next_renew = new_expiration_dt - self._renewal_window
-            log.info(
-                "[DeadlineRenewalScheduler] sandbox_id=%s post-extend ttl=%d — "
-                "next_renew derived from clamped expiry",
+        # D1 upper-bound consistency watermark: the platform must not report
+        # more remaining life than the pre-extend expiry plus the requested
+        # extension minutes (plus tol). An optimistic echo — the platform
+        # clamped the TTL but reported the request — exceeds this bound;
+        # reject it into the conservative rescan fallback below instead of
+        # scheduling past the real expiry. Both values share the platform
+        # epoch domain, so the comparison is clock-offset free.
+        expected_expiration_ms = ttl_ms + ttl_minutes * 60_000
+        if (
+            new_expiration_ms is not None
+            and new_expiration_ms
+            > expected_expiration_ms
+            + self._config.post_extend_consistency_tol_minutes * 60_000
+        ):
+            log.warning(
+                "[DeadlineRenewalScheduler] sandbox_id=%s post-extend ttl=%d "
+                "exceeds expected=%d + %dmin tol — untrusted, conservative rescan",
                 sandbox_id,
                 new_expiration_ms,
+                expected_expiration_ms,
+                self._config.post_extend_consistency_tol_minutes,
             )
+            log.info(
+                "[arca_ttl_metrics] post_extend_ttl_inconsistent=1 sandbox_id=%s "
+                "source_table=%s source_id=%s",
+                record.get("sandbox_id"),
+                record["source_table"],
+                record["source_id"],
+            )
+            new_expiration_ms = None
+
+        if new_expiration_ms is not None:
+            new_expiration_dt = naive_cst_fromtimestamp(new_expiration_ms / 1000)
+            # D2: R' stays in the platform epoch domain (same arithmetic as
+            # remaining_hours at step 3(c-d)); the persisted next_renew stays
+            # a naive Asia/Shanghai wall clock (CR-01).
+            # D2 notation R' (plan-level spec) kept as the variable name.
+            R_minutes = (new_expiration_ms / 1000.0 - time.time()) / 60.0  # noqa: N806
+            window_minutes = self._renewal_window.total_seconds() / 60.0
+            cron_minutes = self._config.cron_interval_seconds / 60.0
+            if R_minutes > window_minutes:
+                next_renew = new_expiration_dt - self._renewal_window
+                log.info(
+                    "[DeadlineRenewalScheduler] sandbox_id=%s post-extend ttl=%d — "
+                    "next_renew derived from clamped expiry",
+                    sandbox_id,
+                    new_expiration_ms,
+                )
+            else:
+                half_life_minutes = max(R_minutes / 2.0, cron_minutes)
+                next_renew = naive_cst_now() + timedelta(minutes=half_life_minutes)
+                log.info(
+                    "[DeadlineRenewalScheduler] sandbox_id=%s post-extend ttl=%d "
+                    "R_minutes=%.1f window_minutes=%.0f — half-life next_renew "
+                    "at now + %.1fmin",
+                    sandbox_id,
+                    new_expiration_ms,
+                    R_minutes,
+                    window_minutes,
+                    half_life_minutes,
+                )
         else:
             log.warning(
                 "[DeadlineRenewalScheduler] sandbox_id=%s renewed %d min but "
@@ -753,6 +806,14 @@ class DeadlineRenewalScheduler:
             next_renew = naive_cst_now() + timedelta(
                 seconds=self._config.cron_interval_seconds
             )
+        # EG-1 floor: EVERY success outcome schedules at least one full cron
+        # interval out — including the status-quo branch, whose E' - window
+        # target can land at/behind now when the platform clamps hard (the
+        # fallback branch is already at the floor, so max is an identity).
+        cron_floor = naive_cst_now() + timedelta(
+            seconds=self._config.cron_interval_seconds
+        )
+        next_renew = max(next_renew, cron_floor)
         self._schedule_repo.update_after_success(
             self._config.env, record["source_table"], record["source_id"], next_renew
         )
