@@ -49,6 +49,14 @@ from agentclaw.community.plugin_api.space_skill_source import (
 from agentclaw.community.api.space_skill_version_query_service import (
     SpaceSkillVersionQueryServiceProtocol,
 )
+from agentclaw.community.api.space_skill_offline_service import (
+    OfflineBlockerKind,
+    OfflineDraft,
+    OfflineImpact,
+    OfflineImpactItem,
+    SpaceSkillOfflineResult,
+    SpaceSkillOfflineServiceProtocol,
+)
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
 )
@@ -93,6 +101,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftEditLeaseNotFoundError,
     DraftEditLeaseTokenRejectedError,
     DraftSourceNotRefreshableError,
+    SkillOfflineBlockedError,
 )
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
@@ -158,6 +167,11 @@ def draft_edit_lease_service():
 
 
 @pytest.fixture
+def skill_offline_service():
+    return MagicMock()
+
+
+@pytest.fixture
 def client(
     member_service,
     space_service,
@@ -168,6 +182,7 @@ def client(
     skill_version_query_service,
     skill_editor_request_service,
     draft_edit_lease_service,
+    skill_offline_service,
 ):
     class _Bindings(Module):
         def configure(self, binder):
@@ -188,6 +203,7 @@ def client(
                 to=skill_editor_request_service,
             )
             binder.bind(DraftEditLeaseServiceProtocol, to=draft_edit_lease_service)
+            binder.bind(SpaceSkillOfflineServiceProtocol, to=skill_offline_service)
 
     app = FastAPI()
     app.include_router(router)
@@ -1232,6 +1248,90 @@ def test_upgrade_refresh_and_delete_routes_publish_command_contracts(
         skill_application_service.refresh_draft_from_git,
         skill_application_service.delete_draft,
     ]
+
+
+def test_offline_impact_and_command_publish_stable_contracts(
+    client, skill_offline_service
+):
+    impact = OfflineImpact(
+        blocked=True,
+        total=1,
+        counts={"MEMBERSHIP": 1},
+        items=(
+            OfflineImpactItem(
+                kind=OfflineBlockerKind.MEMBERSHIP,
+                resource_id="1115804",
+                display_name="基础能力集",
+            ),
+        ),
+    )
+    skill_offline_service.impact.return_value = impact
+    skill_offline_service.offline.return_value = SpaceSkillOfflineResult(
+        changed=True,
+        lifecycle_status="OFFLINE",
+        draft=OfflineDraft(
+            target_version=3,
+            status="EDITING",
+            revision_id="33333333-3333-4333-8333-333333333333",
+        ),
+    )
+
+    preview = client.get(
+        "/openapi/v1/bots/spaces/7/skills/51/offline-impact",
+        params={"page": 1, "page_size": 20},
+    )
+    executed = client.post("/openapi/v1/bots/spaces/7/skills/51/offline")
+
+    assert preview.status_code == 200
+    assert preview.json()["data"] == {
+        "blocked": True,
+        "total": 1,
+        "counts": {"MEMBERSHIP": 1},
+        "items": [
+            {
+                "kind": "MEMBERSHIP",
+                "resource_id": "1115804",
+                "display_name": "基础能力集",
+            }
+        ],
+    }
+    assert executed.status_code == 200
+    assert executed.json()["data"]["changed"] is True
+    assert executed.json()["data"]["draft"]["target_version"] == 3
+    skill_offline_service.impact.assert_called_once_with(
+        space_id=7,
+        skill_id=51,
+        actor_id="owner-1",
+        page=1,
+        page_size=20,
+    )
+    skill_offline_service.offline.assert_called_once_with(
+        space_id=7, skill_id=51, actor_id="owner-1"
+    )
+
+
+def test_offline_blocked_returns_latest_impact_in_409_data(
+    client, skill_offline_service
+):
+    impact = OfflineImpact(
+        blocked=True,
+        total=1,
+        counts={"UNKNOWN_ARTIFACT": 1},
+        items=(
+            OfflineImpactItem(
+                kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
+                resource_id="artifact-scan",
+                display_name="scan incomplete",
+            ),
+        ),
+    )
+    skill_offline_service.offline.side_effect = SkillOfflineBlockedError(impact)
+
+    response = client.post("/openapi/v1/bots/spaces/7/skills/51/offline")
+
+    assert response.status_code == 409
+    assert response.json()["code"] == 409313
+    assert response.json()["data"]["counts"] == {"UNKNOWN_ARTIFACT": 1}
 
 
 def test_upgrade_maps_exact_source_failure_to_sc_unavailable(

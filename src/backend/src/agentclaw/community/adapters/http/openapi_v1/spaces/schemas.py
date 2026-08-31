@@ -551,6 +551,63 @@ class SpaceSkillDetail(SpaceSkillSummary):
     )
 
 
+class SkillOfflineBlockerKind(_DocumentedEnum):
+    """Reason a Space Skill cannot safely enter recoverable Offline."""
+
+    DRAFT = "DRAFT"
+    PUBLICATION = "PUBLICATION"
+    MEMBERSHIP = "MEMBERSHIP"
+    INSTALLATION = "INSTALLATION"
+    SERVICE_ARTIFACT = "SERVICE_ARTIFACT"
+    UNKNOWN_ARTIFACT = "UNKNOWN_ARTIFACT"
+
+    __descriptions__ = {
+        "DRAFT": "A mutable or frozen Draft already exists.",
+        "PUBLICATION": "A publication Attempt is still in progress or unknown.",
+        "MEMBERSHIP": "An ordinary or Default SkillSet still contains the Skill.",
+        "INSTALLATION": "A Bot still has an effective Skill Installation.",
+        "SERVICE_ARTIFACT": "A live Service Bot can replay this exact Skill Version.",
+        "UNKNOWN_ARTIFACT": "Artifact lineage could not be proved complete and valid.",
+    }
+
+
+class SkillOfflineImpactItem(BaseModel):
+    """One live fact that prevents recoverable Offline."""
+
+    kind: SkillOfflineBlockerKind = Field(
+        description="Category of the blocking reference or lifecycle fact."
+    )
+    resource_id: str = Field(description="Stable blocker resource identifier.")
+    display_name: str = Field(description="Human-readable blocker label.")
+
+
+class SkillOfflineImpact(BaseModel):
+    """Complete blocker counts plus one requested page of blocker details."""
+
+    blocked: bool = Field(description="Whether at least one blocker exists.")
+    total: int = Field(ge=0, description="Total blockers across all categories.")
+    counts: dict[str, int] = Field(
+        description="Non-zero blocker totals keyed by blocker category."
+    )
+    items: list[SkillOfflineImpactItem] = Field(
+        description="Requested page of blockers in deterministic order."
+    )
+
+
+class SkillOfflineResult(BaseModel):
+    """Recoverable Offline state and the editable next-version Draft."""
+
+    changed: bool = Field(
+        description="Whether this request newly moved the Skill Offline."
+    )
+    lifecycle_status: Literal["OFFLINE"] = Field(
+        description="Current recoverable lifecycle state."
+    )
+    draft: SkillDraftSummary = Field(
+        description="Editable Vn+1 Draft retained for recovery publication."
+    )
+
+
 class ImportSpaceSkillFromGitRequest(BaseModel):
     """Credential-free Git snapshot coordinates for Space Skill creation."""
 

@@ -108,6 +108,8 @@ provides:
   - SpaceSkillPublicationServiceProtocol
   - SkillCenterPublicationGatewayProtocol
   - SkillMetadataParserProtocol
+  - ServiceArtifactLineageReaderProtocol
+  - SpaceSkillOfflineServiceProtocol
 consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
@@ -131,6 +133,7 @@ internal_dependencies:
   - agentclaw.community.core.engine_runtime.models    # EngineResult / BotFacts / ConnectionResult — typed in engine_runtime_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.quality.models          # QualityTaskRecord — typed in quality_service.py and task_processor_service.py
   - agentclaw.community.core.service_bot.repository.models  # BotPublishRecord — typed in engine_config_service.py
+  - agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol
   - agentclaw.community.core.resources.models        # Resource / ResourceType — typed in resource_service.py (Protocol signatures mirror slim ResourceService verbatim; round-2 review #4)
   - agentclaw.community.core.spaces.models           # Space/member records and enums — typed in space_service.py
   - agentclaw.community.core.repository.protocols.skill_center_types # Space Skill query projection

@@ -20,6 +20,18 @@ class PublicationAttemptStatus(StrEnum):
     RESULT_UNKNOWN = "RESULT_UNKNOWN"
 
 
+ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES = tuple(
+    status.value
+    for status in (
+        PublicationAttemptStatus.PREPARING,
+        PublicationAttemptStatus.SC_SUBMITTING,
+        PublicationAttemptStatus.WAITING_SC,
+        PublicationAttemptStatus.MATERIALIZING,
+        PublicationAttemptStatus.RESULT_UNKNOWN,
+    )
+)
+
+
 class PublicationRecoveryState(StrEnum):
     AUTO_RETRYING = "AUTO_RETRYING"
     AVAILABLE = "AVAILABLE"
@@ -121,6 +133,7 @@ class PublicationPackageStagerProtocol(Protocol):
 
 
 __all__ = [
+    "ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES",
     "PublicationAttemptCreation",
     "PublicationAttemptRecord",
     "PublicationAttemptStatus",

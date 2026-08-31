@@ -3,6 +3,18 @@
 from agentclaw.community.core.errors import DomainError
 
 
+class SkillOfflineError(Exception):
+    """A new consumption write addressed a recoverably Offline Skill."""
+
+
+class SkillOfflineBlockedError(Exception):
+    """Offline could not prove that every destructive blocker is absent."""
+
+    def __init__(self, impact) -> None:
+        super().__init__("skill offline is blocked")
+        self.impact = impact
+
+
 class SkillDeleteConsistencyError(RuntimeError):
     """A Skill delete could not safely converge filesystem and database state."""
 

@@ -12,14 +12,7 @@ from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillDraftRepository,
     SpaceSkillRepository,
 )
-from agentclaw.community.core.skill_center.canonical_center_store import (
-    CanonicalCenterStoreError,
-    CanonicalCenterStoreErrorCode,
-    CanonicalCenterVersion,
-    CanonicalCenterVersionIdentity,
-    CanonicalCenterVersionRef,
-    CanonicalCenterVersionStore,
-)
+from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterVersionStore
 from agentclaw.community.core.repository.protocols.skill_center_types import (
     SpaceSkillDraftRecord,
 )
@@ -51,12 +44,11 @@ from agentclaw.community.core.skill_center.space_skill_application_service_proto
     SpaceSkillApplicationServiceProtocol,
     SpaceSkillCreationOutcome,
 )
-from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
-from agentclaw.community.plugin_api.skill_center_gateway import (
-    SkillCenterExactDownloadRequest,
-    SkillCenterGateway,
-    SkillCenterReadScope,
+from agentclaw.community.core.skill_center.services.published_version_draft import (
+    PublishedVersionDraftBuilder,
 )
+from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
 from agentclaw.community.plugin_api.space_skill_source import (
     SpaceSkillSourcePlugin,
 )
@@ -88,10 +80,17 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         self._draft_store = draft_store
         self._sources = sources
         self._versions = versions
-        self._canonical = canonical_store
-        self._skill_center = skill_center
         self._env_provider = env_provider
         self._tenant_provider = tenant_provider
+        self._published_drafts = PublishedVersionDraftBuilder(
+            canonical_store=canonical_store,
+            skill_center=skill_center,
+            sources=sources,
+            validator=package_validator,
+            draft_store=draft_store,
+            env_provider=env_provider,
+            tenant_provider=tenant_provider,
+        )
 
     def create_from_folder(
         self,
@@ -338,76 +337,25 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         if not rows:
             raise DraftNotFoundError("latest Published Version not found")
         latest = rows[0]
-        exact_identity = CanonicalCenterVersionIdentity(
-            skill_uuid=identity["skill_uuid"],
-            sc_version_number=latest["sc_version_number"],
-        )
-        exact_ref = CanonicalCenterVersionRef(exact_identity)
-        try:
-            exact = self._canonical.read_version(exact_ref)
-        except CanonicalCenterStoreError as exc:
-            if exc.code not in {
-                CanonicalCenterStoreErrorCode.NOT_READY,
-                CanonicalCenterStoreErrorCode.CORRUPT_CONTENT,
-            }:
-                raise
-            exact = self._repair_exact_version(identity, exact_identity)
-        package = self._validator.validate_directory(
-            tuple((item.path, item.content) for item in exact.files)
-        )
-        self._require_stable_name(
-            {
-                "name": identity["name"],
-            },
-            package,
-        )
-        target_version = latest["version_ordinal"] + 1
-        revision = DraftRevisionIdentity(
-            tenant=self._tenant_provider(),
-            env=self._env_provider(),
-            skill_uuid=identity["skill_uuid"],
-            target_version=target_version,
-            revision_id=str(uuid4()),
-        )
-        ref = self._draft_store.write_revision(revision, package)
+        prepared = self._published_drafts.prepare(identity=identity, latest=latest)
         try:
             result = self._draft_repository.create_upgrade_draft(
                 space_id=space_id,
                 skill_id=skill_id,
                 actor_id=actor_id,
                 request_id=request_id,
-                expected_version_id=latest["id"],
-                target_version=target_version,
-                new_locator=ref.locator,
-                new_description=package.description,
+                expected_version_id=prepared.expected_version_id,
+                target_version=prepared.target_version,
+                new_locator=prepared.ref.locator,
+                new_description=prepared.description,
                 env=self._env_provider(),
             )
         except Exception:
-            self._best_effort_delete(ref)
+            self._published_drafts.discard(prepared)
             raise
         if not result["created"]:
-            self._best_effort_delete(ref)
+            self._published_drafts.discard(prepared)
         return self._draft_result(result["draft"])
-
-    def _repair_exact_version(self, identity, exact_identity):
-        if identity["sc_team_id"] is None:
-            raise RuntimeError("Space Skill has no SkillCenter team identity")
-        download = self._skill_center.get_exact_download(
-            SkillCenterExactDownloadRequest(
-                skill_code=identity["skill_uuid"],
-                version_number=exact_identity.sc_version_number,
-                scope=SkillCenterReadScope.TEAM,
-                team_id=str(identity["sc_team_id"]),
-            )
-        )
-        package = self._validator.validate_zip(
-            self._sources.fetch_exact_package(
-                url=download.download_url, expected_sha256=download.sha256
-            )
-        )
-        version = CanonicalCenterVersion.from_files(exact_identity, dict(package.files))
-        self._canonical.write_version(version)
-        return self._canonical.read_version(CanonicalCenterVersionRef(exact_identity))
 
     @staticmethod
     def _draft_result(record) -> DraftMutationResult:

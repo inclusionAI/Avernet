@@ -7,6 +7,7 @@ Contains:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, Dict, Optional
@@ -116,6 +117,15 @@ class BotPublishRecord(BaseModel):
             "gmt_create": self.gmt_create.isoformat() if self.gmt_create else None,
             "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class BotPublishLineagePage:
+    """One immutable-id page for complete Artifact lineage scans."""
+
+    records: tuple[BotPublishRecord, ...]
+    next_cursor: int | None
+    complete: bool
 
 
 class BotPublishCreate(BaseModel):

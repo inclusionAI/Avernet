@@ -33,6 +33,9 @@ from agentclaw.community.api.space_skill_grant_service import (
 from agentclaw.community.api.space_skill_editor_request_service import (
     SpaceSkillEditorRequestServiceProtocol,
 )
+from agentclaw.community.api.space_skill_offline_service import (
+    SpaceSkillOfflineServiceProtocol,
+)
 from agentclaw.community.api.draft_edit_lease_service import (
     DraftEditLeaseServiceProtocol,
 )
@@ -59,6 +62,12 @@ from agentclaw.community.core.repository.protocols.space_skill_publication impor
 )
 from agentclaw.community.core.repository.protocols.work_orders import (
     WorkOrderRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.space_skill_offline import (
+    SpaceSkillOfflineRepositoryProtocol,
+)
+from agentclaw.community.core.service_bot.service_artifact_lineage_reader_protocol import (
+    ServiceArtifactLineageReaderProtocol,
 )
 from agentclaw.community.core.spaces.services import (
     SpaceAccessService,
@@ -112,6 +121,12 @@ from agentclaw.community.core.skill_center.services.space_skill_editor_request_s
 )
 from agentclaw.community.core.skill_center.services.draft_edit_lease_service import (
     DraftEditLeaseService,
+)
+from agentclaw.community.core.skill_center.services.published_version_draft import (
+    PublishedVersionDraftBuilder,
+)
+from agentclaw.community.core.skill_center.services.space_skill_offline_service import (
+    SpaceSkillOfflineService,
 )
 from agentclaw.community.core.spaces.protocols import (
     SpaceAccessServiceProtocol as CoreSpaceAccessServiceProtocol,
@@ -209,6 +224,38 @@ class SpacesModule(Module):
     ) -> SpaceSkillEditorRequestServiceProtocol:
         """Assemble editor-request policy with environment at the boundary."""
         return SpaceSkillEditorRequestService(repository, get_current_env)
+
+    @singleton
+    @provider
+    @inject
+    def space_skill_offline_service(
+        self,
+        access: CoreSpaceAccessServiceProtocol,
+        repository: SpaceSkillOfflineRepositoryProtocol,
+        draft_store: DraftContentStore,
+        sources: SpaceSkillSourcePlugin,
+        canonical_store: CanonicalCenterVersionStore,
+        skill_center: SkillCenterGateway,
+        lineage: ServiceArtifactLineageReaderProtocol,
+    ) -> SpaceSkillOfflineServiceProtocol:
+        validator = SkillPackageValidator(SkillParser())
+        drafts = PublishedVersionDraftBuilder(
+            canonical_store=canonical_store,
+            skill_center=skill_center,
+            sources=sources,
+            validator=validator,
+            draft_store=draft_store,
+            env_provider=get_current_env,
+            tenant_provider=get_current_avernet_tenant,
+        )
+        return SpaceSkillOfflineService(
+            access=access,
+            repository=repository,
+            lineage=lineage,
+            drafts=drafts,
+            env_provider=get_current_env,
+            tenant_provider=get_current_avernet_tenant,
+        )
 
     @singleton
     @provider

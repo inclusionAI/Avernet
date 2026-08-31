@@ -9534,6 +9534,90 @@
         "title": "Envelope[SkillGrantItem]",
         "type": "object"
       },
+      "Envelope_SkillOfflineImpact_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillOfflineImpact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SkillOfflineImpact]",
+        "type": "object"
+      },
+      "Envelope_SkillOfflineResult_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillOfflineResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SkillOfflineResult]",
+        "type": "object"
+      },
       "Envelope_SkillParameters_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -19249,6 +19333,136 @@
           }
         },
         "title": "SkillMarketSearchRequest",
+        "type": "object"
+      },
+      "SkillOfflineBlockerKind": {
+        "description": "Reason a Space Skill cannot safely enter recoverable Offline.",
+        "enum": [
+          "DRAFT",
+          "PUBLICATION",
+          "MEMBERSHIP",
+          "INSTALLATION",
+          "SERVICE_ARTIFACT",
+          "UNKNOWN_ARTIFACT"
+        ],
+        "title": "SkillOfflineBlockerKind",
+        "type": "string",
+        "x-enum-descriptions": [
+          "A mutable or frozen Draft already exists.",
+          "A publication Attempt is still in progress or unknown.",
+          "An ordinary or Default SkillSet still contains the Skill.",
+          "A Bot still has an effective Skill Installation.",
+          "A live Service Bot can replay this exact Skill Version.",
+          "Artifact lineage could not be proved complete and valid."
+        ],
+        "x-enum-varnames": [
+          "DRAFT",
+          "PUBLICATION",
+          "MEMBERSHIP",
+          "INSTALLATION",
+          "SERVICE_ARTIFACT",
+          "UNKNOWN_ARTIFACT"
+        ],
+        "x-enumNames": [
+          "DRAFT",
+          "PUBLICATION",
+          "MEMBERSHIP",
+          "INSTALLATION",
+          "SERVICE_ARTIFACT",
+          "UNKNOWN_ARTIFACT"
+        ]
+      },
+      "SkillOfflineImpact": {
+        "description": "Complete blocker counts plus one requested page of blocker details.",
+        "properties": {
+          "blocked": {
+            "description": "Whether at least one blocker exists.",
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Non-zero blocker totals keyed by blocker category.",
+            "title": "Counts",
+            "type": "object"
+          },
+          "items": {
+            "description": "Requested page of blockers in deterministic order.",
+            "items": {
+              "$ref": "#/components/schemas/SkillOfflineImpactItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total blockers across all categories.",
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "blocked",
+          "total",
+          "counts",
+          "items"
+        ],
+        "title": "SkillOfflineImpact",
+        "type": "object"
+      },
+      "SkillOfflineImpactItem": {
+        "description": "One live fact that prevents recoverable Offline.",
+        "properties": {
+          "display_name": {
+            "description": "Human-readable blocker label.",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SkillOfflineBlockerKind",
+            "description": "Category of the blocking reference or lifecycle fact."
+          },
+          "resource_id": {
+            "description": "Stable blocker resource identifier.",
+            "title": "Resource Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "resource_id",
+          "display_name"
+        ],
+        "title": "SkillOfflineImpactItem",
+        "type": "object"
+      },
+      "SkillOfflineResult": {
+        "description": "Recoverable Offline state and the editable next-version Draft.",
+        "properties": {
+          "changed": {
+            "description": "Whether this request newly moved the Skill Offline.",
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "draft": {
+            "$ref": "#/components/schemas/SkillDraftSummary",
+            "description": "Editable Vn+1 Draft retained for recovery publication."
+          },
+          "lifecycle_status": {
+            "const": "OFFLINE",
+            "description": "Current recoverable lifecycle state.",
+            "title": "Lifecycle Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "changed",
+          "lifecycle_status",
+          "draft"
+        ],
+        "title": "SkillOfflineResult",
         "type": "object"
       },
       "SkillOwnerSummary": {
@@ -42502,6 +42716,386 @@
         "summary": "Add Space Skill Manager",
         "tags": [
           "spaces"
+        ]
+      }
+    },
+    "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline": {
+      "post": {
+        "operationId": "offline_space_skill_openapi_v1_bots_spaces__space_id__skills__skill_id__offline_post",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Space Skill primary identifier.",
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "description": "Space Skill primary identifier.",
+              "minimum": 1,
+              "title": "Skill Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillOfflineResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillOfflineImpact_"
+                }
+              }
+            },
+            "description": "Latest Offline blockers from the command transaction."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Offline Space Skill",
+        "tags": [
+          "space-skills"
+        ]
+      }
+    },
+    "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact": {
+      "get": {
+        "operationId": "get_space_skill_offline_impact_openapi_v1_bots_spaces__space_id__skills__skill_id__offline_impact_get",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Space Skill primary identifier.",
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "description": "Space Skill primary identifier.",
+              "minimum": 1,
+              "title": "Skill Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "One-based blocker page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "One-based blocker page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of records per page.",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Number of records per page.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillOfflineImpact_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Get Space Skill Offline Impact",
+        "tags": [
+          "space-skills"
         ]
       }
     },

@@ -14,6 +14,9 @@ from agentclaw.community.core.models.space_skill import (
     SkillSpaceBinding,
     SkillVersion,
 )
+from agentclaw.community.core.skill_center.publication_contract import (
+    ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES,
+)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SpaceSkillReadRepository as SpaceSkillReadRepositoryProtocol,
 )
@@ -31,15 +34,6 @@ from agentclaw.community.core.work_orders.models import (
 )
 from agentclaw.community.core.work_orders.repository.models import WorkOrderModel
 from agentclaw.community.plugin_api.database import DatabasePlugin
-
-
-_ACTIVE_ATTEMPT_STATES = (
-    "PREPARING",
-    "SC_SUBMITTING",
-    "WAITING_SC",
-    "MATERIALIZING",
-    "RESULT_UNKNOWN",
-)
 
 
 class SpaceSkillReadRepository(SpaceSkillReadRepositoryProtocol):
@@ -202,7 +196,9 @@ class SpaceSkillReadRepository(SpaceSkillReadRepositoryProtocol):
                 and_(
                     SkillPublicationAttempt.skill_id == Skill.id,
                     SkillPublicationAttempt.env == env,
-                    SkillPublicationAttempt.status.in_(_ACTIVE_ATTEMPT_STATES),
+                    SkillPublicationAttempt.status.in_(
+                        ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES
+                    ),
                 ),
             )
             .outerjoin(

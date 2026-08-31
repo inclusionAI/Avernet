@@ -155,6 +155,8 @@ provides:
   - SpaceSkillDraftRepository
   - SpaceSkillReadRepository
   - SpaceSkillVersionReadRepository
+  - SpaceSkillOfflineRepositoryProtocol
+  - SpaceSkillOfflineRepository
   - SkillEditorRequestRepository
   - DraftEditLeaseRepository
   - SkillVersionRepositoryProtocol
