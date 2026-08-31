@@ -320,6 +320,24 @@ def last_apply_returns_the_report():
     """The authoritative answer to "did my manifest take effect?"."""
 
 
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
+    scenario="unknown_bot",
+    input=CaseInput(
+        path_params={"bot_id": "no-such-bot"},
+        query_params=_QUERY,
+        headers=_HEADERS,
+    ),
+    seed=_seed_no_bot,
+    expect=ExpectError(status=404),
+)
+def last_apply_unknown_bot_is_a_404():
+    """"Never applied" reading as an empty report does not extend to "no such
+    bot". The ownership guard runs first, so the two stay distinguishable — which
+    is the whole reason the empty-report rule is safe."""
+
+
 # ── GET .../applies/{apply_id} ─────────────────────────────────────────────
 
 
@@ -365,4 +383,25 @@ def poll_by_unknown_id_reads_empty():
     The lookup is scoped to the bot key as well as the id, so an id guessed or
     leaked from another bot cannot be read here: the id is a handle for polling,
     never what authorizes the read.
+    """
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}",
+    scenario="unknown_bot",
+    input=CaseInput(
+        path_params={"bot_id": "no-such-bot", "apply_id": _APPLY_ID},
+        query_params=_QUERY,
+        headers=_HEADERS,
+    ),
+    seed=_seed_no_bot,
+    expect=ExpectError(status=404),
+)
+def poll_by_id_unknown_bot_is_a_404():
+    """The guard runs before the id is looked at.
+
+    Worth pinning separately from the unknown-id case above: that one proves an
+    id this bot does not own reads empty, and this one proves a *bot* the caller
+    does not own is refused outright, rather than leaking the difference between
+    "no such bot" and "that bot has no such apply".
     """
