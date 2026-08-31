@@ -20,6 +20,7 @@ from engine.community.plugin_api.openclaw.skills import (
 from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.plugins.openclaw._file import _convert_path
 from engine.community.plugins.openclaw.layout_activation import (
+    MappingApplyMode,
     MappingSourceLayout,
     activate_openclaw_pool,
     publish_pool_mappings,
@@ -140,6 +141,9 @@ class _SkillsPortMixin:
             "source_layout": MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
+            "apply_mode": MappingApplyMode(
+                params.get("apply_mode", MappingApplyMode.STRICT.value)
+            ),
         }
         if retired.mappings:
             publish_kwargs["retired_mappings"] = list(retired.mappings)
@@ -173,6 +177,9 @@ class _SkillsPortMixin:
             "mappings": list(resolved.mappings),
             "source_layout": MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+            "apply_mode": MappingApplyMode(
+                params.get("apply_mode", MappingApplyMode.STRICT.value)
             ),
         }
         if retired.mappings:

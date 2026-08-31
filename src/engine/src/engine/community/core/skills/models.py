@@ -296,6 +296,13 @@ class PoolMappingSourceLayout(StrEnum):
     LEGACY = "legacy"
 
 
+class PoolMappingApplyMode(StrEnum):
+    """Strict Pool transitions by default; product projection opts in."""
+
+    STRICT = "STRICT"
+    BEST_EFFORT = "BEST_EFFORT"
+
+
 @dataclass
 class PoolMappingPublishResult:
     """Pool mapping 全量发布结果。"""
@@ -334,6 +341,7 @@ __all__ = [
     "PoolLayoutRollbackRequest",
     "PoolMappingPublishResult",
     "PoolMappingSourceLayout",
+    "PoolMappingApplyMode",
     "PoolMappingVerificationResult",
     "PoolQuarantineCleanupRequest",
     "PoolQuarantineCleanupResult",

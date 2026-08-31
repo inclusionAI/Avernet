@@ -49,6 +49,7 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
     PoolMappingPublishResult,
+    PoolMappingApplyMode,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     PoolQuarantineCleanupRequest,
@@ -466,12 +467,14 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         *,
         retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        apply_mode: PoolMappingApplyMode = PoolMappingApplyMode.STRICT,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
         payload: dict[str, object] = {
             "mappings": [_serialize_pool_mapping(item) for item in mappings],
             "source_layout": source_layout.value,
+            "apply_mode": apply_mode.value,
         }
         if retired_mappings:
             payload["retired_mappings"] = [
@@ -491,12 +494,14 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         *,
         retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        apply_mode: PoolMappingApplyMode = PoolMappingApplyMode.STRICT,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:
         payload: dict[str, object] = {
             "mappings": [_serialize_pool_mapping(item) for item in mappings],
             "source_layout": source_layout.value,
+            "apply_mode": apply_mode.value,
         }
         if retired_mappings:
             payload["retired_mappings"] = [

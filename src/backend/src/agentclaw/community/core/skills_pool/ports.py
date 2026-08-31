@@ -68,6 +68,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = "skills-pool-mapping-v2",
+        apply_mode: str = "STRICT",
     ) -> bool: ...
 
     async def verify_mappings(
@@ -79,6 +80,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = "skills-pool-mapping-v2",
+        apply_mode: str = "STRICT",
     ) -> bool: ...
 
 

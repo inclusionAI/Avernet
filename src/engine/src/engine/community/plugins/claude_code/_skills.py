@@ -19,6 +19,7 @@ from engine.community.core.skills.layout_planner import (
     MAPPING_CONTRACT_VERSION,
 )
 from engine.community.plugins.claude_code.layout_pool import (
+    MappingApplyMode,
     MappingSourceLayout,
     activate_claude_code_pool,
     claude_code_retirement_active_roots,
@@ -150,6 +151,9 @@ class _SkillsPortMixin:
             "source_layout": MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
+            "apply_mode": MappingApplyMode(
+                params.get("apply_mode", MappingApplyMode.STRICT.value)
+            ),
         }
         if retired.mappings:
             publish_kwargs["retired_mappings"] = list(retired.mappings)
@@ -187,6 +191,9 @@ class _SkillsPortMixin:
             "mappings": list(resolved.mappings),
             "source_layout": MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+            "apply_mode": MappingApplyMode(
+                params.get("apply_mode", MappingApplyMode.STRICT.value)
             ),
         }
         if retired.mappings:

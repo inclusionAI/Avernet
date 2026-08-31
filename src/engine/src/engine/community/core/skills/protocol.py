@@ -46,6 +46,7 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeResult,
     PoolLayoutRollbackRequest,
     PoolMappingPublishResult,
+    PoolMappingApplyMode,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     PoolQuarantineCleanupRequest,
@@ -241,6 +242,7 @@ class SkillsService(Protocol):
         *,
         retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        apply_mode: PoolMappingApplyMode = PoolMappingApplyMode.STRICT,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
@@ -261,6 +263,7 @@ class SkillsService(Protocol):
         *,
         retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
+        apply_mode: PoolMappingApplyMode = PoolMappingApplyMode.STRICT,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:

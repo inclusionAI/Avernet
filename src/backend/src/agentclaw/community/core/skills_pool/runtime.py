@@ -145,6 +145,7 @@ class SkillsPoolRuntime:
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
+        apply_mode: str = "STRICT",
     ) -> bool:
         if not await self._ensure_center_mappings(
             bot_id=bot_id,
@@ -165,6 +166,7 @@ class SkillsPoolRuntime:
                         mapping.to_dict() for mapping in retired_mappings
                     ],
                     "source_layout": source_layout.value,
+                    "apply_mode": apply_mode,
                 },
             )
         except Exception:
@@ -317,6 +319,7 @@ class SkillsPoolRuntime:
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
+        apply_mode: str = "STRICT",
     ) -> bool:
         try:
             response = await self._invoke(
@@ -330,6 +333,7 @@ class SkillsPoolRuntime:
                         mapping.to_dict() for mapping in retired_mappings
                     ],
                     "source_layout": source_layout.value,
+                    "apply_mode": apply_mode,
                 },
             )
         except Exception:

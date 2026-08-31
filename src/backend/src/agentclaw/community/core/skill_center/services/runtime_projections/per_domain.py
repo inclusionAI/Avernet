@@ -228,6 +228,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                 retired_mappings=retired_mappings,
                 source_layout=source_layout,
                 mapping_contract_version=contract,
+                apply_mode="BEST_EFFORT",
             )
             verified = published and await self._pool_runtime.verify_mappings(
                 bot_id=bot_id,
@@ -236,6 +237,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                 retired_mappings=retired_mappings,
                 source_layout=source_layout,
                 mapping_contract_version=contract,
+                apply_mode="BEST_EFFORT",
             )
         except Exception as exc:
             raise SkillSetRuntimeReconcileError() from exc

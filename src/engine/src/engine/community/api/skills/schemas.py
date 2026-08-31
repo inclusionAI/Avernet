@@ -173,6 +173,7 @@ class PoolMappingVerifyRequest(BaseModel):
         default_factory=list
     )
     source_layout: Literal["pool", "legacy"] = "pool"
+    apply_mode: Literal["STRICT", "BEST_EFFORT"] = "STRICT"
 
 
 __all__ = [
