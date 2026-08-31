@@ -26,6 +26,7 @@ from weakref import WeakKeyDictionary
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from gateway.community.api.app_registration import AppNameTakenError
 from gateway.community.logger import get_logger
 from gateway.community.spi.app import AppRegistry, RegisteredApp
 from gateway.community.spi.database import DataSourcePlugin
@@ -60,7 +61,12 @@ _last_reported: WeakKeyDictionary[object, dict[tuple[str, int], float]] = (
 
 
 class PrefixTakenError(RuntimeError):
-    """The API-key prefix was claimed concurrently; generate another and retry."""
+    """The API-key prefix was claimed concurrently; generate another and retry.
+
+    Stays in ``core`` where :class:`AppNameTakenError` does not, because it never
+    reaches a caller as itself: the registrar retries it, and a caller learns
+    about it only as the ``PrefixAllocationError`` that ends the retry budget.
+    """
 
 
 def _report_once_per_window(
@@ -229,6 +235,17 @@ class AppRepository(AppRegistry):
             )
         return found is not None
 
+    async def exists_app_name(self, app_name: str, env: str) -> bool:
+        """Whether ``(app_name, env)`` is already claimed."""
+        with self._db.orm_session() as session:
+            found = session.scalar(
+                select(self.Model.id).where(
+                    self.Model.app_name == app_name,
+                    self.Model.env == env,
+                )
+            )
+        return found is not None
+
     async def store(
         self,
         *,
@@ -273,14 +290,25 @@ class AppRepository(AppRegistry):
                 session.flush()
                 return row.id
         except IntegrityError as exc:
-            # Only a prefix collision is retryable: mapping every IntegrityError
-            # would turn a NOT NULL or FK violation into three silent retries and
-            # a "no unused prefix" error naming the wrong cause entirely.
-            # Decided by re-reading the table rather than by matching the driver's
-            # message, which differs per backend and moves with index names. The
-            # re-read runs in a fresh transaction, so a collision whose winning
-            # row disappeared in between would escape as a raw IntegrityError —
-            # no delete path exists for app rows, so that cannot happen here.
-            if not await self.exists_prefix(api_key_prefix):
-                raise
-            raise PrefixTakenError(api_key_prefix) from exc
+            # The table has two unique keys a caller can trip, and they want
+            # opposite handling: a prefix collision is the registrar's to retry
+            # with a fresh key, while a taken ``(app_name, env)`` is the caller's
+            # to resolve by choosing another name. Mapping every IntegrityError
+            # to either one would turn a NOT NULL or FK violation into three
+            # silent retries and a "no unused prefix" error naming the wrong
+            # cause entirely.
+            #
+            # Which key was hit is decided by re-reading the table rather than by
+            # matching the driver's message, which differs per backend and moves
+            # with index names. The re-reads run in a fresh transaction, so a
+            # collision whose winning row disappeared in between would escape as
+            # a raw IntegrityError — no delete path exists for app rows, so that
+            # cannot happen here.
+            #
+            # Prefix first: it is the condition the registrar can act on by
+            # itself, and a single insert can violate both keys at once.
+            if await self.exists_prefix(api_key_prefix):
+                raise PrefixTakenError(api_key_prefix) from exc
+            if await self.exists_app_name(app_name, env):
+                raise AppNameTakenError(app_name, env) from exc
+            raise

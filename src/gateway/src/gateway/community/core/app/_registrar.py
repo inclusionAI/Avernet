@@ -74,6 +74,12 @@ class AppRegistrar:
         same prefix would both pass it and leave the second insert to fail. The
         unique index is the real guarantee, so a lost race is retried like any
         other collision.
+
+        :class:`AppNameTakenError` propagates rather than being retried, and the
+        difference is who can fix it. A prefix is ours: another one is a
+        ``generate()`` away and the caller never learns a retry happened. A name
+        is the caller's, and the same name collides on every attempt — retrying
+        it would burn the budget on a certainty and then report the wrong cause.
         """
         last_race: PrefixTakenError | None = None
         for _ in range(_MAX_PREFIX_ATTEMPTS):

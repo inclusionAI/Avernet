@@ -18,6 +18,7 @@ from dependency_injector.wiring import Provide
 from gateway.community.core.access_key import AccessKeyIssuer
 from gateway.community.core.app import AppRegistrar
 from gateway.community.core.authn import Authenticator
+from gateway.community.core.baas_migration import BaasKeyMigrator
 from gateway.community.core.forwarding import Forwarding
 from gateway.community.spi.principal_signer import PrincipalSigner
 
@@ -28,7 +29,11 @@ from ._container import (
     initialize_services,
     shutdown_services,
 )
-from ._credential_issuance import build_access_key_issuer, build_app_registrar
+from ._credential_issuance import (
+    build_access_key_issuer,
+    build_app_registrar,
+    build_baas_key_migrator,
+)
 from ._database import initialize_database
 from ._forwarding import build_forwarding
 from ._principal_signer import build_principal_signer
@@ -43,6 +48,7 @@ class BootstrapResult:
     principal_signer: PrincipalSigner
     access_key_issuer: AccessKeyIssuer
     app_registrar: AppRegistrar
+    baas_key_migrator: BaasKeyMigrator
 
     _container: ApplicationContainer = field(repr=False)
 
@@ -112,12 +118,14 @@ def bootstrap_app() -> BootstrapResult:
     db = container.plugins().database()
     access_key_issuer = build_access_key_issuer(db, principal_signer)
     app_registrar = build_app_registrar(db)
+    baas_key_migrator = build_baas_key_migrator(db)
     return BootstrapResult(
         authenticator=authenticator,
         forwarding=forwarding,
         principal_signer=principal_signer,
         access_key_issuer=access_key_issuer,
         app_registrar=app_registrar,
+        baas_key_migrator=baas_key_migrator,
         _container=container,
     )
 
@@ -143,6 +151,7 @@ def set_container(container: ApplicationContainer) -> None:
 __all__ = [
     "ApplicationContainer",
     "Authenticator",
+    "BaasKeyMigrator",
     "BootstrapResult",
     "DatabaseConfig",
     "Forwarding",
@@ -151,6 +160,7 @@ __all__ = [
     "build_access_key_issuer",
     "build_app_registrar",
     "build_authenticator",
+    "build_baas_key_migrator",
     "build_forwarding",
     "build_principal_signer",
     "initialize_database",
