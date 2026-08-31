@@ -90,15 +90,33 @@ Grouped by the property each set holds. Every one traces to `work-items.zh-CN.md
 
 ### The apply operation
 
-- [ ] `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` applies the stored
-      manifest and answers with the report: a per-entry outcome list plus the
-      summary derived from it.
+- [ ] **`POST /openapi/v1/bots/{bot_id}/config-manifest/apply` does not block.**
+      It accepts the request, mints an `apply_id`, starts the work, and answers
+      `202` with that id. Applying is device I/O today and fetching over the
+      network from W5 — a caller must never be holding an HTTP connection open
+      while it happens.
+- [ ] The `apply_id` is the caller's handle: `GET
+      …/config-manifest/applies/{apply_id}` returns that apply's report, in
+      progress or finished, and `GET …/config-manifest/last-apply` returns the
+      newest one for the bot. A caller who lost the id is not stranded.
+- [ ] A report carries a **status of its own** — `RUNNING` until the work
+      finishes, then the derived `SUCCEEDED` / `PARTIAL` / `FAILED`. A poller can
+      tell "still working" from "finished, partially", which is the distinction
+      W13's `APPLYING` state needs.
+- [ ] **A crashed or restarted process must not strand a report at `RUNNING`
+      forever.** The serialization lock's staleness rule is what bounds it, and a
+      report whose lock has gone stale reads as `FAILED` rather than as a poll
+      that never terminates.
 - [ ] A bot with **no stored manifest** applies nothing and reports nothing
       applied — not an error, the same rule that makes an absent manifest read as
       an empty document rather than a 404.
-- [ ] `dry_run=true` returns the plan the same shape a real apply returns, and
-      performs **no write of any kind** — not to a bot's configuration, and not
-      to the report storage either.
+- [ ] `dry_run=true` **stays synchronous** and returns the plan in the response —
+      a preview whose answer arrives by `apply_id` later is not a preview. It
+      performs **no write of any kind**: not to a bot's configuration, and not to
+      the report storage either, so it mints no `apply_id` and appears in no
+      history. This is safe to keep synchronous only while nothing is fetched;
+      W5 must revisit it when `resolve` starts making network calls, and the
+      spec says so rather than letting W5 discover it.
 - [ ] `GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply` returns the most
       recent report. A bot that has never been applied answers with an empty
       report, not a 404.
@@ -174,9 +192,18 @@ Grouped by the property each set holds. Every one traces to `work-items.zh-CN.md
 ### The two materialisers
 
 - [ ] `script` materialises as a write to the bot's startup script through
-      `BotStartupScriptService` and nothing else. It is delivered now and takes
-      effect at the next start; the response says so rather than leaving a caller
-      to guess.
+      `BotStartupScriptService` and nothing else.
+- [ ] **The response states when it takes effect, in the terms the mechanism
+      actually has.** The row is delivered now and executes at the bot's next
+      **device provisioning** — not "next start" loosely, and not "only the
+      first container". `BaasService._build_create_bot_payload` re-reads
+      `ac_bot_startup_script` on every payload it composes and appends it to
+      `after_create_cmd_hook`, and it is reached from `create_bot` *and*
+      `upgrade_bot`; `BotService.restart_bot` "releases the current device and
+      allocates a new one", so a restart composes a fresh payload and re-reads
+      the row. What it does **not** do is re-execute inside a container that is
+      already running. So a script written by a later manifest version does take
+      effect — at the next create, restart or republish.
 - [ ] `mcp` converges the bot's **enabled-server set** — the area §3.2 names —
       through the existing per-bot activation service: a declared server not yet
       active is activated, one active and no longer declared is deactivated, one
@@ -185,7 +212,7 @@ Grouped by the property each set holds. Every one traces to `work-items.zh-CN.md
       and an entry naming a server the tenant may not enable reports `failed`.
 - [ ] **`mcp[].config` is removed from schema v1** and refused by name, with
       `manifest-schema.zh-CN.md` §3.1 corrected in the same change. An `mcp`
-      entry is a bare `server_code`. See *Decisions* 9.
+      entry is a bare `server_code`. See *Decisions* 10.
 - [ ] **No apply path writes account-scoped MCP configuration.** A test pins
       that the `mcp` materialiser cannot reach `update_user_unified_config` or
       `sync_mcp_detail_to_all_bots` — the write that would fan a per-bot apply
@@ -278,13 +305,34 @@ Settled here rather than left open.
    lasts one work item. Also rejected: silently ignoring them, which would report
    `SUCCEEDED` for an apply that did nothing.
 
-3. **The summary is derived and inert.** `SUCCEEDED`/`PARTIAL`/`FAILED` exists for
+3. **Apply is started, not awaited.** `POST …/apply` answers `202` with an
+   `apply_id` and does the work in the background. Applying is device I/O today
+   and network fetching from W5 — a request that blocks on it is a request that
+   times out, and neither a UI nor a script can hold that connection. The id is
+   the caller's handle, and it is what makes W13's `APPLYING` poll state
+   possible at all: a state you can observe only exists if the work is something
+   you start and then ask about.
+
+   Three consequences worth stating, because each is a place this shape goes
+   wrong if left implicit. The lock is taken and the document re-validated
+   **before** an id is minted, so a caller never holds an id for an apply that
+   did not start. The report carries `RUNNING` as a status of its own, so a
+   poller can distinguish "still working" from "finished, partially" — the
+   distinction W13 needs. And a report must not strand at `RUNNING` when the
+   process dies mid-apply: the serialization lock's staleness rule bounds it,
+   and a stale-locked `RUNNING` report reads as `FAILED`.
+
+   `dry_run` stays synchronous: a preview whose answer arrives by polling is not
+   a preview. That holds only while nothing is fetched, so W5 must revisit it —
+   said here rather than left for W5 to discover.
+
+4. **The summary is derived and inert.** `SUCCEEDED`/`PARTIAL`/`FAILED` exists for
    a human reading a report. No code branches on it, and nothing propagates it to
    the bot record. The one aggregate that *does* drive a decision is per-category
    and deliberately so: "may this category be written at all", scoped so one
    category's failure never touches another's.
 
-4. **Apply serializes on its own lock, not the restart lock's row.** The pattern
+5. **Apply serializes on its own lock, not the restart lock's row.** The pattern
    is reused — a uniqueness constraint arbitrating concurrent inserts, a token
    compared on release, staleness judged on the database clock — because it is
    proven here and a second mechanism would be a second set of failure modes. The
@@ -292,14 +340,14 @@ Settled here rather than left open.
    different operations and blocking one on the other would be an accident, not a
    design.
 
-5. **Convergence compares materialised values, not document text.** Substitution
+6. **Convergence compares materialised values, not document text.** Substitution
    happens between the document and the write, so a comparison against the raw
    text would report `updated` forever on any document using a placeholder. Each
    materialiser is responsible for comparing what it is about to write against
    what is there — which is also the only comparison that can be right when a
    value was set through the category's own endpoint rather than by a manifest.
 
-6. **`Check(OWNER)` on an addressed bot is not wider than the owner-only
+7. **`Check(OWNER)` on an addressed bot is not wider than the owner-only
    categories, and the dominance test must be written to know that.** Three
    categories (`identity`, `resources`, and today's `startup-script`) are
    `OWNER_SCOPED`, which pins the bot to the caller's own. Apply is
@@ -311,18 +359,18 @@ Settled here rather than left open.
    equivalence is written down here so a future reader does not have to
    re-derive it.
 
-7. **The apply record and the apply report are one thing, not two.** §2.7 is
+8. **The apply record and the apply report are one thing, not two.** §2.7 is
    explicit that the per-entry records *are* the report and are apply's only
    output. One store, written once per apply, read by `last-apply`. `keep_last`
    later reads the materialised content from W11's store, which is a different
    question — what bytes were delivered — and does not make this a second record.
 
-8. **No notifications, no alerting, no push.** Recorded because an earlier
+9. **No notifications, no alerting, no push.** Recorded because an earlier
    revision of §2.7 required a surfaced notification and it was withdrawn: no
    design document ever specified one. The record is pull-only in the first
    phase.
 
-9. **`mcp[].config` leaves schema v1, and the schema document is corrected —
+10. **`mcp[].config` leaves schema v1, and the schema document is corrected —
    this is a defect found while specifying, not a scope cut.** §3.1 defines
    `config` as *"per-bot configuration, the same shape as the existing MCP
    config API"*. Those two halves cannot both be true. The platform's MCP
@@ -360,7 +408,7 @@ Settled here rather than left open.
   `script`.
 - **Narrowing the `mcp` entry to `{server_code}`** — the validator rule, the
   capability reason, and the `manifest-schema.zh-CN.md` §3.1 correction, in one
-  change (*Decisions* 9).
+  change (*Decisions* 10).
 - The apply record: its storage, its per-entry detail, and its guarantee of
   consistency after a mid-way failure.
 - `POST …/config-manifest/apply` with `dry_run`, and `GET …/config-manifest/last-apply`,

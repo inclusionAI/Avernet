@@ -28,8 +28,10 @@ than something to work around:
         `skipped` / `failed`. Its docstring records that `skipped` means "not
         written because its category was aborted" and that the author-facing
         `on_fetch_failure: skip` it used to mean no longer exists.
-  - [ ] `ApplyStatus` is `SUCCEEDED` / `PARTIAL` / `FAILED`, with a docstring
-        stating it is derived and that nothing reads it to make a decision.
+  - [ ] `ApplyStatus` is `RUNNING` plus the three terminal values
+        `SUCCEEDED` / `PARTIAL` / `FAILED`, with a docstring stating the
+        terminal three are derived and that nothing in the engine branches on
+        one. `RUNNING` exists because apply is started, not awaited.
   - [ ] `EntryResult` carries the construct, the entry's identity, its outcome,
         and an optional reason. `CategoryResult` carries its entry results **and
         a separate `removals` field** — removals are not `EntryOutcome` values,
@@ -55,8 +57,14 @@ than something to work around:
   - [ ] `ac_bot_config_manifest_apply` carries the columns the plan lists, keyed
         `(avernet_tenant, env, entity_id, bot_id)` with the same 256-char widths
         and the same index-budget reasoning `ac_bot_config_manifest` records.
-  - [ ] Its index is `(avernet_tenant, env, entity_id, bot_id, id DESC)` and the
-        column comment says why: `last-apply` is the only read.
+  - [ ] Two indexes, one per read, each with a comment naming its read:
+        `(…, id DESC)` for `last-apply`, and `(…, apply_id)` for the poll by id.
+        The second carries the bot key rather than being a bare `apply_id`
+        lookup — the id is not the authorization.
+  - [ ] `status` and `finished_at` support the two-write lifecycle: `RUNNING`
+        with a null `finished_at` on insert, terminal values on completion.
+  - [ ] **No `dry_run` column.** A dry run mints no id and writes no row, so
+        there is nothing to mark.
   - [ ] `report` is `Text().with_variant(mysql.MEDIUMTEXT(), "mysql")`, for the
         reason the manifest's `document` column records.
   - [ ] `ac_bot_config_manifest_apply_lock` mirrors `ac_bot_restart_lock`:
@@ -75,7 +83,7 @@ than something to work around:
 
 ## [ ] Task 3: Narrow the `mcp` entry, and fix the schema document
 - **Goal:** Close the account-scoped-config hazard at the vocabulary, so no
-  materialiser has to defend against it (spec *Decisions* 9).
+  materialiser has to defend against it (spec *Decisions* 10).
 - **Files:** `.../core/bot_config_manifest/schema/entries.py`,
   `docs/bot-config-manifest/manifest-schema.zh-CN.md`,
   `docs/bot-config-manifest/work-items.md` + `work-items.zh-CN.md`,
@@ -134,6 +142,11 @@ than something to work around:
 - **Done when:**
   - [ ] The `Materialiser` protocol declares the three stages with the plan's
         signatures, and each docstring names the criterion its boundary serves.
+  - [ ] **Every stage is `@abstractmethod` and each materialiser inherits the
+        Protocol**, the shape the repository and service contracts already use
+        here. A missing stage then fails at construction naming it, rather than
+        as an `AttributeError` the first time a category reaches that stage —
+        which for `write` would be mid-apply on a real bot.
   - [ ] `ResolveResult` carries `intents` and `failures` keyed by entry
         identity, so the orchestrator emits one `EntryResult` per declared entry
         without a materialiser knowing what a report is.
@@ -182,8 +195,13 @@ than something to work around:
         text — the convergence criterion depends on this and nothing else.
   - [ ] `write` calls `BotStartupScriptService.put` / `.delete` and does nothing
         else. No payload composition, no restart, no start-command touching.
-  - [ ] The result records that the script is **delivered now, effective at next
-        start** — a field, not something a caller infers.
+  - [ ] The result records that the script is **delivered now, executed at the
+        bot's next device provisioning** — a field, not something a caller
+        infers, and phrased in the terms the mechanism has. It is re-read from
+        `ac_bot_startup_script` by `_build_create_bot_payload` on every payload
+        (create, restart, republish), and never re-executed inside a container
+        already running. A test pins the wording against that behaviour so the
+        API cannot promise a timing the platform does not have.
 - **Depends on:** Tasks 5, 6
 
 ## [ ] Task 8: The `mcp` materialiser
@@ -219,8 +237,29 @@ than something to work around:
 - **Done when:**
   - [ ] A **second** contract, not more methods on the document service — the
         docstring gives Rule 9's reason and the different-bars reason.
-  - [ ] It exposes `apply(...)` with a `phases` parameter and `dry_run`, and
-        `last_apply(...)`. `phases` is what lets W13 call the halves separately.
+  - [ ] It exposes `start_apply(...)` (with `phases`), `dry_run(...)`,
+        `get_apply(...)` and `last_apply(...)`. `phases` is what lets W13 call
+        the halves separately.
+  - [ ] **`start_apply` does not wait for the apply.** It takes the lock,
+        re-validates the stored document, records `RUNNING` with a fresh
+        `apply_id`, starts the work and returns. A held lock or an invalid
+        document raises **before** an id is minted — a caller never gets an id
+        for an apply that did not start.
+  - [ ] The background thread is wrapped
+        `threading.Thread(target=bind_current_avernet_tenant(fn), daemon=True)`,
+        **inline at the construction site**, matching
+        `bot_publish_service.py:1292`. Never as an `@decorator` on a
+        module-level function: it captures at wrap-time, so a decorator captures
+        at *import*, when there is no request, and binds the default tenant
+        forever.
+  - [ ] A test proves the tenant survives into the thread — not by memory. A
+        wrong tenant here substitutes the wrong `${BOT_TENANT}` **and** reads
+        and writes the manifest tables under the wrong tenant: an isolation
+        failure, not just a correctness one.
+  - [ ] The report reaches a terminal status in a `finally`, so a raising
+        orchestrator still terminates it; a report left `RUNNING` by a killed
+        process reads as `FAILED` once its lock is stale, derived at read time
+        rather than by a second sweeper mechanism.
   - [ ] Every member is `@abstractmethod` and the service inherits the Protocol.
   - [ ] The `(Protocol, ConcreteService)` pair is registered in `_PAIRS`.
   - [ ] Bound in `bot_management_module.py` beside the document service, with a
@@ -234,8 +273,15 @@ than something to work around:
 - **Files:** `.../adapters/http/openapi_v1/bots/config_manifest_apply.py`,
   `.../bots/schemas.py`, `.../openapi_v1/__init__.py`, `.../responses.py`
 - **Done when:**
-  - [ ] `POST …/config-manifest/apply` applies and returns the report;
-        `dry_run` is a query parameter defaulting to false.
+  - [ ] `POST …/config-manifest/apply` answers **202 with the `apply_id`**,
+        having started the work rather than done it. It never blocks on device
+        I/O.
+  - [ ] `dry_run=true` is a query parameter that **stays synchronous** and
+        returns the plan in the body, minting no id and writing no row.
+  - [ ] `GET …/config-manifest/applies/{apply_id}` returns that apply's report,
+        `RUNNING` or terminal. Its query carries the bot key alongside the id,
+        so an id from another bot resolves to nothing — the id is not the
+        authorization.
   - [ ] `GET …/config-manifest/last-apply` returns the newest report, and a bot
         never applied answers with an **empty report, not a 404** — the rule the
         manifest's own `GET` already sets.
@@ -254,8 +300,9 @@ than something to work around:
   `src/backend/tests/community/adapters/http/openapi_v1/test_config_manifest_apply_bars.py`
 - **Done when:**
   - [ ] `POST …/apply` → `GRANT_CHECKED_ADDRESSED_BOT` +
-        `Check(PermissionLevel.OWNER, EDIT_LOCK)`; `GET …/last-apply` →
-        `GRANT_CHECKED_ADDRESSED_BOT` + `Check(PermissionLevel.MEMBER)`.
+        `Check(PermissionLevel.OWNER, EDIT_LOCK)`; `GET …/last-apply` and
+        `GET …/applies/{apply_id}` → `GRANT_CHECKED_ADDRESSED_BOT` +
+        `Check(PermissionLevel.MEMBER)`.
   - [ ] The rows carry comments giving W10's reasoning: the bar follows apply's
         own shape, not a maximum over categories; the admission mode follows
         from `Check`, not from taste.
@@ -290,8 +337,13 @@ than something to work around:
   - [ ] **No materialiser.** A document declaring `skills` and `script`
         delivers the script, fails every `skills` entry, reports `PARTIAL`.
   - [ ] **`dry_run` writes nothing**, proven by counting rows in both new tables
-        before and after.
-  - [ ] **Serialization.** Two concurrent applies: one proceeds, one 409s.
+        before and after — and it mints no `apply_id`.
+  - [ ] **Serialization.** Two concurrent applies: one proceeds, one 409s
+        **before minting an id**.
+  - [ ] **Async lifecycle.** `start_apply` returns while the work is still
+        running; the report reads `RUNNING`, then reaches a terminal status. A
+        raising orchestrator still terminates the report; a report left
+        `RUNNING` past the lock's TTL reads as `FAILED`.
   - [ ] **The record never over-claims.** A failure between two categories
         leaves nothing recorded as materialised that was not.
 - **Depends on:** Tasks 7, 8, 9
@@ -311,10 +363,16 @@ than something to work around:
 ## [ ] Task 14: Endpoint tests
 - **Files:** `src/backend/tests/community/endpoints/test_openapi_config_manifest_apply.py`
 - **Done when:**
-  - [ ] Both routes answer through the app with their declared bars enforced.
+  - [ ] All three routes answer through the app with their declared bars
+        enforced.
+  - [ ] `POST …/apply` returns **202 + `apply_id`**, and polling that id returns
+        the report.
+  - [ ] An `apply_id` belonging to a **different bot** resolves to nothing on
+        this bot's poll route.
   - [ ] No stored manifest ⇒ applies nothing, no error.
   - [ ] Never applied ⇒ `last-apply` is an empty report, not a 404.
-  - [ ] A partial apply is a **200 carrying a report**, not a 4xx/5xx.
+  - [ ] A partial apply is a **terminal report saying so**, not a 4xx/5xx — the
+        request succeeded; the apply was partial.
   - [ ] Every existing manifest, startup-script and MCP endpoint test passes
         **unedited**.
 - **Depends on:** Tasks 10, 11
@@ -333,7 +391,10 @@ than something to work around:
         wrote several, and leaving them is how a README becomes untrustworthy.
   - [ ] Design §3.4's ordering is annotated as **reversed** in the first phase,
         pointing at work-items §2.12, so a reader of the design is not misled.
-  - [ ] The user manual documents both operations, `dry_run`, the outcome
-        vocabulary, and — plainly — that applying a declared category removes
-        what it does not declare.
+  - [ ] The user manual documents all three operations, the start-and-poll
+        shape, `dry_run`, the outcome vocabulary, and — plainly — that applying
+        a declared category removes what it does not declare.
+  - [ ] It states when a `script` takes effect in the terms the mechanism has:
+        delivered on apply, executed at the next device provisioning (create,
+        restart, republish), never re-run inside a container already up.
 - **Depends on:** Task 14
