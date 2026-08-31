@@ -93,6 +93,9 @@ _STATIC_PLAN_TEMPLATES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # ``static_plan_id``/``template_input`` 任何字段(不存在"调用方指定模板"的契约),``static_plan_id``
     # 仅作 materialize 后写回 ``execution_config`` 的内部落库信号,供 engine 识别走预置 plan runtime。
     # 新增模板在末尾追加条目即可。
+    # 串行接力版置顶承接 OKR 内容;老 okr-implementation 保留于 plans/ 供 by-id 加载/历史测试,
+    # 不再被内容路由触发(同关键字排在后面,命中即被 relay 遮蔽)。切回老模板只需删掉 relay 条目。
+    ("okr-implementation-relay", ("okr", "转化率", "双十一", "大促")),
     ("okr-implementation", ("okr", "转化率", "双十一", "大促")),
 )
 
