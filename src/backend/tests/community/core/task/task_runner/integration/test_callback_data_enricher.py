@@ -143,3 +143,11 @@ class TestEnrichBcn:
         eg = cd.data["execution_graph"]
         assert eg["status"] == "DONE"
         assert eg["output"] == {}
+
+
+def test_parse_dict_strict_returns_empty_for_unsupported_value():
+    from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+        _parse_dict_strict,
+    )
+
+    assert _parse_dict_strict(123, field="result_json") == {}

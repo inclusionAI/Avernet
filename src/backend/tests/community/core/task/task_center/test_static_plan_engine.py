@@ -184,3 +184,11 @@ def test_static_plan_invalid_fallback_timeout_uses_default(monkeypatch):
     graph_service.initialize_graph(task_info)
 
     assert _engine(graph_service, _Runner())._static_fallback_delay("t1") == 80.0
+
+
+def test_static_plan_status_filter_ignores_empty_tokens():
+    from agentclaw.community.core.task.task_center.task_service_support import (
+        parse_status_filter,
+    )
+
+    assert parse_status_filter(", ,") is None
