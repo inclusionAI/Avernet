@@ -4,7 +4,10 @@
 > `ci_test.sh` 取真实变行覆盖(未提交的新文件不进 gate 的 diff——先提交后复跑)。
 
 1. **骨架** — 模块 README(Context Boundary:W2=传输安全边界)、`fetch/limits.py`(§5 限额单一
-   来源、`BCM_FETCH_TRANSPORT_ALLOW` 部署白名单、Resolver seam 类型)。
+   来源、部署白名单、Resolver seam 类型)。部署白名单走 application.yaml
+   (`user_config.bot_config_manifest.fetch_transport_allowlist`),由组合根解析注入——
+   初版实现用了环境变量,PR 评审(totalfrank)按仓库规则(AGENTS.md:裸环境访问只属于
+   配置装载/组合根)打回,已改造。
 2. **fetcher(TDD)** — 安全矩阵测试(35 条)先行;`guarded_fetcher.py` 五层防御:URL 形状 →
    全量解析+公网判定(含显式组播) → pinned 连接(Host/SNI 保留) → 逐跳重定向重校验 →
    流式字节上限+同时哈希;digest 不匹配=失败。Protocol 声明 `CredentialInjector`/

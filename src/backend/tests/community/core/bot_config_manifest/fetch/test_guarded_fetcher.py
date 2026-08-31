@@ -15,9 +15,11 @@ the #1470 acceptance lines live in these tests.
 from __future__ import annotations
 
 import hashlib
+import pathlib
 
 import httpx
 import pytest
+import yaml
 
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     AuthorizationPolicy,
@@ -29,6 +31,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     FETCH_ENTRY_LIMITS,
+    transport_allowlist_from_config,
 )
 
 BODY = b"kb-bytes" * 8
@@ -57,12 +60,17 @@ class _Requests:
 
 def _fetch(url: str, *, transport, resolver=None, digest: str | None = None,
            injector: CredentialInjector | None = None,
-           policy: AuthorizationPolicy | None = None, category: str = "resources_file"):
+           policy: AuthorizationPolicy | None = None, category: str = "resources_file",
+           allow: tuple[str, ...] = ()):
     # The seam is a BaseTransport, not a Client: the fetcher owns client
     # construction (one per hop), which is itself the no-reuse guarantee.
+    # ``allow`` is the constructor-injected deployment allowlist — the
+    # production path reads it from application.yaml (see the config tests
+    # below); env vars play no part.
     fetcher = GuardedFetcher(
         resolver=resolver or _resolver_public,
         _transport=httpx.MockTransport(transport),
+        transport_allowlist=allow,
     )
     return fetcher.fetch(
         FetchRequest(
@@ -145,19 +153,19 @@ def test_unsafe_schemes_and_shapes_are_refused_before_the_wire(url):
     assert transport.seen == []
 
 
-def test_http_is_allowed_only_for_a_deployment_allowlisted_host(monkeypatch):
-    monkeypatch.setenv("BCM_FETCH_TRANSPORT_ALLOW", "mirror.example")
+def test_http_is_allowed_only_for_a_deployment_allowlisted_host():
     resolver = lambda host: [PUBLIC_IP]  # noqa: E731
     transport = _Requests(_ok_handler())
-    obj = _fetch("http://mirror.example/x.bin", transport=transport, resolver=resolver)
+    obj = _fetch("http://mirror.example/x.bin", transport=transport,
+                 resolver=resolver, allow=("mirror.example",))
     assert obj.bytes == BODY
 
 
-def test_the_http_allowlist_does_not_cover_other_hosts(monkeypatch):
-    monkeypatch.setenv("BCM_FETCH_TRANSPORT_ALLOW", "mirror.example")
+def test_the_http_allowlist_does_not_cover_other_hosts():
     transport = _Requests(_ok_handler())
     with pytest.raises(FetchRefusedError):
-        _fetch("http://other.example/x.bin", transport=transport)
+        _fetch("http://other.example/x.bin", transport=transport,
+               allow=("mirror.example",))
     assert transport.seen == []
 
 
@@ -185,12 +193,12 @@ def test_one_private_among_public_answers_refuses_the_host():
     assert transport.seen == []
 
 
-def test_the_transport_allowlist_exempts_address_validation(monkeypatch):
+def test_the_transport_allowlist_exempts_address_validation():
     # A corporate mirror on an internal net: exact-host exemption.
-    monkeypatch.setenv("BCM_FETCH_TRANSPORT_ALLOW", "mirror.internal")
     transport = _Requests(_ok_handler())
     obj = _fetch(HTTPS_URL.replace(HOST, "mirror.internal"),
-                 transport=transport, resolver=lambda host: ["10.0.0.52"])
+                 transport=transport, resolver=lambda host: ["10.0.0.52"],
+                 allow=("mirror.internal",))
     assert obj.bytes == BODY
 
 
@@ -199,6 +207,57 @@ def test_unresolvable_host_is_refused_not_crashed():
         raise OSError("no DNS")
     with pytest.raises(FetchRefusedError, match="resolve"):
         _fetch(HTTPS_URL, transport=_Requests(_ok_handler()), resolver=no_such)
+
+
+# --- the deployment allowlist is config-borne, not environment ---------------
+
+
+def test_the_allowlist_parses_from_the_user_config_block():
+    # The yaml shape shipped in configs/application.yaml:
+    # user_config.bot_config_manifest.fetch_transport_allowlist.
+    allow = transport_allowlist_from_config({
+        "bot_config_manifest": {"fetch_transport_allowlist": [
+            "mirror.example", " mirror.internal ", "", "mirror.example",
+        ]},
+    })
+    assert allow == frozenset({"mirror.example", "mirror.internal"})
+
+
+def test_an_absent_block_or_key_means_no_exception():
+    assert transport_allowlist_from_config({}) == frozenset()
+    assert transport_allowlist_from_config(
+        {"bot_config_manifest": None}
+    ) == frozenset()
+    assert transport_allowlist_from_config(
+        {"bot_config_manifest": {"fetch_transport_allowlist": None}}
+    ) == frozenset()
+
+
+@pytest.mark.parametrize("settings", [
+    {"bot_config_manifest": "mirror.example"},
+    {"bot_config_manifest": {"fetch_transport_allowlist": "mirror.example"}},
+    {"bot_config_manifest": {"fetch_transport_allowlist": ["mirror.example", 42]}},
+])
+def test_a_malformed_block_is_a_configuration_error(settings):
+    # A typo in the yaml block must fail its reader loudly, never
+    # silently fetch strictly (or worse: silently widen).
+    with pytest.raises(ValueError):
+        transport_allowlist_from_config(settings)
+
+
+_SHIPPED_APP_YAML = (
+    pathlib.Path(__file__).resolve().parents[5]
+    / "src" / "agentclaw" / "community" / "configs" / "application.yaml"
+)
+
+
+def test_the_shipped_yaml_carries_a_neutral_empty_allowlist():
+    # The knob must exist and must ship empty: whatever a deployment
+    # exempts appears in its own overlay diff, never in community source.
+    tree = yaml.safe_load(_SHIPPED_APP_YAML.read_text(encoding="utf-8"))
+    settings = tree["user_config"]
+    assert settings["bot_config_manifest"]["fetch_transport_allowlist"] == []
+    assert transport_allowlist_from_config(settings) == frozenset()
 
 
 # --- redirects ---------------------------------------------------------------

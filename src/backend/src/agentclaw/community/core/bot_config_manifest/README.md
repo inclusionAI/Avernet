@@ -76,8 +76,10 @@ carries the budget in).
 It owns, for every byte the platform fetches on a manifest's behalf:
 
 - **the address is public and pinned**: URL shape first, DNS resolution next
-  (every resolved address must be globally routable — deployment
-  allowlists can override), and the connection goes to the *validated*
+  (every resolved address must be globally routable — the deployment
+  allowlist in `application.yaml`'s `user_config.bot_config_manifest`
+  block can exempt a named internal mirror, exact-host), and the
+  connection goes to the *validated*
   address with the original Host header and SNI preserved, so a hostname
   re-resolving between check and connect cannot reach a refused target;
 - **every redirect hop re-validated** (scheme, address, authorization

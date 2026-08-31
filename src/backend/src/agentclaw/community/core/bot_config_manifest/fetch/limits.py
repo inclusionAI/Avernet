@@ -6,17 +6,20 @@ Single source for every number the transport enforces — schema §5 of
 at PUT only what it can see at write time, and duplicating fetch numbers
 there is how the two drift.
 
-Deployment allowlists are deliberately env-driven and simple: they exist so
-an operator can turn a *deployment decision* (corporate HTTP mirror, an
-internal content proxy) into an exception without a code change. They widen
-nothing else — a host on the allowlist still goes through address
-validation.
+The deployment transport allowlist is *config-driven, not env-driven* — it
+turns a deployment decision (corporate HTTP mirror, an internal content
+proxy) into an exception through ``application.yaml``'s
+``user_config.bot_config_manifest`` block, per the repo rule that raw
+environment access belongs to config loading and composition roots, never
+to core. Core here stays pure: ``transport_allowlist_from_config`` parses
+the merged YAML tree, and the composition root hands the result to
+``GuardedFetcher`` as a constructor value. It widens nothing else — a host
+on the allowlist still goes through address validation.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 
 #: Address resolution seam: host → resolved IP string list. Real DNS via
 #: socket in production; tests inject deterministic answers (including the
@@ -54,17 +57,55 @@ MAX_REDIRECTS = 5
 SAFE_SCHEMES = frozenset({"https"})
 
 
-def fetch_transport_allowlist() -> frozenset[str]:
+#: Where the allowlist lives in the YAML tree, as one constant: the block
+#: name under ``user_config`` and the key inside it.
+_MANIFEST_BLOCK = "bot_config_manifest"
+_TRANSPORT_ALLOWLIST_KEY = "fetch_transport_allowlist"
+
+
+def transport_allowlist_from_config(
+    settings: Mapping[str, Any],
+) -> frozenset[str]:
     """Hosts exempted from public-only resolution and, where needed, the
-    https-only rule (``BCM_FETCH_TRANSPORT_ALLOW``, comma-separated).
+    https-only rule, from the merged ``user_config`` tree
+    (``AppConfig.user_config``) of ``application.yaml``.
 
     Matching is exact-host — the DNS-rebinding lesson: a hostname on the
     list is the hostname exempted. Allowlisted hosts keep every other rule:
     redirect budget, byte caps, hop-by-hop re-validation. The list admits
     *destinations*, not behaviors.
+
+    The block is optional and empty by default (no deployment exception);
+    a present-but-malformed block is a configuration error and raises
+    ``ValueError`` — a typo in yaml must fail its reader loudly, not
+    silently fetch strictly. Consumers: the composition root that
+    constructs ``GuardedFetcher`` reads ``user_config`` through this seam
+    (kept in core as a pure parser over the already-loaded tree, so core
+    never touches raw environment itself).
     """
-    raw = os.environ.get("BCM_FETCH_TRANSPORT_ALLOW", "")
-    return frozenset(part.strip() for part in raw.split(",") if part.strip())
+    block = settings.get(_MANIFEST_BLOCK)
+    if block is None:
+        return frozenset()
+    if not isinstance(block, Mapping):
+        raise ValueError(
+            f"user_config.{_MANIFEST_BLOCK} must be a mapping, "
+            f"got {type(block).__name__}"
+        )
+    hosts = block.get(_TRANSPORT_ALLOWLIST_KEY, [])
+    if hosts is None:
+        hosts = []
+    if isinstance(hosts, str) or not isinstance(hosts, (list, tuple)):
+        raise ValueError(
+            f"user_config.{_MANIFEST_BLOCK}.{_TRANSPORT_ALLOWLIST_KEY} "
+            f"must be a list of hostnames, got {type(hosts).__name__}"
+        )
+    for host in hosts:
+        if not isinstance(host, str):
+            raise ValueError(
+                f"user_config.{_MANIFEST_BLOCK}.{_TRANSPORT_ALLOWLIST_KEY} "
+                f"must contain hostnames only, got {type(host).__name__}"
+            )
+    return frozenset(h.strip() for h in hosts if h.strip())
 
 
 @dataclass(frozen=True)

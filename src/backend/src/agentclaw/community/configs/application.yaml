@@ -209,3 +209,14 @@ user_config:
       - "http://localhost:8888"
     allow_origin_regex: []
 
+  # bot-config-manifest 抓取（W2 guarded fetcher）的部署传输白名单。
+  # 精确 host 匹配：把"部署级目的地例外"（企业 HTTP 镜像、内部内容代理）
+  # 写进配置而不是改代码/环境变量。列入的 host 仅豁免两条规则——"仅
+  # 公网地址"与"仅 https"（仍可写 https://… 到内网 mirror，或对该 host
+  # 走 http）；逐跳重定向重校验、字节上限、跳数预算、digest 校验照常。
+  # 中性默认为空（无任何例外）；corp env overlay 在此处提供镜像 host。
+  # 读取方：core/bot_config_manifest/fetch/limits.py 的
+  # transport_allowlist_from_config（组合根在装配 GuardedFetcher 时调用）。
+  bot_config_manifest:
+    fetch_transport_allowlist: []
+

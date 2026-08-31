@@ -21,6 +21,9 @@
     "bcsfuse": {
       "base_url": "${BCS_FUSE_URL:-}"
     },
+    "bot_config_manifest": {
+      "fetch_transport_allowlist": []
+    },
     "bot_oss_config": {
       "bucket_name": "agentclaw",
       "endpoint": ""

@@ -43,7 +43,7 @@ import re
 import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, Protocol
+from typing import Iterable, Optional, Protocol
 
 import httpx
 
@@ -54,7 +54,6 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     Resolver as ResolverType,
-    fetch_transport_allowlist,
 )
 from agentclaw.community.log import get_logger
 
@@ -128,27 +127,6 @@ class FetchedObject:
     size_bytes: int
 
 
-def _validate_url(url: str) -> httpx.URL:
-    """Step 1: shape — refused before any DNS or wire contact."""
-    try:
-        parsed = httpx.URL(url)
-    except (httpx.InvalidURL, ValueError) as exc:
-        raise FetchRefusedError("untrusted URL shape") from exc
-    host = parsed.host
-    if not host:
-        raise FetchRefusedError("untrusted URL: no host")
-    if parsed.userinfo:
-        # Credentials in the URL would persist in logs and audits; the
-        # manifest carries a credential *name*, never a value.
-        raise FetchRefusedError("untrusted URL: userinfo present")
-    allow = fetch_transport_allowlist()
-    if parsed.scheme not in SAFE_SCHEMES and not (
-        parsed.scheme == "http" and host in allow
-    ):
-        raise FetchRefusedError(f"untrusted URL scheme: {parsed.scheme!r}")
-    return parsed
-
-
 def _refused_address(ip: ipaddress._BaseAddress) -> bool:
     """The refusal set, explicit.
 
@@ -166,34 +144,6 @@ def _refused_address(ip: ipaddress._BaseAddress) -> bool:
         or ip.is_link_local
         or ip.is_loopback
     )
-
-
-def _pinned_address(host: str, resolver: ResolverType) -> ipaddress._BaseAddress:
-    """Step 2: validate every resolved address, pin the lowest one.
-
-    The connection goes to a *validated* address — the name is never
-    consulted again on the wire, so a re-resolving hostname cannot swing
-    the connection to a refused target between check and connect. A host
-    on the deployment transport allowlist is exempt from the public-only
-    rule (the deployment declared the destination), never from any other.
-    """
-    exempt = host in fetch_transport_allowlist()
-    try:
-        resolved = resolver(host)
-    except FetchRefusedError:
-        raise
-    except OSError as exc:
-        raise FetchRefusedError(f"cannot resolve host: {host!r}") from exc
-    if not resolved:
-        raise FetchRefusedError(f"cannot resolve host: {host!r}")
-    try:
-        addresses = [ipaddress.ip_address(ip) for ip in resolved]
-    except ValueError as exc:
-        raise FetchRefusedError(f"unresolved host: {host!r}") from exc
-    if not exempt and any(_refused_address(ip) for ip in addresses):
-        # Every address validates, not a lucky first one.
-        raise FetchRefusedError(f"non-public address for host: {host!r}")
-    return min(addresses, key=lambda ip: (ip.version, int(ip)))
 
 
 def _host_header(url: httpx.URL) -> str:
@@ -214,7 +164,12 @@ class GuardedFetcher:
     """The one funnel.
 
     ``resolver`` and ``_transport`` are the two test seams: production uses
-    real DNS and no transport override. A **fresh ``httpx.Client`` per hop** —
+    real DNS and no transport override. ``transport_allowlist`` is the
+    deployment decision (config, not environment): the composition root
+    reads ``user_config.bot_config_manifest.fetch_transport_allowlist``
+    from ``application.yaml`` — via
+    :func:`~agentclaw.community.core.bot_config_manifest.fetch.limits.transport_allowlist_from_config`
+    — and passes it here at construction. A **fresh ``httpx.Client`` per hop** —
     no fetcher-lifetime client, deliberately: httpcore keys its connection
     pool on the *dialed* origin, which under IP pinning is the validated
     address, so a shared client would hand a later request (another
@@ -227,9 +182,59 @@ class GuardedFetcher:
         self,
         resolver: ResolverType = _resolve_via_socket,
         _transport: httpx.BaseTransport | None = None,
+        transport_allowlist: Iterable[str] = (),
     ) -> None:
         self._resolver = resolver
         self._transport = _transport
+        # frozenset ≡ exact-host matching: no pattern semantics to reason
+        # about, and a re-issued construction cannot mutate the exemption.
+        self._allow_hosts = frozenset(transport_allowlist)
+
+    def _validate_url(self, url: str) -> httpx.URL:
+        """Step 1: shape — refused before any DNS or wire contact."""
+        try:
+            parsed = httpx.URL(url)
+        except (httpx.InvalidURL, ValueError) as exc:
+            raise FetchRefusedError("untrusted URL shape") from exc
+        host = parsed.host
+        if not host:
+            raise FetchRefusedError("untrusted URL: no host")
+        if parsed.userinfo:
+            # Credentials in the URL would persist in logs and audits; the
+            # manifest carries a credential *name*, never a value.
+            raise FetchRefusedError("untrusted URL: userinfo present")
+        if parsed.scheme not in SAFE_SCHEMES and not (
+            parsed.scheme == "http" and host in self._allow_hosts
+        ):
+            raise FetchRefusedError(f"untrusted URL scheme: {parsed.scheme!r}")
+        return parsed
+
+    def _pinned_address(self, host: str) -> ipaddress._BaseAddress:
+        """Step 2: validate every resolved address, pin the lowest one.
+
+        The connection goes to a *validated* address — the name is never
+        consulted again on the wire, so a re-resolving hostname cannot swing
+        the connection to a refused target between check and connect. A host
+        on the deployment transport allowlist is exempt from the public-only
+        rule (the deployment declared the destination), never from any other.
+        """
+        exempt = host in self._allow_hosts
+        try:
+            resolved = self._resolver(host)
+        except FetchRefusedError:
+            raise
+        except OSError as exc:
+            raise FetchRefusedError(f"cannot resolve host: {host!r}") from exc
+        if not resolved:
+            raise FetchRefusedError(f"cannot resolve host: {host!r}")
+        try:
+            addresses = [ipaddress.ip_address(ip) for ip in resolved]
+        except ValueError as exc:
+            raise FetchRefusedError(f"unresolved host: {host!r}") from exc
+        if not exempt and any(_refused_address(ip) for ip in addresses):
+            # Every address validates, not a lucky first one.
+            raise FetchRefusedError(f"non-public address for host: {host!r}")
+        return min(addresses, key=lambda ip: (ip.version, int(ip)))
 
     def fetch(self, request: FetchRequest) -> FetchedObject:
         if request.expected_digest is not None and not _DIGEST_RE.match(
@@ -238,12 +243,12 @@ class GuardedFetcher:
             raise FetchRefusedError(
                 f"untrusted declared digest: {request.expected_digest!r}"
             )
-        current = _validate_url(request.url)
+        current = self._validate_url(request.url)
         if request.policy is not None:
             request.policy.reauthorize(current)
         hops = MAX_REDIRECTS
         while True:
-            pinned = _pinned_address(current.host, self._resolver)
+            pinned = self._pinned_address(current.host)
             pinned_url = current.copy_with(host=str(pinned))
             headers: dict[str, str] = {
                 # The original name is the identity on the wire — Host
@@ -279,7 +284,7 @@ class GuardedFetcher:
                         # fresh client above — always re-handshakes: a
                         # redirected request never rides the first hop's
                         # TLS connection.
-                        current = _validate_url(str(current.join(location)))
+                        current = self._validate_url(str(current.join(location)))
                         if request.policy is not None:
                             request.policy.reauthorize(current)
                         continue
