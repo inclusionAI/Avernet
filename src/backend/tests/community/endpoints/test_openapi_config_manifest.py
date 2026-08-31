@@ -4,26 +4,15 @@ Four routes, exercised through the assembled public app rather than a mocked
 router: the real gateway-principal verification, the ownership guard, the
 capability resolver, schema validation, and the repository round trip.
 
-Every seed turns the feature switch on. The switch decides whether this surface
-is served at all, and off is its shipping default — a case that did not set it
-would be asserting the 404 rather than the operation. The one case that *is*
-about the switch lives in
-``tests/community/adapters/http/openapi_v1/test_config_manifest_surface.py``,
-where it can be asserted without leaving process state behind for whichever
-case the runner picks next.
 """
 
 from __future__ import annotations
 
-import os
 import time
 
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.core.bot_config_manifest.feature_flag import (
-    CONFIG_MANIFEST_ENABLED_ENV,
-)
 from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
     BotRepository,
@@ -32,6 +21,8 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
+from tests.community.factories.access import make_staff_user
+from tests.community.factories.bot_collaborator import make_collaborator
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -71,7 +62,7 @@ class _Resolver:
         return _Secret()
 
 
-def _principal() -> str:
+def _principal(user_id: str = _OWNER) -> str:
     """A gateway-signed principal naming a **user** and no application.
 
     No ``app`` entry on purpose: that is what makes the caller a human, and a
@@ -88,7 +79,7 @@ def _principal() -> str:
             "principals": [
                 {
                     "type": "user",
-                    "subject": {"id": _OWNER, "username": "manifest@example.test"},
+                    "subject": {"id": user_id, "username": f"{user_id}@example.test"},
                 }
             ],
         },
@@ -100,12 +91,21 @@ def _principal() -> str:
 _HEADERS = {PRINCIPAL_HEADER: _principal()}
 _QUERY = {"user_id": _OWNER}
 
+#: A collaborator holding MEMBER on the owner's bot. These operations are
+#: collaborator-scoped — MEMBER to read, ADMIN to write — so this caller is the
+#: one that proves the bars are real rather than decorative.
+#: Collaboration is a service-bot notion in this codebase, so the shared bot is
+#: a service bot; the owner-scoped cases above keep using the personal one.
+_SHARED_BOT_ID = "config-manifest-shared-bot"
+_MEMBER = "config-manifest-member"
+_MEMBER_HEADERS = {PRINCIPAL_HEADER: _principal(_MEMBER)}
+#: ``user_id`` is the caller; ``owner_id`` names whose bot is addressed.
+_MEMBER_QUERY = {"user_id": _MEMBER, "owner_id": _OWNER}
 
-def _enable_surface() -> None:
-    os.environ[CONFIG_MANIFEST_ENABLED_ENV] = "true"
 
-
-def _insert_bot(world, *, bot_id: str, engine: str = "openclaw") -> None:
+def _insert_bot(
+    world, *, bot_id: str, engine: str = "openclaw", bot_type: str = "personal"
+) -> None:
     """A bot with **no** binding — PENDING between create and first start.
 
     Deliberately the supported case: it is exactly when an owner wants to attach
@@ -123,19 +123,17 @@ def _insert_bot(world, *, bot_id: str, engine: str = "openclaw") -> None:
             "creator_id": _OWNER,
             "status": "ACTIVE",
             "active_engine": engine,
-            "bot_type": "personal",
+            "bot_type": bot_type,
         }
     )
 
 
 def _seed_bot(world) -> None:
-    _enable_surface()
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     _insert_bot(world, bot_id=_BOT_ID)
 
 
 def _seed_teclaw_bot(world) -> None:
-    _enable_surface()
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     _insert_bot(world, bot_id=_TECLAW_BOT_ID, engine="teclaw")
 
@@ -153,9 +151,32 @@ def _seed_bot_with_manifest(world) -> None:
     )
 
 
+def _seed_member(world) -> None:
+    """A shared service bot carrying a manifest, plus a MEMBER collaborator."""
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_SHARED_BOT_ID, bot_type="service")
+    world.get(BotConfigManifestRepositoryProtocol).upsert(
+        env=get_current_env(),
+        entity_id=_OWNER,
+        bot_id=_SHARED_BOT_ID,
+        document=_DOCUMENT,
+        size_bytes=len(_DOCUMENT.encode("utf-8")),
+        schema_version=1,
+        modifier=_OWNER,
+    )
+    make_staff_user(world, user_id=_MEMBER)
+    make_collaborator(
+        world,
+        bot_id=_SHARED_BOT_ID,
+        owner_id=_OWNER,
+        user_id=_MEMBER,
+        role="member",
+        operator_id=_OWNER,
+    )
+
+
 def _seed_no_bot(world) -> None:
-    """Only the verifier and the switch — the bot deliberately does not exist."""
-    _enable_surface()
+    """Only the verifier — the bot deliberately does not exist."""
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
 
 
@@ -410,3 +431,45 @@ def get_config_manifest_capabilities_ok():
 )
 def get_config_manifest_capabilities_unknown_bot():
     """Capabilities are a property of a bot the caller can reach."""
+
+
+# ── collaborator bars ──────────────────────────────────────────────────────
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/config-manifest",
+    scenario="a_member_collaborator_can_read_it",
+    input=CaseInput(
+        path_params={"bot_id": _SHARED_BOT_ID},
+        query_params=_MEMBER_QUERY,
+        headers=_MEMBER_HEADERS,
+    ),
+    seed=_seed_member,
+    expect=ExpectSuccess(
+        status=200, json_contains={"code": 200000, "data": {"document": _DOCUMENT}}
+    ),
+)
+def get_config_manifest_as_member():
+    """Reading how a bot is configured is part of working on it, so the read bar
+    is MEMBER — the same bar the channels reads take."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/{bot_id}/config-manifest",
+    scenario="a_member_collaborator_cannot_write_it",
+    input=CaseInput(
+        path_params={"bot_id": _SHARED_BOT_ID},
+        query_params=_MEMBER_QUERY,
+        headers=_MEMBER_HEADERS,
+        json_body={"document": "schema_version: 1\n"},
+    ),
+    seed=_seed_member,
+    expect=ExpectError(status=404, json_contains={"data": None}),
+)
+def put_config_manifest_as_member_is_refused():
+    """Replacing the manifest decides what the bot *is*, so the write bar is
+    ADMIN. The refusal is a masked 404, byte-identical to a bot that does not
+    exist — anything finer would confirm the bot to a caller who may not reach
+    it."""

@@ -148,23 +148,6 @@ class StartupScriptUnsupportedError(Exception):
     """
 
 
-class ConfigManifestSurfaceDisabledError(Exception):
-    """The config-manifest routes are switched off in this deployment (→ 404).
-
-    A 404, not a 503 or a 501: 503 promises the address will answer once
-    something recovers, and 501 confirms the address exists and is simply not
-    implemented. Neither is true — the surface is deliberately not being served
-    yet — and an address that is not served should not confirm its own
-    existence, which is the same rule :class:`BotAccessRefusedError` follows one
-    step further in.
-
-    The switch is a deployment gate over an unfinished feature, not an
-    authorization decision, so it lives here rather than in ``admission.py`` or
-    ``authorization.py``: those two decide *who* may reach an operation, and
-    both still apply behind it.
-    """
-
-
 class DeptLookupError(Exception):
     """The staff directory could not answer a department lookup (→ 502).
 

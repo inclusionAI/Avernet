@@ -26,6 +26,15 @@ implementation would appear. :func:`resolve_capabilities` takes the two values;
 :func:`capabilities_for_bot` is a two-line adapter that reads them off a record.
 Two entry points, one body.
 
+**Constructs are enums, and a construct's kind is its type.** ``kind`` and
+``name`` are not two free strings that happen to be used together: most of their
+combinations are meaningless — there is no ``source`` called ``mcp``. So each
+kind gets its own enum, those three enums *are* the construct vocabulary, and
+``kind`` is derived from which enum a value belongs to. An illegal pair is not
+rejected at runtime; it cannot be written. The wire shape is unchanged — a
+construct still serialises as ``{kind, name, supported, reason}`` — but nothing
+inside this package passes the two around separately.
+
 **No third "unknown" state.** Support is a property of the bot record, never of
 a live lookup (work-items §2.5, and the same reasoning ``bot_startup_script``
 records for its own support check): ``is_teclaw`` is the engine authority and
@@ -35,43 +44,88 @@ never look like a verdict about what a bot supports.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from enum import StrEnum
+from typing import Any, Callable, Iterable
 
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
     SUPPORTED_ENGINE_TYPES,
 )
 
-#: Construct kinds. Strings rather than an enum because they cross the HTTP
-#: boundary verbatim and a client reads them as strings either way.
-KIND_CATEGORY = "category"
-KIND_SECTION = "section"
-KIND_SOURCE = "source"
+class ConstructKind(StrEnum):
+    """What sort of thing a construct is. Derived, never chosen at a call site."""
 
-#: The six categories under ``manifest``, in the order schema §1 lists them.
-#: This is also the *closed* set the parser admits: an unknown key under
-#: ``manifest`` is refused, not ignored.
-CATEGORIES: tuple[str, ...] = (
-    "mcp",
-    "resources",
-    "skills",
-    "engine_config",
-    "identity",
-    "cli_tools",
-)
+    CATEGORY = "category"
+    SECTION = "section"
+    SOURCE = "source"
 
-#: Top-level sections that are not categories.
-SECTION_SCRIPT = "script"
 
-#: How an entry names its content. Four forms, and the distinction is
-#: load-bearing for support: two of them have no resolver in the first wave.
-#: ``git`` covers both spellings of a git source — inline on an entry and
-#: declared under ``sources`` — because one resolver would serve both and
-#: neither has it yet.
-SOURCE_URL = "url"
-SOURCE_GIT = "git"
-SOURCE_NAMED = "named"
-SOURCE_CONTENT = "content"
+class ManifestCategory(StrEnum):
+    """The six categories under ``manifest``, in the order schema §1 lists them.
+
+    Also the *closed* set the parser admits: an unknown key under ``manifest``
+    is refused, not ignored.
+    """
+
+    MCP = "mcp"
+    RESOURCES = "resources"
+    SKILLS = "skills"
+    ENGINE_CONFIG = "engine_config"
+    IDENTITY = "identity"
+    CLI_TOOLS = "cli_tools"
+
+
+class ManifestSection(StrEnum):
+    """A top-level section that is not a category."""
+
+    SCRIPT = "script"
+
+
+class SourceForm(StrEnum):
+    """How an entry names its content.
+
+    Four forms, and the distinction is load-bearing for support: two of them
+    have no resolver in the first wave. ``GIT`` covers both spellings of a git
+    source — inline on an entry and declared under ``sources`` — because one
+    resolver would serve both and neither has it yet.
+    """
+
+    URL = "url"
+    GIT = "git"
+    NAMED = "named"
+    CONTENT = "content"
+
+
+#: Any of the three. A value's own type says which kind it is, which is what
+#: makes an ill-formed ``(kind, name)`` pair unwritable rather than merely
+#: invalid.
+Construct = ManifestCategory | ManifestSection | SourceForm
+
+_KIND_BY_TYPE: dict[type, ConstructKind] = {
+    ManifestCategory: ConstructKind.CATEGORY,
+    ManifestSection: ConstructKind.SECTION,
+    SourceForm: ConstructKind.SOURCE,
+}
+
+
+def kind_of(construct: Construct) -> ConstructKind:
+    """The kind a construct belongs to, read off its type."""
+    return _KIND_BY_TYPE[type(construct)]
+
+
+def parse_category(value: object) -> ManifestCategory | None:
+    """A ``manifest`` key as a category, or ``None`` when it is not one.
+
+    The parser needs this because a submitted document may name anything;
+    everything *inside* this package works in enums from there on.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return ManifestCategory(value)
+    except ValueError:
+        return None
+
 
 #: The schema versions this build parses. A document naming anything else is
 #: refused rather than best-effort parsed.
@@ -123,16 +177,20 @@ _REASON_UNKNOWN_ENGINE = (
 class Capability:
     """Whether one construct can be accepted, and why not when it cannot."""
 
-    kind: str
-    name: str
+    construct: Construct
     supported: bool
     reason: str
+
+    @property
+    def kind(self) -> ConstructKind:
+        """Read off the construct's type, never stored — so it cannot disagree."""
+        return kind_of(self.construct)
 
     def as_dict(self) -> dict[str, Any]:
         """The wire shape. Public contract — flat, and stable across versions."""
         return {
-            "kind": self.kind,
-            "name": self.name,
+            "kind": self.kind.value,
+            "name": self.construct.value,
             "supported": self.supported,
             "reason": self.reason,
         }
@@ -147,28 +205,29 @@ class ManifestCapabilities:
     schema_versions: tuple[int, ...]
     constructs: tuple[Capability, ...]
 
-    def find(self, kind: str, name: str) -> Capability | None:
-        """The verdict for one construct, or ``None`` if it is not a construct."""
+    def find(self, construct: Construct) -> Capability | None:
+        """The verdict for one construct, or ``None`` if it has no row."""
         for capability in self.constructs:
-            if capability.kind == kind and capability.name == name:
+            if capability.construct is construct:
                 return capability
         return None
 
-    def supports(self, kind: str, name: str) -> bool:
+    def supports(self, construct: Construct) -> bool:
         """Whether the construct is supported.
 
-        An unrecognised construct is **not** supported. That default is the
-        conservative half of this module's rule: a name nobody has ruled on is a
-        name nothing applies.
+        A construct with no row is **not** supported — the conservative half of
+        this module's rule: something nobody ruled on is something nothing
+        applies. Unreachable while every enum member gets a row below, which a
+        test holds.
         """
-        capability = self.find(kind, name)
+        capability = self.find(construct)
         return capability is not None and capability.supported
 
-    def reason_for(self, kind: str, name: str) -> str:
+    def reason_for(self, construct: Construct) -> str:
         """Why the construct is unsupported; ``""`` when it is supported."""
-        capability = self.find(kind, name)
+        capability = self.find(construct)
         if capability is None:
-            return f"unknown {kind}: {name}"
+            return f"no verdict for {kind_of(construct).value} '{construct.value}'"
         return capability.reason
 
     def as_payload(self) -> dict[str, Any]:
@@ -213,62 +272,66 @@ def resolve_capabilities(
     # and a document's acceptability must not turn on an operator's env var.
     unknown_engine = not teclaw and engine not in SUPPORTED_ENGINE_TYPES
 
-    def verdict(blocked_reason: str | None) -> tuple[bool, str]:
+    def capability(construct: Construct, blocked_reason: str | None) -> Capability:
         """Deployment-wide refusals win over per-construct ones."""
         if desktop:
-            return False, _REASON_DESKTOP
+            return Capability(construct, False, _REASON_DESKTOP)
         if unknown_engine:
-            return False, _REASON_UNKNOWN_ENGINE
+            return Capability(construct, False, _REASON_UNKNOWN_ENGINE)
         if blocked_reason:
-            return False, blocked_reason
-        return True, ""
+            return Capability(construct, False, blocked_reason)
+        return Capability(construct, True, "")
 
-    def capability(kind: str, name: str, blocked_reason: str | None) -> Capability:
-        supported, reason = verdict(blocked_reason)
-        return Capability(kind=kind, name=name, supported=supported, reason=reason)
-
-    blocked_by_category: dict[str, str | None] = {
-        "mcp": None,
-        # Accepted with no materializer *yet* (W6) — which is exactly what the
-        # feature flag over these routes is for, and why that flag lifts at W8
-        # rather than at W5. An accepted document sits inert until then.
-        "resources": None,
-        "skills": None,
-        "engine_config": _REASON_ENGINE_CONFIG,
-        "identity": None,
-        "cli_tools": _REASON_CLI_TOOLS,
+    blocked: dict[Construct, str | None] = {
+        ManifestCategory.MCP: None,
+        # Accepted with no materializer *yet* (W6). An accepted document sits
+        # inert until then, which is what `GET …/capabilities` and the module
+        # README say out loud rather than leaving a caller to discover.
+        ManifestCategory.RESOURCES: None,
+        ManifestCategory.SKILLS: None,
+        ManifestCategory.ENGINE_CONFIG: _REASON_ENGINE_CONFIG,
+        ManifestCategory.IDENTITY: None,
+        ManifestCategory.CLI_TOOLS: _REASON_CLI_TOOLS,
+        ManifestSection.SCRIPT: _script_reason(teclaw=teclaw, desktop=desktop),
+        SourceForm.URL: None,
+        SourceForm.CONTENT: None,
+        SourceForm.GIT: _REASON_GIT_SOURCE,
+        SourceForm.NAMED: _REASON_NAMED_SOURCE,
     }
-
-    script_reason: str | None = None
-    if teclaw:
-        script_reason = _REASON_TECLAW_SCRIPT
-    elif desktop:
-        # Named for its own reason rather than falling through to the blanket
-        # desktop one: this refusal predates the manifest (#926 refuses a
-        # startup script on a desktop bot today) and survives if desktop ever
-        # comes into scope for the rest of the vocabulary.
-        script_reason = _REASON_DESKTOP_SCRIPT
-
-    constructs: list[Capability] = [
-        capability(KIND_CATEGORY, name, blocked_by_category[name])
-        for name in CATEGORIES
-    ]
-    constructs.append(capability(KIND_SECTION, SECTION_SCRIPT, script_reason))
-    constructs.extend(
-        [
-            capability(KIND_SOURCE, SOURCE_URL, None),
-            capability(KIND_SOURCE, SOURCE_CONTENT, None),
-            capability(KIND_SOURCE, SOURCE_GIT, _REASON_GIT_SOURCE),
-            capability(KIND_SOURCE, SOURCE_NAMED, _REASON_NAMED_SOURCE),
-        ]
-    )
 
     return ManifestCapabilities(
         engine_type=engine,
         bot_type=bot,
         schema_versions=SUPPORTED_SCHEMA_VERSIONS,
-        constructs=tuple(constructs),
+        # Every member of every construct enum, in declaration order. Built by
+        # iterating the enums rather than by listing them again, so a construct
+        # added to the vocabulary without a verdict is a KeyError here — at
+        # import of the first call — instead of a silent "unsupported".
+        constructs=tuple(
+            capability(construct, blocked[construct])
+            for construct in _all_constructs()
+        ),
     )
+
+
+def _all_constructs() -> Iterable[Construct]:
+    """Every construct, categories first, then sections, then source forms."""
+    yield from ManifestCategory
+    yield from ManifestSection
+    yield from SourceForm
+
+
+def _script_reason(*, teclaw: bool, desktop: bool) -> str | None:
+    """Why ``script`` is refused for this bot, or ``None`` when it is not."""
+    if teclaw:
+        return _REASON_TECLAW_SCRIPT
+    if desktop:
+        # Named for its own reason rather than falling through to the blanket
+        # desktop one: this refusal predates the manifest (#926 refuses a
+        # startup script on a desktop bot today) and survives if desktop ever
+        # comes into scope for the rest of the vocabulary.
+        return _REASON_DESKTOP_SCRIPT
+    return None
 
 
 def capabilities_for_bot(

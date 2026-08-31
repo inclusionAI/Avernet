@@ -205,6 +205,26 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
+    # Config manifest. Read at MEMBER, write at ADMIN — the same split the
+    # channels rows above make, and for the same reason: reading how a bot is
+    # configured is part of working on it, while replacing that configuration
+    # decides what the bot is. There is no reason a collaborator who may read a
+    # bot's channels may not read its manifest, which is why these are not
+    # OWNER_SCOPED like the startup script beside them.
+    #
+    # No EDIT_LOCK. The lock asks who holds the Bot's *draft*, and a manifest is
+    # not drafted — one `PUT` replaces the whole document, and the row it lands
+    # on is guarded by its own uniqueness key rather than by a lease.
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest"): Check(PermissionLevel.MEMBER),
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest/capabilities",
+    ): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/config-manifest"): Check(PermissionLevel.ADMIN),
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/config-manifest",
+    ): Check(PermissionLevel.ADMIN),
     ("GET", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
@@ -373,14 +393,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
-    # Same bar as the startup script, for the same reason: the manifest decides
-    # what a bot is configured with, no collaborator level has been decided for
-    # it, and the operation resolves the bot as (bot_id, caller) so only the
-    # owner reaches it. Migrates with the rest of the OWNER_SCOPED rows.
-    ("DELETE", "/openapi/v1/bots/{bot_id}/config-manifest"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest/capabilities"): OWNER_SCOPED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/config-manifest"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/status"): OWNER_SCOPED,
 
     # ── Operations that address no bot ────────────────────────────────────

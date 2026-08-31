@@ -10,6 +10,7 @@ from datetime import datetime
 
 import pytest
 
+from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
 from agentclaw.community.core.bot_config_manifest.repository.models import (
     BotConfigManifestRecord,
 )
@@ -230,7 +231,7 @@ def test_the_read_and_write_paths_share_one_capability_answer(service):
     assert from_record == from_fields
 
     script_doc = "schema_version: 1\nscript:\n  body: |\n    echo hi\n"
-    assert not from_record.supports("section", "script")
+    assert not from_record.supports(ManifestSection.SCRIPT)
     with pytest.raises(ManifestValidationError):
         service.put(
             entity_id="ent",

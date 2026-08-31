@@ -3,22 +3,21 @@
 Four operations on their own router, mounted before the ``{bot_id}`` wildcard
 group like every other bot-component group.
 
-**The whole group is behind a feature switch.** These are public addresses, and
-until the apply engine lands an accepted manifest does nothing — a caller would
-write one, receive a 200, and watch their bot stay exactly as it was. The switch
-answers `404` rather than `503` for the same reason a bot the caller may not
-reach answers 404: an address that is not being served should not confirm that
-it exists. See ``core/bot_config_manifest/feature_flag.py`` for why it lifts at
-W8 and why it is not what keeps this surface honest.
-
 Nothing about *what a document may contain* is decided here. The router resolves
 the bot, hands the service the two fields capabilities are answered from, and
 shapes the result; the rules live in ``core/bot_config_manifest``.
+
+**The bot may be someone else's.** These operations are collaborator-scoped —
+MEMBER to read, ADMIN to write (``authorization.py``) — so the owner arrives as
+``OwnerIdDep`` and the bot is resolved as *theirs*, while ``UserIdDep`` stays the
+acting caller. The two are the same person on a bot you own and different on one
+you collaborate on, which is exactly why the audit stamp takes the actor and the
+bot lookup takes the owner.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -28,8 +27,8 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import (
-    ConfigManifestSurfaceDisabledError,
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
@@ -44,9 +43,6 @@ from agentclaw.community.api.bot_config_manifest_service import (
     BotConfigManifestServiceProtocol,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_config_manifest.feature_flag import (
-    config_manifest_surface_enabled,
-)
 from agentclaw.community.di import Injected
 
 from .config_manifest_support import (
@@ -58,22 +54,10 @@ from .config_manifest_support import (
 from .schemas import ConfigManifest, ConfigManifestCapabilities, ConfigManifestWrite
 
 
-def require_config_manifest_surface() -> None:
-    """Refuse every operation in this group while the switch is off.
-
-    Declared once, on the router, rather than per handler: the point of the
-    switch is that the *surface* is not served, and a per-handler declaration is
-    one a fifth route could be added without.
-    """
-    if not config_manifest_surface_enabled():
-        raise ConfigManifestSurfaceDisabledError()
-
-
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}",
     tags=["bots"],
     route_class=PublicAPIRoute,
-    dependencies=[Depends(require_config_manifest_surface)],
 )
 
 
@@ -87,7 +71,8 @@ router = APIRouter(
 async def get_bot_config_manifest(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     manifest_service: BotConfigManifestServiceProtocol = Injected(
         BotConfigManifestServiceProtocol
@@ -101,7 +86,7 @@ async def get_bot_config_manifest(
     The document is returned exactly as it was written, byte for byte, including
     the `script` body's quoting and whitespace.
     """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    bot = bot_service.get_bot(bot_id, owner_id)  # addressed owner/tenant guard
     entity_id = manifest_target(bot)
     record = manifest_service.get(entity_id=entity_id, bot_id=bot_id)
     return envelope(manifest_payload(bot_id, record), request)
@@ -118,7 +103,8 @@ async def update_bot_config_manifest(
     bot_id: BotIdPath,
     body: ConfigManifestWrite,
     request: Request,
-    owner_id: UserIdDep,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
     caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     manifest_service: BotConfigManifestServiceProtocol = Injected(
@@ -141,7 +127,7 @@ async def update_bot_config_manifest(
 
     Storing a manifest applies nothing yet.
     """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    bot = bot_service.get_bot(bot_id, owner_id)  # addressed owner/tenant guard
     entity_id = manifest_target(bot)
     result = manifest_service.put(
         entity_id=entity_id,
@@ -149,7 +135,7 @@ async def update_bot_config_manifest(
         document=body.document,
         # From the verified caller, never the body — and naming the application
         # when one is acting, not the user it acted for.
-        modifier=audit_actor(caller, owner_id),
+        modifier=audit_actor(caller, actor_id),
         active_engine=bot.get("active_engine"),
         bot_type=bot.get("bot_type"),
     )
@@ -168,7 +154,8 @@ async def update_bot_config_manifest(
 async def delete_bot_config_manifest(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     manifest_service: BotConfigManifestServiceProtocol = Injected(
         BotConfigManifestServiceProtocol
@@ -179,7 +166,7 @@ async def delete_bot_config_manifest(
     Entities a previous apply produced are **not** removed: this clears the
     declaration, not the assets it named.
     """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    bot = bot_service.get_bot(bot_id, owner_id)  # addressed owner/tenant guard
     entity_id = manifest_target(bot)
     manifest_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
@@ -195,7 +182,8 @@ async def delete_bot_config_manifest(
 async def get_bot_config_manifest_capabilities(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     manifest_service: BotConfigManifestServiceProtocol = Injected(
         BotConfigManifestServiceProtocol
@@ -210,6 +198,6 @@ async def get_bot_config_manifest_capabilities(
 
     An unrecognised engine supports nothing.
     """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
+    bot = bot_service.get_bot(bot_id, owner_id)  # addressed owner/tenant guard
     capabilities = manifest_service.capabilities_for_bot(bot)
     return envelope(capabilities_payload(bot_id, capabilities), request)

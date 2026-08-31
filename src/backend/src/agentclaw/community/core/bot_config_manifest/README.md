@@ -88,9 +88,11 @@ on `/openapi/v1/bots/{bot_id}/config-manifest`, and `GET
 …/config-manifest/capabilities`), and the Service API contract the adapter
 depends on is `api/bot_config_manifest_service.py`.
 
-Those routes are hidden behind `feature_flag.py` until W8 — see that module for
-why the flag lifts there and not at W5, and why it is not what keeps the surface
-honest.
+**There is no feature switch over the group.** An earlier revision hid it until
+apply landed; the surface ships enabled instead, and what keeps it honest is the
+capability resolver above — which had to keep working after any switch was
+removed anyway. Until apply lands, an accepted manifest is stored and read back
+and does nothing else, which is what `GET …/capabilities` and this README say.
 
 ## Known gaps, recorded rather than discovered
 
@@ -122,6 +124,13 @@ provides:
   - BotConfigManifestModel
   - ManifestCapabilities
   - Capability
+  - Construct
+  - ConstructKind
+  - ManifestCategory
+  - ManifestSection
+  - SourceForm
+  - kind_of
+  - parse_category
   - ManifestWriteResult
   - ManifestValidationError
   - ManifestTooLargeError
@@ -131,7 +140,6 @@ provides:
   - resolve_capabilities
   - capabilities_for_bot
   - validate_document
-  - config_manifest_surface_enabled
   - MAX_DOCUMENT_BYTES
   - MAX_ENTRIES_PER_CATEGORY
   - MAX_INLINE_CONTENT_BYTES

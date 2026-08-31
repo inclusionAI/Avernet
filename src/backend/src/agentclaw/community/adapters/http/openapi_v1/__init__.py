@@ -337,6 +337,10 @@ _SUBGROUPS = [
 # declares it explicitly so the admission rule is visible where the public
 # surface is assembled. FastAPI caches the shared dependency per request.
 _ADDRESSED_BOT_SUBGROUPS = [
+    # The config manifest is collaborator-scoped (MEMBER to read, ADMIN to
+    # write), so it may address a shared bot and takes the addressed-owner
+    # grant rather than the own-bot one.
+    config_manifest_router,
     # Bot grants lend the delegating user's live Bot permissions. Editors and
     # render screens therefore use the same addressed-owner grant boundary as
     # the other shared-Bot configuration groups; their services still enforce
@@ -375,11 +379,6 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
-    # The config manifest is own-bot on all four of its operations, so the grant
-    # check is declared once for the group. It carries its own feature switch as
-    # a router-level dependency — the switch decides whether the surface is
-    # served at all, which is a different question from who may reach it.
-    config_manifest_router,
     identity_router,
     resources_router,
     routines_router,

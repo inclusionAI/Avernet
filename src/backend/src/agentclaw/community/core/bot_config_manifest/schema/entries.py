@@ -14,10 +14,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
-    SOURCE_CONTENT,
-    SOURCE_GIT,
-    SOURCE_NAMED,
-    SOURCE_URL,
+    ManifestCategory,
+    SourceForm,
 )
 from agentclaw.community.core.bot_config_manifest.schema._support import (
     Context,
@@ -61,13 +59,14 @@ _COMMON_SOURCE_KEYS: frozenset[str] = frozenset(
 #: Every key a category's entry may carry. Closed: an unknown key is refused
 #: rather than ignored, because an ignored key is a caller believing they
 #: configured something.
-CATEGORY_ENTRY_KEYS: dict[str, frozenset[str]] = {
-    "resources": _COMMON_SOURCE_KEYS | {"path", "unpack", "strip_components"},
-    "skills": _COMMON_SOURCE_KEYS | {"name", "unpack"},
-    "identity": _COMMON_SOURCE_KEYS | {"type"},
-    "cli_tools": _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
+CATEGORY_ENTRY_KEYS: dict[ManifestCategory, frozenset[str]] = {
+    ManifestCategory.RESOURCES: _COMMON_SOURCE_KEYS
+    | {"path", "unpack", "strip_components"},
+    ManifestCategory.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack"},
+    ManifestCategory.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
+    ManifestCategory.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
     # A registry reference, not a fetch: no source-side field applies.
-    "mcp": frozenset({"server_code", "config"}),
+    ManifestCategory.MCP: frozenset({"server_code", "config"}),
 }
 
 #: The four mutually exclusive ways an entry can name its content (schema §2).
@@ -75,12 +74,11 @@ _SOURCE_SELECTORS = ("from", "source", "content")
 
 
 @dataclass(frozen=True)
-class SourceForm:
+class EntrySource:
     """Which source an entry chose, once exclusivity has been settled."""
 
-    #: One of the ``SOURCE_*`` construct names, or ``None`` when the entry
-    #: named no usable source at all.
-    kind: str | None
+    #: The chosen form, or ``None`` when the entry named no usable source.
+    form: SourceForm | None
     #: True when the source is a git reference — the one form for which a
     #: ``digest`` is a contradiction rather than an option.
     is_git: bool = False
@@ -106,7 +104,9 @@ def legal_identity_types(engine_type: str) -> frozenset[str]:
     return frozenset(VALID_IDENTITY_FILES)
 
 
-def check_entry_keys(ctx: Context, location: str, entry: dict[str, Any], category: str) -> None:
+def check_entry_keys(
+    ctx: Context, location: str, entry: dict[str, Any], category: ManifestCategory
+) -> None:
     """Refuse any key the category does not define."""
     allowed = CATEGORY_ENTRY_KEYS[category]
     for key in entry:
@@ -120,13 +120,13 @@ def check_entry_keys(ctx: Context, location: str, entry: dict[str, Any], categor
         ctx.add(
             f"{location}.{key}",
             "unknown_field",
-            f"unknown field '{key}' for a {category} entry",
+            f"unknown field '{key}' for a {category.value} entry",
         )
 
 
 def resolve_source(
     ctx: Context, location: str, entry: dict[str, Any]
-) -> SourceForm:
+) -> EntrySource:
     """Settle which source an entry uses, and refuse the illegal combinations.
 
     Four rules, all from schema §2, and each names the offending entry:
@@ -150,14 +150,14 @@ def resolve_source(
             "an entry names exactly one source; found "
             + ", ".join(f"'{key}'" for key in present),
         )
-        return SourceForm(kind=None)
+        return EntrySource(form=None)
     if not present:
         ctx.add(
             location,
             "missing_source",
             "an entry must name one of 'from', 'source' or 'content'",
         )
-        return SourceForm(kind=None)
+        return EntrySource(form=None)
 
     selector = present[0]
     form = _classify(ctx, location, entry, selector)
@@ -225,11 +225,11 @@ def resolve_source(
 
 def _classify(
     ctx: Context, location: str, entry: dict[str, Any], selector: str
-) -> SourceForm:
+) -> EntrySource:
     """Name the source form and gate it on what this build can resolve."""
     if selector == "content":
-        ctx.require_source_support(f"{location}.content", SOURCE_CONTENT)
-        return SourceForm(kind=SOURCE_CONTENT)
+        ctx.require_source_support(f"{location}.content", SourceForm.CONTENT)
+        return EntrySource(form=SourceForm.CONTENT)
 
     if selector == "from":
         name = entry["from"]
@@ -239,7 +239,7 @@ def _classify(
                 "invalid_source_reference",
                 "'from' must name a source declared under top-level 'sources'",
             )
-            return SourceForm(kind=SOURCE_NAMED)
+            return EntrySource(form=SourceForm.NAMED)
         ctx.referenced_sources.add(name)
         if name not in ctx.source_names:
             ctx.add(
@@ -248,26 +248,26 @@ def _classify(
                 f"'from' references source '{name}', which is not declared "
                 "under top-level 'sources'",
             )
-        ctx.require_source_support(f"{location}.from", SOURCE_NAMED)
+        ctx.require_source_support(f"{location}.from", SourceForm.NAMED)
         # A named source may be a git source, but the reference itself is
         # already refused above in the first wave, so the git-ness of the target
         # adds nothing a caller could act on.
-        return SourceForm(kind=SOURCE_NAMED)
+        return EntrySource(form=SourceForm.NAMED)
 
     source = entry["source"]
     if isinstance(source, str):
         check_https_url(ctx, f"{location}.source", source)
-        ctx.require_source_support(f"{location}.source", SOURCE_URL)
-        return SourceForm(kind=SOURCE_URL)
+        ctx.require_source_support(f"{location}.source", SourceForm.URL)
+        return EntrySource(form=SourceForm.URL)
     if isinstance(source, dict):
         validate_git_source(ctx, f"{location}.source", source)
-        return SourceForm(kind=SOURCE_GIT, is_git=True)
+        return EntrySource(form=SourceForm.GIT, is_git=True)
     ctx.add(
         f"{location}.source",
         "invalid_source",
         "'source' must be an https URL or a git reference object",
     )
-    return SourceForm(kind=None)
+    return EntrySource(form=None)
 
 
 #: Keys a git reference object may carry, inline or under ``sources``.
@@ -295,7 +295,7 @@ def validate_git_source(ctx: Context, location: str, source: dict[str, Any]) -> 
             ctx, f"{location}.subpath", source["subpath"], what="subpath"
         )
     check_source_mode(ctx, location, source)
-    ctx.require_source_support(location, SOURCE_GIT)
+    ctx.require_source_support(location, SourceForm.GIT)
 
 
 def check_source_mode(ctx: Context, location: str, source: dict[str, Any]) -> None:
@@ -420,7 +420,7 @@ def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> No
     bot type alone so that W13 can run it before a bot record exists. A registry
     lookup would need a tenant-scoped service that leg does not have.
     """
-    check_entry_keys(ctx, location, entry, "mcp")
+    check_entry_keys(ctx, location, entry, ManifestCategory.MCP)
     server_code = entry.get("server_code")
     if not isinstance(server_code, str) or not server_code:
         ctx.add(
@@ -440,7 +440,7 @@ def validate_resource_entry(
     ctx: Context, location: str, entry: dict[str, Any]
 ) -> str | None:
     """A workspace resource. Returns its ``path`` when the path is usable."""
-    check_entry_keys(ctx, location, entry, "resources")
+    check_entry_keys(ctx, location, entry, ManifestCategory.RESOURCES)
     path = entry.get("path")
     usable = check_relative_path(ctx, f"{location}.path", path, what="path")
     is_directory = isinstance(path, str) and path.endswith("/")
@@ -451,9 +451,9 @@ def validate_resource_entry(
         ctx,
         location,
         entry,
-        archive_expected=is_directory and form.kind == SOURCE_URL,
+        archive_expected=is_directory and form.form is SourceForm.URL,
     )
-    if is_directory and form.kind == SOURCE_URL and "unpack" not in entry:
+    if is_directory and form.form is SourceForm.URL and "unpack" not in entry:
         ctx.add(
             location,
             "missing_unpack",
@@ -465,7 +465,7 @@ def validate_resource_entry(
 
 def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> str | None:
     """A local skill. Returns its ``name`` when the name is usable."""
-    check_entry_keys(ctx, location, entry, "skills")
+    check_entry_keys(ctx, location, entry, ManifestCategory.SKILLS)
     name = entry.get("name")
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
     form = resolve_source(ctx, location, entry)
@@ -474,7 +474,7 @@ def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> 
     # every non-git form must be pinned. A git ref has a commit SHA doing the
     # same job; a URL without a digest is a blind fetch of the latest at every
     # apply point (schema §3.3).
-    if form.kind in (SOURCE_URL,) and "digest" not in entry:
+    if form.form is SourceForm.URL and "digest" not in entry:
         ctx.add(
             location,
             "missing_digest",
@@ -489,7 +489,7 @@ def validate_identity_entry(
     ctx: Context, location: str, entry: dict[str, Any], *, engine_type: str
 ) -> None:
     """An identity file, checked against this engine's own legal set."""
-    check_entry_keys(ctx, location, entry, "identity")
+    check_entry_keys(ctx, location, entry, ManifestCategory.IDENTITY)
     file_type = entry.get("type")
     legal = legal_identity_types(engine_type)
     if not isinstance(file_type, str) or file_type not in legal:
@@ -527,7 +527,7 @@ def validate_cli_tool_entry(
     implemented here either. What remains is the ordinary source machinery plus
     the two rules below.
     """
-    check_entry_keys(ctx, location, entry, "cli_tools")
+    check_entry_keys(ctx, location, entry, ManifestCategory.CLI_TOOLS)
     name = entry.get("name")
     name_ok = check_name(ctx, f"{location}.name", name, what="a tool name")
     form = resolve_source(ctx, location, entry)
@@ -538,7 +538,7 @@ def validate_cli_tool_entry(
     # caller's behalf, and the digest is also the only thing convergence can
     # compare (schema §3.7). It covers the fetched source object — the binary
     # itself, or the whole archive — with ``subpath`` selecting the file inside.
-    if form.kind is not None and form.kind != SOURCE_GIT and "digest" not in entry:
+    if form.form is not None and form.form is not SourceForm.GIT and "digest" not in entry:
         ctx.add(
             location,
             "missing_digest",

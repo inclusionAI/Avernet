@@ -24,12 +24,11 @@ from typing import Any
 import yaml
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
-    CATEGORIES,
-    KIND_CATEGORY,
-    KIND_SECTION,
-    SECTION_SCRIPT,
     SUPPORTED_SCHEMA_VERSIONS,
     ManifestCapabilities,
+    ManifestCategory,
+    ManifestSection,
+    parse_category,
 )
 from agentclaw.community.core.bot_config_manifest.schema._support import (
     Context,
@@ -58,12 +57,6 @@ from agentclaw.community.core.bot_config_manifest.schema.violations import (
 #: unknown top-level key is refused rather than ignored.
 _TOP_LEVEL_KEYS: frozenset[str] = frozenset(
     {"schema_version", "sources", "manifest", "script"}
-)
-
-#: Categories whose value is a list of entries. ``engine_config`` is the one
-#: that is not — it is a single object (schema §3.4).
-_LIST_CATEGORIES: frozenset[str] = frozenset(
-    {"mcp", "resources", "skills", "identity", "cli_tools"}
 )
 
 #: Longest YAML parser message forwarded to a caller. The text is about their
@@ -282,26 +275,27 @@ def _validate_manifest(ctx: Context, manifest: Any) -> None:
         ctx.add("manifest", "invalid_manifest", "'manifest' must be a mapping")
         return
 
-    for category, value in manifest.items():
-        location = f"manifest.{category}"
-        if category not in CATEGORIES:
+    for key, value in manifest.items():
+        location = f"manifest.{key}"
+        category = parse_category(key)
+        if category is None:
             ctx.add(
                 location,
                 "unknown_category",
-                f"unknown manifest category '{category}'; allowed: "
-                + ", ".join(CATEGORIES),
+                f"unknown manifest category '{key}'; allowed: "
+                + ", ".join(c.value for c in ManifestCategory),
             )
             continue
-        if not ctx.capabilities.supports(KIND_CATEGORY, category):
+        if not ctx.capabilities.supports(category):
             ctx.add(
                 location,
                 "unsupported_category",
-                f"category '{category}' is not supported: "
-                + ctx.capabilities.reason_for(KIND_CATEGORY, category),
+                f"category '{category.value}' is not supported: "
+                + ctx.capabilities.reason_for(category),
             )
             # Still walked below: a caller fixing an unsupported category should
             # not then discover a second round of shape errors inside it.
-        if category == "engine_config":
+        if category is ManifestCategory.ENGINE_CONFIG:
             _validate_engine_config(ctx, location, value)
             continue
         _validate_category_list(ctx, location, category, value)
@@ -338,14 +332,14 @@ def _validate_engine_config(ctx: Context, location: str, value: Any) -> None:
 
 
 def _validate_category_list(
-    ctx: Context, location: str, category: str, value: Any
+    ctx: Context, location: str, category: ManifestCategory, value: Any
 ) -> None:
     """A list category: the count limit, then each entry, then cross-entry rules."""
     if not isinstance(value, list):
         ctx.add(
             location,
             "invalid_category",
-            f"'{category}' must be a list of entries",
+            f"'{category.value}' must be a list of entries",
         )
         return
     if len(value) > MAX_ENTRIES_PER_CATEGORY:
@@ -365,7 +359,7 @@ def _validate_category_list(
         entries.append((at, entry))
         _check_entry_placeholders(ctx, at, entry)
 
-    if category == "mcp":
+    if category is ManifestCategory.MCP:
         for at, entry in entries:
             validate_mcp_entry(ctx, at, entry)
         _check_duplicates(
@@ -375,15 +369,15 @@ def _validate_category_list(
             code="duplicate_server_code",
             what="MCP server_code",
         )
-    elif category == "resources":
+    elif category is ManifestCategory.RESOURCES:
         paths = [validate_resource_entry(ctx, at, entry) for at, entry in entries]
         _check_resource_layout(ctx, location, [p for p in paths if p])
-    elif category == "skills":
+    elif category is ManifestCategory.SKILLS:
         names = [validate_skill_entry(ctx, at, entry) for at, entry in entries]
         _check_duplicates(
             ctx, location, [n for n in names if n], code="duplicate_name", what="skill name"
         )
-    elif category == "identity":
+    elif category is ManifestCategory.IDENTITY:
         for at, entry in entries:
             validate_identity_entry(
                 ctx, at, entry, engine_type=ctx.capabilities.engine_type
@@ -395,7 +389,7 @@ def _validate_category_list(
             code="duplicate_identity_type",
             what="identity type",
         )
-    elif category == "cli_tools":
+    elif category is ManifestCategory.CLI_TOOLS:
         commands = [validate_cli_tool_entry(ctx, at, entry) for at, entry in entries]
         _check_duplicates(
             ctx,
@@ -475,12 +469,12 @@ def _validate_script(ctx: Context, script: Any) -> None:
     if not isinstance(body, str):
         ctx.add("script.body", "invalid_script", "'script.body' must be a string")
         return
-    if not ctx.capabilities.supports(KIND_SECTION, SECTION_SCRIPT):
+    if not ctx.capabilities.supports(ManifestSection.SCRIPT):
         ctx.add(
             "script",
             "unsupported_script",
             "a startup script is not supported for this bot: "
-            + ctx.capabilities.reason_for(KIND_SECTION, SECTION_SCRIPT),
+            + ctx.capabilities.reason_for(ManifestSection.SCRIPT),
         )
     try:
         size = len(body.encode("utf-8"))

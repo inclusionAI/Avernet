@@ -110,6 +110,14 @@ _OWNER_ADDRESSED_ELSEWHERE = {
         "get",
         "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}",
     ),
+    # The config manifest is collaborator-scoped — MEMBER to read, ADMIN to
+    # write — so it addresses a bot that may be someone else's, and takes the
+    # owner half of ``(owner, bot_id)``. No ``stage``: a manifest is one row per
+    # bot, not one per runtime, so there is nothing for the parameter to name.
+    ("get", "/openapi/v1/bots/{bot_id}/config-manifest"),
+    ("put", "/openapi/v1/bots/{bot_id}/config-manifest"),
+    ("delete", "/openapi/v1/bots/{bot_id}/config-manifest"),
+    ("get", "/openapi/v1/bots/{bot_id}/config-manifest/capabilities"),
     # The product chat reads address a bot that may be shared with the acting
     # user, so they take the owner half of ``(owner, bot_id)`` for the same
     # reason and with the same default — the caller's own bot.

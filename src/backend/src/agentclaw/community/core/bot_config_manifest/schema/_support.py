@@ -12,8 +12,8 @@ from typing import Any, Iterable
 from urllib.parse import urlsplit
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
-    KIND_SOURCE,
     ManifestCapabilities,
+    SourceForm,
 )
 from agentclaw.community.core.bot_config_manifest.schema.placeholders import (
     unknown_placeholders,
@@ -59,15 +59,15 @@ class Context:
             Violation(location=location, code=code, message=message)
         )
 
-    def require_source_support(self, location: str, source_kind: str) -> bool:
+    def require_source_support(self, location: str, form: SourceForm) -> bool:
         """Refuse a source form nothing can resolve yet. True when supported."""
-        if self.capabilities.supports(KIND_SOURCE, source_kind):
+        if self.capabilities.supports(form):
             return True
         self.add(
             location,
             "unsupported_source",
-            f"source form '{source_kind}' is not supported: "
-            + self.capabilities.reason_for(KIND_SOURCE, source_kind),
+            f"source form '{form.value}' is not supported: "
+            + self.capabilities.reason_for(form),
         )
         return False
 

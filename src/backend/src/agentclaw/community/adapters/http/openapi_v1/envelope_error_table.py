@@ -36,7 +36,6 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     CallerIdentityForbiddenError,
     CallerIdentityInvalidError,
     CallerIdentityOpenApiError,
-    ConfigManifestSurfaceDisabledError,
     DeptLookupError,
     ClusterMismatchError,
     GrantNotResolvableError,
@@ -598,9 +597,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         f"Config manifest exceeds the {MAX_DOCUMENT_BYTES}-byte limit",
     ),
     ManifestNotEncodableError: (400, "Config manifest is not valid UTF-8"),
-    # The surface is switched off in this deployment. 404, not 503: an address
-    # that is not being served should not confirm that it exists.
-    ConfigManifestSurfaceDisabledError: (404, "Not found"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),

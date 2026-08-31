@@ -8,10 +8,13 @@ testable without a client.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.api.bot_config_manifest_service import ManifestCapabilities
+from agentclaw.community.core.bot_config_manifest.repository.models import (
+    BotConfigManifestRecord,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -36,24 +39,28 @@ def manifest_target(bot: dict[str, Any]) -> str:
     return entity_id
 
 
-def audit_actor(caller: ActingCaller, owner_id: str) -> str:
+def audit_actor(caller: ActingCaller, actor_id: str) -> str:
     """Who to record as having changed the manifest.
+
+    ``actor_id`` is who made the change — the caller, which on a shared bot is a
+    collaborator rather than the owner. Never the addressed owner: attributing a
+    collaborator's edit to the bot's owner is the one thing an audit column must
+    not do.
 
     For an application caller ``user_id`` is the *delegating* user, not the
     caller — downstream code cannot tell an admitted application from that user,
     which is the seam's whole point. That is right for scoping and wrong for an
-    audit field: it would attribute a configuration change to a person who did
-    not make it. So an application is named as itself, with the user it acted for
+    audit field, so an application is named as itself with the user it acted for
     kept alongside.
     """
     if caller.is_application:
-        return f"app:{caller.app_id}:on-behalf-of:{owner_id}"
-    return owner_id
+        return f"app:{caller.app_id}:on-behalf-of:{actor_id}"
+    return actor_id
 
 
 def manifest_payload(
     bot_id: str,
-    record: Any,
+    record: Optional[BotConfigManifestRecord],
     warnings: Sequence[str] = (),
 ) -> ConfigManifest:
     """Shape a stored row — or its absence — as the response model.
@@ -81,13 +88,8 @@ def capabilities_payload(
         engine_type=capabilities.engine_type,
         bot_type=capabilities.bot_type,
         schema_versions=list(capabilities.schema_versions),
-        constructs=[
-            ManifestConstruct(
-                kind=item.kind,
-                name=item.name,
-                supported=item.supported,
-                reason=item.reason,
-            )
-            for item in capabilities.constructs
-        ],
+        # ``as_dict`` is the construct's own wire shape — a ``kind``/``name``
+        # pair of plain strings. Reading it here rather than unpacking the enum
+        # keeps one definition of how a construct serialises.
+        constructs=[ManifestConstruct(**item.as_dict()) for item in capabilities.constructs],
     )
