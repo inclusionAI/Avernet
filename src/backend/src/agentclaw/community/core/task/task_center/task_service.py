@@ -243,23 +243,42 @@ class TaskService:
             return request  # 内容未命中任何预置模板 → 走默认 dynamic planner(LLM 自发现 plan)
         template_dir = Path(__file__).resolve().parents[1] / "task_plan" / "plans"
         inputs = dict(cfg.get("template_input") or {})
+        _obj = request.task_spec.goal.objective
+        _inst = request.task_spec.metadata.instruction
+        _title = request.task_spec.metadata.title
+        logger.info(
+            "[task][template-run][DIAG] materialize enter template_id=%s task_type=%s cfg_static_plan_id=%s "
+            "cfg_template_input=%s objective=%r instruction=%r title=%r",
+            template_id, cfg.get("task_type"), cfg.get("static_plan_id"), dict(inputs), _obj, _inst, _title,
+        )
         try:
             definition = StaticPlanDefinition.from_file(template_id, template_dir)
-            # 调用方不感知 template_input——内容路由命中预置模板后,按模板必填 input_schema 用调用方
-            # task_spec 的 objective→instruction→title 兜底补齐缺省值(已显式传非空值的不覆盖)。不存在
-            # "调用方显式指定模板"的契约,故命中即无条件兜底,不再区分 explicit_id 严格契约路径。
+            logger.info(
+                "[task][template-run][DIAG] definition parsed template_id=%s input_schema=%s",
+                template_id, dict(definition.input_schema),
+            )
             for _name, _schema in (definition.input_schema or {}).items():
-                if _schema.get("required") and inputs.get(_name) in (None, ""):
+                _required = bool(_schema.get("required")) if isinstance(_schema, dict) else False
+                _cur = inputs.get(_name)
+                logger.info(
+                    "[task][template-run][DIAG] fill check name=%s required=%s cur=%r require_fill=%s",
+                    _name, _required, _cur, (_required and _cur in (None, "")),
+                )
+                if _required and _cur in (None, ""):
                     _fallback = next(
-                        (t for t in (
-                            request.task_spec.goal.objective,
-                            request.task_spec.metadata.instruction,
-                            request.task_spec.metadata.title,
-                        ) if t),
+                        (t for t in (_obj, _inst, _title) if t),
                         "",
+                    )
+                    logger.info(
+                        "[task][template-run][DIAG] fill apply name=%s fallback=%r",
+                        _name, _fallback,
                     )
                     if _fallback:
                         inputs[_name] = _fallback
+            logger.info(
+                "[task][template-run][DIAG] pre-validate inputs=%s",
+                sorted(inputs),
+            )
             definition.validate_input(inputs)
             definition.validate_bindings()
         except TaskStateError:
@@ -982,3 +1001,4 @@ class TaskService:
 def run_execute(facade: TaskService, request: TaskInfoRequest) -> TaskOpResult:
     """同步执行 ``execute``(无事件循环依赖的调用方/单测用)。"""
     return asyncio.new_event_loop().run_until_complete(facade.execute(request))
+
