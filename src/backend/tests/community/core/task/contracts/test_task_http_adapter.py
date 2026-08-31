@@ -251,6 +251,29 @@ def _static_plan_dict_dynamic_task_type_okr_content() -> dict:
     }
 
 
+def _static_plan_dict_dynamic_without_template_input() -> dict:
+    """task_type=dynamic + OKR 业务语义,且 execution_config 完全不带 template_input(模拟 source_type=bot
+    只给 task_spec 业务语义的动态调用)。内容路由命中 okr-implementation 后,materialize 应按必填 input
+    用 task_spec objective 兜底补齐 template_input.okr,而非以 missing input 返 409。"""
+    return {
+        "task_spec": {
+            "metadata": {
+                "title": "制定2026年度大促OKR完成策略",
+                "instruction": "目标:制定2026年度大促OKR完成策略,实现平稳过多平台年度大促并取得用户和收益双增长",
+            },
+            "context": {"background": "2026年度大促OKR完成策略制定", "extend_props": {}},
+            "goal": {
+                "objective": "制定2026年度大促OKR完成策略,实现平稳过多平台年度大促并取得用户和收益双增长",
+                "acceptances": [],
+            },
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {"task_type": "dynamic"},
+    }
+
+
 def _execute_and_get_id(c) -> str:
     """POST execute → 返回服务端生成的 task_id(契约:task_id 不在请求体,服务端 uuid4)。"""
     r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
@@ -353,6 +376,24 @@ class TestTaskExecute:
         assert body["code"] == 200000
         assert isinstance(body["data"]["task_id"], str) and body["data"]["task_id"]
         assert body["data"]["success"] is True
+
+    def test_execute_static_plan_fills_template_input_from_task_spec_when_absent(self, client):
+        # 内容路由命中预置模板但调用方未传 template_input(模拟 bot 动态调用):materialize 应按模板必填 input
+        # 用 task_spec objective 兜底补齐,返 200 而非 409(missing static plan input)。
+        c, inj = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_dynamic_without_template_input(),
+        )
+        assert r.status_code == 200, r.text
+        task_id = r.json()["data"]["task_id"]
+        record = inj.get(TaskInfoRepositoryProtocol).get(task_id)
+        assert record is not None
+        # 模板必填 input okr 被用调用方目标镜像兜底补进,并落到预置模板 plan
+        assert record.execution_config["static_plan_id"] == "okr-implementation"
+        assert record.execution_config["template_input"]["okr"] == (
+            "制定2026年度大促OKR完成策略,实现平稳过多平台年度大促并取得用户和收益双增长"
+        )
 
     def test_execute_returns_op_result(self, client):
         c, _ = client

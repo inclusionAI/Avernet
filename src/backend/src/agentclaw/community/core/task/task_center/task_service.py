@@ -244,6 +244,23 @@ class TaskService:
         inputs = dict(cfg.get("template_input") or {})
         try:
             definition = StaticPlanDefinition.from_file(template_id, template_dir)
+            # 仅内容路由命中(调用方未显式指定 static_plan_id,如 source_type=bot 的动态调用)时,
+            # 才用 task_spec 的 objective/instruction/title 兜底补齐缺失必填 input,使"内容命中→走预置模板"
+            # 对调用方透明、无需额外传 template_input;显式 static_plan_id 调用方已明确选模板,仍按严格
+            # 契约——缺必填 input → 422(保留旧契约)。调用方已显式传非空值的 input 不覆盖。
+            if not explicit_id:
+                for _name, _schema in (definition.input_schema or {}).items():
+                    if _schema.get("required") and inputs.get(_name) in (None, ""):
+                        _fallback = next(
+                            (t for t in (
+                                request.task_spec.goal.objective,
+                                request.task_spec.metadata.instruction,
+                                request.task_spec.metadata.title,
+                            ) if t),
+                            "",
+                        )
+                        if _fallback:
+                            inputs[_name] = _fallback
             definition.validate_input(inputs)
             definition.validate_bindings()
         except TaskStateError:
@@ -264,7 +281,8 @@ class TaskService:
         patched_cfg = dict(cfg)
         patched_cfg.setdefault("static_plan_id", template_id)
         patched_cfg.setdefault("static_plan_yaml", yaml_path.read_text(encoding="utf-8"))
-        patched_cfg.setdefault("template_input", inputs)
+        # 兜底补齐后的 inputs 落回(即便调用方传了空 template_input 也覆盖,避免 setdefault 丢值)
+        patched_cfg["template_input"] = inputs
         # 固定 plan 与动态 plan 等价:这里只把"提前固化的 yaml plan"补进 execution_config,
         # 不自行合成任何占位 task_spec。调用方原始 task_spec(title/instruction/objective/
         # context.background/acceptances)保留不动,与走 LLM planner 的动态任务在 taskinfo
