@@ -183,23 +183,23 @@ than something to work around:
         has stopped meaning anything.
 - **Depends on:** Tasks 1, 4, 5
 
-## [ ] Task 7: The `script` materialiser
+## [x] Task 7: The `script` materialiser
 - **Files:** `apply/materialisers/script.py`
 - **Done when:**
-  - [ ] `resolve` substitutes `${BOT_*}` via the existing
+  - [x] `resolve` substitutes `${BOT_*}` via the existing
         `schema/placeholders.py::resolve` — one whitelist, one resolver, no
         second copy.
-  - [ ] `resolve` re-asks the capability resolver whether `script` is supported
+  - [x] `resolve` re-asks the capability resolver whether `script` is supported
         for this bot, because a bot's engine can change between `PUT` and apply.
-  - [ ] `plan` compares against the **substituted** body, never the raw document
+  - [x] `plan` compares against the **substituted** body, never the raw document
         text — the convergence criterion depends on this and nothing else.
-  - [ ] `write` calls `BotStartupScriptService.put` / `.delete` and does nothing
+  - [x] `write` calls `BotStartupScriptService.put` / `.delete` and does nothing
         else. No payload composition, no restart, no republish, no
         start-command touching — **apply never triggers the script's
         execution**, it only delivers the row, and the existing #926 machinery
         picks it up. A structural test asserts this module reaches no
         provisioning or restart path.
-  - [ ] The result records that the script is **delivered now, executed at the
+  - [x] The result records that the script is **delivered now, executed at the
         bot's next device provisioning** — a field, not something a caller
         infers, and phrased in the terms the mechanism has. It is re-read from
         `ac_bot_startup_script` by `_build_create_bot_payload` on every payload
@@ -208,22 +208,22 @@ than something to work around:
         API cannot promise a timing the platform does not have.
 - **Depends on:** Tasks 5, 6
 
-## [ ] Task 8: The `mcp` materialiser
+## [x] Task 8: The `mcp` materialiser
 - **Files:** `apply/materialisers/mcp.py`
 - **Done when:**
-  - [ ] `resolve` runs the **existing** tenant permission check per
+  - [x] `resolve` runs the **existing** tenant permission check per
         `server_code`; a server the tenant may not enable is a `failed` entry.
-  - [ ] A `server_code` governed by a Set or platform-Default policy — where
+  - [x] A `server_code` governed by a Set or platform-Default policy — where
         `DirectActivationService` is not legal — resolves to a `failed` entry
         with a readable reason, never an exception escaping the orchestrator.
-  - [ ] `plan` reads `list_installed_mcps` and classifies: declared − current ⇒
+  - [x] `plan` reads `list_installed_mcps` and classifies: declared − current ⇒
         `created`, intersection ⇒ `unchanged`, current − declared ⇒ removals.
-  - [ ] `write` calls `activate_mcp` / `deactivate_mcp` only.
-  - [ ] A structural test asserts this module cannot reach
+  - [x] `write` calls `activate_mcp` / `deactivate_mcp` only.
+  - [x] A structural test asserts this module cannot reach
         `update_user_unified_config`, `write_unified_config` or
         `sync_mcp_detail_to_all_bots` — the account-scoped write whose fan-out
         Task 3 removed from the vocabulary.
-  - [ ] The route docstring says plainly that a declared `mcp` category
+  - [x] The route docstring says plainly that a declared `mcp` category
         deactivates servers activated through the UI. The first person surprised
         by that will be a real user.
 - **Depends on:** Tasks 3, 5, 6

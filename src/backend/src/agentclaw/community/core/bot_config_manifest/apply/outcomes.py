@@ -93,6 +93,12 @@ class EntryResult:
     #: value, and never raw exception text that might carry one — materialisers
     #: compose these deliberately.
     reason: str | None = None
+    #: Something true of a *successful* entry that a caller would otherwise have
+    #: to infer. Separate from ``reason`` rather than sharing it, because they
+    #: answer opposite questions — "why did this not happen" and "what happens
+    #: next" — and a client rendering failures would otherwise show a note as an
+    #: error. Today's only use is ``script``'s delivery timing.
+    note: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The wire shape for one entry."""
@@ -101,6 +107,7 @@ class EntryResult:
             "name": self.identity,
             "action": self.outcome.value,
             "error": self.reason,
+            "note": self.note,
         }
 
 

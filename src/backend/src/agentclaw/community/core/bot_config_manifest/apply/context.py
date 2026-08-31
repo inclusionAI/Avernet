@@ -11,6 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agentclaw.community.core.bot_config_manifest.capabilities import (
+    ManifestCapabilities,
+)
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
 
 
@@ -38,6 +41,16 @@ class ApplyContext:
     bot_type: str
     #: The bot record, for the seam constructors that read one.
     bot: dict[str, Any]
+    #: Resolved once per apply and carried, rather than re-resolved per
+    #: materialiser. Two reasons: the resolver needs the teclaw engine test
+    #: injected, and a materialiser reaching for it would drag that dependency
+    #: into every one of them; and a single resolution cannot disagree with
+    #: itself midway through an apply.
+    #:
+    #: Re-asked at apply time rather than trusted from the ``PUT`` that accepted
+    #: the document: a bot's engine can change after a manifest is stored, and
+    #: the construct that was appliable then may not be now.
+    capabilities: ManifestCapabilities
 
     def coords_for(self, category: str, **extra: Any) -> BotConfigCoords:
         """This bot's write address for one category, via W10's seam.

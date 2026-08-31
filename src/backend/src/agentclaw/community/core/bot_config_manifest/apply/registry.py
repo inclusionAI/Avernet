@@ -156,19 +156,26 @@ class Materialiser(Protocol):
         ...
 
 
-def build_materialisers() -> dict[ApplyConstruct, Materialiser]:
-    """The registry, constructed lazily.
+def build_materialisers(
+    *,
+    script_service: Any,
+    activation_service: Any,
+    mcp_auth_service: Any,
+) -> dict[ApplyConstruct, Materialiser]:
+    """The registry, built from injected services.
 
-    A function rather than a module-level dict because the materialisers hold no
-    state but their modules import bot-configuration services, and building at
-    import time would pull that graph into anything that merely wants the
-    ordering table. ``test_no_module_level_service_instances`` cares about this
-    class of thing too.
+    A function taking its dependencies rather than a module-level dict: the
+    materialisers hold service references, and a module-level registry would
+    both construct services at import time (``test_no_module_level_service_instances``
+    exists for that class of thing) and pull the bot-configuration graph into
+    anything that merely wants the ordering table.
 
-    **W4 registers two.** ``skills``, ``identity`` and ``resources`` arrive with
-    W5/W6, ``engine_config`` when X2/T3 lets it back in, ``cli_tools`` with W9.
-    Until then a document declaring one of those is handled by the orchestrator's
-    no-materialiser path — an expected state, not a gap.
+    **W4 registers two**, and the map is keyed by each materialiser's own
+    ``construct`` rather than by a name written here — so a materialiser cannot
+    be registered under the wrong key. ``skills`` and ``identity`` arrive with
+    W5, ``resources`` with W6, ``engine_config`` when X2/T3 lets it back in, and
+    ``cli_tools`` with W9. Until then a document declaring one of those takes the
+    orchestrator's no-materialiser path: an expected state, not a gap.
     """
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.mcp import (
         McpMaterialiser,
@@ -178,8 +185,8 @@ def build_materialisers() -> dict[ApplyConstruct, Materialiser]:
     )
 
     materialisers: tuple[Materialiser, ...] = (
-        ScriptMaterialiser(),
-        McpMaterialiser(),
+        ScriptMaterialiser(script_service),
+        McpMaterialiser(activation_service, mcp_auth_service),
     )
     return {m.construct: m for m in materialisers}
 
