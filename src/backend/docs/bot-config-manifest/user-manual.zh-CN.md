@@ -191,6 +191,12 @@ apply 点会被改回去。**想改内容，改源头（仓库里的文件）或
 这条不是平台霸道，是 #926 的立项动机：手工获胜的话，老实例带着手调过的
 SOUL.md、新实例从清单长出来，同一个 bot 两个实例人设不同。
 
+**那我怎么知道哪些东西归清单管？**看清单本身，以及上次 apply 做了什么——
+**界面上不会给它们打标记**：清单装出来的实体与你手工创建的存储完全一样，下游
+无从区分，也不需要区分。所以「谁管着这个 skill」的答案在
+`GET …/config-manifest`（声明了什么）与 `GET …/last-apply`（上次实际写了什么）
+里，不在实体的某个标志位上。
+
 ### 3.3 覆盖的单位是「类目区域」
 
 让清单生效 = 把**每个被声明的类目**覆盖到恰好等于声明。没声明的类目**完全不碰**。
@@ -1097,7 +1103,7 @@ PUT /openapi/v1/source-credentials/oss-artifacts
 | --- | --- | --- |
 | §3.1：`PUT` 惰性生效（等下次重启） | `PUT` **立即生效，不需要重启**；`script` 例外——立即下发、下次启动执行 | §7 |
 | §3.4：固定顺序 `engine_config → identity → resources → skills → mcp`，`script` 最后、可依赖已就位的实体 | 第一期**反过来**：首启时 `script` 先于其余类目，因此不得依赖它们 | §5.5 |
-| §3.2：实体上有 `managed by manifest` 标记 | v1 **没有**这个标记：清单装的实体与手工创建的完全一样；状态由 `GET …/config-manifest` 与 `last-apply` 回答 | §3.2 |
+| §3.2：实体上有 `managed by manifest` 标记 | v1 **没有**这个标记：清单装的实体与手工创建的完全一样；状态由 `GET …/config-manifest` 与 `last-apply` 回答 | §3.2 · schema §1 |
 | §4.3：`on_fetch_failure` 有 `skip` | 只有 `keep_last` / `fail` | §6.4 |
 | §6：`DELETE` 把实体「摘除 managed 标记」 | `DELETE` **什么都不删**（没有类目被声明 = 没有东西被覆盖）；要清空用 `[]` | §3.3 |
 | §10.5：git 源走托管服务的归档 API | 改为 **git over HTTPS 的浅层单 ref fetch**——本部署的 git 宿主没有只读的 API scope | schema §2.2 |
