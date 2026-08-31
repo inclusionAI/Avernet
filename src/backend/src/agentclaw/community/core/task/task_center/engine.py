@@ -733,8 +733,10 @@ class ExecutionEngine:
         不进 dispatcher.dispatch / 不查 catalog / 不做 claim_join,故未 ready 的依赖节点
         (strategy_approval/implementation)不会被提前搜推成 MISS/claim_mode_off,且 YAML 绑定
         的 bot_id 永远被尊重(不会被 catalog 命中的其他 bot 替换)。依赖顺序由 runtime.ready 保证。"""
-        auto = self._static_auto_report_on(task_id)
         to_run: list[TaskNode] = []
+        # 固定流程默认真实上报 + fallback 兜底:每个真实派发节点都额外调度一条延迟 mock 上报,
+        # 真实回投在 fallback 超时(默认 80s,env OCB_TASK_STATIC_FALLBACK_TIMEOUT)内先到则自跳过,
+        # 否则超时后由 mock 推进;auto=True 演示模式仍走短延迟(_static_auto_report 内按 mode 取 delay)。
         auto_nodes: list[TaskNode] = []
         for node in ready_nodes:
             definition = runtime.by_id.get(node.node_id)
@@ -865,8 +867,7 @@ class ExecutionEngine:
                     )
                 )
                 side.append(("group", node, gf))
-                if auto:
-                    auto_nodes.append(node)
+                auto_nodes.append(node)  # 拉群真实派发 + 调度兜底 mock 上报
                 continue
             bot_id = getattr(definition, "bot_id", None)
             if bot_id:
@@ -888,8 +889,7 @@ class ExecutionEngine:
                     )
                 )
                 to_run.append(node)
-                if auto:
-                    auto_nodes.append(node)
+                auto_nodes.append(node)  # 单 bot 真实派发 + 调度兜底 mock 上报
             else:
                 logger.warning(
                     "[task][static-plan] task=%s node=%s 无 bot 绑定也无 group,跳过",
@@ -902,7 +902,9 @@ class ExecutionEngine:
             side.append(("auto", auto_nodes))
 
     async def _static_auto_report(self, task_id: str, node_id: str) -> None:
-        """演示自驱:真实派发后,延迟(默认 10s)用 mock 上报替代真实 bot 上报推进图态。
+        """固定流程兜底上报:节点真实派发后,若在 fallback 超时(默认 80s)内无真实回投,
+        则以 mock 信息回投 PASS→DONE 推进图态,避免单节点不上报致整流程卡死;
+        auto=True 演示模式改走短("demo")延迟。
 
         mock 只替代"上报信息",不替代派发——拉群/发消息仍走真实路径(_drain group/run)。
         延迟到期后仅在节点处 RUNNING 态(真实派发成功)时才回投 PASS→DONE;
@@ -910,9 +912,15 @@ class ExecutionEngine:
         runtime = self._static_runtime(task_id)
         if runtime is None:
             return
-        delay = self._static_auto_report_delay(task_id)
+        auto = self._static_auto_report_on(task_id)
+        delay = (
+            self._static_auto_report_delay(task_id)
+            if auto
+            else self._static_fallback_delay(task_id)
+        )
         logger.info(
-            "[task][static-plan] auto-report scheduled task=%s node=%s in %.2fs",
+            "[task][static-plan] %s scheduled task=%s node=%s in %.2fs",
+            "auto-report" if auto else "fallback-report",
             task_id, node_id, delay,
         )
         await asyncio.sleep(delay)
@@ -961,10 +969,71 @@ class ExecutionEngine:
             )
         )
 
+
+    async def _static_bbs_handoff_auto_report(
+        self, task_id: str, node_id: str, rnd_bot_id: str, items: Any
+    ) -> None:
+        """固定流程 bbs_handoff 兜底上报:与节点级 _static_auto_report 同语义——真实 poller 在 timeout
+        内闭环则自跳过(节点非 RUNNING);否则超时后 mock PASS→DONE,避免旁路节点长挂致整流程不终态。
+        auto 演示模式用短 demo 延迟,默认真实模式用 fallback 超时(80s)。"""
+        auto = self._static_auto_report_on(task_id)
+        delay = (
+            self._static_auto_report_delay(task_id)
+            if auto
+            else self._static_fallback_delay(task_id)
+        )
+        logger.info(
+            "[task][static-plan] %s scheduled task=%s node=%s in %.2fs",
+            "bbs-auto-report" if auto else "bbs-fallback-report",
+            task_id, node_id, delay,
+        )
+        await asyncio.sleep(delay)
+        g2 = self._graph.query_task_dashboard(task_id)
+        n2 = next((x for x in g2.tasks if x.node_id == node_id), None)
+        if n2 is None or n2.status != Status.RUNNING:
+            logger.info(
+                "[task][static-plan] bbs_handoff report-skip task=%s node=%s status=%s (真实闭环/未RUNNING)",
+                task_id, node_id, n2.status.value if n2 is not None else None,
+            )
+            return
+        await self.on_report(
+            TaskNodePatch(
+                task_id=task_id, node_id=node_id,
+                acceptance_result=AcceptanceResult(
+                    verdict=AcceptanceVerdict.DONE,
+                    acceptances_metric=["bbs_handoff"],
+                ),
+                output_patch={
+                    "result": {
+                        "summary": f"[bbs-handoff] node={node_id}",
+                        "handed_to": rnd_bot_id,
+                        "items": items,
+                        "random": f"{random.randrange(10 ** 6):06d}",
+                    }
+                },
+                extend_props_patch={"dispatching": None},
+            )
+        )
+
+    def _static_fallback_delay(self, task_id: str) -> float:
+        """固定流程真实上报的兜底超时:节点真实派发后,若该时长内无真实回投,则以 mock 兜底推进,
+        避免整流程因单节点不上报而卡死。仅固定 plan 任务生效(由调度点保证)。
+        优先级:execution_config.static_fallback_timeout → env OCB_TASK_STATIC_FALLBACK_TIMEOUT → 80.0。"""
+        cfg = self._graph._execution_config(task_id)
+        v = cfg.get("static_fallback_timeout")
+        if v in (None, ""):
+            raw = os.environ.get("OCB_TASK_STATIC_FALLBACK_TIMEOUT")
+            v = raw if raw not in (None, "") else None
+        try:
+            return float(v) if v is not None else 80.0
+        except (TypeError, ValueError):
+            return 80.0
+
     def _static_auto_report_delay(self, task_id: str) -> float:
         """自驱 mock 上报延迟秒数:execution_config.static_auto_report_delay →
         env OCB_TASK_STATIC_AUTO_REPORT_DELAY → random.uniform(20,60)(每节点完成节奏不一,
         演示时能看出节点状态逐次流转而非瞬间全 DONE)。"""
+
         cfg = self._graph._execution_config(task_id)
         v = cfg.get("static_auto_report_delay")
         if v in (None, ""):
@@ -1068,34 +1137,14 @@ class ExecutionEngine:
             task_id, node_id, rnd_bot_id,
             items if isinstance(items, list) else type(items).__name__,
         )
-        # 交接完成:auto 模式 mock 上报 PASS→DONE(真实模式等 poller 闭环)
-        if self._static_auto_report_on(task_id):
-            g2 = self._graph.query_task_dashboard(task_id)
-            n2 = next((x for x in g2.tasks if x.node_id == node_id), None)
-            if n2 is None or n2.status != Status.RUNNING:
-                logger.info(
-                    "[task][static-plan] bbs_handoff mock-skip task=%s node=%s status=%s",
-                    task_id, node_id, n2.status.value if n2 is not None else None,
-                )
-                return
-            await self.on_report(
-                TaskNodePatch(
-                    task_id=task_id, node_id=node_id,
-                    acceptance_result=AcceptanceResult(
-                        verdict=AcceptanceVerdict.DONE,
-                        acceptances_metric=["bbs_handoff"],
-                    ),
-                    output_patch={
-                        "result": {
-                            "summary": f"[bbs-handoff] node={node_id}",
-                            "handed_to": rnd_bot_id,
-                            "items": items,
-                            "random": f"{random.randrange(10 ** 6):06d}",
-                        }
-                    },
-                    extend_props_patch={"dispatching": None},
-                )
-            )
+        # 交接完成:固定流程 bbs_handoff 始终调度兜底上报——真实 poller 在 timeout 内闭环则自跳过;
+        # 否则超时后 mock PASS→DONE,避免旁路节点长挂致整个固定流程永不终态。
+        # auto 演示模式用短延迟;默认(非 auto)用 fallback 超时(80s)兜底。
+        _bbs_t = asyncio.create_task(
+            self._static_bbs_handoff_auto_report(task_id, node_id, rnd_bot_id, items)
+        )
+        self._bg_tasks.add(_bbs_t)
+        _bbs_t.add_done_callback(self._on_auto_report_done)
 
     async def _on_static_report(self, task_id: str, node_id: str) -> None:
         runtime = self._static_runtime(task_id)
@@ -2526,11 +2575,11 @@ class ExecutionEngine:
                             status_from=Status.PENDING,
                             status_to=Status.RUNNING,
                         )
-        # ④ auto(静态自驱 mock,OCB_TASK_STATIC_AUTO_REPORT):dispatching 守门防重派;后台 on_report
-        #    自回投 PASS+mock 翻 DONE 推进图态,不占真实 bot/群。
+        # ④ 固定流程兜底上报:每个真实派发节点都调度一条延迟 mock 兜底(auto=True 短延迟演示,
+        #    默认真实模式 fallback 超时 80s);真实回投先到则 _static_auto_report 内自跳过。
         if auto_nodes:
             logger.info(
-                "[task][drain] task=%s auto-mock scheduled %d nodes: %s",
+                "[task][drain] task=%s fallback-mock scheduled %d nodes: %s",
                 task_id, len(auto_nodes), [n.node_id for n in auto_nodes],
             )
             for n in auto_nodes:
@@ -2539,7 +2588,7 @@ class ExecutionEngine:
                 self._bg_tasks.add(t)
                 t.add_done_callback(self._on_auto_report_done)
                 logger.info(
-                    "[task][static-plan] auto-report scheduled task=%s node=%s task_obj=%s",
+                    "[task][static-plan] report-fallback scheduled task=%s node=%s task_obj=%s",
                     task_id, n.node_id, id(t),
                 )
         # ② dispatch_fail:落 dispatch_error(留 PENDING,harness 按超时重试搜推)
