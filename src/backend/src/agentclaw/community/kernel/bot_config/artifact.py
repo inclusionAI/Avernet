@@ -3,8 +3,9 @@
 This is a **published cross-boundary contract**, not an internal model: an
 external engine consumes it to boot a bot. Field names ARE the external API.
 The language-neutral source of truth is ``artifact.schema.json`` (beside this
-file); contract evolution goes through :data:`SCHEMA_VERSION` — distinct from
-the per-bot content ``version`` carried inside an artifact.
+file). :data:`SCHEMA_VERSION` is distinct from the per-bot content ``version``
+carried inside an artifact — and note it no longer tracks every contract change;
+see the comment on the constant.
 
 Module rules (kernel is the lowest layer):
 
@@ -46,15 +47,16 @@ from typing import Any
 # consume (an early v4 iteration nested it under a ``stdio`` object;
 # ``from_dict`` still re-flattens that form on read).
 #
-# v5 (declared, NOT yet emitted): the optional top-level ``cli_tools`` array —
-# command-line tools the model can invoke. The shape is defined here and in
-# ``artifact.schema.json`` so the contract is reviewable, but the constant stays
-# at 4 on purpose. ``ConfigComposer`` stamps this value onto *every* artifact it
-# builds, so bumping it ships ``"schema_version": 5`` to engines running today —
-# and ``teclaw-cli-contract.zh-CN.md`` §6 promises teclaw the opposite: that an
-# old engine will not be handed a new artifact. Bump this to 5 in the same
-# change that first populates ``cli_tools``, once teclaw has answered §8's
-# question 4 (do they accept v5, and from when).
+# The optional top-level ``cli_tools`` array (command-line tools the model can
+# invoke) was added WITHOUT bumping this constant — a deliberate decision with
+# the teclaw owner, 2026-08-31. The field rides into existing v4 artifacts and
+# compatibility rests on the engine contract's "ignore unknown fields rather
+# than reject" rule, which teclaw has agreed to
+# (``engine-convergence-contract.zh-CN.md`` A5).
+#
+# The cost, stated so nobody rediscovers it: ``schema_version`` no longer tracks
+# this contract's evolution. "Does this artifact carry cli_tools?" is answered by
+# probing for the key, never by the version number.
 SCHEMA_VERSION = 4
 
 
@@ -115,9 +117,12 @@ class CliToolRef:
     engine never arbitrates a clash), and placement — where the file lands and
     how it reaches the agent's PATH — is the engine owner's decision.
 
-    ``md5`` is computed by the platform over the bytes at ``path`` for the
-    engine to verify what it retrieves from the store. It is **not** the store's
-    ETag: a multipart upload's ETag is not the content MD5.
+    ``md5`` is computed by the platform over the bytes at ``path`` and serves as
+    the engine's **change test**, not an integrity gate: same ``md5`` as the tool
+    already in the container means skip the re-download and the replace. Supply-
+    chain integrity is settled platform-side by enforcing the user-declared
+    ``sha256`` before delivery. It is **not** the store's ETag — a multipart
+    upload's ETag is not the content MD5.
     """
 
     name: str
@@ -220,9 +225,12 @@ class BotConfigArtifact:
     skills: list[SkillRef] = field(default_factory=list)
     resources: list[ResourceRef] = field(default_factory=list)
     identity_files: list[FileRef] = field(default_factory=list)
-    # ``None`` = not declared → the applier leaves the bot's tools alone.
-    # ``[]`` = declared empty → the applier removes every manifest-delivered
-    # tool. The two are NOT interchangeable; see ``to_dict``.
+    # ``None`` = this platform build does not produce tools yet, so the key is
+    # left off the wire entirely (see ``to_dict``). It is a TRANSITIONAL state,
+    # not a semantic: once the composer populates ``cli_tools`` it is always
+    # present and always complete, exactly like every other category — an
+    # artifact is a full snapshot of platform state, never a manifest diff. At
+    # that point ``[]`` simply means "this bot has no platform-delivered tools".
     cli_tools: list[CliToolRef] | None = None
     stores: dict[str, StoreRef] = field(default_factory=dict)
     engine_overrides: dict[str, Any] = field(default_factory=dict)
@@ -240,13 +248,13 @@ class BotConfigArtifact:
         would reject them. Omitting them keeps those bytes exactly what they
         were, so only artifacts that genuinely carry the local form differ.
 
-        ``cli_tools`` is omitted on the same principle, but the stakes are
-        higher than wire shape: for that key **absence and ``[]`` are different
-        instructions**. Absence means "the manifest said nothing about tools —
-        leave them alone"; ``[]`` means "remove every tool". ``asdict`` would
-        emit ``"cli_tools": []`` on every artifact, so an unrelated change (a
-        skill edit, say) would ship a wipe order for tools the bot is using.
-        Only a genuine declaration puts the key on the wire.
+        ``cli_tools`` is omitted on the same principle: nothing populates it
+        yet, and ``asdict`` would otherwise put ``"cli_tools": []`` on every
+        artifact — a new key on the wire to every engine, ahead of the feature
+        that gives it meaning. Omitting it keeps today's artifacts byte-identical
+        to those built before the field existed. This is transitional, not a
+        semantic distinction the engine has to honour: once the composer fills
+        the field it is always present and always complete.
         """
         data = asdict(self)
         for server in data.get("mcp", {}).get("servers", []):

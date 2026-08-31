@@ -45,7 +45,7 @@ together.
 | **W2** guarded fetcher | #1470 | **W9** `cli_tools` (deferred — *artifact shape landed*) | #1477 |
 | **W3** source credentials | #1471 | **W10** service-layer seam — *merged* | #1509 |
 | | | **W11** platform-side materialisation | #1510 |
-| | | **W12** cross-engine semantics contract — *written half delivered, awaiting teclaw review* | #1684 |
+| | | **W12** cross-engine semantics contract — *done* | #1684 |
 | | | **W13** create a bot from a manifest | #1696 |
 
 Planning PR: #1465. **All thirteen items are assigned in §7**, and every item carries an **Owner** line with its day budget and calendar day.
@@ -1198,13 +1198,26 @@ the split of responsibilities, and a self-check list. Together with
 former is the convergence semantics for every category, the latter the one
 addition they have to implement, `cli_tools`.
 
-> **Progress: the written half is delivered** (PR #1734). What remains is not
-> our effort but **their review**: the first two acceptance criteria
-> (requirement-shaped rules, reserved names) are met; the last two (teclaw has
-> reviewed, divergences recorded in the capability matrix) cannot be ticked
-> until they answer. **The next step is sending both documents to the teclaw
-> owner and chasing an explicit reply** — agreement, or the parts they will not
-> implement. Silence is not an answer.
+> **✅ Done (2026-08-31).** All four acceptance criteria are met: the contract
+> states requirements on the applier, the reserved-names clause is in, teclaw
+> reviewed and agreed point by point, and the conclusions are recorded in the
+> capability matrix (`engine-requirements.zh-CN.md` §2 and T1/T2/T4 in §3).
+>
+> **The review caught a substantive error, recorded here so it is not repeated.**
+> The first draft stated "declared categories overwrite, undeclared are
+> untouched, an empty set is a declaration, absence is not `[]`" as **requirements
+> on teclaw**. That was wrong: `ConfigComposer` assembles the artifact by reading
+> **platform entities** for their full current state, not by reading the manifest,
+> so **an artifact is always a complete snapshot, never a diff** — the
+> declared/undeclared distinction dissolves before the artifact exists and never
+> reaches the engine. The contract is now split into **A1–A5 (requirements on the
+> applier)** and **P1–P4 (platform-side rules, for context only)**.
+>
+> Two other decisions landed with it: **`md5` is a change test, not an integrity
+> gate** (an unchanged md5 means skip the re-download and replace), and
+> **`schema_version` is not bumped** — `cli_tools` rides into v4 and relies on
+> A5's ignore-unknown-fields rule. Placement, PATH approach and sandbox policy are
+> teclaw's own business; the platform does not ask.
 
 **Depends on.** §3.2 being settled (it is) · **Blocked by.** —
 
@@ -2117,26 +2130,57 @@ in the design itself. Not scheduled.
 > | `cliToolRef` + optional `cli_tools` in `artifact.schema.json` | ✅ merged |
 > | `CliToolRef` in `artifact.py`; `to_dict` omits the key when undeclared, `from_dict` never reads an absence as `[]` | ✅ merged, pinned by tests |
 > | The three "artifact schema unchanged" statements in `README.zh-CN.md` | ✅ reconciled |
-> | `SCHEMA_VERSION` 4 → 5 | ❌ **deliberately not done** — see below |
+> | `SCHEMA_VERSION` 4 → 5 | ➖ **decided against** (2026-08-31) — `cli_tools` rides into v4, compatibility via ignore-unknown-fields |
 > | Manifest-side `cli_tools` (§3.7): storage, validation, materialiser | ❌ not started |
 > | Fetch / `sha256` enforcement / unpack / select `subpath` / compute `md5` / write to store | ❌ not started |
 > | ELF header check, `${BOT_ARCH}` → `amd64` | ❌ not started |
 > | ARCA-side PATH proposal + the usage skill in the default skill set | ❌ not started |
 > | `bcs-cli` adopted as the first consumer | ❌ not started |
 >
-> **The bump has a precondition — it is not a one-line finishing touch.**
-> `ConfigComposer` stamps `SCHEMA_VERSION` onto *every* artifact, so raising it
-> to 5 immediately hands `"schema_version": 5` to engines running today —
-> precisely what `teclaw-cli-contract.zh-CN.md` §6 promises will not happen.
-> **Do it in the same change that first populates `cli_tools`**, once teclaw has
-> answered question 4 in that document's §8. A test in
-> `tests/community/kernel/test_bot_config_artifact.py` pins it at 4 along with
-> this reasoning — that test is a **prompt**: confirm the precondition holds
-> before editing it.
+> **`SCHEMA_VERSION` is not being bumped — that is settled, not pending.**
+> Decided with the teclaw owner on 2026-08-31: `cli_tools` rides into v4
+> artifacts as a new field and compatibility rests on the engine-side
+> "ignore unknown fields rather than reject" rule
+> (`engine-convergence-contract.zh-CN.md` A5, agreed). **The cost, stated:
+> `schema_version` no longer tracks this contract's evolution** — to know
+> whether an artifact carries `cli_tools`, probe for the key, never the version.
+> A test in `tests/community/kernel/test_bot_config_artifact.py` guards against
+> it drifting upward.
 >
 > **Note that issue #1477's body still describes the pre-flattening shape**
 > (`entrypoints`, "the engine receives an unpacked directory"). This document
 > and `teclaw-cli-contract.zh-CN.md` are authoritative.
+
+**Depends on.** W8. (The part that landed is the exception: it only declares a
+shape and produces no content, so it does not depend on W8.)
+
+**The artifact contract genuinely changes, and `artifact.schema.json` is part of
+it.** `kernel/bot_config/artifact.py` and its language-neutral
+`artifact.schema.json` are the published contract; that schema sets top-level
+`"additionalProperties": false`, so a `cli_tools` field is **rejected** until the
+schema file is amended and `SCHEMA_VERSION` goes 4 → 5. This item owns both, plus
+reconciling the "artifact schema unchanged" statements in `README.zh-CN.md` and
+§9 — they are true for every other category and stop being true for this one.
+
+> **Landed early: the shape, not the version.** `cliToolRef` and the optional
+> `cli_tools` array are in the schema, `CliToolRef` is in `artifact.py`, and the
+> three "unchanged" statements in `README.zh-CN.md` are reconciled. That half
+> depends on nothing — it declares a shape without producing content — so it
+> went first, to keep the spec teclaw reviews identical to the code.
+>
+> **`SCHEMA_VERSION` is still 4, and that is the rest of this item — with a
+> precondition.** `ConfigComposer` stamps the constant onto *every* artifact, so
+> bumping it hands `"schema_version": 5` to engines running today, which is
+> precisely what `teclaw-cli-contract.zh-CN.md` §6 promises teclaw will not
+> happen. **Bump it in the same change that first populates `cli_tools`**, once
+> teclaw has answered §8's question 4.
+>
+> **`cli_tools` is currently off the wire.** Nothing populates it, so `to_dict`
+> omits the key and today's artifacts are byte-identical to those built before
+> the field existed. **This is transitional, not a semantic**: an artifact is a
+> full snapshot of platform state, so once the composer fills the field it is
+> always present and always complete like every other category, and `[]` simply
+> means the bot has no platform-delivered tools.
 
 **Depends on.** W8. (The part that landed is the exception: it only declares a
 shape and produces no content, so it does not depend on W8.)
