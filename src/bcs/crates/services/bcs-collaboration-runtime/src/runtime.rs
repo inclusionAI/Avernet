@@ -5924,7 +5924,7 @@ fn render_state_machine_opening_message(
         ));
     };
     opening_message
-        .render(OpeningMessageRenderContext {
+        .render(OpeningMessageRenderContext::StateMachineRun {
             group_id: &group.id,
             session_id: &run.session_id,
             run_id: &run.run_id,

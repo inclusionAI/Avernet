@@ -137,7 +137,8 @@ pub struct CreateGroupRequest {
     /// User-provided group context (optional description of collaboration goal/background).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
-    /// Optional StateMachine Run opening-message template.
+    /// Optional Group opening-message template. Chat and Manager-Worker use a
+    /// Session scope; StateMachine uses a Run scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opening_message: Option<OpeningMessage>,
     /// Group topic (sets the group label as "Group: {topic}").

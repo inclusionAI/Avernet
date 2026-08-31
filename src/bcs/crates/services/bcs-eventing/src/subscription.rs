@@ -1347,15 +1347,15 @@ fn delivery_summary(
 fn attempt_summary(
     attempt: &EventDeliveryAttemptRecord,
 ) -> Result<EventDeliveryAttemptSummary, ApplicationError> {
-    let result = match attempt.result {
+    let result = attempt.result.map(|result| match result {
         EventDeliveryAttemptRecordResult::Success => EventDeliveryAttemptResult::Success,
         EventDeliveryAttemptRecordResult::Retryable => EventDeliveryAttemptResult::Retryable,
         EventDeliveryAttemptRecordResult::Terminal => EventDeliveryAttemptResult::Terminal,
-    };
+    });
     Ok(EventDeliveryAttemptSummary {
         attempt_no: attempt.attempt_no,
         started_at: timestamp(attempt.started_at_ms)?,
-        completed_at: timestamp(attempt.completed_at_ms)?,
+        completed_at: attempt.completed_at_ms.map(timestamp).transpose()?,
         latency_ms: attempt.latency_ms,
         result,
         http_status: attempt.http_status,

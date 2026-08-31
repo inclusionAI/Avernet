@@ -3566,7 +3566,7 @@ async fn update_rejects_delivery_policy_for_non_chat_strategy() {
 }
 
 #[tokio::test]
-async fn update_opening_message_preserves_patch_states_and_strategy_guard() {
+async fn update_opening_message_preserves_patch_states_and_strategy_scopes() {
     let runtime = Arc::new(RecordingRuntime::default());
     let fixture = Fixture::new_with_runtime(runtime.clone()).await;
     for bot in ["driver", "helper"] {
@@ -3689,7 +3689,7 @@ async fn update_opening_message_preserves_patch_states_and_strategy_guard() {
     );
     chat.opening_message = None;
     fixture.groups.upsert(chat).await.expect("store Chat Group");
-    let error = fixture
+    fixture
         .service
         .update(UpdateGroup {
             caller: bot_principal("driver"),
@@ -3700,7 +3700,31 @@ async fn update_opening_message_preserves_patch_states_and_strategy_guard() {
             },
         })
         .await
-        .expect_err("Chat Group must reject opening message");
+        .expect("Chat Group accepts session-scoped opening message");
+    assert_eq!(
+        fixture
+            .groups
+            .get("chat")
+            .await
+            .expect("stored Chat Group")
+            .opening_message,
+        Some(OpeningMessage::Text("hello".into()))
+    );
+
+    let error = fixture
+        .service
+        .update(UpdateGroup {
+            caller: bot_principal("driver"),
+            group_id: "chat".into(),
+            patch: GroupPatch {
+                opening_message: Some(Some(OpeningMessage::Text(
+                    "Run {{bcs.run_id}}".into(),
+                ))),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect_err("Chat Group must reject run-scoped variables");
     assert!(matches!(
         error,
         ApplicationError::InvalidInput { code, .. } if code == "invalid_opening_message"

@@ -21,6 +21,7 @@ use rand::RngCore;
 use sha2::Digest;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{MissedTickBehavior, interval};
+use tracing::{debug, warn};
 use url::Url;
 
 use crate::retry::EventRetryPolicy;
@@ -106,11 +107,29 @@ impl EventDispatcher {
                 env: self.env.clone(),
             })
             .await
-            .map_err(|_| EventDispatcherError::Repository)?;
+            .map_err(|error| {
+                warn!(
+                    worker_id,
+                    env = %self.env,
+                    error = %error,
+                    "failed to claim webhook deliveries"
+                );
+                EventDispatcherError::Repository
+            })?;
         let count = deliveries.len();
+        debug!(worker_id, env = %self.env, count, "claimed webhook deliveries");
         stream::iter(deliveries)
             .for_each_concurrent(self.worker_concurrency, |delivery| async move {
-                let _ = self.dispatch(delivery).await;
+                let delivery_id = delivery.delivery_id.clone();
+                let attempt_no = delivery.attempt_count;
+                if let Err(error) = self.dispatch(delivery).await {
+                    warn!(
+                        delivery_id,
+                        attempt_no,
+                        error = %error,
+                        "webhook delivery dispatch did not complete"
+                    );
+                }
             })
             .await;
         self.host_semaphores
@@ -152,7 +171,15 @@ impl EventDispatcher {
                             env: env.clone(),
                         })
                         .await
-                        .map_err(|_| EventDispatcherError::Repository)?;
+                        .map_err(|error| {
+                            warn!(
+                                delivery_id,
+                                attempt_no,
+                                error = %error,
+                                "failed to renew webhook delivery lease"
+                            );
+                            EventDispatcherError::Repository
+                        })?;
                 }
             }
         }
@@ -170,9 +197,36 @@ impl EventDispatcher {
                 &self.env,
             )
             .await
-            .map_err(|_| EventDispatcherError::Repository)?
-            .ok_or(EventDispatcherError::MissingState)?;
-        let host_key = endpoint_host_key(&revision.endpoint_url)?;
+            .map_err(|error| {
+                warn!(
+                    delivery_id = %delivery_record.delivery_id,
+                    attempt_no = delivery_record.attempt_count,
+                    subscription_id = %delivery_record.subscription_id,
+                    error = %error,
+                    "failed to load webhook subscription revision"
+                );
+                EventDispatcherError::Repository
+            })?
+            .ok_or_else(|| {
+                warn!(
+                    delivery_id = %delivery_record.delivery_id,
+                    attempt_no = delivery_record.attempt_count,
+                    subscription_id = %delivery_record.subscription_id,
+                    revision = delivery_record.subscription_revision,
+                    "webhook subscription revision is missing"
+                );
+                EventDispatcherError::MissingState
+            })?;
+        let host_key = endpoint_host_key(&revision.endpoint_url).map_err(|error| {
+            warn!(
+                delivery_id = %delivery_record.delivery_id,
+                attempt_no = delivery_record.attempt_count,
+                subscription_id = %delivery_record.subscription_id,
+                error = %error,
+                "webhook endpoint is invalid"
+            );
+            error
+        })?;
         let semaphore = {
             let mut semaphores = self.host_semaphores.lock().await;
             semaphores
@@ -183,10 +237,18 @@ impl EventDispatcher {
         let _permit = semaphore
             .acquire_owned()
             .await
-            .map_err(|_| EventDispatcherError::InvalidEndpoint)?;
+            .map_err(|error| {
+                warn!(
+                    delivery_id = %delivery_record.delivery_id,
+                    attempt_no = delivery_record.attempt_count,
+                    error = %error,
+                    "webhook host concurrency semaphore closed"
+                );
+                EventDispatcherError::InvalidEndpoint
+            })?;
         let started_at_ms = (self.now_ms)();
         let attempt_no = delivery_record.attempt_count;
-        let mut response = self
+        let mut response = match self
             .delivery
             .deliver(EventDeliveryRequest {
                 endpoint_url: revision.endpoint_url,
@@ -194,30 +256,49 @@ impl EventDispatcher {
                 request_timeout_ms: revision.request_timeout_ms,
             })
             .await
-            .unwrap_or_else(|_| EventDeliveryResponse {
-                disposition: EventDeliveryDisposition::Retryable,
-                http_status: None,
-                retry_after_ms: None,
-                response_bytes_observed: 0,
-                error_category: Some("delivery_adapter".to_string()),
-                error_summary: Some("Webhook delivery adapter failed".to_string()),
-            });
-        if response.disposition == EventDeliveryDisposition::DisableSubscription
-            && self
+        {
+            Ok(response) => response,
+            Err(error) => {
+                warn!(
+                    delivery_id = %delivery_record.delivery_id,
+                    attempt_no,
+                    subscription_id = %delivery_record.subscription_id,
+                    error = %error,
+                    "webhook delivery adapter failed"
+                );
+                EventDeliveryResponse {
+                    disposition: EventDeliveryDisposition::Retryable,
+                    http_status: None,
+                    retry_after_ms: None,
+                    response_bytes_observed: 0,
+                    error_category: Some("delivery_adapter".to_string()),
+                    error_summary: Some("Webhook delivery adapter failed".to_string()),
+                }
+            }
+        };
+        if response.disposition == EventDeliveryDisposition::DisableSubscription {
+            if let Err(error) = self
                 .disable_subscription(&delivery_record.subscription_id)
                 .await
-                .is_err()
-        {
-            // Do not permanently consume the 410 until the required durable
-            // Subscription disable/cancellation transaction has committed.
-            response = EventDeliveryResponse {
-                disposition: EventDeliveryDisposition::Retryable,
-                http_status: response.http_status,
-                retry_after_ms: None,
-                response_bytes_observed: response.response_bytes_observed,
-                error_category: Some("subscription_disable".to_string()),
-                error_summary: Some("Subscription disable will be retried".to_string()),
-            };
+            {
+                warn!(
+                    delivery_id = %delivery_record.delivery_id,
+                    attempt_no,
+                    subscription_id = %delivery_record.subscription_id,
+                    error = %error,
+                    "failed to disable webhook subscription after terminal response"
+                );
+                // Do not permanently consume the 410 until the required durable
+                // Subscription disable/cancellation transaction has committed.
+                response = EventDeliveryResponse {
+                    disposition: EventDeliveryDisposition::Retryable,
+                    http_status: response.http_status,
+                    retry_after_ms: None,
+                    response_bytes_observed: response.response_bytes_observed,
+                    error_category: Some("subscription_disable".to_string()),
+                    error_summary: Some("Subscription disable will be retried".to_string()),
+                };
+            }
         }
         let completed_at_ms = (self.now_ms)();
         self.complete_attempt(
@@ -292,7 +373,37 @@ impl EventDispatcher {
                 response_bytes_observed: response.response_bytes_observed,
             })
             .await
-            .map_err(|_| EventDispatcherError::Repository)?;
+            .map_err(|error| {
+                warn!(
+                    delivery_id = %delivery.delivery_id,
+                    attempt_no,
+                    next_status = ?next_status,
+                    http_status = ?response.http_status,
+                    error_category = ?response.error_category,
+                    error_summary = ?response.error_summary,
+                    error = %error,
+                    "failed to persist webhook delivery attempt completion"
+                );
+                EventDispatcherError::Repository
+            })?;
+        if next_status == EventDeliveryStatus::Succeeded {
+            debug!(
+                delivery_id = %delivery.delivery_id,
+                attempt_no,
+                http_status = ?response.http_status,
+                "webhook delivery attempt succeeded"
+            );
+        } else {
+            warn!(
+                delivery_id = %delivery.delivery_id,
+                attempt_no,
+                next_status = ?next_status,
+                http_status = ?response.http_status,
+                error_category = ?response.error_category,
+                error_summary = ?response.error_summary,
+                "webhook delivery attempt failed"
+            );
+        }
         Ok(())
     }
 
@@ -304,7 +415,14 @@ impl EventDispatcher {
             .repo
             .get_subscription(subscription_id, &self.env)
             .await
-            .map_err(|_| EventDispatcherError::Repository)?
+            .map_err(|error| {
+                warn!(
+                    subscription_id,
+                    error = %error,
+                    "failed to load webhook subscription for disable"
+                );
+                EventDispatcherError::Repository
+            })?
         else {
             return Err(EventDispatcherError::MissingState);
         };
@@ -350,7 +468,14 @@ impl EventDispatcher {
                 env: self.env.clone(),
             })
             .await
-            .map_err(|_| EventDispatcherError::Repository)?;
+            .map_err(|error| {
+                warn!(
+                    subscription_id,
+                    error = %error,
+                    "failed to persist disabled webhook subscription"
+                );
+                EventDispatcherError::Repository
+            })?;
         Ok(())
     }
 }

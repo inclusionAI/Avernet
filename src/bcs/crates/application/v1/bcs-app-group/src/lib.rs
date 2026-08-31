@@ -21,7 +21,7 @@ use bcs_service_api::application::v1::{
     require_authenticated_user, require_human, select_principal,
 };
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
-use bcs_service_api::types::{EventActor, EventActorType};
+use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, AuthenticatedHumanCaller, BotRegistryCoreService,
     CollaborationDefinitionRef, CollaborationRuntimeError, CollaborationRuntimeService,
@@ -1109,13 +1109,7 @@ impl GroupServiceImpl {
         let (strategy, routing_policy, state_machine) =
             map_create_collaboration(request.collaboration.clone());
         if let Some(opening_message) = &request.opening_message {
-            if strategy != GroupStrategy::StateMachine {
-                return Err(ApplicationError::invalid(
-                    "invalid_opening_message",
-                    "opening_message is only supported for StateMachine Groups",
-                ));
-            }
-            opening_message.validate().map_err(|error| {
+            opening_message.validate_for(opening_message_scope(strategy)).map_err(|error| {
                 ApplicationError::invalid("invalid_opening_message", error.to_string())
             })?;
         }
@@ -2056,14 +2050,10 @@ impl GroupService for GroupServiceImpl {
             ));
         }
         if let Some(opening_message) = &command.patch.opening_message {
-            if group.group_strategy != GroupStrategy::StateMachine {
-                return Err(ApplicationError::invalid(
-                    "invalid_opening_message",
-                    "opening_message is only supported for StateMachine Groups",
-                ));
-            }
             if let Some(opening_message) = opening_message {
-                opening_message.validate().map_err(|error| {
+                opening_message
+                    .validate_for(opening_message_scope(group.group_strategy))
+                    .map_err(|error| {
                     ApplicationError::invalid("invalid_opening_message", error.to_string())
                 })?;
             }
@@ -2417,6 +2407,13 @@ impl GroupService for GroupServiceImpl {
             }
             Err(error) => Err(map_group_error(error)),
         }
+    }
+}
+
+fn opening_message_scope(strategy: GroupStrategy) -> OpeningMessageScope {
+    match strategy {
+        GroupStrategy::StateMachine => OpeningMessageScope::StateMachineRun,
+        GroupStrategy::Chat | GroupStrategy::ManagerWorker => OpeningMessageScope::Session,
     }
 }
 

@@ -8,7 +8,7 @@ use crate::core::validate_service_spec_patch;
 use crate::noop::{
     EmptyRelationCoreService, EmptySessionManagementService, NoopSystemMessageService,
 };
-use bcs_service_api::types::{EventActor, EventActorType};
+use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
     CallbackChannelConfig, CanResolveInteraction, CanResolveInteractionCommand,
@@ -1006,13 +1006,11 @@ impl GroupManagementService for GroupManagement {
         }
         let requested_strategy = cmd.group_strategy.unwrap_or_default();
         if let Some(opening_message) = &cmd.opening_message {
-            if requested_strategy != GroupStrategy::StateMachine {
-                return Err(GroupUseCaseError::InvalidProposal(
-                    "invalid_opening_message: opening_message is only supported for state_machine groups"
-                        .to_string(),
-                ));
-            }
-            opening_message.validate().map_err(|error| {
+            let scope = match requested_strategy {
+                GroupStrategy::StateMachine => OpeningMessageScope::StateMachineRun,
+                GroupStrategy::Chat | GroupStrategy::ManagerWorker => OpeningMessageScope::Session,
+            };
+            opening_message.validate_for(scope).map_err(|error| {
                 GroupUseCaseError::InvalidProposal(format!("invalid_opening_message: {error}"))
             })?;
         }

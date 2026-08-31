@@ -589,6 +589,9 @@ CreateCollaborationGroup:
     context:
       type: string
     opening_message:
+      description: >-
+        Optional opening-message template. Chat and Manager-Worker render it
+        once when a new Session is created; StateMachine renders it per Run.
       oneOf:
         - $ref: ../domain-models.yaml#/OpeningMessage
         - type: "null"
@@ -648,6 +651,9 @@ UpdateGroup:
     context:
       type: string
     opening_message:
+      description: >-
+        Replaces or clears the Group opening-message template. The selected
+        collaboration strategy determines the supported variables.
       oneOf:
         - $ref: ../domain-models.yaml#/OpeningMessage
         - type: "null"
