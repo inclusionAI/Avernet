@@ -254,7 +254,7 @@ def test_validation_or_scanner_failure_never_publishes(
     versions = _Versions(_target())
     materializer = _materializer(package=package, scanner=scanner, versions=versions)
 
-    with pytest.raises(SkillVersionMaterializationError):
+    with pytest.raises(SkillVersionMaterializationError) as failure:
         materializer.materialize(
             SkillVersionMaterializationRequest(
                 env="pre",
@@ -264,6 +264,7 @@ def test_validation_or_scanner_failure_never_publishes(
             )
         )
 
+    assert failure.value.stage == "scanner"
     assert versions.published is None
 
 
@@ -275,7 +276,7 @@ def test_team_exact_package_still_rejects_manifest_name_mismatch() -> None:
         versions=versions,
     )
 
-    with pytest.raises(SkillVersionMaterializationError, match="name changed"):
+    with pytest.raises(SkillVersionMaterializationError, match="name changed") as failure:
         materializer.materialize(
             SkillVersionMaterializationRequest(
                 env="pre",
@@ -286,6 +287,7 @@ def test_team_exact_package_still_rejects_manifest_name_mismatch() -> None:
             )
         )
 
+    assert failure.value.stage == "name_match"
     assert versions.published is None
 
 
