@@ -30,5 +30,8 @@ def resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
 
 # Content routing is internal to execute. There is no public template endpoint.
 STATIC_PLAN_TEMPLATES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # 串行接力版置顶承接 OKR 内容;老 okr-implementation 保留于 plans/(by-id/历史测试可达),
+    # 同关键字在后被遮蔽/内容不再触发。切回老模板只需删掉 relay 条目。
+    ("okr-implementation-relay", ("okr", "转化率", "双十一", "大促")),
     ("okr-implementation", ("okr", "转化率", "双十一", "大促")),
 )

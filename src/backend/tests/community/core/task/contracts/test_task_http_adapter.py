@@ -331,7 +331,7 @@ class TestTaskExecute:
         assert "运行静态模板" not in spec["metadata"]["instruction"]
         assert spec["metadata"]["title"] != "okr-implementation"
         assert spec["goal"]["objective"] != "okr-implementation"
-        assert record.execution_config["static_plan_id"] == "okr-implementation"
+        assert record.execution_config["static_plan_id"] == "okr-implementation-relay"
         assert record.execution_config["static_plan_yaml"]
         assert record.execution_config["task_type"] == "dynamic"
 
@@ -361,7 +361,7 @@ class TestTaskExecute:
         record = inj.get(TaskInfoRepositoryProtocol).get(task_id)
         assert record is not None
         # 模板必填 input okr 被用调用方目标镜像兜底补进,并落到预置模板 plan
-        assert record.execution_config["static_plan_id"] == "okr-implementation"
+        assert record.execution_config["static_plan_id"] == "okr-implementation-relay"
         assert record.execution_config["template_input"]["okr"] == (
             "制定2026年度大促OKR完成策略,实现平稳过多平台年度大促并取得用户和收益双增长"
         )

@@ -1,0 +1,94 @@
+template_id: okr-implementation-relay
+entry_bot_id: 20260828_8azkbtgs
+task_type: static_plan
+# 串行接力版(与 okr-implementation 并存,本模板暂由内容路由切换前不触发):
+# 入口(20260828_8azkbtgs,总结需求+问题形成 handoff) -> 1 大促营销策略专家
+# -> 2 圈人选品群(协作) -> 3 风险评估群(协作)
+# -> 4 不可实现任务转BBS广场+自动研发bot(串行腿,非旁路)
+# -> 5 营销策略审核(读 3 risk_result + 4 handoff) -> 6 投放实施 -> 7 通知
+# 接力承载:"handoff" output 用 $.result(取整个上报内容),pre-键统一真实模式也能携带;
+# 与各 bot 的 rule 约定"产上下文总结+剩余问题"共同形成接力包。
+input_schema:
+  okr:
+    type: string
+    required: true
+nodes:
+  - id: marketing_strategy
+    name: 大促营销策略专家
+    type: bot
+    bot_id: 20260828_whd6nx7x
+    depends_on: []
+    input:
+      okr: $.input.okr
+    output:
+      strategy_result: $.result
+      handoff: $.result
+  - id: crowd_product_group
+    name: 圈人选品群
+    type: collaboration
+    depends_on: [marketing_strategy]
+    collaboration:
+      bot_ids: [20260828_6snfeiq0, 20260828_roqtqqkx]
+      mode: chat
+      completion: report
+    input:
+      strategy_result: $.marketing_strategy.output.strategy_result
+      handoff: $.marketing_strategy.output.handoff
+    output:
+      strategy_result: $.report.result
+      handoff: $.result
+  - id: risk_assessment
+    name: 风险评估群
+    type: collaboration
+    depends_on: [crowd_product_group]
+    collaboration:
+      bot_ids: [20260828_7q4cbeze, 20260828_jbadndne]
+      mode: chat
+      completion: report
+    input:
+      strategy_result: $.crowd_product_group.output.strategy_result
+      handoff: $.crowd_product_group.output.handoff
+    output:
+      risk_result: $.report.result
+      unhandled_tasks: $.result.unhandled_tasks
+      handoff: $.result
+  - id: risk_unhandled_to_bbs
+    name: 不可实现任务转BBS广场
+    type: bbs_handoff
+    bot_id: 20260828_f7wfi27d
+    depends_on: [risk_assessment]
+    input:
+      unhandled_tasks: $.risk_assessment.output.unhandled_tasks
+      handoff: $.risk_assessment.output.handoff
+    output:
+      bbs_handed: $.result
+      handoff: $.result
+  - id: strategy_approval
+    name: 营销策略审核
+    type: bot
+    bot_id: 20260828_9rgd70li
+    depends_on: [risk_unhandled_to_bbs]
+    input:
+      risk_result: $.risk_assessment.output.risk_result
+      handoff: $.risk_unhandled_to_bbs.output.handoff
+    output:
+      approval_result: $.result
+      handoff: $.result
+  - id: implementation
+    name: 投放实施
+    type: bot
+    bot_id: 20260828_k9c2slro
+    depends_on: [strategy_approval]
+    input:
+      approval_result: $.strategy_approval.output.approval_result
+      handoff: $.strategy_approval.output.handoff
+    output:
+      implementation_result: $.result
+      handoff: $.result
+  - id: notify_done
+    name: 通知完成
+    type: notify
+    depends_on: [implementation]
+    input:
+      implementation_result: $.implementation.output.implementation_result
+      handoff: $.implementation.output.handoff
