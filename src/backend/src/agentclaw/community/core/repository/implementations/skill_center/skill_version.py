@@ -7,7 +7,11 @@ from datetime import datetime
 from injector import inject
 from sqlalchemy import and_, func
 
-from agentclaw.community.core.models.skill import Skill
+from agentclaw.community.core.models.skill import (
+    BotSkillInstallation,
+    Skill,
+    SkillSetSkill,
+)
 from agentclaw.community.core.models.space_skill import SkillSpaceBinding, SkillVersion
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillVersionMaterializationRepositoryProtocol,
@@ -121,9 +125,7 @@ class SkillVersionRepository(
                 or not git_path.startswith("center://")
                 or not git_path[len("center://") :]
             ):
-                raise RuntimeError(
-                    "Center Version has no stable Asset identity"
-                )
+                raise RuntimeError("Center Version has no stable Asset identity")
             return self._materializing(
                 version,
                 skill_uuid=skill_uuid,
@@ -136,6 +138,7 @@ class SkillVersionRepository(
         env: str,
         skill_id: int,
         skill_version_id: int,
+        name: str,
         metadata_json: str,
         description: str,
         published_at: datetime,
@@ -152,7 +155,8 @@ class SkillVersionRepository(
             skill, version = locked
             if version.status == "PUBLISHED":
                 if (
-                    version.metadata_json != metadata_json
+                    version.name != name
+                    or version.metadata_json != metadata_json
                     or version.description != description
                     or version.published_at is None
                 ):
@@ -160,6 +164,13 @@ class SkillVersionRepository(
                         "PUBLISHED Skill Version conflicts with materialized facts"
                     )
             elif version.status == "MATERIALIZING":
+                self._converge_public_manifest_name(
+                    session,
+                    skill=skill,
+                    version=version,
+                    env=env,
+                    manifest_name=name,
+                )
                 version.metadata_json = metadata_json
                 version.description = description
                 version.published_at = published_at
@@ -207,6 +218,72 @@ class SkillVersionRepository(
                 metadata_json=version.metadata_json,
                 published_at=version.published_at,
             )
+
+    @staticmethod
+    def _converge_public_manifest_name(
+        session,
+        *,
+        skill: Skill,
+        version: SkillVersion,
+        env: str,
+        manifest_name: str,
+    ) -> None:
+        """Freeze the exact package name for an unconsumed SC Public Asset.
+
+        Public catalogue metadata is available before the exact package and
+        may use a presentation name unrelated to ``SKILL.md.name``.  The row
+        is still provisional while its first Version is MATERIALIZING.  A
+        one-time convergence is safe only before any PUBLISHED Version or Bot
+        relationship exists; every later mismatch fails closed.
+        """
+        if skill.name == manifest_name and version.name == manifest_name:
+            return
+        git_path = skill.git_path or ""
+        if (
+            not manifest_name
+            or not git_path.startswith("center://")
+            or not git_path[len("center://") :]
+            or version.publication_attempt_id is not None
+        ):
+            raise RuntimeError("materialized SKILL.md name changed")
+        has_space = (
+            session.query(SkillSpaceBinding.id)
+            .filter(
+                SkillSpaceBinding.skill_id == int(skill.id),
+                SkillSpaceBinding.env == env,
+            )
+            .first()
+            is not None
+        )
+        has_published = (
+            session.query(SkillVersion.id)
+            .filter(
+                SkillVersion.skill_id == int(skill.id),
+                SkillVersion.env == env,
+                SkillVersion.status == "PUBLISHED",
+            )
+            .first()
+            is not None
+        )
+        has_membership = (
+            session.query(SkillSetSkill.id)
+            .filter(SkillSetSkill.skill_id == int(skill.id), SkillSetSkill.env == env)
+            .first()
+            is not None
+        )
+        has_installation = (
+            session.query(BotSkillInstallation.id)
+            .filter(
+                BotSkillInstallation.skill_id == int(skill.id),
+                BotSkillInstallation.env == env,
+            )
+            .first()
+            is not None
+        )
+        if has_space or has_published or has_membership or has_installation:
+            raise RuntimeError("materialized SKILL.md name changed")
+        skill.name = manifest_name
+        version.name = manifest_name
 
     @staticmethod
     def _materializing(

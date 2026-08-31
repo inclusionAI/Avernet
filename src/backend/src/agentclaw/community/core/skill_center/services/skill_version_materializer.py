@@ -43,6 +43,7 @@ from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterExactDownloadRequest,
+    SkillCenterReadScope,
 )
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
@@ -75,7 +76,9 @@ def _dependency(entry: object) -> dict[str, object]:
         "icon_url": ("icon_url", "iconUrl"),
         "description": ("description",),
     }.items():
-        selected = next((value.get(key) for key in alternatives if value.get(key)), None)
+        selected = next(
+            (value.get(key) for key in alternatives if value.get(key)), None
+        )
         if selected is not None:
             normalized[target] = selected
     return normalized
@@ -195,7 +198,9 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 raise ValueError("exact SC identity is incomplete")
             if target.status == "PUBLISHED":
                 if not self._store.verify_version(ref):
-                    raise ValueError("PUBLISHED Version has no verified canonical content")
+                    raise ValueError(
+                        "PUBLISHED Version has no verified canonical content"
+                    )
                 return self._published_target(target)
 
             exact = self._gateway.get_exact_download(
@@ -219,8 +224,15 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
             if hashlib.sha256(package_bytes).hexdigest() != expected_digest:
                 raise ValueError("downloaded package digest does not match SC")
 
-            package = self._validator.validate_zip(package_bytes)
-            if package.name != target.name:
+            package = (
+                self._validator.validate_public_center_zip(package_bytes)
+                if request.scope is SkillCenterReadScope.PUBLIC
+                else self._validator.validate_zip(package_bytes)
+            )
+            if (
+                request.scope is not SkillCenterReadScope.PUBLIC
+                and package.name != target.name
+            ):
                 raise ValueError("materialized SKILL.md name changed")
             scan = self._scanner.scan(package)
             dependencies = _dependencies(
@@ -251,9 +263,7 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 separators=(",", ":"),
                 sort_keys=True,
             )
-            version = CanonicalCenterVersion.from_files(
-                identity, dict(package.files)
-            )
+            version = CanonicalCenterVersion.from_files(identity, dict(package.files))
             written = self._store.write_version(version)
             if written != ref or not self._store.verify_version(ref):
                 raise ValueError("canonical exact Version did not verify")
@@ -261,6 +271,7 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 env=request.env,
                 skill_id=request.skill_id,
                 skill_version_id=request.skill_version_id,
+                name=package.name,
                 metadata_json=metadata_json,
                 description=package.description,
                 published_at=self._clock(),

@@ -347,6 +347,7 @@ class SkillVersionMaterializationRepositoryProtocol(Protocol):
         env: str,
         skill_id: int,
         skill_version_id: int,
+        name: str,
         metadata_json: str,
         description: str,
         published_at: datetime,
