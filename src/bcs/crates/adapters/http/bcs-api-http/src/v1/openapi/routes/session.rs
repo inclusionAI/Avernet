@@ -9,7 +9,7 @@ use bcs_service_api::application::v1::{
     DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, UncollectSession,
     UpdateSessionParticipant,
 };
-use bcs_service_api::MessageHistoryOptions;
+use bcs_service_api::application::MessageHistoryOptions;
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
