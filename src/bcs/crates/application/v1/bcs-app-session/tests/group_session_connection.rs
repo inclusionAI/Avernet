@@ -270,6 +270,8 @@ fn session_detail(session_id: &str, group_id: &str) -> SessionDetail {
             mode: ParticipantMode::Present,
             joined_at: None,
         }],
+        caller_principal: None,
+        created_by: None,
         created_at: 1,
         updated_at: 1,
         state_machine_run_id: None,

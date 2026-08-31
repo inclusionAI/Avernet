@@ -605,6 +605,8 @@ fn session_detail() -> SessionDetail {
         input: None,
         meta: None,
         participants: vec![session_participant()],
+        caller_principal: None,
+        created_by: None,
         created_at: 1,
         updated_at: 2,
         state_machine_run_id: None,
