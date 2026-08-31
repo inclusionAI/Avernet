@@ -2,8 +2,13 @@
 
 > 状态：DRAFT（讨论稿）。本文给出**一份完整的配置清单文档示例**（§1），然后
 > 逐块讲解每一段的含义、可选写法与 apply 时平台实际做了什么（§2 起）。
-> 规范性定义见 `manifest-schema.zh-CN.md`，设计论证见 `design.zh-CN.md`；
-> 本文所引端点、字段、路径均取自现有业务代码。
+> 规范性定义见 `manifest-schema.zh-CN.md`，设计论证见 `design.zh-CN.md`，
+> 操作说明见 `user-manual.zh-CN.md`；本文所引端点、字段、路径均取自现有业务
+> 代码。
+>
+> **本文展示的是 v1 的完整形状**，其中有几处第一期还没开放（`engine_config`、
+> `cli_tools`、命名源 `from` 与 git 源）——它们写了会在 `PUT` 时被拒绝，清单
+> 见 `manifest-schema.zh-CN.md` §7。
 
 ## 0. 场景设定
 
@@ -92,7 +97,7 @@ manifest:
   identity:                                  # ④ 人设/规则文件
     - type: SOUL.md                          # 每个 bot 一份，路径按 bot 变量拼
       from: content
-      subpath: bots/${OCB_BOT_ID}/soul.md
+      subpath: bots/${BOT_ID}/soul.md
     - type: RULES.md                          # 全体共享一份话术规范
       from: content
       subpath: kb/service-rules.md
@@ -242,7 +247,7 @@ engine_config:
 identity:
   - type: SOUL.md
     from: content
-    subpath: bots/${OCB_BOT_ID}/soul.md
+    subpath: bots/${BOT_ID}/soul.md
   - type: RULES.md
     from: content
     subpath: kb/service-rules.md
@@ -253,7 +258,7 @@ identity:
 ```
 
 **含义**：人设集中运营——SOUL.md 每个 bot 一份（用平台注入变量
-`${OCB_BOT_ID}` 拼源内路径），RULES.md 全体共享一份，SAFETY.md 是三行
+`${BOT_ID}` 拼源内路径），RULES.md 全体共享一份，SAFETY.md 是三行
 红线。
 
 **`type` 是白名单枚举**，不是自由命名：RULES / OKR / SAFETY / SOUL /
@@ -288,8 +293,9 @@ bot 当前引擎校验并明确报错，而不是 apply 时静默跳过。
 路径差异由 `path_factory` 现状处理）；teclaw 物化后以
 `FileRef{name, store, path}` 进 `identity_files[]`。
 
-**提醒**：MEMORY.md 等引擎运行期生成的文件技术上可声明，但声明获胜语义
-会在每个 apply 点重置它们——人设/规则类才是本类目的主场景。
+**提醒**：`MEMORY.md` 与 `IDENTITY.md` 在**保留名单**上——apply 永不写入、
+永不移除，声明它们会在 `PUT` 时被拒（schema §3.5）。人设/规则类文件才是本
+类目的主场景。
 
 ## 5. `resources` — 工作区资源（单文件与目录）
 
@@ -327,16 +333,18 @@ resources:
 - **收敛单位是整棵树**（git 形态即 commit SHA，归档形态即归档内容
   hash）：未变 → `unchanged` 零动作，几百个文件也不逐一比对；
 - **目录级声明获胜**：`path` 下整棵树归 manifest 管辖——源中不存在的
-  文件在 apply 时被清除（含手工添加的）；temp 目录物化 + 原子 rename，
-  无半新半旧的中间态；目录之外完全不碰；
+  文件在 apply 时被清除（含手工添加的）；平台侧解包到临时位置，保证坏归档
+  到不了 bot，但下发只有「删树 + 逐文件写」，中间窗口真实存在——中途失败该
+  条目记 `failed`，报告说明这棵树状态未知（schema §3.2）；目录之外完全不碰；
 - **嵌套禁止**：任何条目的 `path` 不得位于另一个目录条目之下（所有权
   无法定义），PUT 时拒绝；
 - **权限拍平**：源里的可执行位不保留——可执行物必须走 `cli_tools`；
 - **`strip_components` 不做魔法**：只按声明的层数剥，**不**自动探测单一
   顶层目录，同一份声明的行为不取决于归档内部长什么样。
 
-**`on_fetch_failure`**：`keep_last`（默认，源站抖动时沿用上一次成功的
-版本，不阻塞 bot 拉起）/ `skip` / `fail`。
+**`on_fetch_failure`**：只有两个取值——`keep_last`（默认，源站抖动时沿用
+上一次成功物化的副本，不阻塞 bot 拉起）与 `fail`（该类目不写）。`skip` 已
+随类目覆盖决策删除：在覆盖语义下它会意味着「把这一条删掉」。
 
 **交付**：ARCA 系写入 bot 工作区（NAS 持久，重建即见）；teclaw 物化进
 bot-data store 后以 `ResourceRef{name, store, path}` 进 artifact——目录
@@ -406,10 +414,11 @@ git 是反模式（仓库膨胀、LFS 运维），而可执行物需要的是 di
 供应链通道——制品库（OSS）+ 强制 `digest` 才是它的形态。路径里带版本号
 （`shopctl/2.3.0/…`）让制品不可变，配合 digest 双保险。
 
-**平台做什么（三件事）**：取二进制 → **digest 强校验**（不符即 `failed`）
-→ 落进平台定义的逻辑「工具目录」（NAS 持久）+ 置可执行位 → 保证该目录
-在 agent 进程的 PATH 上。平台的承诺到此为止，就一句话：**`shopctl`
-这个命令敲得到**。
+**平台做什么**：取二进制 → **digest 强校验**（不符即 `failed`）→ 落进平台
+定义的逻辑「工具目录」（NAS 持久）+ 置可执行位 → 保证该目录在 agent 进程的
+PATH 上。teclaw 走 artifact，平台另外为最终那个文件计算 **`md5`** 写进
+`cli_tools` 条目，供引擎落地前校验字节完整性。平台的承诺到此为止，就一句话：
+**`shopctl` 这个命令敲得到**。
 
 **用户做什么（模型怎么会用）**：平台不解析工具、不向模型宣告任何东西。
 「知道有这个工具、什么时候用、参数怎么传」是内容问题，走 `skills`（配一个
@@ -423,13 +432,21 @@ git 是反模式（仓库膨胀、LFS 运维），而可执行物需要的是 di
 TOOLS.md 的必要性根源。仓库里的 `bcs-cli` 正是这个双件套的现成先例
 （二进制挂 PATH + `SKILL.md` 教用法），本类目是它的产品化。
 
-**v1 范围**：静态二进制、压缩包（含 `entrypoints` 声明包内哪些文件暴露
-为命令）。需要跑包管理器（npm/pip/apt）的安装属命令式领域，走 script
-（ARCA-only）——与「机制层操作不进 manifest」同一条原则。
+**v1 范围：一个条目 = 一个命令 = 一个文件。**交付的是**自包含的单个可执行
+文件**（静态二进制是典型形态）。压缩包只是**传输形态**——用 `subpath` 指出
+包内哪个文件是这个命令，平台解包取出它，**包内其余文件不下发**；一个包里
+有两个命令就写两个条目。因此**需要同包辅助程序、或运行时要读同包 `lib/` 的
+工具在 v1 不支持**，请打成自包含二进制。需要跑包管理器（npm/pip/apt）的安装
+属命令式领域，走 script（ARCA-only）——与「机制层操作不进 manifest」同一条
+原则。
 
-**能力**：ARCA 系支持（PATH 注入点见 A2）；**teclaw 待确认（T4）**——
-可执行位、PATH 注入、以及对用户提供二进制的沙箱策略，与 script 的能力
-边界相邻，须 teclaw 表态。
+> 早期草案里一个条目是「一个目录 + `entrypoints` 清单」，这一层已被摊平
+> （schema §3.7）：命令名就是 `name`，不再有包内相对路径需要被约束。
+
+**能力**：ARCA 系支持（PATH 注入点见 A2）；**teclaw 按
+`teclaw-cli-contract.zh-CN.md` 实现**——artifact 顶层新增 `cli_tools`
+（`{name, store, path, md5, version}`，`schema_version` 4 → 5），沙箱策略
+仍待其表态。
 
 ## 8. `mcp` — MCP servers
 
@@ -491,7 +508,7 @@ script:
 | `resources`（文件） | 工作区单文件 | 取源 | 取内容 → 资源写路径 | `resources[]` |
 | `resources`（目录） | 工作区整棵树 | git（免打包）/ 归档 | 物化 → 守卫 → 原子整树替换 | `resources[]`（逐文件展开；T5） |
 | `skills` | Local Skill | git 目录 / OSS zip（digest 强制） | 取内容 → upload → activate | `skills[]`（scope=user） |
-| `cli_tools` | 模型可调命令 | OSS 制品（digest 强制） | digest 强校验 → 工具目录 + PATH | 待确认（T4） |
+| `cli_tools` | 模型可调命令（一条目一命令一文件） | OSS 制品（digest 强制；压缩包用 `subpath` 取单个文件） | digest 强校验 → 工具目录 + PATH | `cli_tools[]`（`{name, store, path, md5}`，schema v5） |
 | `mcp` | MCP server | 注册表引用 | 权限校验 + 入 bot MCP 集合 | `mcp.servers[]` |
 | `script` | 容器内命令式逻辑 | 内联 body | #935 启动链现状 | ——（不支持） |
 

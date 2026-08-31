@@ -1431,19 +1431,17 @@ capability table is fully determined.
     reserving the name means a future mixed fleet changes only where the value
     comes from, with no schema change and nothing for users to rewrite;
   - a `resources.path` that is absolute or contains `../`;
-  - two `cli_tools` entrypoints whose **basenames collide**, anywhere across the
-    bot's whole `cli_tools` list (`bin/tool` and `helpers/tool`, or the same
-    `tool` from two different tools). The exposed command name is the basename,
-    so colliding ones cannot both be callable — one shadows the other and the
-    winner depends on installation order. v1 has no alias field: the collision
-    is refused instead;
-  - a `cli_tools.entrypoints` value that is **syntactically** unsafe: absolute,
-    or containing a `..` segment. `entrypoints` decides what gets made
-    **executable and put on PATH**, so an unconstrained value would have an
-    engine chmod a file outside the materialised tree. **Only the syntactic half
-    belongs here** — this item does no fetching, so at `PUT` there is no unpacked
-    tree to inspect. Existence, regular-file and symlink-resolution checks need
-    materialised content and are W9's, listed there;
+  - a `subpath` that is absolute or contains a `..` segment, in **any** category
+    — the source-side path is checked on write, not only when a fetch resolves
+    it. `cli_tools` makes this load-bearing: after flattening, `subpath` is what
+    selects the file that gets made executable and put on PATH;
+  - two `cli_tools` entries with the **same `name`**, or a `name` carrying a path
+    separator. Since the category was flattened to one entry = one command = one
+    file (schema §3.7), `name` *is* the exposed command name, so duplicates
+    cannot both be callable — one would shadow the other and the winner would
+    depend on installation order. v1 has no alias field: the collision is
+    refused instead. This replaces the withdrawn entrypoint-basename rule, which
+    existed only because a single entry could expose several commands;
   - a `resources` entry whose `path` lies under another directory entry's
     `path` (the nesting ban, schema §3.2);
   - an `identity.type` outside the engine's legal set — `VALID_IDENTITY_FILES`
@@ -1481,16 +1479,21 @@ capability table is fully determined.
       client that follows the published contract gets rejected. The two documents
       cannot disagree. It lands here rather than earlier because the schema doc
       describes an implemented contract, and until this item there is nothing to
-      describe. As of iteration 1 the amendments owed are:
+      describe.
 
-      | Schema doc says | Validator accepts | Why |
-      | --- | --- | --- |
-      | §4: `OCB_*` substitution variables | `BOT_*` only | §2.9 renamed them; leaving it would tell a user to write `${OCB_BOT_ID}` and then refuse it |
-      | `on_fetch_failure`: `keep_last` / `skip` / `fail` | `keep_last` / `fail` | `skip` was removed with the category-overwrite decision (§2.7, W5); the schema still advertises a value that is now rejected |
-      | no `mode` field on a source | `mode: strict \| non_strict`, default `non_strict` | §3.2 settled the moving-ref selector; the field has to be documented before anyone can write it. **This row is the rule catching its own case** — it was found by applying the rule above to a change made in the same round, not by a reviewer |
+      **The amendments owed as of iteration 1 have landed** — the schema doc now
+      states `BOT_*` variables (§4), `on_fetch_failure` without `skip` (§2), the
+      source-level `mode` selector (§2.3), category-level overwrite and what
+      `skills: []` versus a `DELETE` means (§1), the `MEMORY.md` / `IDENTITY.md`
+      reserved list (§3.5), the first-boot `script` ordering (§3.6), the narrowed
+      directory-replacement guarantee (§3.2), the shallow single-ref git fetch
+      (§2.2), and a §7 listing the constructs the first phase rejects at `PUT`.
+      **The rule stays**: this item's validator is what the schema doc must
+      describe, so any further divergence is a schema edit in the same PR, not a
+      note somewhere else.
 
-      Stated as a rule with a table because the divergences arrive one at a time
-      and each one has so far been noticed only after it shipped.
+      Stated as a rule because the divergences arrive one at a time and each one
+      had so far been noticed only after it shipped.
 
 **Notes.** A `PUT` carrying `script` stores it and does nothing else until W4
 materialises it. That is why the feature flag exists.
@@ -1550,12 +1553,13 @@ declared but unbound (W3 binds it).
       identical input must behave identically regardless of the archive's
       internal shape (schema §3.2).
 - [ ] Permission bits are flattened: nothing unpacked is executable. **This is
-      the right default for every category that ships data, and it collides head-on
-      with `cli_tools`, which by definition ships programs.** Object storage does
-      not preserve POSIX bits anyway, so the original mode is gone before any
-      engine sees the file — meaning "leave the rest of the package as it was" is
-      not a thing an engine can do. W9 owns that exception and must resolve it
-      explicitly rather than widening this rule.
+      the right default for every category that ships data, and `cli_tools` by
+      definition ships programs.** Object storage does not preserve POSIX bits
+      anyway, so the original mode is gone before any engine sees the file —
+      which is why the executable bit is set by whoever pulls the file down, not
+      carried through. Since `cli_tools` was flattened to one file per entry
+      (W9), that exception is narrow and needs nothing from this rule: the engine
+      marks the one delivered file executable. Do not widen the flattening here.
 
 **Notes.** `src/engine/.../plugins/resource_materialization.py` is the nearest
 precedent in the monorepo and is worth reading first, but it lives in the engine
@@ -2101,10 +2105,11 @@ reconciling the "artifact schema unchanged" statements in `README.zh-CN.md` and
 **The teclaw half is written and ready to hand over.**
 `teclaw-cli-contract.zh-CN.md` is the engine-facing specification: the delivery
 contract is unchanged, `cli_tools` is the only addition, and the platform does
-the fetch, digest check and unpack so the engine receives an already-unpacked
-directory. What teclaw implements is placement, the executable bit, PATH, and
-the same full-overwrite semantics every other category already has. It carries
-six worked use cases and an acceptance checklist. `schema_version` goes 4 → 5.
+the fetch, digest check, unpack and file selection so the engine receives **one
+executable file per entry** (`{name, store, path, md5, version}`). What teclaw
+implements is placement, the `md5` check, the executable bit, PATH, and the same
+full-overwrite semantics every other category already has. It carries six worked
+use cases and an acceptance checklist. `schema_version` goes 4 → 5.
 
 **Blocked by.** — **X3 is closed** (§4): the ARCA fleet is `linux/amd64`, so a
 single URL per tool suffices. teclaw needs only an artifact protocol from us; the
@@ -2114,47 +2119,50 @@ every `bcs-cli` reference is singlebox orchestration, and no delivery path
 handles an executable bit. This item stays deferred by business priority, not by
 a missing answer.
 
-**An open design question this item must answer: private executable helpers.**
-W2 flattens permission bits — nothing fetched is executable — and the teclaw
-contract restores the bit **only for the paths listed in `entrypoints`**, because
-those are exactly the ones that go on PATH. That leaves no way to express *"this
-file must be executable but must not become a command"*. A packaged CLI whose
-`bin/tk` execs a bundled `libexec/helper` therefore fails at runtime with
-`EACCES`, and the package is not fixable from the manifest — the author can only
-promote the helper to an entrypoint, which puts an internal implementation detail
-on PATH under a name that can then collide.
+**The category is flattened: one entry = one command = one file.** `entrypoints`
+is gone from both the manifest schema (§3.7) and the artifact contract. An entry
+names one executable file; an archive is a *transport form* from which `subpath`
+selects that one file, and the rest of the package is **not delivered**. The
+artifact entry is `{name, store, path → the file, md5, version}` and the exposed
+command name is `name`.
 
-The contract cannot dodge this by saying the rest of the package "lands as it
-was": object storage does not carry POSIX bits, so the original mode is already
-gone. Two candidate answers, to be decided when this item is scheduled:
+**This closes the private-executable-helper question rather than deferring it,
+and the cost is explicit.** The withdrawn shape — a directory plus a list of
+entrypoints — left no way to say *"this file must be executable but must not
+become a command"*, so a packaged CLI whose `bin/tk` execs a bundled
+`libexec/helper` would fail at runtime with `EACCES` and could not be fixed from
+the manifest. The candidate answers were a second non-PATH `executables` list, or
+carrying POSIX mode through the platform's fetch/unpack/store path (which nothing
+does today, and which re-opens trusting an archive's own bits). Flattening
+removes the shape that produced the question: **v1 ships self-contained single
+executables**, so tools needing bundled helpers or a sibling `lib/` are out of
+scope and must be built as static binaries. Say that in the schema, the manual
+and the teclaw contract — a limitation stated is a scoping decision; the same
+limitation unstated is a bug report from the first user who packages a wrapper.
 
-1. **A second, non-PATH list** — e.g. `executables`, made executable but never
-   exposed as a command. Explicit, and it keeps `entrypoints` meaning exactly
-   "commands".
-2. **Preserve validated executable bits within the tool's own directory** —
-   requires carrying mode through the platform's fetch/unpack/store path, which
-   nothing does today, and it re-opens the question of trusting an archive's own
-   bits.
+What flattening also deletes, and what should not be reintroduced by accident:
+the containment rules that existed **only** to constrain entrypoint values
+(in-package traversal, symlink escape, basename collisions across the bot's
+tools). Uniqueness is now `name` uniqueness (W1).
 
-Option 1 is the smaller change and does not weaken W2's flattening default for
-any other category. Recorded rather than decided, because the schema addition is
-part of what goes to the teclaw owner and should be settled once, not twice.
-
-**Done when (sketch).** **The content-dependent `entrypoints` checks live here,
-not in W1** — once the archive is unpacked, every entrypoint must exist, be a
-**regular file**, and still resolve inside its tool directory after symlink
+**Done when (sketch).** **The content-dependent `subpath` checks live here, not
+in W1** — once an archive is unpacked, the selected `subpath` must exist, be a
+**regular file**, and still resolve inside the unpacked tree after symlink
 resolution. W1 rejects only the syntactic half (absolute paths, `..` segments,
-colliding basenames) because it does no fetching and has no tree to inspect at
-`PUT`. Then: targets `linux/amd64` with a single URL per tool (§4,
+duplicate `name`s) because it does no fetching and has no tree to inspect at
+`PUT`. Then: the platform computes the **`md5`** of the finally selected file and
+carries it in the artifact entry, so the engine can verify the bytes it pulls
+from the store (it is our own hash, never the store's ETag — a multipart ETag is
+not a content MD5). Then: targets `linux/amd64` with a single URL per tool (§4,
 X3), while `${BOT_ARCH}` resolves to `amd64` in W1's whitelist and a fetched binary's
 ELF header is validated — so a wrong-architecture binary fails in the apply report
 rather than as an `exec format error` the model meets mid-task. Then: `digest`
 mandatory, and the convergence key is the **whole delivery-relevant
-declaration — `digest` *and* `entrypoints`** — not the digest alone. Same binary
-with `entrypoints` changed from `bin/old` to `bin/new` is a real change: keying
-on digest would report `unchanged`, deliver nothing, and leave `old` exposed on
-PATH while the declaration says `new`;
-static binary and archive forms only; a platform-defined logical tool directory
+declaration — `digest` *and* `subpath`** — not the digest alone. The same package
+with `subpath` changed from `bin/old` to `bin/new` is a real change: keying on
+digest would report `unchanged`, deliver nothing, and leave the old file exposed
+while the declaration names the new one;
+static binary and archive-plus-`subpath` forms only; a platform-defined logical tool directory
 on the agent process's PATH, with users never seeing a physical path; a
 tools-usage skill in the engine-aware **default skill set** (`SkillSetService`
 already has one) so the model knows the tools exist and how to call them; and an
