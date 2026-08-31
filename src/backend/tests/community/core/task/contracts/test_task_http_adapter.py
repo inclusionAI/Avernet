@@ -147,6 +147,113 @@ def _task_info_dict() -> dict:
     }
 
 
+def _static_plan_dict() -> dict:
+    """execute 一条 task_type=static_plan + okr-implementation 模板入参,验证单一 execute API 也能跑模板。"""
+    return {
+        "task_spec": {
+            "metadata": {"title": "okr-implementation", "instruction": "运营 okr"},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "okr-implementation", "acceptances": []},
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {
+            "task_type": "static_plan",
+            "static_plan_id": "okr-implementation",
+            "template_input": {"okr": "提升双十一活动转化率"},
+            "static_auto_report": True,
+        },
+    }
+
+
+def _static_plan_dict_no_template_id() -> dict:
+    """前端不显式传 static_plan_id,凭 task_spec 内容路由到 okr-implementation 模板。"""
+    return {
+        "task_spec": {
+            "metadata": {"title": "OKR 实现", "instruction": "为业务提升双十一活动转化率"},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "提升双十一活动转化率", "acceptances": []},
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {
+            "task_type": "static_plan",
+            "template_input": {"okr": "提升双十一活动转化率"},
+            "static_auto_report": True,
+        },
+    }
+
+
+def _static_plan_dict_unroutable_content() -> dict:
+    """task_type=static_plan 但 task_spec 内容命不中任何已注册模板关键字的负例。"""
+    return {
+        "task_spec": {
+            "metadata": {"title": "未知需求", "instruction": "做点别的"},
+            "context": {"background": "", "extend_props": {}},
+            "goal": {"objective": "其它", "acceptances": []},
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {
+            "task_type": "static_plan",
+            "template_input": {"okr": "提升双十一活动转化率"},
+            "static_auto_report": True,
+        },
+    }
+
+
+def _static_plan_dict_dynamic_task_type_okr_content() -> dict:
+    """task_type=dynamic 且 OKR 业务语义(不传 static_plan_id),验证 execute 内容路由依然命中预置模板 plan,
+    证明显式 static_plan 与默认 dynamic 对调用方等价——底层都是动态任务,仅 plan 源不同。"""
+    return {
+        "task_spec": {
+            "metadata": {"title": "OKR 实现", "instruction": "为业务提升双十一活动转化率"},
+            "context": {
+                "background": "活动周期：2026.10.15-2026.11.15；预算约束1000万",
+                "extend_props": {},
+            },
+            "goal": {
+                "objective": "提升双十一活动转化率",
+                "acceptances": [{"id": "acc_risk", "acceptance": "风险评估群需产出可承接下发的结果"}],
+            },
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {
+            "task_type": "dynamic",
+            "template_input": {"okr": "提升双十一活动转化率"},
+            "static_auto_report": True,
+        },
+    }
+
+
+def _static_plan_dict_dynamic_without_template_input() -> dict:
+    """task_type=dynamic + OKR 业务语义,且 execution_config 完全不带 template_input(模拟 source_type=bot
+    只给 task_spec 业务语义的动态调用)。内容路由命中 okr-implementation 后,materialize 应按必填 input
+    用 task_spec objective 兜底补齐 template_input.okr,而非以 missing input 返 409。"""
+    return {
+        "task_spec": {
+            "metadata": {
+                "title": "制定2026年度大促OKR完成策略",
+                "instruction": "目标:制定2026年度大促OKR完成策略,实现平稳过多平台年度大促并取得用户和收益双增长",
+            },
+            "context": {"background": "2026年度大促OKR完成策略制定", "extend_props": {}},
+            "goal": {
+                "objective": "制定2026年度大促OKR完成策略,实现平稳过多平台年度大促并取得用户和收益双增长",
+                "acceptances": [],
+            },
+        },
+        "source_type": "api",
+        "owner_user_id": "owner_user",
+        "owner_bot_id": "owner_bot",
+        "execution_config": {"task_type": "dynamic"},
+    }
+
+
 def _execute_and_get_id(c) -> str:
     """POST execute → 返回服务端生成的 task_id(契约:task_id 不在请求体,服务端 uuid4)。"""
     r = c.post("/openapi/v1/collaboration/tasks/execute", json=_task_info_dict())
@@ -155,16 +262,109 @@ def _execute_and_get_id(c) -> str:
 
 
 class TestTaskExecute:
-    def test_internal_router_exposes_static_template_run_endpoint(self):
+    def test_internal_router_does_not_expose_static_template_run_endpoint(self):
+        # 单一对外 API:静态模板经 execute + task_type=static_plan 提交,无独立 run-template route。
         routes = {
             (route.path, method)
             for route in task_internal_router.routes
             for method in getattr(route, "methods", set())
         }
-        assert (
-            "/api/v1/collaboration/tasks/run-template",
-            "POST",
-        ) in routes
+        assert ("/api/v1/collaboration/tasks/run-template", "POST") not in routes
+
+    def test_execute_runs_static_plan_template(self, client):
+        # execute + task_type=static_plan + 静态模板,落库并立刻返回 task_id。
+        c, _ = client
+        r = c.post("/openapi/v1/collaboration/tasks/execute", json=_static_plan_dict())
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["code"] == 200000
+        task_id = body["data"]["task_id"]
+        assert isinstance(task_id, str) and task_id
+        assert body["data"]["success"] is True
+
+    def test_execute_static_plan_routes_by_content_without_template_id(self, client):
+        # 不传 static_plan_id,凭 task_spec 命中 OKR 关键字路由到 okr-implementation,与显式传等价。
+        c, _ = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_no_template_id(),
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["code"] == 200000
+        assert isinstance(body["data"]["task_id"], str) and body["data"]["task_id"]
+        assert body["data"]["success"] is True
+
+    def test_execute_static_plan_unroutable_content_returns_error(self, client):
+        # task_type=static_plan 但 task_spec 内容不命中任何模板关键字 → 上层报错。
+        c, _ = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_unroutable_content(),
+        )
+        assert r.status_code >= 400, r.text
+
+    def test_execute_static_plan_preserves_caller_task_spec_not_placeholder(self, client):
+        # 固定 plan 与动态 plan 在 taskinfo 封装上等价:内容路由命中预置模板后,materialize 只补
+        # execution_config(static_plan_id/yaml/template_input),绝不替调用方合成占位 task_spec。
+        # 持久化的根 task_spec 必须原样保留调用方真实 OKR(title/instruction/objective/background/
+        # acceptances),不能被 "运行静态模板 okr-implementation" / objective=template_id /
+        # 背景="" / acceptances=[] 覆盖;而 plan 源仍被路由到预置模板(static_plan_id 命中)。
+        c, inj = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_dynamic_task_type_okr_content(),
+        )
+        assert r.status_code == 200, r.text
+        task_id = r.json()["data"]["task_id"]
+        repo = inj.get(TaskInfoRepositoryProtocol)
+        record = repo.get(task_id)
+        assert record is not None
+        spec = record.task_spec
+        assert spec["metadata"]["title"] == "OKR 实现"
+        assert spec["metadata"]["instruction"] == "为业务提升双十一活动转化率"
+        assert spec["goal"]["objective"] == "提升双十一活动转化率"
+        assert spec["context"]["background"] == "活动周期：2026.10.15-2026.11.15；预算约束1000万"
+        assert spec["goal"]["acceptances"] == [
+            {"id": "acc_risk", "description": "风险评估群需产出可承接下发的结果"}
+        ]
+        assert "运行静态模板" not in spec["metadata"]["instruction"]
+        assert spec["metadata"]["title"] != "okr-implementation"
+        assert spec["goal"]["objective"] != "okr-implementation"
+        assert record.execution_config["static_plan_id"] == "okr-implementation"
+        assert record.execution_config["static_plan_yaml"]
+        assert record.execution_config["task_type"] == "dynamic"
+
+    def test_execute_static_plan_routes_when_dynamic_task_type(self, client):
+        # task_type=dynamic + OKR 业务语义(不传 static_plan_id)→ 内容路由命中预置模板,与 task_type=static_plan 等价。
+        c, _ = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_dynamic_task_type_okr_content(),
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["code"] == 200000
+        assert isinstance(body["data"]["task_id"], str) and body["data"]["task_id"]
+        assert body["data"]["success"] is True
+
+    def test_execute_static_plan_fills_template_input_from_task_spec_when_absent(self, client):
+        # 内容路由命中预置模板但调用方未传 template_input(模拟 bot 动态调用):materialize 应按模板必填 input
+        # 用 task_spec objective 兜底补齐,返 200 而非 409(missing static plan input)。
+        c, inj = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json=_static_plan_dict_dynamic_without_template_input(),
+        )
+        assert r.status_code == 200, r.text
+        task_id = r.json()["data"]["task_id"]
+        record = inj.get(TaskInfoRepositoryProtocol).get(task_id)
+        assert record is not None
+        # 模板必填 input okr 被用调用方目标镜像兜底补进,并落到预置模板 plan
+        assert record.execution_config["static_plan_id"] == "okr-implementation"
+        assert record.execution_config["template_input"]["okr"] == (
+            "制定2026年度大促OKR完成策略,实现平稳过多平台年度大促并取得用户和收益双增长"
+        )
 
     def test_execute_returns_op_result(self, client):
         c, _ = client
