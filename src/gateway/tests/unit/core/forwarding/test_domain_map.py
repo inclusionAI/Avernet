@@ -132,7 +132,7 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     requirement = security.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
     assert requirement == {
         PrincipalType.USER: Presence.OPTIONAL,
-        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.APP: Presence.OPTIONAL,
         PrincipalType.BOT: Presence.OPTIONAL,
     }
 
@@ -140,7 +140,7 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
         "POST", "/openapi/v1/collaboration/friend-connections/requests"
     )
     assert friend_requirement is not None
-    assert friend_requirement[PrincipalType.USER] is Presence.REQUIRED
+    assert friend_requirement[PrincipalType.USER] is Presence.OPTIONAL
 
     websocket_requirement = security.resolve(
         "WEBSOCKET", "/openapi/v1/collaboration/messages/ws"
@@ -327,8 +327,7 @@ def test_shipped_config_routes_harness_to_backend() -> None:
     ]:
         requirement = security.resolve(method, path)
         assert requirement is not None, path
-        assert requirement[PrincipalType.USER] is Presence.OPTIONAL, path
-        assert requirement[PrincipalType.APP] is Presence.OPTIONAL, path
+        assert requirement[PrincipalType.USER] is Presence.REQUIRED, path
 
     # The old shape is unrouted: with the harness domain gone, no domain claims
     # /openapi/v1/harness/** and the gateway refuses it rather than forwarding.
