@@ -1920,22 +1920,6 @@ impl Default for BcsServerState {
             None,
             session_repo.clone(),
         );
-        let group_message_history = create_group_message_history_service(
-            sessions.clone(),
-            bot_registry.clone(),
-            bot_delivery.clone(),
-            Arc::clone(&bot_connections),
-            provider_transport.clone(),
-            message_repo.clone(),
-            session_repo.clone(),
-            cutoff_timestamp,
-            manager_worker_cutoff_timestamp,
-            config.message_history.new_participant_visible_limit,
-            config.message_history.default_page_limit,
-            config.message_history.max_page_limit,
-            session_file_service.clone(),
-            config.session_files.share.history_attachment_ttl_seconds,
-        );
         let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
             config.async_chat_run_max_entries,
         ));
@@ -1967,6 +1951,54 @@ impl Default for BcsServerState {
             .bcs_endpoint
             .clone()
             .unwrap_or_else(|| format!("http://{}:{}", config.bind, config.port));
+        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
+        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
+            Arc::new(CompositeBotTerminalObserver::new(vec![
+                interaction_terminal_observer.clone(),
+                Arc::new(AdminInvocationTerminalObserver::new(
+                    admin_invocation_runs.clone(),
+                    outbound_url_guard.clone(),
+                )),
+            ]));
+        let state_machine_terminal_observer =
+            Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        let message_flow_builder = create_message_flow_builder(
+            bot_registry.clone(),
+            sessions.clone(),
+            router.clone(),
+            bot_delivery.clone(),
+            frontend_delivery.clone(),
+            config.max_group_messages,
+            interceptors.clone(),
+            session_management.clone(),
+            bot_run_context.clone(),
+            Some(message_repo.clone()),
+            provider_stream_gray_list.clone(),
+            state_machine_terminal_observer.clone(),
+            config.provider_chat_run_timeout_ms,
+            config.eventing.enabled.then(|| group_event_factory.clone()),
+            crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
+        );
+        let pending_messages = message_flow_builder
+            .pending_message_port()
+            .expect("message flow pending reader requires run context");
+        let group_message_history = create_group_message_history_service(
+            sessions.clone(),
+            bot_registry.clone(),
+            bot_delivery.clone(),
+            Arc::clone(&bot_connections),
+            provider_transport.clone(),
+            message_repo.clone(),
+            session_repo.clone(),
+            cutoff_timestamp,
+            manager_worker_cutoff_timestamp,
+            config.message_history.new_participant_visible_limit,
+            config.message_history.default_page_limit,
+            config.message_history.max_page_limit,
+            session_file_service.clone(),
+            pending_messages,
+            config.session_files.share.history_attachment_ttl_seconds,
+        );
         let system_message: Arc<dyn bcs_service_api::SystemMessageService> = {
             let dispatcher = SystemMessageDispatcherImpl::builder()
                 .with_registry(bot_registry.clone())
@@ -1990,35 +2022,8 @@ impl Default for BcsServerState {
                 sessions.clone(),
             ))
         };
-        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
-        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
-            Arc::new(CompositeBotTerminalObserver::new(vec![
-                interaction_terminal_observer.clone(),
-                Arc::new(AdminInvocationTerminalObserver::new(
-                    admin_invocation_runs.clone(),
-                    outbound_url_guard.clone(),
-                )),
-            ]));
-        let state_machine_terminal_observer =
-            Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
-        let (message_flow, channel_slot) = create_message_flow_services(
-            bot_registry.clone(),
-            sessions.clone(),
-            router.clone(),
-            bot_delivery.clone(),
-            frontend_delivery.clone(),
-            config.max_group_messages,
-            interceptors.clone(),
-            session_management.clone(),
-            bot_run_context.clone(),
-            system_message.clone(),
-            Some(message_repo.clone()),
-            provider_stream_gray_list.clone(),
-            state_machine_terminal_observer.clone(),
-            config.provider_chat_run_timeout_ms,
-            config.eventing.enabled.then(|| group_event_factory.clone()),
-            crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
-        );
+        let (message_flow, channel_slot) =
+            finalize_message_flow(message_flow_builder, system_message.clone());
         let group_management_impl = Arc::new(GroupManagement::new(
             sessions.clone(),
             bot_registry.clone(),
@@ -2784,7 +2789,7 @@ impl BotTerminalObserverPort for DeferredStateMachineTerminalObserver {
     }
 }
 
-fn create_message_flow_services(
+fn create_message_flow_builder(
     registry: Arc<dyn BotRegistryCoreService>,
     group: Arc<dyn GroupCoreService>,
     routing: Arc<dyn RoutingCoreService>,
@@ -2794,14 +2799,13 @@ fn create_message_flow_services(
     interceptors: Arc<InterceptorChain>,
     session_management: Arc<dyn SessionManagementService>,
     bot_run_context: Arc<dyn BotRunContextPort>,
-    system_message: Arc<dyn bcs_service_api::SystemMessageService>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     provider_stream_gray_list: Arc<ProviderStreamGrayList>,
     bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
     provider_chat_run_timeout_ms: u64,
     event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
     event_recorder: Arc<dyn EventRecorderPort>,
-) -> (Arc<dyn MessageFlowService>, ChannelSlot) {
+) -> BcsMessageFlow {
     let mut message_flow = BcsMessageFlow::new(
         group,
         routing,
@@ -2814,7 +2818,6 @@ fn create_message_flow_services(
     .with_session_management(session_management)
     .with_bot_run_context(bot_run_context)
     .with_provider_chat_run_timeout_ms(provider_chat_run_timeout_ms)
-    .with_system_message(system_message)
     .with_provider_stream_gray_list(provider_stream_gray_list)
     .with_bot_terminal_observer(bot_terminal_observer)
     .with_event_recorder(event_recorder);
@@ -2824,10 +2827,16 @@ fn create_message_flow_services(
     if let Some(repo) = message_repo {
         message_flow = message_flow.with_message_repo(repo);
     }
-    let channel_slot = message_flow.channel_slot();
-    let message_flow: Arc<dyn MessageFlowService> = Arc::new(message_flow);
+    message_flow
+}
 
-    (message_flow, channel_slot)
+fn finalize_message_flow(
+    message_flow: BcsMessageFlow,
+    system_message: Arc<dyn bcs_service_api::SystemMessageService>,
+) -> (Arc<dyn MessageFlowService>, ChannelSlot) {
+    let message_flow = message_flow.with_system_message(system_message);
+    let channel_slot = message_flow.channel_slot();
+    (Arc::new(message_flow), channel_slot)
 }
 
 fn create_interceptor_chain(config: &BcsConfig) -> crate::Result<Arc<InterceptorChain>> {
@@ -3165,6 +3174,7 @@ fn create_group_message_history_service(
     default_page_limit: u32,
     max_page_limit: u32,
     session_file: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
+    pending_messages: Arc<dyn bcs_service_api::PendingGroupMessagePort>,
     history_attachment_ttl: u64,
 ) -> Arc<dyn GroupMessageHistoryService> {
     let websocket_request: Arc<dyn GroupHistoryBotRequestPort> =
@@ -3185,6 +3195,7 @@ fn create_group_message_history_service(
         group,
         registry,
         session_file,
+        pending_messages,
         cutoff_timestamp,
         manager_worker_cutoff_timestamp,
         new_participant_visible_limit,
@@ -3485,6 +3496,37 @@ impl BcsServer {
             None,
             session_repo.clone(),
         );
+        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
+        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
+            Arc::new(CompositeBotTerminalObserver::new(vec![
+                interaction_terminal_observer.clone(),
+                Arc::new(AdminInvocationTerminalObserver::new(
+                    admin_invocation_runs.clone(),
+                    callback_url_guard.clone(),
+                )),
+            ]));
+        let state_machine_terminal_observer =
+            Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        let message_flow_builder = create_message_flow_builder(
+            bot_registry.clone(),
+            sessions.clone(),
+            router.clone(),
+            bot_delivery.clone(),
+            frontend_delivery.clone(),
+            config.max_group_messages,
+            interceptors.clone(),
+            session_management.clone(),
+            bot_run_context.clone(),
+            Some(message_repo.clone()),
+            provider_stream_gray_list.clone(),
+            state_machine_terminal_observer.clone(),
+            config.provider_chat_run_timeout_ms,
+            config.eventing.enabled.then(|| group_event_factory.clone()),
+            crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
+        );
+        let pending_messages = message_flow_builder
+            .pending_message_port()
+            .expect("message flow pending reader requires run context");
         let group_message_history = create_group_message_history_service(
             sessions.clone(),
             bot_registry.clone(),
@@ -3499,6 +3541,7 @@ impl BcsServer {
             config.message_history.default_page_limit,
             config.message_history.max_page_limit,
             session_file_service.clone(),
+            pending_messages,
             config.session_files.share.history_attachment_ttl_seconds,
         );
         let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
@@ -3555,35 +3598,8 @@ impl BcsServer {
             provider_stream_gray_list.clone(),
             Arc::new(bcs_test_support::NoopPermissionProfileRepo),
         );
-        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
-        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
-            Arc::new(CompositeBotTerminalObserver::new(vec![
-                interaction_terminal_observer.clone(),
-                Arc::new(AdminInvocationTerminalObserver::new(
-                    admin_invocation_runs.clone(),
-                    callback_url_guard.clone(),
-                )),
-            ]));
-        let state_machine_terminal_observer =
-            Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
-        let (message_flow, channel_slot) = create_message_flow_services(
-            bot_registry.clone(),
-            sessions.clone(),
-            router.clone(),
-            bot_delivery.clone(),
-            frontend_delivery.clone(),
-            config.max_group_messages,
-            interceptors.clone(),
-            session_management.clone(),
-            bot_run_context.clone(),
-            use_cases.system_message.clone(),
-            Some(message_repo.clone()),
-            provider_stream_gray_list.clone(),
-            state_machine_terminal_observer.clone(),
-            config.provider_chat_run_timeout_ms,
-            config.eventing.enabled.then(|| group_event_factory.clone()),
-            crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
-        );
+        let (message_flow, channel_slot) =
+            finalize_message_flow(message_flow_builder, use_cases.system_message.clone());
 
         let collaboration_store = Arc::new(
             MemoryCollaborationStore::new()
@@ -4297,6 +4313,40 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             session_repo.clone(),
         )
         .await;
+        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
+        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
+            Arc::new(CompositeBotTerminalObserver::new(vec![
+                interaction_terminal_observer.clone(),
+                Arc::new(AdminInvocationTerminalObserver::new(
+                    admin_invocation_runs.clone(),
+                    outbound_url_guard.clone(),
+                )),
+            ]));
+        let state_machine_terminal_observer =
+            Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        let message_flow_builder = create_message_flow_builder(
+            bot_registry.clone(),
+            sessions.clone(),
+            router.clone(),
+            bot_delivery.clone(),
+            frontend_delivery.clone(),
+            config.max_group_messages,
+            interceptors.clone(),
+            session_management.clone(),
+            bot_run_context.clone(),
+            Some(message_repo.clone()),
+            provider_stream_gray_list.clone(),
+            state_machine_terminal_observer.clone(),
+            config.provider_chat_run_timeout_ms,
+            config
+                .eventing
+                .enabled
+                .then(|| crate::eventing_wiring::event_record_factory(&config, event_repo.clone())),
+            crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
+        );
+        let pending_messages = message_flow_builder
+            .pending_message_port()
+            .expect("message flow pending reader requires run context");
         let group_message_history = create_group_message_history_service(
             sessions.clone(),
             bot_registry.clone(),
@@ -4311,6 +4361,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             config.message_history.default_page_limit,
             config.message_history.max_page_limit,
             session_file_service.clone(),
+            pending_messages,
             config.session_files.share.history_attachment_ttl_seconds,
         );
         let a2a_run_store: Arc<bcs_message_flow::a2a_chat::ChatRunStore> =
@@ -4380,38 +4431,8 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             provider_stream_gray_list.clone(),
             profile_store.clone(),
         );
-        let interaction_terminal_observer = Arc::new(InteractionTerminalObserver::default());
-        let terminal_observer: Arc<dyn BotTerminalObserverPort> =
-            Arc::new(CompositeBotTerminalObserver::new(vec![
-                interaction_terminal_observer.clone(),
-                Arc::new(AdminInvocationTerminalObserver::new(
-                    admin_invocation_runs.clone(),
-                    outbound_url_guard.clone(),
-                )),
-            ]));
-        let state_machine_terminal_observer =
-            Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
-        let (message_flow, channel_slot) = create_message_flow_services(
-            bot_registry.clone(),
-            sessions.clone(),
-            router.clone(),
-            bot_delivery.clone(),
-            frontend_delivery.clone(),
-            config.max_group_messages,
-            interceptors.clone(),
-            session_management.clone(),
-            bot_run_context.clone(),
-            use_cases.system_message.clone(),
-            Some(message_repo.clone()),
-            provider_stream_gray_list.clone(),
-            state_machine_terminal_observer.clone(),
-            config.provider_chat_run_timeout_ms,
-            config
-                .eventing
-                .enabled
-                .then(|| crate::eventing_wiring::event_record_factory(&config, event_repo.clone())),
-            crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
-        );
+        let (message_flow, channel_slot) =
+            finalize_message_flow(message_flow_builder, use_cases.system_message.clone());
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
             .await;

@@ -103,6 +103,20 @@ impl BcsMessageFlow {
         self.channel.clone()
     }
 
+    pub fn pending_message_port(
+        &self,
+    ) -> ServiceResult<Arc<dyn bcs_service_api::PendingGroupMessagePort>> {
+        let run_context = self.bot_run_context.clone().ok_or_else(|| {
+            ServiceError::InternalError(
+                "pending message reader requires BotRunContextPort".to_string(),
+            )
+        })?;
+        Ok(Arc::new(crate::pending_message::PendingMessageReader::new(
+            self.message_tracker.clone(),
+            run_context,
+        )))
+    }
+
     pub fn with_bot_terminal_observer(
         mut self,
         observer: Arc<dyn BotTerminalObserverPort>,
@@ -557,6 +571,39 @@ mod attachment_persistence_tests {
             persisted,
             serde_json::Value::String("plain chat".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod staged_construction_tests {
+    use std::sync::Arc;
+
+    use bcs_test_support::{
+        NoopBotDeliveryPort, NoopBotRegistryCoreService, NoopFrontendDeliveryPort,
+        NoopGroupCoreService, NoopRoutingCoreService,
+    };
+
+    use super::BcsMessageFlow;
+
+    fn message_flow() -> BcsMessageFlow {
+        BcsMessageFlow::new(
+            Arc::new(NoopGroupCoreService),
+            Arc::new(NoopRoutingCoreService),
+            Arc::new(NoopBotRegistryCoreService),
+            Arc::new(NoopBotDeliveryPort),
+            Arc::new(NoopFrontendDeliveryPort),
+        )
+    }
+
+    #[test]
+    fn pending_reader_requires_run_context_before_finalize() {
+        let missing = message_flow();
+        assert!(missing.pending_message_port().is_err());
+
+        let configured = message_flow().with_bot_run_context(Arc::new(
+            crate::run_context::MemoryBotRunContextStore::new(),
+        ));
+        assert!(configured.pending_message_port().is_ok());
     }
 }
 

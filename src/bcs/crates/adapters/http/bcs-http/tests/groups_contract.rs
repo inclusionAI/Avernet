@@ -419,6 +419,7 @@ impl GroupQueryService for RecordingGroupQuery {
             context_injected: 0,
             service_spec: None,
             latest_running_session_id: None,
+            initial_run: None,
             visibility: "private".to_string(),
         })
     }
@@ -497,6 +498,7 @@ impl GroupManagementService for RecordingGroupManagement {
             context_injected: 0,
             service_spec: None,
             latest_running_session_id: None,
+            initial_run: None,
             visibility: "private".to_string(),
         };
         self.create_dm_calls.lock().await.push(cmd);
@@ -545,6 +547,7 @@ impl GroupManagementService for RecordingGroupManagement {
             context_injected: 0,
             service_spec: None,
             latest_running_session_id: None,
+            initial_run: None,
             visibility: "private".to_string(),
         };
         self.status_calls.lock().await.push(cmd);
@@ -611,6 +614,7 @@ impl GroupManagementService for RecordingGroupManagement {
             context_injected: 0,
             service_spec: None,
             latest_running_session_id: None,
+            initial_run: None,
             visibility: "private".to_string(),
         };
         self.terminate_calls.lock().await.push(cmd);
@@ -643,6 +647,7 @@ impl GroupManagementService for RecordingGroupManagement {
             context_injected: 0,
             service_spec: None,
             latest_running_session_id: None,
+            initial_run: None,
             visibility: "private".to_string(),
         };
         self.label_calls.lock().await.push(cmd);
@@ -2942,6 +2947,7 @@ fn detail_from_create(cmd: &GroupCreateCommand) -> GroupDetailResult {
         context_injected: 0,
         service_spec: None,
         latest_running_session_id: None,
+        initial_run: None,
         visibility: "private".to_string(),
     }
 }

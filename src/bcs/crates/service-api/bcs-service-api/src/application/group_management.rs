@@ -204,8 +204,32 @@ pub struct GroupDetailResult {
     pub context_injected: u64,
     pub service_spec: Option<ServiceSpec>,
     pub latest_running_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_run: Option<InitialGroupRun>,
     pub originator: Option<String>,
     pub visibility: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InitialGroupRun {
+    pub run_id: String,
+    pub bot_uuid: String,
+    pub activity_kind: InitialGroupRunActivityKind,
+    pub state: InitialGroupRunState,
+    pub started_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitialGroupRunActivityKind {
+    GroupBootstrap,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitialGroupRunState {
+    Running,
+    Failed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

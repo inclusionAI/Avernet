@@ -503,6 +503,7 @@ fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult
         context_injected: 0,
         service_spec: None,
         latest_running_session_id: None,
+        initial_run: None,
         originator: None,
         visibility: "private".to_string(),
     }

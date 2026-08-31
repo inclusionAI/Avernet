@@ -1046,7 +1046,7 @@ impl GroupServiceImpl {
         mut request: CreateCollaborationGroup,
         group_id: Option<String>,
         provisioning: bool,
-    ) -> Result<(GroupDetail, Option<String>), ApplicationError> {
+    ) -> Result<(GroupDetail, Option<String>, Option<bcs_service_api::InitialGroupRun>), ApplicationError> {
         let originator = request
             .originator
             .take()
@@ -1232,6 +1232,7 @@ impl GroupServiceImpl {
             .await
             .map_err(map_group_error)?;
         let initial_session_id = created.latest_running_session_id.clone();
+        let initial_run = created.initial_run.clone();
 
         if let Some(state_machine) = state_machine {
             let mut response_state_machine = state_machine.clone();
@@ -1313,7 +1314,7 @@ impl GroupServiceImpl {
                 let detail = self
                     .project_detail_with_state_machine(group, Some(response_state_machine))
                     .await?;
-                return Ok((detail, initial_session_id));
+                return Ok((detail, initial_session_id, initial_run));
             }
 
             let session_id = match created.latest_running_session_id.clone() {
@@ -1412,7 +1413,7 @@ impl GroupServiceImpl {
             let detail = self
                 .project_detail_with_state_machine(group, Some(response_state_machine))
                 .await?;
-            return Ok((detail, initial_session_id));
+            return Ok((detail, initial_session_id, initial_run));
         }
 
         let group = self
@@ -1423,7 +1424,7 @@ impl GroupServiceImpl {
             .ok_or_else(|| {
                 ApplicationError::internal("created Group disappeared before projection")
             })?;
-        Ok((self.project_detail(group).await?, initial_session_id))
+        Ok((self.project_detail(group).await?, initial_session_id, initial_run))
     }
 
     async fn rollback_state_machine_creation(
@@ -1502,6 +1503,8 @@ impl GroupServiceImpl {
         Ok(CreateGroupOutcome {
             group: self.project_detail(group).await?,
             created: result.created,
+            initial_session_id: None,
+            initial_run: None,
             event_subscriptions: Vec::new(),
         })
     }
@@ -1601,14 +1604,18 @@ impl GroupServiceImpl {
         principal: Principal,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
         match command.group {
-            CreateGroupSpec::Collaboration(request) => Ok(CreateGroupOutcome {
-                group: self
+            CreateGroupSpec::Collaboration(request) => {
+                let (group, initial_session_id, initial_run) = self
                     .create_collaboration(principal, request, None, false)
-                    .await?
-                    .0,
-                created: true,
-                event_subscriptions: Vec::new(),
-            }),
+                    .await?;
+                Ok(CreateGroupOutcome {
+                    group,
+                    created: true,
+                    initial_session_id,
+                    initial_run,
+                    event_subscriptions: Vec::new(),
+                })
+            }
             CreateGroupSpec::DirectMessage(request) => {
                 self.create_dm(principal, request, None, false).await
             }
@@ -1844,11 +1851,13 @@ impl GroupService for GroupServiceImpl {
             CreateGroupSpec::Collaboration(request) => self
                 .create_collaboration(principal, request, Some(group_id.clone()), true)
                 .await
-                .map(|(group, initial_session_id)| {
+                .map(|(group, initial_session_id, initial_run)| {
                     (
                         CreateGroupOutcome {
                             group,
                             created: true,
+                            initial_session_id: initial_session_id.clone(),
+                            initial_run,
                             event_subscriptions: Vec::new(),
                         },
                         initial_session_id,

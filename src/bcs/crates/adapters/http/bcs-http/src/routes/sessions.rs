@@ -1490,6 +1490,8 @@ pub struct GetSessionMessagesQuery {
     pub limit: Option<u64>,
     #[serde(default)]
     pub before: Option<u64>,
+    #[serde(default)]
+    pub include_pending: bool,
 }
 
 pub async fn get_session_messages(
@@ -1565,7 +1567,12 @@ pub async fn get_session_messages(
     match state
         .services
         .group_message_history
-        .get_session_history(cmd)
+        .get_session_history_with_options(
+            cmd,
+            bcs_service_api::MessageHistoryOptions {
+                include_pending: query.include_pending,
+            },
+        )
         .await
     {
         Ok(result) => (StatusCode::OK, Json(result.messages)).into_response(),

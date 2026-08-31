@@ -40,7 +40,7 @@ use bcs_service_api::{
     CollaborationRuntimeService, CreateSessionLaunch, FriendCoreService, Group as DomainGroup,
     GroupCoreService, GroupMessage, GroupMessageHistoryService, GroupStrategy, GroupUseCaseError,
     HumanActor, Participant, ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService,
-    RequestedSessionRole, ServiceError, Session, SessionHistoryCommand, SessionKind,
+    MessageHistoryOptions, RequestedSessionRole, ServiceError, Session, SessionHistoryCommand, SessionKind,
     SessionLaunchError, SessionLaunchRequest, SessionLaunchService,
     SessionStatus as DomainSessionStatus, StateMachineRunView, SystemMessageEvent,
     backfill_participant_names,
@@ -1177,6 +1177,15 @@ impl SessionMessageService for SessionServiceImpl {
         &self,
         query: ListSessionMessages,
     ) -> Result<Vec<GroupMessage>, ApplicationError> {
+        self.list_with_options(query, MessageHistoryOptions::default())
+            .await
+    }
+
+    async fn list_with_options(
+        &self,
+        query: ListSessionMessages,
+        options: MessageHistoryOptions,
+    ) -> Result<Vec<GroupMessage>, ApplicationError> {
         if query.limit == 0 || query.limit > 100 {
             return Err(ApplicationError::invalid(
                 "invalid_request",
@@ -1210,18 +1219,21 @@ impl SessionMessageService for SessionServiceImpl {
         let user = require_authenticated_user(&query.caller)?;
         let result = self
             .history
-            .get_session_history(SessionHistoryCommand {
-                caller: CallerContext::Human(HumanActor {
-                    actor_id: format!("human_{}", user.id),
-                    staff_no: user.id.clone(),
-                }),
-                group_id: session.group_id.clone(),
-                session_id: query.session_id,
-                session_participants: session.participants,
-                view_bot_id: Some(view_actor_id),
-                limit: query.limit,
-                before: query.before,
-        })
+            .get_session_history_with_options(
+                SessionHistoryCommand {
+                    caller: CallerContext::Human(HumanActor {
+                        actor_id: format!("human_{}", user.id),
+                        staff_no: user.id.clone(),
+                    }),
+                    group_id: session.group_id.clone(),
+                    session_id: query.session_id,
+                    session_participants: session.participants,
+                    view_bot_id: Some(view_actor_id),
+                    limit: query.limit,
+                    before: query.before,
+                },
+                options,
+            )
             .await
             .map_err(map_group_use_case_error)?;
         Ok(result.messages)

@@ -141,6 +141,8 @@ struct PendingSystemMessageDelivery {
     recipient_id: String,
     run_id: String,
     record_run_context: bool,
+    is_provider_send: bool,
+    delivery_type: DeliveryType,
     group_id: String,
     bcs_session_id: Option<String>,
 }
@@ -232,6 +234,8 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                         );
                         results.push(SystemMessageRecipientResult {
                             recipient_id: recipient.clone(),
+                            run_id,
+                            delivery_type: msg.delivery_type,
                             delivered: false,
                             error: Some(error),
                         });
@@ -297,8 +301,10 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                 commands.push(PendingSystemMessageDelivery {
                     recipient_id: recipient.clone(),
                     run_id: run_id.clone(),
-                    record_run_context: msg.delivery_type == DeliveryType::Send
+                    record_run_context: msg.delivery_type == DeliveryType::Send,
+                    is_provider_send: msg.delivery_type == DeliveryType::Send
                         && target.is_http_provider(),
+                    delivery_type: msg.delivery_type,
                     group_id: group.id.clone(),
                     bcs_session_id: Some(session_id.to_string()),
                     cmd: BotDeliveryCommand {
@@ -321,7 +327,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
             let delivery = delivery.clone();
             let bot_run_context = bot_run_context.clone();
             async move {
-                let is_provider_send = cmd.record_run_context;
+                let is_provider_send = cmd.is_provider_send;
                 let (delivered, mut error) = match delivery.deliver(cmd.cmd).await {
                     Ok(r) => (r.delivered, r.error),
                     Err(e) => {
@@ -333,7 +339,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                     if let Some(run_context) = bot_run_context {
                         run_context
                             .put_context(BotRunContext {
-                                run_id: cmd.run_id,
+                                run_id: cmd.run_id.clone(),
                                 bot_id: recipient.clone(),
                                 group_id: cmd.group_id,
                                 bcs_session_id: cmd.bcs_session_id,
@@ -351,6 +357,8 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                 (
                     SystemMessageRecipientResult {
                         recipient_id: recipient,
+                        run_id: cmd.run_id,
+                        delivery_type: cmd.delivery_type,
                         delivered,
                         error,
                     },

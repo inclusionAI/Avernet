@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use bcs_message_flow::{BcsMessageFlow, MemoryBotRunContextStore};
@@ -4734,11 +4735,16 @@ async fn task_dispatch_blocking_interceptor_prevents_bot_delivery() {
 #[derive(Default)]
 struct RecordingMessageRepo {
     appended: RwLock<Vec<bcs_domain::NewMessage>>,
+    fail_appends: AtomicBool,
 }
 
 impl RecordingMessageRepo {
     async fn appended(&self) -> Vec<bcs_domain::NewMessage> {
         self.appended.read().await.clone()
+    }
+
+    fn set_fail_appends(&self, fail: bool) {
+        self.fail_appends.store(fail, Ordering::Relaxed);
     }
 }
 
@@ -4748,6 +4754,11 @@ impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
         &self,
         msg: bcs_domain::NewMessage,
     ) -> Result<bcs_domain::PersistedMessage, bcs_service_api::port::repo::MessageRepoError> {
+        if self.fail_appends.load(Ordering::Relaxed) {
+            return Err(bcs_service_api::port::repo::MessageRepoError::StorageError(
+                "injected append failure".to_string(),
+            ));
+        }
         let seq = self.appended.read().await.len() as i64 + 1;
         let persisted = bcs_domain::PersistedMessage {
             message_id: format!("msg-{seq}"),
@@ -5745,7 +5756,7 @@ async fn agent_tool_result_persists_worker_owner_and_public_manager_owner_for_ma
 }
 
 #[tokio::test]
-async fn agent_tool_result_backfills_missing_name_from_tool_start() {
+async fn agent_tool_result_clears_cached_start_after_successful_persist() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let repo = Arc::new(RecordingMessageRepo::default());
     let flow = BcsMessageFlow::new(
@@ -5804,11 +5815,80 @@ async fn agent_tool_result_backfills_missing_name_from_tool_start() {
     let appended = repo.appended().await;
     assert_eq!(appended.len(), 2);
     assert_eq!(appended[0].content["name"], "Bash");
-    assert_eq!(appended[1].content["name"], "Bash");
-    assert_eq!(appended[1].content["args"]["command"], "mcporter list --json");
+    assert_eq!(appended[1].content["name"], "");
+    assert_eq!(appended[1].content["args"], Value::Null);
     assert_eq!(
         appended[1].content["result"]["content"][0]["text"],
         "actual command output"
+    );
+}
+
+#[tokio::test]
+async fn agent_tool_result_retains_cached_start_when_persistence_fails() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(RecordingMessageRepo::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone());
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-tool-retry".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "tool",
+            "data": {
+                "phase": "start",
+                "toolCallId": "tool-retry",
+                "name": "Bash",
+                "args": { "command": "mcporter list --json" },
+            },
+        }),
+        state: ChatEventState::ToolCallStart,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    repo.set_fail_appends(true);
+    let failed = flow
+        .handle_bot_event(BotEventCommand {
+            bot_id: "bot-observer".to_string(),
+            run_id: "run-tool-retry".to_string(),
+            group_id: "group-1".to_string(),
+            event_type: "agent".to_string(),
+            event_payload: agent_tool_result_payload(None, "tool-retry", "failed output", false),
+            state: ChatEventState::ToolCallEnd,
+            bcs_session_id: Some("group-1:abcdef12".to_string()),
+        })
+        .await;
+    assert!(failed.is_err());
+
+    repo.set_fail_appends(false);
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-observer".to_string(),
+        run_id: "run-tool-retry".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: agent_tool_result_payload(None, "tool-retry", "actual output", false),
+        state: ChatEventState::ToolCallEnd,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let appended = repo.appended().await;
+    assert_eq!(appended.len(), 1);
+    assert_eq!(appended[0].content["name"], "Bash");
+    assert_eq!(
+        appended[0].content["args"]["command"],
+        "mcporter list --json"
     );
 }
 

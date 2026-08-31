@@ -16,6 +16,7 @@ use bcs_service_api::{
     DmCreateResult, FriendCoreService, Group as DomainGroup, GroupAddMemberCommand,
     GroupAddMemberResult, GroupCoreService, GroupCreateCommand, GroupDeleteCommand,
     GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind, GroupListCommand,
+    InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState,
     GroupListEntry, GroupListResult, GroupManagementService, GroupMutableFieldsPatch,
     GroupParticipantModeCommand, GroupParticipantModeResult, GroupParticipantView,
     GroupPatchSettingsCommand, GroupPatchSettingsConflict, GroupPatchSettingsResult,
@@ -26,7 +27,7 @@ use bcs_service_api::{
     GroupWorkspaceResult, NoopChannelBindingCleanupPort, Participant, ParticipantMode,
     ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, ServiceResult, ServiceSpec,
     ServiceSpecPatchConflictField, Session, SessionKind, SessionManagementService,
-    SystemMessageEvent, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
+    DeliveryType, SystemMessageEvent, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
     WorkbenchConnectOutcome, WorkbenchParticipantView, WorkbenchSessionService,
     WorkbenchUseCaseError, backfill_bot_names, generated_group_id, validate_sender_routes,
 };
@@ -1118,6 +1119,7 @@ impl GroupManagementService for GroupManagement {
         )
         .unwrap_or_default();
         let initial_session_id;
+        let mut initial_run = None;
         let context_injected = match self
             .session_management
             .create_or_reactivate(bcs_service_api::CreateOrReactivateCommand {
@@ -1150,8 +1152,8 @@ impl GroupManagementService for GroupManagement {
                     let sid = outcome.session.id.clone();
                     let gid = group.id.clone();
                     let session_participants = outcome.session.participants.clone();
-                    self.system_message
-                        .notify(
+                    match self.system_message
+                        .notify_with_outcome(
                             &gid,
                             SystemMessageEvent::SessionContext {
                                 group_id: gid.clone(),
@@ -1165,7 +1167,46 @@ impl GroupManagementService for GroupManagement {
                             &session_participants,
                         )
                         .await
-                        .unwrap_or(0) as u64
+                    {
+                        Ok(dispatch) => {
+                            if requested_strategy == GroupStrategy::ManagerWorker
+                                && let Some(manager) = group
+                                    .participants
+                                    .iter()
+                                    .find(|participant| {
+                                        participant.role == ParticipantRole::Manager
+                                    })
+                                && let Some(result) = dispatch.recipient_results.iter().find(
+                                    |result| {
+                                        result.recipient_id == manager.bot_uuid
+                                            && result.delivery_type == DeliveryType::Send
+                                    },
+                                )
+                            {
+                                initial_run = Some(InitialGroupRun {
+                                    run_id: result.run_id.clone(),
+                                    bot_uuid: manager.bot_uuid.clone(),
+                                    activity_kind: InitialGroupRunActivityKind::GroupBootstrap,
+                                    state: if result.delivered {
+                                        InitialGroupRunState::Running
+                                    } else {
+                                        InitialGroupRunState::Failed
+                                    },
+                                    started_at: chrono::Utc::now().to_rfc3339(),
+                                });
+                            }
+                            dispatch.successful_deliveries as u64
+                        }
+                        Err(error) => {
+                            warn!(
+                                group_id = %gid,
+                                session_id = %sid,
+                                error = %error,
+                                "failed to deliver initial group context"
+                            );
+                            0
+                        }
+                    }
                 }
             }
             Err(error) => {
@@ -1189,6 +1230,7 @@ impl GroupManagementService for GroupManagement {
 
         let mut detail = group_to_detail_with_context(group, context_injected);
         detail.latest_running_session_id = initial_session_id;
+        detail.initial_run = initial_run;
         Ok(detail)
     }
 
@@ -2279,6 +2321,7 @@ fn group_to_detail_with_context(group: DomainGroup, context_injected: u64) -> Gr
         context_injected,
         service_spec: group.service_spec.clone(),
         latest_running_session_id: None,
+        initial_run: None,
         originator: group.originator,
         visibility: group.visibility.clone(),
     }

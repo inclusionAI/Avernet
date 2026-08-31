@@ -9,6 +9,7 @@ use bcs_service_api::application::v1::{
     DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, UncollectSession,
     UpdateSessionParticipant,
 };
+use bcs_service_api::MessageHistoryOptions;
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
@@ -182,13 +183,18 @@ async fn list_session_messages(
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = state
         .message_service
-        .list(ListSessionMessages {
-            caller,
-            session_id,
-            before: query.before,
-            limit: query.limit,
-            view_bot_id: query.view_bot_id,
-        })
+        .list_with_options(
+            ListSessionMessages {
+                caller,
+                session_id,
+                before: query.before,
+                limit: query.limit,
+                view_bot_id: query.view_bot_id,
+            },
+            MessageHistoryOptions {
+                include_pending: query.include_pending,
+            },
+        )
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
