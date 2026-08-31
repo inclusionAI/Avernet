@@ -1,0 +1,339 @@
+# Tasks: the Manifest Apply Engine
+
+> Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
+
+Groups run in order. Within a group, tasks are independent.
+
+Two invariants hold in every task, and a violation of either is a finding rather
+than something to work around:
+
+- **No existing test is edited.** This change adds operations; it does not alter
+  one. The single planned exception is the `mcp`-entry key-set test in Task 3,
+  which the spec records as a deliberate schema narrowing.
+- **Nothing existing is destroyed by a failure.** Every path that cannot
+  complete leaves the bot exactly as it was. If a task's implementation makes
+  that untrue, the task is wrong, not the criterion.
+
+---
+
+## Group A — Foundations: the vocabulary, the tables, the schema fix
+
+## [ ] Task 1: Outcome and report vocabulary
+- **Goal:** The types every later task speaks, in a leaf module that imports
+  nothing else from the feature.
+- **Files:** `src/backend/.../core/bot_config_manifest/apply/outcomes.py`,
+  `apply/__init__.py`
+- **Done when:**
+  - [ ] `EntryOutcome` is exactly `created` / `updated` / `unchanged` /
+        `skipped` / `failed`. Its docstring records that `skipped` means "not
+        written because its category was aborted" and that the author-facing
+        `on_fetch_failure: skip` it used to mean no longer exists.
+  - [ ] `ApplyStatus` is `SUCCEEDED` / `PARTIAL` / `FAILED`, with a docstring
+        stating it is derived and that nothing reads it to make a decision.
+  - [ ] `EntryResult` carries the construct, the entry's identity, its outcome,
+        and an optional reason. `CategoryResult` carries its entry results **and
+        a separate `removals` field** — removals are not `EntryOutcome` values,
+        because the five classify declared entries and a removal has none.
+  - [ ] `ApplyReport` matches design §7's shape: `apply_id`, `bot_id`,
+        `trigger`, `started_at`, `finished_at`, `result`, `sources`, `entries`.
+        `sources` is empty in this wave and its docstring says W5 fills it.
+  - [ ] `ApplyReport.as_payload()` is the one place the wire shape is defined,
+        and it is structurally incapable of emitting a credential value: it
+        serialises named fields, never a passthrough of a declared entry.
+  - [ ] `apply/__init__.py` holds a docstring only, for the cycle reason
+        `bot_config_surface/__init__.py` records.
+- **Depends on:** —
+
+## [ ] Task 2: The two tables
+- **Goal:** Persistence for the apply record and for the serialization lock.
+- **Files:** `.../core/bot_config_manifest/repository/apply_models.py`,
+  `.../core/bot_config_manifest/sql/2026_08_31_bot_config_manifest_apply.sql`,
+  `.../core/repository/protocols/bot/config_manifest_apply.py`,
+  `.../core/repository/implementations/bot/config_manifest_apply.py`,
+  `.../core/repository/protocols/bot/__init__.py`, `.../core/schema.py`
+- **Done when:**
+  - [ ] `ac_bot_config_manifest_apply` carries the columns the plan lists, keyed
+        `(avernet_tenant, env, entity_id, bot_id)` with the same 256-char widths
+        and the same index-budget reasoning `ac_bot_config_manifest` records.
+  - [ ] Its index is `(avernet_tenant, env, entity_id, bot_id, id DESC)` and the
+        column comment says why: `last-apply` is the only read.
+  - [ ] `report` is `Text().with_variant(mysql.MEDIUMTEXT(), "mysql")`, for the
+        reason the manifest's `document` column records.
+  - [ ] `ac_bot_config_manifest_apply_lock` mirrors `ac_bot_restart_lock`:
+        `UNIQUE(avernet_tenant, env, entity_id, bot_id)` **is** the lock,
+        `acquire` inserts and treats `IntegrityError` as held, `release`
+        compares `lock_token` before deleting, `get_if_stale` reads both
+        timestamps from the **database clock**.
+  - [ ] Both models call `register_avernet_tenant_guard`.
+  - [ ] Both protocols are `@abstractmethod` throughout and the implementations
+        inherit them, matching `BotConfigManifestRepositoryProtocol`.
+  - [ ] `core/schema.py` imports the models so `create_all` emits both tables.
+  - [ ] The DDL file carries the tenancy and index-budget reasoning in comments,
+        as its sibling does — a reader must not have to rediscover why
+        `entity_id` is 256.
+- **Depends on:** —
+
+## [ ] Task 3: Narrow the `mcp` entry, and fix the schema document
+- **Goal:** Close the account-scoped-config hazard at the vocabulary, so no
+  materialiser has to defend against it (spec *Decisions* 9).
+- **Files:** `.../core/bot_config_manifest/schema/entries.py`,
+  `docs/bot-config-manifest/manifest-schema.zh-CN.md`,
+  `docs/bot-config-manifest/work-items.md` + `work-items.zh-CN.md`,
+  `.../core/bot_config_manifest/README.md`,
+  `src/backend/tests/community/core/bot_config_manifest/test_manifest_schema.py`
+- **Done when:**
+  - [ ] `CATEGORY_ENTRY_KEYS[ManifestCategory.MCP]` is `{"server_code"}`.
+  - [ ] `validate_mcp_entry` drops its `config` branch; `config` is refused by
+        the existing `unknown_field` path, exactly as retired `entrypoints` is.
+  - [ ] A named test pins the refusal, mirroring
+        `test_the_retired_entrypoints_field_is_refused_rather_than_ignored`.
+        **This is the one new test in an existing file**, and it is an addition,
+        not an edit of an existing case.
+  - [ ] `manifest-schema.zh-CN.md` §3.1 is rewritten: an `mcp` entry is a bare
+        `server_code`; credentials, headers, endpoint env and transport are
+        configured through `GET`/`PUT
+        /openapi/v1/bots/mcp/servers/{server_code}/config`, which is
+        account-scoped and always was.
+  - [ ] The rewrite states **why**, not just what: `ac_user_mcp_config` is keyed
+        `(user_id, server_code)` and its write fans out via
+        `sync_mcp_detail_to_all_bots`, so a per-bot manifest could not own it;
+        and design §4.5 forbids a credential in a manifest regardless.
+  - [ ] Both work-items files' `mcp` descriptions agree with the schema
+        document. A divergence between them is what Rule 16 exists to prevent.
+  - [ ] The module README's "known gaps" records the finding and that
+        `ac_bot_mcp_call_config` (`call_type`) is the additive follow-up.
+- **Depends on:** —
+
+---
+
+## Group B — The engine
+
+## [ ] Task 4: The ordering table and the registry
+- **Goal:** Ordering is a complete, inspectable contract; materialiser presence
+  is a separate, sparse fact.
+- **Files:** `apply/order.py`, `apply/registry.py`, `apply/context.py`
+- **Done when:**
+  - [ ] `APPLY_ORDER` names **all six** constructs plus `script`, with
+        `script` alone in `PRE_CONTAINER` at position 0 and
+        `identity → resources → skills → mcp` in `ON_CONTAINER` in that order.
+  - [ ] Its docstring states that this **reverses design §3.4** and why
+        (work-items §2.12): `script` needs no container and must precede start-
+        command composition; phase B resolves a device and raises if unbound.
+  - [ ] `MATERIALISERS` maps `script` and `mcp` only. Its docstring says a
+        missing key is an expected state that W5/W6 close, not a gap.
+  - [ ] `ApplyContext` carries the identity and coordinates one apply runs
+        under, built from a bot record via **W10's seam** — never re-derived.
+  - [ ] A test asserts every `MATERIALISERS` key has an `APPLY_ORDER` row, and
+        that `APPLY_ORDER` covers every construct the vocabulary defines. The
+        reverse containment is deliberately **not** asserted.
+- **Depends on:** Task 1
+
+## [ ] Task 5: The materialiser contract
+- **Goal:** `resolve` → `plan` → `write`, with the boundaries the criteria need.
+- **Files:** `apply/registry.py`
+- **Done when:**
+  - [ ] The `Materialiser` protocol declares the three stages with the plan's
+        signatures, and each docstring names the criterion its boundary serves.
+  - [ ] `ResolveResult` carries `intents` and `failures` keyed by entry
+        identity, so the orchestrator emits one `EntryResult` per declared entry
+        without a materialiser knowing what a report is.
+  - [ ] `CategoryPlan` carries classified intents **and** `removals`.
+  - [ ] `plan` is documented as read-only, and that `dry_run` is "stop after
+        this" — a missing call, not a discipline.
+- **Depends on:** Task 4
+
+## [ ] Task 6: The orchestrator
+- **Goal:** Every category-level rule, implemented once, for every category.
+- **Files:** `apply/orchestrator.py`
+- **Done when:**
+  - [ ] It walks `APPLY_ORDER` in position order, filtered to the requested
+        phases, and handles the five cases the plan lists in that order.
+  - [ ] **Undeclared ⇒ untouched and unreported.** Absence is not a
+        declaration.
+  - [ ] **Declared with no materialiser ⇒ every entry `failed`** with a reason
+        naming the construct, and the category aborted.
+  - [ ] **Any `resolve` failure ⇒ those entries `failed`, the rest `skipped`,
+        no `plan` and no `write` call.** The absence of the calls is what the
+        test asserts.
+  - [ ] One category's abort never affects another's.
+  - [ ] `dry_run` returns after `plan` for every category, and writes no report
+        row.
+  - [ ] `ApplyStatus` is tallied **after** every decision is made.
+  - [ ] The lock is taken once around the whole call and released in a
+        `finally`, `dry_run` included; a held lock raises
+        `ManifestApplyInProgressError`.
+  - [ ] **Nothing is written to the bot record on any path** — no status, no
+        activation, no readiness gate — and no code branches on whether this is
+        a first boot.
+  - [ ] A structural test asserts the orchestrator module names no category
+        (`skills`, `identity`, `resources`) anywhere. If it does, the registry
+        has stopped meaning anything.
+- **Depends on:** Tasks 1, 4, 5
+
+## [ ] Task 7: The `script` materialiser
+- **Files:** `apply/materialisers/script.py`
+- **Done when:**
+  - [ ] `resolve` substitutes `${BOT_*}` via the existing
+        `schema/placeholders.py::resolve` — one whitelist, one resolver, no
+        second copy.
+  - [ ] `resolve` re-asks the capability resolver whether `script` is supported
+        for this bot, because a bot's engine can change between `PUT` and apply.
+  - [ ] `plan` compares against the **substituted** body, never the raw document
+        text — the convergence criterion depends on this and nothing else.
+  - [ ] `write` calls `BotStartupScriptService.put` / `.delete` and does nothing
+        else. No payload composition, no restart, no start-command touching.
+  - [ ] The result records that the script is **delivered now, effective at next
+        start** — a field, not something a caller infers.
+- **Depends on:** Tasks 5, 6
+
+## [ ] Task 8: The `mcp` materialiser
+- **Files:** `apply/materialisers/mcp.py`
+- **Done when:**
+  - [ ] `resolve` runs the **existing** tenant permission check per
+        `server_code`; a server the tenant may not enable is a `failed` entry.
+  - [ ] A `server_code` governed by a Set or platform-Default policy — where
+        `DirectActivationService` is not legal — resolves to a `failed` entry
+        with a readable reason, never an exception escaping the orchestrator.
+  - [ ] `plan` reads `list_installed_mcps` and classifies: declared − current ⇒
+        `created`, intersection ⇒ `unchanged`, current − declared ⇒ removals.
+  - [ ] `write` calls `activate_mcp` / `deactivate_mcp` only.
+  - [ ] A structural test asserts this module cannot reach
+        `update_user_unified_config`, `write_unified_config` or
+        `sync_mcp_detail_to_all_bots` — the account-scoped write whose fan-out
+        Task 3 removed from the vocabulary.
+  - [ ] The route docstring says plainly that a declared `mcp` category
+        deactivates servers activated through the UI. The first person surprised
+        by that will be a real user.
+- **Depends on:** Tasks 3, 5, 6
+
+---
+
+## Group C — The service and the public surface
+
+## [ ] Task 9: The Service API contract and its implementation
+- **Files:** `.../core/bot_config_manifest/bot_config_manifest_apply_service_protocol.py`,
+  `.../core/bot_config_manifest/services/config_manifest_apply_service.py`,
+  `.../api/bot_config_manifest_apply_service.py`,
+  `.../di/modules/bot_management_module.py`,
+  `src/backend/tests/community/architecture/test_service_api_conformance.py`
+- **Done when:**
+  - [ ] A **second** contract, not more methods on the document service — the
+        docstring gives Rule 9's reason and the different-bars reason.
+  - [ ] It exposes `apply(...)` with a `phases` parameter and `dry_run`, and
+        `last_apply(...)`. `phases` is what lets W13 call the halves separately.
+  - [ ] Every member is `@abstractmethod` and the service inherits the Protocol.
+  - [ ] The `(Protocol, ConcreteService)` pair is registered in `_PAIRS`.
+  - [ ] Bound in `bot_management_module.py` beside the document service, with a
+        comment saying why it lives there.
+  - [ ] It re-validates the stored document before applying, and the docstring
+        says why that is not paranoia: capabilities resolve from the bot's
+        engine, which can change after a document is accepted.
+- **Depends on:** Tasks 6, 7, 8
+
+## [ ] Task 10: The two routes
+- **Files:** `.../adapters/http/openapi_v1/bots/config_manifest_apply.py`,
+  `.../bots/schemas.py`, `.../openapi_v1/__init__.py`, `.../responses.py`
+- **Done when:**
+  - [ ] `POST …/config-manifest/apply` applies and returns the report;
+        `dry_run` is a query parameter defaulting to false.
+  - [ ] `GET …/config-manifest/last-apply` returns the newest report, and a bot
+        never applied answers with an **empty report, not a 404** — the rule the
+        manifest's own `GET` already sets.
+  - [ ] A bot with **no stored manifest** applies nothing and reports nothing
+        applied, without erroring.
+  - [ ] `ManifestApplyInProgressError` maps to 409 in both the status map and
+        the biz-code map; a failed entry or an aborted category is a **200 with
+        a report**, never an error status.
+  - [ ] Routes carry no domain policy: they resolve the bot, call the service,
+        shape the result. Rule 7.
+  - [ ] Mounted in `openapi_v1/__init__.py` beside `config_manifest_router`.
+- **Depends on:** Task 9
+
+## [ ] Task 11: The bars and the dominance test
+- **Files:** `.../openapi_v1/authorization.py`, `.../openapi_v1/admission.py`,
+  `src/backend/tests/community/adapters/http/openapi_v1/test_config_manifest_apply_bars.py`
+- **Done when:**
+  - [ ] `POST …/apply` → `GRANT_CHECKED_ADDRESSED_BOT` +
+        `Check(PermissionLevel.OWNER, EDIT_LOCK)`; `GET …/last-apply` →
+        `GRANT_CHECKED_ADDRESSED_BOT` + `Check(PermissionLevel.MEMBER)`.
+  - [ ] The rows carry comments giving W10's reasoning: the bar follows apply's
+        own shape, not a maximum over categories; the admission mode follows
+        from `Check`, not from taste.
+  - [ ] The **dominance test** iterates `MATERIALISERS`, so a category W5
+        registers enters it automatically.
+  - [ ] It compares the **admitted set**, not raw enum ordering, and carries the
+        `Check(OWNER)` ≡ `OWNER_SCOPED` equivalence as a comment so the next
+        reader does not re-derive it.
+  - [ ] `test_admission_inventory.py` and `test_authorization_inventory.py` pass
+        with the new rows and are **not edited**.
+- **Depends on:** Task 10
+
+---
+
+## Group D — Proof
+
+## [ ] Task 12: Convergence, all-or-nothing, and the overwrite rules
+- **Files:** `src/backend/tests/community/core/bot_config_manifest/test_apply_engine.py`
+- **Done when:**
+  - [ ] **Convergence by absence of writes.** Two applies of an unchanged
+        document: every entry `unchanged`, and the startup-script and activation
+        services not called on the second.
+  - [ ] **The transient-failure test.** `mcp` declaring `{A, B}` with B failing
+        leaves A exactly as it was, B `failed`, A `skipped`, and neither
+        `activate_mcp` nor `deactivate_mcp` called.
+  - [ ] **`[]` and `DELETE` in one test.** `skills: []` empties its area;
+        deleting the manifest empties nothing. One rule, one test.
+  - [ ] **Per-category area.** Applying a document declaring only `mcp` leaves
+        skills, identity files and the workspace untouched.
+  - [ ] **Reserved identity files** are unreachable from apply — asserted here
+        as well as refused at `PUT`, so the guarantee rests on two layers.
+  - [ ] **No materialiser.** A document declaring `skills` and `script`
+        delivers the script, fails every `skills` entry, reports `PARTIAL`.
+  - [ ] **`dry_run` writes nothing**, proven by counting rows in both new tables
+        before and after.
+  - [ ] **Serialization.** Two concurrent applies: one proceeds, one 409s.
+  - [ ] **The record never over-claims.** A failure between two categories
+        leaves nothing recorded as materialised that was not.
+- **Depends on:** Tasks 7, 8, 9
+
+## [ ] Task 13: The two-phase proof — W13's call pattern, before W13
+- **Files:** same test module as Task 12
+- **Done when:**
+  - [ ] Phase A alone applies `script` and nothing else.
+  - [ ] Phase B alone applies `mcp` and not `script`.
+  - [ ] Both together preserve `APPLY_ORDER`'s order and produce one report.
+  - [ ] The phase-A call reaches no device context and no container — the
+        property that makes it callable before provisioning, pinned rather than
+        assumed. This is the same discipline W10 used for its uncalled
+        `from_spec`.
+- **Depends on:** Task 6
+
+## [ ] Task 14: Endpoint tests
+- **Files:** `src/backend/tests/community/endpoints/test_openapi_config_manifest_apply.py`
+- **Done when:**
+  - [ ] Both routes answer through the app with their declared bars enforced.
+  - [ ] No stored manifest ⇒ applies nothing, no error.
+  - [ ] Never applied ⇒ `last-apply` is an empty report, not a 404.
+  - [ ] A partial apply is a **200 carrying a report**, not a 4xx/5xx.
+  - [ ] Every existing manifest, startup-script and MCP endpoint test passes
+        **unedited**.
+- **Depends on:** Tasks 10, 11
+
+## [ ] Task 15: Documentation
+- **Files:** `.../core/bot_config_manifest/README.md`,
+  `docs/bot-config-manifest/user-manual.zh-CN.md`,
+  `docs/bot-config-manifest/design.zh-CN.md`
+- **Done when:**
+  - [ ] The module README's Context Boundary block lists everything the apply
+        subpackage provides and consumes. Its `consumes` names the five bot
+        configuration services and W10's seam.
+  - [ ] A README section states the orchestrator must not grow category logic,
+        and names the structural test that enforces it.
+  - [ ] The README's "apply does not exist yet" statements are corrected — W1
+        wrote several, and leaving them is how a README becomes untrustworthy.
+  - [ ] Design §3.4's ordering is annotated as **reversed** in the first phase,
+        pointing at work-items §2.12, so a reader of the design is not misled.
+  - [ ] The user manual documents both operations, `dry_run`, the outcome
+        vocabulary, and — plainly — that applying a declared category removes
+        what it does not declare.
+- **Depends on:** Task 14
