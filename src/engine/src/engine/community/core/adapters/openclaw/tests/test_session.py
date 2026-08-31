@@ -50,13 +50,15 @@ def _make_raw_session(
     message_count: int = 3,
     messages: list[dict] | None = None,
     preview: str | None = "hello",
+    created_at: object | None = None,
+    updated_at: object | None = None,
 ) -> dict[str, Any]:
     msgs = messages if messages is not None else [
         _make_raw_message(role="user", content="hi"),
         _make_raw_message(role="assistant", content="hello"),
         _make_raw_message(role="user", content="bye"),
     ]
-    return {
+    result = {
         "key": key,
         "label": label,
         "model": model,
@@ -67,6 +69,11 @@ def _make_raw_session(
         "outputTokens": 5,
         "preview": preview,
     }
+    if created_at is not None:
+        result["createdAt"] = created_at
+    if updated_at is not None:
+        result["updatedAt"] = updated_at
+    return result
 
 
 def _make_raw_message(
@@ -281,6 +288,34 @@ async def test_list_populates_last_message_from_raw_messages():
     assert sessions[0].last_message is not None
     assert isinstance(sessions[0].last_message, Message)
     assert sessions[0].last_message.content == "last reply"
+
+
+@pytest.mark.asyncio
+async def test_list_uses_openclaw_session_timestamps_when_available():
+    raw = _make_raw_session(
+        created_at=1_700_000_000_000,
+        updated_at="2024-01-02T03:04:05Z",
+    )
+    adapter = OpenClawSessionAdapter(_FakeSessionPort(sessions_list_result=[raw]))
+
+    session = (await adapter.list(SessionListRequest()))[0]
+
+    assert session.created_at == datetime.fromtimestamp(1_700_000_000, tz=UTC)
+    assert session.updated_at == datetime(2024, 1, 2, 3, 4, 5, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_list_derives_times_from_history_when_session_timestamps_absent():
+    first = _make_raw_message(timestamp=1_700_000_000_000)
+    last = _make_raw_message(timestamp=1_700_000_100_000)
+    raw = _make_raw_session(messages=[last, first])
+    adapter = OpenClawSessionAdapter(_FakeSessionPort(sessions_list_result=[raw]))
+
+    session = (await adapter.list(SessionListRequest()))[0]
+
+    assert session.created_at == datetime.fromtimestamp(1_700_000_000, tz=UTC)
+    assert session.updated_at == datetime.fromtimestamp(1_700_000_100, tz=UTC)
+    assert session.last_message_at == datetime.fromtimestamp(1_700_000_100, tz=UTC)
 
 
 @pytest.mark.asyncio
