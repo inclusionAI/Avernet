@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Query, Request
+from fastapi import APIRouter, Path, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -61,10 +61,28 @@ ApplyIdPath = Annotated[
 ]
 
 
+#: Two shapes from one operation, so the model is declared per-response rather
+#: than as a single ``response_model``. FastAPI coerces a returned object to the
+#: declared model, so a single declaration silently truncated a dry run's plan to
+#: the two fields of the accepted shape — caught by the endpoint test, and the
+#: reason ``response_model`` is ``None`` here.
+_APPLY_RESPONSES: dict[int | str, dict[str, object]] = {
+    **USER_SCOPED_403,
+    200: {
+        "model": Envelope[ConfigManifestApply],
+        "description": "A dry run's plan, computed without performing it.",
+    },
+    202: {
+        "model": Envelope[ConfigManifestApplyAccepted],
+        "description": "The apply has started; poll it with the returned id.",
+    },
+}
+
+
 @router.post(
     "/config-manifest/apply",
-    response_model=Envelope[ConfigManifestApplyAccepted],
-    responses=USER_SCOPED_403,
+    response_model=None,
+    responses=_APPLY_RESPONSES,
     status_code=202,
     operation_id="apply_bot_config_manifest",
 )
@@ -72,6 +90,7 @@ ApplyIdPath = Annotated[
 async def apply_bot_config_manifest(
     bot_id: BotIdPath,
     request: Request,
+    response: Response,
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     caller: ActingCallerDep,
@@ -120,6 +139,9 @@ async def apply_bot_config_manifest(
     actor = audit_actor(caller, actor_id)
 
     if dry_run:
+        # A dry run is finished when it answers — nothing was accepted for later
+        # processing — so it is a 200, not the route's default 202.
+        response.status_code = 200
         report = await apply_service.dry_run(
             entity_id=entity_id,
             bot_id=bot_id,

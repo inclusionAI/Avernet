@@ -364,20 +364,20 @@ than something to work around:
         `from_spec`.
 - **Depends on:** Task 6
 
-## [ ] Task 14: Endpoint tests
+## [x] Task 14: Endpoint tests
 - **Files:** `src/backend/tests/community/endpoints/test_openapi_config_manifest_apply.py`
 - **Done when:**
-  - [ ] All three routes answer through the app with their declared bars
+  - [x] All three routes answer through the app with their declared bars
         enforced.
-  - [ ] `POST …/apply` returns **202 + `apply_id`**, and polling that id returns
+  - [x] `POST …/apply` returns **202 + `apply_id`**, and polling that id returns
         the report.
-  - [ ] An `apply_id` belonging to a **different bot** resolves to nothing on
+  - [x] An `apply_id` belonging to a **different bot** resolves to nothing on
         this bot's poll route.
-  - [ ] No stored manifest ⇒ applies nothing, no error.
-  - [ ] Never applied ⇒ `last-apply` is an empty report, not a 404.
-  - [ ] A partial apply is a **terminal report saying so**, not a 4xx/5xx — the
+  - [x] No stored manifest ⇒ applies nothing, no error.
+  - [x] Never applied ⇒ `last-apply` is an empty report, not a 404.
+  - [x] A partial apply is a **terminal report saying so**, not a 4xx/5xx — the
         request succeeded; the apply was partial.
-  - [ ] Every existing manifest, startup-script and MCP endpoint test passes
+  - [x] Every existing manifest, startup-script and MCP endpoint test passes
         **unedited**.
 - **Depends on:** Tasks 10, 11
 
