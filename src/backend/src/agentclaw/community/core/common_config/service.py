@@ -10,13 +10,14 @@ from injector import inject
 from agentclaw.community.core.common_config.models import CommonConfigRecord
 from agentclaw.community.core.repository.protocols.config import CommonConfigRepositoryProtocol
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.common_config.common_config_service_protocol import CommonConfigServiceProtocol
 
 
 logger = get_logger()
 _PROTECTED_CONFIG_KEYS = {("skills_pool", "layout_rollout")}
 
 
-class CommonConfigService:
+class CommonConfigService(CommonConfigServiceProtocol):
     """基于 ``ac_common_config`` 的通用配置管理服务。"""
 
     @inject

@@ -1,11 +1,17 @@
-"""Service API Protocol for the SkillParameterService factory."""
+"""Service API Protocol for the SkillParameterService factory.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_parameter_service_factory_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.skill_parameter_service_factory_protocol import (
+    SkillParameterServiceFactoryProtocol,
+)
 
-
-@runtime_checkable
-class SkillParameterServiceFactoryProtocol(Protocol):
-    """Service API for minting SkillParameterService for a (bot_id, user_id) pair."""
-
-    async def create(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "SkillParameterServiceFactoryProtocol",
+]

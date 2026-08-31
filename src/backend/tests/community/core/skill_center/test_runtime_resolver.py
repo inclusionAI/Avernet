@@ -7,7 +7,9 @@ import pytest
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeDesiredState,
     RuntimeNameConflictError,
+    RuntimeProjection,
     RuntimeProjectionResolver,
+    RuntimeSkillProjection,
 )
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 from agentclaw.community.core.workspace.skill_layout import (
@@ -50,6 +52,22 @@ def test_resolver_projects_every_supported_skill_corpus_and_deduplicates_inputs(
     ]
     assert projection.mcp_server_codes == ("mcp-a", "mcp-b", "mcp-default")
     assert projection.cli_commands == ("builtin",)
+
+
+def test_skill_projection_is_explicitly_distinct_from_the_complete_snapshot() -> None:
+    """A Skill-only plan must not masquerade as a complete RuntimeProjection."""
+    resolver = RuntimeProjectionResolver()
+    skills = (
+        RegisteredSkillAsset(skill_id=1, name="repo", git_path="git://team/repo"),
+    )
+
+    skill_projection = resolver.resolve_skills(skills)
+    complete_projection = resolver.resolve(RuntimeDesiredState(skills=skills))
+
+    assert type(skill_projection) is RuntimeSkillProjection
+    assert type(complete_projection) is RuntimeProjection
+    assert skill_projection.skill_assets == complete_projection.skill_assets
+    assert skill_projection.skill_mappings == complete_projection.skill_mappings
 
 
 def test_resolver_uses_ac_skill_name_for_local_runtime_entry_not_locator_tail() -> None:

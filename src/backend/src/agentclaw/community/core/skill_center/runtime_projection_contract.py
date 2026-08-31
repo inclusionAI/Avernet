@@ -5,11 +5,12 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RegisteredSkillAsset,
     RuntimeProjection,
+    RuntimeSkillProjection,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 
@@ -30,7 +31,10 @@ class CapabilityRuntimeBoundary(Protocol):
     """
 
     async def project_skills(
-        self, *, desired_skills: list[dict] | None = None
+        self,
+        *,
+        desired_skills: Optional[list[dict]] = None,
+        effective_mcps: Optional[list[dict]] = None,
     ) -> bool:
         """Apply one complete resolver-owned Skill snapshot to the runtime.
 
@@ -38,6 +42,12 @@ class CapabilityRuntimeBoundary(Protocol):
         whole-artifact engine an artifact compose and the outbound apply
         request — but keeping off the event loop is the implementation's
         responsibility, not the caller's. Await it like ``project_mcps``.
+
+        ``effective_mcps`` is for the whole-artifact case only, and for the
+        same reason ``desired_skills`` is passed: the compose behind this call
+        re-reads desired state that plan resolution already read, and handing
+        the resolved value over is what avoids the second pass. A runtime with
+        a separate MCP endpoint composes nothing here and leaves it ``None``.
         """
         ...
 
@@ -51,15 +61,28 @@ class CapabilityRuntimeBoundary(Protocol):
         """Apply one MCP projection: deliver, withdraw, and declare the set."""
         ...
 
+    async def project_whole_artifact(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
+        """Compose and apply one structure-only whole-artifact snapshot.
+
+        No filesystem mapping is built before this call. Exact Center identity
+        reaches the artifact composer as data, so a whole-artifact engine never
+        guesses a path or trips over the legacy symlink adapter.
+        """
+        ...
+
 
 @dataclass(frozen=True, slots=True)
-class ResolvedCapabilityPlan:
-    """One Bot's desired capability state, resolved and ready to apply.
+class ResolvedSkillPlan:
+    """One Bot's complete Skill state, resolved and ready to apply.
 
-    Everything read-only about a projection, gathered before anything is
-    written: the flush has run, the pre-flight checks have passed, and the
-    values below cannot change under the write that follows. A projection that
-    aborts does so while building this, with nothing half-applied behind it.
+    The Installation flush, Skill validation, and mapping resolution have all
+    completed before this value crosses the engine seam. It deliberately says
+    nothing about MCP, CLI, or Passport state.
 
     It exists as a value rather than a tuple because it crosses a seam — an
     ``EngineRuntimeProjection`` acts from the plan alone — and a positional
@@ -79,10 +102,30 @@ class ResolvedCapabilityPlan:
     #: ``ac_bots.active_engine`` — the registry key. Whose runtime contract
     #: applies is decided from this and nothing else.
     engine: str
-    #: The deduplicated Skill/MCP/CLI snapshot to converge the runtime on.
+    #: The complete Skill half. It is a distinct type from RuntimeProjection,
+    #: so an engine cannot mistake omitted Non-Skill state for an empty final
+    #: MCP/CLI snapshot.
+    projection: RuntimeSkillProjection
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCapabilityPlan(ResolvedSkillPlan):
+    """One Bot's complete Skill/MCP/CLI state, resolved before any write."""
+
+    #: The complete engine-neutral projection. This field deliberately narrows
+    #: the base type: a ResolvedCapabilityPlan can always satisfy a Skill-only
+    #: consumer, while its MCP consumers receive a genuine full snapshot.
     projection: RuntimeProjection
-    #: Effective Default CLI facts, as the authorization service holds them.
+    #: Effective Default CLI facts, as the authorization service holds them,
+    #: ready for the overwrite-style Passport update.
     effective_cli_items: list[dict]
+    #: The Bot's effective MCP set — default policy ∪ installed ∪ Skill
+    #: dependencies — as ``collect_bot_active_mcps`` resolved it for the
+    #: projected MCP codes. Carried rather than recomputed because a
+    #: whole-artifact engine composes its document from the same set: without
+    #: this the delivery would re-read it from the database it was just read
+    #: from. Bare association entries, no MCP Center detail merged in.
+    effective_mcp_entries: list[dict]
     #: Per-MCP execution identity, resolved during plan resolution because it
     #: can fail — see ``BotRuntimeProjector._resolve_mcp_identity_modes``.
     identity_modes: Mapping[str, object]
@@ -131,7 +174,7 @@ class EngineRuntimeProjection(Protocol):
     async def apply(
         self,
         *,
-        plan: ResolvedCapabilityPlan,
+        plan: ResolvedSkillPlan,
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
@@ -139,7 +182,9 @@ class EngineRuntimeProjection(Protocol):
 
         Raises ``SkillSetRuntimeReconcileError`` if it did not converge, so
         the caller can compensate. How many runtime calls that took, and in
-        what order, is decided here and is not observable to the caller.
+        what order, is decided here and is not observable to the caller. MCP
+        writers require ``ResolvedCapabilityPlan``; Skill-only writers accept
+        the narrower ``ResolvedSkillPlan``.
         """
         ...
 
@@ -272,7 +317,11 @@ class BotRuntimeProjectorProtocol(Protocol):
         owner_id: str,
         scope: ProjectionScope,
     ) -> None:
-        """Project MCP/CLI while an external authority owns Skill mappings."""
+        """Project MCP/CLI while an external authority owns Skill mappings.
+
+        ``scope.mcp`` must be true; callers cannot use this entry point to
+        smuggle a Skill-only projection around the normal ``project`` seam.
+        """
         ...
 
 
@@ -282,4 +331,5 @@ __all__ = [
     "EngineRuntimeProjection",
     "ProjectionScope",
     "ResolvedCapabilityPlan",
+    "ResolvedSkillPlan",
 ]

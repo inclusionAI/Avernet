@@ -1,14 +1,17 @@
-"""Service API for public Bot-owned Local Skill deletion."""
+"""Service API for public Bot-owned Local Skill deletion.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/local_skill_delete_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.local_skill_delete_service_protocol import (
+    LocalSkillDeleteServiceProtocol,
+)
 
-
-@runtime_checkable
-class LocalSkillDeleteServiceProtocol(Protocol):
-    """Delete one inactive Bot-owned Local Skill by deployment-wide ID."""
-
-    async def delete_local_skill(
-        self, *, skill_id: str, owner_id: str, user_id: str
-    ) -> None: ...
+__all__ = [
+    "LocalSkillDeleteServiceProtocol",
+]

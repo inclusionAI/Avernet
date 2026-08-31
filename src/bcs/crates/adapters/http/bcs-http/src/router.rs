@@ -313,7 +313,7 @@ fn build_api_routes() -> Router<HttpAppState> {
         )
         .route(
             "/groups/{id}/messages",
-            get(routes::group_messages::get_messages).post(routes::group_messages::send_message),
+            post(routes::group_messages::send_message),
         )
         .route("/groups/{id}/fuse", post(routes::messages::fuse_context))
         .route(
@@ -332,6 +332,10 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route(
             "/state-machine-runs/{run_id}/graph",
             get(routes::collaboration_runs::get_state_machine_run_graph),
+        )
+        .route(
+            "/state-machine-runs/{run_id}/reruns",
+            post(routes::collaboration_runs::rerun_state_machine_run),
         )
         .route(
             "/state-machine-runs/{run_id}/nodes/{node_id}",

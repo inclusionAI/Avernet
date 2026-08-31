@@ -40,12 +40,13 @@ from agentclaw.community.core.caller_identity.contracts import CallerIdentityEng
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.caller_identity.caller_identity_service_protocol import CallerIdentityServiceProtocol
 
 
 logger = get_logger()
 
 
-class CallerIdentityService:
+class CallerIdentityService(CallerIdentityServiceProtocol):
     """Persist per-MCP modes and expose the aggregate Bot call type."""
 
     def __init__(

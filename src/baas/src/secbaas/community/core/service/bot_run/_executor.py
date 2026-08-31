@@ -256,6 +256,7 @@ class BotRunRequestExecutor:
         cache_plugin: CachePlugin,
         api_key_repository: APIKeyRepository,
         stream_flush_interval_seconds: float = 0.2,
+        stream_flush_max_content_bytes: int = 65536,
     ) -> None:
         self._repo = run_repository
         self._bot_service_plugin = bot_service_plugin
@@ -264,6 +265,9 @@ class BotRunRequestExecutor:
         self._cache_plugin = cache_plugin
         self._api_key_repository = api_key_repository
         self._stream_flush_interval = stream_flush_interval_seconds
+        # 单条 chunk content 的字节上界：超过阈值时提前 flush，避免在 ZDAS tracer
+        # 等非参数化内联 SQL 路径下因单条 payload 过大触发 1064 转义断裂。
+        self._stream_flush_max_content_bytes = stream_flush_max_content_bytes
 
     async def execute(self, record: BotRunQueueRecord) -> None:
         run = self._repo.get_by_run_id(record.run_id)
@@ -429,9 +433,11 @@ class BotRunRequestExecutor:
     ) -> None:
         """流式发送：消费 bot_service.send_message_stream，逐 chunk 写 chunk 表 + ZCache watermark。
 
-        200ms 批量窗口合并 delta / agent chunks：
-        - delta chunks 先缓冲，200ms 或非 delta/agent 事件触发 flush
-        - agent chunks 先缓冲到独立 buffer，200ms 或非 delta/agent 事件触发 flush（JSON array 合并）
+        200ms 批量窗口合并 delta / agent chunks，并由 ``stream_flush_max_content_bytes``
+        字节阈值提前 flush，避免单条 chunk content 在 ZDAS tracer 等非参数化内联
+        SQL 路径下过大触发 1064：
+        - delta chunks 先缓冲，200ms / 字节阈值 / 非 delta/agent 事件触发 flush
+        - agent chunks 先缓冲到独立 buffer，200ms / 字节阈值 / 非 delta/agent 事件触发 flush（JSON array 合并）
         - 非 delta/agent（final/error）先 flush 两个缓冲，再立即写入
         - ZCache watermark: cache.set(f"run:{run_id}:seq", f"{seq}:{chunk_type}", ttl=120)
         """
@@ -439,17 +445,20 @@ class BotRunRequestExecutor:
         seq = 0
         delta_buffer: list[str] = []
         delta_engine_type: str | None = None
+        delta_buffer_bytes: int = 0
         agent_buffer: list[dict] = []
         agent_engine_type: str | None = None
+        agent_buffer_bytes: int = 0
         cache_key = f"run:{run.run_id}:seq"
 
         def _flush_delta() -> None:
             """将缓冲的 delta 合并为一条 chunk 写入。"""
-            nonlocal seq, delta_buffer, delta_engine_type
+            nonlocal seq, delta_buffer, delta_engine_type, delta_buffer_bytes
             if not delta_buffer:
                 return
             merged = "".join(delta_buffer)
             delta_buffer.clear()
+            delta_buffer_bytes = 0
             metadata_json = None
             if delta_engine_type:
                 metadata_json = json.dumps({"engine_type": delta_engine_type})
@@ -465,11 +474,12 @@ class BotRunRequestExecutor:
 
         def _flush_agent() -> None:
             """将缓冲的 agent 事件合并为一条 chunk（JSON array）写入。"""
-            nonlocal seq, agent_buffer, agent_engine_type
+            nonlocal seq, agent_buffer, agent_engine_type, agent_buffer_bytes
             if not agent_buffer:
                 return
             merged = json.dumps(agent_buffer, ensure_ascii=False)
             agent_buffer.clear()
+            agent_buffer_bytes = 0
             metadata_json = None
             if agent_engine_type:
                 metadata_json = json.dumps({"engine_type": agent_engine_type})
@@ -522,16 +532,26 @@ class BotRunRequestExecutor:
             ):
                 if chunk.type == "delta":
                     delta_buffer.append(chunk.content)
+                    delta_buffer_bytes += len(chunk.content or "")
                     if chunk.engine_type:
                         delta_engine_type = chunk.engine_type
-                    if time.monotonic() - last_flush_ts >= self._stream_flush_interval:
+                    if (
+                        time.monotonic() - last_flush_ts >= self._stream_flush_interval
+                        or delta_buffer_bytes >= self._stream_flush_max_content_bytes
+                    ):
                         _flush_buffers()
                         last_flush_ts = time.monotonic()
                 elif chunk.type == "agent":
                     agent_buffer.append(chunk.metadata or {})
+                    agent_buffer_bytes += len(
+                        json.dumps(chunk.metadata or {}, ensure_ascii=False)
+                    )
                     if chunk.engine_type:
                         agent_engine_type = chunk.engine_type
-                    if time.monotonic() - last_flush_ts >= self._stream_flush_interval:
+                    if (
+                        time.monotonic() - last_flush_ts >= self._stream_flush_interval
+                        or agent_buffer_bytes >= self._stream_flush_max_content_bytes
+                    ):
                         _flush_buffers()
                         last_flush_ts = time.monotonic()
                 elif chunk.type == "final":

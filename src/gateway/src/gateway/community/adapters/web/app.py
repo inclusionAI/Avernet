@@ -111,6 +111,7 @@ def create_app() -> FastAPI:
     app.state.principal_signer = bs.principal_signer
     app.state.access_key_issuer = bs.access_key_issuer
     app.state.app_registrar = bs.app_registrar
+    app.state.baas_key_migrator = bs.baas_key_migrator
 
     _default_openapi = app.openapi
 

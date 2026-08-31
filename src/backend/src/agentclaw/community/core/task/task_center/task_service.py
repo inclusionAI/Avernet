@@ -48,6 +48,7 @@ from agentclaw.community.core.task.task_runner.callback_adapter import (
     TaskLoopCallback,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
+from agentclaw.community.core.task.task_service_protocol import TaskServiceProtocol
 
 logger = logging.getLogger("task.service")
 
@@ -68,7 +69,7 @@ def _resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
 # TaskService 结构化实现 api.task.task_service.TaskServiceProtocol —— 依 api/README 四层
 # 契约,core/ 不 import api/(见 test_service_api_conformance.py:core 服务不继承 api Protocol,
 # 由 @runtime_checkable 的 isinstance/issubclass 做结构化一致性校验)。此处置空基类即可。
-class TaskService:
+class TaskService(TaskServiceProtocol):
     """对外 facade;内部持 ExecutionEngine 编排核 + TaskGraphService + Harness(可选)+ TaskLoopCallback。
 
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。

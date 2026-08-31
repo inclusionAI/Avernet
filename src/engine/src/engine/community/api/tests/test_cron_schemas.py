@@ -38,6 +38,8 @@ class TestCreateTaskRequest:
         assert req.timezone == "Asia/Shanghai"  # default
         assert req.enabled is True              # default
         assert req.timeout_secs == 86400        # default
+        assert req.owner_id is None
+        assert req.bot_id is None
         assert req.model is None
         assert req.notify is None
 
@@ -53,10 +55,14 @@ class TestCreateTaskRequest:
             timezone="UTC",
             enabled=False,
             timeout_secs=3600,
+            owner_id="owner-1",
+            bot_id="bot-1",
             model="gpt-4",
             notify=NotifyRequest(enabled=True, user_ids=["u1"]),
         )
         assert req.timezone == "UTC"
+        assert req.owner_id == "owner-1"
+        assert req.bot_id == "bot-1"
         assert req.model == "gpt-4"
         assert req.notify.enabled is True
 

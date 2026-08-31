@@ -32,8 +32,9 @@ pub use channel::{
 };
 pub use collaboration::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
-    GroupRuntimeBindingRepoPort, MarkHumanNodeRunningCommand, StateMachineDefinitionRepoPort,
-    StateMachineEventfulTransition, StateMachineRunRepoPort,
+    CreateStateMachineRerun, CreateStateMachineRerunOutcome, GroupRuntimeBindingRepoPort,
+    MarkHumanNodeRunningCommand, StateMachineDefinitionRepoPort, StateMachineEventfulTransition,
+    StateMachineRunRepoPort,
 };
 pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};
 pub use edge_grant::EdgeGrantRepoPort;
@@ -58,8 +59,9 @@ pub use relation::RelationRepoPort;
 pub use permission_profile::PermissionProfileRepoPort;
 pub use permission_request::PermissionRequestRepoPort;
 pub use session::{
-    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent,
-    NewSessionParams, RemoveSessionParticipantWithEvent, SessionRepoPort,
+    AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
+    CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
 };
 pub use session_file::{
     NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,

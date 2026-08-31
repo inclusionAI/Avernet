@@ -189,6 +189,26 @@ class ChatInjectRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ChatAbortRequest(BaseModel):
+    """chat.abort 请求体
+
+    BCN 请求中止某 session 下运行中的 run。与 send/inject 不同，abort 不携带
+    message / timeout_ms / attachments / from_，仅含路由与幂等字段。
+    ``id`` 为本次 abort 请求 ID（幂等键），``session_id`` 定位目标 run。
+    """
+
+    type: Literal["req"] = Field(default="req", description="固定为 req")
+    id: str = Field(..., description="本次 abort 请求 ID，也是 chat.abort 幂等键")
+    session_id: str = Field(..., description="会话标识，按它定位运行中的 run")
+    bcn_group_id: str = Field(..., description="BCN 侧 group ID")
+    method: Literal["chat.abort"] = Field(
+        default="chat.abort", description="固定为 chat.abort"
+    )
+    to_bot: BotRef = Field(..., description="目标 Bot 信息")
+
+    model_config = {"populate_by_name": True}
+
+
 class ChatHistoryRequest(BaseModel):
     """chat.history 请求体
 
@@ -304,6 +324,19 @@ class ChatInjectSuccessResponse(BaseModel):
     """chat.inject 成功响应"""
 
     ok: bool = Field(default=True)
+
+
+class ChatAbortSuccessResponse(BaseModel):
+    """chat.abort 成功响应"""
+
+    ok: bool = Field(default=True)
+    aborted: bool = Field(
+        default=False, description="是否实际取消了至少一个运行中的 run"
+    )
+    aborted_run_ids: list[str] = Field(
+        default_factory=list,
+        description="本次被取消的 run_id 列表",
+    )
 
 
 class HistoryPluginMeta(BaseModel):

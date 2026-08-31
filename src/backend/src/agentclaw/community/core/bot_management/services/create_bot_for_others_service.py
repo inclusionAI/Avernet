@@ -33,6 +33,7 @@ from agentclaw.community.utils.avernet_tenant import (
     DEFAULT_AVERNET_TENANT,
     get_current_avernet_tenant,
 )
+from agentclaw.community.core.bot_management.create_bot_for_others_service_protocol import CreateBotForOthersServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -55,7 +56,7 @@ class _TargetLockEntry:
         self.users = 0
 
 
-class CreateBotForOthersService:
+class CreateBotForOthersService(CreateBotForOthersServiceProtocol):
     """Ensure Passport and owner authorization before create/restart actions.
 
     Looks up an existing bot for the target user by owner (not by a literal

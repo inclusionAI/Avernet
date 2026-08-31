@@ -57,12 +57,13 @@ from agentclaw.community.core.repository.implementations.governance.notify_log i
 from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
 from agentclaw.community.log import get_logger
 from injector import inject
+from agentclaw.community.core.economy.governance_service_protocol import GovernanceLifecycleServiceProtocol
 
 
 log = get_logger(__name__)
 
 
-class GovernanceLifecycleService:
+class GovernanceLifecycleService(GovernanceLifecycleServiceProtocol):
     """Sole driver of the governance ticket main state machine (Rule 14/20).
 
     Note: this service deliberately does NOT depend on

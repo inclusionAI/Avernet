@@ -7,10 +7,11 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::{
-    AcceptFriendRequest, AcceptInvitation, CreateBotFriendRequest, CreateGroupInvitation,
-    CreateSessionInvitation, DeleteBotFriendship, FriendRequest, Friendship, FriendshipService,
-    Invitation, InvitationAcceptResult, InvitationService, ListBotFriendRequests,
-    ListBotFriendships, RejectFriendRequest,
+    AcceptFriendRequest, AcceptInvitation, BotRegistration, CreateBotFriendRequest,
+    CreateGroupInvitation, CreateSessionInvitation, DeleteBotFriendship, FriendRequest,
+    Friendship, FriendshipService, Invitation, InvitationAcceptResult, InvitationService,
+    IssueRegisterToken, ListBotFriendRequests, ListBotFriendships, RegisterBot, RegisterService,
+    RegisterTokenView, RejectFriendRequest,
 };
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AddSessionParticipant, ApplicationError, AuthenticatedAppIdentity,
@@ -366,6 +367,25 @@ impl FriendshipService for NoopFriendshipService {
     }
 }
 
+struct NoopRegisterService;
+
+#[async_trait]
+impl RegisterService for NoopRegisterService {
+    async fn issue_register_token(
+        &self,
+        _command: IssueRegisterToken,
+    ) -> Result<RegisterTokenView, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+
+    async fn register_bot(
+        &self,
+        _command: RegisterBot,
+    ) -> Result<BotRegistration, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Fake session + message services.
 // ---------------------------------------------------------------------------
@@ -600,6 +620,8 @@ fn session_summary() -> SessionSummary {
         status: SessionStatus::Running,
         title: Some("Planning".into()),
         participant_count: Some(1),
+        caller_principal: None,
+        created_by: None,
         created_at: 1,
         updated_at: 2,
         collected: None,
@@ -636,6 +658,7 @@ fn test_session_router_for_caller(
             session,
             message,
             Arc::new(NoopInvitationService),
+            Arc::new(NoopRegisterService),
             Arc::new(NoopFriendshipService),
             Arc::new(HeaderVerifier {
                 caller: authenticated_caller,

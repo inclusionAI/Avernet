@@ -25,7 +25,7 @@ from injector import inject
 from agentclaw.community.core.bot_startup_script.repository.models import (
     BotStartupScriptRecord,
 )
-from agentclaw.community.api.bot_startup_script_service import (
+from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
     MAX_SCRIPT_BYTES,
     BotStartupScriptServiceProtocol,
     StartupScriptNotEncodableError,

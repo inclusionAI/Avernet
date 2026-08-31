@@ -14,9 +14,10 @@ from agentclaw.community.core.harness.models import (
     PatchTemplateStatus,
 )
 from agentclaw.community.core.repository.protocols.harness import HarnessTemplateRepository
+from agentclaw.community.core.harness.patch_library_service_protocol import PatchLibraryProtocol
 
 
-class PatchLibrary:
+class PatchLibrary(PatchLibraryProtocol):
     """Patch template management center.
 
     All Kits share this library; each Kit filters by ``layer``.

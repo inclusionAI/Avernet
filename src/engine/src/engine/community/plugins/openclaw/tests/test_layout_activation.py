@@ -238,9 +238,12 @@ def test_registered_local_cutover_syncs_latest_content_and_retires_bridges(
 
     assert result.status is PoolActivationStatus.COMMITTED
     assert result.evidence["resolved_layout"] == {
+        "engine": "openclaw",
+        "layout_contract_version": LAYOUT_CONTRACT_VERSION,
         "active_root": str(home / ".openclaw/workspace/skills"),
         "local_root": str(pool_local),
         "repo_root": str(pool_repo),
+        "pool_center": str(pool_repo.parent / "skill-center"),
     }
     assert result.evidence["local_locators"] == {
         "handmade": f"local://{pool_local / 'handmade'}"

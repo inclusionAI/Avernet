@@ -307,7 +307,7 @@ class TestCommunityOverlaySelection:
         # nested blocks the providers read via _block(name)
         assert uc.get("workspace", {}).get("openclaw_root", "").startswith("./")
         assert uc.get("device_allocation", {}).get("mode") == "multi"
-        assert uc.get("baas", {}).get("tenant") == "community"
+        assert uc.get("baas", {}).get("tenant") == ""
         assert uc.get("desktop_bot_periodic_scan", {}).get("enabled") is False
 
     def test_explicit_community_overlay_ignores_server_env(self, monkeypatch):

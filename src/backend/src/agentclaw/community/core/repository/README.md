@@ -152,9 +152,19 @@ provides:
   - SkillPropagationLogRepository
   - SkillRepository
   - SpaceSkillRepository
+  - SpaceSkillDraftRepository
+  - SpaceSkillReadRepository
+  - SpaceSkillVersionReadRepository
+  - SpaceSkillOfflineRepositoryProtocol
+  - SpaceSkillOfflineRepository
   - SkillEditorRequestRepository
   - DraftEditLeaseRepository
+  - SkillVersionRepositoryProtocol
+  - SkillVersionMaterializationRepositoryProtocol
+  - SpaceSkillPublicationRepositoryProtocol
   - SkillSetRepository
+  - SkillCenterReferenceRepositoryProtocol
+  - TrackLatestRepositoryProtocol
   # skills_pool
   - QuarantineRepositoryProtocol
   - SkillsPoolLayoutRepositoryProtocol
@@ -199,6 +209,10 @@ provides:
   - OrmPublishOperationRepository
   # skill_center
   - SpaceSkillRepository
+  - SkillVersionRepository
+  - SpaceSkillPublicationRepository
+  - SkillCenterReferenceRepository
+  - TrackLatestRepository
   # skills_pool
   - SkillsPoolLayoutRepository
   - SkillsPoolRolloutRepository

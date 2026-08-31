@@ -1,15 +1,17 @@
-"""Service API Protocol for MCP marketplace listings."""
+"""Service API Protocol for MCP marketplace listings.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/mcp/mcp_market_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.mcp.mcp_market_service_protocol import (
+    MCPMarketServiceProtocol,
+)
 
-
-@runtime_checkable
-class MCPMarketServiceProtocol(Protocol):
-    """Service API for MCP marketplace listing + detail + tenant browsing."""
-
-    def get_mcp_list(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_mcp_detail(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_tenant_list(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "MCPMarketServiceProtocol",
+]

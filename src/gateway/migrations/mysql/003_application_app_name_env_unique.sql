@@ -1,0 +1,51 @@
+-- Migration: avernet_application names an application once per environment.
+--
+-- `001_init_schema.sql` is `CREATE TABLE IF NOT EXISTS`, so it is a no-op on a
+-- database that already has these tables — editing it does not migrate anyone.
+-- This file carries the change for deployments created before the key existed.
+--
+-- WHY: `app_name` is how a person picks their application out of a listing, and
+-- two rows sharing one within an `env` make every such listing ambiguous. It
+-- also has to be a database constraint rather than a check in code, because two
+-- concurrent registrations both pass an application-level "is this name free?"
+-- and only the index stops the second.
+--
+-- `env` is IN the key, not merely alongside it: one database backs several
+-- environments and the same application legitimately exists in each. Keyed on
+-- `app_name` alone, registering "billing" in dev would lock the name out of
+-- prod.
+--
+-- ⚠️ APPLY-TIME PRECONDITION — this migration FAILS (ER_DUP_ENTRY, 1062) if the
+-- table already holds two rows with the same (app_name, env). That is the
+-- correct behaviour: the duplicates are a data question only their owner can
+-- answer, and creating the index by silently dropping rows is not something a
+-- migration gets to decide. Find them first:
+--
+--   SELECT app_name, env, COUNT(*) c, GROUP_CONCAT(id) ids
+--     FROM avernet_application
+--    GROUP BY app_name, env
+--   HAVING c > 1;
+--
+-- and rename the losers before running this. NOTE that `app_name`'s collation
+-- is the server default (case-insensitive), so 'Billing' and 'billing' in one
+-- env are duplicates here — the query above finds them, because it groups under
+-- the same collation the index will use.
+--
+-- ONE statement, deliberately, for the reason `002_application_api_key.sql`
+-- gives: DDL auto-commits per statement, so splitting the drop and the add
+-- across two ALTERs risks a schema with neither index if the second fails.
+-- MySQL 8's DDL is atomic per statement, so as a single ALTER this either lands
+-- completely or not at all.
+--
+-- Re-running it errors with ER_DUP_KEYNAME (1061) rather than silently doing
+-- nothing — the intended behaviour for a one-shot migration, matching 002.
+--
+-- The plain index is DROPPED rather than kept. `app_name` is the leading column
+-- of the new unique key, so a B-tree prefix scan serves every lookup
+-- `idx_avernet_application_app_name` served; keeping both would maintain two
+-- structures for one access path. It is dropped in the same statement as the
+-- add so the table is never left with only the weaker of the two.
+
+ALTER TABLE `avernet_application`
+  DROP INDEX `idx_avernet_application_app_name`,
+  ADD UNIQUE KEY `uk_avernet_application_app_name_env` (`app_name`, `env`);

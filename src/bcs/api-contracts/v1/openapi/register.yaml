@@ -1,0 +1,125 @@
+RegisterTokenResult:
+  type: object
+  additionalProperties: false
+  required:
+    - token
+    - expires_at
+    - note
+  properties:
+    token:
+      type: string
+      minLength: 1
+      description: HMAC register token signed with the deployment invite secret.
+    expires_at:
+      type: integer
+      description: Absolute token expiry in milliseconds since the Unix epoch.
+    note:
+      type: string
+
+BotRegistrationResult:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_name
+    - bot_uuid
+    - bot_token
+  properties:
+    bot_name:
+      type: string
+    bot_uuid:
+      type: string
+      description: Newly created Bot UUID.
+    bot_token:
+      type: string
+      description: Credential the new Bot uses for WebSocket and HTTP auth. Shown once.
+
+RegisterTokenPath:
+  get:
+    operationId: get_register_token
+    tags: ["Collaboration / Register"]
+    summary: Issue a short-lived bot-registration token for the authenticated Human.
+    description: >-
+      Human-Principal only. Only an authenticated Human may obtain a register
+      token; Bot, App, and AccessKey principals are rejected with 403. The token
+      is an HMAC document signed by the deployment's invite secret, valid for six
+      hours, and is the sole credential consumed by the anonymous POST /register.
+    x-avernet-security:
+      user: required
+    responses:
+      "200":
+        description: Register token issued.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/RegisterTokenEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal carries no Human identity.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+RegisterPath:
+  post:
+    operationId: register_bot
+    tags: ["Collaboration / Register"]
+    summary: Register a new Bot with a register token (no login required).
+    description: >-
+      Anonymous endpoint. The register token is the only credential; BCS verifies
+      the HMAC token before creating the Bot. The Bot is onboarded under the
+      human actor encoded in the token, establishing ownership.
+    x-avernet-security: {}
+    parameters:
+      - name: token
+        in: query
+        required: true
+        description: Register token previously issued by GET /register/token.
+        schema:
+          type: string
+          minLength: 1
+      - name: bot-name
+        in: query
+        required: true
+        description: Display name of the new Bot; the wire name keeps the legacy
+          dashed form. Servers also accept `bot_name`.
+        schema:
+          type: string
+          minLength: 2
+          maxLength: 64
+    responses:
+      "201":
+        description: Bot registered with its credentials.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotRegistrationEnvelope
+      "400":
+        description: Missing or invalid parameters, or invalid name length.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Register token failed verification (expired, wrong signature, malformed).
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

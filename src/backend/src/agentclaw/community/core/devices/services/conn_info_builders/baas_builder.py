@@ -83,9 +83,13 @@ class BaasConnInfoBuilder:
         raw_engine_type = (bot or {}).get("active_engine") or _DEFAULT_ENGINE_TYPE
         bot_type = (bot or {}).get("bot_type") or ""
         template_type = (bot or {}).get("template_type") or ""
+        raw_template_config = (bot or {}).get("template_config")
         engine_type = SystemConfigBaasTemplateResolver.normalize_engine_for_template(
             engine_type=raw_engine_type,
             template_type=template_type,
+            template_config=raw_template_config
+            if isinstance(raw_template_config, dict)
+            else None,
         )
 
         if not bot:

@@ -1282,6 +1282,10 @@ StateMachineRun:
   properties:
     run_id:
       type: string
+    root_run_id:
+      type: string
+    rerun_of:
+      type: string
     definition_id:
       type: string
     definition_version:
@@ -1292,6 +1296,9 @@ StateMachineRun:
       type: integer
     session_id:
       type: string
+    session_activation_count:
+      type: integer
+      minimum: 1
     created_by:
       type: string
     status:
@@ -2015,6 +2022,42 @@ CreatedInvitationEnvelope:
       type: string
     data:
       $ref: "#/Invitation"
+    request_id:
+      type: string
+
+RegisterTokenEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "./openapi/register.yaml#/RegisterTokenResult"
+    request_id:
+      type: string
+
+BotRegistrationEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "./openapi/register.yaml#/BotRegistrationResult"
     request_id:
       type: string
 

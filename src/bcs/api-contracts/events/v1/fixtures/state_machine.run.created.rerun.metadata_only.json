@@ -1,0 +1,32 @@
+{
+  "spec_version": "1.0",
+  "event_id": "evt-state-machine-run-rerun-created-1",
+  "event_type": "state_machine.run.created",
+  "schema_version": "1.0",
+  "source": "bcs",
+  "occurred_at": "2026-08-27T10:10:00.000Z",
+  "recorded_at": "2026-08-27T10:10:00.004Z",
+  "subject": {
+    "type": "state_machine.run",
+    "id": "run-2"
+  },
+  "scope": {
+    "group_id": "group-1",
+    "session_id": "session-1",
+    "run_id": "run-2"
+  },
+  "stream": {
+    "key": "state-machine-run:run-2",
+    "sequence": 1
+  },
+  "correlation_id": "collaboration-1",
+  "data": {
+    "definition_id": "definition-1",
+    "definition_version": 1,
+    "root_run_id": "run-1",
+    "rerun_of": "run-1",
+    "session_activation_count": 2,
+    "run_mode": "configured",
+    "status": "running"
+  }
+}

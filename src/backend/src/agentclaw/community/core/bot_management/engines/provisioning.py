@@ -18,9 +18,12 @@ from enum import StrEnum
 from typing import Any, Dict, Optional
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
+from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
 # Public template input must not set platform-owned identity or lifecycle data.
+# ``engine_form`` is the server-managed form marker written only by creation
+# normalization (legacy ``aicoding`` engine folded into ``claude_code``).
 TEMPLATE_SERVER_RESERVED_FIELDS = frozenset(
     {
         "workspace_id",
@@ -29,6 +32,7 @@ TEMPLATE_SERVER_RESERVED_FIELDS = frozenset(
         "workspace_status",
         "workspace_state",
         "start_status",
+        ENGINE_FORM_KEY,
     }
 )
 

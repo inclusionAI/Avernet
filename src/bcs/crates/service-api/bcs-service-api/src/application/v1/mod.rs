@@ -19,6 +19,7 @@ pub mod internal_bot_attributes;
 pub mod invitation;
 pub mod message;
 pub mod principal;
+pub mod register;
 pub mod session;
 pub mod session_file;
 
@@ -43,5 +44,6 @@ pub use internal_bot_attributes::*;
 pub use invitation::*;
 pub use message::*;
 pub use principal::{AuthenticatedUser, BotPrincipal, HumanPrincipal, Principal};
+pub use register::*;
 pub use session::*;
 pub use session_file::*;

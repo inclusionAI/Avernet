@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 
 use axum::{
     Json,
+    body::Bytes,
     extract::{OriginalUri, Path, State},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::caller::authenticated_bot_from_headers;
@@ -15,9 +16,10 @@ use crate::state::HttpAppState;
 use bcs_service_api::{
     AuthenticatedHumanCaller, CollaborationDefinitionRef, CollaborationRuntimeError,
     HumanResponseSource, ListPendingHumanNodesCommand, RespondHumanNodeCommand,
+    RerunStateMachineCommand,
     RuntimeParticipantBinding, SessionStateMachinePermissionCommand,
     StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
-    StateMachineRunAccessCommand,
+    StateMachineRunAccessCommand, StateMachineRunView,
 };
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +53,13 @@ pub struct StartSessionStateMachineRunRequest {
 #[derive(Debug, Deserialize)]
 pub struct RespondHumanNodeRequest {
     pub content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RerunStateMachineRunResponse {
+    #[serde(flatten)]
+    view: StateMachineRunView,
+    idempotent_replay: bool,
 }
 
 pub async fn start_state_machine_run(
@@ -177,6 +186,47 @@ pub async fn get_state_machine_run(
             Json(serde_json::json!({"error": "not_found"})),
         )
             .into_response(),
+        Err(error) => collaboration_error_to_response(error),
+    }
+}
+
+pub async fn rerun_state_machine_run(
+    State(state): State<HttpAppState>,
+    Path(source_run_id): Path<String>,
+    headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
+    body: Bytes,
+) -> Response {
+    if !body.is_empty() {
+        return collaboration_error_to_response(CollaborationRuntimeError::InvalidRequest(
+            "state-machine rerun request must not contain a body".to_string(),
+        ));
+    }
+    let authenticated_human = optional_authenticated_human(&state, &headers, &uri).await;
+    match state
+        .services
+        .collaboration_runtime
+        .rerun_state_machine_run(RerunStateMachineCommand {
+            source_run_id,
+            authenticated_human,
+        })
+        .await
+    {
+        Ok(outcome) => {
+            let status = if outcome.created {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            };
+            (
+                status,
+                Json(RerunStateMachineRunResponse {
+                    view: outcome.view,
+                    idempotent_replay: !outcome.created,
+                }),
+            )
+                .into_response()
+        }
         Err(error) => collaboration_error_to_response(error),
     }
 }

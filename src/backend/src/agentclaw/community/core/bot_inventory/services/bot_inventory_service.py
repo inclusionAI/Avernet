@@ -34,12 +34,13 @@ from agentclaw.community.core.bot_inventory.types import (
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_inventory.bot_inventory_service_protocol import BotInventoryServiceProtocol
 
 
 logger = get_logger()
 
 
-class BotInventoryService:
+class BotInventoryService(BotInventoryServiceProtocol):
     def __init__(
         self,
         *,

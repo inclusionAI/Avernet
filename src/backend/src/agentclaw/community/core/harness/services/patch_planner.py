@@ -27,6 +27,7 @@ from agentclaw.community.core.harness.services.patch_library import PatchLibrary
 from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
 from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
 from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
+from agentclaw.community.core.harness.patch_planner_service_protocol import PatchPlannerProtocol
 
 
 def _align_trailing_newline(dst: str, src: str) -> str:
@@ -40,7 +41,7 @@ def _align_trailing_newline(dst: str, src: str) -> str:
     return dst
 
 
-class PatchPlanner:
+class PatchPlanner(PatchPlannerProtocol):
     """FindingsReport → PatchRecord[].
 
     规则引擎只负责发现问题，PatchPlanner 负责：

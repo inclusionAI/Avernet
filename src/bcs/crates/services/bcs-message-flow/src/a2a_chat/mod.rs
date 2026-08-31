@@ -696,7 +696,7 @@ impl A2aChatService for A2aChat {
     }
 
     async fn record_run_event(&self, run_id: &str, event_json: &str) -> ServiceResult<bool> {
-        let record = self
+        let mut record = self
             .run_store
             .get(run_id)
             .await
@@ -721,6 +721,13 @@ impl A2aChatService for A2aChat {
                             DirectChatRunReason::None,
                         )
                         .await;
+                        // The ack CAS advanced the overlay/DB version. The
+                        // local snapshot below is the append's frame base, and
+                        // a stale version would make this first frame's delta
+                        // be refused as a caller-behind base — re-fetch once.
+                        if let Some(refreshed) = self.run_store.get(run_id).await {
+                            record = refreshed;
+                        }
                     }
                 }
                 DetachDeliveryCallback::Error(msg) => {
@@ -749,7 +756,7 @@ impl A2aChatService for A2aChat {
         ) {
             DrainOutcome::Continue => {
                 if self
-                    .apply_run_content_change(run_id, &before, &accumulated)
+                    .apply_run_content_change(&record, &before, &accumulated)
                     .await
                     && record.state == ChatRunState::Pending
                 {
@@ -764,7 +771,7 @@ impl A2aChatService for A2aChat {
                 false
             }
             DrainOutcome::Final => {
-                self.apply_run_content_change(run_id, &before, &accumulated)
+                self.apply_run_content_change(&record, &before, &accumulated)
                     .await;
                 if self.run_store.mark_completed(run_id, None).await {
                     self.emit_run_lifecycle(
@@ -902,14 +909,17 @@ impl A2aChat {
 
     async fn apply_run_content_change(
         &self,
-        run_id: &str,
+        record: &ChatRunRecord,
         before: &str,
         accumulated: &str,
     ) -> bool {
+        // Frame-local merge: `record` is this frame's entry snapshot, so the
+        // mutators take it as the append base instead of re-reading the repo
+        // (one fetch per frame, not two).
         if let Some(delta) = new_suffix(before, accumulated) {
-            self.run_store.append_delta(run_id, delta).await
+            self.run_store.append_delta_from_base(record, delta).await
         } else if accumulated != before {
-            self.run_store.replace_content(run_id, accumulated).await
+            self.run_store.replace_content_from_base(record, accumulated).await
         } else {
             false
         }

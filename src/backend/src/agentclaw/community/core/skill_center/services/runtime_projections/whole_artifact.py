@@ -11,8 +11,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
     ProjectionScope,
     ResolvedCapabilityPlan,
+    ResolvedSkillPlan,
 )
-from agentclaw.community.core.skill_center.runtime_resolver import RuntimeProjection
+from agentclaw.community.core.skill_center.runtime_resolver import RuntimeSkillProjection
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     RegisteredSkillAsset,
@@ -51,22 +52,17 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         skill_assets: Sequence[RegisteredSkillAsset],
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
-        """Refuse Center-corpus desired state: v4 has no request contract for it.
+        """Accept Resolver-complete Local/Repo/Center desired state.
 
-        Phase 2 adds the OSS-backed Center Store. Until then this must fail
-        before any runtime, MCP, Passport, probe or mapping request is
-        emitted, which is why it is asked during plan resolution rather than
-        at delivery.
+        Center is delivered as an additive v4 ``skill-center`` Store/SkillRef;
+        the composer validates the exact identity and configured Store before
+        any apply request is sent.
         """
-        if any(
-            asset.git_path.startswith("center://") for asset in skill_assets
-        ) or any(mapping.corpus == "center" for mapping in retired_mappings):
-            raise SkillSetRuntimeReconcileError()
 
     async def apply(
         self,
         *,
-        plan: ResolvedCapabilityPlan,
+        plan: ResolvedSkillPlan,
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
@@ -85,9 +81,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
             )
             return
 
-        # Defence in depth. Plan resolution already refused this, but the
-        # delivery is the thing that would strand Center state on a runtime
-        # with no contract for it, so the guard sits next to the write too.
+        # Defence in depth: plan shape is checked again next to the write.
         self.validate_plan(
             skill_assets=plan.projection.skill_assets,
             retired_mappings=retired_mappings,
@@ -95,19 +89,18 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
 
         logger.info(
             "[WholeArtifactRuntimeProjection] Delivering whole artifact: "
-            "bot_id=%s, engine=%s, skills=%s, mcps=%s",
+            "bot_id=%s, engine=%s, skills=%s, mcp_scope=%s",
             plan.bot_id,
             plan.engine,
             len(plan.projection.skill_assets),
-            len(plan.projection.mcp_server_codes),
+            scope.mcp,
         )
         # This one call is the whole delivery. Despite the name, on a
-        # whole-artifact engine ``project_skills`` does not write Skills: it
-        # resolves the device, recomposes the Bot's entire
-        # ``BotConfigArtifact`` from the database — Skills, MCP servers, CLI,
-        # credentials — and POSTs it to ``/api/v1/bot/apply``. The MCP half of
-        # this projection rides in that same document, which is why there is
-        # no second call here.
+        # whole-artifact engine ``project_skills`` does not write only Skills:
+        # it resolves the device, recomposes the BotConfigArtifact from the
+        # database — Skills, MCP servers, and credentials — and POSTs it to
+        # ``/api/v1/bot/apply``. CLI authorization remains in Passport. The
+        # MCP half rides in the same artifact, so there is no second call.
         #
         # All of that is blocking, but staying off the event loop is
         # ``project_skills``'s own responsibility — it dispatches to a thread
@@ -121,14 +114,29 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         # falls back to ``get_active_skills`` when this is ``None``, which
         # re-runs the flush-and-read that ``_resolve_plan`` just did. Handing
         # over the resolved assets is what avoids that second pass.
-        if not await plan.service.project_skills(
+        #
+        # The MCP set rides along for exactly that reason. Plan resolution
+        # collected it — it had to, the projected codes and the Passport scope
+        # are derived from it — and the compose inside this call would
+        # otherwise ask the same database the same question again, with
+        # ``strict_policy_context=True`` on both sides making the two answers
+        # the same by contract. A Skill-only plan intentionally has no such
+        # value: passing ``None`` preserves ConfigComposer's database fallback
+        # without rebuilding the projector's Non-Skill plan.
+        effective_mcps = (
+            plan.effective_mcp_entries
+            if isinstance(plan, ResolvedCapabilityPlan)
+            else None
+        )
+        if not await plan.service.project_whole_artifact(
             desired_skills=self._desired_skills(plan.projection),
+            effective_mcps=effective_mcps,
         ):
             raise SkillSetRuntimeReconcileError()
 
     @staticmethod
     def _desired_skills(
-        projection: RuntimeProjection,
+        projection: RuntimeSkillProjection,
     ) -> list[dict[str, str | None]]:
         return [
             {

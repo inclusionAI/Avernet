@@ -117,7 +117,7 @@ run_context_store = "redis" # | "memory";缺省 "memory"
 Codex 评审后修复(详见 PR 评论):
 - **C8**:ChatRun overlay TTL 由 `expires_at_ms` 改为 `expires_at_ms + retention`——超时清扫(`force_fail` 在 `expires_at < now` 后才跑)仍能合并流式正文,不再丢 `failed("timeout")` 的累积文本。
 - **C2**:`RedisBotRunContextStore` 的 context/transport/term 键 TTL 由固定 `retention`(120s)改为 `deadline_ms + retention`——长 provider run 不再在 120s 被驱逐成 `run_not_found`。两 store 统一"deadline + retention grace"模型。
-- **C11(回归)**:恢复 detached-delivery 清理语义——已 ack 的 `DetachDeliveryAck` run 不再被 `force_fail("timeout")`(已成功投递不应标失败);`list_active` 排除它们,新增 `drop_detached_expired` 端口按 `ack_at + retention` 静默退役(Dropped,非 Expired)。MySQL 侧 no-op 交平台。
+- **C11(回归)**:恢复 detached-delivery 清理语义——已 ack 的 `DetachDeliveryAck` run 不再被 `force_fail("timeout")`(已成功投递不应标失败);`list_active` 排除它们,新增 `drop_detached_expired` 端口按 `ack_at + retention` 静默退役(Dropped,非 Expired)。persistent DB 侧统一 no-op 交平台(见 §11.2 detach 分支)。
 - **C5**:启动校验 `bot_run_context_store="redis"` 要求 `[cache.redis]` 真为 Redis(capability 校验),否则 `InvalidConfig` 拒绝启动——不再静默退化为进程本地。
 - **C12**:启动校验 `async_chat_run_store`/`bot_run_context_store` 为枚举,拼写错误(如 `"persisent"`)直接报错而非静默落回 memory。
 - 拒绝/非-issue:C1(SQL CAS version 守卫——版本漂移容差是设计内,终态合并 overlay 已正确,真实子问题即 C8)、C3(bind 原子性——sticky-session 下单副本单次绑定)、C10(wait 跨副本唤醒——sticky-session),均在 PR 内回复并 resolve。
@@ -130,23 +130,29 @@ Codex 评审后修复(详见 PR 评论):
 - **Audit retention**(长,30/90 天):MySQL 终态行作为审计记录留存多久。persistent 模式专属。
 - 之前两者焊成同一个 `async_chat_run_retention_ms`(2min)→ persistent 模式终态正文 2min 即删,违背审计承诺;现已按模式区分。
 
-### 11.2 终态行删除:B1,外包给 MySQL 平台(persistent 代码不删)
-- 决定:persistent 模式终态行删除交由**内部 MySQL 平台的定时清理任务**,BCS 代码侧不实现删除定时器(除非将来有代码级定时任务基础设施,再以 `bcs-admin retention prune` / leader-gated housekeeping 作为 B2 备选)。
-- `SqlChatRunRepo::delete_expired_terminal`:`flavor == MySQL` 时 **no-op**(返回空,平台负责);`flavor == SQLite`(dev/test,无平台)仍照常删并返回被删记录。memory 实现照常删。引擎 `cleanup_expired` 对两模式统一调用,差异封在实现里。
-- 10s cleanup 循环只保留**活性职责**:`list_active`(索引范围扫,命中本窗口超时的非终态)+ `force_fail`(UPDATE 成 `failed("timeout")`——状态转移,不是删除)。
-- 交给平台的清理 SQL(用 `idx_chat_runs_completed` 索引,分块批量):
+### 11.2 行退役清理:B1,外包给平台(persistent 代码不删)
+- 决定:persistent 模式行删除交由**内部 MySQL 平台的定时清理任务**,BCS 代码侧不实现删除定时器(除非将来有代码级定时任务基础设施,再以 `bcs-admin retention prune` / leader-gated housekeeping 作为 B2 备选)。覆盖两类行:终态行(completed/failed/cancelled)与已 ack 的 detached running 行。
+- `SqlChatRunRepo::delete_expired_terminal` 与 `drop_detached_expired`:**对所有 DB flavor 统一 no-op**(返回空,退役交平台),不再按 `flavor` 分流。memory 实现照常退役并 emit `Dropped`/`Expired` 生命周期。SQLite(dev/test,无平台)同样 no-op——dev 无审计需求、本地表可跨用例 reset,统一实现优先于 SQLite 自清。引擎 `cleanup_expired` 对两模式统一调用,差异封在实现里。
+- 10s cleanup 循环只保留**活性职责**:`list_active`(索引范围扫,命中本窗口超时的非终态)+ `force_fail`(UPDATE 成 `failed("timeout")`——状态转移,不是删除)。`list_active` 排除已 ack 的 detached run(C11:已成功投递不应标 failed),其退役改由下方 SQL 的 detach 分支静默删除。
+- 交给平台的清理 SQL(分块批量,`LIMIT 1000` 循环到 affected_rows=0,框住单事务锁持有时间):
   ```sql
   DELETE FROM bcs_chat_runs
-   WHERE state IN ('completed','failed','cancelled')
-     AND completed_at_ms < <now - audit_retention_ms>
-   LIMIT 1000;   -- 循环到 affected_rows=0,框住单事务锁持有时间
+   WHERE (state IN ('completed','failed','cancelled')
+          AND completed_at_ms < <now - audit_retention_ms>)
+      OR (state = 'running'
+          AND completion_policy = 'detach_delivery_ack'
+          AND delivery_ack_at_ms IS NOT NULL
+          AND delivery_ack_at_ms < <now - detach_retention_ms>)
+   LIMIT 1000;
   ```
+  - 终态分支按 (env, state, completed_at_ms) 索引范围扫,审计 retention 30/90 天。
+  - detach 分支按 `state='running'` 前缀扫再过滤 `completion_policy`/`delivery_ack_at_ms`(无专用索引,但 detach running 行量小、仅平台 cron 周期跑,不在 10s 热路径);用**短** `<detach_retention_ms>`(对齐 memory/SQLite 旧 `drop_detached_expired` 的 `async_chat_run_retention_ms`≈2min,**不是** 30/90 天审计 retention)。如此 BCS 重启/流断产生的孤儿 detached run 不会在 active-run gauge 上挂一个月;平台 cron 哪怕每小时跑一次,gauge 窗口也 ≤ cron 间隔 + ~2min,有界。审计信号由生命周期 counter(`Dropped`)兜底。
 - 查询性反而更好:终态 run 在整个 audit retention 窗口都 `GET` 得到。
 
 ### 11.3 删除 `metric_client_kinds` 全表扫
-- 原 `metric_client_kinds`(`SELECT run_id, client FROM bcs_chat_runs`,无 WHERE 全表扫,每 10s × 副本,返回全表行建 HashMap)用于 cleanup 删前快照做 Expired/Dropped 的 client_kind 归属——属 memory 模式"遍历 slots 近乎零成本"的 port-到-SQL 成本陷阱,且 B1 下 persistent 的 `dropped` 恒空,快照失去意义。
+- 原 `metric_client_kinds`(`SELECT run_id, client FROM bcs_chat_runs`,无 WHERE 全表扫,每 10s × 副本,返回全表行建 HashMap)用于 cleanup 删前快照做 Expired/Dropped 的 client_kind 归属——属 memory 模式"遍历 slots 近乎零成本"的 port-到-SQL 成本陷阱,且 B1 下 persistent 两侧删除端口统一 no-op,`dropped` 恒空(仅 memory 实现返回被删记录),快照失去意义。
 - 已删掉该端口(`list_client_kinds`)+ 引擎方法(`metric_client_kinds`)。归属改用 cleanup **已 fetch 的记录**:
-  - `delete_expired_terminal` 返回 `Vec<ChatRunRecord>`(被删记录,带 `client`)→ Dropped 归属。
+  - `delete_expired_terminal` 返回 `Vec<ChatRunRecord>`(被删记录,带 `client`)→ Dropped 归属(SQL 实现返回空,退役已由 §11.2 平台 SQL 接管)。
   - `list_active` 返回的完整记录(带 `client`)→ Expired 归属。
   - 引擎 `cleanup_expired` 返回 `Vec<(String, DirectChatClientKind)>` 两个元组;mod.rs 直接用于 `emit_run_lifecycle`。
 - 改完 cleanup 的 DB 操作全是"本窗口有界 + 索引",与表大小无关;长 audit retention 才安全。

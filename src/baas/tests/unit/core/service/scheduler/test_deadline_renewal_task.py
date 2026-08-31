@@ -744,7 +744,7 @@ class TestStep3RenewalDecision:
         assert result == "failed"
 
     @pytest.mark.asyncio
-    async def test_get_device_info_raises_enters_failure(self):
+    async def test_get_device_info_raises_enters_failure(self, caplog):
         """Test 20: get_device_info raises Exception → failure handling."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
@@ -753,11 +753,49 @@ class TestStep3RenewalDecision:
         mock_repo.update_after_failure = MagicMock()
 
         record = _renewal_record()
-        result = await scheduler._renew_one(record)
+        with caplog.at_level(logging.WARNING, logger="core-scheduler"):
+            result = await scheduler._renew_one(record)
 
         mock_facade.extend_ttl.assert_not_called()
         mock_repo.update_after_failure.assert_called_once()
         assert result == "failed"
+
+        failure_lines = [
+            r for r in caplog.records if "get_device_info failed" in r.message
+        ]
+        assert len(failure_lines) == 1
+        assert failure_lines[0].levelno == logging.WARNING
+        assert "timeout" in failure_lines[0].message
+
+    @pytest.mark.asyncio
+    async def test_get_device_info_failure_logs_debug_traceback(self, caplog):
+        """WR-01: get_device_info failure keeps a DEBUG exc_info traceback."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(side_effect=Exception("timeout"))
+        mock_facade.extend_ttl = AsyncMock()
+        mock_repo.update_after_failure = MagicMock()
+
+        caplog.set_level(logging.DEBUG, logger="core-scheduler")
+        record = _renewal_record()
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+
+        matching = [r for r in caplog.records if "get_device_info failed" in r.message]
+        warning_records = [r for r in matching if r.levelno == logging.WARNING]
+        debug_records = [r for r in matching if r.levelno == logging.DEBUG]
+        assert len(warning_records) == 1
+        assert len(debug_records) == 1
+
+        warning = warning_records[0]
+        assert "timeout" in warning.message
+        assert warning.exc_info is None
+
+        debug = debug_records[0]
+        assert "timeout" in debug.message
+        assert debug.exc_info is not None
+        assert debug.exc_info[0] is Exception
 
     @pytest.mark.asyncio
     async def test_ttl_timestamp_none_enters_failure(self):
@@ -794,7 +832,7 @@ class TestStep3RenewalDecision:
         assert result == "failed"
 
     @pytest.mark.asyncio
-    async def test_extend_ttl_raises_enters_failure(self):
+    async def test_extend_ttl_raises_enters_failure(self, caplog):
         """Test 22: get_device_info succeeds, but extend_ttl raises → failure."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
@@ -805,10 +843,51 @@ class TestStep3RenewalDecision:
         mock_repo.update_after_failure = MagicMock()
 
         record = _renewal_record()
-        result = await scheduler._renew_one(record)
+        with caplog.at_level(logging.WARNING, logger="core-scheduler"):
+            result = await scheduler._renew_one(record)
 
         mock_repo.update_after_failure.assert_called_once()
         assert result == "failed"
+
+        failure_lines = [r for r in caplog.records if "extend_ttl failed" in r.message]
+        assert len(failure_lines) == 1
+        assert failure_lines[0].levelno == logging.WARNING
+        assert "Arca API error" in failure_lines[0].message
+        assert "ttl_minutes=" in failure_lines[0].message
+
+    @pytest.mark.asyncio
+    async def test_extend_ttl_failure_logs_debug_traceback(self, caplog):
+        """WR-01: extend_ttl failure keeps a DEBUG exc_info traceback."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(10))
+        )
+        mock_facade.extend_ttl = AsyncMock(side_effect=Exception("Arca API error"))
+        mock_repo.update_after_failure = MagicMock()
+
+        caplog.set_level(logging.DEBUG, logger="core-scheduler")
+        record = _renewal_record()
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+
+        matching = [r for r in caplog.records if "extend_ttl failed" in r.message]
+        warning_records = [r for r in matching if r.levelno == logging.WARNING]
+        debug_records = [r for r in matching if r.levelno == logging.DEBUG]
+        assert len(warning_records) == 1
+        assert len(debug_records) == 1
+
+        warning = warning_records[0]
+        assert "Arca API error" in warning.message
+        assert "ttl_minutes=" in warning.message
+        assert warning.exc_info is None
+
+        debug = debug_records[0]
+        assert "extend_ttl failed" in debug.message
+        assert "ttl_minutes=" in debug.message
+        assert debug.exc_info is not None
+        assert debug.exc_info[0] is Exception
 
     @pytest.mark.asyncio
     async def test_extend_ttl_returns_false_enters_failure(self):
@@ -1602,6 +1681,16 @@ class TestStoppedTransitionMetric:
         assert "sandbox_id=sb-1" in msg
         assert "fail_count=10" in msg
 
+        transition_records = [
+            r for r in caplog.records if "stopped_transition" in r.message
+        ]
+        assert len(transition_records) == 1
+        assert transition_records[0].levelno == logging.INFO
+
+        stopped_lines = [r for r in caplog.records if "marked STOPPED" in r.message]
+        assert len(stopped_lines) == 1
+        assert stopped_lines[0].levelno == logging.WARNING
+
 
 class TestRenewalDigestLogging:
     """REN-07: ttl_renew_digest CSV emission from every terminal branch.
@@ -1701,7 +1790,9 @@ class TestRenewalDigestLogging:
         assert fields[8] == "-"
 
     @pytest.mark.asyncio
-    async def test_pathological_ttl_digest_format_failure_uses_placeholder(self, caplog):
+    async def test_pathological_ttl_digest_format_failure_uses_placeholder(
+        self, caplog
+    ):
         """ME-01: a numeric-but-pathological ttl_timestamp (huge negative
         epoch overflowing the datetime range) flows through failure
         accounting exactly once; the digest TTL formatter's failure

@@ -29,7 +29,10 @@ from agentclaw.community.core.repository.protocols.skill_center import SkillRepo
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
-from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
+    SkillSetRuntimeReconcileError,
+)
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.policies.default_skill_set_selection import (
     DefaultSkillSetSelection,
@@ -473,7 +476,10 @@ class SkillSetService:
         return template_type if isinstance(template_type, str) else None
 
     def _sync_symlinks_to_device_if_needed(
-        self, user_id: str | None = None, desired_skills: list[dict] | None = None
+        self,
+        user_id: Optional[str] = None,
+        desired_skills: Optional[list[dict]] = None,
+        effective_mcps: Optional[list[dict]] = None,
     ) -> bool:
         """如果需要，同步软链配置到设备。
 
@@ -482,6 +488,9 @@ class SkillSetService:
 
         Args:
             user_id: 用户ID
+            desired_skills: 调用方已解析的技能快照（可选）
+            effective_mcps: 调用方已解析的 MCP 集合（可选）。仅整包投递的设备
+                会用到它——它会跳过 compose 里重复的那次 DB 读取。
 
         Returns:
             True if sync attempted, False otherwise
@@ -501,7 +510,17 @@ class SkillSetService:
             logger.info(f"[_sync_symlinks_to_device_if_needed] Syncing {len(symlinks)} symlinks to device (bot_id={self.bot_id})")
 
             symlinks_dict = [sm.to_dict() for sm in symlinks]
-            sync_result = device_sync.sync_symlinks(symlinks_dict)
+            # Passed only when the caller actually resolved it, the same way
+            # ``desired_skills`` is threaded above: the keyword means something
+            # to a whole-artifact device and nothing to the rest, so a
+            # DeviceSync implementation that has no use for it never has to
+            # grow a parameter to stay callable from here.
+            sync_kwargs: dict[str, Any] = {}
+            if effective_mcps is not None:
+                sync_kwargs["effective_mcps"] = effective_mcps
+            if desired_skills is not None:
+                sync_kwargs["desired_skills"] = desired_skills
+            sync_result = device_sync.sync_symlinks(symlinks_dict, **sync_kwargs)
 
             if sync_result.get("success"):
                 logger.info(f"[_sync_symlinks_to_device_if_needed] Sync successful: {sync_result.get('message')}")
@@ -515,7 +534,10 @@ class SkillSetService:
             return False
 
     async def project_skills(
-        self, *, desired_skills: list[dict] | None = None
+        self,
+        *,
+        desired_skills: Optional[list[dict]] = None,
+        effective_mcps: Optional[list[dict]] = None,
     ) -> bool:
         """Apply one complete resolver-owned skill snapshot to the runtime.
 
@@ -530,11 +552,58 @@ class SkillSetService:
         request behind it. Owning the ``to_thread`` here makes staying off the
         event loop a property of this method, which no caller can forget —
         the same reason ``sync_mcp_desired_state`` wraps its own device calls.
+
+        ``effective_mcps`` is the caller's already-resolved MCP set, carried
+        for the same reason ``desired_skills`` is: on a whole-artifact engine
+        the compose behind this call would otherwise re-read state the caller
+        has just read. Meaningless to a device that consumes the symlinks
+        directly, which is why it is optional and ignored there.
         """
         return await asyncio.to_thread(
             self._sync_symlinks_to_device_if_needed,
             self.user_id or self.entity_id,
             desired_skills,
+            effective_mcps,
+        )
+
+    def _project_whole_artifact_sync(
+        self,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None,
+    ) -> bool:
+        """Deliver structured desired state without invoking path mapping."""
+        try:
+            effective_user_id = self.user_id or self.entity_id or "default"
+            ctx = self._resolver.resolve_for_bot(self.bot_id, effective_user_id)
+            device_sync = self._device_sync_dispatcher.dispatch(ctx)
+            result = device_sync.sync_symlinks(
+                [],
+                desired_skills=desired_skills,
+                effective_mcps=effective_mcps,
+            )
+            if not result.get("success"):
+                raise SkillSetRuntimeReconcileError(
+                    str(result.get("message") or "Skill set runtime sync failed")
+                )
+            return True
+        except SkillSetRuntimeReconcileError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "[project_whole_artifact] delivery failed: %s", exc, exc_info=True
+            )
+            return False
+
+    async def project_whole_artifact(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._project_whole_artifact_sync,
+            desired_skills,
+            effective_mcps,
         )
 
     async def project_mcps(

@@ -1,34 +1,19 @@
-"""Service API Protocol for channel CRUD + OpenClaw sync."""
+"""Service API Protocol for channel CRUD + OpenClaw sync.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/channel/channel_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, runtime_checkable
+from agentclaw.community.core.channel.channel_service_protocol import (
+    ChannelRecord,
+    ChannelServiceProtocol,
+)
 
-from agentclaw.community.core.channel.models import ChannelRecord
-
-
-@runtime_checkable
-class ChannelServiceProtocol(Protocol):
-    """Service API for channel management."""
-
-    def list_channels(self, *args: Any, **kwargs: Any) -> list[ChannelRecord]: ...
-
-    def create_channel(self, *args: Any, **kwargs: Any) -> int: ...
-
-    def update_status(self, channel_id: int, status: str) -> None: ...
-
-    def delete(self, channel_id: int) -> None: ...
-
-    def update_channel(self, *args: Any, **kwargs: Any) -> None: ...
-
-    def get_channel_by_id(self, channel_id: int) -> Optional[ChannelRecord]: ...
-
-    async def sync_channel_to_openclaw(
-        self, channel_id: int, *, action: str
-    ) -> bool: ...
-
-    async def set_channel_status(self, channel_id: int, status: str) -> None: ...
-
-    async def sync_active_channel(self, channel_id: int) -> None: ...
-
-    async def generate_openclaw_configs(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "ChannelRecord",
+    "ChannelServiceProtocol",
+]

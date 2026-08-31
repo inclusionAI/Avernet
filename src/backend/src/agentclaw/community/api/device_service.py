@@ -1,44 +1,17 @@
-"""Service API Protocol for device allocation/lifecycle/inspection."""
+"""Service API Protocol for device allocation/lifecycle/inspection.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/devices/device_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.devices.device_service_protocol import (
+    DeviceServiceProtocol,
+)
 
-
-@runtime_checkable
-class DeviceServiceProtocol(Protocol):
-    """Service API for device management surface used by HTTP routes."""
-
-    def apply_device(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def release_device(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_device(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_device_by_device_id(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_device_connection(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def list_devices(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def list_connectable_devices(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_provider_inventory(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def batch_set_env(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def report_device_alive(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def report_device_status(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def exec_shell(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_instances(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_instances_by_bot(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def restart_device(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def restart_device_by_bot(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def get_device_connection_by_bot(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "DeviceServiceProtocol",
+]

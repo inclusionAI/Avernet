@@ -1,27 +1,18 @@
-"""Service API for resolving the current Engine runtime Skills layout."""
+"""Service API for resolving the current Engine runtime Skills layout.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/runtime_layout_probe_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
-from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol import (
     RuntimeLayoutProbeResult,
+    RuntimeLayoutProbeServiceProtocol,
     RuntimeLayoutProbeStatus,
 )
-
-
-@runtime_checkable
-class RuntimeLayoutProbeServiceProtocol(Protocol):
-    """Ask the active Engine runtime to resolve its authoritative layout."""
-
-    async def probe_bot(
-        self,
-        *,
-        bot_id: str,
-        user_id: str,
-        engine: str,
-    ) -> RuntimeLayoutProbeResult: ...
-
 
 __all__ = [
     "RuntimeLayoutProbeResult",

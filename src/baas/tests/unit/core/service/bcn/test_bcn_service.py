@@ -9,7 +9,10 @@ from secbaas.community.api.bcn import (
     Attachment,
     BcnInteractionAnswer,
     BcnInteractionResolveInput,
+    BcnRunTerminatedError,
     BotRef,
+    ChatAbortInput,
+    ChatAbortResult,
     ChatHistoryInput,
     ChatInjectInput,
     ChatSendInput,
@@ -25,6 +28,7 @@ from secbaas.community.core.service.bcn._bcn_service import (
     DefaultBcnDownlinkService,
     _extract_message_text,
 )
+from secbaas.community.core.service.bot_run import AbortOutcome
 
 # ==================== _extract_message_text tests ====================
 
@@ -792,3 +796,115 @@ async def test_handle_chat_send_stream_with_attachments(service, mock_bot_runner
     )
     assert len(attachments) == 1
     assert attachments[0].attachment_id == "att_1"
+
+
+# ==================== chat.abort tests ====================
+
+
+def _make_chat_abort_input(**kwargs) -> ChatAbortInput:
+    defaults = dict(
+        id="abort-1",
+        session_id="session-abort-1",
+        bcn_group_id="group-1",
+        to_bot=BotRef(provider_id="baas", provider_bot_ref="bot-1"),
+    )
+    defaults.update(kwargs)
+    return ChatAbortInput(**defaults)
+
+
+@pytest.fixture
+def mock_abort_surface():
+    surface = MagicMock()
+    surface.abort_runs_by_session = AsyncMock()
+    return surface
+
+
+@pytest.fixture
+def service_with_abort(
+    mock_bot_runner,
+    mock_api_key_repo,
+    mock_uplink_client,
+    mock_run_repo,
+    mock_interaction_service,
+    mock_abort_surface,
+):
+    return DefaultBcnDownlinkService(
+        bot_runner=mock_bot_runner,
+        api_key_repository=mock_api_key_repo,
+        bcn_api_key_prefix="baas-prefix",
+        uplink_client=mock_uplink_client,
+        run_repository=mock_run_repo,
+        interaction_service=mock_interaction_service,
+        abort_surface=mock_abort_surface,
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_abort_success(service_with_abort, mock_abort_surface):
+    """RUNNING run -> 200 {aborted:true, aborted_run_ids:[...]}."""
+    mock_abort_surface.abort_runs_by_session.return_value = AbortOutcome(
+        aborted_run_ids=["run-a", "run-b"], had_terminal=False
+    )
+
+    result = await service_with_abort.handle_chat_abort(_make_chat_abort_input())
+
+    assert result.aborted is True
+    assert result.aborted_run_ids == ["run-a", "run-b"]
+    mock_abort_surface.abort_runs_by_session.assert_awaited_once_with("session-abort-1")
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_abort_already_terminal_raises_410(
+    service_with_abort, mock_abort_surface
+):
+    """Already-terminal run -> BcnRunTerminatedError (410)."""
+    mock_abort_surface.abort_runs_by_session.return_value = AbortOutcome(
+        aborted_run_ids=[], had_terminal=True
+    )
+
+    with pytest.raises(BcnRunTerminatedError) as exc_info:
+        await service_with_abort.handle_chat_abort(_make_chat_abort_input())
+
+    assert exc_info.value.http_status == 410
+    assert exc_info.value.error_code == "run_terminated"
+    assert exc_info.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_abort_idempotent_repeat_terminal_stable_410(
+    service_with_abort, mock_abort_surface
+):
+    """Repeat abort on same terminal run stably raises 410 (idempotency via outcome)."""
+    mock_abort_surface.abort_runs_by_session.return_value = AbortOutcome(
+        aborted_run_ids=[], had_terminal=True
+    )
+
+    for _ in range(3):
+        with pytest.raises(BcnRunTerminatedError):
+            await service_with_abort.handle_chat_abort(_make_chat_abort_input())
+
+    assert mock_abort_surface.abort_runs_by_session.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_abort_no_run_record_returns_aborted_false(
+    service_with_abort, mock_abort_surface
+):
+    """Session with no run record -> 200 {aborted:false, aborted_run_ids:[]}."""
+    mock_abort_surface.abort_runs_by_session.return_value = AbortOutcome(
+        aborted_run_ids=[], had_terminal=False
+    )
+
+    result = await service_with_abort.handle_chat_abort(_make_chat_abort_input())
+
+    assert result.aborted is False
+    assert result.aborted_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_abort_no_surface_returns_aborted_false(service):
+    """When no abort_surface wired, best-effort returns aborted=false (no raise)."""
+    result = await service.handle_chat_abort(_make_chat_abort_input())
+
+    assert result.aborted is False
+    assert result.aborted_run_ids == []

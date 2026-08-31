@@ -16,6 +16,7 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
+from agentclaw.community.core.skill_center.skill_scan_service_protocol import SkillScanServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
@@ -44,7 +45,7 @@ DEFAULT_CONFIG = {
 # skipped at startup (see ``startup``).
 
 
-class SkillScanService(LifecycleBase):
+class SkillScanService(LifecycleBase, SkillScanServiceProtocol):
     """Skill Scan Service - 提供技能扫描和定时任务管理能力."""
 
     async def startup(self) -> None:
@@ -390,12 +391,11 @@ class SkillScanService(LifecycleBase):
     # Center Skill 每日定时任务（与 git daily task 完全对称）
     # =========================================================================
     def exec_center_task(self) -> dict[str, Any]:
-        """执行一次全量 center:// skill 扫描。
+        """Run the canonical materialized-SC-Public reconciliation once.
 
-        流程：
-        1. 抢分布式锁（防多机并发）
-        2. 查 ac_skill 表所有 center:// PUBLISHED skill
-        3. 对每个 skill 调 SkillCenterSyncService.scan_after_sync()
+        This legacy scheduler delegates to the G4 Sync Service rather than
+        enumerating ``center://`` rows itself.  The service owns the exact
+        materialized-public filter and the environment-wide stable lock.
         """
         from agentclaw.community.utils.env_utils import get_current_env
 
@@ -408,30 +408,21 @@ class SkillScanService(LifecycleBase):
             return {"success": False, "error": "Lock held by another instance"}
 
         try:
-            skill_repo = self._skill_repository
-            skills = skill_repo.list_published_center_skills()
-            logger.info("[SkillScanService] exec_center_task: found %d center skills", len(skills))
-
             sync_svc = self._skill_center_sync_service
-            success_count = 0
-            failed_count = 0
-
-            for skill in skills:
-                uuid = skill.get("skill_uuid") or skill.get("uuid") or skill.get("id")
-                if not uuid:
-                    continue
-                try:
-                    sync_svc.scan_after_sync(str(uuid), env)
-                    success_count += 1
-                except Exception as e:
-                    logger.warning("[SkillScanService] exec_center_task: scan failed uuid=%s: %s", uuid, e)
-                    failed_count += 1
+            summary = sync_svc.sync()
 
             logger.info(
                 "[SkillScanService] exec_center_task done: total=%d success=%d failed=%d",
-                len(skills), success_count, failed_count,
+                summary.scanned,
+                summary.updated + summary.unchanged,
+                summary.failed,
             )
-            return {"success": True, "total": len(skills), "success_count": success_count, "failed_count": failed_count}
+            return {
+                "success": True,
+                "total": summary.scanned,
+                "success_count": summary.updated + summary.unchanged,
+                "failed_count": summary.failed,
+            }
 
         except Exception as e:
             logger.error("[SkillScanService] exec_center_task error: %s", e)

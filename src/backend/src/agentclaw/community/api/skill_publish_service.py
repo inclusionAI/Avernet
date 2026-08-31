@@ -1,17 +1,17 @@
-"""Service API Protocol for skill publishing."""
+"""Service API Protocol for skill publishing.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/skill_center/skill_publish_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.skill_center.skill_publish_service_protocol import (
+    SkillPublishServiceProtocol,
+)
 
-
-@runtime_checkable
-class SkillPublishServiceProtocol(Protocol):
-    """Service API for publishing skills to the SkillCenter."""
-
-    def publish(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def publish_upgrade(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def query_status(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def list_versions(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "SkillPublishServiceProtocol",
+]

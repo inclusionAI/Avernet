@@ -127,9 +127,7 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
             self._missing(f"public skill {skill_code} does not exist")
         return public_matches[0]
 
-    def _pathlib_write_artifact(
-        self, request: SkillCenterPublishSubmitRequest
-    ) -> None:
+    def _pathlib_write_artifact(self, request: SkillCenterPublishSubmitRequest) -> None:
         manifest = (
             "---\n"
             f"name: {json.dumps(request.skill_name, ensure_ascii=False)}\n"
@@ -166,9 +164,7 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
         self._teams_by_ref[key] = team
         return team
 
-    def get_team_by_ref(
-        self, request: SkillCenterTeamLookupRequest
-    ) -> SkillCenterTeam:
+    def get_team_by_ref(self, request: SkillCenterTeamLookupRequest) -> SkillCenterTeam:
         team = self._teams_by_ref.get((request.ref_source, request.ref_source_id))
         if team is None:
             self._team_not_found(
@@ -206,9 +202,7 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
                 request.creator_work_no is None
                 or request.creator_work_no == skill.creator_work_no
             )
-            and (
-                request.belong_to is None or request.belong_to is skill.belong_to
-            )
+            and (request.belong_to is None or request.belong_to is skill.belong_to)
         ]
         if request.sort_by is SkillCenterSortOrder.OLDEST:
             pass
@@ -294,11 +288,17 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
         if existing_team_id is not None and existing_team_id != request.team_id:
             self._missing(f"skill {request.skill_code} already belongs to another team")
         key = (request.team_id, request.skill_code)
+        existing_skill = self._skills.get(key)
+        skill_id = (
+            existing_skill.skill_id
+            if existing_skill is not None
+            else str(len(self._skills) + 1)
+        )
         self._skills[key] = SkillCenterTeamSkill(
             skill_code=request.skill_code,
             skill_name=request.skill_name,
             description=request.description or "",
-            skill_id=f"local-skill-{len(self._skills) + 1}",
+            skill_id=skill_id,
             creator_name=request.creator_name,
             creator_work_no=request.creator_work_no,
             latest_version_number=request.version_number,
@@ -311,10 +311,20 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
             is_test=False,
             team_id=request.team_id,
         )
+        self._pathlib_write_artifact(request)
         versions = self._versions.setdefault(key, [])
         if all(v.version_number != request.version_number for v in versions):
-            versions.append(SkillCenterVersion(version_number=request.version_number))
-        self._pathlib_write_artifact(request)
+            _url, digest = self._artifacts[
+                (request.team_id, request.skill_code, request.version_number)
+            ]
+            version_id = str(sum(len(items) for items in self._versions.values()) + 1)
+            versions.append(
+                SkillCenterVersion(
+                    version_number=request.version_number,
+                    version_id=version_id,
+                    sha256=digest,
+                )
+            )
         return SkillCenterPublishSubmission(
             skill_code=request.skill_code,
             version_number=request.version_number,
@@ -367,9 +377,7 @@ class LocalSkillCenterGateway(MockSeam, SkillCenterGateway):
         team_id = self._resolve_read_team_id(
             request.scope, request.team_id, request.skill_code
         )
-        if not self._has_version(
-            team_id, request.skill_code, request.version_number
-        ):
+        if not self._has_version(team_id, request.skill_code, request.version_number):
             self._missing(
                 f"skill {request.skill_code} version {request.version_number} "
                 f"does not exist in team {team_id}"

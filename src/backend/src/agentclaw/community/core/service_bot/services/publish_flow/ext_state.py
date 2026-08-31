@@ -130,6 +130,24 @@ class PublishExtState:
             expected_ext=expected_ext,
         )
 
+    def commit_built_artifact(
+        self,
+        *,
+        publish_id: int,
+        ext: dict,
+        expected_ext: dict | None,
+        center_skill_uuids: tuple[str, ...],
+        env: str,
+    ) -> None:
+        """Atomically fence Offline and make the built Artifact replayable."""
+        self._publish_service.commit_built_artifact(
+            publish_id=publish_id,
+            ext=ext,
+            expected_ext=expected_ext,
+            center_skill_uuids=center_skill_uuids,
+            env=env,
+        )
+
     # ── per-stage engine_overrides / artifact stamping ───────────────────
     def stage_overrides(
         self, publish_record: BotPublishRecord, stage: PublishStage

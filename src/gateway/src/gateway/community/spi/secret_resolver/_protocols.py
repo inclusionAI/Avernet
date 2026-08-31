@@ -7,11 +7,11 @@ reads from the process environment; enterprise may resolve from a corp secret
 store / KMS. The gateway Protocol is a plain ``Protocol`` (gateway SPI
 convention) rather than the backend ``Plugin`` base.
 
-``get_secret`` MAY return either a duck-typed object exposing ``.secret_user`` /
-``.secret_value`` (community flavor) or a plain ``str`` value (env flavor);
-consumers must accept both shapes. The SPI intentionally exposes only
-``get_secret``; the gateway does not need the wider BaaS ``SecretStorePlugin``
-surface (``resolve_secret``, ``get_kv_secret``, ``generate_proxy_token``,
+``get_secret`` returns an object exposing ``.secret_user`` / ``.secret_value``
+(community flavor) or ``None`` when the backend has no such secret; consumers
+must accept that shape. The SPI intentionally exposes only ``get_secret``; the
+gateway does not need the wider BaaS ``SecretStorePlugin`` surface
+(``resolve_secret``, ``get_kv_secret``, ``generate_proxy_token``,
 ``resolve_common_sm4_key``, ``close``) gated by this Protocol.
 """
 

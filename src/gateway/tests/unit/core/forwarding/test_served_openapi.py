@@ -153,7 +153,11 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     )
 
     paths = document["paths"]
-    collaboration_http_security = {"user": "required", "app": "required"}
+    collaboration_http_security = {
+        "user": "optional",
+        "app": "optional",
+        "bot": "optional",
+    }
     assert "/openapi/v1/bots" in paths
     # REL #748 renamed the BaaS chat/session surface to /openapi/v1/chat/**;
     # the shipped baas artifact now serves the sessions path under chat.
@@ -216,6 +220,7 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "Collaboration / Friendships",
         "Collaboration / Groups",
         "Collaboration / Sessions",
+        "Collaboration / Register",
         "Collaboration / Invitations",
         "Collaboration / Channels",
         "Collaboration / Event Subscriptions",
@@ -356,8 +361,7 @@ def test_harness_paths_served_with_user_security() -> None:
     They live under ``/openapi/v1/bots/{bot_id}/harness/…`` now, so the bots
     domain routes and documents them: no separate domain can pin a match behind
     the ``{bot_id}`` parameter, and the bots artifact carries their description.
-    Their rule is the one thing that stays their own — both user and app are
-    optional, with the backend admission check enforcing the live grant.
+    Their rule is the one thing that stays their own — user is required.
     """
     dm = DomainMap.from_yaml(_SHIPPED_CONFIG, variables=_BCSFUSE_VARS)
     mount_prefixes = {name: domain.mount_prefix for name, domain in dm.domains.items()}
@@ -389,6 +393,5 @@ def test_harness_paths_served_with_user_security() -> None:
         for method, operation in document["paths"][path].items():
             if method in _METHODS:
                 assert operation["x-avernet-security"] == {
-                    "user": "optional",
-                    "app": "optional",
+                    "user": "required",
                 }, f"{method} {path}"

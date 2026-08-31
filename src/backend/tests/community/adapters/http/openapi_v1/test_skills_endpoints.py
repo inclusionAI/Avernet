@@ -14,6 +14,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
 from agentclaw.community.adapters.http.openapi_v1.contracts import EXAMPLE_TRACE_ID
@@ -626,7 +627,10 @@ def _real_query_service(db, bots, skills) -> SkillQueryService:
     parameters is read, so nothing ever calls them.
     """
     reader = BotCapabilityStateReader(
-        CapabilityDesiredStateRepository(db), bots, skills
+        CapabilityDesiredStateRepository(db),
+        bots,
+        skills,
+        PassthroughSkillVersionResolver(),
     )
     return SkillQueryService(
         skills, bots, object(), reader, object(), object(), lambda: object()

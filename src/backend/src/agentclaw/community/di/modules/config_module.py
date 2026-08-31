@@ -25,7 +25,9 @@ from typing import Any
 
 from injector import Module, inject, provider, singleton
 
+from agentclaw.community.core.skill_center import draft_content
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
+from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
@@ -62,6 +64,18 @@ def _block(name: str) -> dict[str, Any]:
     """Pull one named block out of ``user_config``; ``{}`` if missing."""
     raw = _user_config().get(name) or {}
     return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _object_prefix_setting(name: str, default: str) -> Any:
+    raw = _user_config().get(name)
+    if raw is None:
+        return default
+    if not isinstance(raw, dict):
+        raise ValueError(f"{name} must be a mapping")
+    unknown = sorted(set(raw) - {"base_prefix_template"})
+    if unknown:
+        raise ValueError(f"{name} contains unknown keys: " + ", ".join(unknown))
+    return raw.get("base_prefix_template", default)
 
 
 def _app_name() -> str | None:
@@ -252,23 +266,35 @@ class ConfigModule(Module):
 
     @singleton
     @provider
-    def workspace(self) -> cfg.WorkspaceConfig:
-        """Bot workspace filesystem layout.
+    def canonical_center_store(self) -> CanonicalCenterStoreConfig:
+        defaults = CanonicalCenterStoreConfig(env=get_current_env())
+        prefix = _object_prefix_setting(
+            "canonical_center_store", defaults.base_prefix_template
+        )
+        if not isinstance(prefix, str):
+            raise ValueError(
+                "canonical_center_store.base_prefix_template must be a string"
+            )
+        return CanonicalCenterStoreConfig(
+            env=get_current_env(),
+            base_prefix_template=prefix,
+        )
 
-        Sources both roots from the ``workspace`` user_config block;
-        falls back to the dataclass defaults (sandbox paths) when the
-        block is absent or a field is missing. ``~`` is expanded for
-        each path so application-dev.yaml can use ``~/.openclaw`` and
-        get the dev's home directory at boot.
+    @singleton
+    @provider
+    def workspace(self) -> cfg.WorkspaceConfig:
+        """Resolve workspace roots to absolute host paths at the DI boundary.
+
+        Missing fields retain the dataclass sandbox defaults.
         """
-        import pathlib
+        import os
 
         block = _block("workspace")
         defaults = cfg.WorkspaceConfig()
 
         def _expand(value: str | None, default: str) -> str:
             raw = value if isinstance(value, str) and value else default
-            return str(pathlib.Path(raw).expanduser())
+            return os.path.abspath(os.path.expanduser(raw))
 
         return cfg.WorkspaceConfig(
             openclaw_root=_expand(block.get("openclaw_root"), defaults.openclaw_root),
@@ -278,6 +304,7 @@ class ConfigModule(Module):
             aicoding_root=_expand(
                 block.get("aicoding_root"), defaults.aicoding_root
             ),
+            hermes_root=_expand(block.get("hermes_root"), defaults.hermes_root),
         )
 
     # ── Access policy ───────────────────────────────────────────────
@@ -371,24 +398,22 @@ class ConfigModule(Module):
     @provider
     def secret_names(self) -> cfg.SecretNamesConfig:
         """Secret-registry key names (neutral empty defaults; corp env overlays
-        set the real Mist names via the ``secret_names`` yaml block)."""
+        set the real Mist names via the ``secret_names`` yaml block).
+
+        Built reflectively: every field is a plain string whose yaml key is its
+        own name, and a hand-written constructor call silently pins any field
+        left out of it to its default while nobody reads its yaml key.
+        ``skill_center_internal_token`` shipped that way, which for a token
+        name meant the auth guard fell back to the public singlebox constant
+        in every environment. A field needing other handling must be lifted out.
+        """
         block = _block("secret_names")
         defaults = cfg.SecretNamesConfig()
         return cfg.SecretNamesConfig(
-            dormant_internal_token=block.get(
-                "dormant_internal_token", defaults.dormant_internal_token
-            ),
-            aiworkbench_repo_url=block.get(
-                "aiworkbench_repo_url", defaults.aiworkbench_repo_url
-            ),
-            gateway_principal_signing_key=block.get(
-                "gateway_principal_signing_key",
-                defaults.gateway_principal_signing_key,
-            ),
-            aicoding_theta_master_key=block.get(
-                "aicoding_theta_master_key",
-                defaults.aicoding_theta_master_key,
-            ),
+            **{
+                f.name: block.get(f.name, getattr(defaults, f.name))
+                for f in fields(cfg.SecretNamesConfig)
+            }
         )
 
     @singleton
@@ -435,6 +460,14 @@ class ConfigModule(Module):
                 block.get("access_key_secret", defaults.secret_name),
             ),
         )
+
+    @singleton
+    @provider
+    def draft_content_store(self) -> draft_content.DraftContentStoreConfig:
+        """Immutable Draft revision object-key prefix."""
+        defaults = draft_content.DraftContentStoreConfig()
+        value = _object_prefix_setting("draft_content_store", defaults.base_prefix_template)
+        return draft_content.DraftContentStoreConfig(base_prefix_template=value)
 
     # NOTE: codefuse_token provider moved to ``CorpConfigModule`` (B8).
 

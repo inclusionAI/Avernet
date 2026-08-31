@@ -644,16 +644,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         eval_session_log=eval_session_log,
     )
 
-    bcn_downlink_service = providers.Singleton(
-        DefaultBcnDownlinkService,
-        bot_runner=bot_runner,
-        api_key_repository=api_gateway_repo,
-        bcn_api_key_prefix=config.bcn.api_key.prefix,
-        uplink_client=bcn_uplink_client,
-        run_repository=bot_run_repository,
-        interaction_service=bot_interaction_service,
-    )
-
     # ── SSE stream converter factory ────────────────────────────────────────
     stream_converter_factory = providers.Singleton(
         SseConverterFactory,
@@ -708,6 +698,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         queue_repository=bot_run_queue_repository,
         qpm_manager=bot_qpm_manager,
         executor=result_guard_executor,
+        run_repository=bot_run_repository,
         post_run_callback_factories=providers.Dict(
             {
                 "bcn_uplink": bcn_uplink_callback,
@@ -716,6 +707,19 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         ),
         machine_count_provider=machine_count_provider,
         config=bot_request_worker_config,
+    )
+
+    # BCN 下行服务依赖 bot_request_worker 作为 chat.abort 的取消接入面
+    # （abort_surface）。bot_request_worker 在此之前定义，避免前向引用。
+    bcn_downlink_service = providers.Singleton(
+        DefaultBcnDownlinkService,
+        bot_runner=bot_runner,
+        api_key_repository=api_gateway_repo,
+        bcn_api_key_prefix=config.bcn.api_key.prefix,
+        uplink_client=bcn_uplink_client,
+        run_repository=bot_run_repository,
+        interaction_service=bot_interaction_service,
+        abort_surface=bot_request_worker,
     )
 
     # ── Sandbox device management providers ───────────────────────────────────

@@ -204,6 +204,11 @@ ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
         "description": "Upstream service error",
         **error_example(502, "Bad Gateway"),
     },
+    503: {
+        "model": ErrorEnvelope,
+        "description": "Temporarily unavailable",
+        **error_example(503, "Service Unavailable"),
+    },
 }
 
 # The extra failure a **user-scoped** route can produce: its ``user_id`` named

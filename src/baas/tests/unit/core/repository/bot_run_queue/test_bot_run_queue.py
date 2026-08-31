@@ -264,3 +264,76 @@ def test_update_meta_merges_json(repo: OrmBotRunQueueRepository):
     assert rec.meta.get("extra") == 42
     # 不存在的 run_id
     assert repo.update_meta("nonexistent", {}) is False
+
+
+# ---------------------------------------------------------------------------
+# find_running_by_session / find_terminal_by_session —— chat.abort 按 session 查询
+# ---------------------------------------------------------------------------
+
+
+def test_find_running_by_session_returns_pending_and_running(
+    repo: OrmBotRunQueueRepository,
+):
+    """PENDING + RUNNING of the session are returned; other sessions excluded."""
+    _insert(repo, "bot-1", session_id="sess-other")
+    r1 = _insert(repo, "bot-1", session_id="sess-abort")
+    r2 = _insert(repo, "bot-1", session_id="sess-abort")
+    # claim is per-bot FIFO; with sess-other inserted first it gets claimed first,
+    # so claim sess-other out of the way before exercising sess-abort.
+    claimed_other = repo.claim_pending_by_bot("bot-1", "worker-A")
+    assert claimed_other is not None and claimed_other.session_id == "sess-other"
+    # now claim the two sess-abort records -> RUNNING
+    claimed1 = repo.claim_pending_by_bot("bot-1", "worker-A")
+    claimed2 = repo.claim_pending_by_bot("bot-1", "worker-A")
+    assert {claimed1.run_id, claimed2.run_id} == {r1, r2}
+
+    r3 = _insert(repo, "bot-1", session_id="sess-abort")  # stays PENDING
+
+    running = repo.find_running_by_session("sess-abort")
+    run_ids = {r.run_id for r in running}
+    assert run_ids == {r1, r2, r3}, run_ids
+    assert all(r.status in ("PENDING", "RUNNING") for r in running)
+    # sess-other is RUNNING but a different session -> not included in the
+    # sess-abort result (already enforced by run_ids above); querying its own
+    # session returns its own RUNNING record, proving the filter is session-scoped.
+    other = repo.find_running_by_session("sess-other")
+    assert [r.run_id for r in other] == [claimed_other.run_id], other
+    assert all(r.status == "RUNNING" for r in other)
+
+
+def test_find_running_by_session_empty_session_returns_empty(
+    repo: OrmBotRunQueueRepository,
+):
+    assert repo.find_running_by_session("") == []
+    assert repo.find_running_by_session("no-such-session") == []
+
+
+def test_find_running_by_session_excludes_done(
+    repo: OrmBotRunQueueRepository,
+):
+    r1 = _insert(repo, "bot-1", session_id="sess-abort")
+    claimed = repo.claim_pending_by_bot("bot-1", "worker-A")
+    assert claimed is not None and claimed.run_id == r1
+    assert repo.mark_done(r1, "worker-A") == 1
+
+    assert repo.find_running_by_session("sess-abort") == []
+
+
+def test_find_terminal_by_session_returns_done_only(
+    repo: OrmBotRunQueueRepository,
+):
+    r1 = _insert(repo, "bot-1", session_id="sess-abort")
+    r2 = _insert(repo, "bot-1", session_id="sess-abort")
+    claimed = repo.claim_pending_by_bot("bot-1", "worker-A")
+    assert claimed is not None and claimed.run_id == r1
+    # force_done r1 -> DONE; r2 stays PENDING
+    assert repo.force_done(r1) == 1
+
+    terminals = repo.find_terminal_by_session("sess-abort")
+    run_ids = {r.run_id for r in terminals}
+    assert run_ids == {r1}, run_ids
+    assert all(r.status == "DONE" for r in terminals)
+
+    # no-terminal session -> empty
+    assert repo.find_terminal_by_session("no-such-session") == []
+    assert repo.find_terminal_by_session("") == []

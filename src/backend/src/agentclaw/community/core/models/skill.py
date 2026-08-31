@@ -152,8 +152,12 @@ class Skill(Base):
     # untouched while the Space Skill feature flag is off.
     draft_target_version = Column(Integer, nullable=True)
     draft_status = Column(String(16), nullable=True)
-    retired_at = Column(DateTime, nullable=True)
-    retired_by = Column(String(128), nullable=True)
+    draft_description = Column(Text, nullable=True)
+    draft_source_kind = Column(String(32), nullable=True)
+    creation_request_id = Column(String(128), nullable=True)
+    creation_request_hash = Column(String(64), nullable=True)
+    offline_at = Column(DateTime, nullable=True)
+    offline_by = Column(String(128), nullable=True)
     source_repo_url = Column(String(2048), nullable=True)
     source_branch = Column(String(512), nullable=True)
     source_subdir = Column(String(1024), nullable=True)
@@ -167,6 +171,12 @@ class Skill(Base):
     # unique within its tenant and environment.
     __table_args__ = (
         UniqueConstraint("avernet_tenant", "env", "skill_uuid", name="uk_skill_uuid"),
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "creation_request_id",
+            name="uk_skill_creation_request",
+        ),
         {"extend_existing": True},
     )
 

@@ -93,6 +93,8 @@ class EvalPublishMixin:
             ext_info["biz_id"] = biz_id
         if default_tag:
             ext_info["default_tag"] = default_tag
+        if publish_record.ext.get("skills_manifest") is not None:
+            ext_info["skills_manifest"] = publish_record.ext["skills_manifest"]
 
         # (#197) Crash-safe issuance via the operation runner. Eval is a CREATION
         # (no bot to adopt), so a crash after the BaaS create but before the id is

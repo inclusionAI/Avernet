@@ -71,12 +71,17 @@ def test_ready_requires_real_bridge_mount_and_readable_repo(tmp_path):
         == "skills-pool-mapping-v2"
     )
     assert result.evidence["resolved_layout"] == {
+        "engine": "openclaw",
+        "layout_contract_version": LAYOUT_CONTRACT_VERSION,
         "active_root": str(home / ".openclaw/workspace/skills"),
         "local_root": str(
             home / ".openclaw/workspace/skills-pool/skills-local"
         ),
         "repo_root": str(
             home / ".openclaw/workspace/skills-pool/skills-repo"
+        ),
+        "pool_center": str(
+            home / ".openclaw/workspace/skills-pool/skill-center"
         ),
     }
     assert result.evidence["checks"]["pool_repo_mounted"] is True

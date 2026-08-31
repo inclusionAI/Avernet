@@ -17,9 +17,6 @@ from agentclaw.community.api.bot_runtime_projector import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
-from agentclaw.community.api.local_skill_upload_service import (
-    LocalSkillUploadServiceProtocol,
-)
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
 )
@@ -64,9 +61,6 @@ from agentclaw.community.core.repository.implementations.skill_center.propagatio
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     CapabilityDesiredStateRepository,
 )
-from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
-    SpaceSkillRepository as UnifiedSpaceSkillRepository,
-)
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
 )
@@ -93,10 +87,6 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
-)
-from agentclaw.community.core.repository.protocols.skill_center import (
-    DraftEditLeaseRepository,
-    SpaceSkillRepository,
 )
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
@@ -130,11 +120,20 @@ from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
 )
+from agentclaw.community.core.skill_center.installation_backfill_protocol import (
+    InstallationBackfillServiceProtocol,
+)
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
+)
+from agentclaw.community.core.skill_center.services.installation_backfill_service import (
+    InstallationBackfillService,
+)
+from agentclaw.community.di.modules.skill_center_internal_token_module import (
+    SkillCenterInternalTokenBindings,
 )
 from agentclaw.community.core.skill_center.services.git_sync import (
     GitSyncConfig,
@@ -142,9 +141,6 @@ from agentclaw.community.core.skill_center.services.git_sync import (
 )
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
-)
-from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
-    LocalSkillUploadService,
 )
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
 from agentclaw.community.core.skill_center.services.repository_catalog_service import (
@@ -169,7 +165,6 @@ from agentclaw.community.core.skill_center.services.skill_member_service import 
 from agentclaw.community.core.skill_center.services.skill_propagation_service import (
     SkillPropagationService,
 )
-from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.services.skill_publish_service import (
     SkillPublishService,
 )
@@ -203,8 +198,20 @@ from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.modules.canonical_center_store_module import (
+    CanonicalCenterStoreBindings,
+)
+from agentclaw.community.di.modules.draft_content_store_module import (
+    DraftContentStoreBindings,
+)
+from agentclaw.community.di.modules.local_skill_upload_module import (
+    LocalSkillUploadBindings,
+)
 from agentclaw.community.di.modules.skill_center_protocols import (
     SkillCenterProtocolBindings,
+)
+from agentclaw.community.di.modules.space_skill_repository_bindings import (
+    bind_space_skill_repositories,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
@@ -215,7 +222,6 @@ from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
@@ -249,7 +255,14 @@ logger = get_logger()
 # ── Module ─────────────────────────────────────────────────────────────────
 
 
-class SkillCenterModule(SkillCenterProtocolBindings, Module):
+class SkillCenterModule(
+    CanonicalCenterStoreBindings,
+    DraftContentStoreBindings,
+    LocalSkillUploadBindings,
+    SkillCenterInternalTokenBindings,
+    SkillCenterProtocolBindings,
+    Module,
+):
     """Production singletons + factories for skill_center."""
 
     def configure(self, binder: Binder) -> None:
@@ -306,19 +319,10 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             to=UnifiedSkillCenterSyncLogRepository,
             scope=singleton,
         )
-        binder.bind(
-            SpaceSkillRepository,
-            to=UnifiedSpaceSkillRepository,
-            scope=singleton,
-        )
+        bind_space_skill_repositories(binder)
         binder.bind(
             SkillEditorRequestRepositoryProtocol,
             to=SkillEditorRequestRepository,
-            scope=singleton,
-        )
-        binder.bind(
-            DraftEditLeaseRepository,
-            to=UnifiedSpaceSkillRepository,
             scope=singleton,
         )
         binder.bind(
@@ -349,6 +353,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         binder.bind(
             BotCapabilityStateReader,
             to=BotCapabilityStateReader,
+            scope=singleton,
+        )
+        binder.bind(
+            InstallationBackfillServiceProtocol,
+            to=InstallationBackfillService,
             scope=singleton,
         )
         binder.bind(
@@ -500,32 +509,6 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             mcp_center,
             mcp_auth,
             ext_info_provider=_build__ext_info_provider(injector),
-        )
-
-    @singleton
-    @provider
-    @inject
-    def local_skill_upload_service(
-        self,
-        skill_repo: SkillRepository,
-        bot_repo: BotRepository,
-        collaborator_service: CollaboratorServiceProtocol,
-        skill_service_factory: SkillServiceFactory,
-        audit_log_repo: BotCollabLogRepositoryProtocol,
-        edit_guard: SkillsPoolEditGuard,
-        injector: Injector,
-        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
-    ) -> LocalSkillUploadServiceProtocol:
-        return LocalSkillUploadService(
-            skill_repo,
-            bot_repo,
-            collaborator_service,
-            skill_service_factory,
-            audit_log_repo,
-            edit_guard,
-            lambda: injector.get(DeviceContextResolver),
-            runtime_reconciler,
-            SkillParser(),
         )
 
     @singleton
@@ -861,40 +844,8 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
             device_fs_dispatcher=device_fs_dispatcher,
         )
 
-    @singleton
-    @provider
-    @inject
-    def skill_center_sync_service(
-        self,
-        skill_center_client: SkillCenterClient,
-        sync_log_repo: SkillCenterSyncLogRepository,
-        skill_repo: SkillRepository,
-        cache_plugin: CachePlugin,
-        skill_scan_service_provider: Callable[[], SkillScanService],
-    ) -> SkillCenterSyncService:
-        from agentclaw.community.core.skill_center.feature_flags import (
-            get_skill_center_flags,
-        )
-
-        flags = get_skill_center_flags()
-        logger.info("[NEW-ARCH] SkillCenterSyncService initialized")
-        return SkillCenterSyncService(
-            skill_center_client=skill_center_client,
-            sync_log_repo=sync_log_repo,
-            skill_repo=skill_repo,
-            cache_plugin=cache_plugin,
-            skill_scan_service_provider=skill_scan_service_provider,
-            nas_sync_enabled=flags.nas_sync_enabled,
-        )
-
-    # Cycle-breaker: ``SkillScanService.__init__`` needs
-    # ``SkillCenterSyncService`` (passed by its provider above), and
-    # ``SkillCenterSyncService.scan_after_sync`` needs to construct a
-    # ``SkillScanService`` to scan a freshly-synced skill. Injecting the
-    # service directly closes the cycle at graph-build time. We expose a
-    # ``Callable[[], SkillScanService]`` instead so the lookup is deferred
-    # until ``scan_after_sync`` actually runs — by then both singletons
-    # exist and the lambda just returns the cached instance.
+    # Legacy callers still use a lazy scan-service factory; G4 exact-version
+    # materialization no longer calls the mutable NAS scan path.
     @singleton
     @provider
     @inject
@@ -921,13 +872,11 @@ class SkillCenterModule(SkillCenterProtocolBindings, Module):
         log_repo: SkillPropagationLogRepository,
         resolver: DeviceContextResolver,
         device_sync_dispatcher: DeviceSyncDispatcher,
-        sync_service: SkillCenterSyncService,
         skill_set_repo: SkillSetRepository,
         skill_set_service_factory: SkillSetServiceFactory,
     ) -> SkillPropagationService:
         return SkillPropagationService(
             log_repo=log_repo,
-            sync_service=sync_service,
             skill_set_repo=skill_set_repo,
             resolver=resolver,
             device_sync_dispatcher=device_sync_dispatcher,

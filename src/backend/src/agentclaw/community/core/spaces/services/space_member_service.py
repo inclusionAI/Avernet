@@ -35,12 +35,13 @@ from agentclaw.community.plugin_api.staff_dept import (
 )
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
+from agentclaw.community.core.spaces.space_service_protocol import SpaceMemberServiceProtocol
 
 
 logger = get_logger()
 
 
-class SpaceMemberService:
+class SpaceMemberService(SpaceMemberServiceProtocol):
     @staticmethod
     def _user_id(value: str) -> str:
         normalized = value.strip()

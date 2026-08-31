@@ -129,6 +129,7 @@ pub use bcs_routing::MessageRouter;
 pub mod auth_wiring;
 mod config;
 mod config_loader;
+pub mod callback_recovery_scanner;
 mod env;
 mod error;
 mod eventing_wiring;

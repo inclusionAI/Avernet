@@ -3,6 +3,18 @@
 from agentclaw.community.core.errors import DomainError
 
 
+class SkillOfflineError(Exception):
+    """A new consumption write addressed a recoverably Offline Skill."""
+
+
+class SkillOfflineBlockedError(Exception):
+    """Offline could not prove that every destructive blocker is absent."""
+
+    def __init__(self, impact) -> None:
+        super().__init__("skill offline is blocked")
+        self.impact = impact
+
+
 class SkillDeleteConsistencyError(RuntimeError):
     """A Skill delete could not safely converge filesystem and database state."""
 
@@ -151,6 +163,66 @@ class DraftEditLeaseTokenRejectedError(Exception):
     """The supplied fencing token is stale or belongs to another holder."""
 
 
+class SpaceSkillIdempotencyConflictError(Exception):
+    """An Idempotency-Key was already bound to a different creation intent."""
+
+
+class DraftNotFoundError(Exception):
+    """The addressed Space Skill has no current Draft."""
+
+
+class DraftFrozenError(Exception):
+    """A FROZEN Draft cannot be mutated or deleted."""
+
+
+class DraftRevisionConflictError(Exception):
+    """The expected Draft revision is no longer current."""
+
+
+class DraftAlreadyExistsError(Exception):
+    """The Skill already has a current Draft for another creation request."""
+
+
+class DraftFileNotFoundError(Exception):
+    """The addressed file does not exist in the current Draft."""
+
+
+class DraftFileNotTextError(Exception):
+    """The addressed Draft file is not UTF-8 text."""
+
+
+class DraftSourceNotRefreshableError(Exception):
+    """Only a Draft retaining a Git snapshot source can be refreshed."""
+
+
+class SkillNameChangedError(Exception):
+    """A Draft mutation attempted to change the stable SKILL.md name."""
+
+
+class PublicationAttemptNotFoundError(Exception):
+    """The addressed Publication Attempt is absent from the Skill aggregate."""
+
+
+class PublicationInProgressError(Exception):
+    """The Skill already has a non-terminal Publication Attempt."""
+
+
+class PublicationResultUnknownError(Exception):
+    """SC submission may have succeeded, so another publish is forbidden."""
+
+
+class PublicationRecoveryNotAvailableError(Exception):
+    """The addressed Attempt currently has no safe recovery action."""
+
+
+class PublicationRequiresNewAttemptError(Exception):
+    """A clearly failed Attempt requires editing and a new Publication."""
+
+
+class PublicationTaskUnavailableError(Exception):
+    """The Attempt exists, but its durable execution task could not be ensured."""
+
+
 # ── SkillSet control plane ────────────────────────────────────────────────
 # These are ``DomainError`` subclasses so the SkillSet routers can raise the
 # situation and let the HTTP adapter decide the status: the mapping lives in
@@ -194,6 +266,7 @@ class SkillSetRuntimeReconcileError(DomainError):
 
     def __init__(self, detail: str = "Skill set runtime sync failed") -> None:
         super().__init__(detail)
+
 
 class SkillSetControlPlaneLockUnavailableError(DomainError):
     """The runtime layout edit boundary is unavailable; mutation failed closed."""

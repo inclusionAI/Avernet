@@ -13,12 +13,13 @@ from agentclaw.community.core.repository.protocols.bot import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.bot_management.render_screen_service_protocol import RenderScreenServiceProtocol
 
 
 logger = get_logger()
 
 
-class RenderScreenService:
+class RenderScreenService(RenderScreenServiceProtocol):
     """第四屏 CDN 配置业务逻辑。"""
 
     @inject

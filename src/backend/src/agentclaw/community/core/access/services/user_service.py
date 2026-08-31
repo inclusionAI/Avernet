@@ -5,11 +5,12 @@ from agentclaw.community.core.access.errors import UserNotFoundError
 from agentclaw.community.core.repository.protocols.identity import PolicyRepository
 from agentclaw.community.core.access.models import UserInfoRecord
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.access.user_service_protocol import UserServiceProtocol
 
 logger = get_logger()
 
 
-class UserService:
+class UserService(UserServiceProtocol):
     """Thin service encapsulating user CRUD previously inlined in the router."""
 
     @inject

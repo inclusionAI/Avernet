@@ -71,3 +71,21 @@ class BotRunQueueRepository(Protocol):
     def scan_timeout(self, limit: int = 200) -> list[BotRunQueueRecord]:
         """扫描 PENDING/RUNNING 中已超时的工作项（meta.timeout 已过期）。"""
         ...
+
+    def find_running_by_session(self, session_id: str) -> list[BotRunQueueRecord]:
+        """按 session_id 查询所有未终结（PENDING/RUNNING）的工作项。
+
+        供 chat.abort 按 session 定位待取消的 run。``session_id`` 在首条消息
+        入队时可能为 NULL（``update_session_id`` 在首条后才合并），该 session 下
+        返回空，调用方按 best-effort 处理。
+        """
+        ...
+
+    def find_terminal_by_session(self, session_id: str) -> list[BotRunQueueRecord]:
+        """按 session_id 查询所有已终结（DONE）的队列工作项。
+
+        用于 chat.abort 区分"session 无任何 run 记录"与"run 已终态"：前者返回
+        200 ``{aborted: false}``，后者返回 410 ``run_terminated``。DONE 行在 TTL
+        清理前可见。
+        """
+        ...

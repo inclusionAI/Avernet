@@ -27,6 +27,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
 )
+from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -119,6 +120,15 @@ class DefaultExclusionCommands:
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if not str(skill_id).isdecimal():
                 return DesiredStateMutation(_item(row), False, old)
+            skill = (
+                self._scope(session.query(Skill), Skill)
+                .filter(Skill.id == int(skill_id))
+                .with_for_update()
+                .one_or_none()
+            )
+            if skill is None:
+                raise SkillSetControlPlaneNotFoundError()
+            require_skill_online(skill)
             removed = default_exclusions.unexclude_skill(
                 session, bot_id=bot_id, owner_id=owner_id,
                 set_id=int(row.id), skill_id=int(skill_id),

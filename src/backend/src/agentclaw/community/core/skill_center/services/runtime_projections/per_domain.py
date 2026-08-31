@@ -11,8 +11,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
     ProjectionScope,
     ResolvedCapabilityPlan,
+    ResolvedSkillPlan,
 )
-from agentclaw.community.core.skill_center.runtime_resolver import RuntimeProjection
+from agentclaw.community.core.skill_center.runtime_resolver import RuntimeSkillProjection
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
@@ -72,7 +73,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
     async def apply(
         self,
         *,
-        plan: ResolvedCapabilityPlan,
+        plan: ResolvedSkillPlan,
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> None:
@@ -100,6 +101,8 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                 plan.bot_id, plan.engine,
             )
         if scope.mcp:
+            if not isinstance(plan, ResolvedCapabilityPlan):
+                raise SkillSetRuntimeReconcileError()
             await self._apply_mcp_projection(plan=plan, scope=scope)
         else:
             logger.info(
@@ -111,7 +114,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
     async def _apply_skill_projection(
         self,
         *,
-        plan: ResolvedCapabilityPlan,
+        plan: ResolvedSkillPlan,
         retired_mappings: Sequence[PoolSkillMapping],
     ) -> None:
         mappings = list(plan.projection.skill_mappings)
@@ -241,7 +244,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
 
     @staticmethod
     def _desired_skills(
-        projection: RuntimeProjection,
+        projection: RuntimeSkillProjection,
     ) -> list[dict[str, str | None]]:
         return [
             {

@@ -21,9 +21,10 @@ from agentclaw.community.core.spaces.services.space_access_service import (
     SpaceAccessService,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.core.market_favorites.market_favorite_service_protocol import MarketFavoriteServiceProtocol
 
 
-class MarketFavoriteService:
+class MarketFavoriteService(MarketFavoriteServiceProtocol):
     @inject
     def __init__(
         self,

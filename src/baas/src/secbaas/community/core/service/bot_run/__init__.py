@@ -34,6 +34,8 @@ from ._claw_service import BotServiceConfig, ClawBotService
 from ._engine_adapter_registry import BotEngineAdapterRegistry
 from ._executor import BotRunRequestExecutor, ResultGuardExecutor, SerializingExecutor
 from ._internal_protocols import (
+    AbortOutcome,
+    BotRunAbortSurface,
     BotService,
     MessageDispatcher,
     PostRunCallback,
@@ -89,4 +91,6 @@ __all__ = [
     "QueueStatus",
     "ResultGuardExecutor",
     "SerializingExecutor",
+    "AbortOutcome",
+    "BotRunAbortSurface",
 ]

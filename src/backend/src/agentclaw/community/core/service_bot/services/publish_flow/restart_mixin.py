@@ -402,6 +402,9 @@ class RestartMixin:
                 publish_stage=stage_enum,
                 version=version,
                 delivery=delivery,
+                ext_info={
+                    "skills_manifest": publish_record.ext["skills_manifest"]
+                } if publish_record.ext.get("skills_manifest") is not None else None,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
                 template_config=service_publish_template_config(bot),
@@ -582,6 +585,9 @@ class RestartMixin:
                 publish_stage=stage_enum,
                 version=version,
                 delivery=delivery,
+                ext_info={
+                    "skills_manifest": publish_record.ext["skills_manifest"]
+                } if publish_record.ext.get("skills_manifest") is not None else None,
                 extra_envs=skills_env,
                 docker_image=docker_image,
                 template_config=service_publish_template_config(bot),

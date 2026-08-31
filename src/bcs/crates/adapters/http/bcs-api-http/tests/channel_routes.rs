@@ -11,13 +11,14 @@ use bcs_service_api::application::channel::{
 };
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
-    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, CompleteSession,
-    CreateBotFriendRequest, CreateGroup, CreateGroupInvitation, CreateSession,
+    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, BotRegistration,
+    CompleteSession, CreateBotFriendRequest, CreateGroup, CreateGroupInvitation, CreateSession,
     CreateSessionInvitation, CreateSessionOutcome, DeleteBotFriendship, DeleteGroup,
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, Friendship,
     FriendshipService, FriendRequest, GetGroup, GetSession, GroupDetail, GroupService,
-    GroupSummary, Invitation, InvitationAcceptResult, InvitationService, ListBotFriendRequests,
-    ListBotFriendships, ListGroups, ListSessionMessages, ListSessions, Page, RejectFriendRequest,
+    GroupSummary, Invitation, InvitationAcceptResult, InvitationService, IssueRegisterToken,
+    ListBotFriendRequests, ListBotFriendships, ListGroups, ListSessionMessages, ListSessions, Page,
+    RegisterBot, RegisterService, RegisterTokenView, RejectFriendRequest,
     SessionCompletionResult, SessionDetail, SessionMessageService, SessionParticipant,
     SessionService, SessionSummary, UpdateGroup, UpdateGroupParticipant, UpdateSession,
     UpdateSessionParticipant,
@@ -310,6 +311,25 @@ impl InvitationService for NoopInvitationService {
     }
 }
 
+struct NoopRegisterService;
+
+#[async_trait]
+impl RegisterService for NoopRegisterService {
+    async fn issue_register_token(
+        &self,
+        _command: IssueRegisterToken,
+    ) -> Result<RegisterTokenView, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+
+    async fn register_bot(
+        &self,
+        _command: RegisterBot,
+    ) -> Result<BotRegistration, ApplicationError> {
+        Err(ApplicationError::internal("register service is a noop in this test"))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Fake channel service.
 // ---------------------------------------------------------------------------
@@ -406,6 +426,7 @@ fn test_router(service: Arc<dyn ChannelService>, caller: AuthenticatedCaller) ->
             Arc::new(NoopSessionService),
             Arc::new(NoopSessionMessageService),
             Arc::new(NoopInvitationService),
+            Arc::new(NoopRegisterService),
             Arc::new(NoopFriendshipService),
             Arc::new(HeaderVerifier { caller }),
         )

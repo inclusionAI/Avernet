@@ -5,13 +5,19 @@ naming the missing member, instead of raising ``AttributeError`` at the call
 site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 ``core/repository/README.md`` for why that direction is load-bearing.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.skill_center.materialization_contract import (
+        MaterializingSkillVersion,
+        PublishedMaterializedSkillVersion,
+    )
     from agentclaw.community.core.work_orders.models import (
         WorkOrderNotificationDraft,
         WorkOrderRecord,
@@ -24,12 +30,20 @@ from .skill_center_types import (
     SpaceRecord,
     SpaceSkillCreateData,
     SpaceSkillCreationRecord,
+    SpaceSkillCreationReplayRecord,
     SpaceSkillOwnerGrantData,
     SpaceSkillOwnershipData,
     SpaceSkillQueryRecord,
+    SpaceSkillReadRecord,
     SpaceSkillGrantItem,
     SpaceSkillGrantSetRecord,
     DraftEditLeaseRecord,
+    SkillVersionRecord,
+    SpaceSkillDraftRecord,
+    DraftDeleteRecord,
+    DraftUpgradeRecord,
+    SkillUpgradeIdentityRecord,
+    SkillUpgradeRequestRecord,
 )
 
 
@@ -38,12 +52,10 @@ class SpaceSkillRepository(Protocol):
     """Tenant-scoped persistence seam for additive Space Skill facts."""
 
     @abstractmethod
-    def create_space(self, data: SpaceCreateData) -> SpaceRecord:
-        ...
+    def create_space(self, data: SpaceCreateData) -> SpaceRecord: ...
 
     @abstractmethod
-    def get_space(self, space_id: int, *, env: str) -> SpaceRecord | None:
-        ...
+    def get_space(self, space_id: int, *, env: str) -> SpaceRecord | None: ...
 
     @abstractmethod
     def create_space_skill(
@@ -54,6 +66,13 @@ class SpaceSkillRepository(Protocol):
         owner_grant_data: SpaceSkillOwnerGrantData,
     ) -> SpaceSkillCreationRecord:
         """Atomically persist the initial identity, ownership and owner grant."""
+        ...
+
+    @abstractmethod
+    def get_creation_by_request_id(
+        self, *, request_id: str, env: str
+    ) -> SpaceSkillCreationReplayRecord | None:
+        """Resolve the resource permanently bound to one creation request."""
         ...
 
     @abstractmethod
@@ -114,6 +133,28 @@ class SpaceSkillRepository(Protocol):
         env: str,
         retain_previous_owner_as_manager: bool = False,
     ) -> SpaceSkillGrantSetRecord: ...
+
+
+@runtime_checkable
+class SpaceSkillReadRepository(Protocol):
+    """Read model for Space Skill workshop summaries and details."""
+
+    @abstractmethod
+    def list_skills(
+        self,
+        *,
+        space_id: int,
+        actor_id: str,
+        env: str,
+        keyword: str | None,
+        offset: int,
+        limit: int,
+    ) -> tuple[int, list[SpaceSkillReadRecord]]: ...
+
+    @abstractmethod
+    def get_skill(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> SpaceSkillReadRecord: ...
 
 
 @runtime_checkable
@@ -192,13 +233,132 @@ class DraftEditLeaseRepository(Protocol):
         self, *, space_id: int, skill_id: int, actor_id: str, env: str
     ) -> DraftEditLeaseRecord: ...
 
+
+@runtime_checkable
+class SpaceSkillDraftRepository(Protocol):
+    """Atomic Draft revision and fencing persistence seam."""
+
+    @abstractmethod
+    def get_draft(
+        self, *, space_id: int, skill_id: int, env: str
+    ) -> SpaceSkillDraftRecord: ...
+
+    @abstractmethod
+    def get_draft_for_mutation(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+        env: str,
+    ) -> SpaceSkillDraftRecord:
+        """Preauthorize editor, revision and fencing before external Draft I/O."""
+        ...
+
+    @abstractmethod
+    def replace_draft_revision(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+        new_locator: str,
+        new_description: str,
+        source_commit_sha: str | None = None,
+        env: str,
+    ) -> str:
+        """Commit one EDITING revision CAS and return the previous locator."""
+        ...
+
+    @abstractmethod
+    def delete_draft(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        expected_revision_id: str,
+        fencing_token: int | None,
+        env: str,
+    ) -> DraftDeleteRecord: ...
+
+    @abstractmethod
+    def get_skill_for_upgrade(
+        self, *, space_id: int, skill_id: int, actor_id: str, env: str
+    ) -> SkillUpgradeIdentityRecord: ...
+
+    @abstractmethod
+    def get_upgrade_by_request_id(
+        self, *, request_id: str, env: str
+    ) -> SkillUpgradeRequestRecord | None: ...
+
+    @abstractmethod
+    def create_upgrade_draft(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        actor_id: str,
+        request_id: str,
+        expected_version_id: int,
+        target_version: int,
+        new_locator: str,
+        new_description: str,
+        env: str,
+    ) -> DraftUpgradeRecord: ...
+
+
+@runtime_checkable
+class SkillVersionRepositoryProtocol(Protocol):
+    """Read-only persistence seam for immutable published Skill Versions."""
+
+    @abstractmethod
+    def list_latest_published(
+        self, *, env: str, skill_ids: tuple[int, ...]
+    ) -> tuple[SkillVersionRecord, ...]:
+        """Return at most one highest-ordinal PUBLISHED row per Skill."""
+        ...
+
+    @abstractmethod
+    def get_exact_published(
+        self, *, env: str, skill_id: int, skill_version_id: int
+    ) -> SkillVersionRecord | None:
+        """Return the addressed PUBLISHED row, never MATERIALIZING."""
+        ...
+
+
+@runtime_checkable
+class SkillVersionMaterializationRepositoryProtocol(Protocol):
+    """Persistence boundary for exact-Version Ready-Gate publication."""
+
+    @abstractmethod
+    def get_materialization_target(
+        self, *, env: str, skill_id: int, skill_version_id: int
+    ) -> MaterializingSkillVersion | None: ...
+
+    @abstractmethod
+    def publish_materialized(
+        self,
+        *,
+        env: str,
+        skill_id: int,
+        skill_version_id: int,
+        metadata_json: str,
+        description: str,
+        published_at: datetime,
+    ) -> PublishedMaterializedSkillVersion: ...
+
+
 @runtime_checkable
 class SkillRepository(Protocol):
     """技能 Repository 接口"""
 
     @abstractmethod
-    def get_by_id(self, skill_id: str) -> dict | None:
-        ...
+    def get_by_id(self, skill_id: str) -> dict | None: ...
 
     @abstractmethod
     def get_by_uuid(self, skill_uuid: str, env: str | None = None) -> dict | None:
@@ -206,17 +366,20 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def get_by_git_path(self, git_path: str) -> dict | None:
-        ...
+    def get_by_git_path(self, git_path: str) -> dict | None: ...
 
     @abstractmethod
-    def get_by_link_name(self, link_name: str, bolt_id: str | None = None) -> dict | None:
-        ...
+    def get_by_link_name(
+        self, link_name: str, bolt_id: str | None = None
+    ) -> dict | None: ...
 
     @abstractmethod
-    def list_skills(self, user_id: str | None = None, bolt_id: str | None = 'default',
-                    env: str | None = None) -> list[dict]:
-        ...
+    def list_skills(
+        self,
+        user_id: str | None = None,
+        bolt_id: str | None = "default",
+        env: str | None = None,
+    ) -> list[dict]: ...
 
     @abstractmethod
     def get_bot_local_by_name(
@@ -279,12 +442,10 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def create(self, skill_data: dict) -> dict:
-        ...
+    def create(self, skill_data: dict) -> dict: ...
 
     @abstractmethod
-    def update(self, skill_id: str, skill_data: dict) -> dict | None:
-        ...
+    def update(self, skill_id: str, skill_data: dict) -> dict | None: ...
 
     @abstractmethod
     def replace_bot_local_skill(
@@ -301,8 +462,7 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def delete(self, skill_id: str) -> bool:
-        ...
+    def delete(self, skill_id: str) -> bool: ...
 
     @abstractmethod
     def list_skill_set_references(
@@ -324,7 +484,9 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def check_skill_blocked_by_bot(self, name: str, env: str | None = None) -> list[str]:
+    def check_skill_blocked_by_bot(
+        self, name: str, env: str | None = None
+    ) -> list[str]:
         """Return bot ids whose active skill-sets reference this skill
         (deletion blockers); empty list if none."""
         ...
@@ -336,15 +498,17 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def update_risk_tags(self, skill_id: str, risk_tags: list) -> dict | None:
-        ...
+    def update_risk_tags(self, skill_id: str, risk_tags: list) -> dict | None: ...
 
     @abstractmethod
-    def update_mcp_dependencies(self, skill_id: str, mcp_dependencies: list) -> dict | None:
-        ...
+    def update_mcp_dependencies(
+        self, skill_id: str, mcp_dependencies: list
+    ) -> dict | None: ...
 
     @abstractmethod
-    def get_by_name_global_include_deleted(self, name: str, user_id: str | None = None) -> dict | None:
+    def get_by_name_global_include_deleted(
+        self, name: str, user_id: str | None = None
+    ) -> dict | None:
         """根据技能名称全局查询（包括已删除 Bot 的技能），用于复用已删除记录避免唯一约束冲突。"""
         ...
 
@@ -362,7 +526,10 @@ class SkillRepository(Protocol):
 
     @abstractmethod
     def get_active_skills_by_bot(
-        self, bot_id: str, entity_type: str, owner_id: str,
+        self,
+        bot_id: str,
+        entity_type: str,
+        owner_id: str,
     ) -> list[dict]:
         """查询指定 bot 的所有 active skills。
 
@@ -381,8 +548,7 @@ class SkillSetRepository(Protocol):
     """技能集 Repository 接口"""
 
     @abstractmethod
-    def get_by_id(self, skill_set_id: str) -> dict | None:
-        ...
+    def get_by_id(self, skill_set_id: str) -> dict | None: ...
 
     @abstractmethod
     def get_default(
@@ -390,8 +556,7 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
-    ) -> dict | None:
-        ...
+    ) -> dict | None: ...
 
     @abstractmethod
     def list_all(
@@ -401,34 +566,30 @@ class SkillSetRepository(Protocol):
         engine_type: str | None = None,
         default_skill_set_bolt_id: str | None = None,
         default_skill_set_engine_type: str | None = None,
-    ) -> list[dict]:
-        ...
+    ) -> list[dict]: ...
 
     @abstractmethod
-    def create(self, skill_set_data: dict) -> dict:
-        ...
+    def create(self, skill_set_data: dict) -> dict: ...
 
     @abstractmethod
-    def update(self, skill_set_id: str, skill_set_data: dict) -> dict | None:
-        ...
+    def update(self, skill_set_id: str, skill_set_data: dict) -> dict | None: ...
 
     @abstractmethod
-    def delete(self, skill_set_id: str) -> bool:
-        ...
+    def delete(self, skill_set_id: str) -> bool: ...
 
     @abstractmethod
     def add_skill_to_set(
         self, skill_set_id: str, skill_id: str, user_id: str | None = None
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
     @abstractmethod
-    def get_skills_in_set(self, skill_set_id: str) -> list[dict]:
-        ...
+    def get_skills_in_set(self, skill_set_id: str) -> list[dict]: ...
 
     @abstractmethod
     def find_affected_bots_by_skill_uuid(
-        self, skill_uuid: str, env: str | None = None,
+        self,
+        skill_uuid: str,
+        env: str | None = None,
     ) -> list[dict]:
         """找出所有受 skill_uuid 升级影响的 bot。
 
@@ -442,20 +603,17 @@ class SkillSetRepository(Protocol):
         ...
 
     @abstractmethod
-    def remove_skill_from_set(self, skill_set_id: str, skill_id: str) -> bool:
-        ...
+    def remove_skill_from_set(self, skill_set_id: str, skill_id: str) -> bool: ...
 
     @abstractmethod
     def add_default_skill_exclusion(
         self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
     @abstractmethod
     def remove_default_skill_exclusion(
         self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
     @abstractmethod
     def remove_all_default_skill_exclusions(
@@ -465,14 +623,19 @@ class SkillSetRepository(Protocol):
         ...
 
     @abstractmethod
-    def add_mcp_to_set(self, skill_set_id: str, server_code: str, name: str,
-                       description: str | None = None, icon: str | None = None,
-                       user_id: str | None = None, env: str | None = None) -> bool:
-        ...
+    def add_mcp_to_set(
+        self,
+        skill_set_id: str,
+        server_code: str,
+        name: str,
+        description: str | None = None,
+        icon: str | None = None,
+        user_id: str | None = None,
+        env: str | None = None,
+    ) -> bool: ...
 
     @abstractmethod
-    def get_mcp_servers_in_set(self, skill_set_id: str) -> list[dict]:
-        ...
+    def get_mcp_servers_in_set(self, skill_set_id: str) -> list[dict]: ...
 
     @abstractmethod
     def get_mcp_servers_in_set_for_env(
@@ -482,8 +645,7 @@ class SkillSetRepository(Protocol):
         ...
 
     @abstractmethod
-    def remove_mcp_from_set(self, skill_set_id: str, server_code: str) -> bool:
-        ...
+    def remove_mcp_from_set(self, skill_set_id: str, server_code: str) -> bool: ...
 
     @abstractmethod
     def get_active_skill_set(
@@ -491,8 +653,7 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
-    ) -> dict | None:
-        ...
+    ) -> dict | None: ...
 
     @abstractmethod
     def set_active_skill_set(
@@ -501,8 +662,7 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
     @abstractmethod
     def clear_active_skill_set(
@@ -510,8 +670,7 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
     @abstractmethod
     def get_all_active_skill_sets(
@@ -521,8 +680,7 @@ class SkillSetRepository(Protocol):
         engine_type: str | None = None,
         default_skill_set_bolt_id: str | None = None,
         default_skill_set_engine_type: str | None = None,
-    ) -> list[dict]:
-        ...
+    ) -> list[dict]: ...
 
     @abstractmethod
     def get_all_active_skill_sets_for_env(
@@ -545,8 +703,7 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
     @abstractmethod
     def deactivate_skill_set(
@@ -555,12 +712,10 @@ class SkillSetRepository(Protocol):
         user_id: str | None = None,
         bolt_id: str | None = None,
         engine_type: str | None = None,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
     @abstractmethod
-    def activate_default_skillset(self) -> int:
-        ...
+    def activate_default_skillset(self) -> int: ...
 
     @abstractmethod
     def list_all_exclude_deleted(
@@ -575,7 +730,9 @@ class SkillSetRepository(Protocol):
         ...
 
     @abstractmethod
-    def get_skill_set_by_name_include_deleted(self, name: str, user_id: str, bolt_id: str | None = None) -> dict | None:
+    def get_skill_set_by_name_include_deleted(
+        self, name: str, user_id: str, bolt_id: str | None = None
+    ) -> dict | None:
         """根据名称查找技能集（包括已删除 Bot 的），用于复用记录避免唯一约束冲突。
 
         Args:
@@ -586,8 +743,7 @@ class SkillSetRepository(Protocol):
         ...
 
     @abstractmethod
-    def get_all_user_mcps(self, user_id: str) -> list[dict]:
-        ...
+    def get_all_user_mcps(self, user_id: str) -> list[dict]: ...
 
     @abstractmethod
     def delete_by_bot_id(self, bot_id: str) -> int:
@@ -769,8 +925,15 @@ class SkillCategoryRepository(Protocol):
         ...
 
     @abstractmethod
-    def create(self, code: str, name: str, parent_code: str,
-               path: str, level: int, sort_order: int) -> dict:
+    def create(
+        self,
+        code: str,
+        name: str,
+        parent_code: str,
+        path: str,
+        level: int,
+        sort_order: int,
+    ) -> dict:
         """创建类目，返回创建后的 dict。"""
         ...
 
@@ -791,12 +954,12 @@ class SkillCenterSyncLogRepository(Protocol):
     """SC 同步日志 repository 协议（local SQLite / prod 关系存储实现）。"""
 
     @abstractmethod
-    def create(self, data: dict) -> dict:
-        ...
+    def create(self, data: dict) -> dict: ...
 
     @abstractmethod
-    def mark_success(self, skill_uuid: str, version: str, env: str, checksum: str = None) -> None:
-        ...
+    def mark_success(
+        self, skill_uuid: str, version: str, env: str, checksum: str = None
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -814,6 +977,8 @@ class SkillPropagationLogRepository(Protocol):
         ...
 
     @abstractmethod
-    def find_recent(self, skill_uuid: str, env: str, within_seconds: int) -> dict | None:
+    def find_recent(
+        self, skill_uuid: str, env: str, within_seconds: int
+    ) -> dict | None:
         """查找 within_seconds 内同 (skill_uuid, env) 的最新 done/pending 记录。"""
         ...

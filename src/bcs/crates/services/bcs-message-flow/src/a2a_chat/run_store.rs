@@ -126,6 +126,47 @@ impl ChatRunStore {
         self.notifiers.write().await.remove(run_id);
     }
 
+    /// Reclaim node-local notifier entries that have no parked long-poll waiter.
+    ///
+    /// The `Notify` registry is a latency-only optimization for `wait_update`
+    /// — correctness comes from re-reading the repo, and [`Self::notifier`]
+    /// rebuilds an entry on demand — so evicting an idle entry is always safe.
+    /// This is the only reclaim path for runs that retire without a terminal
+    /// CAS (acknowledged detached-delivery runs, which are excluded from the
+    /// timeout sweep and retire as `Dropped`), since [`Self::drop_notifier`]
+    /// is only reached on a terminal transition. It is independent of the repo
+    /// retirement path, so it also covers MySQL production, where detached
+    /// retirement is delegated to platform cleanup and `drop_detached_expired`
+    /// is a no-op that returns no retired rows.
+    ///
+    /// An entry is idle iff the map is its sole owner (`Arc::strong_count == 1`),
+    /// i.e. no `wait_update` call currently holds a clone. Every clone is taken
+    /// while holding the map's `RwLock` (in [`Self::notifier`]), and the
+    /// re-check below runs under the write lock, so the count is precise at the
+    /// decision point and a parked waiter can never be evicted.
+    async fn sweep_idle_notifiers(&self) {
+        let candidates: Vec<String> = {
+            let map = self.notifiers.read().await;
+            map.iter()
+                .filter(|(_, notify)| Arc::strong_count(notify) == 1)
+                .map(|(run_id, _)| run_id.clone())
+                .collect()
+        };
+        if candidates.is_empty() {
+            return;
+        }
+        let mut map = self.notifiers.write().await;
+        for run_id in candidates {
+            // Re-check under the write lock: a waiter may have cloned the entry
+            // between the read and write phases. Only remove if still idle.
+            if let Some(notify) = map.get(&run_id) {
+                if Arc::strong_count(notify) == 1 {
+                    map.remove(&run_id);
+                }
+            }
+        }
+    }
+
     pub async fn create(&self, record: ChatRunRecord) -> Result<(), ChatRunStoreError> {
         self.repo.create(record).await.map_err(|err| match err {
             ChatRunRepoError::Capacity { max_entries } => {
@@ -254,19 +295,102 @@ impl ChatRunStore {
         self.apply_state_cas(run_id, current.version, new).await
     }
 
+    /// Append a streaming chunk onto an ALREADY-FETCHED base record
+    /// (frame-local merge): the drain path holds the pre-frame snapshot —
+    /// fetched exactly once per frame — so the append does not re-read the
+    /// repo. The base must be the frame's entry snapshot; the single writer
+    /// discipline makes it equivalent to a fresh read except when an
+    /// in-frame mutation (the detach acknowledgement) advanced the version —
+    /// re-fetch the record there before calling.
+    pub async fn append_delta_from_base(&self, base: &ChatRunRecord, chunk: &str) -> bool {
+        if chunk.is_empty() {
+            return false;
+        }
+        if base.state.is_terminal() {
+            return false;
+        }
+
+        let (accumulated, truncated) =
+            Self::append_chunk_with_truncation(&base.accumulated_content, base.content_truncated, chunk);
+
+        self.append_content_at_version(&base.run_id, base.version, accumulated, truncated)
+            .await
+    }
+
     pub async fn append_delta(&self, run_id: &str, chunk: &str) -> bool {
         if chunk.is_empty() {
             return false;
         }
-        let Some(current) = self.get(run_id).await else {
+        let Some(base) = self.get(run_id).await else {
             return false;
         };
-        if current.state.is_terminal() {
+        self.append_delta_from_base(&base, chunk).await
+    }
+
+    /// Replace the record's content from an already-fetched base — see
+    /// [`Self::append_delta_from_base`] for the frame-local-merge contract.
+    pub async fn replace_content_from_base(&self, base: &ChatRunRecord, content: &str) -> bool {
+        if base.state.is_terminal() {
+            return false;
+        }
+        let was_pending = base.state == ChatRunState::Pending;
+
+        let (next, truncated) = Self::truncate_content(content);
+        let changed = base.accumulated_content != next
+            || base.content_truncated != truncated
+            || was_pending;
+        if !changed {
             return false;
         }
 
-        let mut accumulated = current.accumulated_content.clone();
-        let mut truncated = current.content_truncated;
+        self.append_content_at_version(&base.run_id, base.version, next, truncated)
+            .await
+    }
+
+    pub async fn replace_content(&self, run_id: &str, content: &str) -> bool {
+        let Some(base) = self.get(run_id).await else {
+            return false;
+        };
+        self.replace_content_from_base(&base, content).await
+    }
+
+    /// Shared commit path for both content mutators: CAS-expected version,
+    /// notify-on-success, log-only on backend failure (the store remains the
+    /// truth; #1546 forbids masquerading a failed write as success).
+    async fn append_content_at_version(
+        &self,
+        run_id: &str,
+        version: u64,
+        accumulated: String,
+        truncated: bool,
+    ) -> bool {
+        match self
+            .repo
+            .append_streaming_content(run_id, version, accumulated, truncated)
+            .await
+        {
+            Ok(true) => {
+                self.notify_waiters(run_id).await;
+                true
+            }
+            Ok(false) => false,
+            Err(err) => {
+                error!(run_id, error = %err, "chat run append_streaming_content failed");
+                false
+            }
+        }
+    }
+
+    /// Append `chunk` onto `current` with the 1 MiB char-boundary-safe
+    /// truncation rule; returns the new accumulated string plus the
+    /// truncated flag.
+    fn append_chunk_with_truncation(
+        current: &str,
+        truncated: bool,
+        chunk: &str,
+    ) -> (String, bool) {
+        let mut accumulated = current.to_string();
+        let mut truncated = truncated;
         let remaining = MAX_CONTENT_BYTES.saturating_sub(accumulated.len());
         if remaining == 0 {
             truncated = true;
@@ -280,33 +404,11 @@ impl ChatRunStore {
             accumulated.push_str(&chunk[..boundary]);
             truncated = true;
         }
-
-        match self
-            .repo
-            .append_streaming_content(run_id, current.version, accumulated, truncated)
-            .await
-        {
-            Ok(true) => {
-                self.notify_waiters(run_id).await;
-                true
-            }
-            Ok(false) => false,
-            Err(err) => {
-                error!(run_id, error = %err, "chat run append_delta failed");
-                false
-            }
-        }
+        (accumulated, truncated)
     }
 
-    pub async fn replace_content(&self, run_id: &str, content: &str) -> bool {
-        let Some(current) = self.get(run_id).await else {
-            return false;
-        };
-        if current.state.is_terminal() {
-            return false;
-        }
-        let was_pending = current.state == ChatRunState::Pending;
-
+    /// Cap `content` at the 1 MiB char-boundary-safe truncation rule.
+    fn truncate_content(content: &str) -> (String, bool) {
         let mut next = String::new();
         let mut truncated = false;
         if content.len() <= MAX_CONTENT_BYTES {
@@ -319,28 +421,7 @@ impl ChatRunStore {
             next.push_str(&content[..boundary]);
             truncated = true;
         }
-
-        let changed =
-            current.accumulated_content != next || current.content_truncated != truncated || was_pending;
-        if !changed {
-            return false;
-        }
-
-        match self
-            .repo
-            .append_streaming_content(run_id, current.version, next, truncated)
-            .await
-        {
-            Ok(true) => {
-                self.notify_waiters(run_id).await;
-                true
-            }
-            Ok(false) => false,
-            Err(err) => {
-                error!(run_id, error = %err, "chat run replace_content failed");
-                false
-            }
-        }
+        (next, truncated)
     }
 
     pub async fn mark_completed(&self, run_id: &str, final_text: Option<&str>) -> bool {
@@ -458,6 +539,11 @@ impl ChatRunStore {
         Vec<(String, DirectChatClientKind)>,
         Vec<(String, DirectChatClientKind)>,
     ) {
+        // Reclaim idle notifier entries every tick. This runs before the repo
+        // sweeps so it always fires (even if a repo call below errors) and is
+        // the only reclaim path for detached runs that retire without a CAS.
+        self.sweep_idle_notifiers().await;
+
         let mut expired = Vec::new();
         let active = match self.repo.list_active(now_ms_v).await {
             Ok(active) => active,
@@ -519,6 +605,21 @@ pub(crate) fn direct_chat_client_kind(client: Option<&str>) -> DirectChatClientK
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bcs_service_api::ChatResponseMode;
+
+    fn record(run_id: &str) -> ChatRunRecord {
+        ChatRunRecord::new(
+            run_id.to_string(),
+            "bot".to_string(),
+            "from".to_string(),
+            "sk".to_string(),
+            0,
+            u64::MAX,
+            Some("http-chat-async".to_string()),
+            ChatResponseMode::Full,
+            ChatRunCompletionPolicy::WaitForFinal,
+        )
+    }
 
     #[test]
     fn direct_chat_client_kind_uses_closed_low_cardinality_mapping() {
@@ -540,5 +641,112 @@ mod tests {
             direct_chat_client_kind(Some("custom-client")),
             DirectChatClientKind::Unknown
         );
+    }
+
+    #[tokio::test]
+    async fn cleanup_expired_reclaims_idle_notifier_for_retired_detached_run() {
+        let store = ChatRunStore::new();
+        // Acked detached-delivery run, eligible for retirement (ack far in past).
+        let mut rec = record("detached");
+        rec.completion_policy = ChatRunCompletionPolicy::DetachDeliveryAck;
+        rec.state = ChatRunState::Running;
+        rec.delivery_ack_at_ms = Some(0);
+        store.create(rec).await.unwrap();
+
+        // A status long-poll registers a node-local notifier entry; the poller
+        // then returns (no parked waiter) leaving the entry idle.
+        let _ = store
+            .wait_update("detached", 1, Duration::from_millis(20))
+            .await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            1,
+            "wait_update poll should register a notifier entry"
+        );
+
+        // The 10s cleanup retires the acked detached run and must also reclaim
+        // its now-idle notifier. Without the sweep this entry leaks, because the
+        // run retires as Dropped without a terminal CAS, so drop_notifier is
+        // never called for it.
+        let _ = store.cleanup_expired(5_000_000, 5_000_000).await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            0,
+            "idle notifier for a retired detached run must be swept"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_reclaims_idle_notifier_independent_of_retirement() {
+        // The run stays alive in the repo (nothing is overdue or past
+        // retention), yet its notifier must be reclaimed once the poller has
+        // left — idleness alone is the criterion. This independence from the
+        // retirement path is what makes the sweep effective in MySQL production,
+        // where detached retirement is delegated to platform cleanup.
+        let store = ChatRunStore::new();
+        store.create(record("alive")).await.unwrap();
+        let _ = store
+            .wait_update("alive", 1, Duration::from_millis(20))
+            .await;
+        assert_eq!(store.notifiers.read().await.len(), 1);
+        // now=0, retention=max: nothing expires, nothing retires — only the sweep runs.
+        let _ = store.cleanup_expired(0, u64::MAX).await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            0,
+            "idle notifier must be reclaimed even when the run still exists"
+        );
+        assert!(
+            store.get("alive").await.is_some(),
+            "the run itself must be untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_keeps_notifier_for_parked_waiter() {
+        // A parked long-poll holds a clone of the notifier, so strong_count > 1
+        // and the sweep must not evict it. We verify by waking the parked
+        // waiter via notify_waiters and asserting it resolves promptly rather
+        // than waiting out its timeout (which would mean the entry was evicted
+        // and the wake became a no-op).
+        let store = Arc::new(ChatRunStore::new());
+        store.create(record("parked")).await.unwrap();
+        let s = store.clone();
+        let waiter = tokio::spawn(async move {
+            s.wait_update("parked", 1, Duration::from_secs(2)).await
+        });
+        // Let the poller reach the `notified().await` park point.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let _ = store.cleanup_expired(0, u64::MAX).await;
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            1,
+            "notifier for a parked waiter must survive the sweep"
+        );
+
+        store.mark_completed("parked", Some("done")).await;
+        let resolved = tokio::time::timeout(Duration::from_millis(300), waiter)
+            .await
+            .expect("parked waiter should wake via notify, not wait for timeout");
+        assert_eq!(resolved.unwrap().unwrap().state, ChatRunState::Completed);
+    }
+
+    #[tokio::test]
+    async fn sweep_coexists_with_terminal_cas_drop() {
+        // A terminal CAS already drops the notifier via apply_terminal_cas; the
+        // sweep must be an idempotent no-op on the already-empty map.
+        let store = ChatRunStore::new();
+        store.create(record("term")).await.unwrap();
+        let _ = store.wait_update("term", 1, Duration::from_millis(10)).await;
+        assert_eq!(store.notifiers.read().await.len(), 1);
+        assert!(store.mark_completed("term", Some("done")).await);
+        assert_eq!(
+            store.notifiers.read().await.len(),
+            0,
+            "terminal CAS drops the notifier"
+        );
+        let _ = store.cleanup_expired(0, u64::MAX).await;
+        assert_eq!(store.notifiers.read().await.len(), 0);
     }
 }

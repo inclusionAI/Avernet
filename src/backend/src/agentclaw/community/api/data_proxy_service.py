@@ -1,13 +1,17 @@
-"""Service API Protocol for the aicoding data-proxy."""
+"""Service API Protocol for the aicoding data-proxy.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/aicoding/data_proxy_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.aicoding.data_proxy_service_protocol import (
+    DataProxyServiceProtocol,
+)
 
-
-@runtime_checkable
-class DataProxyServiceProtocol(Protocol):
-    """Service API for forwarding ``/api/aicoding/data-proxy/*`` requests to the engine ``/data/*`` leg."""
-
-    async def forward(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def resolve_engine_base(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "DataProxyServiceProtocol",
+]

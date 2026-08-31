@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import string
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -69,11 +68,29 @@ def _wait_for_ready(
     )
 
 
-def _render_template(template_id: str, variables: dict[str, str]) -> str:
-    """Read ``template/{template_id}.yaml`` and substitute ``${VAR}`` placeholders."""
+def _render_template(template_id: str, variables: dict) -> str:
+    """Render ``template/{template_id}.yaml`` as a Jinja2 template."""
+    from jinja2 import Template
+
     template_path = _TEMPLATE_DIR / f"{template_id}.yaml"
     raw = template_path.read_text(encoding="utf-8")
-    return string.Template(raw).safe_substitute(variables)
+    return Template(raw).render(**variables)
+
+
+def _parse_envs_string(raw: str) -> dict[str, str]:
+    """Parse a ``key1=val1;key2=val2;`` string into a dict.
+
+    Empty or whitespace-only entries are skipped. Returns ``{}`` when
+    the input is empty.
+    """
+    result: dict[str, str] = {}
+    for pair in raw.split(";"):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        key, _, value = pair.partition("=")
+        result[key.strip()] = value.strip()
+    return result
 
 
 def _build_template_vars(
@@ -83,20 +100,11 @@ def _build_template_vars(
     storage: Storage | None = None,
     resource_spec: ResourceSpecification | None = None,
     ttl_in_minutes: float | int | None = None,
-) -> dict[str, str]:
-    """Build runtime variables for template rendering.
-
-    ``images`` is a mapping of container name → image address (e.g.
-    ``{"avernet-agent": "...", "avernet-sidecar": "...", "init": "...",
-    "nas-server": "..."}``). Each is exposed as ``${AGENT_IMAGE}``,
-    ``${SIDECAR_IMAGE}``, ``${INIT_IMAGE}``, ``${NAS_SERVER}`` respectively.
-
-    ``ttl_in_minutes``, when provided, is exposed as
-    ``${TTL_EXPIRATION_TIMESTAMP}`` — the absolute expiry deadline (ms epoch,
-    ``now + ttl_in_minutes*60*1000``) recorded in the Pod's
-    ``avernet.arcasandbox/ttl_expiration_timestamp`` annotation. An empty string
-    (no TTL) renders an empty annotation value.
-    """
+    image: str | None = None,
+    envs: dict[str, str] | None = None,
+    outbound_operation_rule: OutBoundOperationRule | None = None,
+) -> dict:
+    """Build Jinja2 template variables for rendering."""
     images = images or {}
     storage_id = (
         _sanitize_pod_name(storage.storage_id)
@@ -113,18 +121,21 @@ def _build_template_vars(
             int(time.time() * 1000 + ttl_in_minutes * 60 * 1000)
         )
     return {
-        "UID": uid,
-        "NAMESPACE": namespace,
-        "AGENT_IMAGE": images.get("avernet-agent", ""),
-        "SIDECAR_IMAGE": images.get("avernet-sidecar", ""),
-        "INIT_IMAGE": images.get("init", ""),
-        "NAS_SERVER": images.get("nas-server", ""),
-        "STORAGE_ID": storage_id,
-        "STORAGE_SIZE": storage_size,
-        "MOUNT_PATH": mount_path,
-        "CPU": cpu,
-        "MEMORY": memory,
-        "TTL_EXPIRATION_TIMESTAMP": ttl_expiration_timestamp,
+        "uid": uid,
+        "namespace": namespace,
+        "container_name": "avernet-agent",
+        "agent_image": image or images.get("avernet-agent", ""),
+        "sidecar_image": images.get("avernet-sidecar", ""),
+        "init_image": images.get("init", ""),
+        "nas_server": images.get("nas-server", ""),
+        "storage_id": storage_id,
+        "storage_size": storage_size,
+        "mount_path": mount_path,
+        "cpu": cpu,
+        "memory": memory,
+        "ttl_expiration_timestamp": ttl_expiration_timestamp,
+        "envs": envs or {},
+        "header_rules_yaml": _convert_outbound_rules(outbound_operation_rule),
     }
 
 
@@ -175,7 +186,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         config: ArcaCredentials | None = None,
         *,
         namespace: str = "default",
-        default_images: dict[str, str] | None = None,
+        default_images: dict[str, dict[str, str]] | None = None,
         arca_utils: ArcaUtils | None = None,
     ) -> None:
         self._config = config
@@ -215,13 +226,16 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         resource_spec: ResourceSpecification | None,
         outbound_operation_rule: OutBoundOperationRule | None = None,
         ttl_in_minutes: float | int | None = None,
-    ) -> tuple[str, str]:
+        envs: dict[str, str] | None = None,
+        image: str | None = None,
+    ) -> str:
         """Render the template YAML and apply it to the cluster.
 
-        Returns ``(deployment_name, container_name)`` extracted from the
-        rendered template so callers need not hard-code them.
+        Returns the deployment name.
         """
-        images = self._default_images.get(template_id, {})
+        images = self._default_images.get(template_id) or {}
+        config_envs = _parse_envs_string(images.pop("env", ""))
+        merged_envs = {**config_envs, **(envs or {})}
         variables = _build_template_vars(
             uid,
             namespace,
@@ -229,26 +243,13 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             storage=storage,
             resource_spec=resource_spec,
             ttl_in_minutes=ttl_in_minutes,
-        )
-        variables["HEADER_RULES_YAML"] = _convert_outbound_rules(
-            outbound_operation_rule
+            image=image,
+            envs=merged_envs,
+            outbound_operation_rule=outbound_operation_rule,
         )
         rendered = _render_template(template_id, variables)
 
         docs = list(yaml.safe_load_all(rendered))
-        deployment_name = ""
-        container_name = ""
-        resource_kinds = []
-        for doc in docs:
-            if not doc:
-                continue
-            kind = doc.get("kind", "")
-            resource_kinds.append(f"{kind}/{doc.get('metadata', {}).get('name', '')}")
-            if kind == "Deployment":
-                deployment_name = doc["metadata"]["name"]
-                containers = doc["spec"]["template"]["spec"]["containers"]
-                container_name = containers[0]["name"]
-
         client = self._client()
         create_from_yaml(
             k8s_client=client,
@@ -256,14 +257,15 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             namespace=namespace,
         )
 
+        deployment_name = f"avernet-agent-{uid}"
         logger.info(
-            "[aliyun_ack] template applied uid=%s namespace=%s deployment=%s resources=[%s]",
+            "[aliyun_ack] template applied uid=%s namespace=%s deployment=%s\n%s",
             uid,
             namespace,
             deployment_name,
-            ", ".join(resource_kinds),
+            rendered,
         )
-        return deployment_name, container_name
+        return deployment_name
 
     def create_sync_sandbox(
         self,
@@ -282,7 +284,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         namespace = self._get_namespace()
         sandbox_id = f"{template_id}-{uuid.uuid4().hex[:12]}"
         uid = _sanitize_pod_name(sandbox_id)
-        deployment_name, container_name = self._create_deployment(
+        deployment_name = self._create_deployment(
             uid,
             template_id,
             namespace,
@@ -290,6 +292,8 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             resource_spec,
             outbound_operation_rule=outbound_operation_rule,
             ttl_in_minutes=ttl_in_minutes,
+            envs=envs,
+            image=image,
         )
         try:
             core_api = CoreV1Api(self._client())
@@ -306,6 +310,12 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
                 pass
             raise
 
+        resource_names = {
+            "Deployment": deployment_name,
+            "ConfigMap": f"envoy-header-rules-{uid}",
+            "NetworkPolicy": f"avernet-agent-netpol-{uid}",
+            "container_name": "avernet-agent",
+        }
         device = AliyunAckSandbox(
             sandbox_id=sandbox_id,
             namespace=namespace,
@@ -313,7 +323,8 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             client=self._client(),
             pod_name=pod_name,
             deployment_name=deployment_name,
-            container_name=container_name,
+            container_name="avernet-agent",
+            resource_names=resource_names,
             image=image or "",
             ttl_in_minutes=ttl_in_minutes,
         )
@@ -334,33 +345,24 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             pods = core_api.list_namespaced_pod(
                 namespace=namespace, label_selector=f"biz-id={uid}"
             )
-            if not pods.items:
-                raise RuntimeError(
-                    f"Sandbox {sandbox_id} not found (no pod for biz-id={uid})"
-                )
-            pod = pods.items[0]
-            pod_name = pod.metadata.name
         except ApiException as e:
             raise RuntimeError(f"Sandbox {sandbox_id} not found ({e.status})") from e
-
-        template_id = "aliyun_ack"
-        if pod.metadata and pod.metadata.labels:
-            template_id = pod.metadata.labels.get(
-                "avernet.arcasandbox/template", "aliyun_ack"
+        if not pods.items:
+            raise RuntimeError(
+                f"Sandbox {sandbox_id} not found (no pod for biz-id={uid})"
             )
 
-        deployment_name = ""
-        if pod.metadata and pod.metadata.owner_references:
-            for ref in pod.metadata.owner_references:
-                if ref.kind == "ReplicaSet":
-                    deployment_name = ref.name.rsplit("-", 1)[0]
-                    break
+        pod = pods.items[0]
+        meta = pod.metadata or None
+        pod_name = meta.name if meta else sandbox_id
+        labels = meta.labels if meta and meta.labels else {}
+        template_id = labels.get("avernet.arcasandbox/template", "aliyun_ack")
+        deployment_name = f"avernet-agent-{uid}"
+        container_name = "avernet-agent"
 
-        container_name = ""
-        if pod.spec and pod.spec.containers:
-            container_name = pod.spec.containers[0].name
-
-        logger.info("[aliyun_ack] sandbox connected sandbox_id=%s", sandbox_id)
+        logger.info(
+            "[aliyun_ack] sandbox connected sandbox_id=%s pod=%s", sandbox_id, pod_name
+        )
         return AliyunAckSandbox(
             sandbox_id=sandbox_id,
             namespace=namespace,
@@ -371,6 +373,12 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             container_name=container_name,
             image="",
             ttl_in_minutes=None,
+            resource_names={
+                "Deployment": deployment_name,
+                "ConfigMap": f"envoy-header-rules-{uid}",
+                "NetworkPolicy": f"avernet-agent-netpol-{uid}",
+                "container_name": container_name,
+            },
         )
 
     def resolve_ws_conn_info(
@@ -416,35 +424,19 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         """Release any ACK clients."""
 
     def delete_storage(self, storage_id: str, tenant_name: str) -> bool:
-        namespace = self._get_namespace()
-        pvc_name = _sanitize_pod_name(storage_id)
         logger.info(
-            "[aliyun_ack] delete_storage storage_id=%s tenant_name=%s pvc=%s",
+            "[aliyun_ack] delete_storage skipped (NAS mount) "
+            "storage_id=%s tenant_name=%s",
             storage_id,
             tenant_name,
-            pvc_name,
         )
-        try:
-            core_api = CoreV1Api(self._client())
-            core_api.delete_namespaced_persistent_volume_claim(
-                name=pvc_name, namespace=namespace
-            )
-            return True
-        except ApiException as e:
-            if e.status == 404:
-                logger.info(
-                    "[aliyun_ack] delete_storage: pvc %s not found (404), idempotent",
-                    pvc_name,
-                )
-                return True
-            logger.warning("[aliyun_ack] delete_storage failed (%s)", e.status)
-            return False
+        return True
 
 
 def aliyun_ack_plugin_factory(
     _credentials=None,
     *,
-    default_images: dict[str, str] | None = None,
+    default_images: dict[str, dict[str, str]] | None = None,
     arca_utils: ArcaUtils | None = None,
 ):
     """Return a callable that builds AliyunAckSandboxPlugin with config baked in.

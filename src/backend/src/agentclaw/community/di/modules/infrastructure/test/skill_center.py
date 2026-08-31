@@ -1,4 +1,5 @@
 """Skill-center-client concern — test / singlebox binding (local stub)."""
+
 from __future__ import annotations
 
 from injector import Module, provider, singleton
@@ -7,6 +8,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
+from agentclaw.community.plugin_api.space_skill_source import SpaceSkillSourcePlugin
 
 
 logger = get_logger()
@@ -41,3 +43,12 @@ class TestSkillCenterClientModule(Module):
         from agentclaw.community.plugins.local.skill_scanner import LocalSkillScanner
 
         return LocalSkillScanner()
+
+    @singleton
+    @provider
+    def space_skill_source(self) -> SpaceSkillSourcePlugin:
+        from agentclaw.community.plugins.local.space_skill_source import (
+            LocalSpaceSkillSource,
+        )
+
+        return LocalSpaceSkillSource()

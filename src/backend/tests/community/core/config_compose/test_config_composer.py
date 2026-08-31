@@ -47,6 +47,7 @@ _STORES = {
     "skill-repo": StoreRef(type="oss", bucket="antsys-agentclaw-prod", base="bolt_shared/skills-repo"),
     "user-nas": StoreRef(type="nas", base="/home/admin/nfs/bot-data"),
     "bot-data": StoreRef(type="oss", bucket="antsys-agentclaw-prod", base="teclaw/prod/bolt_data"),
+    "skill-center": StoreRef(type="oss", bucket="antsys-agentclaw-prod", base="bolt_shared/skills-center"),
     "unused": StoreRef(type="oss", bucket="never-referenced"),
 }
 
@@ -158,6 +159,47 @@ def test_compose_leaves_engine_ext_empty_for_producer() -> None:
 def test_compose_live_bot_has_no_version() -> None:
     artifact = _composer(_FakeCollector()).compose(_req(version=None))
     assert artifact.version is None
+
+
+def test_teclaw_v4_adds_skill_center_store_only_when_exact_ref_is_used() -> None:
+    artifact = _composer(
+        _FakeCollector(
+            skills=[
+                CollectedSkill(
+                    "center-weather",
+                    "shared",
+                    store="skill-center",
+                    path="00000000-0000-4000-8000-000000000010/1.0.0",
+                )
+            ]
+        )
+    ).compose(_req())
+
+    assert artifact.schema_version == 4
+    assert artifact.skills[0].store == "skill-center"
+    assert artifact.skills[0].path == (
+        "00000000-0000-4000-8000-000000000010/1.0.0"
+    )
+    assert artifact.stores["skill-center"].base == "bolt_shared/skills-center"
+
+
+def test_referenced_center_store_missing_fails_closed() -> None:
+    composer = ConfigComposer(
+        mcporter_composer=McporterComposer(),
+        collector=_FakeCollector(
+            skills=[
+                CollectedSkill(
+                    "center-weather", "shared", "skill-center", "uuid/1.0.0"
+                )
+            ]
+        ),
+        stores={"bot-data": _STORES["bot-data"]},
+    )
+
+    import pytest
+
+    with pytest.raises(ValueError, match="unknown store"):
+        composer.compose(_req())
 
 
 def test_compose_empty_bot_yields_empty_collections() -> None:

@@ -16,11 +16,12 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.config import ConfigRepositoryProtocol
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.system_config.system_config_service_protocol import SystemConfigServiceProtocol
 
 logger = get_logger()
 
 
-class SystemConfigService:
+class SystemConfigService(SystemConfigServiceProtocol):
     """系统配置服务
 
     提供通用配置管理功能：

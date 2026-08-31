@@ -98,6 +98,18 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/skills"),
     ("post", "/openapi/v1/bots/{bot_id}/skills"),
     ("post", "/openapi/v1/bots/{bot_id}/skills/upload-folder"),
+    (
+        "post",
+        "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    ),
+    (
+        "get",
+        "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references",
+    ),
+    (
+        "get",
+        "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references/{reference_id}",
+    ),
     # The product chat reads address a bot that may be shared with the acting
     # user, so they take the owner half of ``(owner, bot_id)`` for the same
     # reason and with the same default — the caller's own bot.

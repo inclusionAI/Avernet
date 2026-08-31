@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator, Mapping, Optional, Union
 
 import httpx
+from agentclaw.community.core.aicoding.data_proxy_service_protocol import DataProxyServiceProtocol
 
 log = logging.getLogger("aicoding-data-proxy")
 
@@ -218,7 +219,7 @@ async def _drain(
 # ── Service ───────────────────────────────────────────────────────────────
 
 
-class DataProxyService:
+class DataProxyService(DataProxyServiceProtocol):
     """Forwards requests to ``{engine_base}/data/{subpath}``.
 
     No constructor dependencies — the service is a pure transparent

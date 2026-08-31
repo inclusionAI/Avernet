@@ -1,19 +1,17 @@
-"""Service API Protocol for MCP per-user unified config."""
+"""Service API Protocol for MCP per-user unified config.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/mcp/mcp_config_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.mcp.mcp_config_service_protocol import (
+    MCPConfigServiceProtocol,
+)
 
-
-@runtime_checkable
-class MCPConfigServiceProtocol(Protocol):
-    """Service API for per-user MCP config (get / validate / update / rollback)."""
-
-    def get_user_unified_config(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def validate_headers_for_mcp(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def update_user_unified_config(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def rollback_unified_config(self, *args: Any, **kwargs: Any) -> Any: ...
-
-    def build_mcp_sync_payload(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "MCPConfigServiceProtocol",
+]

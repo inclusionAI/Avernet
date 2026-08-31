@@ -6,13 +6,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use bcs_service_api::application::session::{
-    CreateOrReactivateCommand, CreateOrReactivateOutcome, SessionManagementService,
-    SessionUseCaseError,
+    ClaimSessionCallbackCommand, ClaimSessionCallbackOutcome,
+    CompleteSessionCallbackCommand, CreateOrReactivateCommand, CreateOrReactivateOutcome,
+    SessionManagementService, SessionUseCaseError,
 };
 use bcs_service_api::core::session::new_session_id;
 use bcs_service_api::port::repo::{
-    AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent,
-    GroupRepoPort, RemoveSessionParticipantWithEvent, SessionRepoPort,
+    AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
+    CompleteSessionWithEvent, CreateSessionWithEvent, GroupRepoPort,
+    RemoveSessionParticipantWithEvent, SessionRepoPort,
 };
 use bcs_service_api::port::{EventRecordFactoryPort, NewEvent};
 use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
@@ -105,12 +107,37 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         self.inner.list_running_service(offset, limit).await
     }
 
+    async fn list_recoverable_callbacks(
+        &self,
+        now_ms: u64,
+        after_session_id: Option<&str>,
+        limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        self.inner
+            .list_recoverable_callbacks(now_ms, after_session_id, limit)
+            .await
+    }
+
     async fn update_callback_status(
         &self,
         session_id: &str,
         status: &str,
     ) -> Result<(), SessionUseCaseError> {
         self.inner.update_callback_status(session_id, status).await
+    }
+
+    async fn claim_callback(
+        &self,
+        command: ClaimSessionCallbackCommand,
+    ) -> Result<Option<ClaimSessionCallbackOutcome>, SessionUseCaseError> {
+        self.inner.claim_callback(command).await
+    }
+
+    async fn complete_callback(
+        &self,
+        command: CompleteSessionCallbackCommand,
+    ) -> Result<bool, SessionUseCaseError> {
+        self.inner.complete_callback(command).await
     }
 
     async fn complete_if_running(
@@ -442,12 +469,77 @@ impl SessionManagementService for SessionManagementServiceImpl {
         Ok(self.repo.list_running_service(offset, limit).await)
     }
 
+    async fn list_recoverable_callbacks(
+        &self,
+        now_ms: u64,
+        after_session_id: Option<&str>,
+        limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        Ok(self
+            .repo
+            .list_recoverable_callbacks(now_ms, after_session_id, limit)
+            .await?)
+    }
+
     async fn update_callback_status(
         &self,
         session_id: &str,
         status: &str,
     ) -> Result<(), SessionUseCaseError> {
         Ok(self.repo.update_callback_status(session_id, status).await?)
+    }
+
+    async fn claim_callback(
+        &self,
+        command: ClaimSessionCallbackCommand,
+    ) -> Result<Option<ClaimSessionCallbackOutcome>, SessionUseCaseError> {
+        if command.expected_activation_count < 1
+            || command.lease_owner.is_empty()
+            || command.lease_until_ms <= command.now_ms
+        {
+            return Err(SessionUseCaseError::InvalidParams(
+                "callback claim requires a positive activation, non-empty owner, and future lease"
+                    .to_string(),
+            ));
+        }
+        Ok(self
+            .repo
+            .claim_callback(ClaimSessionCallback {
+                session_id: command.session_id,
+                expected_activation_count: command.expected_activation_count,
+                lease_owner: command.lease_owner,
+                now_ms: command.now_ms,
+                lease_until_ms: command.lease_until_ms,
+            })
+            .await?
+            .map(|claim| ClaimSessionCallbackOutcome {
+                lease_token: claim.lease_token,
+            }))
+    }
+
+    async fn complete_callback(
+        &self,
+        command: CompleteSessionCallbackCommand,
+    ) -> Result<bool, SessionUseCaseError> {
+        if !matches!(
+            command.terminal_status.as_str(),
+            "succeeded" | "partial_failed" | "failed" | "not_applicable"
+        ) {
+            return Err(SessionUseCaseError::InvalidParams(format!(
+                "invalid terminal callback status: {}",
+                command.terminal_status
+            )));
+        }
+        Ok(self
+            .repo
+            .complete_callback(CompleteSessionCallback {
+                session_id: command.session_id,
+                expected_activation_count: command.expected_activation_count,
+                lease_owner: command.lease_owner,
+                lease_token: command.lease_token,
+                terminal_status: command.terminal_status,
+            })
+            .await?)
     }
 
     async fn complete_if_running(

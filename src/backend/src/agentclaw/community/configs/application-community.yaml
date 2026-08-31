@@ -22,6 +22,7 @@ user_config:
     openclaw_root: "./data/workspace/openclaw"
     claude_code_root: "./data/workspace/claude_code"
     aicoding_root: "./data/workspace/aicoding"
+    hermes_root: "./data/workspace/hermes"
 
   # Operator whitelist gating admin endpoints. Empty = no privileged operators
   # by default; a community deployment lists its own admin subject ids.
@@ -100,7 +101,7 @@ user_config:
   # tenant/template are neutral placeholders — set per deployment.
   baas:
     api_base_url: "${BASS_URL:-}"
-    tenant: "community"
+    tenant: "${BAAS_TENANT:-}"
     template_uuid: "${BAAS_TEMPLATE_ID:-}"
     # ACK/ECI deployment — run the open-source engine image on managed
     # Kubernetes via AckDeployConfigComposer, not the managed bot image.
@@ -217,10 +218,12 @@ user_config:
   #
   #   secret_names:
   #     dormant_internal_token: "dormant_internal_token"   # gates /api/internal/dormant/*
+  #     skill_center_internal_token: "skill_center_internal_token"  # gates /api/internal/skill-center/*
   #     aiworkbench_repo_url: "aiworkbench_repo_url"       # skills source repo URL
   #
   # ...each read from "{env_prefix}{NAME}_VALUE", so with the prefix above:
   #     AGENTCLAW_SECRET_DORMANT_INTERNAL_TOKEN_VALUE
+  #     AGENTCLAW_SECRET_SKILL_CENTER_INTERNAL_TOKEN_VALUE
   #     AGENTCLAW_SECRET_AIWORKBENCH_REPO_URL_VALUE
   #
   # The gateway principal signing key needs NO entry here — its name already

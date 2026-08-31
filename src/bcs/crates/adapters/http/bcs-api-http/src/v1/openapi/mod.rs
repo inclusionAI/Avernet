@@ -20,6 +20,7 @@ pub fn protected_router() -> Router<ApiState> {
             .merge(routes::group::router())
             .merge(routes::session::router())
             .merge(routes::invitation::router())
+            .merge(routes::register::router())
             .merge(routes::friendship::router())
             .merge(routes::friend_connection::router())
             .merge(routes::channel::router()),
@@ -27,5 +28,12 @@ pub fn protected_router() -> Router<ApiState> {
 }
 
 pub fn public_router() -> Router<ApiState> {
+    // v1::router merges this WITHOUT the "/openapi/v1/collaboration" nest the
+    // protected router uses (nesting happens here, not at the merge site —
+    // compare internal::public_router, whose routes carry full paths).
     Router::new()
+        .nest(
+            "/openapi/v1/collaboration",
+            routes::register::public_router(),
+        )
 }

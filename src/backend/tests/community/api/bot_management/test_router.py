@@ -132,7 +132,6 @@ def mock_bot_service():
     svc.delete_bot.return_value = None
     svc.restart_bot.return_value = BOT_SAMPLE
     svc.check_bot_name_exists.return_value = False
-    svc.switch_engine.return_value = BOT_SAMPLE
     svc.get_engine_paths.return_value = {"openclaw": "/some/path"}
     svc.get_bot_work_path.return_value = "/some/path"
     svc.get_bot_config_path.return_value = "/some/config"
@@ -928,56 +927,6 @@ class TestRestartBot:
 
 
 # ---------------------------------------------------------------------------
-# POST /api/bots/switch-engine
-# ---------------------------------------------------------------------------
-
-class TestSwitchEngine:
-    def test_success(self, client):
-        tc, svc, _ = client
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default", "engine_type": "openclaw"})
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-
-    def test_missing_bot_id(self, client):
-        tc, svc, _ = client
-        resp = tc.post("/api/bots/switch-engine", json={"engine_type": "openclaw"})
-        assert resp.json()["error_code"] == 400
-
-    def test_missing_engine_type(self, client):
-        tc, svc, _ = client
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default"})
-        assert resp.json()["error_code"] == 400
-
-    def test_bot_not_found(self, client):
-        tc, svc, _ = client
-        svc.switch_engine.side_effect = BotNotFoundError("nope")
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "missing", "engine_type": "openclaw"})
-        assert resp.json()["error_code"] == 404
-
-    def test_service_error(self, client):
-        tc, svc, _ = client
-        svc.switch_engine.side_effect = BotServiceError("fail")
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default", "engine_type": "openclaw"})
-        assert resp.json()["error_code"] == 400
-
-    def test_default_teclaw_error_preserves_business_message(self, client):
-        tc, svc, _ = client
-        svc.switch_engine.side_effect = DefaultBotTeclawNotAllowedError()
-
-        resp = tc.post(
-            "/api/bots/switch-engine",
-            json={"bot_id": "default", "engine_type": "teclaw"},
-        )
-
-        assert resp.json() == {
-            "success": False,
-            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
-            "error_code": 400,
-            "data": None,
-        }
-
-
-# ---------------------------------------------------------------------------
 # POST /api/bots/restart-scheduler
 # ---------------------------------------------------------------------------
 
@@ -1492,15 +1441,16 @@ class TestCreateBot:
         # openclaw (default engine) carries no CLI items — fail-closed for non-aicoding
         assert passport_kwargs["cli_items"] == []
 
-    def test_create_passport_carries_default_cli_items_for_aicoding(
+    def test_create_passport_folds_plain_aicoding_engine_into_claude_code(
         self, mock_bot_service, mock_passport
     ):
-        """aicoding engine create path carries the 9 default CLI items.
+        """Plain engine_type=aicoding folds into claude_code with no CLI items.
 
-        Mirrors test_create_filters_local_mcp_codes_before_passport but posts
-        engine_type=aicoding, then asserts the passport call receives the full
-        default CLI list (verifies router.py wiring end-to-end, not just the
-        _defaults getter in isolation).
+        The old link's engine_type=aicoding is a legacy internal-engine value:
+        the bot is created on the real engine (claude_code), and the aicoding
+        default CLI grants follow the aicoding *form* — a plain no-template
+        bot has no form, so it is authorized nothing (fail-closed), like the
+        openclaw default in the sibling test above.
         """
         from agentclaw.community.adapters.http.bot_management.router import router
         import agentclaw.community.adapters.http.bot_management.router as router_module
@@ -1530,9 +1480,56 @@ class TestCreateBot:
 
         assert resp.json()["success"] is True
         passport_kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
-        assert passport_kwargs["engine_type"] == "aicoding"
-        # MCP codes still passed through independently of CLI items
+        assert passport_kwargs["engine_type"] == "claude_code"  # folded alias
         assert passport_kwargs["mcp_codes"] == ["mcp.remote.1"]
+        assert passport_kwargs["cli_items"] == []
+
+    def test_create_passport_carries_aicoding_cli_items_for_form_marked_template(
+        self, mock_bot_service, mock_passport
+    ):
+        """Template-backed engine_type=aicoding keeps the 9 default CLI items.
+
+        The fold records the server-managed engine_form marker in the template
+        snapshot and the default-capability bucket resolution reads it, so the
+        passport still authorizes the full aicoding CLI set — end-to-end
+        through the router, not just the _defaults getter in isolation.
+        """
+        from agentclaw.community.adapters.http.bot_management.router import router
+        import agentclaw.community.adapters.http.bot_management.router as router_module
+
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_request_context] = lambda: _make_ctx()
+        mock_auth = MagicMock()
+        mock_auth.authorize_entity_access = AsyncMock(
+            side_effect=lambda ctx, requested_entity_id, requested_entity_type: (
+                requested_entity_id, requested_entity_type,
+            )
+        )
+        attach_injector(app, Injector([_bind_bot_service(
+            mock_bot_service,
+            bot_repo=MagicMock(),
+            passport=mock_passport,
+            auth=mock_auth,
+            auth_rel=MagicMock(),
+            skill_set_factory=_stub_skill_set_factory(["mcp.remote.1"]),
+        )]))
+
+        with patch.object(router_module, "generate_bot_id", return_value="default"):
+            resp = TestClient(app).post(
+                "/api/bots",
+                json={
+                    "bot_name": "NewBot",
+                    "engine_type": "aicoding",
+                    "template_type": "applicationCoding",
+                    "template_config": {"devflow_workflow": "x"},
+                },
+            )
+
+        assert resp.json()["success"] is True
+        passport_kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
+        assert passport_kwargs["engine_type"] == "claude_code"  # folded alias
+        # The aicoding form (marker in the template snapshot) keeps the CLI set.
         cli_codes = [c["cli_code"] for c in passport_kwargs["cli_items"]]
         assert len(cli_codes) == 9
         assert "antcode-cli" in cli_codes

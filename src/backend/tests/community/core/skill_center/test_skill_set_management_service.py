@@ -39,6 +39,7 @@ from agentclaw.community.core.skill_center.skill_set_batch import (
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
 )
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
@@ -511,10 +512,31 @@ class _RuntimeFactoryService:
         self.mcp_projections: list[
             tuple[frozenset[str], frozenset[str], set[str]]
         ] = []
+        # What each delivery was handed as the already-resolved MCP set. A
+        # whole-artifact delivery composes from the database, so this is what
+        # decides whether that compose re-reads what plan resolution read.
+        self.delivered_effective_mcps: list[list[dict] | None] = []
 
-    async def project_skills(self, *, desired_skills: list[dict]) -> bool:
+    async def project_skills(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
         self.desired_skills = desired_skills
         self.runtime_syncs.append(desired_skills)
+        self.delivered_effective_mcps.append(effective_mcps)
+        return True
+
+    async def project_whole_artifact(
+        self,
+        *,
+        desired_skills: list[dict],
+        effective_mcps: list[dict] | None = None,
+    ) -> bool:
+        self.desired_skills = desired_skills
+        self.runtime_syncs.append(desired_skills)
+        self.delivered_effective_mcps.append(effective_mcps)
         return True
 
     async def sync_mcp_delivery(
@@ -649,12 +671,16 @@ class _TeclawRuntimeBots(_RuntimeBots):
 class _McpInstallations:
     def __init__(self) -> None:
         self.flush_calls: list[dict] = []
+        self.list_installed_calls: list[dict] = []
 
     def flush_installations(self, **kwargs) -> InstallationFlushPlan:
         self.flush_calls.append(kwargs)
         return InstallationFlushPlan(frozenset(), frozenset(), frozenset())
 
     def list_installed_mcps(self, *, bot_id: str, owner_id: str) -> set[str]:
+        self.list_installed_calls.append(
+            {"bot_id": bot_id, "owner_id": owner_id}
+        )
         assert bot_id == "bot-1"
         assert owner_id == "true-owner"
         return {"mcp.weather"}
@@ -718,8 +744,8 @@ class _CenterRuntimeSkills:
             RegisteredSkillAsset(
                 skill_id=7,
                 name="center-skill",
-                git_path="center://stable-skill-uuid",
-                skill_uuid="stable-skill-uuid",
+                git_path="center://public-skill",
+                skill_uuid="00000000-0000-4000-8000-000000000007",
                 sc_version_number="3.0.0",
             )
         ]
@@ -742,6 +768,7 @@ def _reader(skills, repository=None, bots=None):
         repository=repository if repository is not None else _McpInstallations(),
         bot_repo=bots if bots is not None else _RuntimeBots(),
         pool_skills=skills,
+        version_resolver=PassthroughSkillVersionResolver(),
     )
 
 
@@ -753,11 +780,13 @@ class _RuntimeLayouts:
 class _RuntimePassport:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.query_calls: list[tuple[str, str]] = []
 
     def update_passport(self, **kwargs) -> None:
         self.calls.append(kwargs)
 
     def query_passport_clis(self, bot_id: str, owner_id: str) -> list[dict]:
+        self.query_calls.append((bot_id, owner_id))
         assert (bot_id, owner_id) == ("bot-1", "true-owner")
         # This is the effective Default CLI scope after a user removed a
         # static default. A reconcile must preserve it exactly, not revive the
@@ -2464,7 +2493,7 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
     assert pool.publish_calls[0]["mappings"][0].to_dict() == {
         "corpus": "center",
         "link_name": "center-skill",
-        "skill_uuid": "stable-skill-uuid",
+            "skill_uuid": "00000000-0000-4000-8000-000000000007",
         "sc_version_number": "3.0.0",
     }
 
@@ -2529,7 +2558,7 @@ async def test_existing_coding_runtime_uses_its_resolved_layout(
 
 
 @pytest.mark.asyncio
-async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
+async def test_teclaw_v4_consumes_exact_center_through_whole_artifact():
     pool = _CenterRuntimePool()
     factory = _RuntimeFactory()
     runtime = BotRuntimeProjector(
@@ -2542,16 +2571,23 @@ async def test_teclaw_v4_rejects_center_without_any_center_runtime_request():
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
 
-    with pytest.raises(SkillSetRuntimeReconcileError):
-        await runtime.project(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            scope=ProjectionScope.everything(),
-        )
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
 
     assert pool.probe_calls == []
     assert pool.publish_calls == []
-    assert factory.service.collect_calls == []
+    assert factory.service.desired_skills == [
+        {
+            "id": "7",
+            "name": "center-skill",
+            "git_path": "center://public-skill",
+            "skill_uuid": "00000000-0000-4000-8000-000000000007",
+            "sc_version_number": "3.0.0",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -2613,20 +2649,34 @@ async def test_non_skill_projection_never_writes_skill_mappings():
     assert pool.verify_calls == []
 
 
+@pytest.mark.asyncio
+async def test_non_skill_entry_rejects_a_scope_without_mcp():
+    runtime = _scoped_projector()
 
-def _teclaw_runtime(factory, *, pool=None, passport=None):
+    with pytest.raises(ValueError, match="requires scope.mcp=True"):
+        await runtime.project_mcp_and_cli(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            scope=ProjectionScope(skills=True),
+        )
+
+
+
+def _teclaw_runtime(
+    factory, *, pool=None, passport=None, repository=None, identity=None
+):
     """A projector over a teclaw Bot, wired the way production wires one."""
     return BotRuntimeProjector(
         factory=factory,
         bot_repo=_TeclawRuntimeBots(),
-        repository=_McpInstallations(),
+        repository=repository or _McpInstallations(),
         reader=_reader(_TeclawRuntimeSkills()),
         registry=_registry(
             pool_runtime=pool or _RuntimePool(),
             pool_layouts=_RuntimeLayouts(),
         ),
         passport=passport or _RuntimePassport(),
-        caller_identity_repo=_RuntimeCallerIdentity(),
+        caller_identity_repo=identity or _RuntimeCallerIdentity(),
     )
 
 
@@ -2692,6 +2742,65 @@ async def test_teclaw_mcp_only_scope_still_delivers_the_skill_bearing_artifact()
 
 
 @pytest.mark.asyncio
+async def test_teclaw_delivery_carries_the_mcp_set_plan_resolution_read():
+    """One projection reads the effective MCP set once, then hands it over.
+
+    Plan resolution has to collect it — the projected codes and the Passport
+    scope are derived from it — and the whole-artifact delivery recomposes the
+    bot's document from the same database moments later. Without the handover
+    that compose repeats the identical ``collect_bot_active_mcps`` query for an
+    answer the projection is already holding; both sides ask with
+    ``strict_policy_context=True``, so it is the same answer by contract.
+
+    Asserted on the collect count and the delivered value rather than on
+    timing: what makes the second read unnecessary is that the first one's
+    result reaches the composer, and that is what would silently regress.
+    """
+    factory = _RuntimeFactory()
+    runtime = _teclaw_runtime(factory)
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner", scope=ProjectionScope.everything(),
+    )
+
+    assert len(factory.service.collect_calls) == 1
+    assert factory.service.delivered_effective_mcps == [
+        [
+            {"server_code": "mcp.template-preset"},
+            {"server_code": "hitl", "source": "local"},
+        ]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_per_domain_delivery_carries_no_mcp_set():
+    """The handover is for engines that compose; a per-domain one does not.
+
+    Its Skill call writes symlinks and its MCP half goes to a separate
+    endpoint, so there is no compose behind ``project_skills`` to spare a read
+    — passing the set would only imply a re-use that never happens.
+    """
+    factory = _RuntimeFactory()
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=_registry(
+            pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()
+        ),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1", owner_id="true-owner", scope=ProjectionScope.everything(),
+    )
+
+    assert factory.service.delivered_effective_mcps == [None]
+
+
+@pytest.mark.asyncio
 async def test_teclaw_still_updates_the_passport_with_identity_coloured_items():
     """The Passport is the platform's record, not the runtime's — it still runs.
 
@@ -2719,7 +2828,14 @@ async def test_teclaw_still_updates_the_passport_with_identity_coloured_items():
 async def test_teclaw_skill_only_scope_makes_no_passport_call():
     """No MCP change declared, no manifest write — unchanged from today."""
     passport = _RuntimePassport()
-    runtime = _teclaw_runtime(_RuntimeFactory(), passport=passport)
+    factory = _RuntimeFactory()
+    repository, identity = _McpInstallations(), _RuntimeCallerIdentity()
+    runtime = _teclaw_runtime(
+        factory,
+        passport=passport,
+        repository=repository,
+        identity=identity,
+    )
 
     await runtime.project(
         bot_id="bot-1", owner_id="true-owner",
@@ -2727,6 +2843,15 @@ async def test_teclaw_skill_only_scope_makes_no_passport_call():
     )
 
     assert passport.calls == []
+    # Teclaw still delivers exactly one full artifact, whose ConfigComposer
+    # independently reads persisted MCP/CLI state. The projector must not
+    # duplicate those reads for a Skill-only mutation.
+    assert len(factory.service.runtime_syncs) == 1
+    assert factory.service.delivered_effective_mcps == [None]
+    assert factory.service.collect_calls == []
+    assert repository.list_installed_calls == []
+    assert passport.query_calls == []
+    assert identity.calls == []
 
 
 @pytest.mark.asyncio
@@ -2757,7 +2882,7 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
     async def _refuse(**_):
         return False
 
-    factory.service.project_skills = _refuse
+    factory.service.project_whole_artifact = _refuse
     runtime = _teclaw_runtime(factory, passport=passport)
 
     with pytest.raises(SkillSetRuntimeReconcileError):
@@ -2809,7 +2934,9 @@ async def test_runtime_delivery_never_runs_on_the_event_loop():
         user_id = "owner-1"
         entity_id = "owner-1"
 
-        def _sync_symlinks_to_device_if_needed(self, user_id, desired_skills):
+        def _sync_symlinks_to_device_if_needed(
+            self, user_id, desired_skills, effective_mcps
+        ):
             seen.append(threading.get_ident())
             return True
 
@@ -3343,15 +3470,17 @@ async def test_an_inactive_set_still_skips_projection_entirely():
 # already there. The scope the command declares is what decides.
 
 
-def _scoped_projector(pool=None, passport=None, factory=None):
+def _scoped_projector(
+    pool=None, passport=None, factory=None, repository=None, identity=None
+):
     return BotRuntimeProjector(
         factory=factory or _RuntimeFactory(),
         bot_repo=_RuntimeBots(),
-        repository=_McpInstallations(),
+        repository=repository or _McpInstallations(),
         reader=_reader(_RuntimeSkills()),
         registry=_registry(pool_runtime=pool or _RuntimePool(), pool_layouts=_RuntimeLayouts()),
         passport=passport or _RuntimePassport(),
-        caller_identity_repo=_RuntimeCallerIdentity(),
+        caller_identity_repo=identity or _RuntimeCallerIdentity(),
     )
 
 
@@ -3388,7 +3517,13 @@ async def test_a_skill_only_scope_touches_neither_the_device_mcps_nor_passport()
     mutation.
     """
     passport, factory = _RuntimePassport(), _RuntimeFactory()
-    runtime = _scoped_projector(passport=passport, factory=factory)
+    repository, identity = _McpInstallations(), _RuntimeCallerIdentity()
+    runtime = _scoped_projector(
+        passport=passport,
+        factory=factory,
+        repository=repository,
+        identity=identity,
+    )
 
     await runtime.project(
         bot_id="bot-1", owner_id="true-owner", scope=ProjectionScope(skills=True)
@@ -3398,6 +3533,60 @@ async def test_a_skill_only_scope_touches_neither_the_device_mcps_nor_passport()
     assert factory.service.mcp_codes is None
     assert factory.service.deliveries == []
     assert passport.calls == []
+    # No MCP mutation means no MCP/CLI read-side pre-flight either.  Those
+    # facts would only be consumed by a device-MCP write or Passport update,
+    # both of which this scope explicitly omits.
+    assert factory.service.collect_calls == []
+    assert repository.list_installed_calls == []
+    assert passport.query_calls == []
+    assert identity.calls == []
+
+
+@pytest.mark.asyncio
+async def test_projector_exposes_skill_and_complete_plan_shapes_at_the_engine_seam():
+    """The engine seam receives an honest type, never an incomplete full plan."""
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        EngineRuntimeProjection,
+        ResolvedCapabilityPlan,
+        ResolvedSkillPlan,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
+        EngineRuntimeProjectionRegistry,
+    )
+
+    plans = []
+
+    class _RecordingProjection(EngineRuntimeProjection):
+        def validate_plan(self, *, skill_assets, retired_mappings=()) -> None:
+            return None
+
+        async def apply(self, *, plan, scope, retired_mappings=()) -> None:
+            plans.append(plan)
+
+    projection = _RecordingProjection()
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=EngineRuntimeProjectionRegistry(default=projection),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(skills=True),
+    )
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope(mcp=True),
+    )
+
+    assert type(plans[0]) is ResolvedSkillPlan
+    assert type(plans[1]) is ResolvedCapabilityPlan
 
 
 @pytest.mark.asyncio

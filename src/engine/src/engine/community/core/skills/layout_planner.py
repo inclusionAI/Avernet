@@ -307,9 +307,12 @@ def resolved_filesystem_layout_evidence(
     """Return the roots selected by the caller as Backend evidence."""
 
     return {
+        "engine": plan.engine_type,
+        "layout_contract_version": plan.layout_contract_version,
         "active_root": str(plan.active_root),
         "local_root": str(local_root),
         "repo_root": str(repo_root),
+        "pool_center": str(plan.pool_center),
     }
 
 

@@ -727,6 +727,8 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
             view: StateMachineRunView {
                 run: StateMachineRun {
                     run_id: "sm-http-test".to_string(),
+                    root_run_id: Some("sm-http-test".to_string()),
+                    rerun_of: None,
                     definition_id: "sm_e2e_single".to_string(),
                     definition_version: 1,
                     group_id: cmd.group_id,
@@ -734,6 +736,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                     session_id: cmd
                         .session_id
                         .unwrap_or_else(|| "group-1:abcdef12".to_string()),
+                    session_activation_count: None,
                     created_by: cmd.caller_id.clone(),
                     status: StateMachineRunStatus::Running,
                     input: cmd.input,

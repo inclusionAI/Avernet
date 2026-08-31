@@ -171,11 +171,11 @@ class BarePrincipalSigner:
 
 
 def _secret_value(material: object) -> str:
-    """Read the plaintext secret from either SecretResolver return shape.
+    """Read the plaintext secret from a SecretResolver return shape.
 
-    ``get_secret`` returns either a plain ``str`` (the BaaS-aligned ``env``
-    flavor) or a duck-typed object exposing ``.secret_value``/``.secret_user``
-    (the ``community`` flavor), or ``None``. Normalise to the plain string.
+    ``get_secret`` returns a duck-typed object exposing
+    ``.secret_value``/``.secret_user`` (the ``community`` flavor), a plain
+    ``str`` (enterprise/KMS flavors), or ``None``. Normalise to the plain string.
     """
     if material is None:
         return ""
@@ -205,7 +205,7 @@ def _resolve_signing_key(
     try:
         material = secret_resolver.get_secret(signer_cfg.secret_name)
     except RuntimeError:
-        # The ``env`` flavor raises on absence; treat it as "no key" so the
+        # A strict resolver raises on absence; treat it as "no key" so the
         # strict gate in ``load_signer_config`` decides the outcome.
         material = None
     raw = _secret_value(material)

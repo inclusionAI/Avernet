@@ -4,6 +4,7 @@ from enum import IntEnum, StrEnum
 
 
 class SpaceErrorCode(IntEnum):
+    SC_MARKET_UNAVAILABLE = 502000
     SKILL_CENTER_TEAM_CREATE_FAILED = 502201
     SKILL_GRANT_FORBIDDEN = 403203
     SKILL_GRANT_NOT_FOUND = 404201
@@ -14,9 +15,31 @@ class SpaceErrorCode(IntEnum):
     DRAFT_EDIT_LEASE_NOT_FOUND = 404202
     DRAFT_EDIT_LEASE_CONFLICT = 409303
     DRAFT_EDIT_LEASE_TOKEN_REJECTED = 409304
+    IDEMPOTENCY_KEY_REUSED = 409305
+    DRAFT_ALREADY_EXISTS = 409306
+    DRAFT_FROZEN = 409307
+    DRAFT_REVISION_CONFLICT = 409308
+    SKILL_PACKAGE_INVALID = 422202
+    SKILL_NAME_CHANGED = 422203
+    SKILL_MANIFEST_MISSING = 422205
+    SKILL_MANIFEST_MULTIPLE = 422206
+    DRAFT_NOT_FOUND = 404204
+    SKILL_PATH_INVALID = 422207
+    DRAFT_SOURCE_NOT_REFRESHABLE = 422208
+    SKILL_GIT_UNAVAILABLE = 502202
+    SKILL_DRAFT_STORE_UNAVAILABLE = 503202
+    PUBLICATION_ATTEMPT_NOT_FOUND = 404205
+    PUBLICATION_IN_PROGRESS = 409309
+    PUBLICATION_RESULT_UNKNOWN = 409310
+    PUBLICATION_RECOVERY_NOT_AVAILABLE = 409311
+    PUBLICATION_REQUIRES_NEW_ATTEMPT = 409315
+    PUBLICATION_TASK_UNAVAILABLE = 503203
+    SKILL_OFFLINE = 409312
+    SKILL_OFFLINE_BLOCKED = 409313
 
 
 class SpacePublicErrorMessage(StrEnum):
+    SC_MARKET_UNAVAILABLE = "Skill Center is unavailable"
     SKILL_CENTER_TEAM_CREATE_FAILED = "Skill Center team creation failed"
     SKILL_GRANT_FORBIDDEN = "Forbidden"
     SKILL_GRANT_NOT_FOUND = "Not found"
@@ -27,3 +50,24 @@ class SpacePublicErrorMessage(StrEnum):
     DRAFT_EDIT_LEASE_NOT_FOUND = "Not found"
     DRAFT_EDIT_LEASE_CONFLICT = "Draft edit Lease is already held"
     DRAFT_EDIT_LEASE_TOKEN_REJECTED = "Draft edit Lease fencing token was rejected"
+    IDEMPOTENCY_KEY_REUSED = "Idempotency-Key was already used for another request"
+    DRAFT_ALREADY_EXISTS = "Draft already exists"
+    DRAFT_FROZEN = "Frozen Draft cannot be changed"
+    DRAFT_REVISION_CONFLICT = "Draft revision changed"
+    SKILL_PACKAGE_INVALID = "Skill package is invalid"
+    SKILL_NAME_CHANGED = "SKILL.md name cannot be changed"
+    SKILL_MANIFEST_MISSING = "SKILL.md manifest is missing"
+    SKILL_MANIFEST_MULTIPLE = "Multiple SKILL.md manifests were provided"
+    DRAFT_NOT_FOUND = "Not found"
+    SKILL_PATH_INVALID = "Skill file path is invalid"
+    DRAFT_SOURCE_NOT_REFRESHABLE = "Draft is not backed by a Git snapshot"
+    SKILL_GIT_UNAVAILABLE = "Git snapshot is unavailable"
+    SKILL_DRAFT_STORE_UNAVAILABLE = "Draft content store is unavailable"
+    PUBLICATION_ATTEMPT_NOT_FOUND = "Not found"
+    PUBLICATION_IN_PROGRESS = "Publication is already in progress"
+    PUBLICATION_RESULT_UNKNOWN = "Publication result is still unknown"
+    PUBLICATION_RECOVERY_NOT_AVAILABLE = "Publication recovery is not available"
+    PUBLICATION_REQUIRES_NEW_ATTEMPT = "Edit the Draft and create a new Publication"
+    PUBLICATION_TASK_UNAVAILABLE = "Publication task is unavailable"
+    SKILL_OFFLINE = "Skill is offline"
+    SKILL_OFFLINE_BLOCKED = "Skill Offline is blocked"

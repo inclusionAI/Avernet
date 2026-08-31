@@ -90,6 +90,7 @@ user_config:
     openclaw_root: "~/.openclaw"
     claude_code_root: "~/.claude_code"
     aicoding_root: "~/.aicoding"
+    hermes_root: "~/.hermes"
 
   openclaw:
     skills_repo_url: "git@code.teamclaw.com:security_release/aiworkbench.git"
@@ -281,3 +282,4 @@ user_config:
   # is a deliberate change, not a config line.
   secret_names:
     aiworkbench_repo_url: "other_manual_agentclaw_aiworkbench_repo_url"
+    skill_center_internal_token: "other_manual_agentclaw_skill_center_internal_token"

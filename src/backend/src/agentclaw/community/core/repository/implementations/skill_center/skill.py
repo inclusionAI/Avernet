@@ -53,6 +53,7 @@ from sqlalchemy import and_, func, or_
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
+from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -1480,10 +1481,12 @@ class SkillSetRepository(
                     self.Skill.id == int(skill_id),
                     self.Skill.env == get_current_env(),
                 )
+                .with_for_update()
                 .one_or_none()
             )
             if skill_set is None or skill is None:
                 return False
+            require_skill_online(skill)
             # Existing membership remains the successful idempotent result.
             # Canonical cross-Set uniqueness is enforced by the new control
             # plane under its Bot mutation lease, not by this legacy writer.

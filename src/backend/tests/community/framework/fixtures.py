@@ -66,6 +66,16 @@ def app_with_testing_modules(request) -> FastAPI:
     from agentclaw.community.di import DeployProfile, build_injector
     from agentclaw.community.plugin_api.database import DatabasePlugin
     from agentclaw.community.plugins.local import database as db_mod
+    from agentclaw.community.utils.gateway_principal_config import (
+        reset_principal_verifier_config_cache,
+    )
+
+    # The public OpenAPI principal verifier is intentionally process-wide in the
+    # application. Endpoint cases, however, install per-case signing keys in
+    # their seed hooks. Keep those keys from leaking to the next case in the same
+    # xdist worker: each test starts from the production boot default (deny) and
+    # must opt in by seeding its own verifier config.
+    reset_principal_verifier_config_cache()
 
     # B11 (3.2): honor the active deploy profile so this fixture serves both trees —
     # ``test`` (corp-free) for the community runner, ``corp_test`` (corp doubles) for
@@ -97,6 +107,9 @@ def app_with_testing_modules(request) -> FastAPI:
         _CURRENT_TEST_INJECTOR.pop(id(request.node), None)
         if prev_app is not None:
             attach_injector(app, prev_app)
+        # Drop any per-case public principal key installed by a seed hook before
+        # another endpoint case reuses this worker process.
+        reset_principal_verifier_config_cache()
         # Dispose the per-test engine deterministically; ``reset_for_tests``
         # on the NEXT injector build would do this anyway, but explicit
         # disposal here keeps connection lifecycle observable.

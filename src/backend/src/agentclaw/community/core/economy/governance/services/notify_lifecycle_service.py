@@ -34,6 +34,7 @@ from agentclaw.community.core.economy.governance.domain.notification import (
     IllegalNotifyTransitionError,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.economy.governance_service_protocol import NotifyLifecycleServiceProtocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-class NotifyLifecycleService:
+class NotifyLifecycleService(NotifyLifecycleServiceProtocol):
     """通知发送状态机正常路径唯一驱动 —— 无状态、领域往返。
 
     经 DI 注入(``di/modules/economy_governance_module``);注入

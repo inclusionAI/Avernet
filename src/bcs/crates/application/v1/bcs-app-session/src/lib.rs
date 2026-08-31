@@ -1268,6 +1268,8 @@ fn project_summary(session: &Session) -> SessionSummary {
         status: project_status(session.status),
         title: session.session_title.clone(),
         participant_count: Some(session.participants.len()),
+        caller_principal: session.caller_principal.clone(),
+        created_by: session.created_by.clone(),
         created_at: session.created_at,
         updated_at: session.updated_at,
         collected: None,

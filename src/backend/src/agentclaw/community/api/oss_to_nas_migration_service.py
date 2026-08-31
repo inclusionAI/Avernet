@@ -1,14 +1,17 @@
-"""Service API Protocol for OSS-to-NAS file migration."""
+"""Service API Protocol for OSS-to-NAS file migration.
+
+Re-export only. The Protocol is defined in its owning core module
+(``core/devices/oss_to_nas_migration_service_protocol.py``) so the concrete service can
+inherit it without a ``core -> api`` waiver; adapters keep importing
+it from here.
+"""
+
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from agentclaw.community.core.devices.oss_to_nas_migration_service_protocol import (
+    OssToNasMigrationServiceProtocol,
+)
 
-
-@runtime_checkable
-class OssToNasMigrationServiceProtocol(Protocol):
-    """Service API for migrating OSS-backed bot data into NAS."""
-
-    def oss_path_to_nas_path(self, oss_file_path: Path) -> Path | None: ...
-
-    def migrate(self, *args: Any, **kwargs: Any) -> Any: ...
+__all__ = [
+    "OssToNasMigrationServiceProtocol",
+]

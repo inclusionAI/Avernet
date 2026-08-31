@@ -105,7 +105,10 @@ def _mapping_command(
     )
 
 
-@router.post("/layout/probe", response_model=RuntimeLayoutProbeApiResponse)
+@router.post(
+    "/layout/probe",
+    response_model=RuntimeLayoutProbeApiResponse,
+)
 async def probe_runtime_skills_layout(
     body: RuntimeLayoutProbeRequest,
 ) -> RuntimeLayoutProbeApiResponse:

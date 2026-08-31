@@ -17,7 +17,6 @@ from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
 from gateway.community.plugins.schema_catalog.http import HttpSchemaCatalog
 from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
-from gateway.community.plugins.secret_resolver.env import EnvSecretResolver
 
 
 def _default(value, fallback):
@@ -54,15 +53,13 @@ class PluginContainer(containers.DeclarativeContainer):
     )
 
     # SecretResolver — community flavor reads signing keys (and other creds)
-    # from the process environment; the ``env`` flavor provides a BaaS-aligned
-    # env-backed resolver (BaaS ``EnvSecretStorePlugin`` contract). Enterprise
-    # may register further options via plugin_registry.
+    # from the process environment. Enterprise may register further options via
+    # plugin_registry.
     secret_resolver = providers.Selector(
         config.plugins.secret,
         community=providers.Singleton(
-            CommunitySecretResolver, env_prefix=config.secret.env_prefix
+            CommunitySecretResolver,
         ),
-        env=providers.Singleton(EnvSecretResolver, env_prefix=config.secret.env_prefix),
     )
 
     cache_plugin = providers.Selector(

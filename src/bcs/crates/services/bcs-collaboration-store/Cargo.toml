@@ -25,4 +25,5 @@ bcs-service-api = { workspace = true }
 
 [dev-dependencies]
 bcs-db-local = { workspace = true }
+bcs-session-store = { workspace = true }
 tokio = { workspace = true }

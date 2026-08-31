@@ -29,6 +29,8 @@ from agentclaw.community.core.economy.governance.domain.enums import (
 from agentclaw.community.core.economy.governance.services.service_protocols import (
     GovernanceLifecycleServiceProtocol,
 )
+from agentclaw.community.core.economy.governance_service_protocol import GovernanceWhitelistProtocol
+from agentclaw.community.core.economy.governance_service_protocol import GovernanceWhitelistServiceProtocol
 
 
 if TYPE_CHECKING:
@@ -40,7 +42,7 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-class GovernanceWhitelistService:
+class GovernanceWhitelistService(GovernanceWhitelistProtocol, GovernanceWhitelistServiceProtocol):
     """Whitelist management — add, remove, bulk orchestration (independent domain)."""
 
     @inject

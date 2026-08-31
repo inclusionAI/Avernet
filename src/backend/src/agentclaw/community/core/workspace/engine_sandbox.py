@@ -87,16 +87,17 @@ class EngineSandboxProvider(Protocol):
         sub_path: str = "",
         recursive: bool = False,
         *,
-        sandbox_id: str | None = None,
+        device_fs: Any | None = None,
     ) -> list[DirectoryItem]:
         """List a sub-tree under ``get_base_path()``.
 
         Dispatch:
-          * ``sandbox_id`` provided → query the remote sandbox via arca.
+          * ``device_fs`` provided → query the remote sandbox through the
+            device-filesystem boundary.
           * Otherwise → walk the local filesystem at ``get_base_path()``.
 
         The provider does not branch on runtime mode; the caller chooses
-        whether to pass a sandbox_id based on the bot's device binding.
+        whether to pass ``device_fs`` based on the bot's device binding.
         """
         ...
 

@@ -108,60 +108,11 @@ _IMPORT_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
         "core/bot_collaborator/services/collaborator_service.py",
         "agentclaw.community.plugins.passport",
     ),
-    # BotBuildService is wired with the Channel service Protocol for build-time
-    # OpenClaw config generation; keep this as a test-only exception for the
-    # current code shape.
-    (
-        "core/service_bot/services/bot_build_service.py",
-        "agentclaw.community.api.channel_service",
-    ),
-    # BotService consumes the PolicyService API Protocol (defined in api/,
-    # implemented in core/access) to resolve the per-owner bot-count ceiling.
-    # Same cross-core consumption shape as bot_build_service above; kept as a
-    # test-only exception for the current code shape.
-    (
-        "core/bot_management/services/bot_service.py",
-        "agentclaw.community.api.policy_service",
-    ),
-    # BetaQuotaService consumes the PolicyService API Protocol (defined in api/,
-    # implemented in core/access) to whitelist the caller on quota adjust.
-    # Same cross-core consumption shape as bot_service above; kept as a
-    # test-only exception for the current code shape.
-    (
-        "core/common_config/beta_quota_service.py",
-        "agentclaw.community.api.policy_service",
-    ),
     # PublishApprovalService implements the API Protocol defined in api/publish_approval.py.
     # Core services implement API Protocols for DI wiring; exceptions document this pattern.
     (
         "core/service_bot/services/publish_approval_service.py",
         "agentclaw.community.api.publish_approval",
-    ),
-    # SpaceSkillQueryService implements the Service API Protocol defined in
-    # api/space_skill_query_service.py; this is the same explicit DI contract
-    # bridge as the service implementations listed above.
-    (
-        "core/skill_center/services/space_skill_query_service.py",
-        "agentclaw.community.api.space_skill_query_service",
-    ),
-    # BotStartupScriptService implements the API Protocol defined in
-    # api/bot_startup_script_service.py — the same shape as PublishApprovalService
-    # above. Inheriting it is the point: every member of that Protocol is
-    # @abstractmethod, so omitting one fails at construction naming the member
-    # instead of surfacing as an AttributeError at a call site.
-    (
-        "core/bot_startup_script/services/startup_script_service.py",
-        "agentclaw.community.api.bot_startup_script_service",
-    ),
-    # SkillQueryService implements the Service API Protocol defined in
-    # api/skill_query_service.py — the same shape as BotStartupScriptService
-    # above, and for the same reason: every member of that Protocol is
-    # @abstractmethod, so omitting one fails at construction naming the member.
-    # Inheriting it also makes the contract navigable from Protocol to
-    # implementation in an IDE.
-    (
-        "core/skill_center/services/skill_query_service.py",
-        "agentclaw.community.api.skill_query_service",
     ),
 })
 

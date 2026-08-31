@@ -61,6 +61,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
+from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
     require_can_join_set,
 )
@@ -327,6 +328,7 @@ class CapabilityDesiredStateRepository(
                 and skill.bolt_id != bot_id
             ):
                 raise SkillSetControlPlaneNotFoundError()
+            require_skill_online(skill)
             old = self._snapshot(
                 session, bot_id, owner_id, engine_type=engine_type
             )
@@ -587,6 +589,26 @@ class CapabilityDesiredStateRepository(
             if engine_type is not None:
                 query = query.filter(SkillSet.engine_type == engine_type)
             current_sets = query.with_for_update().all()
+            restored_skill_ids = set(state.installations)
+            restored_skill_ids.update(
+                skill_id
+                for members in state.memberships.values()
+                for skill_id, _user_id, _skill_uuid in members
+            )
+            # Compensation is another consumption writer: projection failure
+            # must not resurrect a Membership/Installation after Offline won.
+            # Match every forward writer's lock and take multiple Skills in
+            # immutable id order before the first desired-state mutation.
+            for skill_id in sorted(restored_skill_ids):
+                skill = (
+                    self._scope(session.query(Skill), Skill)
+                    .filter(Skill.id == skill_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if skill is None:
+                    raise SkillSetControlPlaneNotFoundError()
+                require_skill_online(skill)
             current_ids = {int(row.id) for row in current_sets}
             if current_ids:
                 self._scope(session.query(SkillSetSkill), SkillSetSkill).filter(

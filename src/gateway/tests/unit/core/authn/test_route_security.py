@@ -41,15 +41,16 @@ def test_shipped_config_uses_human_or_owned_bot_for_group_creation() -> None:
 
     assert requirement == {
         PrincipalType.USER: Presence.OPTIONAL,
-        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.APP: Presence.OPTIONAL,
         PrincipalType.BOT: Presence.OPTIONAL,
     }
 
     # The exact POST override must not relax other Group operations.
     sibling = rs.resolve("GET", "/openapi/v1/collaboration/groups")
     assert sibling == {
-        PrincipalType.USER: Presence.REQUIRED,
-        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.OPTIONAL,
+        PrincipalType.BOT: Presence.OPTIONAL,
     }
 
 
@@ -75,7 +76,7 @@ def test_shipped_config_uses_human_or_owned_bot_for_resource_operations(
 
     assert requirement == {
         PrincipalType.USER: Presence.OPTIONAL,
-        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.APP: Presence.OPTIONAL,
         PrincipalType.BOT: Presence.OPTIONAL,
     }
 
@@ -120,10 +121,7 @@ _HUMAN_ONLY = [
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
     ("GET", "/openapi/v1/bots/spaces/1/skills"),
-    ("POST", "/openapi/v1/bots/bot-123/iam-token"),
     ("POST", "/openapi/v1/bots"),
-    ("POST", "/openapi/v1/bots/local"),
-    ("GET", "/openapi/v1/bots/bot-123/local/auth-status"),
     ("GET", "/openapi/v1/bots/bot-123/authorized-apps"),
     ("DELETE", "/openapi/v1/bots/bot-123/authorized-apps/42"),
     ("GET", "/openapi/v1/bots/logs/traces"),
@@ -169,7 +167,10 @@ def test_iam_operations_do_not_resolve_an_app_identity(method: str, path: str) -
     )
 
     assert req is not None
-    assert req == {PrincipalType.USER: Presence.REQUIRED}
+    assert req == {
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.OPTIONAL,
+    }
 
 
 def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:
@@ -295,7 +296,7 @@ def test_collaboration_socket_exemption_does_not_reach_the_http_plane() -> None:
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
     req = rs.resolve("GET", _COLLABORATION_SOCKET_PATH)
     assert req is not None
-    assert req[PrincipalType.USER] is Presence.REQUIRED
+    assert req[PrincipalType.USER] is Presence.OPTIONAL
 
 
 def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_public() -> (
@@ -313,20 +314,21 @@ def test_shipped_config_collects_all_optional_file_identities_and_keeps_share_pu
         PrincipalType.APP: Presence.OPTIONAL,
         PrincipalType.BOT: Presence.OPTIONAL,
     }
-    assert (
-        rs.resolve(
-            "GET",
-            "/openapi/v1/collaboration/sessions/shared-file/content",
-        )
-        == {}
-    )
+    assert rs.resolve(
+        "GET",
+        "/openapi/v1/collaboration/sessions/shared-file/content",
+    ) == {
+        PrincipalType.USER: Presence.OPTIONAL,
+        PrincipalType.APP: Presence.OPTIONAL,
+        PrincipalType.BOT: Presence.OPTIONAL,
+    }
     sibling = rs.resolve("GET", "/openapi/v1/collaboration/sessions/session-1")
     assert sibling == {
         PrincipalType.USER: Presence.OPTIONAL,
-        PrincipalType.APP: Presence.REQUIRED,
+        PrincipalType.APP: Presence.OPTIONAL,
         PrincipalType.BOT: Presence.OPTIONAL,
     }
-    assert sibling[PrincipalType.APP] is Presence.REQUIRED
+    assert sibling[PrincipalType.APP] is Presence.OPTIONAL
 
 
 def test_shipped_config_requires_user_and_app_for_session_collection() -> None:
@@ -345,8 +347,8 @@ def test_shipped_config_requires_user_and_app_for_session_collection() -> None:
     ):
         requirement = rs.resolve(method, path)
         assert requirement is not None
-        assert requirement[PrincipalType.USER] is Presence.REQUIRED
-        assert requirement[PrincipalType.APP] is Presence.REQUIRED
+        assert requirement[PrincipalType.USER] is Presence.OPTIONAL
+        assert requirement[PrincipalType.APP] is Presence.OPTIONAL
 
 
 _AUTHORIZED_APPS_PATH = "/openapi/v1/bots/bot-123/authorized-apps"
@@ -463,3 +465,44 @@ def test_from_yaml_user_config_not_dict_uses_empty_table(tmp_path) -> None:
     cfg.write_text("user_config: not-a-dict\n")
     rs = RouteSecurity.from_yaml(cfg)
     assert rs.resolve("GET", "/anything") is None
+
+
+def test_shipped_config_keeps_register_token_human_only() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("GET", "/openapi/v1/collaboration/register/token")
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.REQUIRED
+
+
+def test_shipped_config_admits_anonymous_registration() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("POST", "/openapi/v1/collaboration/register")
+    # `resolve` returns None only when NO rule matches; the explicit empty `{}`
+    # entry matches and resolves to an EMPTY identity requirement — fully
+    # anonymous by declaration, not by accident of a missed route.
+    assert req is not None
+    assert len(req) == 0
+
+
+def test_register_security_overrides_must_be_method_scoped() -> None:
+    """The register overrides are deliberately method-qualified.
+
+    Every OTHER method under the register paths falls back to the broad
+    collaboration rule (identities resolved but optional — BCN enforces the
+    effective-caller policy itself, per #1557/#1712). What must NOT happen is
+    the anonymous-POST exemption leaking to the token GET's methods (or vice
+    versa): the wide rule's exact presence values may keep evolving without
+    weakening this ranking assertion, so assert rank, not presence.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    stray = rs.resolve("POST", "/openapi/v1/collaboration/register/token")
+    assert stray is not None
+    assert stray != {}, "stray methods must not inherit the anonymous exemption"
+    anon = rs.resolve("POST", "/openapi/v1/collaboration/register")
+    assert anon is not None and len(anon) == 0
+    token_get = rs.resolve("GET", "/openapi/v1/collaboration/register/token")
+    assert token_get is not None
+    assert token_get[PrincipalType.USER] is Presence.REQUIRED

@@ -60,6 +60,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.core.bot_public.bot_public_service_protocol import BotPublicServiceProtocol
 
 logger = get_logger()
 
@@ -131,7 +132,7 @@ class BotPermissionError(BotPublicServiceError):
     pass
 
 
-class BotPublicService:
+class BotPublicService(BotPublicServiceProtocol):
     """Bot public service for managing friend request approval flow.
 
     通过依赖注入接收 bot_friend_repo、bot_repository、process_service、bot_service。
