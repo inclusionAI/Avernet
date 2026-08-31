@@ -116,42 +116,42 @@ than something to work around:
 
 ## Group B — The engine
 
-## [ ] Task 4: The ordering table and the registry
+## [x] Task 4: The ordering table and the registry
 - **Goal:** Ordering is a complete, inspectable contract; materialiser presence
   is a separate, sparse fact.
 - **Files:** `apply/order.py`, `apply/registry.py`, `apply/context.py`
 - **Done when:**
-  - [ ] `APPLY_ORDER` names **all six** constructs plus `script`, with
+  - [x] `APPLY_ORDER` names **all six** constructs plus `script`, with
         `script` alone in `PRE_CONTAINER` at position 0 and
         `identity → resources → skills → mcp` in `ON_CONTAINER` in that order.
-  - [ ] Its docstring states that this **reverses design §3.4** and why
+  - [x] Its docstring states that this **reverses design §3.4** and why
         (work-items §2.12): `script` needs no container and must precede start-
         command composition; phase B resolves a device and raises if unbound.
-  - [ ] `MATERIALISERS` maps `script` and `mcp` only. Its docstring says a
+  - [x] `MATERIALISERS` maps `script` and `mcp` only. Its docstring says a
         missing key is an expected state that W5/W6 close, not a gap.
-  - [ ] `ApplyContext` carries the identity and coordinates one apply runs
+  - [x] `ApplyContext` carries the identity and coordinates one apply runs
         under, built from a bot record via **W10's seam** — never re-derived.
-  - [ ] A test asserts every `MATERIALISERS` key has an `APPLY_ORDER` row, and
+  - [x] A test asserts every `MATERIALISERS` key has an `APPLY_ORDER` row, and
         that `APPLY_ORDER` covers every construct the vocabulary defines. The
         reverse containment is deliberately **not** asserted.
 - **Depends on:** Task 1
 
-## [ ] Task 5: The materialiser contract
+## [x] Task 5: The materialiser contract
 - **Goal:** `resolve` → `plan` → `write`, with the boundaries the criteria need.
 - **Files:** `apply/registry.py`
 - **Done when:**
-  - [ ] The `Materialiser` protocol declares the three stages with the plan's
+  - [x] The `Materialiser` protocol declares the three stages with the plan's
         signatures, and each docstring names the criterion its boundary serves.
-  - [ ] **Every stage is `@abstractmethod` and each materialiser inherits the
+  - [x] **Every stage is `@abstractmethod` and each materialiser inherits the
         Protocol**, the shape the repository and service contracts already use
         here. A missing stage then fails at construction naming it, rather than
         as an `AttributeError` the first time a category reaches that stage —
         which for `write` would be mid-apply on a real bot.
-  - [ ] `ResolveResult` carries `intents` and `failures` keyed by entry
+  - [x] `ResolveResult` carries `intents` and `failures` keyed by entry
         identity, so the orchestrator emits one `EntryResult` per declared entry
         without a materialiser knowing what a report is.
-  - [ ] `CategoryPlan` carries classified intents **and** `removals`.
-  - [ ] `plan` is documented as read-only, and that `dry_run` is "stop after
+  - [x] `CategoryPlan` carries classified intents **and** `removals`.
+  - [x] `plan` is documented as read-only, and that `dry_run` is "stop after
         this" — a missing call, not a discipline.
 - **Depends on:** Task 4
 
