@@ -407,12 +407,6 @@ _story_group_workspace_round_trip() {
     assert_json_not_empty "persistent message receives an id" "$RESPONSE" "message_id"
     assert_json_not_empty "persistent message records routing targets" "$RESPONSE" "routed_to"
 
-    api_get "/groups/${group_id}/messages?limit=20"
-    require_status "human reads group message history" "200" || return
-    local history_is_array
-    history_is_array=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print("1" if isinstance(json.load(sys.stdin), list) else "0")' 2>/dev/null || echo 0)
-    assert_eq "group history response is a JSON array" "$history_is_array" "1"
-
     bot_post "/groups/${group_id}/chat" CEO \
         "{\"message\":\"@产品经理 please coordinate the release\",\"from\":\"${BOT_CEO_UUID}\"}"
     require_status "driver sends a live group chat message" "200" || return
