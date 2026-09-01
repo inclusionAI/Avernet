@@ -43,7 +43,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         The SET clauses mirror the enterprise ON DUPLICATE KEY UPDATE
         semantics item for item: ``sandbox_id = VALUES(sandbox_id),
         next_renew_at = VALUES(next_renew_at), status = 'ACTIVE',
-        renew_fail_count = 0, gmt_modified = NOW()``.
+        renew_fail_count = 0, stop_reason = NULL, gmt_modified = NOW()``.
 
         Dialect upserts do NOT apply ``Column.onupdate``, so
         ``gmt_modified`` must be set explicitly in both branches
@@ -60,6 +60,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     "status": "ACTIVE",
                     "renew_fail_count": 0,
                     "gmt_modified": func.now(),
+                    "stop_reason": None,
                 },
             )
         stmt = mysql_insert(TtlRenewalScheduleModel).values(**values)
@@ -69,6 +70,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
             status="ACTIVE",
             renew_fail_count=0,
             gmt_modified=func.now(),
+            stop_reason=literal(None),
         )
 
     def _json_unquote(self, col, path: str):
@@ -540,19 +542,32 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         source_table: str,
         source_id: int,
         status: str,
+        stop_reason: str | None = None,
     ) -> None:
         """Update the status of a schedule record.
+
+        A STOPPED write may stamp its origin via ``stop_reason``
+        (vocabulary: lifecycle | orphan | threshold_gone |
+        threshold_expired). The column is only added to the UPDATE when a
+        reason is provided — a bare None would render a stop_reason = NULL
+        bind on both dialects — so the legacy no-reason call shape renders
+        byte-identical SQL.
 
         Called from stop / destroy hooks to mark STOPPED, and from the
         scheduler for orphan cleanup or max-fail threshold.
         """
         log.info(
-            "set_status: env=%s, source_table=%s, source_id=%s, status=%s",
+            "set_status: env=%s, source_table=%s, source_id=%s, status=%s, "
+            "stop_reason=%s",
             env,
             source_table,
             source_id,
             status,
+            stop_reason,
         )
+        values: dict = {"status": status, "gmt_modified": func.now()}
+        if stop_reason is not None:
+            values["stop_reason"] = stop_reason
         stmt = (
             update(TtlRenewalScheduleModel)
             .where(
@@ -560,7 +575,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                 TtlRenewalScheduleModel.source_table == source_table,
                 TtlRenewalScheduleModel.source_id == source_id,
             )
-            .values(status=status, gmt_modified=func.now())
+            .values(**values)
         )
         self._session.execute(stmt)
         log.info("[arca_ttl:set_status] result: done")
