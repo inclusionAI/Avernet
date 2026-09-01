@@ -20,5 +20,6 @@ class TtlRenewalScheduleRecord:
     next_renew_at: datetime
     renew_fail_count: int
     status: str
+    stop_reason: str | None
     last_renewed_at: datetime | None
     env: str

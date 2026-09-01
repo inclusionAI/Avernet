@@ -110,8 +110,11 @@ class TtlRenewalScheduleRepository(Protocol):
         source_table: str,
         source_id: int,
         status: str,
+        stop_reason: str | None = None,
     ) -> None:
-        """Update the status of a schedule record."""
+        """Update the status of a schedule record, optionally stamping the
+        STOPPED origin (lifecycle | orphan | threshold_gone |
+        threshold_expired)."""
         ...
 
     def count_hot_arca_devices(self, env: str) -> int:
