@@ -597,8 +597,7 @@ class TestFindUnregistered:
                 "baas_device.provider_device_id" in sql_text
             )
             assert (
-                "baas_bot_ttl_renewal_schedule.source_id = baas_device.id"
-                in sql_text
+                "baas_bot_ttl_renewal_schedule.source_id = baas_device.id" in sql_text
             )
             assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
             assert len([k for k in compiled.params if k.startswith("status")]) == 1
@@ -720,9 +719,7 @@ class TestFindUnregistered:
             "ac_entity_device_binding.id" in sqlite_sql
         )
         assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sqlite_sql
-        assert (
-            len([k for k in sqlite_compiled.params if k.startswith("status")]) == 1
-        )
+        assert len([k for k in sqlite_compiled.params if k.startswith("status")]) == 1
 
         assert len(results) == 1
         assert results[0]["sandbox_id"] == "sb-new-789"
