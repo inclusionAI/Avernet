@@ -696,7 +696,10 @@ class DeadlineRenewalScheduler:
           (a) Get authoritative TTL from Arca via facade.get_device_info()
           (b) Extract ttl_timestamp — None/0 → failed
           (c-d) Compute remaining_hours from current time
-          (e) remaining < 0 (expired) → failed
+          (e) remaining below -(clock_tol_minutes/60) h — expired beyond
+              the host-clock grace margin → confirming failure
+              (threshold_expired); a negative reading within the margin
+              is non-confirming (WR-02, option 1)
           (f) remaining > 24h (cannot renew) → skipped (postpone)
           (g) 12h < remaining <= 24h (not yet due) → skipped (postpone)
           (h) 0 <= remaining <= 12h (renewal window) → extend_ttl(); on
@@ -706,7 +709,7 @@ class DeadlineRenewalScheduler:
 
         Failure branches route through _handle_failure with a liveness
         verdict — only platform-confirmed gone (DEVICE_NOT_FOUND) or
-        expired (remaining < 0) verdicts can terminate at the cap.
+        expired-beyond-the-grace-margin verdicts can terminate at the cap.
         """
         sandbox_id = record.get("sandbox_id", "")
 
@@ -773,7 +776,24 @@ class DeadlineRenewalScheduler:
             self._min_remaining = min(self._min_remaining, remaining_hours)
 
         # ---- Step 3(e): Expired (remaining < 0) ----
-        if remaining_hours < 0:
+        # WR-02 (86-REVIEW, option 1): this is the only confirming verdict
+        # derived from host-clock arithmetic — (platform ttl_ms) minus
+        # (scheduler host time.time()). A host clock skewed ahead by a few
+        # minutes fabricates a persistent false-expired reading for
+        # containers whose real remaining life is small, and one cap
+        # crossing with that reading used to write terminal STOPPED.
+        # Genuinely expired TTLs are already minutes-to-hours past expiry
+        # by the time the cap crossing happens (retry_delay x
+        # max_fail_count rounds of readings), so requiring the remaining
+        # to fall below -(clock_tol_minutes/60) hours filters clock skew
+        # without delaying real terminations — the margin only screens
+        # skew-fabricated false positives. (The D1 watermark in the
+        # success path compares platform-vs-platform epochs and stays
+        # clock-offset free — this knob does not affect it.)
+        clock_tol_minutes = self._config.clock_tol_minutes
+        if remaining_hours < -(clock_tol_minutes / 60.0):
+            # Confirmed expiry: the overshoot is beyond plausible host
+            # clock drift — the sandbox's real TTL is gone.
             log.warning(
                 "[DeadlineRenewalScheduler] sandbox_id=%s TTL expired "
                 "(remaining=%.1fh)",
@@ -783,6 +803,30 @@ class DeadlineRenewalScheduler:
             outcome = await self._handle_failure(
                 record, stop_reason="threshold_expired"
             )
+            self._emit_renew_digest(
+                record, outcome, ttl_before_ms=ttl_ms, run_uuid=run_uuid
+            )
+            return outcome
+
+        if remaining_hours < 0:
+            # Within the ±clock_tol_minutes band: the platform still
+            # served get_device_info for this sandbox (this path is
+            # unreachable otherwise), so the small negative reading is
+            # indistinguishable from host clock skew — NOT confirming.
+            # Route through non-confirming failure handling: below the cap
+            # the count increments and retries; at the cap it holds
+            # (cap-and-hold) and keeps retrying. A genuinely dead sandbox
+            # confirms in a later round via threshold_gone (dead-sandbox
+            # error class) or a deeper expiry crossing the margin.
+            log.warning(
+                "[DeadlineRenewalScheduler] sandbox_id=%s TTL within clock "
+                "tolerance band (remaining=%.1fh, tol=%dmin) — non-confirming "
+                "failure",
+                sandbox_id,
+                remaining_hours,
+                clock_tol_minutes,
+            )
+            outcome = await self._handle_failure(record)
             self._emit_renew_digest(
                 record, outcome, ttl_before_ms=ttl_ms, run_uuid=run_uuid
             )

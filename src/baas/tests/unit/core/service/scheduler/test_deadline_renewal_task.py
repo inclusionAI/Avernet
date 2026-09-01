@@ -1446,6 +1446,82 @@ class TestStep4FailureHandling:
         assert result == "stopped"
 
     @pytest.mark.asyncio
+    async def test_expired_within_clock_tol_band_not_confirmed_holds_cap_and_retries(
+        self,
+    ):
+        """WR-02 (86-REVIEW, option 1): fail_count=9 + remaining=-1min with
+        tol=5 — the reading is inside the grace band, NOT confirming: no
+        STOPPED write, cap-and-hold at 9, retry next round."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"clock_tol_minutes": 5},
+        )
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1 / 60))
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        self._assert_cap_and_hold(mock_repo)
+
+    @pytest.mark.asyncio
+    async def test_expired_within_clock_tol_band_below_cap_increments_and_retries(
+        self,
+    ):
+        """WR-02 (86-REVIEW, option 1): below the cap, a within-band reading
+        routes through ordinary non-confirming failure accounting (count
+        increments, retry scheduled) — never a confirming verdict."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"clock_tol_minutes": 5},
+        )
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1 / 60))
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=3)
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        call_kwargs = mock_repo.update_after_failure.call_args.kwargs
+        assert call_kwargs.get("new_fail_count") == 4
+
+    @pytest.mark.asyncio
+    async def test_expired_beyond_clock_tol_confirms_threshold_expired(self):
+        """WR-02 (86-REVIEW, option 1): fail_count=9 + remaining=-10min with
+        tol=5 — beyond the grace band → confirmed STOPPED with
+        stop_reason=threshold_expired."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"clock_tol_minutes": 5},
+        )
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-10 / 60))
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_expired"
+        )
+        mock_repo.update_after_failure.assert_not_called()
+        assert result == "stopped"
+
+    @pytest.mark.asyncio
     async def test_failure_threshold_outage_error_class_holds_cap_and_retries(self):
         """fail_count=9 + DEVICE_UNAVAILABLE (outage) → NO stop, cap-and-hold at 9."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
