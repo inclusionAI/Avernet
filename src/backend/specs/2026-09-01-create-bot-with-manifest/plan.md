@@ -2,9 +2,10 @@
 
 Spec: `spec.md` in this directory. Work item W13, issue #1696.
 
-> **Revision 4.** Applying moves off its daemon thread and onto the task queue,
-> for all three cases; the creation job waits only for phase A; submission never
-> creates inline; the poll is a pure read. Revision history at the end.
+> **Revision 5.** All open questions closed: the terminal states name *what*
+> failed, the submit response carries no state, and the endpoint is **ARCA-only**.
+> Rev 4 moved applying onto the task queue for all three cases. Revision history
+> at the end.
 
 ## What already exists, and what that leaves
 
@@ -42,11 +43,12 @@ POST /openapi/v1/bots/with-manifest
   │
   ├─ _prepare_create (existing policy)
   ├─ preflight: quota / name / engine            ← existing
-  ├─ preflight: manifest                         ← NEW  validate + materialiser gate
+  ├─ preflight: ARCA-only + manifest             ← NEW  engine gate, validate,
+  │                                                     materialiser gate
   ├─ persist manifest  key=(entity_id, bot_id)   ← NEW  no schema change
   ├─ Passport apply → authorization handles      ← existing (never creates inline)
   └─ enqueue creation job(attributes + tenant, deadline)
-        └─► 202 {bot_id, AWAITING_AUTHORIZATION, iframe_url, redirect_url}
+        └─► 202 {bot_id, iframe_url, redirect_url}   (no state — poll owns that)
 
 TaskWorker ──► CreationJobHandler                 (reschedules itself)
   │  with avernet_tenant_scope(payload["tenant"]):
@@ -210,11 +212,18 @@ whole creation is done", via `last_apply` — so no repository method is added.
 | --- | --- |
 | Job live, no bot record | `AWAITING_AUTHORIZATION` + handles |
 | Job `FAILED` (declined) | `AUTHORIZATION_REJECTED` |
-| Job `TIMED_OUT` | `AUTHORIZATION_EXPIRED` |
+| Job `TIMED_OUT` before a bot exists | `AUTHORIZATION_EXPIRED` |
 | Bot record exists; no `create:on_container` apply yet | `CREATING` |
+| Bot record exists but provisioning failed, or the deadline elapsed with no container | `CREATE_FAILED` |
 | `create:on_container` apply `RUNNING` | `APPLYING` |
 | …terminal `SUCCEEDED` | `READY` + report + bot |
-| …terminal `PARTIAL` / `FAILED` | `FAILED` + report + bot |
+| …terminal `PARTIAL` / `FAILED` | `APPLY_FAILED` + report + bot |
+
+The two failure states are kept apart deliberately: `CREATE_FAILED` means there is
+no usable bot and the manifest is beside the point, `APPLY_FAILED` means the bot is
+up and part of its configuration is missing. A caller must not have to read a
+message to tell those apart, and an invalid manifest is neither — it is a `422` at
+submission with no bot and no state.
 
 **No row in that table requires an external call.** The first one in particular is
 read off "the job is live and no bot exists", *not* by querying AgentPass — the
@@ -225,11 +234,29 @@ The authorization handles come from the job's payload (written at submission),
 read via the task record. If that proves awkward, the alternative is not to return
 them at all — the create response already did — rather than to re-query Passport.
 
-Provisioning that fails outright is the one edge the six states do not name: the
-bot exists but no container will ever come up, so the job hits its deadline and the
-poll reports `FAILED` with a message naming provisioning, not the manifest.
+`CREATE_FAILED` is what the earlier revisions had no name for. It covers both
+shapes of "no usable bot": creation itself raised, or the bot record exists and no
+container ever came up, in which case the job reaches its deadline with no
+`create:on_container` apply to point at.
 
-### K-9 Submission never creates the bot inline
+### K-9a ARCA only
+
+The preflight refuses a teclaw engine, using the same mechanism as the unbacked-
+construct refusal. The reason is structural rather than a missing materialiser:
+this item's pre/post-container split exists because
+`BaasService._build_create_bot_payload` reads the startup-script row while
+composing a start command, and teclaw has no analogue — `TeclawProvisionService`
+composes a config artifact at provision time and hands it to BaaS. Delivering a
+teclaw manifest post-container would be a different mechanism from the one W8
+lands, so a bot created here would get semantics that change under it. W8 owns
+that arm: its scope names "teclaw 在第一份 artifact 组装之前", its first acceptance
+criterion is the first-artifact guarantee, and its scale note lists
+`TeclawProvisionService`.
+
+`is_teclaw` is the engine authority — the same callable the capability resolver
+already takes — never a hand-rolled `== "teclaw"`.
+
+### K-9b Submission never creates the bot inline
 
 `create_bot_with_authorization` creates the bot inline when Passport returns a
 token immediately. This endpoint always goes through user consent, so W13's
@@ -318,4 +345,5 @@ This is what retires the feature switch.
 | **rev 1** | Rode the existing two-leg Passport pipeline; a device-activation listener ran phase B; the poll echoed creation attributes; a default-off switch. |
 | **rev 2** | Onto a task-queue job with a deadline. The listener and its restart guard go; abandonment becomes terminal; the poll takes only a `bot_id`; the switch is replaced by the job cleaning up after itself. |
 | **rev 3** | Phase A moves ahead of bot creation, deleting both the `pre_provision` seam in `create_bot` and the synchronous `apply_now`. |
-| **rev 4** | Applying becomes a task on all three paths (D-9), one task type (D-10); the job stops waiting for phase B (K-5); submission never creates inline (K-9); the poll is a pure read (K-8). |
+| **rev 4** | Applying becomes a task on all three paths (D-9), one task type (D-10); the job stops waiting for phase B (K-5); submission never creates inline (K-9b); the poll is a pure read (K-8). |
+| **rev 5** | Terminal states split into `CREATE_FAILED` and `APPLY_FAILED` so the three failure modes are distinguishable (D-6); the submit response carries no state; the endpoint refuses teclaw (D-8, K-9a). Deployment preconditions confirmed by the owner. |

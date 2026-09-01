@@ -2,10 +2,10 @@
 
 Spec: `spec.md` · Plan: `plan.md` · Issue #1696.
 
-> **Revision 4.** Group A now moves apply execution onto the task queue (spec D-9,
-> D-10) — that is new work, and it changes the running-bot path's executor while
-> leaving its contract alone. Group C loses the phase-B wait. Nothing adds a table
-> or a column.
+> **Revision 5.** All open questions closed: terminal states split into
+> `CREATE_FAILED` / `APPLY_FAILED` so the three failure modes are distinguishable,
+> the submit response carries no state, and the endpoint refuses teclaw. Rev 4
+> moved apply execution onto the task queue. Nothing adds a table or a column.
 
 Six groups. A→B→C are a chain; D needs C; E proves the lot.
 
@@ -101,7 +101,13 @@ Conventions from `plan.md` that every task assumes:
         which is a write.
   - [ ] Every violation is reported in one pass, naming the construct and what
         would apply it.
-  - [ ] The module docstring states why this is stricter than `PUT`.
+  - [ ] **A teclaw engine is refused** by the same function, naming W8 as where
+        teclaw creation lives. The check goes through `is_teclaw` — the engine
+        authority the capability resolver already takes — never a hand-rolled
+        `== "teclaw"`.
+  - [ ] The module docstring states why this is stricter than `PUT`, and why the
+        teclaw refusal is structural rather than a missing materialiser
+        (`plan.md` K-9a).
 - **Depends on:** Task 4
 
 ## [ ] Task 6: The creation seam object
@@ -198,9 +204,15 @@ Conventions from `plan.md` that every task assumes:
         existing create body accepts.
   - [ ] The **poll has no body and no query parameters** — `bot_id` in the path is
         its whole input.
-  - [ ] A `CreationState` enum with the seven states, and a response carrying the
-        state, the authorization handles while awaiting, and — at both terminal
-        states — the apply report **and the bot**.
+  - [ ] A `CreationState` enum with these eight states — `AWAITING_AUTHORIZATION`,
+        `AUTHORIZATION_REJECTED`, `AUTHORIZATION_EXPIRED`, `CREATING`,
+        `CREATE_FAILED`, `APPLYING`, `READY`, `APPLY_FAILED`.
+  - [ ] The poll response carries the state, the authorization handles while
+        awaiting, and — at `READY` and `APPLY_FAILED` — the apply report **and the
+        bot**.
+  - [ ] **The submit response has no state field at all.** The enum appears only
+        on the poll, so no terminal value can be returned by submission. A test
+        pins that the submit model has no such field.
 - **Depends on:** —
 
 ## [ ] Task 12: The two routes
@@ -213,8 +225,11 @@ Conventions from `plan.md` that every task assumes:
   - [ ] `GET /openapi/v1/bots/{bot_id}/with-manifest/status` answers `plan.md`
         §K-8 and **makes no external call** — no AgentPass query, no work started,
         nothing written. A test asserts the Passport plugin is never touched.
-  - [ ] The provisioning-failure edge reports `FAILED` with a message naming
-        provisioning, not the manifest.
+  - [ ] The three failure modes answer differently and without prose: an invalid
+        manifest is a `422` at submission; a bot that could not be created or never
+        came up is `CREATE_FAILED`; a running bot with an incomplete manifest is
+        `APPLY_FAILED`. A test asserts all three.
+  - [ ] A teclaw creation is refused at submission, naming W8.
   - [ ] The router is mounted where its `{bot_id}` literal cannot be captured by a
         wildcard group. **No feature switch.**
   - [ ] Route docstrings state: the manifest is submitted once and never
@@ -268,8 +283,10 @@ Conventions from `plan.md` that every task assumes:
   - [ ] An invalid manifest is refused `422` with every violation named, and
         **Passport is never called** — asserted on the plugin.
   - [ ] A construct with no materialiser is refused at submission, naming it.
-  - [ ] A `PARTIAL` apply reports `FAILED`, the response **carries the bot**, and
-        the bot record is untouched.
+  - [ ] A `PARTIAL` apply reports `APPLY_FAILED`, the response **carries the
+        bot**, and the bot record is untouched.
+  - [ ] A creation whose provisioning fails reports `CREATE_FAILED`, never
+        `APPLY_FAILED`.
   - [ ] `AUTHORIZATION_REJECTED` and `AUTHORIZATION_EXPIRED` are terminal, create
         nothing, and leave no manifest or startup-script row.
   - [ ] Creation with no manifest reports `READY`.

@@ -17,11 +17,12 @@ what this closes.
 
 Work item **W13** · issue #1696 · `work-items.zh-CN.md` §2.11, §2.12, §5.
 
-> **Revision 4** — after three review rounds on PR #1791. Applying now runs as a
-> **task-queue task on every path**, replacing the daemon thread W4 shipped; the
-> creation job waits only for the pre-container phase; submission never creates a
-> bot inline; and the poll is a pure read. The revision history at the end of
-> `plan.md` records how each of those arrived.
+> **Revision 5** — all open questions closed. Applying runs as a **task-queue
+> task on every path**, replacing the daemon thread W4 shipped; the creation job
+> waits only for the pre-container phase; submission never creates a bot inline;
+> the poll is a pure read; the terminal states name **which** thing failed; and
+> the endpoint is **ARCA-only** — teclaw creation is W8's. Revision history at the
+> end of `plan.md`.
 
 ## Motivation
 
@@ -122,17 +123,28 @@ strand it.
 - [ ] **Operational preconditions are stated, not assumed.** The worker runs only
       where it is enabled and its table is provisioned. With applying — and
       therefore bot creation — riding the queue, a deployment with the worker off
-      does not merely run slower: creations never complete. This is a deployment
-      requirement of the feature, and it is written down where an operator will
-      find it.
+      does not merely run slower: creations never complete.
+      `task_queue_worker.enabled=true` is confirmed to hold in the target
+      deployments; it is written down anyway, where an operator will find it,
+      because it is now load-bearing.
 
 ### The create operation
 
 - [ ] A public endpoint accepts a manifest document **plus** the ordinary
       creation attributes (engine, cluster, name, description, bot type, space,
-      engine properties) and returns immediately with the allocated `bot_id`, the
-      authorization handles (`iframe_url` / `redirect_url`), and the state the
-      creation starts in.
+      engine properties) and returns immediately with the allocated `bot_id` and
+      the authorization handles (`iframe_url` / `redirect_url`).
+- [ ] **The submit response carries no state.** The state vocabulary belongs to
+      the poll and appears nowhere else, so no terminal value can ever be returned
+      by submission. A caller that has just submitted is, by construction,
+      awaiting authorization.
+- [ ] **Only ARCA-family engines are accepted.** A teclaw creation is refused, by
+      the same rule as an unbacked construct — never accept what this path cannot
+      deliver. teclaw configures a bot by composing its artifact at provision
+      time, which is a different mechanism from the pre/post-container split here
+      and belongs to W8, whose scope names it ("teclaw 在第一份 artifact 组装之前")
+      and whose first acceptance criterion is the first-artifact guarantee. The
+      refusal says so and names W8.
 - [ ] The manifest is **validated before Passport is applied for**, in the same
       preflight as quota, name and engine checks. A caller with an invalid
       manifest is never sent to authorize, and no Passport application is spent
@@ -186,9 +198,9 @@ strand it.
       at-least-once invocation.
 - [ ] The job is enqueued with an idempotency key derived from the bot id, so a
       resubmission cannot start a second creation for the same bot. This is the
-      **first adoption** of that mechanism, which is permitted only because the
-      mechanism itself landed in an earlier release; that ordering is confirmed
-      before the key is relied on.
+      **first adoption** of that mechanism. The queue requires adoption to ship
+      strictly later than the mechanism itself, which is satisfied: it is
+      implemented and released, and has simply had no call site until now.
 
 ### The poll
 
@@ -213,21 +225,33 @@ strand it.
               ▼
       CREATING                 authorized; the bot record is written, the
               │                container is being provisioned
+              ├──► CREATE_FAILED   terminal — the bot could not be created or
+              │                    never came up. Nothing to do with the manifest
               ▼
       APPLYING                 the post-container apply is running
-              ├──► READY       terminal — success; carries the apply report
-              └──► FAILED      terminal — carries which entries did not land
+              ├──► READY         terminal — the bot is up and the manifest landed
+              └──► APPLY_FAILED  terminal — the bot is up; part of the manifest
+                                 did not land, and the report says which
       ```
 
-- [ ] An apply result of `PARTIAL` reports **`FAILED`**, per the decision recorded
-      on #1696: under §3.2's category overwrite a category is written
-      all-or-nothing, so a declared category that was not written whole is not a
-      success. **The apply record itself still says `PARTIAL`** — the mapping is
-      this poll's summary, not a rewrite of the apply's status, and the `PUT` +
+- [ ] **The three failure modes are distinguishable without reading prose.** An
+      invalid manifest is a `422` at submission with no bot and no state at all; a
+      bot that could not be created or never came up is `CREATE_FAILED`; a bot
+      that is running with an incomplete manifest is `APPLY_FAILED`. A caller
+      never has to parse a message to tell "you have no bot" from "you have a bot
+      that is missing some configuration".
+
+- [ ] An apply result of `PARTIAL` reports **`APPLY_FAILED`**, not `READY`, per
+      the decision recorded on #1696: under §3.2's category overwrite a category is
+      written all-or-nothing, so a declared category that was not written whole is
+      not a success. **The apply record itself still says `PARTIAL`** — the mapping
+      is this poll's summary, not a rewrite of the apply's status, and the `PUT` +
       apply path on a running bot is unaffected.
-- [ ] Because `FAILED` here must never read as "no bot was created", the terminal
-      response **carries the bot** alongside the report. The bot record is not
-      touched by a failing apply (§2.7).
+- [ ] `APPLY_FAILED` states in its own name that the bot exists — that is what the
+      earlier `FAILED` spelling could not do, and the objection it invited ("people
+      will think the bot was never created") is answered by the vocabulary rather
+      than by a note in the payload. The response **also carries the bot**, and the
+      bot record is not touched by a failing apply (§2.7).
 - [ ] Both terminal states carry a report complete enough to answer "did my
       manifest take effect?" without a second call — **including the entries from
       both phases**.
@@ -330,22 +354,43 @@ says.
 failure in charge of the bot record would contradict §2.7 and leave a half-created
 bot to compensate for.
 
-**D-6 — `PARTIAL` reports `FAILED`, and the response shows the bot.**
-A standing decision (#1696, 2026-08-30, superseding an earlier revision that
-rested on `on_fetch_failure: skip`, which §3.2 removed). The objection it invites
-is real — "failed" can read as "no bot was created" — so the terminal response
-carries the bot, and the apply record keeps saying `PARTIAL`.
+**D-6 — The terminal states name what failed.**
+`PARTIAL` still reports a failure rather than `READY` — a standing decision
+(#1696, 2026-08-30, superseding an earlier revision that rested on
+`on_fetch_failure: skip`, which §3.2 removed). What changed is the spelling: three
+distinct outcomes a caller must be able to tell apart — an invalid manifest (a
+`422`, no bot), a bot that could not be created (`CREATE_FAILED`), and a running
+bot with an incomplete manifest (`APPLY_FAILED`) — now have three distinct
+answers. A single `FAILED` covering the last two was the real source of the "did I
+get a bot or not?" ambiguity. The apply record keeps saying `PARTIAL`; only this
+poll's summary maps it.
 
 **D-7 — No feature switch.** The deadline supplies the cap the switch was
 standing in for, and the job deletes what it wrote when a creation ends without a
 bot. #1698's general sweeper is still worth having but is no longer this
 endpoint's gate.
 
-**D-8 — teclaw is accepted, but "in the first artifact" is not claimed.**
-The job waits for the container on either engine family. The stronger teclaw
-guarantee — that the **first** artifact already contains the manifest's results —
-requires reaching into artifact production and is W8's criterion. On teclaw,
-`script` is already unsupported, so phase A has nothing to do there.
+**D-8 — ARCA only; teclaw creation is W8's.**
+*Reversed in rev 5.* Earlier revisions accepted teclaw with a narrower guarantee.
+That was the wrong shape: this item's entire pre/post-container split exists
+because `BaasService._build_create_bot_payload` reads the startup-script row while
+composing a start command, and teclaw has no analogue — it configures a bot by
+**composing its artifact at provision time**. Delivering a teclaw manifest
+post-container would be both a worse fit and a different mechanism from the one
+that lands once W8 does the artifact work, so a teclaw bot created here would get
+semantics that change under it.
+
+The work items already assign it: W8's scope covers creation-time apply for both
+families and names teclaw's as "before the first artifact is assembled", its first
+acceptance criterion is the first-artifact guarantee, and its scale note lists
+`TeclawProvisionService` among the three things it touches. (W8's second criterion
+reads as though W13 covered creation for both engines; against its own scope line
+and first criterion, the reading above is the coherent one, and stating it here
+retires the ambiguity.)
+
+So the endpoint refuses a teclaw engine, by the same rule that refuses an unbacked
+construct. `script` was already unsupported on teclaw anyway, so nothing is lost
+that this path could have delivered.
 
 **D-9 — Applying becomes a task, on every path.**
 `start_apply` runs its work on a daemon thread today. The task queue's own README
@@ -411,14 +456,19 @@ convergent.
 
 ## Open Questions
 
-Two are still the reviewer's to close; neither blocks starting.
+**None.** All four closed in review on 2026-09-01:
 
-1. **`PARTIAL → FAILED`** (D-6). Kept per the standing decision, with the bot
-   carried in the response as the mitigation. The alternative on the table is a
-   distinct `READY_WITH_FAILURES` state rather than folding it back into `READY`.
-2. **`AUTHORIZATION_EXPIRED`** is a seventh state on a machine #1696 specified
-   with six. It exists because the deadline does, and because "never clicked" is
-   not "declined". It can fold into `AUTHORIZATION_REJECTED` if that is preferred.
+1. **Failure vocabulary** — the requirement is that an invalid manifest, a bot
+   that could not be created, and a running bot with an incomplete manifest are
+   all distinguishable. Answered by `422` / `CREATE_FAILED` / `APPLY_FAILED`
+   (D-6).
+2. **`AUTHORIZATION_EXPIRED`** stays — comprehensiveness preferred — and the
+   state vocabulary is confined to the **poll**; the submit response carries no
+   state at all, so no terminal value can appear there.
+3. **teclaw** is out (D-8); the endpoint is ARCA-only and teclaw creation is W8's.
+4. **Preconditions confirmed by the owner:** `task_queue_worker.enabled=true`
+   holds in the target deployments, and enqueue idempotency is implemented and
+   released — this is simply its first call site. The key stays in the design.
 
 ## Follow-ups
 
