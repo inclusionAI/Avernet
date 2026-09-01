@@ -83,11 +83,12 @@ BOT = {
     "entity_id": "u1",
     "entity_type": "staff",
     "device_binding": {"device_id": "dev-9"},
-    # Stored template snapshot: the wire must keep only the allowlisted keys.
+    # Stored template snapshot: returned on the wire verbatim (2026-09-01
+    # passthrough decision — owner-scoped faces echo the caller's own input).
     "template_type": "applicationCoding",
     "template_config": {
         "devflow_workflow": "release-notes",
-        "token": "must-not-leak",
+        "token": "echoed-to-owner",
         "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
         "runtime": "codefuse",
     },
@@ -251,16 +252,19 @@ def test_list_bots(client):
     assert data["items"][0]["bot_id"] == "b1"
 
 
-def test_list_bots_carries_template_projection_and_space(client):
+def test_list_bots_carries_template_snapshot_and_space(client):
     data = _ok(client.get("/openapi/v1/bots"))
     item = data["items"][0]
-    # The stored snapshot's secrets never reach the wire; only the
-    # allowlisted display keys survive.
+    # The stored snapshot reaches the wire verbatim — the passthrough decision
+    # (2026-09-01): an owner-scoped face echoes the caller's own creation
+    # input, secrets included, with no allowlist filtering.
     assert item["template_type"] == "applicationCoding"
-    assert item["template_config"] == {"devflow_workflow": "release-notes"}
-    assert "token" not in item["template_config"]
-    assert "bot_template_config" not in item["template_config"]
-    assert "runtime" not in item["template_config"]
+    assert item["template_config"] == {
+        "devflow_workflow": "release-notes",
+        "token": "echoed-to-owner",
+        "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
+        "runtime": "codefuse",
+    }
     # A NULL ac_bots.space_id resolves to the owner's synthetic personal space.
     space = item["space"]
     assert space["kind"] == "personal"
