@@ -61,18 +61,18 @@ Conventions from `plan.md` that every task assumes:
         mechanism itself; see the spec's corrected criterion.
 - **Depends on:** Task 1
 
-## [ ] Task 3: `carry_from_apply_id`
+## [x] Task 3: `carry_from_apply_id`
 - **Files:** the apply service, the protocol, `apply/outcomes.py` if a merge
   helper is needed
 - **Done when:**
-  - [ ] `start_apply` accepts `carry_from_apply_id: str | None`, carried in the
+  - [x] `start_apply` accepts `carry_from_apply_id: str | None`, carried in the
         task payload.
-  - [ ] The named record's categories are prepended to the finished report and the
+  - [x] The named record's categories are prepended to the finished report and the
         summary re-derived over the union, so `APPLY_ORDER`'s order survives
         (`script` is position 0).
-  - [ ] A failed phase A carried into a clean phase B terminates `PARTIAL`.
-  - [ ] A missing or foreign id is ignored, not fatal.
-  - [ ] Phase A's own record is untouched by the carry.
+  - [x] A failed phase A carried into a clean phase B terminates `PARTIAL`.
+  - [x] A missing or foreign id is ignored, not fatal.
+  - [x] Phase A's own record is untouched by the carry.
 - **Depends on:** Task 2
 
 ## [ ] Task 4: `materialised_constructs()`

@@ -23,6 +23,8 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
+from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ManifestApplyInProgressError,
 )
@@ -663,36 +665,39 @@ def test_a_strict_baseline_is_read_back_from_the_last_report(world, monkeypatch)
     ) == {"charts": "f" * 40}
 
 
-def test_a_launch_failure_closes_the_session_it_built(world, monkeypatch):
-    """The terminal path that never runs ``_run`` still closes the session.
+def test_a_failed_handoff_has_no_session_to_leak(world, monkeypatch):
+    """The terminal path that never runs ``_run``, after the work moved.
 
-    ``Thread.start`` raising means ``_run``'s ``finally`` never exists for
-    this apply, so the launch-failure handler must close the session itself —
-    the same reason it terminates the report row: nothing else will.
+    W7 wrote this against ``Thread.start`` raising: the session was built in
+    the request, so a launch that never ran ``_run`` had to close it by hand
+    or leak an ``mkdtemp`` tree. W13 builds the session in the handler
+    instead — the checkouts belong to the process that applies them — so the
+    leak this guarded against cannot form: a handoff that fails has no
+    session yet. That is the invariant now, and it is worth pinning rather
+    than deleting, because moving the build back into ``start_apply`` would
+    silently restore the leak the launch-failure path no longer closes.
     """
+    service, _applies, _locks, _scripts, _manifests = world
+    queue = service._task_queue_provider()
+    closed = _counting_session_closes(monkeypatch)
+    before = FakeGitClient.constructed
 
-    class _NoThreadsLeftError(RuntimeError):
+    class _QueueUnavailableError(RuntimeError):
         pass
 
-    class ExplodingThread:
-        def __init__(self, *args, **kwargs):
-            pass
+    def _explode(*args, **kwargs):
+        raise _QueueUnavailableError("could not reach the queue")
 
-        def start(self):
-            raise _NoThreadsLeftError("can't start new thread")
+    monkeypatch.setattr(queue, "enqueue", _explode)
 
-    service, _applies, _locks, _scripts, _manifests = world
-    closed = _counting_session_closes(monkeypatch)
-    monkeypatch.setattr(
-        "agentclaw.community.core.bot_config_manifest.services."
-        "config_manifest_apply_service.threading.Thread",
-        ExplodingThread,
-    )
-
-    with pytest.raises(_NoThreadsLeftError):
+    with pytest.raises(_QueueUnavailableError):
         _start(service)
 
-    assert len(closed) == 1, "a launch failure must close the session it built"
+    assert FakeGitClient.constructed == before, (
+        "start_apply built a source session before the handoff; its checkout "
+        "trees would outlive the request that made them"
+    )
+    assert closed == [], "nothing was built, so nothing was there to close"
 
 
 def test_a_dry_run_closes_its_session(world, monkeypatch):
@@ -717,3 +722,131 @@ def test_a_dry_run_closes_its_session(world, monkeypatch):
     assert report.status is ApplyStatus.SUCCEEDED
     assert FakeGitClient.constructed - before == 1
     assert len(closed) == 1, "a dry run must close its session before returning"
+# ── Carrying one phase's report into the next (W13) ────────────────────────
+#
+# A creation runs two applies — the pre-container phase writes `script`, the
+# post-container phase writes everything else — separated by the whole of
+# container provisioning. Each has its own record, so the report a caller reads
+# at the end has to account for both or the manifest looks half-vanished.
+
+
+def test_the_second_phase_report_carries_the_first_phases_categories(world):
+    service, applies, _locks, _scripts, _manifests = world
+
+    first = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:pre_container",
+        phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+    )
+    second = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:on_container",
+        phases=frozenset({ApplyPhase.ON_CONTAINER}),
+        carry_from_apply_id=first.apply_id,
+    )
+
+    merged = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id=second.apply_id
+    )
+    names = [c.construct.value for c in merged.categories]
+    assert "script" in names, (
+        "the post-container report dropped the pre-container phase's category; "
+        "a caller reading it would think the script never landed"
+    )
+    # APPLY_ORDER's own order: script is position 0.
+    assert names[0] == "script"
+
+    # The carried-from record is not rewritten by being carried.
+    earlier = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id=first.apply_id
+    )
+    assert [c.construct.value for c in earlier.categories] == ["script"]
+
+
+def test_a_missing_carry_id_is_ignored_rather_than_failing_the_apply(world):
+    service, _applies, _locks, _scripts, _manifests = world
+
+    accepted = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:on_container",
+        carry_from_apply_id="does-not-exist",
+    )
+
+    report = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id=accepted.apply_id
+    )
+    assert report is not None
+    assert report.status is ApplyStatus.SUCCEEDED, (
+        "losing a reporting nicety must never fail an apply that worked"
+    )
+
+
+def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(world):
+    """The summary is re-derived over the union, not copied from this phase.
+
+    This is the case the merge exists for. On its own the post-container phase
+    here delivers nothing and reports ``SUCCEEDED``; the pre-container phase
+    failed. A caller reading only the second report would be told the manifest
+    applied cleanly, which is exactly the lie the carry prevents.
+
+    The union's status is ``FAILED`` rather than ``PARTIAL`` because this
+    fixture's document declares only ``script``: nothing was delivered at all.
+    ``PARTIAL`` needs a document where something *did* land, which the
+    orchestrator's own suite covers — what matters here is that the summary
+    moved off what this phase alone would have said.
+    """
+    service, _applies, _locks, scripts, _manifests = world
+
+    def _refuse(**_kwargs):
+        raise RuntimeError("startup script write failed")
+
+    scripts.put = _refuse
+    first = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:pre_container",
+        phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+    )
+    assert (
+        service.get_apply(
+            entity_id=_ENTITY, bot_id=_BOT, apply_id=first.apply_id
+        ).status
+        is ApplyStatus.FAILED
+    )
+
+    second = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:on_container",
+        phases=frozenset({ApplyPhase.ON_CONTAINER}),
+        carry_from_apply_id=first.apply_id,
+    )
+    merged = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id=second.apply_id
+    )
+    assert "script" in [c.construct.value for c in merged.categories], (
+        "the failed phase's category did not survive the merge"
+    )
+    assert merged.status is not ApplyStatus.SUCCEEDED, (
+        "the summary was copied from this phase instead of re-derived over the "
+        "union; a caller would be told the script landed when it did not"
+    )
+    assert merged.status is ApplyStatus.FAILED
