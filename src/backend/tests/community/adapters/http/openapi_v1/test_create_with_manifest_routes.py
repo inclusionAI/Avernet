@@ -31,6 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.bots import create_with_manife
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
+    _CONTAINER_FAILED_STATUSES,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
@@ -278,6 +279,18 @@ def test_the_submit_literal_is_not_captured_by_the_bots_wildcard():
         "a /openapi/v1/bots/{...} wildcard is registered ahead of the "
         "with-manifest literal, so a submission would be read as addressing a bot"
     )
+
+
+def test_the_poll_and_the_job_agree_on_what_never_comes_up():
+    """Two copies of "no container is coming", pinned to each other.
+
+    They are separate on purpose — the job's set decides when to stop
+    rescheduling, the poll's decides what to report — but a status added to one
+    and not the other would mean a creation the job has given up on still
+    reporting `CREATING` forever, or the reverse. The duplication is cheap; the
+    divergence is not, and nothing else would catch it.
+    """
+    assert create_with_manifest._PROVISIONING_FAILED == _CONTAINER_FAILED_STATUSES
 
 
 def test_both_routes_refuse_an_application_caller():
