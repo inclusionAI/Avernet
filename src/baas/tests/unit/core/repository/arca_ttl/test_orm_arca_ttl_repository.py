@@ -545,8 +545,8 @@ class TestFindUnregistered:
         assert results[0]["sandbox_id"] == "sb-new-456"
 
     def test_find_unregistered_device_matching_sandbox_still_suppressed(self):
-        """Test 12b: anti-join stays strict — matching source_id + ACTIVE
-        status + sandbox still suppresses the hot row."""
+        """Test 12b: anti-join stays strict — matching source_id + same
+        sandbox suppresses the hot row regardless of cold-row status."""
         repo, mock_session = _make_repo()
         mock_session.execute.return_value = [
             _make_row(
@@ -564,9 +564,47 @@ class TestFindUnregistered:
         compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
         assert "baas_bot_ttl_renewal_schedule.source_id = baas_device.id" in sql_text
-        assert "baas_bot_ttl_renewal_schedule.status = %s" in sql_text
-        assert compiled.params["status_1"] == "ACTIVE"
+        # D-85-AJ1: the ON clause renders no cold-table status predicate —
+        # any cold row on the same sandbox suppresses the hot row. The one
+        # surviving status bind is the hot-table WHERE filter.
+        assert "baas_bot_ttl_renewal_schedule.status" not in sql_text
+        assert len([k for k in compiled.params if k.startswith("status")]) == 1
         assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
+
+    def test_find_unregistered_device_stopped_same_sandbox_still_suppressed(self):
+        """Test 12c: a STOPPED cold row on the same sandbox still suppresses
+        the hot row — no status predicate in either dialect compile."""
+        repo, mock_session = _make_repo()
+        mock_session.execute.return_value = [
+            _make_row(
+                {
+                    "id": 1,
+                    "sandbox_id": "sb-new-456",
+                    "source_table": "baas_device",
+                    "ttl": "2026-08-25T12:00:00",
+                }
+            )
+        ]
+
+        results = repo.find_unregistered("test", "baas_device", 500)
+
+        for dialect in (mysql.dialect(), sqlite.dialect()):
+            compiled = mock_session.execute.call_args[0][0].compile(dialect=dialect)
+            sql_text = str(compiled)
+            assert "baas_bot_ttl_renewal_schedule.status" not in sql_text
+            assert (
+                "baas_bot_ttl_renewal_schedule.sandbox_id = "
+                "baas_device.provider_device_id" in sql_text
+            )
+            assert (
+                "baas_bot_ttl_renewal_schedule.source_id = baas_device.id"
+                in sql_text
+            )
+            assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
+            assert len([k for k in compiled.params if k.startswith("status")]) == 1
+
+        assert len(results) == 1
+        assert results[0]["sandbox_id"] == "sb-new-456"
 
     def test_find_unregistered_binding_stale_sandbox_not_suppressed(self):
         """Test 13a: binding ON equates s.sandbox_id with the device_props
