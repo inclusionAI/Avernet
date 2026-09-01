@@ -196,6 +196,21 @@ def test_publication_attempt_orm_uses_final_recovery_and_error_facts(db):
     assert "failure_code" not in columns
 
 
+def test_publication_attempt_orm_constraint_preserves_legacy_statuses(db):
+    constraint = next(
+        item
+        for item in SkillPublicationAttempt.__table__.constraints
+        if item.name == "ck_skill_publication_attempt_status_v2"
+    )
+    clause = str(constraint.sqltext)
+
+    assert "MATERIALIZATION_FAILED" in clause
+    assert all(
+        status in clause
+        for status in ("VALIDATING", "SCANNING", "MANUAL_RECONCILIATION")
+    )
+
+
 def test_space_repository_is_tenant_env_scoped_and_unique(db):
     repo = _space_skills(db)
     created = repo.create_space(
