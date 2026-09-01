@@ -1570,6 +1570,59 @@ def test_repair_resolves_a_center_member_by_uuid_not_by_stored_skill_id():
         } == {1}
 
 
+def test_repair_rejects_a_center_membership_without_its_stable_uuid():
+    """A malformed Center membership must not disappear from desired state.
+
+    Runtime projection selects mapping-v3 only after Installation exposes a
+    Center asset. Silently resolving this row to no Skill would let an active
+    SkillSet report success while publishing only its Local/Repo mappings.
+    """
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        skill_set = SkillSet(
+            name="active",
+            bolt_id="bot",
+            user_id="owner",
+            engine_type="openclaw",
+            is_active=True,
+            env="dev",
+        )
+        skill = Skill(
+            name="center",
+            git_path="center://public-center",
+            skill_uuid="stable-center-uuid",
+            version=1,
+            status="PUBLISHED",
+            env="dev",
+        )
+        session.add_all([skill_set, skill])
+        session.flush()
+        session.add(
+            SkillSetSkill(
+                skill_set_id=skill_set.id,
+                skill_id=skill.id,
+                skill_uuid=None,
+                env="dev",
+            )
+        )
+
+    repository = CapabilityDesiredStateRepository(db)
+
+    with pytest.raises(
+        SkillSetControlPlaneConflictError,
+        match="CENTER_MEMBERSHIP_IDENTITY_MISSING",
+    ):
+        repository.flush_installations(
+            bot_id="bot",
+            owner_id="owner",
+            env="dev",
+            engine_type="openclaw",
+        )
+
+    with db.orm_session() as session:
+        assert session.query(BotSkillInstallation).count() == 0
+
+
 class _FailingInsertSession:
     """A session whose BotSkillInstallation insert fails without persisting.
 
@@ -2819,6 +2872,58 @@ def test_add_skill_reports_the_skill_s_mcp_dependencies():
 
     # Both stored shapes decode, through the same decoder the projection uses.
     assert result.mcp_codes == frozenset({"mcp.weather", "mcp.maps"})
+
+
+def test_add_center_skill_persists_uuid_and_later_activation_installs_it():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        skill = Skill(
+            name="center",
+            git_path="center://public-center",
+            skill_uuid="stable-center-uuid",
+            version=1,
+            status="PUBLISHED",
+            env="dev",
+        )
+        skill_set = SkillSet(
+            name="set",
+            user_id="owner",
+            bolt_id="bot",
+            engine_type="openclaw",
+            is_active=False,
+            env="dev",
+        )
+        session.add_all([skill, skill_set])
+        session.flush()
+        skill_id = str(skill.id)
+        set_id = str(skill_set.id)
+
+    repository.add_skill(
+        bot_id="bot",
+        owner_id="owner",
+        set_id=set_id,
+        skill_id=skill_id,
+        engine_type="openclaw",
+    )
+
+    with db.orm_session() as session:
+        membership = session.query(SkillSetSkill).one()
+        assert membership.skill_uuid == "stable-center-uuid"
+
+    repository.set_skill_set_active(
+        bot_id="bot",
+        owner_id="owner",
+        set_id=set_id,
+        active=True,
+        engine_type="openclaw",
+    )
+
+    with db.orm_session() as session:
+        assert {
+            installation.skill_id
+            for installation in session.query(BotSkillInstallation).all()
+        } == {int(skill_id)}
 
 
 def test_add_skill_reports_no_dependencies_when_the_skill_declares_none():
