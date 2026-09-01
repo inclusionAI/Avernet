@@ -30,7 +30,7 @@ test("publishes only the public Clawevolve task set", () => {
 test("keeps private hosted defaults outside the public registry", () => {
   const registry = createEvolveNodeRegistry();
   assert.equal(registry.bench.defaultCommand, "/clawevolve-bench --model {{model}} --suite all");
-  assert.equal(registry.optimize.defaultCommand.includes("antchat/"), false);
+  assert.match(registry.optimize.defaultCommand, /--model \{\{model\}\}/);
 
   const hosted = createEvolveNodeRegistry({ bench: "/clawevolve-bench --model hosted-model --suite all" });
   assert.equal(hosted.bench.defaultCommand, "/clawevolve-bench --model hosted-model --suite all");

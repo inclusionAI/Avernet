@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-FORBIDDEN='(?i:alipay\.com|antfin\.com|code\.alipay\.com|reg\.docker\.alibaba-inc\.com|@alipay/|clawweb|\b(?:baas|arca|ais)\b|server/repositories/)'
+FORBIDDEN='(?i:alipay\.com|antfin\.com|code\.alipay\.com|reg\.docker\.alibaba-inc\.com|oss-alipay|@alipay/|antchat/|antsys[-_]|clawweb|\b(?:baas|arca|ais)\b|server/repositories/)'
 SECRET_PATTERN='(?i:(?:access|secret)[_-]?key\s*[:=]\s*[A-Za-z0-9_+/=-]{16,}|BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16})'
 
 scan_targets=(src tests README.md package.json)
