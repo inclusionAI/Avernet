@@ -341,7 +341,7 @@ class TestStep0GapDetection:
         # The suppressed signal is observably zero, never silently dropped.
         assert report.suppressed_terminal_count == 0
         messages = [r.message for r in caplog.records]
-        assert any("covered-count query failed" in m for m in messages)
+        assert any("covered/gauge count query failed" in m for m in messages)
 
     @pytest.mark.asyncio
     async def test_anti_join_periodic_verify_triggers_every_48_rounds(self):
