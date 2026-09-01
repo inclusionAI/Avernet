@@ -53,11 +53,13 @@ class RenewalRunReport:
         """Single-line comma-separated report for monitor scraping.
 
         Format:
-            uuid,trigger,duration,gapl,duel,orphan,ok,skp,fail,stop
+            uuid,trigger,duration,gapl,duel,orphan,ok,skp,fail,stop,
+            suppressed={suppressed_terminal_count}
         """
         return (
             f"{self.run_uuid},{self.trigger},{self.duration_seconds:.2f},"
             f"{self.gap_detected},{self.gap_records_registered},"
             f"{self.due_count},{self.orphan_count},"
-            f"{self.success},{self.skipped},{self.failure},{self.stopped}"
+            f"{self.success},{self.skipped},{self.failure},{self.stopped},"
+            f"suppressed={self.suppressed_terminal_count}"
         )
