@@ -1342,6 +1342,22 @@ APPLYING                 the post-container apply is running
 - **`APPLYING` turns D4's interim cost into a visible state.** Post-start delivery
   (§3.4) leaves a window where the bot is ACTIVE but unconfigured; a caller that
   waits for `READY` never observes it. The window stops being an invisible trap.
+- **A `bot_id` this endpoint did not create is a `404`, not a state.** A bot made
+  the ordinary way and given a manifest by `PUT` has a bot record and an apply
+  record and no creation job — which is exactly the shape of `CREATING`, so
+  without the job the poll would report a creation that never happened. The job
+  is found by an idempotency key derived from `(tenant, entity_id, bot_id)`,
+  which also keeps one owner's `bot_id` from finding another's pending
+  authorization URL.
+
+**Operational precondition (PR #1791).** Applying — and therefore creating a bot
+with a manifest — only progresses where `task_queue_worker.enabled=true` and
+`ac_task_queue` is provisioned. That flag gated an optimisation before this item;
+it now gates the feature, and the failure mode is not slowness. With the worker
+off, submission still answers `202` and the poll sits at
+`AWAITING_AUTHORIZATION` until the deadline retires it as
+`AUTHORIZATION_EXPIRED`; an explicit apply still answers `202` and its report
+stays `RUNNING` until the lock's TTL expires. Neither ever completes.
 
 **Done when.**
 

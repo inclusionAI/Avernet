@@ -1096,6 +1096,19 @@ APPLYING                 容器后那一段 apply 进行中
 - **`APPLYING` 把 D4 的临时代价变成一个可见状态。**启动后下发（§3.4）留下一个
   bot 已 ACTIVE 但未配置的窗口；等待 `READY` 的调用方永远观察不到它。这个窗口
   不再是一个隐形陷阱。
+- **不是本端点创建的 `bot_id` 返回 `404`，而不是某个状态。**用普通方式建出来、
+  事后 `PUT` 了一份 manifest 的 bot，既有 bot 记录也有 apply 记录，就是没有创建
+  job——而那正好是 `CREATING` 的形状，所以少了 job 这一问，轮询就会汇报一次从未
+  发生过的创建。job 用 `(tenant, entity_id, bot_id)` 推导出的幂等键找到，这同时
+  也保证一个 owner 拿另一个 owner 的 `bot_id` 去轮询只会一无所获，而不是拿到对方
+  待授权的链接。
+
+**部署前提（PR #1791）。**apply——因而「用 manifest 创建 bot」——只在
+`task_queue_worker.enabled=true` 且 `ac_task_queue` 已开好的部署里推进。这个开关
+在本项之前只是一个优化开关，从本项起它决定功能可不可用，而且失效方式不是「变慢」：
+worker 关着时，提交照常返回 `202`，轮询会一直停在 `AWAITING_AUTHORIZATION`，直到
+deadline 把它判为 `AUTHORIZATION_EXPIRED`；显式 apply 照常给出 `202`，报告则一直
+停在 `RUNNING`，直到 apply 锁的 TTL 到期。两者都永远不会完成。
 
 **验收标准。**
 

@@ -312,20 +312,21 @@ Conventions from `plan.md` that every task assumes:
         applies with no restart, by the same path as before.
 - **Depends on:** Tasks 2, 12
 
-## [ ] Task 18: Documentation
-- **Files:** `core/bot_config_manifest/README.md`,
+## [x] Task 18: Documentation
+- **Files:** `core/bot_config_manifest/README.md`, `core/task_queue/README.md`
+  (its "not yet adopted by any call site" line is now false — this is the first),
   `docs/bot-config-manifest/user-manual.zh-CN.md`,
   `docs/bot-config-manifest/work-items.zh-CN.md` (+ the English `work-items.md`)
 - **Done when:**
-  - [ ] The user manual documents the create-with-manifest flow, the poll states,
+  - [x] The user manual documents the create-with-manifest flow, the poll states,
         the deadline, `PARTIAL → FAILED`, and that `FAILED` leaves a running bot.
-  - [ ] The `script`-dependency rule is written where a manifest author will read
+  - [x] The `script`-dependency rule is written where a manifest author will read
         it, marked iteration 1 only and pointing at #1508.
-  - [ ] **The operational precondition is written where an operator will find
+  - [x] **The operational precondition is written where an operator will find
         it**: applying runs on the task queue, so the worker must be enabled and
         `ac_task_queue` provisioned, and with the worker off creations do not
         merely slow down — they never complete.
-  - [ ] The README's Context Boundary block lists the creation seam, the apply
+  - [x] The README's Context Boundary block lists the creation seam, the apply
         task and the creation job.
   - [x] **Both work-items documents are already reconciled** (done ahead of
         implementation, since they are the source of truth and the spec had
@@ -336,7 +337,9 @@ Conventions from `plan.md` that every task assumes:
         criteria**, which now say W8 owns teclaw creation *including lifting this
         endpoint's refusal*, the one piece that would otherwise have fallen
         between the two items.
-  - [ ] Re-check that parity still holds at the end of implementation: anything
-        the code forced to differ from the spec must land in both work-items
-        files, not just the spec.
+  - [x] Re-checked at the end of implementation. Two things the code forced,
+        landed in **both** files: a `bot_id` this endpoint did not create is a
+        `404` rather than a state (a bot made the ordinary way has exactly the
+        shape of `CREATING`), and the deployment precondition — the worker and
+        the table — because the queue is now what the feature runs on.
 - **Depends on:** Task 16
