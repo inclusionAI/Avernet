@@ -160,6 +160,12 @@ def uses_aicoding_runtime(
 
 ## 4. 查询接口补齐（all / bots / bot_id 展示 template_type + template_config）
 
+> **修订（2026-09-01）**：本节及 §6 第 7 条中「白名单投影」「`token`/`thetaKey`
+> 绝不出现」的验收要求已被
+> [2026-09-01-template-config-passthrough-decision.md](2026-09-01-template-config-passthrough-decision.md)
+> 撤销——查询面改为全字段原样透传。`engine_form` 露出问题随透传自然消解（存储快照里有什么就返回什么）。
+> 下文保留为历史设计记录。
+
 三个端点已具备返回能力（§1.4），本设计只补三件事：
 
 1. **`_PUBLIC_TEMPLATE_KEYS` 白名单追加 `"engine_form"`**（template_public_view.py:21）——
@@ -205,6 +211,7 @@ def uses_aicoding_runtime(
    runtime/bucket/identity 布局逐项不变。
 7. 查询三接口：template_type/template_config 返回、`engine_form` 露出、
    `token`/`bot_template_config`（thetaKey）绝不出现（扫描断言）。
+   **（2026-09-01 修订：末项已撤销，改为原样透传，见 §4 顶部修订说明。）**
 8. PUBLIC 校验模式：`engine_properties.template` 用户传 `engine_form` → 422。
 
 ## 7. 分期与开放问题

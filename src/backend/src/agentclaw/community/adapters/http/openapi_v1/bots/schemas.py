@@ -117,10 +117,11 @@ class Bot(BaseModel):
     )
     template_config: dict | None = Field(
         default=None,
-        description="Server-projected template snapshot (display-safe subset; "
-        "secrets never returned). Null without a template. Includes the "
-        "server-managed 'engine_form' marker for bots whose runtime form "
-        "differs from the engine (e.g. engine_form='aicoding').",
+        description="Stored template snapshot, copied verbatim from the bot's "
+        "creation input (no field filtering). Null without a template. May "
+        "carry sensitive values the creator supplied (e.g. 'token', "
+        "'bot_template_config.ext_config.thetaKey') and the server-managed "
+        "'engine_form' marker — treat as sensitive.",
     )
     space: BusinessSpace | None = Field(
         default=None,
@@ -724,10 +725,11 @@ class BotInventoryItem(BaseModel):
     )
     template_config: dict | None = Field(
         default=None,
-        description="Server-projected template snapshot (display-safe subset; "
-        "secrets never returned). Null without a template. Includes the "
-        "server-managed 'engine_form' marker for bots whose runtime form "
-        "differs from the engine (e.g. engine_form='aicoding').",
+        description="Stored template snapshot, copied verbatim from the bot's "
+        "creation input (no field filtering). Null without a template. May "
+        "carry sensitive values the creator supplied (e.g. 'token', "
+        "'bot_template_config.ext_config.thetaKey') and the server-managed "
+        "'engine_form' marker — treat as sensitive.",
     )
     avatar_url: str | None = Field(
         default=None, description="Avatar URL for the bot, when configured."

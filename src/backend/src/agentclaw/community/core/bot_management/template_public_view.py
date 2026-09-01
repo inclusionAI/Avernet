@@ -1,54 +1,34 @@
-"""Public projection of ``ac_templates.ext`` (``template_config``).
+"""Public view of ``ac_templates.ext`` (``template_config``).
 
-``template_config`` stored engine-side legitimately carries secrets: the
-aicoding provisioning strategy persists ``bot_template_config.ext_config
-.thetaKey`` as an ``enc:v1:`` ciphertext, and the stable outer contract allows
-a plain ``token``. Listing responses must never echo either — an encrypted
-blob is still offline attack material and a replayable oracle.
+Decision (2026-09-01): the public query faces return the stored template
+snapshot **verbatim** — no allowlist filtering. The snapshot is exactly what
+the bot's creation input supplied, the query faces are owner-scoped (the
+caller is the owner or a delegate the owner authorized), and echoing
+``token`` / ``bot_template_config.ext_config.thetaKey`` therefore echoes the
+caller's own input rather than disclosing a secret. The previous allowlist
+projection was removed by that same decision; reverting to filtering is a
+product call, not a bug fix, and must go through it.
 
-Rules for this file:
-- Allowlist, never denylist: engine-owned extensions surface only when a key
-  is added here explicitly (plus security review). Default is "dropped".
-- The result is a fresh shallow+container copy: callers may mutate it without
-  aliasing the stored snapshot.
+The one rule that survives: the result is a fresh deep copy — callers may
+mutate it without ever aliasing the stored snapshot.
 """
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Mapping
 
-from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
 
-#: Keys that are display-safe. Keep alphabetized.
-_PUBLIC_TEMPLATE_KEYS = (
-    "code_repos",
-    "devflow_workflow",
-    # Server-managed form marker (e.g. "aicoding" on bots created by folding
-    # the legacy aicoding engine into claude_code): the display-side way to
-    # tell an aicoding-form bot from a plain claude_code bot.
-    ENGINE_FORM_KEY,
-    "template_key",
-    "template_uid",
-    "yuque_kb_repos",
-)
-
-
-def project_template_config_for_public(
+def template_config_for_public(
     config: Mapping[str, Any] | None,
 ) -> dict[str, Any] | None:
-    """Project a stored template snapshot onto its public display subset."""
-    if not isinstance(config, Mapping) or not config:
+    """Return the stored template snapshot, detached, for public responses.
+
+    ``None`` for anything that is not a mapping (a missing template row); a
+    verbatim deep copy otherwise — including secrets such as ``token`` and
+    ``bot_template_config.ext_config.thetaKey``, per the 2026-09-01
+    passthrough decision.
+    """
+    if not isinstance(config, Mapping):
         return None
-    if not any(key in config for key in _PUBLIC_TEMPLATE_KEYS):
-        return None
-    projected: dict[str, Any] = {}
-    for key in _PUBLIC_TEMPLATE_KEYS:
-        if key in config:
-            value = config[key]
-            if isinstance(value, list):
-                projected[key] = list(value)
-            elif isinstance(value, dict):
-                projected[key] = dict(value)
-            else:
-                projected[key] = value
-    return projected
+    return deepcopy(config)
