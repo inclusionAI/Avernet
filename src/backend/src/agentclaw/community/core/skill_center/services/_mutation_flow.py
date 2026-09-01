@@ -229,7 +229,7 @@ class MutationProjectionFlow:
                 ),
                 scope=scope,
             )
-        except Exception as exc:
+        except Exception:
             # Do not leak device addresses, paths, or backend exception text
             # through the product wire.  Structured logs retain the exception
             # chain while callers receive a stable, retryable outcome.
