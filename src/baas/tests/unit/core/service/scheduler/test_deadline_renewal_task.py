@@ -390,6 +390,57 @@ class TestStep0GapDetection:
         assert isinstance(report, RenewalRunReport)
 
     @pytest.mark.asyncio
+    async def test_hot_count_failure_degrades_gap_math_not_negative_gap(self, caplog):
+        """WR-02 (85-86 deep review): hot counts raise while the covered
+        count succeeds → the round does NOT compute a negative gap from the
+        residual zeros — gap_detected stays False, no discovery scan runs
+        off a fabricated gap, and the degradation is logged distinctly from
+        both the cold-failure path and a healthy zero-gap round."""
+        import logging
+
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 50000  # cold succeeds
+        mock_repo.count_hot_arca_devices.side_effect = Exception("hot table down")
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 50000  # covered succeeds
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.list_due_for_renewal.return_value = []
+        mock_repo.find_unregistered.return_value = []
+
+        scheduler._round_count = 0  # round 1: 1 % 48 != 0, no periodic verify
+        with caplog.at_level(logging.ERROR, logger="core-scheduler"):
+            report = await scheduler._run_once()
+
+        assert report.gap_detected is False
+        mock_repo.find_unregistered.assert_not_called()
+        messages = [r.message for r in caplog.records]
+        # The hot-degradation signal is present and distinguishable from
+        # the cold-count-failure message.
+        assert any("gap detection degraded" in m for m in messages)
+        assert not any("count_active failed" in m for m in messages)
+
+    @pytest.mark.asyncio
+    async def test_hot_count_failure_keeps_periodic_verify_alive(self):
+        """WR-02 (85-86 deep review): hot counts failing ON a periodic
+        verify round still run the gap-independent anti-join scan — hoisted
+        unregistered rows can never be hidden indefinitely by the degraded
+        gap math."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 50000  # cold succeeds
+        mock_repo.count_hot_arca_devices.side_effect = Exception("hot table down")
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 50000  # covered succeeds
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.list_due_for_renewal.return_value = []
+        mock_repo.find_unregistered.return_value = []
+
+        scheduler._round_count = 47  # about to become 48 in _run_once()
+        report = await scheduler._run_once()
+
+        assert report.gap_detected is False
+        assert mock_repo.find_unregistered.call_count >= 1
+
+    @pytest.mark.asyncio
     async def test_cold_count_failure_skips_gap_detection_but_continues_round(
         self, caplog
     ):

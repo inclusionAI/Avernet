@@ -222,6 +222,7 @@ class DeadlineRenewalScheduler:
 
         hot_count_device = 0
         hot_count_binding = 0
+        hot_counts_degraded = False
         try:
             hot_count_device = self._schedule_repo.count_hot_arca_devices(
                 self._config.env
@@ -230,8 +231,17 @@ class DeadlineRenewalScheduler:
                 self._config.env
             )
         except Exception:
+            # WR-02 (85-86 deep review): a partial hot-count failure must be
+            # distinguishable from a genuine zero gap — the residual
+            # hot_count=0 would fabricate a negative covered gap and read
+            # as "no gap, no discovery". Degrade the gap math this round
+            # instead; the periodic anti-join verify remains the discovery
+            # channel so hoisted unregistered rows are never hidden.
+            hot_counts_degraded = True
             log.exception(
-                "[DeadlineRenewalScheduler] Hot count query failed — discovery scan skipped"
+                "[DeadlineRenewalScheduler] Hot count query failed — gap "
+                "detection degraded this round (discovery limited to the "
+                "periodic anti-join verify)"
             )
 
         hot_count = hot_count_device + hot_count_binding
@@ -254,14 +264,39 @@ class DeadlineRenewalScheduler:
             )
         report.suppressed_terminal_count = suppressed_terminal
 
+        # WR-02 (85-86 deep review): the periodic anti-join verify is the
+        # gap-independent discovery channel — it must stay reachable even
+        # when the gap math itself is skipped (hot-count degradation), so
+        # hoisted unregistered rows can never be hidden by a counting
+        # failure. Cold-count failure (below) still suppresses it, matching
+        # the WR-01 pinned contract.
         should_scan = False
         gap_result = None
+        periodic_verify = (
+            self._round_count % self._config.anti_join_verify_interval_cycles == 0
+        )
         if cold_count is None:
             # Cold-count failure: the gap ground truth is unknown, so gap
             # detection AND the cold-table-dependent discovery scan are
             # skipped this round (see exception log above). Steps 1-2
             # (due query + renewal) run unaffected.
             report.gap_detected = False
+        elif hot_counts_degraded:
+            # WR-02 (85-86 deep review): hot counts failed while the cold
+            # count succeeded — the residual hot_count=0 can only fabricate
+            # a negative covered gap (0 - covered < 0), which silently reads
+            # as "no gap", indistinguishable from a healthy zero-gap round.
+            # Skip the gap math this round (no negative gap is ever
+            # computed) and keep only the gap-independent periodic
+            # anti-join verify alive (see the hot-count exception log
+            # above for the distinguishing signal).
+            report.gap_detected = False
+            should_scan = periodic_verify
+            if should_scan:
+                # The gap is unknowable — hand the scan a bare result holder
+                # (hot/gap keep their 0 defaults and carry no gap semantics)
+                # so the verify still registers hoisted rows.
+                gap_result = GapDetectionResult(cold_count=cold_count)
         else:
             if covered_hot is not None:
                 gap = hot_count - covered_hot
@@ -273,9 +308,7 @@ class DeadlineRenewalScheduler:
                 gap=gap,
             )
             report.gap_detected = gap > 0
-            should_scan = (gap > 0) or (
-                self._round_count % self._config.anti_join_verify_interval_cycles == 0
-            )
+            should_scan = (gap > 0) or periodic_verify
 
         if should_scan and gap_result is not None:
             gap_result = await self._run_discovery_scan(gap_result)
