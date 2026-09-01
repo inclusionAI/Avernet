@@ -16,6 +16,10 @@
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
     },
+    "./server/create-module": {
+      "types": "./dist/server/create-module.d.ts",
+      "import": "./dist/server/create-module.js"
+    },
     "./server/routes/evolve": {
       "types": "./dist/server/routes/evolve.d.ts",
       "import": "./dist/server/routes/evolve.js"
@@ -39,10 +43,14 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "prepack": "npm run check && npm test && npm run build"
   },
-  "dependencies": {},
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^24.12.3",
+    "express": "^5.2.1",
     "tsx": "^4.19.2",
     "typescript": "~6.0.2"
+  },
+  "peerDependencies": {
+    "express": "^5.2.1"
   }
 }

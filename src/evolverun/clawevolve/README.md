@@ -21,6 +21,16 @@ import {
 import {
   createTaskDefinitionsResponse,
 } from "@avernet/clawevolve/server/routes/evolve";
+
+import {
+  createClawevolveModule,
+} from "@avernet/clawevolve/server/create-module";
+```
+
+The module mounts in the host's existing Express process:
+
+```ts
+app.use("/api/evolve", createClawevolveModule());
 ```
 
 The public registry contains only ClawEvolve task types. Host-only task types and integrations remain outside the package. Public command templates use placeholders; a host can provide its own reviewed command defaults through `createEvolveNodeRegistry()`.

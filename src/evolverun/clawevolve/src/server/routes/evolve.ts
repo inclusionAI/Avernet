@@ -3,19 +3,23 @@ import {
   EVOLVE_NODE_REGISTRY,
   EVOLVE_TASK_REGISTRY,
   type EvolveNodeDefinition,
-  type EvolveTaskDefinition,
-  type EvolveTaskType,
 } from "../services/evolve/task-registry.js";
 
+export type EvolveTaskDefinitionLike = {
+  type: string;
+  label: string;
+  nodes: readonly NodeCommandKey[];
+};
+
 export type EvolveTaskDefinitionsOptions = {
-  taskRegistry?: Record<EvolveTaskType, EvolveTaskDefinition>;
+  taskRegistry?: Record<string, EvolveTaskDefinitionLike>;
   nodeRegistry?: Record<NodeCommandKey, EvolveNodeDefinition>;
   variants?: Record<string, readonly NodeCommandKey[]>;
 };
 
 export type EvolveTaskDefinitionsResponse = {
   tasks: Array<{
-    type: EvolveTaskType;
+    type: string;
     label: string;
     nodes: EvolveNodeDefinition[];
   }>;

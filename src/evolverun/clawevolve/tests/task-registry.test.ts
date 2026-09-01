@@ -44,3 +44,18 @@ test("builds task definitions while allowing host-only variants", () => {
   );
   assert.deepEqual(response.variants.hosted_variant.map((node) => node.key), ["plan", "optimize"]);
 });
+
+test("allows a host to append private task definitions without publishing them", () => {
+  const response = createTaskDefinitionsResponse({
+    taskRegistry: {
+      ...EVOLVE_TASK_REGISTRY,
+      host_only: {
+        type: "host_only",
+        label: "Host only",
+        nodes: [],
+      },
+    },
+  });
+  assert.equal(response.tasks.at(-1)?.type, "host_only");
+  assert.equal("host_only" in EVOLVE_TASK_REGISTRY, false);
+});
