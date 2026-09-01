@@ -331,6 +331,22 @@ def deactivate_local_skill_runtime_failure_is_publicly_safe():
     """The public Pending result never exposes runtime transport details."""
 
 
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
+    scenario="set_managed_skill_refuses_direct_control",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectError(status=409, json_contains={"code": 409202}),
+)
+def deactivate_set_managed_skill_is_refused():
+    """A Set-managed Skill can only be changed through its SkillSet command."""
+
+
 # The retiring addresses. `POST /openapi/v1/bots/skills/{skill_id}/activate`
 # names no bot at all, so the shim in `openapi_v1/deprecated/skills.py` reads
 # the skill record, resolves the bot behind it, and re-checks the grant against
@@ -384,6 +400,22 @@ def legacy_activate_runtime_failure_is_publicly_safe():
 
 @endpoint_test(
     method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/activate",
+    scenario="legacy_address_refuses_set_managed_direct_control",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectError(status=409, json_contains={"code": 409202}),
+)
+def legacy_activate_set_managed_skill_is_refused():
+    """The legacy address preserves the canonical ownership restriction."""
+
+
+@endpoint_test(
+    method="POST",
     path="/openapi/v1/bots/skills/{skill_id}/deactivate",
     scenario="legacy_address_is_idempotent_too",
     input=CaseInput(
@@ -425,3 +457,19 @@ def legacy_deactivate_inactive_local_skill_is_an_idempotent_happy_path():
 )
 def legacy_deactivate_runtime_failure_is_publicly_safe():
     """The retiring address also keeps Desired State on Runtime drift."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/deactivate",
+    scenario="legacy_address_refuses_set_managed_direct_control",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectError(status=409, json_contains={"code": 409202}),
+)
+def legacy_deactivate_set_managed_skill_is_refused():
+    """The legacy address preserves the canonical ownership restriction."""
