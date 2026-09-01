@@ -50,4 +50,9 @@ Validation after the fix will rerun the 16 failing gates first, then the affecte
 
 - Restored the MCP-equivalent OpenAPI inventories and endpoint coverage for CLI call-type changes; CLI errors now use the shared HTTP status map and the isolated repository fixture creates the CLI call-config table.
 - Regenerated only the three CLI-affected gateway snapshots. The original MCP sync error/seam remains available while its implementation is factored below the 1000-line cap; device bootstrap similarly depends on a narrow local protocol instead of a direct MCP service import.
-- Local verification passed: focused CI contracts, architecture, device-bootstrap, Default-CLI, and caller-identity suite `334 passed`; `git diff --check`, bytecode compilation, and Ruff on the changed code passed. Project-wide Ruff still reports the two pre-existing duplicate callback keys in `adapters/http/app.py`; this repair did not touch them.
+- Local verification passed: focused CI contracts, architecture, device-bootstrap, Default-CLI, and caller-identity suite `334 passed`; `git diff --check`, bytecode compilation, and Ruff on the changed code passed. The duplicate callback rows found during the first static pass were removed in the second CI follow-up below.
+
+## CI follow-up: second run
+
+- GitHub Backend unit tests then found two remaining integration gaps: the generic endpoint runner seeded the CLI happy path without a phase-one engine, and the shared HTTP status-map module exceeded the 1000-line cap after the new CLI mappings.
+- The endpoint seed now explicitly uses `openclaw`; duplicate callback map rows were removed while adding the CLI mappings, returning the module to the cap. The exact generic endpoint case and the oversized-module gate pass locally, along with Ruff and whitespace checks.

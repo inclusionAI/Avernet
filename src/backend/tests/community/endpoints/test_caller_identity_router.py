@@ -93,6 +93,7 @@ def _seed_service_bot(world, *, acquire_lock: bool) -> None:
         owner_id=_OWNER_ID,
         bot_type="service",
         status="ACTIVE",
+        active_engine="openclaw",
     )
     if acquire_lock:
         world.get(CollaboratorLockService).acquire_lock(
