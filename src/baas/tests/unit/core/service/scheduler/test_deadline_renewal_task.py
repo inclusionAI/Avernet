@@ -298,9 +298,11 @@ class TestStep0GapDetection:
     @pytest.mark.asyncio
     async def test_gap_uses_covered_math_triggers_scan(self):
         """86-02 (R3): the gap trigger runs on covered math — an uncovered
-        remainder (hot 50000, covered 49000) still triggers the scan."""
+        remainder (hot 50000, covered 49000) still triggers the scan even
+        when the legacy hot-minus-cold formula would read zero (cold ==
+        hot), so the trigger is pinned to the new formula alone."""
         scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
-        mock_repo.count_active.return_value = 45000  # cold
+        mock_repo.count_active.return_value = 50000  # cold == hot (legacy gap 0)
         mock_repo.count_hot_arca_devices.return_value = 40000
         mock_repo.count_hot_arca_bindings.return_value = 10000  # hot = 50000
         mock_repo.count_hot_covered.return_value = 49000  # 1000 uncovered
