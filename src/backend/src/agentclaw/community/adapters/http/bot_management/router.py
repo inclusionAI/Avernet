@@ -1923,6 +1923,12 @@ async def get_bots_ceiling(
 @router.get("/{bot_id}/classification", response_model=ApiResponse)
 async def get_bot_classification(
     bot_id: str,
+    entity_id: Optional[str] = Query(
+        None,
+        min_length=1,
+        max_length=1024,
+        description="Entity ID used with bot_id to disambiguate legacy Bot IDs",
+    ),
     _user: AuthenticatedUser = Depends(get_current_user),  # noqa: B008
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> ApiResponse:
@@ -1930,10 +1936,14 @@ async def get_bot_classification(
 
     This intentionally does not use the owner/collaborator interceptor: group
     creation must classify a discoverable BCS actor before collaboration has
-    been established. The service returns an allowlisted projection only.
+    been established. Callers with a composite BCS Bot identity pass its
+    entity suffix as ``entity_id``. The service returns an allowlisted
+    projection only.
     """
     try:
-        classification = bot_service.get_bot_classification(bot_id)
+        classification = bot_service.get_bot_classification(
+            bot_id, entity_id=entity_id
+        )
         if classification is None:
             return ApiResponse(
                 success=False,
