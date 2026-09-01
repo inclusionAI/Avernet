@@ -52,8 +52,15 @@ from injector import inject
 from sqlalchemy import and_, func, or_
 
 from agentclaw.community.log import get_logger
-from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
+from agentclaw.community.core.skill_center.errors import (
+    ActiveSkillSetReferenceError,
+    SkillSetControlPlaneConflictError,
+)
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
+from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
+    CENTER_MEMBERSHIP_IDENTITY_MISSING,
+    center_membership_skill_uuid,
+)
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -1487,10 +1494,11 @@ class SkillSetRepository(
             if skill_set is None or skill is None:
                 return False
             require_skill_online(skill)
+            membership_skill_uuid = center_membership_skill_uuid(skill)
             # Existing membership remains the successful idempotent result.
             # Canonical cross-Set uniqueness is enforced by the new control
             # plane under its Bot mutation lease, not by this legacy writer.
-            if (
+            existing_membership = (
                 db.query(self.SkillSetSkill)
                 .filter(
                     self.SkillSetSkill.skill_set_id == int(skill_set_id),
@@ -1498,13 +1506,21 @@ class SkillSetRepository(
                     self.SkillSetSkill.env == get_current_env(),
                 )
                 .first()
-                is not None
-            ):
+            )
+            if existing_membership is not None:
+                if (
+                    membership_skill_uuid is not None
+                    and existing_membership.skill_uuid != membership_skill_uuid
+                ):
+                    raise SkillSetControlPlaneConflictError(
+                        CENTER_MEMBERSHIP_IDENTITY_MISSING
+                    )
                 return True
             db.add(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),
                     skill_id=int(skill_id),
+                    skill_uuid=membership_skill_uuid,
                     user_id=_normalize_user_id(user_id),
                     env=get_current_env(),
                 )

@@ -735,6 +735,27 @@ def test_add_remove_skill_to_set(skills, sets):
     assert sets.get_skills_in_set(ss["id"]) == []
 
 
+def test_legacy_add_center_skill_to_set_persists_membership_uuid(
+    skills, sets, db
+):
+    skill = skills.create(
+        {
+            "name": "center",
+            "git_path": "center://public-center",
+            "skill_uuid": "stable-center-uuid",
+            "status": "PUBLISHED",
+            "version": 1,
+        }
+    )
+    skill_set = sets.create({"name": "set"})
+
+    assert sets.add_skill_to_set(skill_set["id"], skill["id"]) is True
+
+    with db.orm_session() as session:
+        membership = session.query(SkillSetSkill).one()
+        assert membership.skill_uuid == "stable-center-uuid"
+
+
 def test_legacy_center_version_rows_are_rejected_by_stable_uuid_constraint(skills, sets):
     sets.create({"name": "cset"})
     skills.create(
