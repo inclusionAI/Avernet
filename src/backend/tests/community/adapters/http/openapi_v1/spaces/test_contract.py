@@ -1582,7 +1582,9 @@ def test_initialize_personal_space_exposes_created_state(
     assert data["space_type"] == "PERSONAL"
     assert data["created"] is was_created
     assert data["current_user_role"] == "ADMIN"
-    space_service.initialize_personal.assert_called_once_with(user_id="owner-1")
+    space_service.initialize_personal.assert_called_once_with(
+        user_id="owner-1", create_sc_team=True
+    )
 
 
 def test_create_team_space_returns_owner_metadata(client, space_service):
@@ -1597,7 +1599,9 @@ def test_create_team_space_returns_owner_metadata(client, space_service):
     assert data["space_id"] == 7
     assert data["is_creator"] is True
     assert data["member_count"] == data["owner_count"] == 1
-    space_service.create_team.assert_called_once_with(name="Team", creator_id="owner-1")
+    space_service.create_team.assert_called_once_with(
+        name="Team", creator_id="owner-1", create_sc_team=True
+    )
 
 
 def test_member_list_delete_and_role_update(client, member_service):
