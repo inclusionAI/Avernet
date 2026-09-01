@@ -20,6 +20,7 @@ from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialNotFoundError,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+    FetchFailedError,
     FetchedObject,
 )
 
@@ -89,6 +90,12 @@ class FakeGuardedFetcher:
 
     Records every request so tests can assert what the wire actually saw —
     the substituted URL, the declared digest, the credential binding.
+
+    Implements the one rule of W2's contract a caller can lean on: a declared
+    ``expected_digest`` is verified against the served bytes, and a mismatch
+    is a fetch failure — never a "success with corrupted bytes". Without that
+    in the fake, a materialiser relying on the pin would pass here while the
+    real transport refused.
     """
 
     def __init__(
@@ -105,7 +112,13 @@ class FakeGuardedFetcher:
         failure = self.failures.get(request.url)
         if failure is not None:
             raise failure
-        return self.responses[request.url]
+        response = self.responses[request.url]
+        if (
+            request.expected_digest is not None
+            and response.sha256 != request.expected_digest
+        ):
+            raise FetchFailedError("digest mismatch")
+        return response
 
 
 class FakeCredentials:
@@ -127,6 +140,115 @@ class FakeCredentials:
             headers_for=lambda url: {"X-Custom-Auth": f"payload-of-{name}"},
             reauthorize=lambda url: None,
         )
+
+
+class FakeIdentityService:
+    """Stands in for ``IdentityService``: files held, writes counted.
+
+    The real service's positional contract per method (entity_type,
+    entity_id, bot_id, then the operation's own args, then owner/operator) —
+    the fake mirrors it so a signature drift shows up as a TypeError here
+    before it shows up mid-apply in production.
+
+    Empty content means the same as absent — the domain's own contract — so
+    ``list_bot_files`` answers ``(file, bool(content))`` over the whole
+    whitelist, exactly as the real one does.
+    """
+
+    def __init__(self, files: dict[str, str] | None = None) -> None:
+        self.files = dict(files or {})
+        self.writes: list[dict[str, Any]] = []
+        self.reads: list[str] = []
+        self.listed: int = 0
+
+    async def list_bot_files(
+        self,
+        entity_type: str,
+        entity_id: str,
+        bot_id: str,
+        owner_id: str,
+        *,
+        engine_type: str | None = None,
+        stage: str = "draft",
+    ) -> list[tuple[str, bool]]:
+        from agentclaw.community.core.services.identity import (
+            VALID_IDENTITY_FILES,
+        )
+
+        self.listed += 1
+        return [(ft, bool(self.files.get(ft))) for ft in VALID_IDENTITY_FILES]
+
+    async def read_identity_file(
+        self,
+        entity_type: str,
+        entity_id: str,
+        bot_id: str,
+        file_type: str,
+        owner_id: str,
+        *,
+        engine_type: str | None = None,
+        stage: str = "draft",
+    ) -> str:
+        self.reads.append(file_type)
+        return self.files.get(file_type, "")
+
+    async def update_bot_file(
+        self,
+        entity_type: str,
+        entity_id: str,
+        bot_id: str,
+        file_type: str,
+        content: str,
+        operator_id: str,
+        engine_type: str | None = None,
+        *,
+        stage: str = "draft",
+    ):
+        self.writes.append(
+            {
+                "file_type": file_type,
+                "content": content,
+                "operator": operator_id,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "bot_id": bot_id,
+            }
+        )
+        self.files[file_type] = content
+        return SimpleNamespace(
+            file_type=file_type,
+            file_path=f"identity/{file_type}",
+        )
+
+    def write_count(self, *, file_type: str) -> int:
+        return sum(1 for w in self.writes if w["file_type"] == file_type)
+
+    @property
+    def all_writes(self) -> int:
+        return len(self.writes)
+
+
+def identity_rig(files: dict[str, str] | None = None):
+    """A materialiser over fakes: (materialiser, identity fake, fetcher fake).
+
+    The fetched URL ``SOUL_URL`` serves ``SOUL_BODY`` for identity tests.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+        EntryFetcher,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
+        IdentityMaterialiser,
+    )
+
+    identity = FakeIdentityService(files)
+    fetcher = FakeGuardedFetcher(responses={SOUL_URL: fetched_object(SOUL_BODY)})
+    content = FakeManifestContent()
+    pipeline = EntryFetcher(fetcher, content, FakeCredentials())
+    return IdentityMaterialiser(identity, pipeline), identity, fetcher, content
+
+
+SOUL_URL = "https://content.example/identity/soul.md"
+SOUL_BODY = b"# team charter\nServe the customer honestly.\n"
 
 
 

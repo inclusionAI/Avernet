@@ -88,15 +88,20 @@ def test_a_pinned_entry_with_a_matching_receipt_is_served_from_the_store(rig):
 def test_a_pinned_entry_with_a_mismatched_receipt_refetches(rig):
     content, fetcher, _, pipeline = rig
     _store_serving(content)
-    other = "sha256:" + "0" * 64
+    # The source legitimately rotated: it now serves bytes pinned by a NEW
+    # digest, so the platform's old receipt for this URL is stale, not "last".
+    rotated = b"rotated-bytes"
+    rotated_digest = "sha256:" + hashlib.sha256(rotated).hexdigest()
+    fetcher.responses[URL] = fetched_object(rotated, url=URL)
 
     result = pipeline.fetch(
-        make_context(), source_url=URL, digest=other, category="identity"
+        make_context(), source_url=URL, digest=rotated_digest, category="identity"
     )
     assert len(fetcher.requests) == 1
-    assert fetcher.requests[0].expected_digest == other
+    assert fetcher.requests[0].expected_digest == rotated_digest
     assert fetcher.requests[0].injector is None
     assert result.from_store is False
+    assert result.digest == rotated_digest
     assert len(content.store_calls) == 1
 
 
