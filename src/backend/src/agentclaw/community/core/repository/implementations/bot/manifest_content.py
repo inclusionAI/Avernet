@@ -58,6 +58,9 @@ class ManifestContentRepository(ManifestContentRepositoryProtocol):
                 content_type=record.content_type,
                 size_bytes=record.size_bytes,
                 fetched_at=record.fetched_at,
+                apply_id=record.apply_id,
+                category=record.category,
+                entry_identity=record.entry_identity,
                 modifier=record.modifier,
             )
             session.add(row)
@@ -72,10 +75,19 @@ class ManifestContentRepository(ManifestContentRepositoryProtocol):
         bot_id: str,
         limit: int = DEFAULT_RECORD_LIMIT,
     ) -> list[StoredContentRecord]:
-        """One bot's receipts, newest first — the audit read."""
-        # Clamped, not trusted: a negative LIMIT flips to "unbounded" on
-        # SQLite and varies elsewhere; the audit read is bounded, always.
-        limit = max(0, limit)
+        """One bot's receipts, newest first — the audit read.
+
+        A non-positive ``limit`` raises: an audit read that answers "no
+        receipts" is a claim about the bot, and a caller whose page math went
+        negative must be told it asked something broken, not told the bot
+        never fetched. (And a *negative LIMIT* would still mean "unbounded"
+        on SQLite — see the protocol docstring — so refusing it also keeps
+        the bound honest on every dialect.)
+        """
+        if limit <= 0:
+            raise ValueError(
+                f"records_for limit must be a positive page, got {limit}"
+            )
         with self._db.orm_session() as session:
             rows = (
                 session.query(self._Manifest)

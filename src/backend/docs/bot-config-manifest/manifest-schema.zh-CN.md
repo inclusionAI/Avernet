@@ -673,6 +673,7 @@ cli_tools:
 | 配置清单文档总大小 | 64 KiB（script 部分另按现状 24 KiB） |
 | 每类别条目数 | 50 |
 | `content` 内联单条 | 64 KiB |
+| `source` URL 单条 | 2048 字符（与 provenance 列宽一致；PUT 时拒绝——长度是准入可见的，不是取完后才该知道的） |
 | fetch 单条目 | skills zip 100 MiB；resources 文件 100 MiB；identity 1 MiB；cli_tools 单工具 200 MiB |
 | resources 目录条目 | 单归档 200 MiB；解包后 500 MiB；单归档文件数 5000 |
 | 单次 apply fetch 总量 | 500 MiB（目录条目计解包后大小） |

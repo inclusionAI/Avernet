@@ -58,6 +58,9 @@ class ManifestContentServiceProtocol(Protocol):
         source_url: str,
         credential_name: Optional[str] = None,
         modifier: str = "",
+        apply_id: Optional[str] = None,
+        category: Optional[str] = None,
+        entry_identity: Optional[str] = None,
     ) -> StoredContentRecord:
         """Persist one fetched object as the platform's own copy.
 
@@ -65,6 +68,16 @@ class ManifestContentServiceProtocol(Protocol):
         substitution; the receipt is verified against the bytes before
         anything is written. ``credential_name`` is a name (W3's
         identifier), never a value.
+
+        The ``apply_id``/``category``/``entry_identity`` trio links the row
+        back to the apply and the entry the fetch served — optional because
+        this layer must not require what its caller may not know (keep_last
+        reuse, hand-driven fetches); when a caller supplies them, "what did
+        apply X fetch" and "what was fetched for this entry" are indexed
+        reads instead of ``source_url`` approximation.
+
+        ``content_type`` is advisory: an over-wide header stores ``NULL``
+        plus a log line rather than refusing the receipt.
         """
         ...
 

@@ -779,3 +779,36 @@ def test_a_refusal_always_names_a_location():
     document = "schema_version: 1\nmanifest:\n  identity:\n    - type: NOPE.md\n"
     for location, _ in _reject(document):
         assert location
+
+
+def test_an_oversized_source_url_is_refused_at_put_not_after_a_fetch():
+    """The admission-side length cap (schema §5, 2048 chars — the width the
+    provenance column stores). Without it a 3000-char source would be
+    accepted, fetched in full up to the per-entry cap, and refused only at
+    the store: the expensive order, and a document every apply point rejects
+    — the exact shape "this surface never accepts something it cannot apply"
+    forbids."""
+    long_url = "https://content.example/" + "a" * 3000 + ".bin"
+    document = f"""schema_version: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      source: "{long_url}"
+"""
+    assert ("manifest.identity[0].source", "source_url_too_long") in _reject(
+        document
+    )
+
+
+def test_a_source_url_at_just_under_the_limit_is_accepted():
+    prefix, suffix = "https://content.example/", ".bin"
+    boundary = prefix + "b" * (2048 - len(prefix) - len(suffix)) + suffix
+    assert len(boundary) == 2048
+    _accept(
+        f"""schema_version: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      source: "{boundary}"
+"""
+    )

@@ -214,16 +214,27 @@ def _assert_no_side_effects(tmp_path, repo):
     assert not (tmp_path / "store" / "blobs").exists()
 
 
-def test_an_oversized_source_wire_header_is_refused_before_the_blob(tmp_path):
-    # Content-Type is source-controlled wire data with no length cap of its
-    # own; the column is varchar(256). SQLite (the test DB) does not enforce
-    # varchar widths, so without this store-level check an oversized value
-    # would land only at the row insert — after the blob is already on disk.
+def test_an_oversized_source_wire_header_downgrades_to_null_not_a_refusal(tmp_path):
+    # Content-Type is advisory metadata, not a reconciliation anchor: the
+    # bytes are already fetched, streamed under the cap and digest-verified
+    # when this check runs, and refusing the whole receipt over a wire
+    # header would hand the source side a lever to erase provenance — a
+    # 257-char header is nothing the caller did. The receipt is kept, the
+    # advisory field is NULL, and the blob is on disk and readable.
     service, repo = _service(tmp_path)
-    with pytest.raises(ContentStoreError, match="content_type"):
-        service.store(_fetched(content_type="x" * 257), scope=SCOPE,
-                      source_url="https://content.example/a.bin")
-    _assert_no_side_effects(tmp_path, repo)
+    stored = service.store(_fetched(content_type="x" * 257), scope=SCOPE,
+                           source_url="https://content.example/a.bin")
+    assert stored.content_type is None
+    assert repo.rows[0].content_type is None
+    assert len(repo.rows) == 1  # the receipt survived
+    assert service.read(BODY_SHA) == BODY
+
+
+def test_a_wide_source_wire_header_that_fits_is_stored_verbatim(tmp_path):
+    service, repo = _service(tmp_path)
+    stored = service.store(_fetched(content_type="x" * 256), scope=SCOPE,
+                           source_url="https://content.example/a.bin")
+    assert stored.content_type == "x" * 256
 
 
 def test_an_oversized_url_is_refused_before_the_blob(tmp_path):
@@ -459,3 +470,104 @@ def test_the_shipped_yaml_carries_the_neutral_default_root():
     assert content_store_root_from_config(settings) == Path(
         DEFAULT_CONTENT_STORE_DIR
     )
+
+
+# --- the CR rounds: linkage, literal hosts, durability's leftovers ---------
+
+
+def test_the_apply_linkage_trio_is_filed_and_bounded_before_the_blob(tmp_path):
+    # "What did apply X fetch" and "what was materialised for this entry" are
+    # indexed reads only if the columns hold; widths are enforced with the
+    # same before-any-side-effect discipline as every other column.
+    service, repo = _service(tmp_path)
+    stored = service.store(
+        _fetched(),
+        scope=SCOPE,
+        source_url="https://content.example/a.bin",
+        apply_id="apply-1",
+        category="skills",
+        entry_identity="quality-check",
+    )
+    assert stored.apply_id == "apply-1"
+    assert stored.category == "skills"
+    assert stored.entry_identity == "quality-check"
+    assert repo.rows[0].apply_id == "apply-1"
+
+    with pytest.raises(ContentStoreError, match="apply_id"):
+        service.store(
+            _fetched(url="https://content.example/b.bin"),
+            scope=SCOPE,
+            source_url="https://content.example/b.bin",
+            apply_id="a" * 65,
+        )
+    assert len(repo.rows) == 1  # refused before any row or blob
+
+
+def test_the_apply_linkage_is_optional_and_defaults_to_none(tmp_path):
+    # keep_last reuse and hand-driven fetches have none of the trio; the row
+    # still answers "from where, for which bot, when" and the linkage
+    # questions answer NULL rather than as lies.
+    service, repo = _service(tmp_path)
+    stored = service.store(
+        _fetched(),
+        scope=SCOPE,
+        source_url="https://content.example/a.bin",
+    )
+    assert stored.apply_id is None
+    assert stored.category is None
+    assert stored.entry_identity is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://[2001:db8::1]/a.bin",
+        "https://[2001:db8::1]:8443/a.bin",
+        "https://[2001:db8:85a3:0:0:8a2e:370:7334]/deep/path.bin",
+    ],
+)
+def test_an_ipv6_literal_keeps_its_brackets_in_provenance(tmp_path, url):
+    # httpx.URL.host returns IPv6 literals bare; reassembling without the
+    # brackets makes the port ambiguous ('2001:db8::1:8443' is no authority)
+    # and writes a URL no reader can parse back — into a table this change's
+    # own policy says is never corrected after write.
+    service, _ = _service(tmp_path)
+    stored = service.store(_fetched(url=url), scope=SCOPE, source_url=url)
+    assert stored.fetched_url == url
+    assert stored.source_url == url
+
+
+def test_a_trailing_newline_is_not_a_digest_vocabulary_member(tmp_path):
+    # `$` matches before a trailing newline, so an address with a '\n' tail
+    # previously passed the vocabulary check and failed downstream as a
+    # missing address (the 404 case) instead of an untrusted one. \Z closes
+    # it; the round trip answers the right error family.
+    service, _ = _service(tmp_path)
+    with pytest.raises(ContentStoreError, match="untrusted content address"):
+        service.read("sha256:" + "a" * 64 + "\n")
+
+
+def test_crashed_write_temp_files_are_age_swept_but_fresh_ones_kept(tmp_path):
+    # A process that dies mid-write leaves a .tmp-* of up to the entry cap in
+    # the shard directory, and the retention policy forbids sweeps — so this
+    # is the ONE sanctioned exception (stated in the DDL). Age-based so a
+    # concurrent live writer's own tmp is never mistaken for an orphan.
+    import os
+    import time
+
+    service, _ = _service(tmp_path)
+    shard = tmp_path / "store" / "blobs" / BODY_SHA.partition(":")[2][:2]
+    shard.mkdir(parents=True, exist_ok=True)
+    orphan = shard / ".tmp-orphan"
+    orphan.write_bytes(b"left behind by a crash")
+    stale_age = time.time() - 7200  # beyond the sweep age
+    os.utime(orphan, (stale_age, stale_age))
+    live = shard / ".tmp-live-writer"
+    live.write_bytes(b"belongs to a concurrent store")
+
+    service.store(_fetched(), scope=SCOPE,
+                  source_url="https://content.example/a.bin")
+
+    assert not orphan.exists()  # collected by the next store into the shard
+    assert live.exists()  # fresh tmp untouched — not ours to judge
+    assert service.read(BODY_SHA) == BODY  # and the store itself landed

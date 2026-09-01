@@ -109,10 +109,21 @@ def test_records_limit_bounds_the_audit_read(repo):
                                 bot_id="bot_1")) == 5
     assert len(repo.records_for(env="dev", entity_id="ent_a",
                                 bot_id="bot_1", limit=2)) == 2
-    # A negative LIMIT means "unbounded" on SQLite and varies elsewhere —
-    # the audit read clamps it to zero instead of letting it mean everything.
-    assert repo.records_for(env="dev", entity_id="ent_a",
-                            bot_id="bot_1", limit=-1) == []
+
+
+def test_a_nonpositive_limit_is_refused_not_answered_empty(repo):
+    """The review ruling on the negative clamp: an audit read that returns
+    ``[]`` is read as "this bot has no receipts" — a claim, not a page. A
+    caller whose page math went negative (or computed zero) must be told it
+    asked something broken, not told a fact about the bot. And the raw SQL
+    hazard remains real: a negative LIMIT is "unbounded" on SQLite and
+    varies per dialect, so refusing it keeps the bound honest everywhere.
+    (This deliberately replaces the earlier `limit=-1 → []` pin per that
+    ruling.)"""
+    with pytest.raises(ValueError):
+        repo.records_for(env="dev", entity_id="ent_a", bot_id="bot_1", limit=-1)
+    with pytest.raises(ValueError):
+        repo.records_for(env="dev", entity_id="ent_a", bot_id="bot_1", limit=0)
 
 
 def test_an_unknown_bot_reads_an_empty_receipt_list(repo):

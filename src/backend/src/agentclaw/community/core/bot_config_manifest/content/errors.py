@@ -13,7 +13,11 @@ class ContentStoreError(ValueError):
 
     A malformed digest is the canonical case: the digest IS the address, so
     an address that cannot name content is refused before anything touches
-    the filesystem.
+    the filesystem. Catch this family for caller-fault handling — and know
+    what it does NOT include: platform-side failure is
+    :class:`ContentStoreFault` and its subclasses, which deliberately do
+    not inherit here, so a single ``except ContentStoreError`` cannot
+    answer for disk damage it should be escalating.
     """
 
 
@@ -28,7 +32,20 @@ class ContentMissingError(ContentStoreError):
     """
 
 
-class ContentIntegrityError(ContentStoreError):
+class ContentStoreFault(RuntimeError):
+    """The store's own platform side failed (500-class).
+
+    Sibling to :class:`ContentStoreError`, deliberately not its subclass: a
+    hierarchy that nests a 500-class failure under a 400-class base arms
+    every consumer that maps the base to "caller error" — the one failure
+    in this family that should page someone would be reported to the caller
+    as their own mistake. And the mirror hazard is as wrong: a consumer
+    catching the 400 base to clean up would silently miss this one
+    entirely. Siblings, so both mistakes are impossible.
+    """
+
+
+class ContentIntegrityError(ContentStoreFault):
     """Bytes under an address do not hash to that address (500-class).
 
     Raised when a fetched receipt disagrees with its own bytes at store

@@ -62,7 +62,13 @@ SAFE_SCHEMES = frozenset({"https"})
 #: (declared-digest validation, FetchedObject.sha256) and the W11 content
 #: store uses them as its addressing scheme — one regex, one vocabulary, no
 #: per-module copies that drift.
-DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+#:
+#: ``\A``/``\Z`` rather than ``^``/``$``: in Python ``$`` also matches
+#: immediately before a trailing newline, so a digest with a ``\n`` tail
+#: would pass and then fail downstream as a mismatch or a missing address —
+#: the wrong taxonomy for malformed config. A fixed-width vocabulary has no
+#: room for a newline.
+DIGEST_RE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 
 
 #: Where the allowlist lives in the YAML tree, as one constant: the block

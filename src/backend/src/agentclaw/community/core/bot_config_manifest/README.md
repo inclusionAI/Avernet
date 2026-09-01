@@ -183,17 +183,27 @@ store behind all three consumers of the requirement (audit, delivery,
   `<root>/blobs/<hex[:2]>/<hex64>` under the `content_store_dir` from
   `application.yaml`. The digest (`sha256:<hex>`, the fetcher's own
   vocabulary) IS the address: identical bytes are written once, ever, and the
-  write is atomic (temp + `os.replace` in the shard directory). They are not
-  in the database — schema §5 lets one entry be 100–200 MiB, and a column
-  holding that is a self-destructing design.
+  write is durable before it is visible — fsync on the temp file, then
+  `os.replace` (power loss must not leave an address holding half its
+  bytes: this layer never re-fetches, so an in-flight retry cannot heal a
+  torn write). They are not in the database — schema §5 lets one entry be
+  100–200 MiB, and a column holding that is a self-destructing design.
 - **Provenance lives in `ac_manifest_content`**, append-only, one row per
-  store event: the bot axes `(avernet_tenant, env, entity_id, bot_id)`, the
-  digest, both URLs (entry source after `${BOT_*}` substitution, and the
-  final hop — differing values mean a redirect happened), the credential
-  **name** (W3's identifier; the value never crosses into this layer), size,
-  fetch time, and who triggered it. No unique key: fetching the same digest
-  twice is two audit events, not one row to overwrite. Dedup lives in the
-  blob layer by content address; repetition in the log is the fact.
+  store event — and a row is a **fetch event, not a delivery**: under §3.2's
+  all-or-nothing overwrite, an entry can be fetched, verified and filed here
+  and never materialised because a sibling in its category failed (read
+  alone, this table over-reports; the apply linkage below joins the rest of
+  the answer). Each row carries: the bot axes `(avernet_tenant, env,
+  entity_id, bot_id)`, the digest, both URLs (entry source after
+  `${BOT_*}` substitution, and the final hop — differing values mean a
+  redirect happened), the credential **name** (W3's identifier; the value
+  never crosses into this layer), size, fetch time, who triggered it — and
+  the `apply_id` / `category` / `entry_identity` trio linking the row back
+  to the apply and the entry the fetch served (nullable; present whenever
+  the fetch pipeline knew them, and indexed for "what did apply X fetch").
+  No unique key: fetching the same digest twice is two audit events, not
+  one row to overwrite. Dedup lives in the blob layer by content address;
+  repetition in the log is the fact.
 - **`read(digest)` is the one read path**, shared by delivery and audit:
   read in chunks with the hash computed on the same pass, returned whole
   (peak ≈ 2× the blob at the §5 cap — a stated v1 trade; the consumer
@@ -206,12 +216,24 @@ store behind all three consumers of the requirement (audit, delivery,
 - **URLs in provenance carry path but neither userinfo nor query** — the
   same posture as the fetcher's own log line (query strings are where
   signed-source tokens live). The reconciliation anchor for audit is the
-  digest, never a one-time signed URL.
+  digest, never a one-time signed URL. IPv6 literals keep their brackets
+  (httpx hands the host back bare; a bracketless authority with a port is
+  unreadable, and this table is never corrected after write). The wire's
+  ``Content-Type`` is advisory — a header wider than its column stores NULL
+  plus a log line, because throwing away digest-verified bytes over
+  advisory metadata hands the source a provenance eraser. Source **URL
+  length** is refused upfront at `PUT` (2048, the provenance column width —
+  admission, not a post-fetch surprise); the store keeps the width check as
+  the last line of defence for what admission cannot see, a redirect
+  destination's length.
 - **Retention is stated, not defaulted**: v1 retains rows and blobs
   unconditionally — no delete, no sweep, no TTL. Until an audit horizon is
   named, any deletion is a manufactured audit gap. A retention window, when
   audit names one, lands as a DDL-comment change plus a sweep mechanism in
-  that PR, not as a silent default.
+  that PR, not as a silent default. The one stated exception, so a future
+  sweeper's boundary is already drawn: `.tmp-*` staging files from crashed
+  writes are not audit facts, and a store into the shard collects the ones
+  old enough that no live writer owns them.
 
 The store is a declared machine part in the same shape as the fetcher: the
 service takes its repository and the blob root as constructor values, and the

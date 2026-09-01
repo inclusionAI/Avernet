@@ -71,8 +71,18 @@ class StoredContentRecord(BaseModel):
         default=None, description="凭证名（仅名字，绝不存值）"
     )
     content_type: Optional[str] = Field(default=None, description="Content-Type")
+    #: Advisory when populated at all: store() nulls an over-wide header
+    #: rather than refusing the receipt (the digest, not the media type, is
+    #: the reconciliation anchor).
     size_bytes: int = Field(..., description="字节数")
     fetched_at: datetime = Field(..., description="拉取时间")
+    #: The apply and the entry this fetch served — nullable, see the DDL:
+    #: rows written by anything that did not know them (keep_last reuse,
+    #: hand-driven fetches) still answer "from where, for which bot, when",
+    #: and the apply-linkage questions answer as NULL rather than as lies.
+    apply_id: Optional[str] = Field(default=None, description="触发拉取的 apply 键")
+    category: Optional[str] = Field(default=None, description="条目类目")
+    entry_identity: Optional[str] = Field(default=None, description="条目标识")
     modifier: str = Field(default="", description="审计：触发拉取的身份")
     gmt_create: datetime = Field(default_factory=datetime.now, description="创建时间")
     gmt_modified: datetime = Field(default_factory=datetime.now, description="修改时间")
@@ -116,6 +126,12 @@ class ManifestContentModel(Base):
     content_type = Column(String(256), nullable=True, comment="Content-Type")
     size_bytes = Column(BigInteger, nullable=False, comment="字节数")
     fetched_at = Column(DateTime, nullable=False, comment="拉取时间")
+    # The link back to the apply record and the entry coordinates — added
+    # with the table (see the DDL: never-update retention means a column
+    # added after rows exist stays NULL forever for those rows).
+    apply_id = Column(String(64), nullable=True, comment="触发拉取的 apply 键")
+    category = Column(String(32), nullable=True, comment="条目类目")
+    entry_identity = Column(String(256), nullable=True, comment="条目标识")
     modifier = Column(String(1024), nullable=False, default="", comment="审计：触发拉取的身份")
 
     # Data-isolation tenant — same load-bearing role as W1's table: a bot_id
@@ -145,7 +161,11 @@ class ManifestContentModel(Base):
             "bot_id",
             "gmt_create",
         ),
-        Index("idx_digest", "digest"),
+        # "What did apply X fetch": the join the apply record's own comment
+        # anticipated this table providing. (idx_digest was dropped with this
+        # change: the repository exposes no digest-keyed read, and an index
+        # with no reader taxes every append — it returns with the read's PR.)
+        Index("idx_apply", "apply_id"),
     )
 
     def to_record(self) -> StoredContentRecord:
@@ -162,6 +182,9 @@ class ManifestContentModel(Base):
             content_type=self.content_type,
             size_bytes=self.size_bytes,
             fetched_at=self.fetched_at,
+            apply_id=self.apply_id,
+            category=self.category,
+            entry_identity=self.entry_identity,
             modifier=self.modifier,
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,

@@ -56,8 +56,10 @@ class ManifestContentRepositoryProtocol(Protocol):
     ) -> list[StoredContentRecord]:
         """One bot's receipts, newest first — the audit read.
 
-        ``limit`` bounds the answer and is clamped at zero from below
-        (a negative LIMIT changes meaning per dialect — SQLite reads it as
-        unbounded — so it can never mean "everything" here).
+        ``limit`` must be positive and is **refused otherwise** (raises
+        ``ValueError``): an empty answer in this context would be read as
+        "this bot has no receipts" — a claim, not a page — and a negative
+        LIMIT changes meaning per dialect (SQLite reads it as unbounded),
+        so clamping it to nothing would merely be the quieter wrong answer.
         """
         ...
