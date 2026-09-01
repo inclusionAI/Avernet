@@ -75,19 +75,19 @@ _STATIC_MOCK_SUMMARY: dict[str, str] = {
         "人群:淘宝老客分层(高价值/沉睡/流失召回)、京东品质人群+蓝海潜客、拼多多下沉新客设证质门槛;"
         "选品:淘宝冬装基本款+羽绒服爆款、京东高端羽绒+配饰、拼多多低价引流款设证质拦截刷单;"
         "玩法:预售10.15起定金翻倍、11.4–11.11品类券、11.11–11.15返场,总投入不超1000万。"
-        "无法闭环:多平台比价、低质拉新、负面舆情需风控评估;舆情监测无人承接需研发补。"
+        "无法闭环:多平台比价、低质拉新、负面舆情需风控评估;舆情监测无人承接需安全架构师补。"
     ),
     "risk_lead": (
         "锁定8项重点风险点与评审范围:①券规则被中介套利(三平台品类券);②拼多多低质拉新二次客诉(下沉新客);"
         "③部分地区发货延迟(羽绒服重货);④客诉赔付超日常1.5倍;⑤京东价保争议;⑥热销缺货/预售超卖;"
-        "⑦大促负面舆情无承接系统(无人承接,需研发补舆情监测);⑧跨平台比价套利。建议风险评审群重点审②③④⑦。"
-        "无法闭环:舆情监测无对接系统无承接团队,业务风控也补不了,带进风险评审群标无人承接/需研发补。"
+        "⑦大促负面舆情无承接系统(无人承接,需安全架构师补舆情监测);⑧跨平台比价套利。建议风险评审群重点审②③④⑦。"
+        "无法闭环:舆情监测无对接系统无承接团队,业务风控也补不了,带进风险评审群标无人承接/需安全架构师补。"
     ),
     "risk_assessment": (
         "8项风险逐项定级与约束:客诉赔付(高,赔付预案¥300万+夜间客服扩容)、发货延迟(高,热销品前置入仓+运力保底)、"
         "低质拉新(高,证质门槛+拉新黑名单)、券套利(中,单平台限购+实名校验)、价保争议(中,规则前置公示)、"
-        "库存缺货(高,预售库存强校验)、跨平台比价(中,每日价差监控)、舆情监测(无人承接,转研发)。"
-        "无人承接任务:舆情监测系统无承接团队无对接系统→转BBS研发Bot领研发。unhandled_tasks见上报硬字段。"
+        "库存缺货(高,预售库存强校验)、跨平台比价(中,每日价差监控)、舆情监测(无人承接,转安全架构师)。"
+        "无人承接任务:舆情监测系统无承接团队无对接系统→转BBS安全架构师承接。unhandled_tasks见上报硬字段。"
     ),
     "risk_unhandled_to_bbs": (
         "交付大促舆情监控补齐方案(舆情监测MVP):覆盖三平台店铺评论+社媒关键词,情感分类,负面按严重度分级,"
@@ -109,18 +109,18 @@ _STATIC_MOCK_SUMMARY: dict[str, str] = {
     ),
     "notify_done": (
         "大促方案已实施,通知负责人收尾。各跳交接摘要:①专家出三平台策略方向→②策略生成群细化人群+选品+玩法→"
-        "③'风控圈8项风险点→③风险评审群评审定级与约束→④研发补舆情监测MVP+带全料→⑤审核批准有条件通过+三项硬约束→"
+        "③'风控圈8项风险点→③风险评审群评审定级与约束→④安全架构师补舆情监测MVP+带全料→⑤审核批准有条件通过+三项硬约束→"
         "⑥落地配置单+监控+预案。当前状态:已实施待执行日,三项高风险需盯控(低质拉新/发货延迟/客诉赔付),舆情监测已上线。"
     ),
 }
 
 # 固定流程兜底 mock 的"不可实现任务"(risk_assessment 上报无结构化 unhandled_tasks 时兜底)。
-# 大促剧本:风险评审认为差外部舆情监控能力,内部找不到对应舆情监控 bot → 转 BBS 广场由研发 bot 承接。
+# 大促剧本:风险评审认为差外部舆情监控能力,内部找不到对应舆情监控 bot → 转 BBS 广场由安全架构师承接。
 _UHT_MOCK: list[dict[str, str]] = [
     {
         "id": "uht-sentiment-1",
         "title": "舆情监控方案缺失",
-        "reason": "风险评审认为差外部舆情监控能力(发货慢/尺码偏小等负面舆情无监测,需告警→客服闭环),内部找不到对应舆情监控 bot,转 BBS 广场由研发 bot 承接",
+        "reason": "风险评审认为差外部舆情监控能力(发货慢/尺码偏小等负面舆情无监测,需告警→客服闭环),内部找不到对应舆情监控 bot,转 BBS 广场由安全架构师承接",
     },
 ]
 
@@ -800,7 +800,7 @@ class ExecutionEngine:
         的 bot_id 永远被尊重(不会被 catalog 命中的其他 bot 替换)。依赖顺序由 runtime.ready 保证。"""
         to_run: list[TaskNode] = []
         # 固定流程默认真实上报 + fallback 兜底:每个真实派发节点都额外调度一条延迟 mock 上报,
-        # 真实回投在 fallback 超时(默认 80s,env OCB_TASK_STATIC_FALLBACK_TIMEOUT)内先到则自跳过,
+        # 真实回投先到则自跳过(mock 兜底延迟改为随机:单 bot 20-40s,协作群 40-80s,无固定超时),
         # 否则超时后由 mock 推进;auto=True 演示模式仍走短延迟(_static_auto_report 内按 mode 取 delay)。
         auto_nodes: list[TaskNode] = []
         for node in ready_nodes:
@@ -872,9 +872,9 @@ class ExecutionEngine:
                 )
                 continue
             # bbs_handoff 旁路:不可实现任务转 BBS 广场(与 approval 并行,不阻塞主实施线)。
-            # 阶段① 入广场:写 assignee=研发 bot + bbs_status=posted_in_square(dashboard 即可点开研发
+            # 阶段① 入广场:写 assignee=安全架构师 + bbs_status=posted_in_square(dashboard 即可点开安全架构师
             # bot 主会话,不再空 assignee 致点不开);30s 后由 _bbs_handoff_claim 被接:真实 start_run 发
-            # 研发 bot 并落 session_id + 翻 claimed。
+            # 安全架构师 并落 session_id + 翻 claimed。
             if getattr(definition, "node_type", "bot") == "bbs_handoff":
                 bot_id = getattr(definition, "bot_id", None) or ""
                 static_input = node.task_spec.context.extend_props.get("static_input") or {}
@@ -883,7 +883,7 @@ class ExecutionEngine:
                     pass  # 真实风险评估上报了结构化不可实现任务 → 原样用其内容
                 else:
                     # 真实评估为自然语言、无结构化 unhandled_tasks → 兜底 mock 占位(与 _static_auto_report
-                    # 的 _UHT_MOCK 同口径),研发 bot 不致收到空;真实检测到时优先用真实内容。
+                    # 的 _UHT_MOCK 同口径),安全架构师 不致收到空;真实检测到时优先用真实内容。
                     items = list(_UHT_MOCK)
                     logger.info(
                         "[task][static-plan] bbs_handoff 真实无结构化 unhandled_tasks,兜底 mock 占位 task=%s node=%s",
@@ -979,7 +979,7 @@ class ExecutionEngine:
             side.append(("auto", auto_nodes))
 
     async def _static_auto_report(self, task_id: str, node_id: str) -> None:
-        """固定流程兜底上报:节点真实派发后,若在 fallback 超时(默认 80s)内无真实回投,
+        """固定流程兜底上报:节点真实派发后,若在随机延迟内(单 bot 20-40s,协作群 40-80s;取消固定 80s 超时)无真实回投,
         则以 mock 信息回投 PASS→DONE 推进图态,避免单节点不上报致整流程卡死;
         auto=True 演示模式改走短("demo")延迟。
 
@@ -993,7 +993,7 @@ class ExecutionEngine:
         delay = (
             self._static_auto_report_delay(task_id)
             if auto
-            else self._static_fallback_delay(task_id)
+            else self._static_mock_fallback_delay(task_id, node_id)
         )
         logger.info(
             "[task][static-plan] %s scheduled task=%s node=%s in %.2fs",
@@ -1023,7 +1023,7 @@ class ExecutionEngine:
         ):
             mock_result["approved"] = True
         # 造不可实现任务列表(仅当节点 output 含 $.result.unhandled_tasks,如 risk_assessment 群):
-        # 大促剧本兜底=舆情监控方案缺失(内部无舆情监控 bot,转 BBS 研发)。
+        # 大促剧本兜底=舆情监控方案缺失(内部无舆情监控 bot,转 BBS 安全架构师)。
         if definition is not None and any(
             isinstance(v, str) and v.startswith("$.result.unhandled_tasks")
             for v in definition.output.values()
@@ -1050,14 +1050,14 @@ class ExecutionEngine:
     async def _static_bbs_handoff_auto_report(
         self, task_id: str, node_id: str, rnd_bot_id: str, items: Any
     ) -> None:
-        """固定流程 bbs_handoff 兜底上报:与节点级 _static_auto_report 同语义——真实 poller 在 timeout
-        内闭环则自跳过(节点非 RUNNING);否则超时后 mock PASS→DONE,避免旁路节点长挂致整流程不终态。
-        auto 演示模式用短 demo 延迟,默认真实模式用 fallback 超时(80s)。"""
+        """固定流程 bbs_handoff 兜底上报:与节点级 _static_auto_report 同语义——真实 poller 先到则自跳过(节点非 RUNNING);
+        否则随机延迟(单 bot/node 同单 bot 20-40s)后 mock PASS→DONE,避免旁路节点长挂致整流程不终态。
+        auto 演示模式用短 demo 延迟。"""
         auto = self._static_auto_report_on(task_id)
         delay = (
             self._static_auto_report_delay(task_id)
             if auto
-            else self._static_fallback_delay(task_id)
+            else self._static_mock_fallback_delay(task_id, node_id)
         )
         logger.info(
             "[task][static-plan] %s scheduled task=%s node=%s in %.2fs",
@@ -1106,6 +1106,15 @@ class ExecutionEngine:
         except (TypeError, ValueError):
             return 80.0
 
+    def _static_mock_fallback_delay(self, task_id: str, node_id: str) -> float:
+        """固定流程真实上报兜底 mock 的随机延迟(取消固定 fallback 超时):
+        单 bot 节点随机 20-40s,协作群节点随机 40-80s;auto 演示模式仍走 _static_auto_report_delay 短延迟。
+        无法定 node_type 时按单 bot 处理(20-40)。真实回投先到则本兜底自跳过,不被使用。"""
+        runtime = self._static_runtime(task_id)
+        definition = runtime.by_id.get(node_id) if runtime is not None else None
+        is_group = definition is not None and definition.node_type == "collaboration"
+        return random.uniform(40.0, 80.0) if is_group else random.uniform(20.0, 40.0)
+
     def _static_auto_report_delay(self, task_id: str) -> float:
         """自驱 mock 上报延迟秒数:execution_config.static_auto_report_delay →
         env OCB_TASK_STATIC_AUTO_REPORT_DELAY → random.uniform(20,60)(每节点完成节奏不一,
@@ -1146,7 +1155,7 @@ class ExecutionEngine:
     async def _bbs_handoff_claim(
         self, task_id: str, node_id: str, rnd_bot_id: str, items: Any
     ) -> None:
-        """BBS 交接"被接":延迟后真实 start_run 发自动研发 bot,成功翻 claimed + 展示研发 bot;
+        """BBS 交接"被接":延迟后真实 start_run 发安全架构师,成功翻 claimed + 展示安全架构师;
         auto 模式随即 mock 上报 PASS→DONE(派发完成即交接完成),真实模式留给 poller。
         失败留 PENDING(post_failed),不掩盖真实派发失败。"""
         delay = self._bbs_handoff_delay(task_id)
@@ -1163,7 +1172,7 @@ class ExecutionEngine:
                 task_id, node_id, node.status.value if node is not None else None,
             )
             return
-        # ① assignee 先置研发 bot(供 start_run 定位)+ 记录 bbs_owner(阶段① 已置,这里幂等再写)。
+        # ① assignee 先置安全架构师(供 start_run 定位)+ 记录 bbs_owner(阶段① 已置,这里幂等再写)。
         node.run_info.assignee = rnd_bot_id
         node.run_info.run_mode = "bbs"
         with self._lock_for(task_id):
@@ -1174,8 +1183,8 @@ class ExecutionEngine:
                     extend_props_patch={"bbs_owner": rnd_bot_id, "bbs_handed_to": rnd_bot_id},
                 )
             )
-        # ② 研发 bot 真实接单:临时切 single_bot 模态 start_run,真实发消息并落 session_id/run_id 进
-        #    extend_props(dashboard 可点开研发 bot 会话);run_mode 维持 bbs(bbs 路径语义 + 是否真派发由本处控制)。
+        # ② 安全架构师 真实接单:临时切 single_bot 模态 start_run,真实发消息并落 session_id/run_id 进
+        #    extend_props(dashboard 可点开安全架构师 会话);run_mode 维持 bbs(bbs 路径语义 + 是否真派发由本处控制)。
         ok = False
         node.run_info.run_mode = "single_bot"
         try:
@@ -1183,7 +1192,7 @@ class ExecutionEngine:
             ok = bool(results[0]) if results else False
         except Exception as ex:  # noqa: BLE101
             logger.warning(
-                "[task][static-plan] bbs_handoff 研发 bot 派发异常 task=%s node=%s rnd_bot=%s: %s",
+                "[task][static-plan] bbs_handoff 安全架构师 派发异常 task=%s node=%s rnd_bot=%s: %s",
                 task_id, node_id, rnd_bot_id, ex,
             )
             ok = False
@@ -1192,7 +1201,7 @@ class ExecutionEngine:
         with self._lock_for(task_id):
             if not ok:
                 # 真派发失败:不回 PENDING/不清 assignee,直接 no-op 翻 RUNNING(bbs 路径仍由兜底推进),
-                # dashboard 可按 assignee 点开研发 bot 主会话;dispatch_error 留痕便于排查。
+                # dashboard 可按 assignee 点开安全架构师 主会话;dispatch_error 留痕便于排查。
                 self._graph.update_task_node_info(
                     TaskNodePatch(
                         task_id=task_id, node_id=node_id,
@@ -1205,7 +1214,7 @@ class ExecutionEngine:
                     )
                 )
             else:
-                # 研发 bot 真发成功:session_id/run_id 已由 dispatcher 写入 extend_props,bbs 翻 RUNNING+claimed。
+                # 安全架构师 真发成功:session_id/run_id 已由 dispatcher 写入 extend_props,bbs 翻 RUNNING+claimed。
                 self._graph.update_task_node_info(
                     TaskNodePatch(
                         task_id=task_id, node_id=node_id,
