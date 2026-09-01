@@ -90,8 +90,12 @@ _STATIC_MOCK_SUMMARY: dict[str, str] = {
         "无人承接任务:舆情监测系统无承接团队无对接系统→转BBS研发Bot领研发。unhandled_tasks见上报硬字段。"
     ),
     "risk_unhandled_to_bbs": (
-        "交付大促舆情监测MVP(覆盖三平台店铺评论+社媒关键词,情感分类,负面按严重度分级,阈值触发告警→审核/实施dashboard);"
-        "并carry-forward上游全料:①三平台差异化营销策略、②人群分层+选品商品池+玩法、③8项风险逐项结论与约束,供下游审核一次看齐。"
+        "交付大促舆情监控补齐方案(舆情监测MVP):覆盖三平台店铺评论+社媒关键词,情感分类,负面按严重度分级,"
+        "阈值触发告警→客服/运营闭环,接入审核/实施dashboard;MVP就位可供审核与实施接入。"
+        "业务风险(逐项成因/等级/约束):低质拉新二次客诉(高,赔付预案¥300万+夜间客服扩容)、发货延迟(高,热销前置入仓+运力保底)、"
+        "券套利(中,单平台限购+实名校验)、价保争议(中,规则前置公示)、库存缺货/预售超卖(高,预售库存强校验)、跨平台比价(中,每日价差监控)。"
+        "技术/系统风险:券核销与库存并发须防超卖(强校验)、价差监控告警链路延迟、舆情监测接入告警通道联调。"
+        "carry-forward上游全料:①三平台差异化营销策略 ②人群分层+选品商品池+玩法 ③上述风险逐项结论与约束,供下游审核一次审齐。"
     ),
     "strategy_approval": (
         "审核结论:批准有条件通过。问题清单:高—低质拉新二次客诉(证质门槛+黑名单,需实施盯控负向清单);"
@@ -109,6 +113,16 @@ _STATIC_MOCK_SUMMARY: dict[str, str] = {
         "⑥落地配置单+监控+预案。当前状态:已实施待执行日,三项高风险需盯控(低质拉新/发货延迟/客诉赔付),舆情监测已上线。"
     ),
 }
+
+# 固定流程兜底 mock 的"不可实现任务"(risk_assessment 上报无结构化 unhandled_tasks 时兜底)。
+# 大促剧本:风险评审认为差外部舆情监控能力,内部找不到对应舆情监控 bot → 转 BBS 广场由研发 bot 承接。
+_UHT_MOCK: list[dict[str, str]] = [
+    {
+        "id": "uht-sentiment-1",
+        "title": "舆情监控方案缺失",
+        "reason": "风险评审认为差外部舆情监控能力(发货慢/尺码偏小等负面舆情无监测,需告警→客服闭环),内部找不到对应舆情监控 bot,转 BBS 广场由研发 bot 承接",
+    },
+]
 
 # 陈旧飞行态阈值(dispatching=True 超此即视为崩溃遗留,redrive 可清理重派)。
 # 默认 60s:正常 start_run 在途远小于此;与默认 recovery lease(60s)对齐——崩溃任务经 recovery
@@ -869,11 +883,8 @@ class ExecutionEngine:
                     pass  # 真实风险评估上报了结构化不可实现任务 → 原样用其内容
                 else:
                     # 真实评估为自然语言、无结构化 unhandled_tasks → 兜底 mock 占位(与 _static_auto_report
-                    # 的 uht-auto 占位同口径),研发 bot 不致收到空;真实检测到时优先用真实内容。
-                    items = [
-                        {"id": "uht-auto-1", "title": "自动研发任务-1", "reason": "评估认为暂不可实现"},
-                        {"id": "uht-auto-2", "title": "自动研发任务-2", "reason": "依赖外部能力暂缺"},
-                    ]
+                    # 的 _UHT_MOCK 同口径),研发 bot 不致收到空;真实检测到时优先用真实内容。
+                    items = list(_UHT_MOCK)
                     logger.info(
                         "[task][static-plan] bbs_handoff 真实无结构化 unhandled_tasks,兜底 mock 占位 task=%s node=%s",
                         task_id, node.node_id,
@@ -1011,15 +1022,13 @@ class ExecutionEngine:
             for v in definition.output.values()
         ):
             mock_result["approved"] = True
-        # 造不可实现任务列表(仅当节点 output 含 $.result.unhandled_tasks,如 risk_assessment 群)
+        # 造不可实现任务列表(仅当节点 output 含 $.result.unhandled_tasks,如 risk_assessment 群):
+        # 大促剧本兜底=舆情监控方案缺失(内部无舆情监控 bot,转 BBS 研发)。
         if definition is not None and any(
             isinstance(v, str) and v.startswith("$.result.unhandled_tasks")
             for v in definition.output.values()
         ):
-            mock_result["unhandled_tasks"] = [
-                {"id": "uht-auto-1", "title": "自动研发任务-1", "reason": "评估认为暂不可实现"},
-                {"id": "uht-auto-2", "title": "自动研发任务-2", "reason": "依赖外部能力暂缺"},
-            ]
+            mock_result["unhandled_tasks"] = [dict(t) for t in _UHT_MOCK]
         logger.info(
             "[task][static-plan] auto-report fire task=%s node=%s mock=%s -> on_report",
             task_id, node_id, mock_result,

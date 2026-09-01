@@ -87,7 +87,7 @@ nodes:
       (硬字段:driver output JSON 须带 unhandled_tasks 数组,供框架路由后续;叙述用职能词)
   - id: risk_unhandled_to_bbs
     name: 不可实现任务转BBS广场
-    title: 无人任务研发承接
+    title: 舆情监控方案缺失
     type: bbs_handoff
     bot_id: 20260828_f7wfi27d
     depends_on: [risk_assessment]
@@ -107,13 +107,14 @@ nodes:
     bot_id: 20260828_9rgd70li
     depends_on: [risk_unhandled_to_bbs]
     input:
+      risks: $.risk_assessment.output.risk_result
       handoff: $.risk_unhandled_to_bbs.output.handoff
     output:
       approval_result: $.result
       handoff: $.result
     task: |
-      你是结构化审核:对双十一大促营销策略做结构化审核;需要退回或流转的,按你的判断给建议。
-      你若看不到③完整风险清单,是上家 rule 没 carry-forward,不找框架做 fan-in。
+      你是结构化审核:对双十一大促营销策略做结构化审核。审核须覆盖全部维度——营销策略(三平台差异化+人群+选品+玩法)、业务风险清单与约束、技术/系统风险清单与约束、舆情监控补齐方案是否就位、不可实现任务交接是否闭环;需要退回或流转的,按你的判断给建议。
+      上游已带 risks(风险评审结论与约束)与 handoff(研发优势输出+舆情监控补齐方案+全料 carry-forward);若仍看不到③完整风险清单,是上家 rule 没 carry-forward,不找框架做 fan-in。
   - id: implementation
     name: 投放实施
     title: 大促投放实施
