@@ -1188,23 +1188,28 @@ impl GroupManagementService for GroupManagement {
                         .await
                     {
                         Ok(dispatch) => {
-                            if requested_strategy == GroupStrategy::ManagerWorker
-                                && let Some(manager) = group
+                            let bootstrap_responder = match requested_strategy {
+                                GroupStrategy::Chat => Some(group.driver_bot.as_str()),
+                                GroupStrategy::ManagerWorker => group
                                     .participants
                                     .iter()
                                     .find(|participant| {
                                         participant.role == ParticipantRole::Manager
                                     })
+                                    .map(|participant| participant.bot_uuid.as_str()),
+                                GroupStrategy::StateMachine => None,
+                            };
+                            if let Some(bot_uuid) = bootstrap_responder
                                 && let Some(result) = dispatch.recipient_results.iter().find(
                                     |result| {
-                                        result.recipient_id == manager.bot_uuid
+                                        result.recipient_id == bot_uuid
                                             && result.delivery_type == DeliveryType::Send
                                     },
                                 )
                             {
                                 initial_run = Some(InitialGroupRun {
                                     run_id: result.run_id.clone(),
-                                    bot_uuid: manager.bot_uuid.clone(),
+                                    bot_uuid: bot_uuid.to_string(),
                                     activity_kind: InitialGroupRunActivityKind::GroupBootstrap,
                                     state: if result.delivered {
                                         InitialGroupRunState::Running

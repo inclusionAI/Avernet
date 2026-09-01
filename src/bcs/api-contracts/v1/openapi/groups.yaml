@@ -128,8 +128,9 @@ GroupsPath:
           Created group detail. When event_subscriptions were supplied, the
           response includes their redacted active summaries. Their scope is
           fixed by the server to the newly created Group. When creation starts
-          an initial Manager run, initial_session_id identifies its Session and
-          initial_run exposes the run identity and current dispatch state.
+          an initial responder run, initial_session_id identifies its Session
+          and initial_run exposes the Driver run for a chat group or the Manager
+          run for a manager-worker group, including its current dispatch state.
         content:
           application/json:
             schema:
