@@ -1,7 +1,8 @@
 # Gateway Principal Contract for BCS V1
 
 `X-Avernet-Principal` carries one raw compact JWT. The verifier requires
-`alg=HS256`, `typ=JWT`, `kid=bare`, `iss=gateway`, `aud=bcs`, integer `iat` and
+`alg=HS256`, `typ=JWT`, `kid=bare`, an `iss` claim matching any configured
+issuer (defaults `gateway` or `backend`), `aud=bcs`, integer `iat` and
 `exp`, and a non-empty `principals` array. It allows one each of `user`, `bot`,
 `app`, and `access_key`.
 

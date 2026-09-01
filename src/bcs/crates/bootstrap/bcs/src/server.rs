@@ -1322,7 +1322,7 @@ fn build_gateway_principal_verifier(
     config.validate().map_err(crate::BcsError::InvalidConfig)?;
     let signing_key = gateway_principal_signing_key(material)?;
     let trust = GatewayPrincipalTrust::new(
-        config.issuer.clone(),
+        config.issuers.clone(),
         config.audience.clone(),
         config.key_id.clone(),
     )
@@ -1704,10 +1704,10 @@ mod gateway_principal_tests {
 
     #[test]
     fn blank_gateway_principal_trust_or_lookup_config_is_rejected() {
-        for field in ["issuer", "audience", "key_id", "signing_key_env"] {
+        for field in ["issuers", "audience", "key_id", "signing_key_env"] {
             let mut config = trust_config();
             match field {
-                "issuer" => config.issuer = " ".to_string(),
+                "issuers" => config.issuers = vec![" ".to_string()],
                 "audience" => config.audience = " ".to_string(),
                 "key_id" => config.key_id = " ".to_string(),
                 "signing_key_env" => config.signing_key_env = " ".to_string(),
@@ -1718,6 +1718,19 @@ mod gateway_principal_tests {
                 Err(crate::BcsError::InvalidConfig(_))
             ));
         }
+        // Empty issuer list and duplicate issuers are also rejected.
+        let mut empty = trust_config();
+        empty.issuers = vec![];
+        assert!(matches!(
+            build_gateway_principal_verifier(&empty, Some("explicit-test-key")),
+            Err(crate::BcsError::InvalidConfig(_))
+        ));
+        let mut duplicate = trust_config();
+        duplicate.issuers = vec!["gateway".to_string(), "gateway".to_string()];
+        assert!(matches!(
+            build_gateway_principal_verifier(&duplicate, Some("explicit-test-key")),
+            Err(crate::BcsError::InvalidConfig(_))
+        ));
     }
 
     #[tokio::test]
@@ -3897,7 +3910,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
         )
         .await?;
         info!(
-            issuer = %config.gateway_principal.issuer,
+            issuers = ?config.gateway_principal.issuers,
             audience = %config.gateway_principal.audience,
             key_id = %config.gateway_principal.key_id,
             "Gateway Principal verifier initialized"
