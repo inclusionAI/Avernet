@@ -636,7 +636,8 @@ class TestFindUnregistered:
         assert results[0]["sandbox_id"] == "sb-new-789"
 
     def test_find_unregistered_binding_matching_sandbox_still_suppressed(self):
-        """Test 13b: binding anti-join stays strict."""
+        """Test 13b: binding anti-join stays strict — matching source_id +
+        same sandbox suppresses regardless of cold-row status."""
         repo, mock_session = _make_repo()
         mock_session.execute.return_value = [
             _make_row(
@@ -657,9 +658,74 @@ class TestFindUnregistered:
             "baas_bot_ttl_renewal_schedule.source_id = "
             "ac_entity_device_binding.id" in sql_text
         )
-        assert "baas_bot_ttl_renewal_schedule.status = %s" in sql_text
-        assert compiled.params["status_1"] == "ACTIVE"
+        # D-85-AJ1: no cold-table status predicate in the ON clause — any
+        # cold row on the same sandbox suppresses. The one surviving status
+        # bind is the hot-table WHERE filter.
+        assert "baas_bot_ttl_renewal_schedule.status" not in sql_text
+        assert len([k for k in compiled.params if k.startswith("status")]) == 1
         assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sql_text
+
+    def test_find_unregistered_binding_stopped_same_sandbox_still_suppressed(self):
+        """Test 13c: a STOPPED cold row on the same binding sandbox still
+        suppresses the hot row — no status predicate in either dialect."""
+        repo, mock_session = _make_repo()
+        mock_session.execute.return_value = [
+            _make_row(
+                {
+                    "id": 2,
+                    "sandbox_id": "sb-new-789",
+                    "source_table": "ac_entity_device_binding",
+                    "ttl": "2026-08-25T18:00:00",
+                }
+            )
+        ]
+
+        results = repo.find_unregistered("test", "ac_entity_device_binding", 500)
+
+        mysql_compiled = mock_session.execute.call_args[0][0].compile(
+            dialect=mysql.dialect()
+        )
+        mysql_sql = str(mysql_compiled)
+        assert "baas_bot_ttl_renewal_schedule.status" not in mysql_sql
+        assert (
+            "baas_bot_ttl_renewal_schedule.sandbox_id = "
+            "json_unquote(json_extract(ac_entity_device_binding.device_props, "
+            "'$.sandbox_id'))" in mysql_sql
+        )
+        assert (
+            "baas_bot_ttl_renewal_schedule.source_id = "
+            "ac_entity_device_binding.id" in mysql_sql
+        )
+        assert "baas_bot_ttl_renewal_schedule.id IS NULL" in mysql_sql
+        assert len([k for k in mysql_compiled.params if k.startswith("status")]) == 1
+
+        # D-05' idiom: flip the session dialect to sqlite before REBUILDING
+        # the statement — the sqlite branch skips the json_unquote wrapper.
+        mock_session.bind.dialect.name = _SQLITE
+        repo.find_unregistered("test", "ac_entity_device_binding", 500)
+
+        sqlite_compiled = mock_session.execute.call_args[0][0].compile(
+            dialect=sqlite.dialect()
+        )
+        sqlite_sql = str(sqlite_compiled)
+        assert "json_unquote" not in sqlite_sql
+        assert "baas_bot_ttl_renewal_schedule.status" not in sqlite_sql
+        assert (
+            "baas_bot_ttl_renewal_schedule.sandbox_id = "
+            "json_extract(ac_entity_device_binding.device_props, '$.sandbox_id')"
+            in sqlite_sql
+        )
+        assert (
+            "baas_bot_ttl_renewal_schedule.source_id = "
+            "ac_entity_device_binding.id" in sqlite_sql
+        )
+        assert "baas_bot_ttl_renewal_schedule.id IS NULL" in sqlite_sql
+        assert (
+            len([k for k in sqlite_compiled.params if k.startswith("status")]) == 1
+        )
+
+        assert len(results) == 1
+        assert results[0]["sandbox_id"] == "sb-new-789"
 
     def test_find_unregistered_sqlite_dialect_skips_unquote(self):
         """D-05': sqlite returns bare json_extract text — no unquote wrapper."""
