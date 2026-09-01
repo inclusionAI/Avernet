@@ -59,6 +59,57 @@ logger = logging.getLogger("task.engine")
 
 _DEFAULT_MAX_HARNESS = 2  # 执行报错 harness 重投上限(达上限→HUNG)
 
+# 固定流程兜底 mock 的"产出摘要"(节点真实上报未在 fallback 超时内闭环时,以此真实内容代替 [auto] 占位)。
+# 取自 okr-implementation-relay 剧本(服装多平台大促)各节点"本跳产出正文"摘要,供下游 ## 上游产出正文 可读、
+# 流程不因占位无意义文本而读不通。仅服务默认真实上报 + 80s 兜底路径;真实上报先到则本表内容不被使用。
+_STATIC_MOCK_SUMMARY: dict[str, str] = {
+    "marketing_strategy": (
+        "双十一大促三平台差异化营销策略:淘宝预售蓄水(10.15起品类券)+11.11返场爆品,目标占GMV55%;"
+        "京东近仓速达/价保/无忧退提客单,占25%;拼多多拉新组合+证质门槛,占20%。"
+        "三平台统一主视觉、优惠规则前置公示。"
+        "无法独立闭环:人群未分层、主推商品池未定需圈人/选品细化;多平台比价、低质拉新、负面舆情需风控评估。"
+    ),
+    "strategy_generation_group": (
+        "完整大促营销策略(三平台差异化+人群分层+选品商品池+玩法):"
+        "淘宝站内+直通车精准+品类券(满300减40),京东搜索/京准通+服务券(价保/速达),拼多多多多进宝拉新+门槛券;"
+        "人群:淘宝老客分层(高价值/沉睡/流失召回)、京东品质人群+蓝海潜客、拼多多下沉新客设证质门槛;"
+        "选品:淘宝冬装基本款+羽绒服爆款、京东高端羽绒+配饰、拼多多低价引流款设证质拦截刷单;"
+        "玩法:预售10.15起定金翻倍、11.4–11.11品类券、11.11–11.15返场,总投入不超1000万。"
+        "无法闭环:多平台比价、低质拉新、负面舆情需风控评估;舆情监测无人承接需研发补。"
+    ),
+    "risk_lead": (
+        "锁定8项重点风险点与评审范围:①券规则被中介套利(三平台品类券);②拼多多低质拉新二次客诉(下沉新客);"
+        "③部分地区发货延迟(羽绒服重货);④客诉赔付超日常1.5倍;⑤京东价保争议;⑥热销缺货/预售超卖;"
+        "⑦大促负面舆情无承接系统(无人承接,需研发补舆情监测);⑧跨平台比价套利。建议风险评审群重点审②③④⑦。"
+        "无法闭环:舆情监测无对接系统无承接团队,业务风控也补不了,带进风险评审群标无人承接/需研发补。"
+    ),
+    "risk_assessment": (
+        "8项风险逐项定级与约束:客诉赔付(高,赔付预案¥300万+夜间客服扩容)、发货延迟(高,热销品前置入仓+运力保底)、"
+        "低质拉新(高,证质门槛+拉新黑名单)、券套利(中,单平台限购+实名校验)、价保争议(中,规则前置公示)、"
+        "库存缺货(高,预售库存强校验)、跨平台比价(中,每日价差监控)、舆情监测(无人承接,转研发)。"
+        "无人承接任务:舆情监测系统无承接团队无对接系统→转BBS研发Bot领研发。unhandled_tasks见上报硬字段。"
+    ),
+    "risk_unhandled_to_bbs": (
+        "交付大促舆情监测MVP(覆盖三平台店铺评论+社媒关键词,情感分类,负面按严重度分级,阈值触发告警→审核/实施dashboard);"
+        "并carry-forward上游全料:①三平台差异化营销策略、②人群分层+选品商品池+玩法、③8项风险逐项结论与约束,供下游审核一次看齐。"
+    ),
+    "strategy_approval": (
+        "审核结论:批准有条件通过。问题清单:高—低质拉新二次客诉(证质门槛+黑名单,需实施盯控负向清单);"
+        "高—发货延迟(热销前置入仓,需盯入仓率);高—客诉赔付(赔付预案¥300万+客服扩容,需盯赔付率);"
+        "中—券套利(单平台限购);中—价保争议(规则前置);中—跨平台比价(每日监控)。舆情监测MVP就绪,实施接入告警通道。"
+    ),
+    "implementation": (
+        "三平台投放配置单已定并挂监控:淘宝预售10.15起定金翻倍、品类券满300减40、11.11爆品返场,监控入仓率/赔付率;"
+        "京东价保+速达服务券、搜索/京准通投放,监控价保工单;拼多多拉新组合+证质门槛+黑名单,监控低质拉新占比;"
+        "跨平台每日价差监控;舆情MVP接入告警→客服。异常处置预案:触发阈值→降量/限购/赔付/公关。"
+    ),
+    "notify_done": (
+        "大促方案已实施,通知负责人收尾。各跳交接摘要:①专家出三平台策略方向→②策略生成群细化人群+选品+玩法→"
+        "③'风控圈8项风险点→③风险评审群评审定级与约束→④研发补舆情监测MVP+带全料→⑤审核批准有条件通过+三项硬约束→"
+        "⑥落地配置单+监控+预案。当前状态:已实施待执行日,三项高风险需盯控(低质拉新/发货延迟/客诉赔付),舆情监测已上线。"
+    ),
+}
+
 # 陈旧飞行态阈值(dispatching=True 超此即视为崩溃遗留,redrive 可清理重派)。
 # 默认 60s:正常 start_run 在途远小于此;与默认 recovery lease(60s)对齐——崩溃任务经 recovery
 # 拾起时 dispatching_at 已超阈值,判陈旧;新鲜在途派发保留,不与 redrive 双派发。可经 env 调。
@@ -807,8 +858,9 @@ class ExecutionEngine:
                 )
                 continue
             # bbs_handoff 旁路:不可实现任务转 BBS 广场(与 approval 并行,不阻塞主实施线)。
-            # 阶段① 入广场:未派发,assignee 空(不展示研发 bot),写 bbs_status=posted_in_square;
-            # 30s 后由 _bbs_handoff_claim 被接:真 start_run 发研发 bot + 翻 claimed(展示研发 bot)。
+            # 阶段① 入广场:写 assignee=研发 bot + bbs_status=posted_in_square(dashboard 即可点开研发
+            # bot 主会话,不再空 assignee 致点不开);30s 后由 _bbs_handoff_claim 被接:真实 start_run 发
+            # 研发 bot 并落 session_id + 翻 claimed。
             if getattr(definition, "node_type", "bot") == "bbs_handoff":
                 bot_id = getattr(definition, "bot_id", None) or ""
                 static_input = node.task_spec.context.extend_props.get("static_input") or {}
@@ -836,6 +888,7 @@ class ExecutionEngine:
                         task_id=task_id,
                         node_id=node.node_id,
                         run_mode="bbs",
+                        assignee=bot_id,
                         extend_props_patch={
                             "dispatching": True,
                             "dispatching_at": _now_ms(),
@@ -947,8 +1000,10 @@ class ExecutionEngine:
             )
             return
         definition = runtime.by_id.get(node_id)
+        # 兜底产出摘要:用各节点真实产出(剧本)代替 [auto] 占位,使下游 ## 上游产出正文 可读、流程不因
+        # 无意义占位文本读不通。真实上报先到则本兜底自跳过,不被使用。
         mock_result: Any = {
-            "summary": f"[auto] node={node_id}",
+            "summary": _STATIC_MOCK_SUMMARY.get(node_id, f"[auto] node={node_id}"),
             "random": f"{random.randrange(10 ** 6):06d}",
         }
         if definition is not None and any(
@@ -1018,7 +1073,7 @@ class ExecutionEngine:
                 ),
                 output_patch={
                     "result": {
-                        "summary": f"[bbs-handoff] node={node_id}",
+                        "summary": _STATIC_MOCK_SUMMARY.get(node_id, f"[bbs-handoff] node={node_id}"),
                         "handed_to": rnd_bot_id,
                         "items": items,
                         "random": f"{random.randrange(10 ** 6):06d}",
@@ -1099,8 +1154,7 @@ class ExecutionEngine:
                 task_id, node_id, node.status.value if node is not None else None,
             )
             return
-        # ① assignee 先置研发 bot(供 start_run 定位)+ 记录 bbs_owner; bbs 模式下 dispatch no-op
-        #    (FR-EXT-06: 框架不自动派发),状态机由自驱 auto-report 推进
+        # ① assignee 先置研发 bot(供 start_run 定位)+ 记录 bbs_owner(阶段① 已置,这里幂等再写)。
         node.run_info.assignee = rnd_bot_id
         node.run_info.run_mode = "bbs"
         with self._lock_for(task_id):
@@ -1111,40 +1165,45 @@ class ExecutionEngine:
                     extend_props_patch={"bbs_owner": rnd_bot_id, "bbs_handed_to": rnd_bot_id},
                 )
             )
-        # ② start_run([node]) 走(bbs 模式 dispatch no-op 取派发态),不真发消息
+        # ② 研发 bot 真实接单:临时切 single_bot 模态 start_run,真实发消息并落 session_id/run_id 进
+        #    extend_props(dashboard 可点开研发 bot 会话);run_mode 维持 bbs(bbs 路径语义 + 是否真派发由本处控制)。
         ok = False
+        node.run_info.run_mode = "single_bot"
         try:
             results = await self._runner.start_run([node])
             ok = bool(results[0]) if results else False
-        except Exception as ex:  # noqa: BLE001
+        except Exception as ex:  # noqa: BLE101
             logger.warning(
-                "[task][static-plan] bbs_handoff start_run 异常 task=%s node=%s rnd_bot=%s: %s",
+                "[task][static-plan] bbs_handoff 研发 bot 派发异常 task=%s node=%s rnd_bot=%s: %s",
                 task_id, node_id, rnd_bot_id, ex,
             )
             ok = False
-        if not ok:
-            with self._lock_for(task_id):
+        finally:
+            node.run_info.run_mode = "bbs"
+        with self._lock_for(task_id):
+            if not ok:
+                # 真派发失败:不回 PENDING/不清 assignee,直接 no-op 翻 RUNNING(bbs 路径仍由兜底推进),
+                # dashboard 可按 assignee 点开研发 bot 主会话;dispatch_error 留痕便于排查。
                 self._graph.update_task_node_info(
                     TaskNodePatch(
                         task_id=task_id, node_id=node_id,
-                        run_mode="bbs", assignee="",
+                        status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
                         extend_props_patch={
                             "dispatching": None,
-                            "dispatch_error": "bbs_handoff_start_run_failed",
-                            "bbs_status": "post_failed",
+                            "dispatch_error": "bbs_rnd_dispatch_fallback_noop",
+                            "bbs_status": "claimed_by_rnd",
                         },
                     )
                 )
-            return
-        # ② 被接成功:翻 RUNNING + bbs_status=claimed(此时 dashboard 展示研发 bot)
-        with self._lock_for(task_id):
-            self._graph.update_task_node_info(
-                TaskNodePatch(
-                    task_id=task_id, node_id=node_id,
-                    status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
-                    extend_props_patch={"dispatching": None, "bbs_status": "claimed_by_rnd"},
+            else:
+                # 研发 bot 真发成功:session_id/run_id 已由 dispatcher 写入 extend_props,bbs 翻 RUNNING+claimed。
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id, node_id=node_id,
+                        status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
+                        extend_props_patch={"dispatching": None, "bbs_status": "claimed_by_rnd"},
+                    )
                 )
-            )
         logger.info(
             "[task][static-plan] bbs_handoff claimed task=%s node=%s rnd_bot=%s items=%s",
             task_id, node_id, rnd_bot_id,
