@@ -20,6 +20,7 @@ class TestHttpConnectionInfo:
 
         assert info.http_url == "http://antclaw-a1b2c3.inc.service.test:9999"
         assert info.token == "abc123"
+        assert info.device_id == ""
 
     def test_fields_are_positional_no_defaults(self) -> None:
         """HttpConnectionInfo fields should be positional-only (no default values)."""
@@ -45,3 +46,24 @@ class TestHttpConnectionInfo:
         )
         assert isinstance(info.http_url, str)
         assert isinstance(info.token, str)
+
+    def test_device_id_defaults_to_empty_and_is_writable(self) -> None:
+        """device_id defaults to empty string and can be backfilled by the dispatcher."""
+        info = HttpConnectionInfo(
+            http_url="http://antclaw-a1b2c3.inc.service.test:9999",
+            token="abc123",
+        )
+        assert info.device_id == ""
+
+        info.device_id = "antclaw-a1b2c3"
+        assert info.device_id == "antclaw-a1b2c3"
+
+    def test_create_with_explicit_device_id(self) -> None:
+        """device_id can be provided explicitly at construction time."""
+        info = HttpConnectionInfo(
+            http_url="http://antclaw-a1b2c3.inc.service.test:9999",
+            token="abc123",
+            target="antclaw-a1b2c3:9999:12345",
+            device_id="antclaw-a1b2c3",
+        )
+        assert info.device_id == "antclaw-a1b2c3"

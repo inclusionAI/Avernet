@@ -37,6 +37,7 @@ class BotHttpConnectionInfoResponse(BaseModel):
     target: str = Field(
         ..., description="Target identifier (format: {platform}_{device_id}:{port})"
     )
+    device_id: str = Field(..., description="PaaS device id of the selected device")
 
 
 class BotHttpConnectionErrorResponse(BaseModel):
@@ -139,6 +140,7 @@ async def get_bot_http_connection_info(
                 http_url=conn_info.http_url,
                 token=conn_info.token,
                 target=conn_info.target,
+                device_id=conn_info.device_id,
             )
         )
 

@@ -382,6 +382,7 @@ class TestDispatchBotWsConnInfo:
         assert result.ws_url.startswith("wss://")
         assert result.token == "test-jwt-token"
         assert "20003" in result.target
+        assert result.device_id == "ARCA-SANDBOX-test-001"
 
         # Verify facade was called with provider_device_id directly
         mock_paas_facade.resolve_ws_conn_info.assert_awaited_once()
@@ -790,6 +791,7 @@ class TestDispatchBotWsConnInfoWithDeviceUuid:
 
         assert result.ws_url.startswith("wss://")
         assert result.token == "test-jwt-token"
+        assert result.device_id == "ARCA-SANDBOX-test-001"
         # Verify facade was called with the correct device's provider_device_id
         mock_paas_facade.resolve_ws_conn_info.assert_awaited_once_with(
             paas_device_id="ARCA-SANDBOX-test-001",
