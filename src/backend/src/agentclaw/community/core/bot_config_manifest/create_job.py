@@ -31,6 +31,9 @@ from typing import Any, Callable, Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
+    ManifestApplyInProgressError,
+)
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
@@ -418,18 +421,55 @@ class BotCreateWithManifestHandler:
         # last chance to notice a completion that only half happened.
         self._repair_owner_relationship_if_missing(payload, bot)
 
-        self._applies_provider().start_apply(
-            entity_id=entity_id,
-            bot_id=bot_id,
-            bot=bot,
-            owner_id=str(payload["user_id"]),
-            actor_id=str(payload["user_id"]),
-            trigger=CREATE_ON_CONTAINER_TRIGGER,
-            phases=frozenset({ApplyPhase.ON_CONTAINER}),
-            carry_from_apply_id=self._phase_a_apply_id(
-                entity_id=entity_id, bot_id=bot_id
-            ),
-        )
+        # Guarded, like its pre-container counterpart, and for a stronger reason
+        # than symmetry: ``start_apply`` does real work *before* it enqueues
+        # anything — it takes the apply lock and re-validates the stored document
+        # against the bot's **current** engine. Two things can raise here, and
+        # they want opposite answers:
+        #
+        #   * ``ManifestApplyInProgressError`` — somebody else holds the lock,
+        #     most plausibly a manual ``POST …/config-manifest/apply`` racing the
+        #     container becoming ACTIVE. That frees itself, so wait.
+        #   * anything else — a document that no longer validates for this bot's
+        #     engine, say — will not fix itself by being retried.
+        #
+        # Letting either propagate makes the worker retry until the queue's
+        # deadline and retire the task ``TIMED_OUT``, which is the slowest
+        # possible way to reach a worse answer.
+        try:
+            self._applies_provider().start_apply(
+                entity_id=entity_id,
+                bot_id=bot_id,
+                bot=bot,
+                owner_id=str(payload["user_id"]),
+                actor_id=str(payload["user_id"]),
+                trigger=CREATE_ON_CONTAINER_TRIGGER,
+                phases=frozenset({ApplyPhase.ON_CONTAINER}),
+                carry_from_apply_id=self._phase_a_apply_id(
+                    entity_id=entity_id, bot_id=bot_id
+                ),
+            )
+        except ManifestApplyInProgressError:
+            logger.info(
+                "[manifest_create] bot_id=%s has an apply in flight; waiting to "
+                "start the post-container phase",
+                bot_id,
+            )
+            return Reschedule(POLL_DELAY_SECONDS)
+        except Exception as could_not_start:  # noqa: BLE001 — see above
+            # Terminal, and deliberately so: the bot is up, so this is an
+            # **apply** failure and the poll reports it as one — a terminal job
+            # beside a running bot reads as `APPLY_FAILED`, carrying the bot.
+            # Completing instead would report `READY` for a bot whose manifest
+            # never ran, which is the one answer a caller must not be given.
+            logger.exception(
+                "[manifest_create] the post-container phase could not start for "
+                "bot_id=%s; the bot is up and unconfigured",
+                bot_id,
+            )
+            return Fail(
+                f"the post-container phase could not start: {could_not_start}"
+            )
         return Complete()
 
     # ── the questions each step asks ────────────────────────────────────────

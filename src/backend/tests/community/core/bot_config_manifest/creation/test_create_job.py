@@ -22,6 +22,13 @@ from agentclaw.community.core.bot_config_manifest.create_job import (
     create_job_idempotency_key,
     enqueue_create_job,
 )
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
+    ManifestApplyInProgressError,
+)
+from agentclaw.community.core.bot_config_manifest.schema import (
+    ManifestValidationError,
+    Violation,
+)
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
@@ -536,3 +543,55 @@ def test_a_relationship_read_that_always_says_missing_does_not_stall():
 
     assert isinstance(handler.handle(dict(_PAYLOAD)), Complete)
     assert applies.started, "a stubbed read stopped the manifest being delivered"
+
+
+def test_a_post_container_phase_that_cannot_start_is_an_apply_failure():
+    """The bot is up, so this is an apply failure — never a create failure.
+
+    ``start_apply`` does real work before it enqueues anything: it takes the
+    lock and re-validates the stored document against the bot's *current*
+    engine. Letting a failure there propagate would make the worker retry until
+    the queue's deadline and retire the task, and the poll would then report a
+    running bot as `CREATE_FAILED` — the "did I get a bot or not?" ambiguity the
+    two terminal states exist to remove. Failing here instead reaches the same
+    terminal row immediately, and the poll reads it as `APPLY_FAILED`.
+    """
+
+    class _RefusingApplies(_Applies):
+        def start_apply(self, **kwargs):
+            raise ManifestValidationError(
+                [Violation(location="manifest.mcp", code="nope", message="no")]
+            )
+
+    applies = _RefusingApplies(
+        _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    )
+    handler, _applies, _seam, _created = _handler(
+        passport_status="ISSUED", bots=_Bots(_ISSUED_BOT), applies=applies
+    )
+
+    outcome = handler.handle(dict(_PAYLOAD))
+
+    assert isinstance(outcome, Fail), outcome
+    assert "post-container phase could not start" in outcome.error
+
+
+def test_an_apply_already_in_flight_is_waited_out_not_failed():
+    """A manual apply racing the container becoming ACTIVE frees itself.
+
+    Reporting the creation failed because somebody else briefly held the lock
+    would turn a few seconds of contention into a permanently unconfigured bot.
+    """
+
+    class _LockedApplies(_Applies):
+        def start_apply(self, **kwargs):
+            raise ManifestApplyInProgressError("someone else is applying")
+
+    applies = _LockedApplies(
+        _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    )
+    handler, _applies, _seam, _created = _handler(
+        passport_status="ISSUED", bots=_Bots(_ISSUED_BOT), applies=applies
+    )
+
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Reschedule)
