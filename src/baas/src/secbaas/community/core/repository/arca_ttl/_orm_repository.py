@@ -410,11 +410,14 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
           - "ac_entity_device_binding" -> anti-join against
             ac_entity_device_binding
 
-        The ON clause also matches s.sandbox_id against the hot row's
-        current sandbox, so a stale ACTIVE cold row for an OLD sandbox
-        (after a destroy+create swap) no longer suppresses the hot row,
-        while a matching ACTIVE row still suppresses it. Both sides are
-        env-scoped.
+        The ON clause deliberately omits cold-table status (existence
+        semantics per D-85-AJ1): any cold-table row — ACTIVE or STOPPED —
+        matching (env, source_table, source_id, sandbox_id) suppresses the
+        hot row, so threshold-STOPPED is terminal and revival happens only
+        via the lifecycle register() upsert. The ON still matches
+        s.sandbox_id against the hot row's current sandbox, so a stale
+        cold row for an OLD sandbox (after a destroy+create swap) does NOT
+        suppress the hot row. Both sides are env-scoped.
 
         Note: the binding side carries no is_deleted filter — production
         ac_entity_device_binding has no such column (D-16'). The device
@@ -504,7 +507,6 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                         TtlRenewalScheduleModel.source_table
                         == "ac_entity_device_binding",
                         TtlRenewalScheduleModel.source_id == DeviceBindingModel.id,
-                        TtlRenewalScheduleModel.status == "ACTIVE",
                         TtlRenewalScheduleModel.env == env,
                         TtlRenewalScheduleModel.sandbox_id == binding_sandbox,
                     ),
