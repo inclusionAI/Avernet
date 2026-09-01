@@ -338,9 +338,11 @@ DELETE .../draft?expected_revision_id=rev-2&fencing_token=7
 ```
 
 - `deleted_scope=DRAFT`：仅放弃本次升级；Published Vn 仍在线；
-- `deleted_scope=SKILL`：首次从未发布且无外部事实，整个 Skill 被删除。
+- `deleted_scope=SKILL`：首次从未发布，且除终态 FAILED Attempt 外无外部事实，整个 Skill
+  及其失败 Attempt 被删除。
 
 FROZEN 时不显示删除按钮。Offline Skill 放弃 Vn+1 Draft 后仍保持 Offline，可再次点击升级。
+删除 Team Draft 会同时使当前 Lease/fencing token 失效，前端必须停止 Lease 轮询并退出编辑态。
 
 ### 7.3 查看历史版本
 
