@@ -131,7 +131,7 @@ def project_template_config_for_public(config):
 | `adapters/http/openapi_v1/bots/router.py` | 请求→strategy 的传参适配;`_to_bot` 无改动(dispatch 内完成) |
 | `src/gateway/configs/schemas/bots.openapi.json` | `BotCreateEngineProperties` schema 手工精准 patch(禁止全量 regen;含 description/example) |
 | `src/gateway/tests/fixtures/bots.openapi.json` | 同步 patch(fixture 与 configs 一致) |
-| ocb 仓库 `src/gateway/configs/schemas/bots.openapi.json` + fixtures | 双写同步(既有约定) |
+| ocb 仓库 `src/gateway/configs/schemas/bots.openapi.json` | 双写约定落查:ocb 侧该文件为更老 vintage,连 `engine_properties` 面都不存在,本次无对应段可 patch;需整体 re-sync(推 PR 时与用户确认机构) |
 | `tests/community/adapters/http/openapi_v1/test_bots_endpoints.py` | 创建/查询用例(§10) |
 | `tests/community/core/bot_management/test_application_coding_create.py` | strategy 单测(§10);全部 `template` 键断言迁移 |
 | `tests/community/core/bot_inventory/services/test_bot_inventory_service.py` | /all attach 投影用例 |
