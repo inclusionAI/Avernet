@@ -132,8 +132,12 @@ class ConfigManifestApply(BaseModel):
     )
     sources: list[dict] = Field(
         default_factory=list,
-        description="Resolved named sources. Always empty in this release — "
-        "nothing is fetched yet. Credentials appear by name only, never by value.",
+        description="Provenance for the manifest's named remote sources: what "
+        "each `source` name actually resolved to, including the exact "
+        "`resolved_sha`, since a moving `ref` like `main` means something "
+        "different next week. Always empty in this release — nothing is fetched "
+        "yet — and filled once remote sources are supported. A credential "
+        "appears by name only, never by value.",
     )
     categories: list[ConfigManifestApplyCategory] = Field(
         default_factory=list,
