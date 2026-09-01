@@ -50,6 +50,27 @@ use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tower::ServiceExt;
 
+const ONE_SHOT_DEFINITION_YAML: &str = r#"
+name: One Shot
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      write:
+        kind: bot_task
+        display_name: Write
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Write the final answer.
+        final_output: true
+"#;
+
 fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
     let principal = AuthPrincipal {
         user_id: Some(staff_no.to_string()),
@@ -197,6 +218,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                     created_by: Some(cmd.caller_bot_id),
                     status: StateMachineRunStatus::Running,
                     input: cmd.input,
+                    opening_message_override: cmd.opening_message,
                     output: None,
                     error: None,
                     created_at: 1,
@@ -236,6 +258,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                     created_by: Some("human_alice".to_string()),
                     status: StateMachineRunStatus::Running,
                     input: Value::Null,
+                    opening_message_override: None,
                     output: None,
                     error: None,
                     created_at: 2,
@@ -302,6 +325,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                 created_by: Some("human_alice".to_string()),
                 status: StateMachineRunStatus::Completed,
                 input: Value::Null,
+                opening_message_override: None,
                 output: None,
                 error: None,
                 created_at: 1,
@@ -790,26 +814,7 @@ async fn session_state_machine_permission_uses_authenticated_bot_identity() {
 async fn session_state_machine_start_forwards_yaml_and_transient_role_bindings() {
     let (app, _, collaboration_runtime, _temp_dir) =
         test_app_with_collaboration_runtime().await;
-    let definition_yaml = r#"
-name: One Shot
-participants:
-  writer:
-    required: true
-runtime:
-  kind: state_machine
-  state_machine:
-    version: 1
-    graph_mode: acyclic
-    nodes:
-      write:
-        kind: bot_task
-        display_name: Write
-        assignee:
-          type: bot_binding
-          binding: writer
-        instruction: Write the final answer.
-        final_output: true
-"#;
+    let definition_yaml = ONE_SHOT_DEFINITION_YAML;
 
     let response = app
         .oneshot(
@@ -827,6 +832,18 @@ runtime:
                                 "bot_ids": ["target-bot"]
                             }
                         },
+                        "opening_message": {
+                            "type": "panel",
+                            "component": "partnerPanel.OneShotRunView",
+                            "params": {
+                                "runId": "{{bcs.run_id}}",
+                                "scene": "release"
+                            },
+                            "tab": {
+                                "title": "One Shot",
+                                "closable": true
+                            }
+                        },
                         "input": {"question": "draft it"}
                     })
                     .to_string(),
@@ -842,6 +859,7 @@ runtime:
     assert_eq!(json["run"]["run_id"], "run-one-shot");
     assert_eq!(json["run"]["session_id"], "session-chat");
     assert_eq!(json["run"]["created_by"], "driver-bot");
+    assert!(json["run"].get("opening_message_override").is_none());
 
     let commands = collaboration_runtime.session_start_commands.lock().await;
     assert_eq!(commands.len(), 1);
@@ -850,6 +868,21 @@ runtime:
     assert_eq!(commands[0].definition_yaml, definition_yaml);
     assert_eq!(commands[0].input, serde_json::json!({"question": "draft it"}));
     assert_eq!(
+        serde_json::to_value(commands[0].opening_message.as_ref().unwrap()).unwrap(),
+        serde_json::json!({
+            "type": "panel",
+            "component": "partnerPanel.OneShotRunView",
+            "params": {
+                "runId": "{{bcs.run_id}}",
+                "scene": "release"
+            },
+            "tab": {
+                "title": "One Shot",
+                "closable": true
+            }
+        })
+    );
+    assert_eq!(
         commands[0]
             .participant_bindings
             .get("writer")
@@ -857,6 +890,105 @@ runtime:
         Some(("manual", &["target-bot".to_string()][..]))
     );
     assert!(!commands[0].judge_available);
+}
+
+#[tokio::test]
+async fn session_state_machine_start_accepts_compatible_opening_message_shapes() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+    let opening_messages = [
+        None,
+        Some(Value::Null),
+        Some(serde_json::json!("Run {{bcs.run_id}}")),
+        Some(serde_json::json!({
+            "type": "card",
+            "component": "partnerCard.OneShotSummary",
+            "params": {"runId": "{{bcs.run_id}}"}
+        })),
+    ];
+
+    for opening_message in opening_messages {
+        let mut payload = serde_json::json!({
+            "definition_yaml": ONE_SHOT_DEFINITION_YAML,
+            "participant_bindings": {},
+            "input": null
+        });
+        if let Some(opening_message) = opening_message {
+            payload["opening_message"] = opening_message;
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions/session-chat/state-machine-runs")
+                    .header("authorization", "Bearer driver-token")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+    }
+
+    let commands = collaboration_runtime.session_start_commands.lock().await;
+    assert_eq!(commands.len(), 4);
+    assert!(commands[0].opening_message.is_none());
+    assert!(commands[1].opening_message.is_none());
+    assert_eq!(
+        serde_json::to_value(commands[2].opening_message.as_ref().unwrap()).unwrap(),
+        serde_json::json!("Run {{bcs.run_id}}")
+    );
+    assert_eq!(
+        serde_json::to_value(commands[3].opening_message.as_ref().unwrap()).unwrap(),
+        serde_json::json!({
+            "type": "card",
+            "component": "partnerCard.OneShotSummary",
+            "params": {"runId": "{{bcs.run_id}}"}
+        })
+    );
+}
+
+#[tokio::test]
+async fn session_state_machine_start_rejects_malformed_opening_message_as_bad_request() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/session-chat/state-machine-runs")
+                .header("authorization", "Bearer driver-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "definition_yaml": ONE_SHOT_DEFINITION_YAML,
+                        "participant_bindings": {},
+                        "opening_message": {
+                            "type": "panel",
+                            "component": "partnerPanel.OneShotRunView",
+                            "unknown": true
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"], "invalid_opening_message");
+    assert!(
+        collaboration_runtime
+            .session_start_commands
+            .lock()
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]

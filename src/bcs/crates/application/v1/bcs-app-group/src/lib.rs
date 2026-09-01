@@ -1342,6 +1342,7 @@ impl GroupServiceImpl {
                     definition: None,
                     definition_ref: None,
                     participant_bindings: None,
+                    opening_message_override: None,
                     input: session.input.unwrap_or(Value::Null),
                     caller_id: Some(principal_actor_id),
                     authenticated_human,

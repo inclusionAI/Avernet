@@ -5,6 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::group::ParticipantRole;
+use crate::opening_message::OpeningMessage;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CollaborationDefinitionRef {
@@ -438,6 +439,11 @@ pub struct StateMachineRun {
     pub created_by: Option<String>,
     pub status: StateMachineRunStatus,
     pub input: Value,
+    /// Immutable request-level opening-message override for one-shot Runs.
+    ///
+    /// This is runtime persistence state, not part of the public Run view.
+    #[serde(default, skip_serializing)]
+    pub opening_message_override: Option<OpeningMessage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

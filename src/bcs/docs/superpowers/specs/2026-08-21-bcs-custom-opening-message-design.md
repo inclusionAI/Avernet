@@ -351,6 +351,7 @@ Group detail 在存在自定义值时返回 `opening_message`；未配置时省�
 - 原始字符串模板最多 `64 KiB` UTF-8 字节；
 - 结构化对象的 canonical JSON 最多 `64 KiB` UTF-8 字节；
 - 模板渲染后的最终消息最多 `64 KiB` UTF-8 字节；
+- 完整 `OpeningMessage` 的持久化 JSON 编码最多 65,535 字节，以适配 MySQL `TEXT`；
 - 字符串不得为空或全空白；
 - `component` 去除首尾空白后必须非空、不得包含控制字符、引号、`<`、`>` 或空白；
 - 对象未知字段、未知模板变量、`card + tab` 和不支持的 Group 策略统一返回
@@ -444,6 +445,7 @@ ALTER TABLE bcs_groups
 - 不修改或重命名已经存在的 `009_eventing.sql`，避免改变已登记迁移的 checksum；
 - `NULL` 表示使用默认消息；
 - 字符串和对象统一以 JSON 编码保存，避免将字符串与对象分别建列；
+- 写入前校验完整 JSON 编码不超过 MySQL `TEXT` 的 65,535 字节上限；
 - 旧记录自然读取为 `None`；
 - DB adapter 负责序列化和反序列化，解析失败必须返回存储错误，不得静默退回默认值。
 

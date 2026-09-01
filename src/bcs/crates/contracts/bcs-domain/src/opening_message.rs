@@ -7,6 +7,8 @@ use serde_json::Value;
 
 pub const MAX_OPENING_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_OPENING_MESSAGE_COMPONENT_BYTES: usize = 256;
+/// Maximum encoded JSON size that fits in the MySQL `TEXT` persistence column.
+pub const MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES: usize = 65_535;
 
 const GROUP_ID_TOKEN: &str = "{{bcs.group_id}}";
 const SESSION_ID_TOKEN: &str = "{{bcs.session_id}}";
@@ -146,6 +148,8 @@ pub enum OpeningMessageError {
     CardWithTab,
     #[error("opening_message could not be serialized: {0}")]
     Serialization(String),
+    #[error("opening_message JSON encoding exceeds the {MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES}-byte persistence limit")]
+    PersistedEncodingTooLarge,
 }
 
 impl OpeningMessage {
@@ -181,7 +185,13 @@ impl OpeningMessage {
                     .map_err(|error| OpeningMessageError::Serialization(error.to_string()))?;
                 ensure_size(&canonical)
             }
+        }?;
+        let persisted = serde_json::to_string(self)
+            .map_err(|error| OpeningMessageError::Serialization(error.to_string()))?;
+        if persisted.len() > MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES {
+            return Err(OpeningMessageError::PersistedEncodingTooLarge);
         }
+        Ok(())
     }
 
     pub fn render(
@@ -508,6 +518,34 @@ mod tests {
             session_name: None,
         };
         assert_eq!(message.render(context), Err(OpeningMessageError::TooLarge));
+    }
+
+    #[test]
+    fn encoded_opening_message_must_fit_the_mysql_text_column() {
+        let largest_plain_text = OpeningMessage::Text(
+            "x".repeat(MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES - 2),
+        );
+        assert_eq!(largest_plain_text.validate(), Ok(()));
+        assert_eq!(
+            serde_json::to_string(&largest_plain_text).unwrap().len(),
+            MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES
+        );
+
+        let oversized_plain_text = OpeningMessage::Text(
+            "x".repeat(MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES - 1),
+        );
+        assert_eq!(
+            oversized_plain_text.validate(),
+            Err(OpeningMessageError::PersistedEncodingTooLarge)
+        );
+
+        let escaped_raw = "\"".repeat(MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES / 2);
+        assert!(escaped_raw.len() < MAX_OPENING_MESSAGE_BYTES);
+        let escaped_text = OpeningMessage::Text(escaped_raw);
+        assert_eq!(
+            escaped_text.validate(),
+            Err(OpeningMessageError::PersistedEncodingTooLarge)
+        );
     }
 
     #[test]

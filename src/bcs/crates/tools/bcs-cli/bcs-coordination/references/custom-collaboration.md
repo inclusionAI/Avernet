@@ -48,7 +48,7 @@ candidate_file="$(mktemp "${TMPDIR:-/tmp}/avernet-session-collaboration.XXXXXX")
 # 将候选 YAML 写入 "$candidate_file"
 ```
 
-5. 一次性提交 YAML、全部必需角色绑定和本次运行输入：
+5. 一次性提交 YAML、全部必需角色绑定和本次运行输入。无需自定义副屏时使用基础命令：
 
 ```bash
 bcs collaborate run "$candidate_file" \
@@ -61,8 +61,35 @@ bcs collaborate run "$candidate_file" \
 
 `--binding` 格式是 `逻辑角色=Bot UUID`，可重复；真实 Bot UUID 不得写进 YAML。`--input` 接受 JSON 字面量或 `@path/to/input.json`。该命令只发送一次运行请求；BCS 在服务端重新检查权限、严格校验 YAML 和角色绑定，然后以临时绑定启动 run，不修改 Group 的持久定义或绑定。
 
-6. 提交成功后保留返回的 run ID 用于诊断。BCS 会向原 session 发送 `bcsPanel.StateMachineRunView` AixUI 副屏消息；完成后，BCS 以发起 Bot 的身份将唯一最终产物发回原群，并保持 Chat session 为 Running。发起 Bot 不要再次手工转发结果。
-7. 无论成功或失败，最后执行 `rm -f -- "$candidate_file"`。
+仅当调用方已经提供可用的 AixUI panel 组件名，或当前产品流程明确指定已注册组件时，才为本次 run 增加自定义副屏。不得猜测组件名或假定前端已经注册组件。常用调用只增加组件和 params；复杂 JSON 使用独立临时文件，避免 shell 转义：
+
+```bash
+panel_params_file="$(mktemp "${TMPDIR:-/tmp}/avernet-session-panel-params.XXXXXX")"
+# 向 "$panel_params_file" 写入 JSON object，例如：
+# {"runId":"{{bcs.run_id}}","scene":"release_review"}
+
+bcs collaborate run "$candidate_file" \
+  --session "$session_id" \
+  --binding "planner=$initiator_bot_uuid" \
+  --binding "researcher=$researcher_bot_uuid" \
+  --binding "writer=$writer_bot_uuid" \
+  --input '{"question":"本次需要解决的问题"}' \
+  --panel-component "$panel_component" \
+  --panel-params "@$panel_params_file"
+```
+
+BCS 不会向自定义组件自动注入 `runId`、`groupId` 或 `sessionId`；组件需要这些值时，必须在 params 中显式使用 `{{bcs.run_id}}`、`{{bcs.group_id}}` 和 `{{bcs.session_id}}`。只有明确需要自定义 Tab 时，才在上述命令末尾继续追加：
+
+```bash
+  --panel-tab-id 'one-shot-{{bcs.run_id}}' \
+  --panel-tab-title '一次性协作' \
+  --panel-tab-closable true
+```
+
+这些 Tab 选项和 `--panel-params` 都依赖 `--panel-component`。未提供 `--panel-component` 时继续使用 BCS 默认副屏。
+
+6. 提交成功后保留返回的 run ID 用于诊断。BCS 会向原 session 发送本次请求指定的自定义副屏；未指定时发送默认 `bcsPanel.StateMachineRunView` AixUI 副屏。完成后，BCS 以发起 Bot 的身份将唯一最终产物发回原群，并保持 Chat session 为 Running。发起 Bot 不要再次手工转发结果。
+7. 无论成功或失败，最后执行 `rm -f -- "$candidate_file"`；如果创建了 `panel_params_file`，同时删除该临时文件。
 
 ## 新建持久自定义协作群
 

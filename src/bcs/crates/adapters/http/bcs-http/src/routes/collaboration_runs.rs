@@ -21,6 +21,7 @@ use bcs_service_api::{
     StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
     StateMachineRunAccessCommand, StateMachineRunView,
 };
+use bcs_service_api::types::OpeningMessage;
 
 #[derive(Debug, Deserialize)]
 pub struct StartStateMachineRunRequest {
@@ -46,6 +47,8 @@ pub struct CancelStateMachineRunRequest {
 pub struct StartSessionStateMachineRunRequest {
     pub definition_yaml: String,
     pub participant_bindings: BTreeMap<String, RuntimeParticipantBinding>,
+    #[serde(default)]
+    pub opening_message: Option<Value>,
     #[serde(default)]
     pub input: Value,
 }
@@ -95,6 +98,7 @@ pub async fn start_state_machine_run(
             definition: body.definition,
             definition_ref: body.definition_ref,
             participant_bindings: None,
+            opening_message_override: None,
             input: body.input,
             caller_id: authenticated_human
                 .as_ref()
@@ -146,6 +150,13 @@ pub async fn start_session_state_machine_run(
     {
         return error.into_response();
     }
+    let opening_message = match body.opening_message {
+        Some(opening_message) => match serde_json::from_value::<OpeningMessage>(opening_message) {
+            Ok(opening_message) => Some(opening_message),
+            Err(error) => return invalid_opening_message_response(error.to_string()),
+        },
+        None => None,
+    };
     match state
         .services
         .collaboration_runtime
@@ -154,6 +165,7 @@ pub async fn start_session_state_machine_run(
             caller_bot_id,
             definition_yaml: body.definition_yaml,
             participant_bindings: body.participant_bindings,
+            opening_message,
             input: body.input,
             judge_available: state.judge_enabled,
         })
@@ -415,6 +427,11 @@ pub(crate) fn collaboration_error_to_response(error: CollaborationRuntimeError) 
         CollaborationRuntimeError::InvalidParticipantBinding(_) => {
             (StatusCode::BAD_REQUEST, "invalid_participant_binding")
         }
+        CollaborationRuntimeError::InvalidRequest(message)
+            if message.starts_with("invalid_opening_message:") =>
+        {
+            (StatusCode::BAD_REQUEST, "invalid_opening_message")
+        }
         CollaborationRuntimeError::InvalidRequest(_) => {
             (StatusCode::BAD_REQUEST, "invalid_request")
         }
@@ -433,6 +450,17 @@ pub(crate) fn collaboration_error_to_response(error: CollaborationRuntimeError) 
         Json(serde_json::json!({
             "error": code,
             "message": error.to_string()
+        })),
+    )
+        .into_response()
+}
+
+fn invalid_opening_message_response(message: String) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": "invalid_opening_message",
+            "message": message,
         })),
     )
         .into_response()

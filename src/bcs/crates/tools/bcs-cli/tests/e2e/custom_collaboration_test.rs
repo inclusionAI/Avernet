@@ -157,6 +157,91 @@ async fn collaborate_run_posts_yaml_bindings_and_input_once() {
 }
 
 #[tokio::test]
+async fn collaborate_run_posts_structured_panel_opening_message() {
+    let ctx = TestContext::new()
+        .await
+        .expect("Failed to create test context");
+    let yaml_file = ctx.temp_dir.path().join("one-shot-panel.yaml");
+    let params_file = ctx.temp_dir.path().join("panel-params.json");
+    std::fs::write(&yaml_file, WORKFLOW_YAML).unwrap();
+    std::fs::write(
+        &params_file,
+        r#"{"scene":"release","runId":"{{bcs.run_id}}"}"#,
+    )
+    .unwrap();
+
+    Mock::given(method("POST"))
+        .and(path("/sessions/group-1:abc12345/state-machine-runs"))
+        .and(bearer_token(&ctx.session.token))
+        .and(body_json(serde_json::json!({
+            "definition_yaml": WORKFLOW_YAML,
+            "participant_bindings": {
+                "writer": {"source": "manual", "bot_ids": ["bot-writer"]}
+            },
+            "input": {},
+            "opening_message": {
+                "type": "panel",
+                "component": "partnerPanel.OneShotRunView",
+                "params": {
+                    "scene": "release",
+                    "runId": "{{bcs.run_id}}"
+                },
+                "tab": {
+                    "id": "one-shot-{{bcs.run_id}}",
+                    "title": "一次性协作",
+                    "closable": true
+                }
+            }
+        })))
+        .respond_with(ResponseTemplate::new(202).set_body_json(serde_json::json!({
+            "run": {
+                "run_id": "run-one-shot-panel",
+                "definition_id": "definition-one-shot",
+                "definition_version": 1,
+                "group_id": "group-1",
+                "group_version": 1,
+                "session_id": "group-1:abc12345",
+                "created_by": ctx.session.bot_uuid,
+                "status": "running",
+                "input": {},
+                "created_at": 1,
+                "updated_at": 1
+            },
+            "nodes": [],
+            "judge_outputs": []
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("collaborate")
+        .arg("run")
+        .arg(&yaml_file)
+        .arg("--session")
+        .arg("group-1:abc12345")
+        .arg("--binding")
+        .arg("writer=bot-writer")
+        .arg("--panel-component")
+        .arg("partnerPanel.OneShotRunView")
+        .arg("--panel-params")
+        .arg(format!("@{}", params_file.display()))
+        .arg("--panel-tab-id")
+        .arg("one-shot-{{bcs.run_id}}")
+        .arg("--panel-tab-title")
+        .arg("一次性协作")
+        .arg("--panel-tab-closable")
+        .arg("true")
+        .output()
+        .expect("Failed to execute panel one-shot run command");
+
+    assert_success(&output);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["run"]["run_id"], "run-one-shot-panel");
+}
+
+#[tokio::test]
 async fn collaboration_validate_calls_server_validation_api() {
     let ctx = TestContext::new()
         .await

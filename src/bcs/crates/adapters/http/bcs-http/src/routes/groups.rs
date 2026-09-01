@@ -870,6 +870,7 @@ async fn start_initial_state_machine_run_for_group(
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: session.input.clone().unwrap_or(Value::Null),
             caller_id,
             authenticated_human,

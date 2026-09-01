@@ -9,9 +9,10 @@ use crate::application::message_flow::ChatEventState;
 use crate::core::ServiceError;
 use crate::port::{JudgeArtifact, JudgeDecision};
 use crate::types::{
-    CollaborationDefinition, CollaborationDefinitionRef, RuntimeParticipantBinding,
-    StateMachineAssignee, StateMachineDeliveryCorrelation, StateMachineGraphMode,
-    StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
+    CollaborationDefinition, CollaborationDefinitionRef, OpeningMessage,
+    RuntimeParticipantBinding, StateMachineAssignee, StateMachineDeliveryCorrelation,
+    StateMachineGraphMode, StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus,
+    StateMachineRun,
 };
 
 pub const MAX_COLLABORATION_DEFINITION_YAML_BYTES: usize = 256 * 1024;
@@ -143,6 +144,9 @@ pub struct StartStateMachineRunCommand {
     /// Optional one-run participant bindings. When present, these override the
     /// group's persisted bindings without mutating the group configuration.
     pub participant_bindings: Option<BTreeMap<String, RuntimeParticipantBinding>>,
+    /// Request-level opening-message override. Only session one-shot starts
+    /// may populate this field.
+    pub opening_message_override: Option<OpeningMessage>,
     pub input: Value,
     pub caller_id: Option<String>,
     pub authenticated_human: Option<AuthenticatedHumanCaller>,
@@ -175,6 +179,7 @@ pub struct StartSessionStateMachineRunCommand {
     pub caller_bot_id: String,
     pub definition_yaml: String,
     pub participant_bindings: BTreeMap<String, RuntimeParticipantBinding>,
+    pub opening_message: Option<OpeningMessage>,
     pub input: Value,
     pub judge_available: bool,
 }
