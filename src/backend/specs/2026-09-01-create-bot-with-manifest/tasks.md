@@ -246,14 +246,15 @@ Conventions from `plan.md` that every task assumes:
 
 ## Group E — Proof
 
-## [ ] Task 13: The ordering proof
-- **Files:** `tests/community/bot_config_manifest/test_creation_ordering.py` (new)
+## [x] Task 13: The ordering proof
+- **Files:** `tests/community/core/bot_config_manifest/creation/test_creation_ordering.py`
+  (new — under `core/`, where this package's suites actually live)
 - **Done when:**
-  - [ ] Phase A completes **before creation is called at all** — asserted on
+  - [x] Phase A completes **before creation is called at all** — asserted on
         recorded call order, not timing.
-  - [ ] The startup-script row is present when the payload is composed, and a
+  - [x] The startup-script row is present when the payload is composed, and a
         manifest with a `script` produces a first boot carrying it.
-  - [ ] A phase A that fails still creates and provisions the bot, and the failure
+  - [x] A phase A that fails still creates and provisions the bot, and the failure
         appears only in the report.
 - **Depends on:** Task 9
 
