@@ -622,6 +622,36 @@ async fn create_manager_worker_group_returns_only_manager_send_as_initial_run() 
 }
 
 #[tokio::test]
+async fn create_chat_group_returns_driver_send_as_initial_run() {
+    let fixture = Fixture::new()
+        .with_bot("manager", "Driver", "public", Some("alice"))
+        .with_bot("worker", "Member", "public", None);
+    let service = fixture.service_with_system_message(Arc::new(InitialRunSystemMessage));
+    let cmd = create_cmd(
+        Some("manager"),
+        "manager",
+        vec![
+            participant("manager", Some("driver")),
+            participant("worker", Some("consultant")),
+        ],
+    );
+
+    let created = service.create_group(cmd).await.expect("create group");
+
+    let initial_run = created.initial_run.expect("driver initial run");
+    assert_eq!(initial_run.run_id, "manager-bootstrap-run");
+    assert_eq!(initial_run.bot_uuid, "manager");
+    assert_eq!(
+        initial_run.activity_kind,
+        bcs_service_api::InitialGroupRunActivityKind::GroupBootstrap
+    );
+    assert_eq!(
+        initial_run.state,
+        bcs_service_api::InitialGroupRunState::Running
+    );
+}
+
+#[tokio::test]
 async fn add_member_allows_provider_downlink_bot_in_manager_worker_group() {
     let fixture = Fixture::new()
         .with_bot("manager", "Manager", "public", Some("alice"))
