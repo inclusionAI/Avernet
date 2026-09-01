@@ -56,11 +56,11 @@ def test_list_returns_full_session_data_for_current_users_favorites(
     session_api,
 ):
     repository.list_session_ids.return_value = ["session-3", "session-1"]
-    session_api.list = AsyncMock(return_value=[
-        _make_session("session-1"),
-        _make_session("session-2"),
-        _make_session("session-3"),
-    ])
+
+    async def list_session(request):
+        return [_make_session(request.session_key)]
+
+    session_api.list = AsyncMock(side_effect=list_session)
 
     response = client.get(
         "/api/session-favorites",
@@ -83,11 +83,36 @@ def test_list_returns_full_session_data_for_current_users_favorites(
         "message_count": 0,
     }]
     repository.list_session_ids.assert_called_once_with("user-a")
-    request = session_api.list.call_args.args[0]
-    assert request.user_id == "user-a"
-    assert request.agent_id == "main"
-    assert request.limit == 10_000
-    assert request.offset == 0
+    assert session_api.list.call_count == 2
+    requests = [call.args[0] for call in session_api.list.call_args_list]
+    assert {request.session_key for request in requests} == {"session-3", "session-1"}
+    assert all(request.user_id == "user-a" for request in requests)
+    assert all(request.agent_id == "main" for request in requests)
+    assert all(request.limit == 1 for request in requests)
+    assert all(request.offset == 0 for request in requests)
+
+
+def test_list_filters_stale_favorites_before_applying_pagination(
+    client,
+    repository,
+    session_api,
+):
+    repository.list_session_ids.return_value = ["stale", "session-2", "session-1"]
+
+    async def list_session(request):
+        if request.session_key == "stale":
+            return []
+        return [_make_session(request.session_key)]
+
+    session_api.list = AsyncMock(side_effect=list_session)
+
+    response = client.get(
+        "/api/session-favorites",
+        params={"user_id": "user-a", "limit": 1, "offset": 1},
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["data"]] == ["session-1"]
 
 
 def test_list_skips_engine_query_when_user_has_no_favorites(client, repository, session_api):
