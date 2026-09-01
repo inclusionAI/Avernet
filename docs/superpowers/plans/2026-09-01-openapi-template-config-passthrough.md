@@ -1,5 +1,7 @@
 # OpenAPI template_config 快照透传 Implementation Plan
 
+> **状态(2026-09-01,实施期)**:Task 4 的查询分发设计已被 REL #1785(`template_config_for_public` verbatim 决策)取代,该 commit 在 REL 落位时被跳过;查询面以 REL 现状为准。其余 Task 全部按计划落地。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 `POST /openapi/v1/bots` 接收 template-factory 快照(`engine_properties.template_type + template_config`,与 available-tc-list item 逐字段对应),原样落库;三个查询面(bots/{id}/all)对工厂快照透传回显(减密钥);`template` 键改名 `template_config`。
