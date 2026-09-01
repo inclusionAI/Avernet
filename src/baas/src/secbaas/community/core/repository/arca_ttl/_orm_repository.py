@@ -416,12 +416,18 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         semantics per D-85-AJ1): any cold-table row — ACTIVE or STOPPED —
         matching (env, source_table, source_id, sandbox_id) suppresses the
         hot row, so threshold-STOPPED is terminal for the matched sandbox.
-        Revival is expected from the lifecycle register() upsert, or — as a
-        safety net — from discovery when the cold row is stale for an OLD
-        sandbox after a swap, which this ON clause still permits: it matches
-        s.sandbox_id against the hot row's current sandbox, so a stale
-        cold row for an OLD sandbox (after a destroy+create swap) does NOT
-        suppress the hot row. Both sides are env-scoped.
+        Revival channels are per side: the device side (baas_device) has
+        the lifecycle register() upsert (restart / destroy+create);
+        ac_entity_device_binding cold rows have NO lifecycle writer — their
+        only automatic revival is via the device-side baas_device row for
+        the same container, and a binding row whose device row also went
+        terminal recovers via a new binding record id (re-bind) or a
+        device-side restart. As a shared safety net, discovery recovers a
+        stale cold row for an OLD sandbox after a swap, which this ON
+        clause still permits: it matches s.sandbox_id against the hot row's
+        current sandbox, so a stale cold row for an OLD sandbox (after a
+        destroy+create swap) does NOT suppress the hot row. Both sides are
+        env-scoped.
 
         Note: the binding side carries no is_deleted filter — production
         ac_entity_device_binding has no such column (D-16'). The device
