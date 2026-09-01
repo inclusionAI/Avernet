@@ -1,6 +1,7 @@
 """_SkillsPortMixin — skills management port methods.
 
-Also contains _SkillsEnsureError (relocated from engines/openclaw/skills.py).
+Center ensure is deliberately read-only: corpus delivery belongs to runtime
+provisioning, not this request path.
 """
 
 from __future__ import annotations
@@ -12,12 +13,15 @@ from pathlib import Path
 from typing import Any
 
 from engine.community.core.skills.layout_planner import (
+    LAYOUT_CONTRACT_VERSION,
     MAPPING_CONTRACT_VERSION,
+    LayoutIdentity,
+    RuntimeLayoutContext,
+    resolve_filesystem_skill_layout,
 )
 from engine.community.plugin_api.openclaw.skills import (
     PoolLayoutActivationPortResult,
 )
-from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.plugins.openclaw._file import _convert_path
 from engine.community.plugins.openclaw.layout_activation import (
     MappingApplyMode,
@@ -31,6 +35,11 @@ from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layou
 from engine.community.plugins.skills_pool.layout_quarantine import (
     cleanup_quarantine,
 )
+from engine.community.plugins.skills_pool.center_mount import (
+    CenterMountStatus,
+    inspect_center_mount,
+    inspect_center_version,
+)
 from engine.community.plugins.skills_pool.mapping_contract import (
     ResolvedMappingPayload,
     resolve_mapping_payload,
@@ -39,26 +48,12 @@ from engine.community.plugins.skills_pool.mapping_contract import (
 log = logging.getLogger("openclaw-port")
 
 
-class _SkillsEnsureError(RuntimeError):
-    """A single center-skill ensure failed (NAS source missing / rsync error).
-
-    Mirrors the legacy `engines/openclaw/skills.py:_EnsureError` so
-    `ensure_center_skills` soft-fails only THESE (→ a `failed` entry), while
-    unexpected OSErrors still propagate (→ HTTP 500), matching legacy.
-    """
-
-
 class _SkillsPortMixin:
     """Domain mixin: skills sync/ensure (local-infra, no gateway/pool/token)."""
 
     _SKILLS_LINK_BASE_DIR_ENV = "SKILLS_LINK_BASE_DIR"
     _DEFAULT_SKILLS_LINK_BASE_DIR = "/home/admin/.extra-skills"
-    _SKILLS_CENTER_NAS_ROOT_ENV = "SKILLS_CENTER_NAS_ROOT"
-    _SKILLS_CENTER_LOCAL_ROOT_ENV = "SKILLS_CENTER_LOCAL_ROOT"
-    _DEFAULT_SKILLS_CENTER_NAS_ROOT = "/home/admin/nfs/skills-center"
-    _DEFAULT_SKILLS_CENTER_LOCAL_ROOT = str(
-        workspace_root() / "skills-pool" / "skill-center"
-    )
+    _skills_center_is_mounted = staticmethod(os.path.ismount)
 
     @staticmethod
     def _pool_mappings(
@@ -205,16 +200,6 @@ class _SkillsPortMixin:
             base = self._DEFAULT_SKILLS_LINK_BASE_DIR
         return Path(base).expanduser().resolve()
 
-    # Per-key asyncio locks (in-process; single-process deployment, isolated per bot).
-    @classmethod
-    def _get_ensure_lock(cls, key: str) -> Any:
-        import asyncio as _asyncio
-        from collections import defaultdict
-
-        if not hasattr(cls, "_skills_ensure_locks_store"):
-            cls._skills_ensure_locks_store: dict[str, Any] = defaultdict(_asyncio.Lock)
-        return cls._skills_ensure_locks_store[key]
-
     @staticmethod
     def _skills_normalize_relative_path(raw: str, field: str) -> str:
         """Validate and normalise a path relative to a base dir.
@@ -267,127 +252,65 @@ class _SkillsPortMixin:
         return (link_path.parent / raw).resolve(strict=False)
 
     @staticmethod
-    def _skills_rsync_dir(src: Path, dst: Path) -> None:
-        """rsync src/ into dst/ (blocking).
-
-        Relocated intact from
-        ``engines/openclaw/skills.py:OpenClawSkillsService._rsync_dir``.
-        """
-        import subprocess as _sp
-
-        result = _sp.run(
-            ["rsync", "-rltD", "--delete", f"{src}/", f"{dst}/"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise _SkillsEnsureError(
-                f"rsync exit {result.returncode}: {result.stderr.strip()[:200]}"
-            )
-
-    @staticmethod
-    def _skills_ensure_current_symlink(uuid_dir: Path, version_dir_name: str) -> None:
-        """Atomically update the ``current`` symlink under ``uuid_dir``.
-
-        Relocated intact from
-        ``engines/openclaw/skills.py:OpenClawSkillsService._ensure_current_symlink``.
-        """
-        current = uuid_dir / "current"
-        if current.is_symlink() and os.readlink(current) == version_dir_name:
-            return
-        tmp = uuid_dir / f".current.tmp.{os.getpid()}"
-        if tmp.is_symlink() or tmp.exists():
-            tmp.unlink()
-        tmp.symlink_to(version_dir_name)
-        os.replace(tmp, current)
-
-    async def _skills_ensure_one(
-        self,
-        item: dict[str, Any],
-        nas_root: Path,
-        local_root: Path,
-    ) -> None:
-        """Ensure a single (skill_uuid, version) exists locally; rsync if absent.
-
-        Relocated intact from
-        ``engines/openclaw/skills.py:OpenClawSkillsService._ensure_one``
-        operating on plain dicts.  Raises ``RuntimeError`` on NAS-source-
-        missing or rsync failure.
-        """
-        import asyncio as _asyncio
-
-        skill_uuid = item["skill_uuid"]
-        version_dir_name = str(item["version"])
-        local_uuid_dir = local_root / skill_uuid
-        local_version_dir = local_uuid_dir / version_dir_name
-
-        if local_version_dir.exists() and any(local_version_dir.iterdir()):
-            return
-
-        lock_key = f"{skill_uuid}/{version_dir_name}"
-        lock = self._get_ensure_lock(lock_key)
-        async with lock:
-            if local_version_dir.exists() and any(local_version_dir.iterdir()):
-                return
-
-            nas_version_dir = nas_root / skill_uuid / version_dir_name
-            if not nas_version_dir.exists():
-                raise _SkillsEnsureError(f"NAS source missing: {nas_version_dir}")
-
-            local_version_dir.parent.mkdir(parents=True, exist_ok=True)
-            await _asyncio.to_thread(
-                self._skills_rsync_dir, nas_version_dir, local_version_dir
-            )
+    def _skills_center_root() -> Path:
+        return resolve_filesystem_skill_layout(
+            LayoutIdentity("openclaw", LAYOUT_CONTRACT_VERSION),
+            RuntimeLayoutContext(home=Path("/home/admin")),
+        ).pool_center
 
     async def ensure_center_skills(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Ensure each (skill_uuid, version) from ``params["items"]`` is present locally.
+        """Read-only check that each requested exact Center version is mounted.
 
         ``params`` keys: ``items`` (list[dict] each with ``skill_uuid``,
         ``version``).
         Returns dict with keys ``ok`` (list[dict]) and ``failed``
         (list[dict] each with ``skill_uuid``, ``version``, ``reason``).
-        Relocated intact from
-        ``engines/openclaw/skills.py:OpenClawSkillsService.ensure_center_skills``.
+        Runtime provisioning owns the mount. This endpoint never creates,
+        copies, replaces, or deletes filesystem content.
         """
         log.info("[skills.ensure] start")
-        nas_root = Path(
-            os.environ.get(
-                self._SKILLS_CENTER_NAS_ROOT_ENV, self._DEFAULT_SKILLS_CENTER_NAS_ROOT
-            )
-        )
-        local_root = Path(
-            os.environ.get(
-                self._SKILLS_CENTER_LOCAL_ROOT_ENV,
-                self._DEFAULT_SKILLS_CENTER_LOCAL_ROOT,
-            )
+        center_root = self._skills_center_root()
+        mount = inspect_center_mount(
+            center_root,
+            is_mounted=self._skills_center_is_mounted,
         )
 
         ok: list[dict[str, Any]] = []
         failed: list[dict[str, Any]] = []
 
         for item in params.get("items", []):
-            try:
-                await self._skills_ensure_one(item, nas_root, local_root)
-                ok.append(item)
-            except _SkillsEnsureError as e:
-                # Soft-fail ONLY explicit ensure errors (NAS-missing / rsync),
-                # matching legacy `_EnsureError`. Unexpected OSErrors propagate
-                # (→ HTTP 500) rather than being silently logged as failures.
-                log.warning(
-                    "[skills.ensure] failed uuid=%s ver=%s: %s",
-                    item.get("skill_uuid"),
-                    item.get("version"),
-                    e,
+            if mount.status is CenterMountStatus.READY:
+                inspection = inspect_center_version(
+                    center_root,
+                    skill_uuid=str(item.get("skill_uuid", "")),
+                    version=str(item.get("version", "")),
                 )
-                failed.append(
-                    {
-                        "skill_uuid": item.get("skill_uuid", ""),
-                        "version": item.get("version", ""),
-                        "reason": str(e),
-                    }
-                )
+                if inspection.ready:
+                    ok.append(item)
+                    continue
+                code = inspection.code or "CENTER_MOUNT_UNAVAILABLE"
+                reason = inspection.reason or "Skill Center 目录当前不可用，请稍后重试"
+            elif mount.status is CenterMountStatus.NOT_READY:
+                code = "CENTER_MOUNT_NOT_READY"
+                reason = "Skill Center 目录尚未挂载，请重启 Bot 后重试"
+            else:
+                code = "CENTER_MOUNT_UNAVAILABLE"
+                reason = "Skill Center 目录当前不可用，请稍后重试"
+            log.warning(
+                "[skills.ensure] failed uuid=%s ver=%s code=%s mount_reason=%s",
+                item.get("skill_uuid"),
+                item.get("version"),
+                code,
+                mount.reason,
+            )
+            failed.append(
+                {
+                    "skill_uuid": item.get("skill_uuid", ""),
+                    "version": item.get("version", ""),
+                    "code": code,
+                    "reason": reason,
+                }
+            )
 
         log.info(
             "[skills.ensure] done total=%d ok=%d failed=%d",
