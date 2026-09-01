@@ -387,3 +387,56 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
             .all()
         )
         return [row.to_record() for row in rows]
+
+    @with_orm_session
+    def find_running_by_bot_session(
+        self, session_id: str, bot_id: str
+    ) -> list[BotRunQueueRecord]:
+        """按 (bot_id, session_id) 维度查询所有 RUNNING 的队列工作项。
+
+        供 ``chat.abort`` 在群聊多 bot 共享同一 ``session_id`` 时精确定位目标 bot 的
+        RUNNING run，避免误杀同 session 下其它 bot 的 run。``session_id`` 与
+        ``bot_id`` 任一为空（首条消息入队前 session_id 可能为 NULL）时返回空，
+        调用方按 best-effort 处理。PENDING 工作项不在此处命中，由
+        ``_timeout_scan_once`` 超时路径兜底。
+        """
+        if not session_id or not bot_id:
+            return []
+        rows = (
+            self._session.query(BotRunQueueModel)
+            .filter(
+                BotRunQueueModel.bot_id == bot_id,
+                BotRunQueueModel.session_id == session_id,
+                BotRunQueueModel.status == "RUNNING",
+                BotRunQueueModel.env == get_current_env(),
+            )
+            .order_by(BotRunQueueModel.gmt_create.asc())
+            .all()
+        )
+        return [row.to_record() for row in rows]
+
+    @with_orm_session
+    def find_terminal_by_bot_session(
+        self, session_id: str, bot_id: str
+    ) -> list[BotRunQueueRecord]:
+        """按 (bot_id, session_id) 维度查询所有已终结（DONE）的队列工作项。
+
+        用于 ``chat.abort`` 在群聊场景区分"该 bot 在该 session 下存在已终结记录"
+        与"该 session 无该 bot 的任何 run 记录"：前者返回 410 ``run_terminated``，
+        后者返回 200 ``{aborted: false}``。维度收窄到目标 bot，避免其它 bot 的
+        终态记录影响判定。
+        """
+        if not session_id or not bot_id:
+            return []
+        rows = (
+            self._session.query(BotRunQueueModel)
+            .filter(
+                BotRunQueueModel.bot_id == bot_id,
+                BotRunQueueModel.session_id == session_id,
+                BotRunQueueModel.status == "DONE",
+                BotRunQueueModel.env == get_current_env(),
+            )
+            .order_by(BotRunQueueModel.gmt_create.asc())
+            .all()
+        )
+        return [row.to_record() for row in rows]
