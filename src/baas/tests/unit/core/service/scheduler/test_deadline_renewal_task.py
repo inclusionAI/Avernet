@@ -182,6 +182,8 @@ class TestStep0GapDetection:
         # Mock hot counts: count_hot_arca_devices + count_hot_arca_bindings
         mock_repo.count_hot_arca_devices.return_value = 40000
         mock_repo.count_hot_arca_bindings.return_value = 10000
+        mock_repo.count_hot_covered.return_value = 50000  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
 
         scheduler._round_count = 0
@@ -199,6 +201,8 @@ class TestStep0GapDetection:
         mock_repo.count_active.return_value = 45000  # cold
         mock_repo.count_hot_arca_devices.return_value = 40000
         mock_repo.count_hot_arca_bindings.return_value = 10000  # hot total = 50000
+        mock_repo.count_hot_covered.return_value = 49000  # covered < hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         # find_unregistered returns empty to stop the loop after first call
         mock_repo.find_unregistered.return_value = []
@@ -217,6 +221,8 @@ class TestStep0GapDetection:
         mock_repo.count_active.return_value = 0  # cold = 0
         mock_repo.count_hot_arca_devices.return_value = 500
         mock_repo.count_hot_arca_bindings.return_value = 500  # hot = 1000
+        mock_repo.count_hot_covered.return_value = 0  # gap = hot - covered
+        mock_repo.count_suppressed_terminal.return_value = 0
 
         # Side effect: 1 batch for baas_device, then empty; empty for binding
         call_counts: dict[str, int] = {}
@@ -247,34 +253,93 @@ class TestStep0GapDetection:
         assert report.gap_records_registered >= 1
 
     @pytest.mark.asyncio
-    async def test_terminal_stopped_gap_never_reregisters(self):
-        """85-02: a persistent gap post-fix scans empty and registers nothing.
+    async def test_terminal_stopped_gap_never_reregisters(self, caplog):
+        """86-02 (R7 retarget): covered-math steady state — no gap, no revival.
 
-        Terminal model: a threshold-STOPPED row stays out of the discovery
-        anti-join result (any-status suppression), so the gap never collapses
-        (cold < hot forever) and the resurrect loop's write — register_if_missing
-        — never fires.
+        Terminal rows stay terminal: a threshold-STOPPED row is excluded
+        from discovery (any-status anti-join), AND the covered counts keep
+        covering their hot rows — gap = hot - covered = 0 with every hot
+        row matched by a (possibly STOPPED) cold row. The steady state is
+        therefore gap_detected False, register_if_missing never fires
+        (dead-sandbox rows never resurrect), and the suppressed-but-hot-
+        ACTIVE population stays visible via suppressed_terminal_count on
+        the gauge line — the ongoing per-round signal.
         """
         scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
         mock_repo.count_active.return_value = 45000  # cold
         mock_repo.count_hot_arca_devices.return_value = 40000
         mock_repo.count_hot_arca_bindings.return_value = 10000  # hot total = 50000
+        mock_repo.count_hot_covered.return_value = 50000  # every hot row covered
+        mock_repo.count_suppressed_terminal.return_value = 5000
         mock_repo.list_due_for_renewal.return_value = []
-        # Post-fix model: every suppressed STOPPED row stays out of discovery,
-        # so the scan comes back empty on both sides.
+        # If the scan somehow ran, it comes back empty on both sides.
         mock_repo.find_unregistered.return_value = []
         mock_repo.register_if_missing = MagicMock()
 
         scheduler._round_count = 0
-        report = await scheduler._run_once()
+        with caplog.at_level(logging.INFO, logger="core-scheduler"):
+            report = await scheduler._run_once()
 
-        # The scan still ran for the persistent gap...
-        assert mock_repo.find_unregistered.call_count >= 1
-        # ...but the gap does NOT collapse — terminal rows keep cold < hot.
-        assert report.gap_detected is True
+        # Covered math (any-status coverage): gap = hot - covered = 0, so
+        # the discovery scan never even runs.
+        assert mock_repo.find_unregistered.call_count == 0
+        assert report.gap_detected is False
         assert report.gap_records_registered == 0
         # The resurrect loop's write never fires.
         assert mock_repo.register_if_missing.call_count == 0
+        # The suppressed-terminal population is still visible as its own
+        # alertable gauge dimension.
+        messages = [r.message for r in caplog.records]
+        assert any(
+            "[arca_ttl_metrics]" in m and "suppressed_terminal_count=5000" in m
+            for m in messages
+        )
+
+    @pytest.mark.asyncio
+    async def test_gap_uses_covered_math_triggers_scan(self):
+        """86-02 (R3): the gap trigger runs on covered math — an uncovered
+        remainder (hot 50000, covered 49000) still triggers the scan."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 45000  # cold
+        mock_repo.count_hot_arca_devices.return_value = 40000
+        mock_repo.count_hot_arca_bindings.return_value = 10000  # hot = 50000
+        mock_repo.count_hot_covered.return_value = 49000  # 1000 uncovered
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.list_due_for_renewal.return_value = []
+        mock_repo.find_unregistered.return_value = []
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        assert report.gap_detected is True
+        assert mock_repo.find_unregistered.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_covered_count_failure_degrades_to_legacy_gap(self, caplog):
+        """86-02 (R3): count_hot_covered raising degrades Step 0 to the
+        legacy hot-minus-cold formula with a warning; the round completes,
+        suppressed_terminal_count forced to 0."""
+        import logging
+
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 50000  # cold == hot
+        mock_repo.count_hot_arca_devices.return_value = 50000
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.side_effect = Exception("DB down")
+        mock_repo.list_due_for_renewal.return_value = []
+
+        scheduler._round_count = 0
+        with caplog.at_level(logging.WARNING, logger="core-scheduler"):
+            report = await scheduler._run_once()
+
+        # Legacy formula: hot(50000) - cold(50000) = 0 → no gap, no scan.
+        assert isinstance(report, RenewalRunReport)
+        assert report.gap_detected is False
+        assert mock_repo.find_unregistered.call_count == 0
+        # The suppressed signal is observably zero, never silently dropped.
+        assert report.suppressed_terminal_count == 0
+        messages = [r.message for r in caplog.records]
+        assert any("covered-count query failed" in m for m in messages)
 
     @pytest.mark.asyncio
     async def test_anti_join_periodic_verify_triggers_every_48_rounds(self):
@@ -283,6 +348,8 @@ class TestStep0GapDetection:
         mock_repo.count_active.return_value = 50000
         mock_repo.count_hot_arca_devices.return_value = 50000
         mock_repo.count_hot_arca_bindings.return_value = 0  # cold == hot
+        mock_repo.count_hot_covered.return_value = 50000  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         mock_repo.find_unregistered.return_value = []
 
@@ -309,6 +376,8 @@ class TestStep0GapDetection:
         mock_repo.count_active.return_value = 50000
         mock_repo.count_hot_arca_devices.side_effect = Exception("DB connection error")
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 0
+        mock_repo.count_suppressed_terminal.return_value = 0
         # Mock Step 1 to return empty
         mock_repo.list_due_for_renewal.return_value = []
 
@@ -330,6 +399,8 @@ class TestStep0GapDetection:
         mock_repo.count_active.side_effect = Exception("cold table down")
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.list_due_for_renewal.side_effect = [
             [
@@ -389,6 +460,8 @@ class TestStep1ColdTableQuery:
         mock_repo.count_active.return_value = 200  # cold == hot, no gap
         mock_repo.count_hot_arca_devices.return_value = 100
         mock_repo.count_hot_arca_bindings.return_value = 100
+        mock_repo.count_hot_covered.return_value = 200  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
 
         mock_repo.list_due_for_renewal.side_effect = [
             [self._due_row("baas_device", 1, "sb-1", hot_id=1) for _ in range(100)],
@@ -412,6 +485,8 @@ class TestStep1ColdTableQuery:
         mock_repo.count_active.return_value = 200
         mock_repo.count_hot_arca_devices.return_value = 200
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 200  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         mock_repo.find_unregistered.return_value = []
 
@@ -424,12 +499,16 @@ class TestStep1ColdTableQuery:
 
     @pytest.mark.asyncio
     async def test_orphan_detection_marks_stopped_and_excludes(self):
-        """Test 12: hot_id=NULL → set_status(STOPPED), excluded from processing."""
+        """Test 12: hot_id=NULL + recheck absent → set_status(STOPPED,
+        stop_reason='orphan'), excluded from processing."""
         scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
         mock_repo.count_active.return_value = 2
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.return_value = False
         mock_repo.list_due_for_renewal.side_effect = [
             # baas_device: 1 valid + 1 orphan
             [
@@ -443,9 +522,9 @@ class TestStep1ColdTableQuery:
         scheduler._round_count = 0
         report = await scheduler._run_once()
 
-        # set_status called for orphan
+        # set_status called for orphan with the WR-02/R4 reason stamp
         mock_repo.set_status.assert_called_once_with(
-            "test", "baas_device", 2, "STOPPED"
+            "test", "baas_device", 2, "STOPPED", stop_reason="orphan"
         )
         # du_count = 2 rows total
         assert report.due_count == 2
@@ -457,7 +536,10 @@ class TestStep1ColdTableQuery:
         mock_repo.count_active.return_value = 2
         mock_repo.count_hot_arca_devices.return_value = 2
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.return_value = False
         mock_repo.set_status.side_effect = Exception("DB connection lost")
         mock_repo.list_due_for_renewal.side_effect = [
             [self._due_row("baas_device", 1, "sb-1", hot_id=None)],
@@ -476,6 +558,55 @@ class TestStep1ColdTableQuery:
         assert isinstance(report, RenewalRunReport)
 
     @pytest.mark.asyncio
+    async def test_orphan_reappeared_hot_row_postpones_not_stops(self):
+        """86-02 (R4): hot_id=None but the recheck finds the hot row alive
+        again → postpone; set_status never called, orphan_count stays 0."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 2
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.return_value = True  # hot row reappeared
+        mock_repo.list_due_for_renewal.side_effect = [
+            [self._due_row("baas_device", 2, "sb-2", hot_id=None)],
+            [],
+        ]
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        # Reappeared hot row → postponed, never stopped this round.
+        mock_repo.set_status.assert_not_called()
+        mock_repo.postpone_renewal.assert_called_once()
+        assert report.orphan_count == 0
+
+    @pytest.mark.asyncio
+    async def test_orphan_recheck_failure_postpones_not_stops(self):
+        """86-02 (R4): hot_row_exists raising → postpone (never STOP on
+        doubt); set_status never called."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 2
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.side_effect = Exception("DB down")
+        mock_repo.list_due_for_renewal.side_effect = [
+            [self._due_row("baas_device", 2, "sb-2", hot_id=None)],
+            [],
+        ]
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        mock_repo.set_status.assert_not_called()
+        mock_repo.postpone_renewal.assert_called_once()
+        assert report.orphan_count == 0
+
+    @pytest.mark.asyncio
     async def test_one_side_query_failure_keeps_healthy_side_rows(self):
         """WR-05: when one due query raises, the healthy side's batch is
         still processed this round — only the failed side is emptied."""
@@ -483,6 +614,8 @@ class TestStep1ColdTableQuery:
         mock_repo.count_active.return_value = 200
         mock_repo.count_hot_arca_devices.return_value = 100
         mock_repo.count_hot_arca_bindings.return_value = 100
+        mock_repo.count_hot_covered.return_value = 200  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.list_due_for_renewal.side_effect = [
             Exception("device table down"),
@@ -528,6 +661,8 @@ class TestEarlyReturnMetrics:
         mock_repo.count_active.return_value = 200
         mock_repo.count_hot_arca_devices.return_value = 200
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 200  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         mock_repo.find_unregistered.return_value = []
 
@@ -553,7 +688,10 @@ class TestEarlyReturnMetrics:
         mock_repo.count_active.return_value = 2
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.return_value = False
         mock_repo.list_due_for_renewal.side_effect = [
             [
                 self._due_row("baas_device", 1, "sb-1", hot_id=None),
@@ -599,6 +737,8 @@ class TestStep2ConcurrentRenewalScaffolding:
         mock_repo.count_active.return_value = 3
         mock_repo.count_hot_arca_devices.return_value = 3
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 3  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
 
         rows = [
@@ -623,6 +763,8 @@ class TestStep2ConcurrentRenewalScaffolding:
         mock_repo.count_active.return_value = 100
         mock_repo.count_hot_arca_devices.return_value = 100
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 100  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.list_due_for_renewal.side_effect = Exception("DB query error")
 
@@ -1087,6 +1229,8 @@ class TestTtlWindowDerivation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0  # gap=1 -> scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         ttl_epoch_sec = 1760000000
 
@@ -1339,6 +1483,8 @@ class TestStep5ReportAndMetrics:
         mock_repo.count_active.return_value = 3
         mock_repo.count_hot_arca_devices.return_value = 3
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 3  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.set_status = MagicMock()
         mock_repo.update_after_success = MagicMock()
@@ -1384,6 +1530,22 @@ class TestStep5ReportAndMetrics:
         # The field is declared: constructing with it is also legal.
         assert RenewalRunReport(anti_join_triggered=True).anti_join_triggered is True
 
+    def test_report_declares_suppressed_terminal_count_field(self):
+        """86-02 (R3): suppressed_terminal_count is a declared dataclass
+        field on RenewalRunReport, so structured consumers (asdict /
+        serializers) preserve the alertable suppression signal instead of
+        silently dropping the dynamic attribute."""
+        from dataclasses import asdict
+
+        report = RenewalRunReport()
+        report.suppressed_terminal_count = 5000
+        assert asdict(report)["suppressed_terminal_count"] == 5000
+        # The field is declared: constructing with it is also legal.
+        assert (
+            RenewalRunReport(suppressed_terminal_count=5000).suppressed_terminal_count
+            == 5000
+        )
+
     @pytest.mark.asyncio
     async def test_metrics_logging_emits_structured_entries(self, caplog):
         """Test 27: after _run_once(), structured [arca_ttl_metrics] log emitted."""
@@ -1393,6 +1555,8 @@ class TestStep5ReportAndMetrics:
         mock_repo.count_active.return_value = 3
         mock_repo.count_hot_arca_devices.return_value = 3
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 3  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.set_status = MagicMock()
         mock_repo.update_after_success = MagicMock()
@@ -1418,6 +1582,7 @@ class TestStep5ReportAndMetrics:
         assert "last_run_timestamp" in msg
         assert "renew_failure_rate" in msg
         assert "due_count" in msg
+        assert "suppressed_terminal_count" in msg
 
     @pytest.mark.asyncio
     async def test_renewal_success_derives_next_renew_from_post_extend_ttl(self):
@@ -1884,6 +2049,8 @@ class TestDiscoveryScanIsolation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 10
         mock_repo.count_hot_arca_bindings.return_value = 0  # gap=10 → scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.side_effect = Exception("DB down")
         mock_repo.list_due_for_renewal.return_value = []
 
@@ -1905,6 +2072,8 @@ class TestDiscoveryScanIsolation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0  # gap=1 → scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         call_counts: dict[str, int] = {}
 
         def _find_unregistered(env, side, limit=500):
@@ -1944,6 +2113,8 @@ class TestDiscoveryScanIsolation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 1  # gap=2 → scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         call_counts: dict[str, int] = {}
 
         def _find_unregistered(env, side, limit=500):
@@ -1981,6 +2152,8 @@ class TestDiscoveryScanIsolation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0  # gap=1 → scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         calls: dict[str, int] = {}
 
         def _find_unregistered(env, side, limit=500):
@@ -2065,6 +2238,8 @@ class TestProcessOneIsolation:
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.update_after_failure = MagicMock()
         mock_repo.update_after_success = MagicMock(side_effect=Exception("DB down"))
@@ -2093,6 +2268,8 @@ class TestProcessOneIsolation:
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.update_after_failure = MagicMock(side_effect=Exception("DB down"))
 
@@ -2394,6 +2571,8 @@ class TestRenewalDigestLogging:
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.update_after_failure = MagicMock()
         # update_after_success raises → _renew_one raises out of the h3 path
@@ -2430,6 +2609,8 @@ class TestRenewalDigestLogging:
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.update_after_failure = MagicMock(side_effect=Exception("DB down"))
 
