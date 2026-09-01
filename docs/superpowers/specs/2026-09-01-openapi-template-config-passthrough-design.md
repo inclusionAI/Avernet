@@ -81,7 +81,7 @@ Front-end 映射:`engine ← item.engine_type`,`bot_type ← item.bot_type`,`eng
 | 2 | 工厂形态:`template_type` 缺失或空串 | 422 `engine_properties.template_type is required for template-config creates` |
 | 3 | 任何形态:`template_config` 缺失或空 | 422(沿用现有 `applicationCoding template_config must not be empty` 文案,新增错误才用新文案,减少测试 churn) |
 | 4 | 完整工厂快照(双键)与手填专用键(`devflow_workflow/code_repos/yuque_kb_repos` 等外层契约键)混传 | 422 工厂路径不解读手填键,明确拒绝;不完整快照(缺 `template_uid`)混有手填键则走手填路径,工厂键按未知键存活(现状) |
-| 5 | 任何形态的 `template_config` 顶层出现拒收 server-managed 字段:`bot_id/workspace_id/workspace_status/workspace_state/start_status/engine_form` | 422 `template_config contains server-managed fields: [...]`(现有错误类型复用,放行清单新增工厂四键) |
+| 5 | 任何形态的 `template_config` 顶层出现拒收 server-managed 字段:`bot_id/workspace_id/workspace_status/workspace_state/start_status/engine_form` | 422 `template_config contains server-managed fields: [...]`(实现事实修正:`TEMPLATE_SERVER_RESERVED_FIELDS` 本含 `template_uid`,工厂分支在 strategy 层对四个工厂身份键做豁免后复用同一拒绝逻辑,手填路径拒绝集合不变) |
 | 6 | 手填路径 `template_type` 传了且 ≠ `applicationCoding` | 422(防形态冒充;工厂值必须走工厂标记) |
 | 7 | 组合 gates 违反(cloud-only、engine 非 claude_code、bot_type 非 personal、非个人空间) | 409(沿用 `BotCombinationUnsupportedError` 既有文案与顺序) |
 | 8 | 已知外层键类型不符 | 422(仅手填路径,沿用 `_validate_application_coding_config` 检查;工厂路径**不做**键级类型校验,透传) |
@@ -125,7 +125,8 @@ def project_template_config_for_public(config):
 |---|---|
 | `adapters/http/openapi_v1/bots/schemas.py` | `BotCreateEngineProperties`:`template` → `template_config` + 新增 `template_type: str \| None`;描述文案泛化 |
 | `core/bot_management/engines/aicoding/strategy.py` | `prepare_create`:键域更新、新增工厂分支(§4)、放行工厂四键进 `to_internal_template_config` 的 PUBLIC 模式(§5.5)、错误文案 |
-| `core/bot_management/engines/provisioning.py` | 预计零改动(工厂四键本就不在 `TEMPLATE_SERVER_RESERVED_FIELDS`),实现时核对确认 |
+| `core/bot_management/engines/provisioning.py` | 零改动(实现核对:`template_uid` 本在 `TEMPLATE_SERVER_RESERVED_FIELDS`,工厂身份四键的豁免落在 strategy 工厂分支内,`provisioning.py` 未动) |
+| `core/bot_management/engines/default.py` | template-intent 判定认 `template_config` 键,保持“非 coding 引擎 + 模板载荷 → 409”映射(Task 1 实现时发现计划漏列,补入) |
 | `core/bot_management/template_public_view.py` | 新增 `project_factory_snapshot` + dispatch(§6) |
 | `adapters/http/openapi_v1/bots/router.py` | 请求→strategy 的传参适配;`_to_bot` 无改动(dispatch 内完成) |
 | `src/gateway/configs/schemas/bots.openapi.json` | `BotCreateEngineProperties` schema 手工精准 patch(禁止全量 regen;含 description/example) |
