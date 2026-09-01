@@ -421,28 +421,15 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # exactly the two operations that mutate it.
     ("PUT", "/openapi/v1/bots/source-credentials/{name}"):
         NoCheck("tenant-guarded credential write; the owner-app check is the service's"),
-    ("GET", "/openapi/v1/bots/source-credentials/{name}"):
-        NoCheck("tenant-guarded masked metadata; every tenant app may read"),
-    ("GET", "/openapi/v1/bots/source-credentials"):
-        NoCheck("tenant-guarded inventory; every tenant app may read"),
+    ("GET", "/openapi/v1/bots/source-credentials/{name}"): NoCheck("tenant-guarded masked metadata; every tenant app may read"),
+    ("GET", "/openapi/v1/bots/source-credentials"): NoCheck("tenant-guarded inventory; every tenant app may read"),
     ("DELETE", "/openapi/v1/bots/source-credentials/{name}"):
         NoCheck("tenant-guarded credential delete; the owner-app check is the service's"),
-    ("GET", "/openapi/v1/org/dept"):
-        NoCheck("the caller's own directory record"),
+    ("GET", "/openapi/v1/org/dept"): NoCheck("the caller's own directory record"),
     ("GET", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
     ("POST", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
-    ("POST", "/openapi/v1/bots/with-manifest"):
-        NoCheck("a creation, not one addressed bot — as POST /openapi/v1/bots"),
-    ("GET", "/openapi/v1/bots/{bot_id}/with-manifest/status"):
-        NoCheck(
-            "the caller's own creation. It addresses a bot_id, but for most of "
-            "a creation's life there is no bot record to run a collaborator "
-            "check against — and after a rejected one there never will be. What "
-            "scopes it instead is that every row it reads is keyed by the "
-            "entity_id resolved from the caller's own principal, the job's "
-            "idempotency key included, so another owner's bot_id finds nothing "
-            "rather than their pending authorization URL"
-        ),
+    ("POST", "/openapi/v1/bots/with-manifest"): NoCheck("a creation, not one addressed bot — as POST /openapi/v1/bots"),
+    ("GET", "/openapi/v1/bots/{bot_id}/with-manifest/status"): NoCheck("the caller's own creation: for most of one there is no bot record to check against, so what scopes it is that every row it reads — the job's idempotency key included — is keyed by the entity_id resolved from the caller's principal"),
     ("GET", "/openapi/v1/bots/all"): NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/authorized"):
         NoCheck("a collection, not one addressed bot"),

@@ -201,6 +201,59 @@ def test_a_failed_apply_is_apply_failed_and_not_create_failed():
     assert state is not CreationState.CREATE_FAILED
 
 
+def test_a_bot_with_a_later_explicit_apply_is_not_reported_as_still_creating():
+    """An apply after the creation supersedes the record the poll reads.
+
+    `last_apply` gives the newest, and once a caller has run
+    `POST .../config-manifest/apply` that is an `explicit` record, not the
+    creation's. Without the job's own verdict this would fall through to
+    `CREATING` — a finished creation reported as still in flight, forever.
+
+    Reading the creation's own record back instead would need a
+    trigger-filtered query the design chose not to add; the job's status
+    answers it for free.
+    """
+    (state, _), _ = _state(
+        bot={"status": "ACTIVE"},
+        report=_Report("explicit", ApplyStatus.SUCCEEDED),
+        job=_Job(TaskStatus.SUCCEEDED),
+    )
+    assert state is CreationState.READY
+
+
+def test_a_bot_created_the_ordinary_way_is_still_nothing_here():
+    """Even with a manifest applied to it afterwards.
+
+    A bot created through `POST /openapi/v1/bots` and given a manifest by `PUT`
+    has a bot record and an apply record, and no creation job — which is what
+    separates it from a creation. This endpoint answers about creations.
+    """
+    answer, _ = _state(
+        bot={"status": "ACTIVE"},
+        report=_Report("explicit", ApplyStatus.SUCCEEDED),
+    )
+    assert answer is None
+
+
+def test_the_report_shown_is_the_creations_own():
+    """A superseding `explicit` report is not returned under a creation state.
+
+    It would answer a question the caller did not ask, and would look like the
+    creation's outcome had changed after the fact.
+    """
+    assert create_with_manifest._report_is_shown(
+        CreationState.READY, _Report(CREATE_ON_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    )
+    assert not create_with_manifest._report_is_shown(
+        CreationState.READY, _Report("explicit", ApplyStatus.SUCCEEDED)
+    )
+    assert not create_with_manifest._report_is_shown(CreationState.READY, None)
+    assert not create_with_manifest._report_is_shown(
+        CreationState.CREATING,
+        _Report(CREATE_ON_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED),
+    )
+
+
 def test_the_states_a_caller_polls_hardest_never_look_the_job_up():
     """The read's cost model, asserted rather than described.
 

@@ -302,13 +302,13 @@ Conventions from `plan.md` that every task assumes:
         the bot without configuration.
 - **Depends on:** Task 12
 
-## [ ] Task 17: Nothing else moved
+## [x] Task 17: Nothing else moved
 - **Files:** existing suites
 - **Done when:**
-  - [ ] Every existing create, auth-status, config-manifest, apply and
+  - [x] Every existing create, auth-status, config-manifest, apply and
         startup-script test passes **unedited** — the load-bearing check on Task 2,
         since moving apply onto the queue must change no contract.
-  - [ ] A bot created by the existing endpoint and given a manifest by `PUT` still
+  - [x] A bot created by the existing endpoint and given a manifest by `PUT` still
         applies with no restart, by the same path as before.
 - **Depends on:** Tasks 2, 12
 

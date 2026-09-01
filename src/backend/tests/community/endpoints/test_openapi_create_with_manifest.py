@@ -701,3 +701,86 @@ def test_an_abandoned_creation_expires_rather_than_reading_as_declined(
         )
         is None
     )
+
+
+def test_the_old_two_call_path_still_works_unchanged(client, world):
+    """The path this endpoint replaces must keep working exactly as it did.
+
+    Create through `POST /openapi/v1/bots`, `PUT` a manifest, apply it. This is
+    the regression that matters most for W13: applying moved off a daemon thread
+    onto the task queue, and *nothing about that is supposed to be visible* from
+    outside — same `202`, same `apply_id`, same terminal report, and still no
+    restart.
+
+    The restart clause is the one worth spelling out. A manifest converges a
+    running bot in place; a configuration change that bounced the container
+    would interrupt whatever the bot was doing, and a caller who applied a
+    one-line script change would have no way to know that was going to happen.
+    """
+    _seed_verifier(world)
+    _stand_in_for_provisioning(world)
+
+    restarts: list[tuple] = []
+
+    def restart_bot(_self, *args, **kwargs):
+        restarts.append((args, kwargs))
+        return {}
+
+    bind_overrides(
+        world,
+        BotServiceProtocol,
+        {"restart_bot": restart_bot},
+        also_bind=(BotService,),
+    )
+
+    created = client.post(
+        "/openapi/v1/bots",
+        params=_QUERY,
+        headers=_HEADERS,
+        json={
+            "bot_name": "Ordinary Bot",
+            "bot_desc": "created the old way",
+            "engine": "claude_code",
+            "cluster_name": "ACRA",
+            "bot_type": "personal",
+        },
+    )
+    assert created.status_code == 201, created.text
+    bot_id = created.json()["data"]["bot_id"]
+
+    stored = client.put(
+        f"/openapi/v1/bots/{bot_id}/config-manifest",
+        params=_QUERY,
+        headers=_HEADERS,
+        json={"document": _FLOW_DOCUMENT},
+    )
+    assert stored.status_code in (200, 201), stored.text
+
+    accepted = client.post(
+        f"/openapi/v1/bots/{bot_id}/config-manifest/apply",
+        params=_QUERY,
+        headers=_HEADERS,
+    )
+    assert accepted.status_code == 202, accepted.text
+    assert accepted.json()["data"]["apply_id"], "the 202 carried no handle"
+    assert accepted.json()["data"]["result"] == "RUNNING"
+
+    _Worker(world).turn()
+
+    report = client.get(
+        f"/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
+        params=_QUERY,
+        headers=_HEADERS,
+    ).json()["data"]
+    assert report["result"] == "SUCCEEDED", report
+    assert report["trigger"] == "explicit", (
+        "an apply on a running bot must not be labelled as part of a creation"
+    )
+
+    assert not restarts, "applying a manifest restarted the bot"
+    assert (
+        world.get(BotRepository).get_by_id_and_entity(bot_id, _OWNER)["status"]
+        == "ACTIVE"
+    )
+    # And the poll for *creations* does not claim this one as its own.
+    assert _poll(client, bot_id).status_code == 404

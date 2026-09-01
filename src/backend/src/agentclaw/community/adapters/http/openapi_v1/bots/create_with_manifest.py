@@ -57,7 +57,7 @@ from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
-    CREATE_PRE_CONTAINER_TRIGGER,
+    CREATE_ON_CONTAINER_TRIGGER,
     BotCreationManifestSeam,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
@@ -308,7 +308,7 @@ async def get_bot_create_with_manifest_status(
             if state is CreationState.AWAITING_AUTHORIZATION
             else "",
             bot=_to_bot(bot) if bot is not None and _bot_is_shown(state) else None,
-            apply=apply_payload(report) if _report_is_shown(state) else None,
+            apply=apply_payload(report) if _report_is_shown(state, report) else None,
             message=_message(state, job),
         ),
         request,
@@ -336,31 +336,40 @@ def _creation_state(*, bot, report, job) -> Optional[tuple[CreationState, Any]]:
             return (CreationState.AWAITING_AUTHORIZATION, record)
         return (_bot_less_terminal(record), record)
 
-    # The bot exists. Phase A's record is not an answer about the creation's
-    # progress — it is written *before* the bot — so it reads the same as none.
-    if report is None or report.trigger == CREATE_PRE_CONTAINER_TRIGGER:
-        if str(bot.get("status") or "") in _PROVISIONING_FAILED:
-            return (CreationState.CREATE_FAILED, None)
-        record = job()
-        if record is None:
-            # A bot with no creation job was not made here — an ordinary create
-            # with a manifest PUT afterwards, say. Reporting a creation state
-            # for it would be inventing one.
-            return None
-        if record.status in TERMINAL_STATUSES and record.status is not (
-            TaskStatus.SUCCEEDED
-        ):
-            # The job gave up with the bot never reaching a container.
-            return (CreationState.CREATE_FAILED, record)
-        return (CreationState.CREATING, record)
+    # The bot exists, and the post-container phase is the only record that
+    # answers how far the creation got. Phase A's is written *before* the bot,
+    # and a later `explicit` apply belongs to a bot that is already configured —
+    # both read the same as no record here.
+    if report is not None and report.trigger == CREATE_ON_CONTAINER_TRIGGER:
+        if report.status is ApplyStatus.RUNNING:
+            return (CreationState.APPLYING, None)
+        if report.status is ApplyStatus.SUCCEEDED:
+            return (CreationState.READY, None)
+        # PARTIAL and FAILED alike: the bot is up, part of the manifest is not.
+        return (CreationState.APPLY_FAILED, None)
 
-    # A post-container apply exists — the creation got as far as configuring.
-    if report.status is ApplyStatus.RUNNING:
-        return (CreationState.APPLYING, None)
-    if report.status is ApplyStatus.SUCCEEDED:
-        return (CreationState.READY, None)
-    # PARTIAL and FAILED alike: the bot is up, part of the manifest is not.
-    return (CreationState.APPLY_FAILED, None)
+    record = job()
+    if record is None:
+        # A bot with no creation job was not made here — an ordinary create with
+        # a manifest PUT afterwards, say. It has a bot record and no
+        # post-container apply, which is the shape of `CREATING`; reporting that
+        # would be inventing a creation that never happened.
+        return None
+    if str(bot.get("status") or "") in _PROVISIONING_FAILED:
+        return (CreationState.CREATE_FAILED, record)
+    if record.status is TaskStatus.SUCCEEDED:
+        # The job finished, so the creation is over — even though the newest
+        # apply record is not the post-container one. That happens when an
+        # explicit apply has landed since, which this endpoint deliberately does
+        # not report: it answers "how did the creation end", and
+        # `GET .../config-manifest/last-apply` answers "how is the bot
+        # configured now". Reading the creation's own record back would need a
+        # trigger-filtered query the design chose not to add.
+        return (CreationState.READY, record)
+    if record.status in TERMINAL_STATUSES:
+        # The job gave up with the bot never reaching a container.
+        return (CreationState.CREATE_FAILED, record)
+    return (CreationState.CREATING, record)
 
 
 def _bot_less_terminal(record) -> CreationState:
@@ -389,8 +398,17 @@ def _bot_is_shown(state: CreationState) -> bool:
     return state in (CreationState.READY, CreationState.APPLY_FAILED)
 
 
-def _report_is_shown(state: CreationState) -> bool:
-    return state in (CreationState.READY, CreationState.APPLY_FAILED)
+def _report_is_shown(state: CreationState, report) -> bool:
+    """Only the creation's own report, and only where it means something.
+
+    The newest apply record is not always the creation's: an `explicit` apply
+    landing afterwards supersedes it. Returning that one under a creation state
+    would answer a question the caller did not ask, and would look like the
+    creation's outcome had changed.
+    """
+    if state not in (CreationState.READY, CreationState.APPLY_FAILED):
+        return False
+    return report is not None and report.trigger == CREATE_ON_CONTAINER_TRIGGER
 
 
 def _handle(job, field: str) -> str:
