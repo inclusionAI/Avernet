@@ -317,15 +317,16 @@ Conventions from `plan.md` that every task assumes:
         merely slow down — they never complete.
   - [ ] The README's Context Boundary block lists the creation seam, the apply
         task and the creation job.
-  - [ ] W13's row in both work-items documents records what shipped, including
-        that applying moved onto the queue for every path, and that this endpoint
-        is **ARCA-only**.
-  - [ ] **W8's criteria are corrected in the same edit.** Its second acceptance
-        criterion says bots created via W13 complete apply inside the creation
-        flow, "so this item covers the *other* apply points — republish,
-        rebuild-restart"; that is now true only for ARCA. W8's scope line already
-        claims teclaw creation-time apply, so the two disagree. The correction
-        states that W8 owns teclaw creation, **including lifting this endpoint's
-        teclaw refusal and giving the creation job a teclaw-shaped sequence** —
-        the one piece that would otherwise fall between the two items.
+  - [x] **Both work-items documents are already reconciled** (done ahead of
+        implementation, since they are the source of truth and the spec had
+        overtaken them). Nine sites in each, kept in parity: W13's header note,
+        its engine scope, its dependency gate, its out-of-scope, the poll states,
+        the `PARTIAL` bullets, the two-phase criteria, §2.11's feature-flag
+        paragraph, the task-queue tenant note, the §6 ordering claim — and **W8's
+        criteria**, which now say W8 owns teclaw creation *including lifting this
+        endpoint's refusal*, the one piece that would otherwise have fallen
+        between the two items.
+  - [ ] Re-check that parity still holds at the end of implementation: anything
+        the code forced to differ from the spec must land in both work-items
+        files, not just the spec.
 - **Depends on:** Task 16
