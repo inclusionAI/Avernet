@@ -56,11 +56,14 @@ class TaskServiceProtocol(Protocol):
         """列持久化任务记录的一页(1-based),可选按状态和 owner 过滤,返回 (items, total)。"""
         ...
 
-    def list_bbs_tasks(self) -> list[BbsTaskOverviewRecord]:
-        """列所有 BBS 接力任务(run_mode='bbs'):``task_node_run_info`` ⋈ ``task_node`` 联合,
-        再按 task_id 补 ``task_info.owner_bot_id``(publisher)。返回 ``BbsTaskOverviewRecord``
-        (含 task_spec/extend_props 原始 dict);title/goal/acceptances/assignee_name 由 adapter
-        translator 二次解析。供 bbs/list 路由调用,委托 TaskGraphService.list_bbs_tasks_overview。"""
+    def list_bbs_tasks(
+        self, page: int = 1, page_size: int = 20
+    ) -> "tuple[list[BbsTaskOverviewRecord], int]":
+        """列 BBS 接力任务(run_mode='bbs')的一页(1-based):``task_node_run_info`` ⋈ ``task_node`` 联合,
+        再按 task_id 补 ``task_info.owner_bot_id``(publisher)。返回 ``(records, total)``——``records`` 为
+        ``BbsTaskOverviewRecord``(含 task_spec/extend_props 原始 dict),title/goal/acceptances/
+        assignee_name 由 adapter translator 二次解析;``total`` 为全量行数。供 bbs/list 路由调用,
+        委托 TaskGraphService.list_bbs_tasks_overview。"""
         ...
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:

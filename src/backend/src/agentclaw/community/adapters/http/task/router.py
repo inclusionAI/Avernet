@@ -485,23 +485,30 @@ async def bbs_result(
     return envelope({"ok": True}, request)
 
 
-@router.get("/bbs/list", response_model=Envelope[list[BbsTaskItemDTO]])
+@router.get("/bbs/list", response_model=Envelope[Page[BbsTaskItemDTO]])
 @envelope_errors
 async def list_bbs_tasks(
     request: Request,
+    page: int = Query(default=1, ge=1, description="页码,1-based,默认 1"),
+    page_size: int = Query(
+        default=20, ge=1, le=100, description="每页数量,默认 20,最大 100"
+    ),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[BbsTaskItemDTO]]:
-    """列所有 BBS 接力任务(run_mode='bbs'):`task_node_run_info` r ⋈ `task_node` n (task_id+node_id),
-    再按 task_id 补 `task_info.owner_bot_id`(publisher)。无 retry 过滤、无分页(当前 retry 恒 0)。
+) -> Envelope[Page[BbsTaskItemDTO]]:
+    """列 BBS 接力任务(run_mode='bbs')的一页:`task_node_run_info` r ⋈ `task_node` n (task_id+node_id),
+    再按 task_id 补 `task_info.owner_bot_id`(publisher)。无 retry 过滤(当前 retry 恒 0)。
 
-    返回 ``BbsTaskItemDTO``:SQL 直投字段(task_id/node_id/run_mode/retry/assignee_id/status/
-    acceptance_result/extend_props/relay_* time/task_spec)+ adapter 二次解析字段
-    (title=task_spec.metadata.title / goal=task_spec.goal.objective /
-    acceptances=task_spec.goal.acceptances / assignee_name=extend_props.assignee_name / publisher)。
-    translator 投影遵循 Rule 22(adapter 只转协议);领域查询委托 TaskServiceProtocol.list_bbs_tasks。
+    分页(1-based,缺省用默认值):``page``(默认 1)/ ``page_size``(默认 20,最大 100)。返回
+    ``Page{total, items}``——``items`` 为 ``BbsTaskItemDTO``(SQL 直投字段 task_id/node_id/run_mode/
+    retry/assignee_id/status/acceptance_result/extend_props/relay_* time/task_spec + adapter 二次解析字段
+    title=task_spec.metadata.title / goal=task_spec.goal.objective / acceptances=task_spec.goal.acceptances
+    / assignee_name=extend_props.assignee_name / publisher);``total`` 为 run_mode='bbs' 全量行数。
+    结果按 run info 记录 id 降序(最新优先);页越界 → items=[] 但 total 真实;非法 page/page_size →
+    422(Query 校验)。translator 投影遵循
+    Rule 22(adapter 只转协议);领域查询委托 TaskServiceProtocol.list_bbs_tasks(page, page_size)。
     """
-    records = service.list_bbs_tasks()
-    return envelope([bbs_task_overview_to_dto(r) for r in records], request)
+    records, total = service.list_bbs_tasks(page=page, page_size=page_size)
+    return page_envelope(total, [bbs_task_overview_to_dto(r) for r in records], request)
 
 
 @router.post("/nodes/update", response_model=Envelope[dict[str, Any]])

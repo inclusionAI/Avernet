@@ -839,13 +839,15 @@ class TaskGraphService:
             summaries.sort(key=lambda s: s.run_id, reverse=True)
             return summaries
 
-    def list_bbs_tasks_overview(self) -> list[BbsTaskOverviewRecord]:
-        """列所有 BBS 接力任务概览(run_mode='bbs' 的 run_info ⋈ node,补 publisher);只读。
+    def list_bbs_tasks_overview(
+        self, page: int = 1, page_size: int = 20
+    ) -> "tuple[list[BbsTaskOverviewRecord], int]":
+        """列 BBS 接力任务概览的一页(run_mode='bbs' 的 run_info ⋈ node,补 publisher);只读。
 
-        委托 ``graph_repo.list_bbs_tasks_overview``;无 repo 绑定(纯内核/测试)→ 空列表,不阻断。"""
+        委托 ``graph_repo.list_bbs_tasks_overview``;无 repo 绑定(纯内核/测试)→ ([], 0),不阻断。"""
         if self._graph_repo is None:
-            return []
-        return self._graph_repo.list_bbs_tasks_overview()
+            return [], 0
+        return self._graph_repo.list_bbs_tasks_overview(page, page_size)
 
     def _node_depth(self, task_id: str, node_id: str) -> int:
         """从 relations 分解树递归自算深度(派生不持久)。根=0。"""

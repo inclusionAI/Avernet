@@ -379,7 +379,7 @@ def bbs_result_error():
 
 # BBS task listing (GET /bbs/list):all run_mode='bbs' runs joined to their node + publisher.
 def _seed_bbs_list_service(world) -> None:
-    def list_bbs_tasks(_self):
+    def list_bbs_tasks(_self, page=1, page_size=20):
         return [
             BbsTaskOverviewRecord(
                 task_id="bbs-endpoint-1",
@@ -396,13 +396,13 @@ def _seed_bbs_list_service(world) -> None:
                 task_spec=_TASK_SPEC,
                 publisher="pub-1",
             )
-        ]
+        ], 1
 
     bind_overrides(world, TaskServiceProtocol, {"list_bbs_tasks": list_bbs_tasks})
 
 
 def _seed_bbs_list_error(world) -> None:
-    def list_bbs_tasks(_self):
+    def list_bbs_tasks(_self, **_):
         raise TaskError("list bbs tasks unavailable")
 
     bind_overrides(world, TaskServiceProtocol, {"list_bbs_tasks": list_bbs_tasks})
@@ -417,15 +417,18 @@ def _seed_bbs_list_error(world) -> None:
         status=200,
         json_contains={
             "code": 200000,
-            "data": [
-                {
-                    "task_id": "bbs-endpoint-1",
-                    "title": "Endpoint case",
-                    "goal": "exercise the route",
-                    "assignee_name": "Alice",
-                    "publisher": "pub-1",
-                }
-            ],
+            "data": {
+                "total": 1,
+                "items": [
+                    {
+                        "task_id": "bbs-endpoint-1",
+                        "title": "Endpoint case",
+                        "goal": "exercise the route",
+                        "assignee_name": "Alice",
+                        "publisher": "pub-1",
+                    }
+                ],
+            },
         },
     ),
 )

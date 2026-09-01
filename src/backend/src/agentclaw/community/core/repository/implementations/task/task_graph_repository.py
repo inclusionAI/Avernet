@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from injector import inject
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 
 from agentclaw.community.core.repository.protocols.task import TaskGraphRepositoryProtocol
 from agentclaw.community.core.task.domain.errors import GraphVersionConflictError
@@ -554,29 +554,43 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             db.flush()
             return True
 
-    def list_bbs_tasks_overview(self) -> list[BbsTaskOverviewRecord]:
-        """列所有 BBS 接力任务(run_mode='bbs'):``task_node_run_info`` ⋈ ``task_node``
-        (task_id+node_id),再按 distinct task_id 批量补 ``task_info.owner_bot_id``→publisher
-        (缺失→None)。只读投影,忠实映射给定 SQL(无 retry 过滤、无分页;当前 retry 恒 0)。
+    def list_bbs_tasks_overview(
+        self, page: int = 1, page_size: int = 20
+    ) -> "tuple[list[BbsTaskOverviewRecord], int]":
+        """列 BBS 接力任务(run_mode='bbs')的一页(1-based):``task_node_run_info`` ⋈ ``task_node``
+        (task_id+node_id),再按 distinct task_id 批量补 ``task_info.owner_bot_id``→publisher(缺失→None)。
+        只读投影;返回 ``(records, total)``——``total`` 为 run_mode='bbs' 联合全量行数,``records`` 为当前页
+        (按 ``task_node_run_info.id`` 降序(最新优先)稳定切片,LIMIT/OFFSET;页越界 → 空列表,``total`` 仍真实)。
 
         ``task_spec``/``extend_props``/``acceptance_result`` 复用模型 ``to_record()`` 的 JSON 解析;
         title/goal/acceptances/assignee_name 由 adapter translator 二次解析(不在此 record 内)。
         """
+        page = max(1, page)
+        page_size = max(1, page_size)
+        offset = (page - 1) * page_size
+        join_clause = and_(
+            TaskNodeRunInfoModel.task_id == TaskNodeModel.task_id,
+            TaskNodeRunInfoModel.node_id == TaskNodeModel.node_id,
+        )
         with self._db.orm_session() as db:
+            total = (
+                db.query(func.count(TaskNodeRunInfoModel.task_id))
+                .join(TaskNodeModel, join_clause)
+                .filter(TaskNodeRunInfoModel.run_mode == "bbs")
+                .scalar()
+            ) or 0
+
             joined = (
                 db.query(TaskNodeRunInfoModel, TaskNodeModel)
-                .join(
-                    TaskNodeModel,
-                    and_(
-                        TaskNodeRunInfoModel.task_id == TaskNodeModel.task_id,
-                        TaskNodeRunInfoModel.node_id == TaskNodeModel.node_id,
-                    ),
-                )
+                .join(TaskNodeModel, join_clause)
                 .filter(TaskNodeRunInfoModel.run_mode == "bbs")
+                .order_by(TaskNodeRunInfoModel.id.desc())
+                .limit(page_size)
+                .offset(offset)
                 .all()
             )
             if not joined:
-                return []
+                return [], total
 
             # publisher:按 distinct task_id 一次 in_() 批查 task_info.owner_bot_id,避免 N+1。
             task_ids = {run.task_id for run, _ in joined}
@@ -610,4 +624,4 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                         publisher=publishers.get(run_rec.task_id),
                     )
                 )
-            return records
+            return records, total
