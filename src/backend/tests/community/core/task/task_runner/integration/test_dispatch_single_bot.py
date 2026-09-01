@@ -19,6 +19,15 @@ from agentclaw.community.core.task.task_runner.integration.prompt_formatter impo
 from agentclaw.community.core.task.task_runner.integration.task_executor import (
     TaskExecutor,
 )
+from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
+    BcsCreateGroupResult,
+)
+from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
+    _DoubleBcsBotIdentityResolver,
+)
+from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+    BcsGroupHandle, SingleBotHandle,
+)
 
 
 def _node(assignee="bot9:ent1", extend_props=None):
@@ -311,3 +320,95 @@ def test_dispatch_single_bot_skill_report_off_registers_poller():
     ok = _run(exe.dispatch([_node()]))
     assert ok == [True]
     assert poller.registered and poller.registered[0].run_id == "mid_1"
+
+
+# ── P2:singlebot_2_group 旁路(默认 true)── 二人群 + 人类观察者 + coop_group 收敛 ──
+
+
+class _Bcs2:
+    def __init__(self):
+        self.created = []
+
+    async def create_group(self, req):
+        self.created.append(req)
+        return BcsCreateGroupResult(group_id="g2g", session_id="s2g", definition_ref=None)
+
+    async def get_group(self, group_id):
+        return {"latest_running_session_id": "s2g"}
+
+    async def get_session_messages(self, sid, *, limit=50, since_msg_id=None):
+        return []
+
+    def task_callback_url(self):
+        return ""
+
+
+class _Dash:
+    def __init__(self, execution_config):
+        self.extend_props = {"execution_config": execution_config, "owner_user_id": "35983"}
+
+
+class _Graph2:
+    """query_task_dashboard 返带 execution_config 的快照;update_task_node_info 捕获 patch。"""
+
+    def __init__(self, execution_config=None):
+        self._ec = execution_config if execution_config is not None else {}
+        self.patches = []
+
+    def update_task_node_info(self, patch):
+        self.patches.append(patch)
+
+    def query_task_dashboard(self, task_id, node_id=None):
+        return _Dash(self._ec)
+
+
+def _exe2(*, execution_config=None):
+    bot = _Bot()
+    bcs = _Bcs2()
+    poller = _Poller()
+    graph = _Graph2(execution_config)
+    exe = TaskExecutor(
+        bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+        poller=poller, graph=graph, identity_resolver=_DoubleBcsBotIdentityResolver(),
+    )
+    return exe, bot, bcs, poller, graph
+
+
+def test_dispatch_single_bot_2_group_bypass_creates_two_person_group():
+    """默认 true + owner 在场 + bcs 已接 → 建二人群(driver bot + 人类观察者),走 BcsGroupHandle 收敛,
+    不发 send_message;run_mode 落库 single_bot→coop_group 且 extend_props.actual_run_mode=single_bot。"""
+    exe, bot, bcs, poller, graph = _exe2()  # execution_config={} → singlebot_2_group 默认 true
+    ok = _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983"})]))
+    assert ok == [True]
+    assert bot.sent == []  # 旁路:不直发
+    assert len(bcs.created) == 1
+    req = bcs.created[0]
+    assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
+    assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
+    assert req.originator == "human_35983"
+    h = poller.registered[0]
+    assert isinstance(h, BcsGroupHandle)
+    assert h.group_id == "g2g" and h.collab_mode == "chat" and h.session_id == "s2g"
+    assert h.loop_task_id == "t1::c1"
+    flip = [p for p in graph.patches if p.run_mode == "coop_group"]
+    assert flip and flip[0].extend_props_patch.get("actual_run_mode") == "single_bot"
+
+
+def test_dispatch_single_bot_2_group_disabled_falls_back_to_send():
+    """singlebot_2_group=false(owner+bcs 在场)→ 走老链路:send_message + SingleBotHandle,不建群。"""
+    exe, bot, bcs, poller, graph = _exe2(execution_config={"singlebot_2_group": False})
+    ok = _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983"})]))
+    assert ok == [True]
+    assert bot.sent and bot.sent[0][0] == "drv:35983"  # 老链路直发
+    assert bcs.created == []
+    assert isinstance(poller.registered[0], SingleBotHandle)
+
+
+def test_dispatch_single_bot_2_group_no_owner_falls_back_to_send():
+    """owner 缺失 → 即便 singlebot_2_group 默认 true,也回退老链路(二人群需要人类)。"""
+    exe, bot, bcs, poller, graph = _exe2()  # 默认 true
+    ok = _run(exe.dispatch([_node("drv")]))  # 无 assignee_owner_id
+    assert ok == [True]
+    assert bot.sent  # 老链路
+    assert bcs.created == []
+    assert isinstance(poller.registered[0], SingleBotHandle)

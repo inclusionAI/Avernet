@@ -8,6 +8,7 @@ task_info.owner_bot_id→publisher),以及 page/page_size 分页透传与默认�
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import pytest
@@ -31,8 +32,15 @@ _TASK_SPEC = {
 }
 
 
-def _record(task_id: str = "bbs-1", title: str = "BBS 任务标题") -> BbsTaskOverviewRecord:
-    spec = {
+def _record(
+    task_id: str = "bbs-1",
+    title: str = "BBS 任务标题",
+    *,
+    status: Status = Status.RUNNING,
+    extend_props: dict | None = None,
+    task_spec: dict | None = None,
+) -> BbsTaskOverviewRecord:
+    spec = task_spec if task_spec is not None else {
         "metadata": {"task_id": task_id, "title": title, "instruction": "执行"},
         "context": {"background": "bg"},
         "goal": {
@@ -46,9 +54,9 @@ def _record(task_id: str = "bbs-1", title: str = "BBS 任务标题") -> BbsTaskO
         run_mode="bbs",
         retry=0,
         assignee_id="asg-1",
-        status=Status.RUNNING,
+        status=status,
         acceptance_result={"verdict": "PASS", "acceptances_metric": [], "gaps": []},
-        extend_props={"assignee_name": "Alice"},
+        extend_props={"assignee_name": "Alice"} if extend_props is None else extend_props,
         relay_create_time=datetime(2026, 9, 1, 10, 0, 0),
         relay_begin_time=datetime(2026, 9, 1, 10, 0, 1),
         relay_end_time=datetime(2026, 9, 1, 10, 5, 0),
@@ -62,15 +70,38 @@ def _canned_record() -> BbsTaskOverviewRecord:
 
 
 class _StubTaskService:
-    """按真实服务语义分页:``list_bbs_tasks(page, page_size) → (page_records, total)``。"""
+    """按真实服务语义分页 + 过滤:``list_bbs_tasks(page, page_size, *, search_word, status)
+    → (page_records, filtered_total)``。过滤模拟生产端:status 等值;search_word 对
+    task_spec/extend_props 的 JSON 文本大小写不敏感包含(整列 like 的等价模拟)。"""
 
     def __init__(self, records: list[BbsTaskOverviewRecord]) -> None:
         self._records = records
 
-    def list_bbs_tasks(self, page: int = 1, page_size: int = 20):
-        total = len(self._records)
+    def list_bbs_tasks(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search_word: str | None = None,
+        status: str | None = None,
+    ):
+        rs = list(self._records)
+        if status is not None:
+            rs = [r for r in rs if str(r.status) == status]
+        if search_word is not None:
+            w = search_word.lower()
+            rs = [
+                r
+                for r in rs
+                if w
+                in (
+                    json.dumps(r.task_spec, ensure_ascii=False)
+                    + json.dumps(r.extend_props or {}, ensure_ascii=False)
+                ).lower()
+            ]
+        total = len(rs)
         offset = (page - 1) * page_size
-        return self._records[offset : offset + page_size], total
+        return rs[offset : offset + page_size], total
 
 
 class _StubTaskServiceModule(Module):
@@ -185,3 +216,139 @@ def test_bbs_list_route_rejects_invalid_page_params():
     assert (
         c.get("/api/v1/collaboration/tasks/bbs/list", params={"page_size": 101}).status_code == 422
     )
+
+
+# ── status 过滤 ──
+
+
+def test_bbs_list_route_filters_by_status():
+    """?status=RUNNING 只返回 RUNNING;total 为过滤后行数。"""
+    c = _client([
+        _record("bbs-run", status=Status.RUNNING),
+        _record("bbs-done", status=Status.DONE),
+        _record("bbs-run2", status=Status.RUNNING),
+    ])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list", params={"status": "RUNNING"})
+    assert r.status_code == 200, r.text
+    page = r.json()["data"]
+    assert page["total"] == 2
+    assert sorted(it["task_id"] for it in page["items"]) == ["bbs-run", "bbs-run2"]
+
+
+def test_bbs_list_route_status_lowercased_matches():
+    """status 大小写归一:小写 running 也命中。"""
+    c = _client([_record("bbs-1", status=Status.RUNNING)])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list", params={"status": "running"})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["total"] == 1
+
+
+def test_bbs_list_route_status_not_filtered_when_omitted():
+    """不传 status → 不按状态过滤,返回全部。"""
+    c = _client([
+        _record("bbs-1", status=Status.RUNNING),
+        _record("bbs-2", status=Status.DONE),
+    ])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list")
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["total"] == 2
+
+
+def test_bbs_list_route_rejects_invalid_status():
+    """status 非枚举值 → 400。"""
+    c = _client([_canned_record()])
+    assert (
+        c.get("/api/v1/collaboration/tasks/bbs/list", params={"status": "NOPE"}).status_code == 400
+    )
+
+
+def test_bbs_list_route_rejects_multi_value_status():
+    """逗号多值 status(RUNNING,DONE)→ 400,强制单值契约。"""
+    c = _client([_canned_record()])
+    assert (
+        c.get(
+            "/api/v1/collaboration/tasks/bbs/list", params={"status": "RUNNING,DONE"}
+        ).status_code
+        == 400
+    )
+
+
+# ── search_word 模糊匹配 ──
+
+
+def test_bbs_list_route_filters_by_search_word_task_spec():
+    """search_word 命中 task_spec(标题)→ 只返回匹配;total 为过滤后行数。"""
+    c = _client([
+        _record("bbs-1", task_spec={"metadata": {"title": "AlphaUnique"}}),
+        _record("bbs-2", task_spec={"metadata": {"title": "BetaUnique"}}),
+    ])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list", params={"search_word": "alphaunique"})
+    assert r.status_code == 200, r.text
+    page = r.json()["data"]
+    assert page["total"] == 1
+    assert page["items"][0]["task_id"] == "bbs-1"
+
+
+def test_bbs_list_route_filters_by_search_word_extend_props():
+    """search_word 命中 extend_props(assignee_name)→ 返回匹配(task_spec 不含该词)。"""
+    c = _client([
+        _record("bbs-1", extend_props={"assignee_name": "ZoeUnique"}),
+        _record("bbs-2", extend_props={"assignee_name": "Other"}),
+    ])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list", params={"search_word": "zoeunique"})
+    assert r.status_code == 200, r.text
+    page = r.json()["data"]
+    assert page["total"] == 1
+    assert page["items"][0]["task_id"] == "bbs-1"
+
+
+def test_bbs_list_route_search_word_case_insensitive():
+    """search_word 大小写不敏感。"""
+    c = _client([_record("bbs-1", task_spec={"metadata": {"title": "MixedCaseTitle"}})])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list", params={"search_word": "mixedcasetitle"})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["total"] == 1
+
+
+def test_bbs_list_route_search_word_no_match():
+    """search_word 无命中 → total=0、items=[]。"""
+    c = _client([_canned_record()])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list", params={"search_word": "zzznotfound"})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"] == {"total": 0, "items": []}
+
+
+def test_bbs_list_route_search_word_not_filtered_when_omitted():
+    """不传 search_word → 不过滤,返回全部。"""
+    c = _client([
+        _record("bbs-1", task_spec={"metadata": {"title": "Alpha"}}),
+        _record("bbs-2", task_spec={"metadata": {"title": "Beta"}}),
+    ])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list")
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["total"] == 2
+
+
+def test_bbs_list_route_search_word_blank_treated_as_omitted():
+    """空白 search_word(空串/纯空格)→ 视为不过滤。"""
+    c = _client([_record("bbs-1"), _record("bbs-2")])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list", params={"search_word": "   "})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["total"] == 2
+
+
+def test_bbs_list_route_combines_status_and_search_word():
+    """status + search_word 同时过滤:交集;total 同步。"""
+    c = _client([
+        _record("bbs-1", status=Status.RUNNING, task_spec={"metadata": {"title": "Alpha"}}),
+        _record("bbs-2", status=Status.DONE, task_spec={"metadata": {"title": "AlphaBeta"}}),
+        _record("bbs-3", status=Status.RUNNING, task_spec={"metadata": {"title": "Gamma"}}),
+    ])
+    r = c.get(
+        "/api/v1/collaboration/tasks/bbs/list",
+        params={"status": "RUNNING", "search_word": "alpha"},
+    )
+    assert r.status_code == 200, r.text
+    page = r.json()["data"]
+    assert page["total"] == 1
+    assert page["items"][0]["task_id"] == "bbs-1"

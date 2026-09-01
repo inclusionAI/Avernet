@@ -35,6 +35,19 @@ logger = logging.getLogger(__name__)
 _DISPATCH_CONCURRENCY = 8
 _BCS_PARTICIPANT_ROLES = {"driver", "consultant", "manager", "worker", "observer"}
 
+# 人类观察者(不发言)拉人机制:任务 owner 以 observer 角色被追加进协作群,
+# routing_policy.inject_observers 让终产投递给观察者(观察者不参与发言)。bot_uuid=human_<owner_user_id>。
+_HUMAN_OBSERVER_ROUTING_POLICY: dict[str, Any] = {"default_bot_final_delivery": "inject_observers"}
+# 走人类观察者拉人的协作模式(state_machine 群 participants 不得带 role,故不在此拉人)。
+_HUMAN_OBSERVER_MODES = {"chat", "manager_worker"}
+
+
+def _human_observer_participant(owner_user_id: str) -> dict[str, Any]:
+    """人类观察者参与者:``bot_uuid=human_<owner_user_id>``,role=observer(不发言)。"""
+    participant = {"bot_uuid": f"human_{owner_user_id}", "bot_name": owner_user_id, "role": "observer"}
+    logger.debug("[task][task-executor] _human_observer_participant owner=%s → %s", owner_user_id, participant)
+    return participant
+
 # BCN 协作群事件回调投递路径:投到 task 模块的 `/api/v1/collaboration/tasks/callback/report`
 # (主 router 的 report 回投路由),该路由 ``callback.report_result`` → ``on_report`` 驱动图态(收口 DONE)。
 # 注:该路由按 ``TaskCallbackDataDTO``(loop_task_id + result{success,...})校验 body;BCS event_subscriptions
@@ -147,6 +160,29 @@ class TaskExecutor:
             )
             return False
 
+    def _singlebot_2_group_enabled(self, task_id: str) -> bool:
+        """singlebot_2_group 旁路开关(默认 True):single_bot 改建"二人 chat 群"(driver bot + 人类观察者,不发言)。
+        从 ``graph.extend_props["execution_config"]`` 读;graph 不可用/缺键 → True(默认走旁路);显式 False → 老链路。"""
+        if self._graph is None:
+            logger.info("[task][task-executor] singlebot_2_group 开关:graph 未接 → 默认 True(走旁路) task=%s", task_id)
+            return True
+        try:
+            snapshot = self._graph.query_task_dashboard(task_id)
+        except Exception:  # noqa: BLE001 graph 不可用 → 默认走旁路
+            logger.warning("[task][task-executor] singlebot_2_group 开关:graph 查询失败 → 默认 True task=%s", task_id)
+            return True
+        cfg = (getattr(snapshot, "extend_props", None) or {}).get("execution_config") or {}
+        if not isinstance(cfg, dict):
+            logger.info("[task][task-executor] singlebot_2_group 开关:execution_config 非 dict → 默认 True task=%s", task_id)
+            return True
+        val = cfg.get("singlebot_2_group", True)
+        enabled = val if isinstance(val, bool) else str(val).lower() not in ("false", "0", "no", "none", "")
+        logger.info(
+            "[task][task-executor] singlebot_2_group 开关:execution_config.singlebot_2_group=%s → enabled=%s task=%s",
+            val, enabled, task_id,
+        )
+        return enabled
+
     async def _dispatch_single_bot(
         self, node: TaskNode, sem: asyncio.Semaphore
     ) -> bool:
@@ -162,6 +198,31 @@ class TaskExecutor:
         skill_report = self._single_bot_skill_report_enabled()
         session_id: str | None = None
         async with sem:
+            # P2 旁路:singlebot_2_group(默认 true)且 owner 在场且 bcs/identity_resolver/graph 已接
+            # → 建"二人 chat 群"(driver=assignee bot + 人类观察者,不发言),按 coop_group 收敛;不发 send_message。
+            _owner_present = bool(assignee_owner_id)
+            _bcs_wired = self._bcs is not None and self._identity_resolver is not None
+            _flag = self._singlebot_2_group_enabled(node.task_id)
+            _bypass = _flag and _owner_present and _bcs_wired and self._graph is not None
+            logger.info(
+                "[task][task-executor] single_bot 派发 task=%s node=%s assignee=%s owner_present=%s bcs_wired=%s graph=%s flag=%s → bypass=%s",
+                node.task_id, node.node_id, assignee, _owner_present, _bcs_wired,
+                self._graph is not None, _flag, _bypass,
+            )
+            if _bypass:
+                try:
+                    return await self._dispatch_single_bot_2_group(
+                        node, openapi_bot_id, assignee_owner_id, loop_task_id
+                    )
+                except Exception:  # noqa: BLE001 旁路建群失败 → 回退老链路(不阻断 single_bot 投递)
+                    logger.exception(
+                        "[task][task-executor] singlebot_2_group 旁路失败 → 回退老链路 task=%s node=%s",
+                        node.task_id, node.node_id,
+                    )
+            logger.info(
+                "[task][task-executor] single_bot 走老链路(send_message) task=%s node=%s bot=%s",
+                node.task_id, node.node_id, openapi_bot_id,
+            )
             try:
                 ctx = dict(self._context.build(node.task_id, node.node_id) or {})
                 ctx.update({
@@ -211,6 +272,87 @@ class TaskExecutor:
                 )
             self._persist_dispatch_ids(node, session_id=session_id, run_id=run_id)
             return True
+
+    async def _dispatch_single_bot_2_group(
+        self,
+        node: TaskNode,
+        openapi_bot_id: str,
+        owner_user_id: str,
+        loop_task_id: str,
+    ) -> bool:
+        """P2 旁路:single_bot → "二人 chat 群"(driver=assignee bot + 人类观察者,不发言),任务指令进群
+        context,按 coop_group 收敛(BcsGroupHandle);并落库 run_mode single_bot→coop_group +
+        extend_props.actual_run_mode=single_bot。复用 form_coop_group(自动加人类观察者 + routing_policy)。"""
+        logger.info(
+            "[task][task-executor] singlebot_2_group 旁路入口 task=%s node=%s driver_bot=%s owner=%s loop_task_id=%s",
+            node.task_id, node.node_id, openapi_bot_id, owner_user_id, loop_task_id,
+        )
+        ctx = dict(self._context.build(node.task_id, node.node_id) or {})
+        ctx.update({
+            "task_id": node.task_id,
+            "node_id": node.node_id,
+            "execution_mode": "single_bot",
+            "backend": self._api_base_url,
+        })
+        message = self._formatter.format_execute(ctx, node)
+        gf = GroupFormation(
+            bot_ids=[openapi_bot_id],
+            collab_mode="chat",
+            group_name=node.run_info.extend_props.get("group_name") or f"{node.task_id}-{node.node_id}",
+            members_info=[{"bot_id": openapi_bot_id, "role": "driver"}],
+            extend_props={
+                "owner_user_id": owner_user_id,
+                "loop_task_id": loop_task_id,
+                "originator": f"human_{owner_user_id}",
+                "task_instruction": message,
+            },
+        )
+        logger.info(
+            "[task][task-executor] singlebot_2_group 建群前 task=%s node=%s driver=%s collab=chat owner=%s",
+            node.task_id, node.node_id, openapi_bot_id, owner_user_id,
+        )
+        gid = await self.form_coop_group(gf)
+        logger.info(
+            "[task][task-executor] singlebot_2_group 建群成功 task=%s node=%s group_id=%s",
+            node.task_id, node.node_id, gid,
+        )
+        # 落库:run_mode single_bot→coop_group(收敛按协作群),extend_props 记 actual_run_mode=single_bot(原模式留痕)。
+        if self._graph is not None:
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=node.task_id,
+                    node_id=node.node_id,
+                    run_mode="coop_group",
+                    extend_props_patch={"actual_run_mode": "single_bot"},
+                )
+            )
+            logger.info(
+                "[task][task-executor] singlebot_2_group run_mode 落库 single_bot→coop_group + actual_run_mode=single_bot task=%s node=%s",
+                node.task_id, node.node_id,
+            )
+        session_id = await self.get_group_session(gid)
+        logger.info(
+            "[task][task-executor] singlebot_2_group 取 session=%s task=%s node=%s group_id=%s",
+            session_id, node.task_id, node.node_id, gid,
+        )
+        self._poller.register(
+            BcsGroupHandle(
+                loop_task_id=loop_task_id,
+                group_id=gid,
+                collab_mode="chat",
+                registered_at=time.monotonic(),
+                session_id=session_id,
+                run_id=None,
+            )
+        )
+        node.run_info.assignee = gid
+        node.run_info.run_mode = "coop_group"
+        self._persist_dispatch_ids(node, group_id=gid, session_id=session_id, run_id=None)
+        logger.info(
+            "[task][task-executor] singlebot_2_group 旁路完成 task=%s node=%s group_id=%s session=%s → BcsGroupHandle 收敛",
+            node.task_id, node.node_id, gid, session_id,
+        )
+        return True
 
     async def _dispatch_coop_group(
 
@@ -295,6 +437,31 @@ class TaskExecutor:
                 task_id=node.task_id, node_id=node.node_id, extend_props_patch=ep
             )
         )
+
+    def _resolve_owner_user_id(self, gf: GroupFormation) -> str | None:
+        """解析任务 owner_user_id:优先 ``gf.extend_props["owner_user_id"]``(P2 直接注入);
+        否则按 ``loop_task_id`` 反查 ``graph.extend_props["owner_user_id"]``(覆盖 engine._drain 协作派发路径,
+        不改 dispatch/planning)。无则 None → 不拉人类观察者。"""
+        explicit = gf.extend_props.get("owner_user_id")
+        if explicit:
+            logger.info("[task][task_executor] resolve_owner_user_id 命中 gf.extend_props[owner_user_id] owner=%s", explicit)
+            return str(explicit)
+        loop_task_id = gf.extend_props.get("loop_task_id") or ""
+        task_id = loop_task_id.split("::", 1)[0] if loop_task_id else ""
+        if task_id and self._graph is not None:
+            try:
+                snapshot = self._graph.query_task_dashboard(task_id)
+            except Exception:  # noqa: BLE001 graph 不可用/查询失败 → 不阻断建群,仅不拉人
+                logger.warning("[task][task_executor] resolve owner_user_id 查询失败 task=%s", task_id)
+                return None
+            owner = (getattr(snapshot, "extend_props", None) or {}).get("owner_user_id")
+            logger.info("[task][task_executor] resolve_owner_user_id 反查 graph task=%s owner=%s", task_id, owner)
+            return str(owner) if owner else None
+        logger.info(
+            "[task][task_executor] resolve_owner_user_id 无来源(loop_task_id=%s graph=%s)→ 不拉人类观察者",
+            loop_task_id, self._graph is not None,
+        )
+        return None
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
         bot_ids = list(dict.fromkeys(gf.bot_ids))
@@ -456,7 +623,10 @@ class TaskExecutor:
                         "apiBaseUrl": gf.extend_props.get("api_base_url") or "",
                     },
                 }
-        if originator_bot_id:
+        _raw_originator = gf.extend_props.get("originator")
+        if _raw_originator:
+            req_kwargs["originator"] = str(_raw_originator)
+        elif originator_bot_id:
             req_kwargs["originator"] = bcs_uuid(str(originator_bot_id))
         service_spec = gf.extend_props.get("service_spec")
         if service_spec:
@@ -615,6 +785,23 @@ class TaskExecutor:
                         }, ensure_ascii=False)
                         + "\n验收未通过时将 status 改为 DONE，并在 acceptance_result.gaps 填写具体差距;只有执行失败才使用 FAILED。"
                     )
+        # 人类观察者(P1):任务 owner 以 observer 角色被拉入协作群(chat/manager_worker),不发言。
+        # routing_policy.inject_observers 默认生效,终产投递给观察者;state_machine 群 participants 不得带 role,故跳过。
+        if mode in _HUMAN_OBSERVER_MODES:
+            _owner_user_id = self._resolve_owner_user_id(gf)
+            if _owner_user_id:
+                req_kwargs["participants"] = list(req_kwargs.get("participants") or []) + [
+                    _human_observer_participant(_owner_user_id)
+                ]
+                req_kwargs["routing_policy"] = dict(_HUMAN_OBSERVER_ROUTING_POLICY)
+                req_kwargs.setdefault("label", gf.group_name or "")
+                logger.info(
+                    "[task][task_executor] form_coop_group 追加人类观察者(不发言) mode=%s owner=%s → routing_policy=inject_observers",
+                    mode, _owner_user_id,
+                )
+            else:
+                logger.info("[task][task_executor] form_coop_group 无 owner_user_id → 不拉人类观察者 mode=%s", mode)
+
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(
             "[task][task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",

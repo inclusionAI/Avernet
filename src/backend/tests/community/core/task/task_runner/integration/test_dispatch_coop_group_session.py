@@ -94,3 +94,29 @@ def test_dispatch_coop_group_session_mode_registers_session_handle():
     h = poller.registered[0]
     assert h.session_id == "s1" and h.run_id is None and h.collab_mode == "chat"
     assert h.loop_task_id == "t1::n1"
+
+
+def test_form_coop_group_appends_human_observer_when_owner_present():
+    """P1:有 owner_user_id 时,人类观察者(不发言)被追加为 participant,且 routing_policy.inject_observers 默认生效。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["drv", "w1"], collab_mode="chat",
+        extend_props={"owner_user_id": "35983"},
+    )))
+    req = bcs.created[0]
+    assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
+    assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
+
+
+def test_form_coop_group_no_human_observer_when_owner_absent():
+    """无 owner_user_id → 不追加人类观察者、不设 routing_policy(向后兼容,现有协作群不变)。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(bot_ids=["drv", "w1"], collab_mode="chat")))
+    req = bcs.created[0]
+    assert all(not str(p.get("bot_uuid", "")).startswith("human_") for p in req.participants)
+    assert req.routing_policy is None
+

@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from injector import inject
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.repository.protocols.task import TaskGraphRepositoryProtocol
 from agentclaw.community.core.task.domain.errors import GraphVersionConflictError
@@ -561,12 +561,21 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             return True
 
     def list_bbs_tasks_overview(
-        self, page: int = 1, page_size: int = 20
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search_word: str | None = None,
+        status: str | None = None,
     ) -> "tuple[list[BbsTaskOverviewRecord], int]":
         """列 BBS 接力任务(run_mode='bbs')的一页(1-based):``task_node_run_info`` ⋈ ``task_node``
         (task_id+node_id),再按 distinct task_id 批量补 ``task_info.owner_bot_id``→publisher(缺失→None)。
-        只读投影;返回 ``(records, total)``——``total`` 为 run_mode='bbs' 联合全量行数,``records`` 为当前页
+        只读投影;返回 ``(records, total)``——``total`` 为**过滤后**行数,``records`` 为当前页
         (按 ``task_node_run_info.id`` 降序(最新优先)稳定切片,LIMIT/OFFSET;页越界 → 空列表,``total`` 仍真实)。
+
+        可选过滤(为 None 即不拼,退化为纯分页):``status``(单值,对 ``task_node.status`` 等值);
+        ``search_word``(大小写不敏感模糊匹配 ``task_node.task_spec`` 或 ``task_node_run_info.extend_props``
+        两列文本;``%``/``_`` 视作通配符,不做转义)。count 与分页两查询共用同一组 filters,保证 total 与页一致。
 
         ``task_spec``/``extend_props``/``acceptance_result`` 复用模型 ``to_record()`` 的 JSON 解析;
         title/goal/acceptances/assignee_name 由 adapter translator 二次解析(不在此 record 内)。
@@ -578,24 +587,32 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             TaskNodeRunInfoModel.task_id == TaskNodeModel.task_id,
             TaskNodeRunInfoModel.node_id == TaskNodeModel.node_id,
         )
+        filters: list = [
+            TaskNodeRunInfoModel.run_mode == "bbs",
+            TaskNodeModel.is_deleted.is_(False),
+        ]
+        if status is not None:
+            filters.append(TaskNodeModel.status == status)
+        if search_word is not None:
+            pat = f"%{search_word.lower()}%"
+            filters.append(
+                or_(
+                    func.lower(TaskNodeModel.task_spec).like(pat),
+                    func.lower(TaskNodeRunInfoModel.extend_props).like(pat),
+                )
+            )
         with self._db.orm_session() as db:
             total = (
                 db.query(func.count(TaskNodeRunInfoModel.task_id))
                 .join(TaskNodeModel, join_clause)
-                .filter(
-                    TaskNodeRunInfoModel.run_mode == "bbs",
-                    TaskNodeModel.is_deleted.is_(False),
-                )
+                .filter(*filters)
                 .scalar()
             ) or 0
 
             joined = (
                 db.query(TaskNodeRunInfoModel, TaskNodeModel)
                 .join(TaskNodeModel, join_clause)
-                .filter(
-                    TaskNodeRunInfoModel.run_mode == "bbs",
-                    TaskNodeModel.is_deleted.is_(False),
-                )
+                .filter(*filters)
                 .order_by(TaskNodeRunInfoModel.id.desc())
                 .limit(page_size)
                 .offset(offset)

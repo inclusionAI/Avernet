@@ -379,7 +379,7 @@ def bbs_result_error():
 
 # BBS task listing (GET /bbs/list):all run_mode='bbs' runs joined to their node + publisher.
 def _seed_bbs_list_service(world) -> None:
-    def list_bbs_tasks(_self, page=1, page_size=20):
+    def list_bbs_tasks(_self, page=1, page_size=20, *, search_word=None, status=None):
         return [
             BbsTaskOverviewRecord(
                 task_id="bbs-endpoint-1",

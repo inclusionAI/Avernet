@@ -378,14 +378,21 @@ class TaskGraphRepositoryProtocol(Protocol):
 
     @abstractmethod
     def list_bbs_tasks_overview(
-        self, page: int = 1, page_size: int = 20
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search_word: str | None = None,
+        status: str | None = None,
     ) -> "tuple[list[BbsTaskOverviewRecord], int]":
         """List one page (1-based) of BBS relay runs: ``task_node_run_info`` (run_mode='bbs')
         ⋈ ``task_node`` on (task_id, node_id), with ``task_info.owner_bot_id`` attached as
         ``publisher`` (batch-looked-up by task_id; missing task_info → ``None``). Returns
-        ``(records, total)``: ``total`` is the full run_mode='bbs' join row count, ``records``
-        the stable ``(task_id, node_id)``-ordered page slice (LIMIT/OFFSET). Read-only
-        overview projection feeding ``GET /api/v1/collaboration/tasks/bbs/list``."""
+        ``(records, total)``: ``total`` is the filtered row count, ``records`` the stable
+        ``(task_id, node_id)``-ordered page slice (LIMIT/OFFSET). Optional filters (None → no
+        filter): ``status`` (single value, equals ``task_node.status``); ``search_word``
+        (case-insensitive LIKE on ``task_node.task_spec`` or ``task_node_run_info.extend_props``).
+        Read-only overview projection feeding ``GET /api/v1/collaboration/tasks/bbs/list``."""
         ...
 
 

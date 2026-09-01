@@ -57,13 +57,18 @@ class TaskServiceProtocol(Protocol):
         ...
 
     def list_bbs_tasks(
-        self, page: int = 1, page_size: int = 20
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search_word: str | None = None,
+        status: str | None = None,
     ) -> "tuple[list[BbsTaskOverviewRecord], int]":
         """列 BBS 接力任务(run_mode='bbs')的一页(1-based):``task_node_run_info`` ⋈ ``task_node`` 联合,
         再按 task_id 补 ``task_info.owner_bot_id``(publisher)。返回 ``(records, total)``——``records`` 为
         ``BbsTaskOverviewRecord``(含 task_spec/extend_props 原始 dict),title/goal/acceptances/
-        assignee_name 由 adapter translator 二次解析;``total`` 为全量行数。供 bbs/list 路由调用,
-        委托 TaskGraphService.list_bbs_tasks_overview。"""
+        assignee_name 由 adapter translator 二次解析;``total`` 为**过滤后**行数。status/search_word
+        可选过滤(为空不过滤),供 bbs/list 路由调用,委托 TaskGraphService.list_bbs_tasks_overview。"""
         ...
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:

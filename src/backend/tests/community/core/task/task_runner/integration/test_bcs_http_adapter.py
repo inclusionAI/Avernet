@@ -64,6 +64,42 @@ def test_create_group_state_machine_forces_strategy_and_start_false():
     assert '"group_strategy":"state_machine"' in seen["body"].replace(" ", "")
 
 
+def test_create_group_forwards_routing_policy_and_label_when_set():
+    import json
+
+    seen = {}
+
+    def h(req):
+        seen["body"] = json.loads(req.read())
+        return httpx.Response(200, json={"group_id": "g9", "session_id": None})
+
+    req = BcsCreateGroupRequest(
+        driver_bot="drv",
+        participants=[{"bot_uuid": "drv"}],
+        routing_policy={"default_bot_final_delivery": "inject_observers"},
+        label="task-t1-c1",
+    )
+    res = _run(_adapter(h).create_group(req))
+    assert res.group_id == "g9"
+    assert seen["body"]["routing_policy"] == {"default_bot_final_delivery": "inject_observers"}
+    assert seen["body"]["label"] == "task-t1-c1"
+
+
+def test_create_group_omits_routing_policy_and_label_when_none():
+    import json
+
+    seen = {}
+
+    def h(req):
+        seen["body"] = json.loads(req.read())
+        return httpx.Response(200, json={"group_id": "g9", "session_id": None})
+
+    req = BcsCreateGroupRequest(driver_bot="drv", participants=[{"bot_uuid": "drv"}])
+    _run(_adapter(h).create_group(req))
+    assert "routing_policy" not in seen["body"]
+    assert "label" not in seen["body"]
+
+
 def test_create_session_returns_session_id():
     def h(req):
         assert req.url.path == "/groups/g1/sessions"

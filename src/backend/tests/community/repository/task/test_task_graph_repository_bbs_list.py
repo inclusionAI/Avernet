@@ -56,8 +56,14 @@ def _seed_task(
     assignee: str = "asg-1",
     publisher: str = "pub-1",
     with_task_info: bool = True,
+    status: Status = Status.RUNNING,
+    task_spec: dict | None = None,
+    extend_props: dict | None = None,
 ) -> None:
-    """落 task_info(可选) + task_node + task_node_run_info 三行,返回控制 bbs 过滤的种子。"""
+    """落 task_info(可选) + task_node + task_node_run_info 三行;status 为 task_node 态,
+    task_spec/extend_props 控制搜索匹配列(默认 _TASK_SPEC / {"assignee_name":"Alice"})。"""
+    spec = task_spec if task_spec is not None else _TASK_SPEC
+    props = {"assignee_name": "Alice"} if extend_props is None else extend_props
     if with_task_info:
         TaskInfoRepository(db).insert(
             TaskInfoRecord(
@@ -76,8 +82,8 @@ def _seed_task(
             id=0,
             task_id=task_id,
             node_id=node_id,
-            task_spec=_TASK_SPEC,
-            status=Status.RUNNING,
+            task_spec=spec,
+            status=status,
         )
     )
     TaskNodeRunInfoRepository(db).insert(
@@ -91,7 +97,7 @@ def _seed_task(
             acceptance_result={"verdict": "PASS", "acceptances_metric": [], "gaps": []},
             retry=0,
             session_id=None,
-            extend_props={"assignee_name": "Alice"},
+            extend_props=props,
             start_time=1000,
             update_time=None,
             end_time=None,
@@ -229,3 +235,138 @@ def test_task_service_facade_list_bbs_tasks(db):
     assert len(rows) == 1
     assert rows[0].task_id == "bbs-1"
     assert rows[0].publisher == "pub-1"
+
+
+# ── status 过滤(repo 层)──
+
+
+def test_list_bbs_tasks_overview_filters_by_status(db):
+    """status 等值过滤:只返回匹配,与 total 一致。"""
+    _seed_task(db, task_id="run-1", node_id="n1", run_mode="bbs", status=Status.RUNNING)
+    _seed_task(db, task_id="done-1", node_id="n2", run_mode="bbs", status=Status.DONE)
+    _seed_task(db, task_id="run-2", node_id="n3", run_mode="bbs", status=Status.RUNNING)
+
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(status="RUNNING")
+
+    assert total == 2
+    assert {r.task_id for r in rows} == {"run-1", "run-2"}
+
+
+def test_list_bbs_tasks_overview_status_no_match(db):
+    """status 无匹配 → total=0、rows=[]。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs", status=Status.RUNNING)
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(status="DONE")
+    assert total == 0
+    assert rows == []
+
+
+def test_list_bbs_tasks_overview_status_excludes_non_bbs(db):
+    """status 过滤只在 bbs 行内生效;非 bbs 行既不计 total 也进不了页。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs", status=Status.RUNNING)
+    _seed_task(db, task_id="single-1", node_id="n2", run_mode="single_bot", status=Status.RUNNING)
+
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(status="RUNNING")
+    assert total == 1
+    assert rows[0].task_id == "bbs-1"
+
+
+# ── search_word 模糊匹配(repo 层,task_spec / extend_props 两列 OR)──
+
+
+def test_list_bbs_tasks_overview_search_word_matches_task_spec(db):
+    """search_word 命中 task_node.task_spec(整列文本 like,大小写不敏感)。"""
+    _seed_task(
+        db, task_id="bbs-1", node_id="n1", run_mode="bbs",
+        task_spec={"metadata": {"title": "AlphaUnique"}},
+    )
+    _seed_task(
+        db, task_id="bbs-2", node_id="n2", run_mode="bbs",
+        task_spec={"metadata": {"title": "BetaUnique"}},
+    )
+
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(search_word="alphaunique")
+
+    assert total == 1
+    assert rows[0].task_id == "bbs-1"
+
+
+def test_list_bbs_tasks_overview_search_word_matches_extend_props(db):
+    """search_word 命中 task_node_run_info.extend_props(task_spec 不含该词)。"""
+    _seed_task(
+        db, task_id="bbs-1", node_id="n1", run_mode="bbs",
+        extend_props={"assignee_name": "ZoeUnique"},
+    )
+    _seed_task(
+        db, task_id="bbs-2", node_id="n2", run_mode="bbs",
+        extend_props={"assignee_name": "Other"},
+    )
+
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(search_word="zoeunique")
+
+    assert total == 1
+    assert rows[0].task_id == "bbs-1"
+
+
+def test_list_bbs_tasks_overview_search_word_case_insensitive(db):
+    """search_word 大小写不敏感(func.lower 两端)。"""
+    _seed_task(
+        db, task_id="bbs-1", node_id="n1", run_mode="bbs",
+        task_spec={"metadata": {"title": "MixedCaseTitle"}},
+    )
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(search_word="mixedcasetitle")
+    assert total == 1
+    assert rows[0].task_id == "bbs-1"
+
+
+def test_list_bbs_tasks_overview_search_word_no_match(db):
+    """search_word 无命中 → total=0、rows=[]。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs")
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(search_word="zzznotfound")
+    assert total == 0
+    assert rows == []
+
+
+def test_list_bbs_tasks_overview_combines_status_and_search_word(db):
+    """status + search_word 组合;total 为交集。"""
+    _seed_task(
+        db, task_id="bbs-1", node_id="n1", run_mode="bbs", status=Status.RUNNING,
+        task_spec={"metadata": {"title": "Alpha"}},
+    )
+    _seed_task(
+        db, task_id="bbs-2", node_id="n2", run_mode="bbs", status=Status.DONE,
+        task_spec={"metadata": {"title": "AlphaBeta"}},
+    )
+    _seed_task(
+        db, task_id="bbs-3", node_id="n3", run_mode="bbs", status=Status.RUNNING,
+        task_spec={"metadata": {"title": "Gamma"}},
+    )
+
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(
+        status="RUNNING", search_word="alpha"
+    )
+    assert total == 1
+    assert rows[0].task_id == "bbs-1"
+
+
+def test_list_bbs_tasks_overview_none_filters_degrade_to_pure_paging(db):
+    """status=None / search_word=None → 退化为纯分页(行为不变)。"""
+    _seed_bbs(db, ["bbs-1", "bbs-2"])
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview(search_word=None, status=None)
+    assert total == 2
+
+
+def test_graph_service_list_bbs_tasks_overview_forwards_filters(db):
+    """TaskGraphService 透传 status/search_word 到 repo(过滤生效)。"""
+    _seed_task(
+        db, task_id="run-1", node_id="n1", run_mode="bbs", status=Status.RUNNING,
+        task_spec={"metadata": {"title": "Alpha"}},
+    )
+    _seed_task(
+        db, task_id="done-1", node_id="n2", run_mode="bbs", status=Status.DONE,
+        task_spec={"metadata": {"title": "Alpha"}},
+    )
+
+    svc = TaskGraphService(graph_repo=TaskGraphRepository(db))
+    rows, total = svc.list_bbs_tasks_overview(status="RUNNING", search_word="alpha")
+    assert total == 1
+    assert rows[0].task_id == "run-1"

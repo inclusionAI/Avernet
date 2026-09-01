@@ -14,7 +14,7 @@
   POST /api/v1/collaboration/tasks/bbs/claim        — BBS 接力步②:CAS 占根(恰一赢,输者 409)
   POST /api/v1/collaboration/tasks/bbs/attach        — BBS 接力步④:挂 run_mode=bbs scoped 子节点 + start
   POST /api/v1/collaboration/tasks/bbs/result        — BBS 接力步⑤:回投终态 + 释放 claim
-  GET  /api/v1/collaboration/tasks/bbs/list          — 列所有 BBS 接力任务(run_info⋈node + publisher)
+  GET  /api/v1/collaboration/tasks/bbs/list          — 列 BBS 接力任务(分页;可选 status / search_word 过滤)
   POST /api/v1/collaboration/tasks/discovery/discover — 任务发现阶段:读取任务 → per-bot engine 建 session → 投递通知
   GET  /api/v1/collaboration/tasks/discovery/status   — 任务发现状态(读 SQLite db)
 
@@ -133,6 +133,18 @@ def _validate_status_filter(status: str | None) -> None:
     for tok in (t.strip().upper() for t in status.split(",") if t.strip()):
         if tok not in valid:
             raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
+
+
+def _validate_single_status(status: str | None) -> str | None:
+    """校验单值 status:空白(None/空串) → None(不过滤);非空则 strip+upper 后必须 ∈ Status 枚举值,
+    否则 400(含逗号多值,如 ``RUNNING,DONE`` 不在枚举内 → 400,强制单值契约)。返回归一化大写字符串,
+    供 ``task_node.status == v`` 直接比对;与多值版 ``_validate_status_filter`` 区分(后者用于 /list)。"""
+    if status is None or not status.strip():
+        return None
+    v = status.strip().upper()
+    if v not in {s.value for s in Status}:
+        raise HTTPException(status_code=400, detail=f"invalid status: {status}")
+    return v
 
 
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
@@ -496,6 +508,14 @@ async def list_bbs_tasks(
     page_size: int = Query(
         default=20, ge=1, le=100, description="每页数量,默认 20,最大 100"
     ),
+    search_word: str | None = Query(
+        default=None,
+        description="可选模糊匹配:对 task_spec/extend_props 两列文本大小写不敏感 LIKE;空则不过滤",
+    ),
+    status: str | None = Query(
+        default=None,
+        description="可选单值状态过滤(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG/CANCELLED);逗号多值/非法 → 400",
+    ),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[Page[BbsTaskItemDTO]]:
     """列 BBS 接力任务(run_mode='bbs')的一页:`task_node_run_info` r ⋈ `task_node` n (task_id+node_id),
@@ -505,12 +525,22 @@ async def list_bbs_tasks(
     ``Page{total, items}``——``items`` 为 ``BbsTaskItemDTO``(SQL 直投字段 task_id/node_id/run_mode/
     retry/assignee_id/status/acceptance_result/extend_props/relay_* time/task_spec + adapter 二次解析字段
     title=task_spec.metadata.title / goal=task_spec.goal.objective / acceptances=task_spec.goal.acceptances
-    / assignee_name=extend_props.assignee_name / publisher);``total`` 为 run_mode='bbs' 全量行数。
-    结果按 run info 记录 id 降序(最新优先);页越界 → items=[] 但 total 真实;非法 page/page_size →
-    422(Query 校验)。translator 投影遵循
-    Rule 22(adapter 只转协议);领域查询委托 TaskServiceProtocol.list_bbs_tasks(page, page_size)。
+    / assignee_name=extend_props.assignee_name / publisher);``total`` 为**过滤后**行数。
+
+    可选过滤(为空时退化为纯分页,行为不变):``status``(单值,对 ``task_node.status`` 等值;逗号多值/非法值
+    → 400)、``search_word``(大小写不敏感模糊匹配 ``task_spec`` 或 ``extend_props`` 文本;``%``/``_`` 视作
+    通配符)。结果按 run info 记录 id 降序(最新优先);页越界 → items=[] 但 total 真实;非法 page/page_size →
+    422(Query 校验)。translator 投影遵循 Rule 22(adapter 只转协议);
+    领域查询委托 TaskServiceProtocol.list_bbs_tasks(page, page_size, search_word=?, status=?)。
     """
-    records, total = service.list_bbs_tasks(page=page, page_size=page_size)
+    normalized_status = _validate_single_status(status)
+    normalized_word = (search_word or "").strip() or None
+    records, total = service.list_bbs_tasks(
+        page=page,
+        page_size=page_size,
+        search_word=normalized_word,
+        status=normalized_status,
+    )
     return page_envelope(total, [bbs_task_overview_to_dto(r) for r in records], request)
 
 
