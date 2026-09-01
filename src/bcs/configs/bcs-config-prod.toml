@@ -35,7 +35,7 @@ onboard_binding_enabled = false
 
 dingtalk_accounts = []
 api_keys = []
-allowed_switch_provider_ids = []
+allowed_switch_provider_ids = ["${DEFAULT_PROVIDER_ID}"]
 
 [cors]
 allowed_origins = [
