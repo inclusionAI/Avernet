@@ -283,6 +283,11 @@ user_config:
       user: optional
       app: required
 
+    "/openapi/v1/auth/**":
+      user: optional
+      app: optional
+      bot: optional
+
     "/openapi/v1/collaboration/**":
       user: optional
       app: optional
@@ -411,6 +416,10 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      auth:
+        server: bcs
+        protocols: [http]
+        schema: {}
       collaboration:
         server: bcs
         protocols: [http, websocket]

@@ -128,6 +128,15 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
         == "/openapi/v1/collaboration/friend-connections/requests"
     )
 
+    auth = dm.http_domain_for("/openapi/v1/auth/user")
+    assert auth is not None
+    assert auth.server.name == "bcs"
+    assert auth.server.base_url == "http://bcs:8081"
+    assert auth.serves_http
+    assert not auth.serves_websocket
+    assert auth.rewrite is None
+    assert auth.upstream_path("/openapi/v1/auth/user") == "/openapi/v1/auth/user"
+
     security = RouteSecurity.from_table(raw["user_config"]["route_security"])
     requirement = security.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
     assert requirement == {

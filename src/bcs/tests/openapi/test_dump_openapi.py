@@ -16,10 +16,12 @@ from scripts.dump_openapi import dump_contract  # noqa: E402
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 COLLABORATION_TAGS = [
+    "Authentication",
     "Collaboration / Bots",
     "Collaboration / Friendships",
     "Collaboration / Groups",
     "Collaboration / Sessions",
+    "Collaboration / Register",
     "Collaboration / Invitations",
     "Collaboration / Channels",
     "Collaboration / Event Subscriptions",
@@ -63,13 +65,17 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 56)
+        self.assertEqual(len(operations), 64)
         collection = contract["paths"][
             "/openapi/v1/collaboration/sessions/{session_id}/collect"
         ]
         self.assertEqual(set(collection), {"post", "delete"})
         self.assertTrue(
-            all(path.startswith("/openapi/v1/collaboration/") for _, path in operations)
+            all(
+                path.startswith("/openapi/v1/collaboration/")
+                or path.startswith("/openapi/v1/auth/")
+                for _, path in operations
+            )
         )
         self.assertTrue(all(reference.startswith("#/") for reference in _references(contract)))
 
@@ -110,7 +116,7 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 13)
+        self.assertEqual(len(operations), 22)
         self.assertTrue(
             all(path.startswith("/api/v1/collaboration/") for _, path in operations)
         )

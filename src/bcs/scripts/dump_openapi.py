@@ -30,14 +30,18 @@ except ImportError:
 DEFAULT_CONTRACT_ROOT = Path(__file__).resolve().parents[1] / "api-contracts" / "v1"
 
 
-def _validate_collaboration_prefix(contract: dict[str, object], prefix: str) -> None:
+def _validate_operation_prefixes(contract: dict[str, object], prefix: str) -> None:
+    prefixes = (prefix,)
+    if prefix == PUBLIC_COLLABORATION_PREFIX:
+        prefixes = (PUBLIC_COLLABORATION_PREFIX, "/openapi/v1/auth/")
     for path, path_item in contract.get("paths", {}).items():
         if not isinstance(path_item, dict):
             continue
         if any(method.lower() in HTTP_METHODS for method in path_item):
-            if not path.startswith(prefix):
+            if not any(path.startswith(item) for item in prefixes):
+                joined = " or ".join(prefixes)
                 raise ValueError(
-                    f"OpenAPI operation path must use {prefix}: {path}"
+                    f"OpenAPI operation path must use {joined}: {path}"
                 )
 
 
@@ -55,7 +59,7 @@ def dump_contract(
     )
     if errors:
         raise ValueError("\n".join(errors))
-    _validate_collaboration_prefix(contract, path_prefix)
+    _validate_operation_prefixes(contract, path_prefix)
     _rewrite_discriminator_mappings(contract)
 
     output.parent.mkdir(parents=True, exist_ok=True)
