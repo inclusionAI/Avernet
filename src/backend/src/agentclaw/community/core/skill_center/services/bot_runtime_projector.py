@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping, Sequence
+import time
 
 from injector import inject
 
@@ -11,6 +12,9 @@ from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,
     passport_mcp_items_from_codes,
     resolve_mcp_identity_modes,
+)
+from agentclaw.community.core.mcp.services.cli_passport_scope import (
+    build_passport_resource_scope,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
@@ -465,6 +469,8 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         second copy that drifted would silently reassert
         ``identity_mode: "owner"`` for every MCP.
         """
+        started = time.monotonic()
+        stage = "snapshot"
         try:
             passport_codes = filter_passport_mcp_codes(plan.projection.mcp_server_codes)
             # Mandatory, not an optimisation — see ``_passport_mcp_items``.
@@ -474,22 +480,50 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 engine=plan.engine,
                 codes=passport_codes,
             )
+            logger.info(
+                "agentpass_runtime_scope_update_requested bot_id=%s engine_type=%s "
+                "branch=runtime_projection stage=%s mcp_count=%s cli_count=%s duration_ms=%s",
+                plan.bot_id,
+                plan.engine,
+                stage,
+                len(mcp_items),
+                len(plan.effective_cli_items),
+                0,
+            )
+            resource_scope = build_passport_resource_scope(
+                self._passport.query_agent_passport(plan.bot_id, plan.owner_id),
+                desired_mcp_items=mcp_items,
+                mcp_identity_modes=plan.identity_modes,
+                additional_cli_items=plan.effective_cli_items,
+            )
+            stage = "update"
             self._passport.update_passport(
                 bot_id=plan.bot_id,
                 user_id=plan.owner_id,
                 engine_type=plan.engine,
-                resource_scope={
-                    # Derived from the items rather than passed separately:
-                    # ``unpack_resource_scope`` ignores ``mcp_codes`` once
-                    # ``mcp_items`` is present, so two independent lists could
-                    # silently diverge and only one would reach the passport service.
-                    "mcp_codes": [item["mcp_code"] for item in mcp_items],
-                    "mcp_items": mcp_items,
-                    "cli_items": plan.effective_cli_items,
-                },
+                resource_scope=resource_scope,
+            )
+            logger.info(
+                "agentpass_runtime_scope_update_succeeded bot_id=%s engine_type=%s "
+                "branch=runtime_projection stage=%s status=succeeded mcp_count=%s cli_count=%s duration_ms=%s",
+                plan.bot_id,
+                plan.engine,
+                stage,
+                len(resource_scope["mcp_items"]),
+                len(resource_scope["cli_items"]),
+                int((time.monotonic() - started) * 1000),
             )
         except Exception as exc:
-            raise SkillSetRuntimeReconcileError() from exc
+            logger.error(
+                "agentpass_runtime_scope_update_failed bot_id=%s engine_type=%s "
+                "branch=runtime_projection stage=%s status=failed error_type=%s duration_ms=%s",
+                plan.bot_id,
+                plan.engine,
+                stage,
+                type(exc).__name__,
+                int((time.monotonic() - started) * 1000),
+            )
+            raise SkillSetRuntimeReconcileError() from None
 
 
 __all__ = [

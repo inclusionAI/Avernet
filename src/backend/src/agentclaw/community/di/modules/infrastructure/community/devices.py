@@ -19,6 +19,7 @@ from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.devices.protocols import BotQueryProtocol
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.baas_device_accessor import BaasDeviceAccessor
@@ -35,6 +36,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
+from agentclaw.community.core.mcp.services.cli_passport_scope import CliPassportScopeReconciler
 
 
 class CommunityDevicesModule(Module):
@@ -89,6 +91,7 @@ class CommunityDevicesModule(Module):
         bot_publish_repo: BotPublishRepositoryProtocol,
         passport_plugin: PassportPlugin,
         sandbox_client: SandboxRuntimeClient,
+        caller_identity_repository: CallerIdentityRepositoryProtocol,
     ) -> DeviceService:
         """BaaS-only ``DeviceServiceRouter`` — no ARCA provider, no corp config.
 
@@ -120,4 +123,8 @@ class CommunityDevicesModule(Module):
             sandbox_client=sandbox_client,
             publish_repo=bot_publish_repo,
             bot_repo=bot_repository,
+            cli_scope_reconciler=CliPassportScopeReconciler(
+                passport_plugin=passport_plugin,
+                identity_repository=caller_identity_repository,
+            ),
         )

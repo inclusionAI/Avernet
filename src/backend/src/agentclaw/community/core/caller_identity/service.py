@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import time
 from typing import Any
 
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
@@ -12,6 +13,8 @@ from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousErr
 from agentclaw.community.core.caller_identity.contracts import (
     CALLER_IDENTITY_CAPABILITY,
     CallerCallTypeInvalidError,
+    CallerCliNotFoundError,
+    CallerCliSyncError,
     CallerContext,
     CallerIamTokenContext,
     CallerIdentityAmbiguousError,
@@ -23,6 +26,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerMcpNotFoundError,
     CallerMcpSyncError,
     McpCallType,
+    CliCallTypeUpdateResult,
     McpCallTypeUpdateResult,
 )
 from agentclaw.community.core.caller_identity.credential import (
@@ -38,16 +42,20 @@ from agentclaw.community.core.caller_identity.protocols import (
 from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityEngineChangedError, CallerIdentityLockMismatchError
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
+from agentclaw.community.core.mcp.services.cli_passport_scope import (
+    CliPassportScopeReconciler,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.caller_identity.caller_identity_service_protocol import CallerIdentityServiceProtocol
+from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 logger = get_logger()
 
 
 class CallerIdentityService(CallerIdentityServiceProtocol):
-    """Persist per-MCP modes and expose the aggregate Bot call type."""
+    """Persist per-resource modes and expose the aggregate Bot call type."""
 
     def __init__(
         self,
@@ -58,6 +66,8 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         mcp_provider: BotMCPProvider,
         repository: CallerIdentityRepositoryProtocol,
         mcp_sync_service: CallerMcpSyncProtocol,
+        passport_plugin: PassportPlugin | None = None,
+        cli_scope_reconciler: CliPassportScopeReconciler | None = None,
     ) -> None:
         self._bot_repository = bot_repository
         self._collaborator_repository = collaborator_repository
@@ -65,6 +75,15 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         self._mcp_provider = mcp_provider
         self._repository = repository
         self._mcp_sync_service = mcp_sync_service
+        self._passport_plugin = passport_plugin
+        self._cli_scope_reconciler = cli_scope_reconciler or (
+            CliPassportScopeReconciler(
+                passport_plugin=passport_plugin,
+                identity_repository=repository,
+            )
+            if passport_plugin is not None
+            else None
+        )
 
     async def update_mcp_call_type(
         self,
@@ -188,6 +207,176 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             bot_call_type=mutation.bot_call_type,
         )
 
+    async def update_cli_call_type(
+        self,
+        *,
+        bot_id: str,
+        cli_code: str,
+        call_type: McpCallType,
+        actor_id: str,
+        lock_epoch: int | None = None,
+        entity_id: str | None = None,
+    ) -> CliCallTypeUpdateResult:
+        """Persist one CLI override and synchronously refresh full Passport scope."""
+        started = time.monotonic()
+        logger.info(
+            "cli_call_type_update_requested bot_id=%s cli_code=%s actor_id=%s "
+            "call_type=%s lock_epoch_supplied=%s entity_scoped=%s",
+            bot_id,
+            cli_code,
+            actor_id,
+            getattr(call_type, "value", call_type),
+            lock_epoch is not None,
+            entity_id is not None,
+        )
+        normalized_call_type = self._parse_call_type(call_type)
+        bot = self._get_bot(bot_id, entity_id)
+        # COSEC: entity-scoped lookup identifies the Bot; only its owner can mutate it.
+        if str(bot.get("owner_id") or "") != actor_id:
+            raise CallerIdentityPermissionError
+        if bot.get("bot_type") != "service" or bot.get("status") != "ACTIVE":
+            raise CallerIdentityReadOnlyError
+        if self._cli_scope_reconciler is None:
+            logger.error(
+                "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
+                "phase=scope_reconciler error_type=%s duration_ms=%s",
+                bot_id, cli_code, actor_id, "Unavailable", int((time.monotonic() - started) * 1000),
+            )
+            raise CallerCliSyncError
+        engine_type = str(bot["active_engine"])
+        if not self._cli_scope_reconciler.supports_profile(bot=bot):
+            logger.warning(
+                "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
+                "phase=profile error_type=%s engine_type=%s duration_ms=%s",
+                bot_id,
+                cli_code,
+                actor_id,
+                "UnsupportedCliProfile",
+                engine_type,
+                int((time.monotonic() - started) * 1000),
+            )
+            raise CallerIdentityReadOnlyError
+        try:
+            current_cli_items = self._cli_scope_reconciler.current_passport_cli_items(
+                bot=bot
+            )
+        except Exception as exc:
+            logger.error(
+                "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
+                "phase=query_scope error_type=%s duration_ms=%s",
+                bot_id, cli_code, actor_id, type(exc).__name__,
+                int((time.monotonic() - started) * 1000),
+            )
+            raise CallerCliSyncError from exc
+        if cli_code not in {str(item.get("cli_code") or "") for item in current_cli_items}:
+            logger.warning(
+                "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
+                "phase=validate_cli error_type=%s duration_ms=%s",
+                bot_id, cli_code, actor_id, "CliNotFound", int((time.monotonic() - started) * 1000),
+            )
+            raise CallerCliNotFoundError
+        active_mcps = self._mcp_provider.collect_bot_active_mcps(
+            entity_id=str(bot["entity_id"]),
+            bot_id=bot_id,
+            user_id=actor_id,
+            entity_type=str(bot.get("entity_type") or "staff"),
+            engine_type=engine_type,
+        )
+        effective_server_codes = {
+            str(item["server_code"])
+            for item in active_mcps
+            if isinstance(item, Mapping) and item.get("server_code")
+        }
+        effective_cli_codes = {
+            str(item["cli_code"])
+            for item in current_cli_items
+            if item.get("cli_code")
+        }
+        lock_key = f"{bot_id}:{actor_id}"
+        lock = self._lock_repository.get_by_key(lock_key)
+        if lock_epoch is None:
+            if lock is not None:
+                logger.warning(
+                    "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
+                    "phase=lock error_type=%s lock_epoch_supplied=%s duration_ms=%s",
+                    bot_id, cli_code, actor_id, "LockEpochInvalid", False,
+                    int((time.monotonic() - started) * 1000),
+                )
+                raise CallerLockEpochError
+        elif lock is None or lock.holder_user_id != actor_id or lock.id != lock_epoch:
+            logger.warning(
+                "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
+                "phase=lock error_type=%s lock_epoch_supplied=%s duration_ms=%s",
+                bot_id, cli_code, actor_id, "LockEpochInvalid", True,
+                int((time.monotonic() - started) * 1000),
+            )
+            raise CallerLockEpochError
+        try:
+            mutation = self._repository.replace_draft_cli_call_type(
+                bot_pk=int(bot["id"]),
+                engine_type=engine_type,
+                cli_code=cli_code,
+                call_type=normalized_call_type,
+                modifier_id=actor_id,
+                lock_key=lock_key,
+                lock_holder_user_id=actor_id,
+                lock_epoch=lock_epoch,
+                effective_server_codes=effective_server_codes,
+                effective_cli_codes=effective_cli_codes,
+            )
+        except CallerIdentityLockMismatchError as exc:
+            logger.warning(
+                "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
+                "phase=persist error_type=%s duration_ms=%s",
+                bot_id, cli_code, actor_id, type(exc).__name__,
+                int((time.monotonic() - started) * 1000),
+            )
+            raise CallerLockEpochError from exc
+        except CallerIdentityEngineChangedError as exc:
+            logger.warning(
+                "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
+                "phase=persist error_type=%s duration_ms=%s",
+                bot_id, cli_code, actor_id, type(exc).__name__,
+                int((time.monotonic() - started) * 1000),
+            )
+            raise CallerIdentityReadOnlyError from exc
+        try:
+            self._cli_scope_reconciler.reconcile(
+                bot=bot,
+                force_update=True,
+            )
+        except Exception as exc:
+            self._compensate_cli_after_sync_failure(
+                bot=bot,
+                bot_id=bot_id,
+                cli_code=cli_code,
+                engine_type=engine_type,
+                mutation=mutation,
+                actor_id=actor_id,
+                lock_epoch=lock_epoch,
+                effective_server_codes=effective_server_codes,
+                effective_cli_codes=effective_cli_codes,
+                started=started,
+            )
+            logger.error(
+                "cli_call_type_update_failed bot_id=%s cli_code=%s actor_id=%s "
+                "phase=update_scope error_type=%s lock_epoch_supplied=%s duration_ms=%s",
+                bot_id, cli_code, actor_id, type(exc).__name__, lock_epoch is not None,
+                int((time.monotonic() - started) * 1000),
+            )
+            raise CallerCliSyncError from exc
+        logger.info(
+            "cli_call_type_update_succeeded bot_id=%s cli_code=%s actor_id=%s "
+            "call_type=%s bot_call_type=%s lock_epoch_supplied=%s duration_ms=%s",
+            bot_id, cli_code, actor_id, normalized_call_type.value, mutation.bot_call_type.value,
+            lock_epoch is not None, int((time.monotonic() - started) * 1000),
+        )
+        return CliCallTypeUpdateResult(
+            cli_code=cli_code,
+            call_type=normalized_call_type,
+            bot_call_type=mutation.bot_call_type,
+        )
+
     def get_context(
         self,
         *,
@@ -197,13 +386,20 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         publish_id: int | None = None,
         entity_id: str | None = None,
     ) -> CallerContext:
-        """Return draft MCP details and the Bot aggregate for an authorized user."""
+        """Return draft MCP/CLI overrides and the Bot aggregate for an authorized user."""
         normalized_stage = CallerIdentityStage(stage)
         bot, is_owner = self._authorize_read(bot_id, actor_id, entity_id)
+        engine_type = str(bot["active_engine"])
         mcp_call_types = dict(
             self._repository.list_draft_call_types(
                 int(bot["id"]),
-                str(bot["active_engine"]),
+                engine_type,
+            )
+        )
+        cli_call_types = dict(
+            self._repository.list_draft_cli_call_types(
+                int(bot["id"]),
+                engine_type,
             )
         )
         return CallerContext(
@@ -212,6 +408,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             publish_id=publish_id,
             bot_call_type=self._bot_call_type(bot),
             mcp_call_types=mcp_call_types,
+            cli_call_types=cli_call_types,
             editable=(
                 is_owner
                 and normalized_stage is CallerIdentityStage.DRAFT
@@ -226,7 +423,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         publish_id: int | None = None,
         entity_id: str | None = None,
     ) -> McpCallType:
-        """Provide marketplace callers the aggregate without MCP enumeration."""
+        """Provide marketplace callers the aggregate without resource enumeration."""
         del stage, publish_id
         return self._bot_call_type(self._get_bot(bot_id, entity_id))
 
@@ -431,6 +628,57 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
                 bot_id,
                 server_code,
                 type(exc).__name__,
+            )
+
+    def _compensate_cli_after_sync_failure(
+        self,
+        *,
+        bot: Mapping[str, Any],
+        bot_id: str,
+        cli_code: str,
+        engine_type: str,
+        mutation: Any,
+        actor_id: str,
+        lock_epoch: int | None,
+        effective_server_codes: set[str],
+        effective_cli_codes: set[str],
+        started: float,
+    ) -> None:
+        try:
+            applied = self._repository.compensate_draft_cli_call_type(
+                bot_pk=int(bot["id"]),
+                engine_type=engine_type,
+                cli_code=cli_code,
+                previous_explicit_call_type=mutation.previous_explicit_call_type,
+                modifier_id=actor_id,
+                expected_revision=mutation.revision,
+                expected_caller_config_revision=mutation.caller_config_revision,
+                lock_key=f"{bot_id}:{actor_id}",
+                lock_holder_user_id=actor_id,
+                lock_epoch=lock_epoch,
+                effective_server_codes=effective_server_codes,
+                effective_cli_codes=effective_cli_codes,
+            )
+            logger.warning(
+                "cli_call_type_update_compensated bot_id=%s cli_code=%s actor_id=%s "
+                "applied=%s lock_epoch_supplied=%s duration_ms=%s",
+                bot_id,
+                cli_code,
+                actor_id,
+                applied,
+                lock_epoch is not None,
+                int((time.monotonic() - started) * 1000),
+            )
+        except Exception as exc:
+            logger.error(
+                "cli_call_type_update_compensation_failed bot_id=%s cli_code=%s "
+                "actor_id=%s error_type=%s lock_epoch_supplied=%s duration_ms=%s",
+                bot_id,
+                cli_code,
+                actor_id,
+                type(exc).__name__,
+                lock_epoch is not None,
+                int((time.monotonic() - started) * 1000),
             )
 
     def _authorize_read(

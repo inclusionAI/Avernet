@@ -94,9 +94,13 @@ def _bind_skillset_deps(app):
 
     mock_passport = MagicMock(spec=PassportPlugin)
     mock_passport.query_passport_clis.return_value = [
-        {"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept"},
-        {"cli_code": "cli.delete", "cli_name": "Delete CLI", "cli_desc": "removed"},
+        {"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept", "identity_mode": "caller"},
+        {"cli_code": "cli.delete", "cli_name": "Delete CLI", "cli_desc": "removed", "identity_mode": "owner"},
     ]
+    mock_passport.query_agent_passport.return_value = {
+        "mcps": [{"mcp_code": "test-mcp", "identity_mode": "caller"}],
+        "clis": mock_passport.query_passport_clis.return_value,
+    }
     bind_mock_service(PassportPlugin, mock_passport, app)
     control = MagicMock()
     control.list_sets.return_value = [MOCK_SKILLSET_ROW]
@@ -191,33 +195,81 @@ class TestSkillsetResources:
             label="GET /api/skillsets/resources data[0]",
         )
         assert data[0]["clis"] == [
-            {"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept"},
-            {"cli_code": "cli.delete", "cli_name": "Delete CLI", "cli_desc": "removed"},
+            {"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept", "identity_mode": "caller"},
+            {"cli_code": "cli.delete", "cli_name": "Delete CLI", "cli_desc": "removed", "identity_mode": "owner"},
         ]
 
 
 class TestDeleteSkillsetCli:
     """DELETE /api/skillsets/{id}/clis/{resource_code} — 删除默认能力集 CLI。"""
 
-    def test_delete_cli_updates_passport_with_remaining_latest_clis(self, gw_client, app_with_testing_modules):
+    def test_delete_cli_updates_passport_with_remaining_latest_clis(self, gw_client, app_with_testing_modules, caplog):
         _mock_factory, mock_passport = _bind_skillset_deps(app_with_testing_modules)
 
-        resp = gw_client.delete("/api/skillsets/1/clis/cli.delete", params={
-            "entity_id": "448524",
-            "entity_type": "staff",
-            "bot_id": "bot_test_001",
-        })
+        with caplog.at_level("INFO", logger="start"):
+            resp = gw_client.delete("/api/skillsets/1/clis/cli.delete", params={
+                "entity_id": "448524",
+                "entity_type": "staff",
+                "bot_id": "bot_test_001",
+            })
         body = resp.json()
 
         assert_success(body, "DELETE /api/skillsets/{id}/clis/{resource_code}")
-        mock_passport.query_passport_clis.assert_called_with("bot_test_001", "448524")
+        mock_passport.query_agent_passport.assert_called_with("bot_test_001", "448524")
         mock_passport.update_passport.assert_called_once_with(
             bot_id="bot_test_001",
             user_id="448524",
             resource_scope={
                 # 覆盖式更新连 identityMode 一起替换，所以 MCP 必须带身份。
                 "mcp_codes": ["test-mcp"],
-                "mcp_items": [{"mcp_code": "test-mcp", "identity_mode": "owner"}],
-                "cli_items": [{"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept"}],
+                "mcp_items": [{"mcp_code": "test-mcp", "identity_mode": "caller"}],
+                "cli_items": [{
+                    "cli_code": "cli.keep",
+                    "cli_name": "Keep CLI",
+                    "cli_desc": "kept",
+                    "identity_mode": "caller",
+                }],
             },
         )
+        assert "agentpass_default_cli_scope_update_requested" in caplog.text
+        assert "agentpass_default_cli_scope_update_succeeded" in caplog.text
+        assert "status=succeeded" in caplog.text
+        assert "duration_ms=" in caplog.text
+
+    def test_delete_cli_snapshot_failure_logs_error_type_without_secret(self, gw_client, app_with_testing_modules, caplog):
+        _mock_factory, mock_passport = _bind_skillset_deps(app_with_testing_modules)
+        mock_passport.query_agent_passport.side_effect = RuntimeError("passport-token-secret")
+
+        with caplog.at_level("INFO", logger="start"):
+            response = gw_client.delete("/api/skillsets/1/clis/cli.delete", params={
+                "entity_id": "448524",
+                "entity_type": "staff",
+                "bot_id": "bot_test_001",
+            })
+
+        assert response.status_code == 500
+        assert "agentpass_default_cli_scope_update_requested" in caplog.text
+        assert "agentpass_default_cli_scope_update_failed" in caplog.text
+        assert "stage=snapshot" in caplog.text
+        assert "error_type=RuntimeError" in caplog.text
+        assert "duration_ms=" in caplog.text
+        assert "passport-token-secret" not in caplog.text
+
+    def test_delete_cli_update_failure_logs_error_type_without_secret(self, gw_client, app_with_testing_modules, caplog):
+        _mock_factory, mock_passport = _bind_skillset_deps(app_with_testing_modules)
+        mock_passport.update_passport.side_effect = RuntimeError("passport-token-secret")
+
+        with caplog.at_level("INFO", logger="start"):
+            response = gw_client.delete("/api/skillsets/1/clis/cli.delete", params={
+                "entity_id": "448524",
+                "entity_type": "staff",
+                "bot_id": "bot_test_001",
+            })
+
+        assert response.status_code == 500
+        assert "agentpass_default_cli_scope_update_requested" in caplog.text
+        assert "agentpass_default_cli_scope_update_failed" in caplog.text
+        assert "stage=update" in caplog.text
+        assert "error_type=RuntimeError" in caplog.text
+        assert "duration_ms=" in caplog.text
+        assert "passport-token-secret" not in caplog.text

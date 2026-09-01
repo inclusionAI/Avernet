@@ -84,16 +84,20 @@ async def get_caller_context(
         publish_id=result.publish_id,
         bot_call_type=result.bot_call_type,
         mcp_call_types=dict(result.mcp_call_types),
+        cli_call_types=dict(result.cli_call_types),
         editable=result.editable,
     )
     logger.info(
         "caller_context_get_succeeded bot_id=%s stage=%s publish_id=%s "
-        "entity_scoped=%s bot_call_type=%s",
+        "entity_scoped=%s bot_call_type=%s mcp_caller_override_count=%s "
+        "cli_caller_override_count=%s",
         bot_id,
         response.stage.value,
         response.publish_id,
         query.entity_id is not None,
         response.bot_call_type.value,
+        len(response.mcp_call_types),
+        len(response.cli_call_types),
     )
     return response
 

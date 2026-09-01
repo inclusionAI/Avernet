@@ -1,0 +1,42 @@
+version: 1
+manifest_version: "2026-08-31.1"
+install_root: "/home/admin/.agentclaw/cli"
+managed_bin_dir: "/home/admin/.agentclaw/bin"
+
+profiles:
+  - id: openclaw-default
+    match:
+      engine_type: openclaw
+    default_cli_codes: [dataphin, deepinsight-cli]
+  - id: claude-code-generalcc-default
+    match:
+      engine_type: claude_code
+      template_type: generalCC
+    default_cli_codes: [dataphin, deepinsight-cli]
+
+installers:
+  acli:
+    bootstrap:
+      url: "https://artifacts.antgroup-inc.cn/t/MAIN_SITE/artifact/repositories/ant-cli-common/cli/acli/install/install.sh"
+      sha256: "aa7ec0dab2289f887a8626be6ae8bd9483bbac16cab0a9076699141fb6b9e9aa"
+    probe_argv: [acli, --version]
+
+catalog:
+  dataphin:
+    cli_name: dataphin-cli
+    cli_desc: Dataphin 命令行工具
+    executable: dataphin
+    default_identity_mode: owner
+    install:
+      installer: acli
+      argv: [install, dataphin]
+    probe_argv: [dataphin, --version]
+  deepinsight-cli:
+    cli_name: deepinsight-cli
+    cli_desc: DeepInsight 命令行工具
+    executable: di
+    default_identity_mode: owner
+    install:
+      installer: acli
+      argv: [install, di]
+    probe_argv: [di, --version]

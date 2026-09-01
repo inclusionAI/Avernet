@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import time
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from injector import inject
@@ -26,15 +27,17 @@ from agentclaw.community.core.mcp.services.detail_fanout import (
     server_code_of,
 )
 from agentclaw.community.core.mcp.services.passport_scope import (
-    merge_passport_cli_items,
     passport_mcp_codes_from_entries,
     passport_mcp_items_from_entries,
+)
+from agentclaw.community.core.mcp.services.cli_passport_scope import (
+    build_passport_resource_scope,
 )
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin, extract_cli_items
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.mcp.mcp_sync_service_protocol import MCPSyncServiceProtocol
 
@@ -887,6 +890,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         engine_type: Optional[str] = None,
     ) -> dict[str, Any]:
         """更新完整 MCP scope；身份或 bot 元数据不可读取时中止覆盖。"""
+        scope_started = time.monotonic()
         bot_name: Optional[str] = None
         bot_desc: Optional[str] = None
         template_type: Optional[str] = None
@@ -900,9 +904,17 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 raw_template_config = bot.get("template_config")
                 template_config = raw_template_config if isinstance(raw_template_config, Mapping) else None
                 engine_type = bot.get("active_engine") or bot.get("engine_type") or engine_type
-        except Exception as e:
-            error = f"获取 bot 信息失败，无法安全解析默认 CLI 范围: {e}"
+        except Exception as exc:
+            error = "获取 bot 信息失败，无法安全解析默认 CLI 范围"
             logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
+            logger.error(
+                "agentpass_mcp_scope_update_failed bot_id=%s engine_type=%s "
+                "branch=mcp_sync stage=bot_metadata status=failed error_type=%s duration_ms=%s",
+                bot_id,
+                engine_type,
+                type(exc).__name__,
+                int((time.monotonic() - scope_started) * 1000),
+            )
             return {"success": False, "error": error}
 
         identity_modes: Mapping[str, object] = {}
@@ -912,9 +924,17 @@ class MCPSyncService(MCPSyncServiceProtocol):
             else:
                 logger.info("[MCPSyncService] 未找到持久化 bot，按 owner 刷新 MCP scope: bot_id=%s", bot_id)
             mcp_items = passport_mcp_items_from_entries(synced_mcps, identity_modes=identity_modes)
-        except Exception as e:
-            error = f"查询 MCP 调用身份失败: {e}"
+        except Exception as exc:
+            error = "查询 MCP 调用身份失败"
             logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
+            logger.error(
+                "agentpass_mcp_scope_update_failed bot_id=%s engine_type=%s "
+                "branch=mcp_sync stage=identity status=failed error_type=%s duration_ms=%s",
+                bot_id,
+                engine_type,
+                type(exc).__name__,
+                int((time.monotonic() - scope_started) * 1000),
+            )
             return {"success": False, "error": error}
 
         synced_server_codes = [item["mcp_code"] for item in mcp_items]
@@ -922,14 +942,55 @@ class MCPSyncService(MCPSyncServiceProtocol):
             item["mcp_code"] for item in mcp_items if item["identity_mode"] == "caller"
         ]
 
-        # MCP 同步触发 resourceManifest 更新时，要回填当前 CLI，避免覆盖式更新丢失 CLI 授权。
+        # Every overwrite reads the full AgentPass MCP+CLI snapshot first. The
+        # desired membership below remains this writer's own decision; the
+        # snapshot only restores historical identity when no sparse row exists.
+        snapshot_started = time.monotonic()
+        logger.info(
+            "agentpass_mcp_scope_snapshot_requested bot_id=%s engine_type=%s "
+            "branch=mcp_sync mcp_count=%s cli_count=%s duration_ms=%s",
+            bot_id,
+            engine_type,
+            "unknown",
+            "unknown",
+            0,
+        )
         try:
-            current_cli_items = self.passport_update.query_passport_clis(bot_id, user_id)
-        except Exception as e:
-            error = f"查询 CLI 范围失败: {e}"
+            passport = self.passport_update.query_agent_passport(bot_id, user_id)
+        except Exception as exc:
+            error = "查询 CLI 范围失败"
             logger.error("[MCPSyncService] %s", error)
+            logger.error(
+                "agentpass_mcp_scope_snapshot_failed bot_id=%s engine_type=%s "
+                "branch=mcp_sync stage=snapshot status=failed error_type=%s duration_ms=%s",
+                bot_id,
+                engine_type,
+                type(exc).__name__,
+                int((time.monotonic() - snapshot_started) * 1000),
+            )
             return {"success": False, "error": error}
 
+        snapshot_mcp_count = (
+            len(passport.get("mcps", []))
+            if isinstance(passport, Mapping) and isinstance(passport.get("mcps"), list)
+            else "unknown"
+        )
+        snapshot_cli_count = (
+            len(passport.get("clis", []))
+            if isinstance(passport, Mapping) and isinstance(passport.get("clis"), list)
+            else "unknown"
+        )
+        logger.info(
+            "agentpass_mcp_scope_snapshot_succeeded bot_id=%s engine_type=%s "
+            "branch=mcp_sync stage=snapshot status=succeeded mcp_count=%s cli_count=%s duration_ms=%s",
+            bot_id,
+            engine_type,
+            snapshot_mcp_count,
+            snapshot_cli_count,
+            int((time.monotonic() - snapshot_started) * 1000),
+        )
+
+        current_cli_items = extract_cli_items(passport)
         default_cli_items = get_default_cli_items(
             engine_type,
             template_type,
@@ -937,7 +998,30 @@ class MCPSyncService(MCPSyncServiceProtocol):
             if template_config
             else None,
         )
-        cli_items = merge_passport_cli_items(current_cli_items, default_cli_items)
+        try:
+            resource_scope = build_passport_resource_scope(
+                passport,
+                desired_mcp_items=mcp_items,
+                mcp_identity_modes=identity_modes,
+                additional_cli_items=default_cli_items,
+            )
+        except Exception as exc:
+            error = "构建 AgentPass 完整范围失败"
+            logger.error(
+                "agentpass_mcp_scope_snapshot_failed bot_id=%s engine_type=%s "
+                "branch=mcp_sync stage=build status=failed error_type=%s duration_ms=%s",
+                bot_id,
+                engine_type,
+                type(exc).__name__,
+                int((time.monotonic() - snapshot_started) * 1000),
+            )
+            return {"success": False, "error": error}
+        mcp_items = resource_scope["mcp_items"]
+        synced_server_codes = resource_scope["mcp_codes"]
+        cli_items = resource_scope["cli_items"]
+        caller_mcp_codes = [
+            item["mcp_code"] for item in mcp_items if item["identity_mode"] == "caller"
+        ]
         if default_cli_items:
             logger.info(
                 "[MCPSyncService] 合并默认 CLI 范围: bot_id=%s, current_clis=%s, "
@@ -950,13 +1034,9 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 template_type,
             )
 
+        update_started = time.monotonic()
         try:
             # resource_scope 是完整快照：MCP 身份与 CLI 都必须回传，避免覆盖丢失授权。
-            resource_scope = {
-                "mcp_codes": synced_server_codes,
-                "mcp_items": mcp_items,
-                "cli_items": cli_items,
-            }
             # 当前 Passport MCP 参数不含 token；保留完整请求以定位 TCAuth 前置校验失败值。
             logger.info(
                 "[MCPSyncService] Passport update request: "
@@ -969,6 +1049,15 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 bot_desc,
                 engine_type,
             )
+            logger.info(
+                "agentpass_mcp_scope_update_requested bot_id=%s engine_type=%s "
+                "branch=mcp_sync stage=update mcp_count=%s cli_count=%s duration_ms=%s",
+                bot_id,
+                engine_type,
+                len(resource_scope["mcp_items"]),
+                len(resource_scope["cli_items"]),
+                0,
+            )
             self.passport_update.update_passport(
                 bot_id=bot_id,
                 user_id=user_id,
@@ -976,6 +1065,15 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 bot_name=bot_name,
                 bot_desc=bot_desc,
                 engine_type=engine_type,
+            )
+            logger.info(
+                "agentpass_mcp_scope_update_succeeded bot_id=%s engine_type=%s "
+                "branch=mcp_sync stage=update status=succeeded mcp_count=%s cli_count=%s duration_ms=%s",
+                bot_id,
+                engine_type,
+                len(resource_scope["mcp_items"]),
+                len(resource_scope["cli_items"]),
+                int((time.monotonic() - update_started) * 1000),
             )
             logger.info(
                 "[MCPSyncService] updatePassport 成功: "
@@ -990,7 +1088,15 @@ class MCPSyncService(MCPSyncServiceProtocol):
                 bot_name,
             )
             return {"success": True}
-        except Exception as e:
-            error = f"更新 passport 失败: {e}"
+        except Exception as exc:
+            error = "更新 passport 失败"
             logger.error("[MCPSyncService] %s", error)
+            logger.error(
+                "agentpass_mcp_scope_update_failed bot_id=%s engine_type=%s "
+                "branch=mcp_sync stage=update status=failed error_type=%s duration_ms=%s",
+                bot_id,
+                engine_type,
+                type(exc).__name__,
+                int((time.monotonic() - update_started) * 1000),
+            )
             return {"success": False, "error": error}

@@ -37,10 +37,13 @@ class CallerContext(BaseModel):
         description="Publication addressed by verify/online, or null for draft."
     )
     bot_call_type: CallerCallType = Field(
-        description="Aggregate Bot identity: caller when any active MCP uses caller."
+        description="Aggregate Bot identity: caller when any active MCP or CLI uses caller."
     )
     mcp_call_types: dict[str, CallerCallType] = Field(
-        description="Explicit Caller identity mode keyed by active MCP server code."
+        description="Sparse Caller overrides keyed by MCP server code; missing means owner."
+    )
+    cli_call_types: dict[str, CallerCallType] = Field(
+        description="Sparse Caller overrides keyed by CLI code; missing means owner."
     )
     editable: bool = Field(
         description="Whether the current caller may edit the draft Caller identity."
@@ -67,9 +70,20 @@ class McpCallTypeResult(BaseModel):
     )
 
 
+class CliCallTypeResult(BaseModel):
+    """Applied identity for one AgentPass-authorized CLI."""
+
+    cli_code: str = Field(description="Updated AgentPass CLI code.")
+    call_type: CallerCallType = Field(description="Applied CLI execution identity.")
+    bot_call_type: CallerCallType = Field(
+        description="Aggregate Bot identity after applying the CLI update."
+    )
+
+
 __all__ = [
     "CallerCallType",
     "CallerContext",
+    "CliCallTypeResult",
     "McpCallTypeResult",
     "McpCallTypeUpdate",
 ]

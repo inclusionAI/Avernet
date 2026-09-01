@@ -93,6 +93,14 @@ def _make_sync_service(
     service.mcp_center = mcp_center or MagicMock()
     service.user_mcp_config_repo = MagicMock()
     service.passport_update = passport_update or MagicMock()
+    if isinstance(service.passport_update, MagicMock):
+        snapshot = service.passport_update.query_agent_passport.return_value
+        if isinstance(snapshot, MagicMock):
+            existing_clis = service.passport_update.query_passport_clis.return_value
+            service.passport_update.query_agent_passport.return_value = {
+                "mcps": [],
+                "clis": existing_clis if isinstance(existing_clis, list) else [],
+            }
     service.mcp_config_service = mcp_config_service or MagicMock()
     service.mcp_config_service.build_mcp_sync_payload.return_value = (
         None, {}, "PROD", None
@@ -171,6 +179,42 @@ class TestRefreshMcpScope:
                 "identity_mode": "owner",
             },
         ]
+
+    @pytest.mark.asyncio
+    async def test_preserves_agentpass_only_caller_identity_without_sparse_row(self):
+        """A history-only Caller MCP survives an unrelated MCP scope refresh."""
+        caller_identity_repository = MagicMock()
+        caller_identity_repository.list_draft_call_types.return_value = {}
+        bot_repository = MagicMock()
+        bot_repository.get_by_id_and_owner.return_value = {
+            "id": 42,
+            "active_engine": "openclaw",
+        }
+        passport_update = MagicMock()
+        passport_update.query_passport_clis.return_value = []
+        passport_update.query_agent_passport.return_value = {
+            "mcps": [{"mcp_code": "mcp.history", "identity_mode": "caller"}],
+            "clis": [],
+        }
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.history"}]),
+            passport_update=passport_update,
+            bot_repository=bot_repository,
+            caller_identity_repository=caller_identity_repository,
+        )
+
+        result = await service.refresh_mcp_scope(
+            user_id="caller-1",
+            entity_id="owner-1",
+            bot_id="default",
+            entity_type="staff",
+            engine_type="openclaw",
+        )
+
+        assert result == {"success": True}
+        assert passport_update.update_passport.call_args.kwargs["resource_scope"][
+            "mcp_items"
+        ] == [{"mcp_code": "mcp.history", "mcp_name": None, "mcp_desc": None, "identity_mode": "caller"}]
 
     @pytest.mark.asyncio
     async def test_logs_scope_payload_before_passport_update(self):
@@ -331,7 +375,12 @@ class TestRefreshMcpScope:
         assert "mcp.test.1" in resource_scope["mcp_codes"]
         assert "mcp.test.2" in resource_scope["mcp_codes"]
         assert resource_scope["cli_items"] == [
-            {"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": None}
+            {
+                "cli_code": "cli.keep",
+                "cli_name": "Keep CLI",
+                "cli_desc": None,
+                "identity_mode": "owner",
+            }
         ]
 
     @pytest.mark.asyncio
@@ -451,6 +500,7 @@ class TestRefreshMcpScope:
             "cli_code": "adev-cli",
             "cli_name": "Custom Adev",
             "cli_desc": "kept",
+            "identity_mode": "owner",
         }
         assert "custom-cli" in cli_codes
         assert cli_codes.count("adev-cli") == 1
@@ -489,7 +539,7 @@ class TestRefreshMcpScope:
         assert len(cli_codes) == 9
 
     @pytest.mark.asyncio
-    async def test_does_not_update_passport_when_bot_metadata_query_fails(self):
+    async def test_does_not_update_passport_when_bot_metadata_query_fails(self, caplog):
         """Bot metadata is required to safely preserve default CLI scope."""
         passport_update = MagicMock()
         passport_update.query_passport_clis.return_value = []
@@ -502,40 +552,108 @@ class TestRefreshMcpScope:
             bot_repository=bot_repository,
         )
 
-        result = await service.refresh_mcp_scope(
-            user_id="user1",
-            entity_id="100",
-            bot_id="bot1",
-            entity_type="staff",
-            engine_type="openclaw",
-        )
+        with caplog.at_level("INFO", logger="start"):
+            result = await service.refresh_mcp_scope(
+                user_id="user1",
+                entity_id="100",
+                bot_id="bot1",
+                entity_type="staff",
+                engine_type="openclaw",
+            )
 
         assert result["success"] is False
         assert "获取 bot 信息失败" in result["error"]
         passport_update.query_passport_clis.assert_not_called()
         passport_update.update_passport.assert_not_called()
+        assert "[MCPSyncService] 获取 bot 信息失败，无法安全解析默认 CLI 范围, bot_id=bot1" in caplog.text
 
     @pytest.mark.asyncio
-    async def test_does_not_update_passport_when_cli_scope_query_fails(self):
+    async def test_does_not_update_passport_when_cli_scope_query_fails(self, caplog):
         """updatePassport requires full MCP+CLI scope; missing CLI scope aborts the update."""
         passport_update = MagicMock()
-        passport_update.query_passport_clis.side_effect = RuntimeError("tcauth down")
+        passport_update.query_agent_passport.side_effect = RuntimeError("passport-token-secret")
         service = _make_sync_service(
             mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
             passport_update=passport_update,
         )
 
-        result = await service.refresh_mcp_scope(
-            user_id="user1",
-            entity_id="100",
-            bot_id="bot1",
-            entity_type="staff",
-            engine_type="openclaw",
-        )
+        with caplog.at_level("INFO", logger="start"):
+            result = await service.refresh_mcp_scope(
+                user_id="user1",
+                entity_id="100",
+                bot_id="bot1",
+                entity_type="staff",
+                engine_type="openclaw",
+            )
 
         assert result["success"] is False
-        assert "查询 CLI 范围失败" in result["error"]
+        assert result == {"success": False, "error": "查询 CLI 范围失败"}
         passport_update.update_passport.assert_not_called()
+        logged = caplog.text
+        assert "[MCPSyncService] 查询 CLI 范围失败" in logged
+        assert "agentpass_mcp_scope_snapshot_failed" in logged
+        assert "error_type=RuntimeError" in logged
+        assert "duration_ms" in logged
+        assert "passport-token-secret" not in logged
+
+    @pytest.mark.asyncio
+    async def test_passport_update_failure_logs_error_type_without_secret(self, caplog):
+        """The overwrite failure remains diagnosable without external details."""
+        passport_update = MagicMock()
+        passport_update.update_passport.side_effect = RuntimeError(
+            "passport-token-secret"
+        )
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+        )
+
+        with caplog.at_level("INFO", logger="start"):
+            result = await service.refresh_mcp_scope(
+                user_id="user1",
+                entity_id="100",
+                bot_id="bot1",
+                entity_type="staff",
+                engine_type="openclaw",
+            )
+
+        assert result == {"success": False, "error": "更新 passport 失败"}
+        assert "[MCPSyncService] 更新 passport 失败" in caplog.text
+        assert "agentpass_mcp_scope_update_requested" in caplog.text
+        assert "agentpass_mcp_scope_update_failed" in caplog.text
+        assert "stage=update" in caplog.text
+        assert "error_type=RuntimeError" in caplog.text
+        assert "duration_ms=" in caplog.text
+        assert "passport-token-secret" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_scope_builder_failure_logs_error_type_without_secret(self, caplog):
+        """A malformed complete snapshot aborts before any overwrite request."""
+        passport_update = MagicMock()
+        service = _make_sync_service(
+            mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.test.1"}]),
+            passport_update=passport_update,
+        )
+
+        with patch(
+            "agentclaw.community.core.mcp.services.sync_service.build_passport_resource_scope",
+            side_effect=RuntimeError("passport-token-secret"),
+        ), caplog.at_level("INFO", logger="start"):
+            result = await service.refresh_mcp_scope(
+                user_id="user1",
+                entity_id="100",
+                bot_id="bot1",
+                entity_type="staff",
+                engine_type="openclaw",
+            )
+
+        assert result == {"success": False, "error": "构建 AgentPass 完整范围失败"}
+        passport_update.update_passport.assert_not_called()
+        assert "agentpass_mcp_scope_snapshot_failed" in caplog.text
+        assert "stage=build" in caplog.text
+        assert "error_type=RuntimeError" in caplog.text
+        assert "duration_ms=" in caplog.text
+        assert "passport-token-secret" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_returns_error_when_scope_fails(self):
