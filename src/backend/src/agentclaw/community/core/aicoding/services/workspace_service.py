@@ -16,7 +16,9 @@ import httpx
 from injector import inject
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.plugin_api.sandbox_runtime import RELAY_PORT, SandboxRuntimeClient
 
@@ -50,11 +52,13 @@ class WorkspaceService:
         device_provider: DeviceService,
         path_factory: WorkspacePathFactory,
         sandbox_client: SandboxRuntimeClient,
+        baas_service: BaasService,
     ) -> None:
         self._bot_provider = bot_provider
         self._device_provider = device_provider
         self._path_factory = path_factory
         self._sandbox_client = sandbox_client
+        self._baas_service = baas_service
 
     def get_workspace_path(
         self,
@@ -180,36 +184,48 @@ class WorkspaceService:
         if not self._bot_provider or not self._device_provider:
             raise RuntimeError("WorkspaceService requires bot_provider and device_provider for git clone")
 
-        sandbox_id = self._resolve_sandbox_id(bot_id, user_id)
-        req = self._sandbox_client.build_proxy_request(
-            sandbox_id=sandbox_id, api_path="/api/git/clone", port=RELAY_PORT
-        )
+        device = self._resolve_device(bot_id, user_id)
+        payload = {"url": git_url, "target_dir": target_dir, "branch": branch}
 
-        async with httpx.AsyncClient(timeout=CLONE_TIMEOUT) as client:
-            resp = await client.post(
-                req.url,
-                json={"url": git_url, "target_dir": target_dir, "branch": branch},
-                headers=req.headers,
+        if device.device_provider == "baas":
+            # BaaS owns runtime addressing, including its backing platform.
+            resp = await asyncio.to_thread(
+                self._baas_service.invoke_http,
+                bind_id=device.id,
+                port=RELAY_PORT,
+                path="/api/git/clone",
+                method="POST",
+                json=payload,
+                device_affinity=user_id,
+                auth_header="x-proxypass-token",
+                timeout=CLONE_TIMEOUT,
             )
-            resp.raise_for_status()
-            result = resp.json()
+        else:
+            sandbox_id = (device.device_props or {}).get("sandbox_id")
+            if not sandbox_id:
+                raise ValueError(f"Bot {bot_id} device has no sandbox_id")
+            req = self._sandbox_client.build_proxy_request(
+                sandbox_id=sandbox_id, api_path="/api/git/clone", port=RELAY_PORT
+            )
+            async with httpx.AsyncClient(timeout=CLONE_TIMEOUT) as client:
+                resp = await client.post(req.url, json=payload, headers=req.headers)
+
+        resp.raise_for_status()
+        result = resp.json()
 
         if not result.get("success"):
             raise Exception(result.get("error", "克隆失败"))
 
-    def _resolve_sandbox_id(self, bot_id: Optional[str], user_id: Optional[str]) -> str:
-        """bot_id → binding_id → sandbox_id"""
+    def _resolve_device(
+        self, bot_id: Optional[str], user_id: Optional[str]
+    ) -> DeviceBindingRecord:
+        """Resolve the binding while preserving its provider identity."""
         bot = self._bot_provider.get_bot(bot_id, user_id)
         binding_id = bot.get("binding_id")
         if not binding_id:
             raise ValueError(f"Bot {bot_id} has no device binding")
 
-        device = self._device_provider.get_device(binding_id=binding_id)
-        device_props = getattr(device, "device_props", {}) or {}
-        sandbox_id = device_props.get("sandbox_id")
-        if not sandbox_id:
-            raise ValueError(f"Bot {bot_id} device has no sandbox_id")
-        return sandbox_id
+        return self._device_provider.get_device(binding_id=binding_id)
 
     async def _check_workspace(self, path: str, user_id: str) -> Dict[str, Any]:
         """检查工作区环境"""

@@ -1,5 +1,5 @@
 """Tests for aicoding workspace initialization endpoint path validation."""
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -118,6 +118,7 @@ class TestWorkspaceServiceDefaults:
             device_provider=MagicMock(),
             path_factory=mock_pf,
             sandbox_client=MagicMock(),
+            baas_service=MagicMock(),
         )
         result = svc.get_workspace_path("u", "bot")
         assert result == "/base/staff_u/bot/aicoding/workspace"

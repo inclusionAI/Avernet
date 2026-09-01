@@ -12,6 +12,8 @@ runs for real. Implementations:
 
 - ``plugins.prod.device_adapter_transport.HttpDeviceAdapterTransport``
   — builds the adapter URL from ``conn_info`` and forwards over httpx.
+- ``plugins.community.device_adapter_transport.CommunityDeviceAdapterTransport``
+  — resolves BaaS ``/http-info`` and forwards without any platform-specific SDK.
 - ``plugins.local.device_adapter_transport.InMemoryDeviceAdapterTransport``
   — a stateful in-memory cron adapter used by injection tests and local
   boots, so the real relay exercises end-to-end without a live adapter.
