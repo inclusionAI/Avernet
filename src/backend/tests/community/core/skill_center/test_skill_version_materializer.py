@@ -9,6 +9,7 @@ import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -339,7 +340,7 @@ def test_team_exact_package_still_rejects_manifest_name_mismatch() -> None:
     assert versions.published is None
 
 
-def test_sdk_scanner_reads_only_the_validated_exact_package(tmp_path) -> None:
+def test_sdk_scanner_reads_only_the_validated_exact_package() -> None:
     package = SkillPackageValidator(SkillParser()).validate_zip(_package())
 
     class _Scan:
@@ -347,13 +348,20 @@ def test_sdk_scanner_reads_only_the_validated_exact_package(tmp_path) -> None:
 
     class _Sdk:
         def scan(self, skill_path: str):
-            assert skill_path.endswith("/SKILL.md")
-            assert open(skill_path, "rb").read().startswith(b"---\n")
+            package_dir = Path(skill_path)
+            assert package_dir.is_dir()
+            assert (package_dir / "SKILL.md").read_bytes().startswith(b"---\n")
+            assert sorted(
+                path.relative_to(package_dir).as_posix()
+                for path in package_dir.rglob("*")
+                if path.is_file()
+            ) == ["SKILL.md", "scripts/fetch.py"]
             return _Scan()
 
         def get_mcp_dependencies(self, *, skill_path, base_dir, min_confidence):
-            assert skill_path.endswith("/SKILL.md")
-            assert base_dir == skill_path.removesuffix("/SKILL.md")
+            assert skill_path == base_dir
+            assert Path(skill_path).is_dir()
+            assert (Path(skill_path) / "SKILL.md").is_file()
             assert min_confidence == 0.8
             return [{"code": "mcp.fs", "name": "FS"}]
 
