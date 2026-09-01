@@ -481,6 +481,19 @@ def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> 
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
     form = resolve_source(ctx, location, entry)
     check_unpack(ctx, location, entry, archive_expected=True)
+    if form.form is SourceForm.CONTENT:
+        # A skill is a package — SKILL.md plus the files it names — and a body
+        # of inline text cannot be one. Identity keeps both source forms: an
+        # identity file IS one text body. W1's rule applies to the mismatch:
+        # the surface never accepts a construct nothing can apply, and W5 (the
+        # wave that materialises skills) has no inline form to give it.
+        ctx.add(
+            f"{location}.content",
+            "content_not_a_skill_package",
+            "a skills entry is a package (SKILL.md + the files it names) — "
+            "inline content cannot be one; declare 'source' (or 'from' once "
+            "named sources land)",
+        )
     # A skill contains scripts the agent loads and runs — code, not data — so
     # every non-git form must be pinned. A git ref has a commit SHA doing the
     # same job; a URL without a digest is a blind fetch of the latest at every

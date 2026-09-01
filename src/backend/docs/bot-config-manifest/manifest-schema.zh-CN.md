@@ -510,6 +510,10 @@ skills:
 - **归档自动识别**：平台按内容类型/扩展名判定是否需要解包，`unpack` 仅在
   扩展名不可靠时作为显式覆盖。两种形态下用户声明的都是「我要这个
   skill」，怎么取回来是平台的事。
+- **W5 起 `content` 内联在 skills 条目上被拒绝**（`content_not_a_skill_package`）：
+  skill 是包（SKILL.md + 其引用的文件），一段内联文本成不了包——按「这个面
+  不接受它物化不了的东西」的既定规则在 `PUT` 拒绝。identity 类目不受此
+  限制（一个 identity 文件本身就是一段文本）。
 - teclaw：物化进 bot-data store 后以 `SkillRef(scope="user")` 进 artifact，
   与今天手工 upload 的 skill 走完全相同的路。
 - v2 预留来源：`source: center://<skill_uuid>@<version>`（skill center 引用，

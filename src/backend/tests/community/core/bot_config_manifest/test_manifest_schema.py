@@ -296,6 +296,32 @@ manifest:
     assert ("manifest.skills[0]", "missing_digest") in _reject(document)
 
 
+def test_inline_content_is_accepted_for_identity_but_not_for_skills():
+    """Both categories reach the validator through the same source machinery,
+    and only identity can mean something by inline text: an identity file IS
+    one text body, while a skill is a package — SKILL.md plus the scripts it
+    names. Accepting a content-form skill would violate W1's rule (the
+    surface never accepts a construct nothing can apply) with W5 the wave
+    that has to catch it: nothing materialises a package from inline text."""
+    identity = """schema_version: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      content: |
+        # Who I am
+"""
+    assert _accept(identity).schema_version == 1
+
+    skill = """schema_version: 1
+manifest:
+  skills:
+    - name: qc
+      content: |
+        # not a package
+"""
+    assert ("manifest.skills[0].content", "content_not_a_skill_package") in _reject(skill)
+
+
 def test_the_dropped_on_fetch_failure_value_is_refused():
     """``skip`` meant "leave this one alone" under per-entry diffing; under
     category overwrite it would mean "delete this one"."""
