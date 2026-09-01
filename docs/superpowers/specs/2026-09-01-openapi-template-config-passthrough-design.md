@@ -79,7 +79,7 @@ Front-end 映射:`engine ← item.engine_type`,`bot_type ← item.bot_type`,`eng
 |---|---|---|
 | 1 | `engine_properties` 出现 `template_type/template_config` 以外的键 | 422 `unsupported engine_properties fields: [...]`(沿用既有文案,键名集合更新) |
 | 2 | 工厂形态:`template_type` 缺失或空串 | 422 `engine_properties.template_type is required for template-config creates` |
-| 3 | 任何形态:`template_config` 缺失或空 | 422(沿用 `applicationCoding template_config must not be empty` 语义,文案去掉 applicationCoding 字样) |
+| 3 | 任何形态:`template_config` 缺失或空 | 422(沿用现有 `applicationCoding template_config must not be empty` 文案,新增错误才用新文案,减少测试 churn) |
 | 4 | 完整工厂快照(双键)与手填专用键(`devflow_workflow/code_repos/yuque_kb_repos` 等外层契约键)混传 | 422 工厂路径不解读手填键,明确拒绝;不完整快照(缺 `template_uid`)混有手填键则走手填路径,工厂键按未知键存活(现状) |
 | 5 | 任何形态的 `template_config` 顶层出现拒收 server-managed 字段:`bot_id/workspace_id/workspace_status/workspace_state/start_status/engine_form` | 422 `template_config contains server-managed fields: [...]`(现有错误类型复用,放行清单新增工厂四键) |
 | 6 | 手填路径 `template_type` 传了且 ≠ `applicationCoding` | 422(防形态冒充;工厂值必须走工厂标记) |
