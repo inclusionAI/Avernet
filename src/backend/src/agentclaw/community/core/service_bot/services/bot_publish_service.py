@@ -624,30 +624,62 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         active_runtime_engine_type: str = "",
     ) -> Dict[str, Any]:
         if stage == PublishStage.EVAL.value:
-            task_record = self._quality_task_service.get_task_by_uuid(task_uuid)
-            if not task_record:
-                raise BotPublishServiceError(
-                    f"Quality task not found for eval stage: task_uuid={task_uuid}"
-                )
-            task_ext = task_record.ext or {}
-            bot_uuid = task_ext.get("bot_uuid", "")
-            if not bot_uuid:
-                raise BotPublishServiceError(
-                    f"Quality task missing bot_uuid in ext: task_uuid={task_uuid}"
-                )
-            return {
-                "bot_id": bot_id,
-                "owner_id": owner_id,
-                "bot_type": "service",
-                "engine_type": bot.get("active_engine", ""),
-                "template_type": bot.get("template_type", ""),
-                "active_runtime_engine_type": active_runtime_engine_type,
-                "publish_id": None,
-                "publish_status": None,
-                "binding_id": None,
-                "device_provider": "baas",
-                "device_id": bot_uuid,
-            }
+            # 路径一：Quality Task 驱动（stage 格式 "eval-{task_uuid}"）
+            if task_uuid and task_uuid != PublishStage.EVAL.value:
+                task_record = self._quality_task_service.get_task_by_uuid(task_uuid)
+                if task_record:
+                    task_ext = task_record.ext or {}
+                    bot_uuid = task_ext.get("bot_uuid", "")
+                    if bot_uuid:
+                        return {
+                            "bot_id": bot_id,
+                            "owner_id": owner_id,
+                            "bot_type": "service",
+                            "engine_type": bot.get("active_engine", ""),
+                            "template_type": bot.get("template_type", ""),
+                            "active_runtime_engine_type": active_runtime_engine_type,
+                            "publish_id": None,
+                            "publish_status": None,
+                            "binding_id": None,
+                            "device_provider": "baas",
+                            "device_id": bot_uuid,
+                        }
+                    logger.warning(
+                        "[BotPublishService] Quality task 缺少 bot_uuid, 降级到 binding 查询: "
+                        "task_uuid=%s", task_uuid,
+                    )
+                else:
+                    logger.warning(
+                        "[BotPublishService] Quality task 不存在, 降级到 binding 查询: "
+                        "task_uuid=%s", task_uuid,
+                    )
+
+            # 路径二：评测沙箱绑定驱动（stage 格式 "eval"，或 Quality Task 降级）
+            # 从 ac_entity_device_binding 中按 default_tag 查询
+            eval_binding = self._find_eval_binding_by_default_tag(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                default_tag=task_uuid if task_uuid and task_uuid != PublishStage.EVAL.value else PublishStage.EVAL.value,
+            )
+            if eval_binding:
+                return {
+                    "bot_id": bot_id,
+                    "owner_id": owner_id,
+                    "bot_type": "service",
+                    "engine_type": bot.get("active_engine", ""),
+                    "template_type": bot.get("template_type", ""),
+                    "active_runtime_engine_type": active_runtime_engine_type,
+                    "publish_id": None,
+                    "publish_status": None,
+                    "binding_id": eval_binding.id,
+                    "device_provider": eval_binding.device_provider,
+                    "device_id": eval_binding.device_id,
+                }
+
+            raise BotPublishServiceError(
+                f"未找到 bot_id={bot_id} 的评测环境绑定信息"
+                f"（task_uuid={task_uuid}, 两条路径均无结果）"
+            )
 
         publish_record = self._get_service_publish_record_for_stage(
             bot_id=bot_id,
@@ -681,6 +713,55 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             "device_provider": getattr(binding, "device_provider", ""),
             "device_id": device_id,
         }
+
+    def _find_eval_binding_by_default_tag(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        default_tag: str,
+    ) -> DeviceBindingRecord | None:
+        """从 ac_entity_device_binding 查找匹配 default_tag 的评测 binding。
+
+        用于评测沙箱绑定驱动路径：当 stage="eval" 但无 Quality Task 时，
+        通过 binding 表的 device_props.AGENTCLAW_DEFAULT_TAG 查找评测容器。
+
+        Args:
+            bot_id: 服务 Bot ID
+            owner_id: 所有者 ID（对应 binding 的 entity_id）
+            default_tag: 评测标签（如 "eval"、"default" 等）
+
+        Returns:
+            匹配的 DeviceBindingRecord，未找到返回 None
+        """
+        from agentclaw.community.plugin_api.eval_env import DYNAMIC_ENV_TAG_KEY
+
+        env = get_current_env()
+        _page = 1
+        _page_size = 200
+        while True:
+            _total, _rows = self._device_binding_repo.list_bindings(
+                env=env,
+                entity_id=owner_id,
+                entity_type=None,
+                status=None,
+                page=_page,
+                page_size=_page_size,
+            )
+            for b in _rows:
+                if b.status == DeviceBindingStatus.RELEASED.value:
+                    continue
+                device_props = b.device_props or {}
+                if device_props.get(DYNAMIC_ENV_TAG_KEY) != default_tag:
+                    continue
+                # 按 bot_id 过滤：有 bot_id 字段必须匹配；无 bot_id 字段（存量数据）不过滤
+                if "bot_id" in device_props and device_props["bot_id"] != bot_id:
+                    continue
+                return b
+            if _page * _page_size >= _total:
+                break
+            _page += 1
+        return None
 
     def _get_next_version(self, publish_bot_id: str, owner_id: str) -> int:
         """获取下一个版本号（基于最大版本号）。
