@@ -24,6 +24,7 @@ input_schema:
 nodes:
   - id: marketing_strategy
     name: 营销策略专家
+    title: 大促营销策略生成
     type: bot
     bot_id: 20260828_whd6nx7x
     depends_on: []
@@ -36,6 +37,7 @@ nodes:
       遇到你无法独立闭环的部分,按你的判断决定如何推进。
   - id: strategy_generation_group
     name: 策略生成群
+    title: 营销策略进一步讨论
     type: collaboration
     depends_on: [marketing_strategy]
     collaboration:
@@ -52,6 +54,7 @@ nodes:
       处理不了的问题,按你的判断标明。
   - id: risk_lead
     name: 业务风控专家
+    title: 风控策略生成
     type: bot
     bot_id: 20260828_7q4cbeze
     depends_on: [strategy_generation_group]
@@ -64,6 +67,7 @@ nodes:
       处理不了的问题,按你的判断标明。
   - id: risk_assessment
     name: 风险评审群
+    title: 风险评审
     type: collaboration
     depends_on: [risk_lead]
     collaboration:
@@ -83,6 +87,7 @@ nodes:
       (硬字段:driver output JSON 须带 unhandled_tasks 数组,供框架路由后续;叙述用职能词)
   - id: risk_unhandled_to_bbs
     name: 不可实现任务转BBS广场
+    title: 无人任务研发承接
     type: bbs_handoff
     bot_id: 20260828_f7wfi27d
     depends_on: [risk_assessment]
@@ -97,6 +102,7 @@ nodes:
       框架兜底:上家真实上报未带 unhandled_tasks,按占位 mock。
   - id: strategy_approval
     name: 营销策略审核
+    title: 大促策略审核
     type: bot
     bot_id: 20260828_9rgd70li
     depends_on: [risk_unhandled_to_bbs]
@@ -110,6 +116,7 @@ nodes:
       你若看不到③完整风险清单,是上家 rule 没 carry-forward,不找框架做 fan-in。
   - id: implementation
     name: 投放实施
+    title: 大促投放实施
     type: bot
     bot_id: 20260828_k9c2slro
     depends_on: [strategy_approval]
@@ -122,6 +129,7 @@ nodes:
       你是投放实施:把已批准方案落为各平台/时段/资源位执行动作并跟踪;异常按你的判断决定处置方式。
   - id: notify_done
     name: 通知完成
+    title: 执行结果通知
     type: notify
     depends_on: [implementation]
     input:
