@@ -516,7 +516,7 @@ def test_baas_restart_publish_listener_dispatches_strategy_after_restart_event()
     )
 
 
-def test_baas_restart_publish_listener_logs_runtime_provider_failure() -> None:
+def test_baas_restart_publish_listener_uses_direct_runtime_reconciler() -> None:
     bot_repo = MagicMock()
     bot_repo.get_by_id_and_owner.return_value = {
         "bot_id": "bot-1",
@@ -531,7 +531,7 @@ def test_baas_restart_publish_listener_logs_runtime_provider_failure() -> None:
         "template_version_id": 101,
         "_aicoding_restart": {"resync_authorization": True},
     }
-    runtime_reconciler_provider = MagicMock(side_effect=RuntimeError("runtime down"))
+    runtime_reconciler = MagicMock()
     strategy = MagicMock()
     strategy.engine_type = "claude_code"
     strategy.refresh_restart_authorization.return_value = True
@@ -539,8 +539,7 @@ def test_baas_restart_publish_listener_logs_runtime_provider_failure() -> None:
     listener = AicodingRestartAuthorizationBaasPublishListener(
         bot_repo=bot_repo,
         template_service=template_service,
-        runtime_reconciler=None,
-        runtime_reconciler_provider=runtime_reconciler_provider,
+        runtime_reconciler=runtime_reconciler,
     )
 
     with patch(
@@ -557,7 +556,6 @@ def test_baas_restart_publish_listener_logs_runtime_provider_failure() -> None:
             )
         )
 
-    runtime_reconciler_provider.assert_called_once_with()
     resolve.assert_called_once_with(
         bot_id="bot-1",
         owner_id="owner-1",
@@ -574,7 +572,7 @@ def test_baas_restart_publish_listener_logs_runtime_provider_failure() -> None:
         bot_repo.get_by_id_and_owner.return_value,
         None,
         skill_set_factory=None,
-        runtime_reconciler=None,
+        runtime_reconciler=runtime_reconciler,
         template_service=template_service,
     )
 

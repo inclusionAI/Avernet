@@ -341,7 +341,6 @@ class BotService(BotServiceProtocol):
         task_queue_service: "TaskQueueService | None" = None,
         common_config_service: "CommonConfigService | None" = None,
         runtime_reconciler: "CoreBotRuntimeProjectorProtocol | None" = None,
-        runtime_reconciler_provider: "Callable[[], CoreBotRuntimeProjectorProtocol] | None" = None,
     ) -> None:
         self._repository = repository
         self._allocation_config = allocation_config
@@ -405,7 +404,6 @@ class BotService(BotServiceProtocol):
         self._task_queue_service = task_queue_service
         self._common_config_service = common_config_service
         self._runtime_reconciler = runtime_reconciler
-        self._runtime_reconciler_provider = runtime_reconciler_provider
 
     def _service_bot_image_policy_enabled(self) -> bool:
         """Whether draft create/restart should opt into image policy."""
@@ -1947,16 +1945,6 @@ class BotService(BotServiceProtocol):
                             template_config=None,
                         )
                         runtime_reconciler = self._runtime_reconciler
-                        if runtime_reconciler is None and self._runtime_reconciler_provider is not None:
-                            try:
-                                runtime_reconciler = self._runtime_reconciler_provider()
-                            except Exception as runtime_error:
-                                logger.warning(
-                                    "[bot_service._allocate_device_async] restart runtime reconciler unavailable; continue allocation: bot_id=%s error=%s",
-                                    bot_id,
-                                    runtime_error,
-                                    exc_info=True,
-                                )
                         refresh_strategy.refresh_restart_authorization(
                             refresh_ctx,
                             bot_record or {},

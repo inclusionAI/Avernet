@@ -286,13 +286,13 @@ class BotManagementModule(Module):
         repository: BotRepository,
         template_service: TemplateService,
         skill_set_factory: SkillSetServiceFactory,
-        injector: Injector,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> AicodingRestartAuthorizationBaasPublishListener:
         return AicodingRestartAuthorizationBaasPublishListener(
             bot_repo=repository,
             template_service=template_service,
             skill_set_factory=skill_set_factory,
-            runtime_reconciler_provider=lambda: injector.get(CoreBotRuntimeProjectorProtocol),
+            runtime_reconciler=runtime_reconciler,
         )
 
     @singleton
@@ -371,6 +371,7 @@ class BotManagementModule(Module):
         task_queue_service: TaskQueueService,
         common_config_service: CommonConfigService,
         caller_identity_repo: CallerIdentityRepositoryProtocol,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -416,7 +417,7 @@ class BotManagementModule(Module):
             task_queue_service=task_queue_service,
             common_config_service=common_config_service,
             caller_identity_repo=caller_identity_repo,
-            runtime_reconciler_provider=lambda: injector.get(CoreBotRuntimeProjectorProtocol),
+            runtime_reconciler=runtime_reconciler,
         )
 
     @singleton

@@ -2270,7 +2270,7 @@ class TestRestartAuthorizationResyncWiring:
         )
         assert repo.release_calls == 1
 
-    def test_async_replacement_refreshes_even_when_runtime_reconciler_provider_fails(self):
+    def test_async_replacement_refreshes_with_runtime_reconciler(self):
         repo = FakeRestartLockRepo()
         device_service = MagicMock()
         device_service.apply_device.return_value = SimpleNamespace(
@@ -2280,8 +2280,7 @@ class TestRestartAuthorizationResyncWiring:
             status=DeviceBindingStatus.ACTIVE.value,
         )
         svc = _make_service(repo, device_provider=device_service)
-        svc._runtime_reconciler = None
-        svc._runtime_reconciler_provider = MagicMock(side_effect=RuntimeError("runtime down"))
+        svc._runtime_reconciler = MagicMock()
         test_engine = "test_restart_engine"
         bot = _make_bot(
             owner_id="owner001",
@@ -2316,13 +2315,12 @@ class TestRestartAuthorizationResyncWiring:
                 extra_configs={"confirmed_template_update": True},
             )
 
-        svc._runtime_reconciler_provider.assert_called_once_with()
         refresh_strategy.refresh_restart_authorization.assert_called_once_with(
             ANY,
             bot,
             {"confirmed_template_update": True},
             skill_set_factory=svc._skill_set_factory,
-            runtime_reconciler=None,
+            runtime_reconciler=svc._runtime_reconciler,
             template_service=svc._template_service,
         )
         assert repo.release_calls == 1

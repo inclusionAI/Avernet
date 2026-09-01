@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.events.bus import get_event_bus
@@ -38,13 +38,11 @@ class AicodingRestartAuthorizationBaasPublishListener(LifecycleBase):
         template_service: "TemplateService",
         skill_set_factory: Any = None,
         runtime_reconciler: BotRuntimeProjectorProtocol | None = None,
-        runtime_reconciler_provider: Callable[[], BotRuntimeProjectorProtocol] | None = None,
     ) -> None:
         self._bot_repo = bot_repo
         self._template_service = template_service
         self._skill_set_factory = skill_set_factory
         self._runtime_reconciler = runtime_reconciler
-        self._runtime_reconciler_provider = runtime_reconciler_provider
 
     async def startup(self) -> None:
         bus = get_event_bus()
@@ -112,17 +110,6 @@ class AicodingRestartAuthorizationBaasPublishListener(LifecycleBase):
                 template_config=template_config if isinstance(template_config, dict) else None,
             )
             runtime_reconciler = self._runtime_reconciler
-            if runtime_reconciler is None and self._runtime_reconciler_provider is not None:
-                try:
-                    runtime_reconciler = self._runtime_reconciler_provider()
-                except Exception as runtime_error:
-                    logger.warning(
-                        "[aicoding.restart_authorization_listener] runtime reconciler unavailable: bot_id=%s publish_id=%s error=%s",
-                        event.bot_id,
-                        event.publish_id,
-                        runtime_error,
-                        exc_info=True,
-                    )
             opted_in = strategy.refresh_restart_authorization(
                 ctx,
                 bot,
