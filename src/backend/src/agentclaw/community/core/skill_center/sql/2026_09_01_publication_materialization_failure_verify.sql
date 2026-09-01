@@ -1,6 +1,14 @@
--- ODC disallows information_schema cross-database queries. Verify these
--- results after the three ordered ALTER statements above have completed.
-SHOW COLUMNS FROM ac_skill_publication_attempt
-  LIKE 'materialization_retry_count';
+SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'ac_skill_publication_attempt'
+  AND COLUMN_NAME = 'materialization_retry_count'
+  AND COLUMN_TYPE = 'int unsigned'
+  AND IS_NULLABLE = 'NO'
+  AND COLUMN_DEFAULT = '0';
 
-SHOW CREATE TABLE ac_skill_publication_attempt;
+SELECT CONSTRAINT_NAME, CHECK_CLAUSE
+FROM information_schema.CHECK_CONSTRAINTS
+WHERE CONSTRAINT_SCHEMA = DATABASE()
+  AND CONSTRAINT_NAME = 'ck_skill_publication_attempt_status'
+  AND CHECK_CLAUSE LIKE '%MATERIALIZATION_FAILED%';

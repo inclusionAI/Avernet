@@ -266,10 +266,9 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
             "gmt_created",
         ),
         CheckConstraint(
-            "status IN ('PREPARING', 'VALIDATING', 'SCANNING', 'SC_SUBMITTING', "
-            "'WAITING_SC', 'RESULT_UNKNOWN', 'MATERIALIZING', 'MATERIALIZATION_FAILED', "
-            "'SUCCEEDED', 'FAILED', 'MANUAL_RECONCILIATION')",
-            name="ck_skill_publication_attempt_status_v2",
+            "status IN ('PREPARING', 'SC_SUBMITTING', 'WAITING_SC', "
+            "'RESULT_UNKNOWN', 'MATERIALIZING', 'MATERIALIZATION_FAILED', 'SUCCEEDED', 'FAILED')",
+            name="ck_skill_publication_attempt_status",
         ),
         CheckConstraint(
             "recovery_state IS NULL OR recovery_state IN "
