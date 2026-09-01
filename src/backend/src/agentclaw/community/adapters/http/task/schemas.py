@@ -276,7 +276,7 @@ class TaskNodeDTO(BaseModel):
     task_id: str = Field(..., description="所属任务ID")
     status: str = Field(
         ...,
-        description="节点状态(product 态:DEFINED/EXECUTING/REVIEWING/DONE/FAILED/CANCELLED)",
+        description="节点状态(product 态:DEFINED/EXECUTING/REVIEWING/DONE/SUCCESS/FAILED/CANCELLED)",
     )
     task_spec: TaskSpecDTO = Field(..., description="节点任务规格")
     run_info: RuntimeInfoDTO = Field(
@@ -565,8 +565,10 @@ def _unwrap_node_output(d: Any) -> Any:
     return dict(d) if isinstance(d, dict) else d
 
 
+# 内部字段不直接透出到 dashboard DTO。编排核仍从 graph.extend_props 读取
+# execution_config 做运行时策略配置,但对外有唯一的顶层 execution_config 投影,避免重复返回。
+_INTERNAL_GRAPH_EXT_PROPS = frozenset({"execution_config"})
 # 内部飞行态标志(纯在途去重/陈旧判定),无 dashboard 价值且恒为 null 噪音 → 不透出到外部 DTO。
-# 持久化与编排核内部仍读 extend_props["dispatching"] 做跨实例/跨协程去重;仅外部序列化剥离。
 _INTERNAL_NODE_EXT_PROPS = frozenset({"dispatching", "dispatching_at"})
 
 
@@ -656,7 +658,11 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
         output=dict(graph.output),
         tasks=nodes,
         relations=relations,
-        extend_props=dict(graph.extend_props),
+        extend_props={
+            key: value
+            for key, value in graph.extend_props.items()
+            if key not in _INTERNAL_GRAPH_EXT_PROPS
+        },
         execution_graph=execution_graph_to_product_status(graph.execution_graph),
         execution_config=_normalize_execution_config(graph),
     )

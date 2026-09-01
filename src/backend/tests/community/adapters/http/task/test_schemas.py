@@ -58,6 +58,7 @@ def test_op_result_to_dto_returns_extend_props():
         ("RUNNING", "EXECUTING"),
         ("HUNG", "REVIEWING"),
         ("DONE", "DONE"),
+        ("SUCCESS", "SUCCESS"),
         ("FAILED", "FAILED"),
         ("CANCELLED", "CANCELLED"),
     ],
