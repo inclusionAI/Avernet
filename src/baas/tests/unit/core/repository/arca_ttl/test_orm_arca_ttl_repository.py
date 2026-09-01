@@ -128,6 +128,45 @@ class TestRegister:
         assert "gmt_modified" in sql_text
         assert "ON DUPLICATE KEY UPDATE" not in sql_text
 
+    def test_register_set_clears_stop_reason_mysql(self):
+        """Re-register clears stop_reason to NULL in the mysql SET region."""
+        repo, mock_session = _make_repo()
+
+        repo.register(
+            "test",
+            sandbox_id="sb-004",
+            source_table="baas_device",
+            source_id=4,
+            next_renew_at=datetime(2026, 8, 20, 12, 0, 0),
+        )
+
+        compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
+        sql_text = str(compiled)
+        set_region = sql_text.split("ON DUPLICATE KEY UPDATE", 1)[1]
+        assert "stop_reason" in set_region
+        assert compiled.params["status"] == "ACTIVE"
+        assert compiled.params["renew_fail_count"] == 0
+
+    def test_register_set_clears_stop_reason_sqlite(self):
+        """Re-register clears stop_reason to NULL in the sqlite SET region."""
+        repo, mock_session = _make_repo()
+        mock_session.bind.dialect.name = _SQLITE
+
+        repo.register(
+            "test",
+            sandbox_id="sb-004",
+            source_table="baas_device",
+            source_id=4,
+            next_renew_at=datetime(2026, 8, 20, 12, 0, 0),
+        )
+
+        compiled = mock_session.execute.call_args[0][0].compile(
+            dialect=sqlite.dialect()
+        )
+        sql_text = str(compiled)
+        set_region = sql_text.split("DO UPDATE SET", 1)[1]
+        assert "stop_reason" in set_region
+
 
 class TestRegisterIfMissing:
     def test_register_if_missing_inserts_via_upsert(self):
@@ -168,6 +207,23 @@ class TestRegisterIfMissing:
         )
 
         mock_session.execute.assert_called_once()
+
+    def test_register_if_missing_set_clears_stop_reason_mysql(self):
+        """Register_if_missing clears stop_reason to NULL on conflict."""
+        repo, mock_session = _make_repo()
+
+        repo.register_if_missing(
+            "test",
+            sandbox_id="sb-001",
+            source_table="baas_device",
+            source_id=1,
+            next_renew_at=datetime(2026, 8, 20, 12, 0, 0),
+        )
+
+        compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
+        sql_text = str(compiled)
+        set_region = sql_text.split("ON DUPLICATE KEY UPDATE", 1)[1]
+        assert "stop_reason" in set_region
 
 
 class TestListDueForRenewal:
@@ -393,6 +449,40 @@ class TestSetStatus:
         assert params["env_1"] == "test"
         assert params["source_table_1"] == "baas_device"
         assert params["source_id_1"] == 1
+
+    def test_set_status_with_stop_reason(self):
+        """stop_reason is threaded as a bound param on the UPDATE."""
+        repo, mock_session = _make_repo()
+
+        repo.set_status(
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_gone"
+        )
+
+        mock_session.execute.assert_called_once()
+        compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
+
+        params = compiled.params
+        assert params["status"] == "STOPPED"
+        assert params["stop_reason"] == "threshold_gone"
+        assert params["env_1"] == "test"
+        assert params["source_table_1"] == "baas_device"
+        assert params["source_id_1"] == 1
+
+    def test_set_status_without_stop_reason_omits_bind(self):
+        """GUARD: the legacy no-reason call shape renders NO stop_reason bind.
+
+        Pins that the new column never leaks into the no-reason UPDATE
+        params (a bare stop_reason=None values() entry would render a
+        stop_reason = NULL bind on both dialects).
+        """
+        repo, mock_session = _make_repo()
+
+        repo.set_status("test", "baas_device", 1, "STOPPED")
+
+        mock_session.execute.assert_called_once()
+        compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
+        params = compiled.params
+        assert "stop_reason" not in params
 
 
 class TestCountActive:

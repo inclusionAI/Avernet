@@ -65,8 +65,9 @@ def _rows() -> list[TtlRenewalScheduleModel]:
         return session.query(TtlRenewalScheduleModel).all()
 
 
-def _flip_stopped_with_failures() -> None:
-    """Mark the registered row STOPPED with failure history and an old mtime."""
+def _flip_stopped_with_failures(*, stop_reason: str | None = None) -> None:
+    """Mark the registered row STOPPED with failure history, an optional
+    stop_reason stamp, and an old mtime."""
     with db_manager.orm_session() as session:
         session.query(TtlRenewalScheduleModel).filter(
             TtlRenewalScheduleModel.env == ENV,
@@ -76,6 +77,7 @@ def _flip_stopped_with_failures() -> None:
             {
                 "status": "STOPPED",
                 "renew_fail_count": 7,
+                "stop_reason": stop_reason,
                 "gmt_modified": datetime(2020, 1, 1, 0, 0, 0),
             },
             synchronize_session=False,
@@ -124,7 +126,7 @@ class TestRegister:
             source_id=SOURCE_ID,
             next_renew_at=FIRST_RENEW,
         )
-        _flip_stopped_with_failures()
+        _flip_stopped_with_failures(stop_reason="threshold_gone")
 
         repo.register(
             ENV,
@@ -141,6 +143,8 @@ class TestRegister:
         assert row.next_renew_at == NEW_RENEW
         assert row.status == "ACTIVE"
         assert row.renew_fail_count == 0
+        # Resurrection clears the stale STOPPED origin along with the status.
+        assert row.stop_reason is None
         # Pitfall 2 guard: dialect upsert does NOT apply Column.onupdate, so
         # the SET must carry gmt_modified explicitly — without it the value
         # stays at 2020-01-01 and this assertion fails.
@@ -206,19 +210,21 @@ def _seed_cold(
     next_renew_at: datetime,
     status: str = "ACTIVE",
     renew_fail_count: int = 0,
+    stop_reason: str | None = None,
 ) -> None:
+    record = TtlRenewalScheduleModel(
+        env=env,
+        sandbox_id=sandbox_id,
+        source_table=source_table,
+        source_id=source_id,
+        next_renew_at=next_renew_at,
+        status=status,
+        renew_fail_count=renew_fail_count,
+    )
+    if stop_reason is not None:
+        record.stop_reason = stop_reason
     with db_manager.orm_session() as session:
-        session.add(
-            TtlRenewalScheduleModel(
-                env=env,
-                sandbox_id=sandbox_id,
-                source_table=source_table,
-                source_id=source_id,
-                next_renew_at=next_renew_at,
-                status=status,
-                renew_fail_count=renew_fail_count,
-            )
-        )
+        session.add(record)
 
 
 def _seed_hot_device(
@@ -540,6 +546,22 @@ class TestRowUpdates:
         assert row.status == "STOPPED"
         assert row.gmt_modified > datetime(2020, 1, 1)
         assert self._foreign_row().status == "ACTIVE"
+
+    def test_set_status_with_stop_reason_persists_and_env_scopes(self, repo):
+        self._seed()
+
+        repo.set_status(
+            ENV, "baas_device", self.SOURCE_ID, "STOPPED", stop_reason="threshold_gone"
+        )
+
+        row = _cold_row(self.SOURCE_ID)
+        assert row.status == "STOPPED"
+        assert row.stop_reason == "threshold_gone"
+        assert row.gmt_modified > datetime(2020, 1, 1)
+        # env scoping: the foreign-env twin stays ACTIVE with no reason.
+        foreign = self._foreign_row()
+        assert foreign.status == "ACTIVE"
+        assert foreign.stop_reason is None
 
 
 # ==================== find_unregistered anti-join ====================
