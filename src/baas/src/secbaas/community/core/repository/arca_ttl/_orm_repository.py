@@ -413,8 +413,10 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         The ON clause deliberately omits cold-table status (existence
         semantics per D-85-AJ1): any cold-table row — ACTIVE or STOPPED —
         matching (env, source_table, source_id, sandbox_id) suppresses the
-        hot row, so threshold-STOPPED is terminal and revival happens only
-        via the lifecycle register() upsert. The ON still matches
+        hot row, so threshold-STOPPED is terminal for the matched sandbox.
+        Revival is expected from the lifecycle register() upsert, or — as a
+        safety net — from discovery when the cold row is stale for an OLD
+        sandbox after a swap, which this ON clause still permits: it matches
         s.sandbox_id against the hot row's current sandbox, so a stale
         cold row for an OLD sandbox (after a destroy+create swap) does NOT
         suppress the hot row. Both sides are env-scoped.
