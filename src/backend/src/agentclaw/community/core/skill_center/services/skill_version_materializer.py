@@ -286,11 +286,11 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 raise ValueError("downloaded package digest does not match SC")
 
             advance_stage("package_validate")
-            package = (
-                self._validator.validate_public_center_zip(package_bytes)
-                if request.scope is SkillCenterReadScope.PUBLIC
-                else self._validator.validate_zip(package_bytes)
-            )
+            # SC exact downloads wrap the Skill files in an opaque transport
+            # directory (commonly the skillCode/UUID) for both Public and Team
+            # reads.  It is not a runtime name and must not participate in the
+            # TeamClaw name invariant below.
+            package = self._validator.validate_skill_center_exact_zip(package_bytes)
             advance_stage("name_match")
             if (
                 request.scope is not SkillCenterReadScope.PUBLIC

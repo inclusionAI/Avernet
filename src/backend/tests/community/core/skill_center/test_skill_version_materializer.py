@@ -340,6 +340,28 @@ def test_team_exact_package_still_rejects_manifest_name_mismatch() -> None:
     assert versions.published is None
 
 
+def test_team_exact_package_ignores_opaque_sc_wrapper() -> None:
+    versions = _Versions(_target())
+    materializer = _materializer(
+        package=_package(name="weather", wrapper="00000000-0000-4000-8000-000000000010"),
+        scanner=_Scanner(expected_name="weather"),
+        versions=versions,
+    )
+
+    published = materializer.materialize(
+        SkillVersionMaterializationRequest(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            scope=SkillCenterReadScope.TEAM,
+            team_id="10001",
+        )
+    )
+
+    assert published.status == "PUBLISHED"
+    assert versions.published is not None
+
+
 def test_sdk_scanner_reads_only_the_validated_exact_package() -> None:
     package = SkillPackageValidator(SkillParser()).validate_zip(_package())
 
