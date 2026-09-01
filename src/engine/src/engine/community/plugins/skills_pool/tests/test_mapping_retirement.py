@@ -57,6 +57,9 @@ def test_best_effort_mapping_keeps_unmanaged_entry_and_publishes_safe_entries(
     assert result.item_for(target=missing_target).code == "MANAGED_SOURCE_MISSING"
     assert result.item_for(target=occupied_target).status == "DEGRADED"
     assert result.item_for(target=occupied_target).code == "UNMANAGED_ACTIVE_ENTRY_RETAINED"
+    assert result.to_data()["items"] == [
+        item.to_data() for item in result.items
+    ]
 
     verified = verify_skill_mappings(
         mappings=[
@@ -74,6 +77,9 @@ def test_best_effort_mapping_keeps_unmanaged_entry_and_publishes_safe_entries(
     by_target = {item.target: item for item in verified.items}
     assert by_target[str(occupied_target)].status == "DEGRADED"
     assert by_target[str(missing_target)].status == "PENDING"
+    assert verified.to_data()["items"] == [
+        item.to_data() for item in verified.items
+    ]
 
 
 def test_best_effort_reports_invalid_requested_mappings_without_touching_safe_ones(
