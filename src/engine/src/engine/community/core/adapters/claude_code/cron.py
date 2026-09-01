@@ -206,8 +206,6 @@ def _build_add_params(request: CreateJobRequest) -> dict[str, Any]:
         "name": request.name,
         "schedule": _schedule_for_wire(request.schedule),
         "payload": _convert_payload_for_wire(request.payload),
-        "owner_id": request.owner_id,
-        "bot_id": request.bot_id,
         "sessionTarget": request.session_target,
         "enabled": request.enabled,
         "delivery": _notify_to_delivery(request.notify),

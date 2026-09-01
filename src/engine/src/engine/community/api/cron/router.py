@@ -163,10 +163,6 @@ async def create_task(request: CreateTaskRequest):
             "message": request.command,
             "timeout_secs": request.timeout_secs if request.timeout_secs is not None else 86400
         }
-        if request.owner_id:
-            payload["owner_id"] = request.owner_id
-        if request.bot_id:
-            payload["bot_id"] = request.bot_id
         if request.model:
             payload["model"] = request.model  # 指定AI模型
         if request.runtime:
