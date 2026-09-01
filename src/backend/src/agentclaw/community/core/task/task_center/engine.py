@@ -1940,6 +1940,18 @@ class ExecutionEngine:
                 "[task][on_harness] task=%s 图已终态,冻结 harness 推进", patch.task_id
             )
             return
+        if self._static_runtime(patch.task_id) is not None:
+            # 固定 plan 任务:真实上报兜底由 _static_auto_report(默认 80s mock PASS→DONE)承担,
+            # V2 relay 节点下发为纯交接正文(不含 {success,data,gaps} poller 协议),bot 常回自然语言
+            # → poller 误判 exec_error;若仍走 harness 重投×MAX_HARNESS→HUNG,会在 80s fallback 之前就把
+            # 节点 HUNG,80s 兜底因 status!=RUNNING 而跳过,致单节点挂死、整流程不往下走。
+            # 此处对固定 plan 跳过 harness 重投/HUNG,把恢复交给 static fallback:真实回投先到则自跳过,
+            # 否则 80s 由 mock 推进 DONE,流程不卡(真实派发已完成,不重复派发)。
+            logger.info(
+                "[task][on_harness] task=%s node=%s 固定 plan,由 static fallback 兜底,跳过 harness 重投/HUNG",
+                patch.task_id, patch.node_id,
+            )
+            return
         side: list[tuple] = []
         with self._lock_for(patch.task_id):
             await self._on_harness_collect(
