@@ -13,9 +13,14 @@ import time
 from datetime import timedelta
 from uuid import uuid4
 
+from secbaas.community.api.device_manage import DeviceFacadeException
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
 from secbaas.community.core.service.distributed_lock import DistributedLockService
-from secbaas.community.core.service.paas import PaasServiceFacade
+from secbaas.community.core.service.paas import (
+    ErrorCode,
+    PaasError,
+    PaasServiceFacade,
+)
 from secbaas.community.core.utils import log_renew_digest
 from secbaas.community.core.utils.time_utils import (
     format_ttl_expiration_time,
@@ -74,6 +79,24 @@ def _requested_ttl_minutes(
         1,
         int((default_ttl_minutes * 60 - remaining_hours * 3600) / 60)
         - ttl_safety_margin_minutes,
+    )
+
+
+def _is_confirmed_gone(exc: BaseException) -> bool:
+    """Confirm only the platform's dead-sandbox error class.
+
+    True only when the exception is a DeviceFacadeException whose
+    original_error is a PaasError with code DEVICE_NOT_FOUND — the error
+    shape the platform emits for a genuinely recycled sandbox. Every other
+    shape (DEVICE_UNAVAILABLE, COMMAND_TIMEOUT, raw network exceptions,
+    anything that is not a DeviceFacadeException) returns False, so an
+    unknown failure can never silently kill a live container.
+    """
+    if not isinstance(exc, DeviceFacadeException):
+        return False
+    original = exc.original_error
+    return (
+        isinstance(original, PaasError) and original.code == ErrorCode.DEVICE_NOT_FOUND
     )
 
 
@@ -560,6 +583,10 @@ class DeadlineRenewalScheduler:
               success next_renew_at is derived from the post-extend TTL
               re-read (WR-03: Arca clamps extensions at its 24h remaining
               cap, so assuming now + window can overshoot the real expiry)
+
+        Failure branches route through _handle_failure with a liveness
+        verdict — only platform-confirmed gone (DEVICE_NOT_FOUND) or
+        expired (remaining < 0) verdicts can terminate at the cap.
         """
         sandbox_id = record.get("sandbox_id", "")
 
@@ -578,7 +605,10 @@ class DeadlineRenewalScheduler:
                 e,
                 exc_info=True,
             )
-            outcome = await self._handle_failure(record)
+            outcome = await self._handle_failure(
+                record,
+                stop_reason=("threshold_gone" if _is_confirmed_gone(e) else None),
+            )
             self._emit_renew_digest(record, outcome, run_uuid=run_uuid)
             return outcome
 
@@ -630,7 +660,9 @@ class DeadlineRenewalScheduler:
                 sandbox_id,
                 remaining_hours,
             )
-            outcome = await self._handle_failure(record)
+            outcome = await self._handle_failure(
+                record, stop_reason="threshold_expired"
+            )
             self._emit_renew_digest(
                 record, outcome, ttl_before_ms=ttl_ms, run_uuid=run_uuid
             )
@@ -715,7 +747,10 @@ class DeadlineRenewalScheduler:
                 e,
                 exc_info=True,
             )
-            outcome = await self._handle_failure(record)
+            outcome = await self._handle_failure(
+                record,
+                stop_reason=("threshold_gone" if _is_confirmed_gone(e) else None),
+            )
             self._emit_renew_digest(
                 record, outcome, ttl_before_ms=ttl_ms, run_uuid=run_uuid
             )
@@ -862,11 +897,22 @@ class DeadlineRenewalScheduler:
     # Step 4: Failure handling
     # ------------------------------------------------------------------
 
-    async def _handle_failure(self, record: dict) -> str:
-        """Handle renewal failure with retry and STOPPED threshold.
+    async def _handle_failure(
+        self, record: dict, *, stop_reason: str | None = None
+    ) -> str:
+        """Handle renewal failure with a liveness-gated STOPPED threshold.
+
+        Two-verdict model: at the cap, a threaded stop_reason
+        (platform-confirmed gone/expired) writes terminal STOPPED with the
+        reason; with NO reason nothing terminal is written — the count is
+        capped at max_fail_count - 1 (cap-and-hold) and the row retries
+        after retry_delay_minutes.
 
         Args:
             record: The schedule record (dict from list_due_for_renewal).
+            stop_reason: Keyword-only verdict threaded from the failure site
+                ("threshold_gone" | "threshold_expired"); None means the
+                failure was non-confirming.
 
         Returns:
             "failed" or "stopped".
@@ -874,35 +920,73 @@ class DeadlineRenewalScheduler:
         new_fail_count = record.get("renew_fail_count", 0) + 1
 
         if new_fail_count >= self._config.max_fail_count:
-            self._schedule_repo.set_status(
-                self._config.env, record["source_table"], record["source_id"], "STOPPED"
+            if stop_reason is not None:
+                self._schedule_repo.set_status(
+                    self._config.env,
+                    record["source_table"],
+                    record["source_id"],
+                    "STOPPED",
+                    stop_reason=stop_reason,
+                )
+                log.warning(
+                    "[DeadlineRenewalScheduler] sandbox_id=%s "
+                    "source=%s:%s reached max_fail_count=%d, marked STOPPED "
+                    "(stop_reason=%s)",
+                    record.get("sandbox_id"),
+                    record["source_table"],
+                    record["source_id"],
+                    self._config.max_fail_count,
+                    stop_reason,
+                )
+                # The persisted STOPPED state is now only written on a
+                # platform-confirmed verdict (gone error class or expired
+                # TTL). After the phase 85 anti-join fix the discovery scan
+                # excludes any cold-table row matching (env, source, sandbox),
+                # so confirmed-STOPPED rows cannot be revived on the same
+                # sandbox. Revival channels stay the device-side lifecycle
+                # register() upsert (restart / destroy+create, baas_device
+                # rows only) and the stale-old-sandbox discovery safety net.
+                # The binding side (ac_entity_device_binding) has NO
+                # lifecycle register() writer — its renewal normally
+                # continues via the baas_device row for the same container,
+                # and a binding row whose device row also went terminal
+                # recovers via a new binding record id (re-bind) or a
+                # device-side restart. The durable alarm signal remains this
+                # metrics line, not the row status.
+                log.info(
+                    "[arca_ttl_metrics] stopped_transition=1 sandbox_id=%s "
+                    "source_table=%s source_id=%s fail_count=%d stop_reason=%s",
+                    record.get("sandbox_id"),
+                    record["source_table"],
+                    record["source_id"],
+                    new_fail_count,
+                    stop_reason,
+                )
+                return "stopped"
+
+            # Cap-and-hold: at/over the cap with a NON-confirming verdict
+            # the count is held at max_fail_count - 1 (the DB keeps the
+            # 9+-signature clue) and the row retries after
+            # retry_delay_minutes.
+            next_retry = naive_cst_now() + timedelta(
+                minutes=self._config.retry_delay_minutes
+            )
+            self._schedule_repo.update_after_failure(
+                self._config.env,
+                record["source_table"],
+                record["source_id"],
+                next_renew_at=next_retry,
+                new_fail_count=self._config.max_fail_count - 1,
             )
             log.warning(
-                "[DeadlineRenewalScheduler] sandbox_id=%s "
-                "source=%s:%s reached max_fail_count=%d, marked STOPPED",
+                "[DeadlineRenewalScheduler] sandbox_id=%s fail_count held at "
+                "%d/%d (non-confirming failure at cap) — retry at %s",
                 record.get("sandbox_id"),
-                record["source_table"],
-                record["source_id"],
+                self._config.max_fail_count - 1,
                 self._config.max_fail_count,
+                next_retry.isoformat(),
             )
-            # The persisted STOPPED state is now terminal for the current
-            # sandbox: after the phase 85 anti-join fix, the discovery scan
-            # excludes any cold-table row matching (env, source, sandbox),
-            # so the next round cannot revive threshold-STOPPED rows on the
-            # same sandbox. Revival can still come from the device-lifecycle
-            # register() upsert (restart / destroy+create), or — as a
-            # deliberate safety net — from discovery when the cold row is
-            # stale for an OLD sandbox after a swap. The durable alarm signal
-            # remains this metrics line, not the row status.
-            log.info(
-                "[arca_ttl_metrics] stopped_transition=1 sandbox_id=%s "
-                "source_table=%s source_id=%s fail_count=%d",
-                record.get("sandbox_id"),
-                record["source_table"],
-                record["source_id"],
-                new_fail_count,
-            )
-            return "stopped"
+            return "failed"
 
         # Retry: schedule next attempt after retry_delay_minutes
         next_retry = naive_cst_now() + timedelta(
