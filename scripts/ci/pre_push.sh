@@ -160,6 +160,14 @@ if matches_any '^src/engine/'; then
   run_heavy "$repo_root/src/engine/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
+if matches_any '^src/bcs/crates/plugins/deepseek-harness-channel-bcn/'; then
+  # The DSH channel is a Node/Cordis package under the BCS tree, so exercise
+  # its own contract suite and packed artifact in addition to BCS Rust gates.
+  dsh_bcn_plugin="$repo_root/src/bcs/crates/plugins/deepseek-harness-channel-bcn"
+  run_heavy npm --prefix "$dsh_bcn_plugin" install --ignore-scripts --no-package-lock
+  run_heavy npm --prefix "$dsh_bcn_plugin" run ci
+fi
+
 if matches_any '^src/bcs/'; then
   # BCS/BCN 默认强卡点:
   # 1) ci_test.sh 跑 Rust workspace 测试,第一个失败就退出。

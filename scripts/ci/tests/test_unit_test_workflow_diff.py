@@ -61,6 +61,8 @@ class UnitTestWorkflowDiffTest(unittest.TestCase):
             "        run: python3 scripts/ci/tests/test_unit_test_workflow_diff.py\n",
             workflow,
         )
+        self.assertIn("dsh-bcn-changed=true", workflow)
+        self.assertIn("npm run ci", workflow)
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = Path(temporary_directory) / "repository"
