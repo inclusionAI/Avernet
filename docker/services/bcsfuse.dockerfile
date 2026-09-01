@@ -23,6 +23,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SERVICE_PORT=8765
 
 # Runtime dependencies we need before pip install can compile extensions.
+# iputils-ping rides along for in-container network diagnostics (the runtime
+# entry, not just the build deps).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -30,6 +32,7 @@ RUN apt-get update \
         libmariadb-dev-compat \
         pkg-config \
         gcc \
+        iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root runtime user.
@@ -57,6 +60,10 @@ COPY src/bcsfuse/LEGAL.md src/bcsfuse/FUSE_API_LOGIC.md ./
 
 RUN chown -R appuser:appuser /app
 
+# The service runs as appuser (non-root). Root stays available for debugging —
+# it is merely password-locked, and container exec needs no password:
+#   kubectl exec -it <pod> -u 0 -- bash    (then apt-get install ...)
+# Root password stays unset on purpose: no secret ships in image layers.
 USER appuser
 
 EXPOSE 8765

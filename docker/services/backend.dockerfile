@@ -78,7 +78,7 @@ WORKDIR /app
 # sudo), not the mount-based one.
 RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends curl git openssh-client rsync \
+    && apt-get install -y --no-install-recommends curl git openssh-client rsync iputils-ping \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 admin \
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
@@ -125,6 +125,10 @@ RUN mkdir -p /app/data/workspace/openclaw \
              /home/admin/logs \
     && chown -R admin:admin /app /home/admin
 
+# The service runs as admin (non-root). Root stays available for debugging —
+# it is merely password-locked, and container exec needs no password:
+#   kubectl exec -it <pod> -u 0 -- bash    (then apt-get install ...)
+# Root password stays unset on purpose: no secret ships in image layers.
 USER admin
 
 EXPOSE 8888

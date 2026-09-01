@@ -61,7 +61,7 @@ WORKDIR /app
 RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl libssl3 libsqlite3-0 \
+        ca-certificates curl libssl3 libsqlite3-0 iputils-ping \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 admin \
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
@@ -75,6 +75,10 @@ COPY src/bcs/configs /app/configs
 RUN mkdir -p /app/tmp /var/lib/bcs /home/admin/logs \
     && chown -R admin:admin /app /var/lib/bcs /home/admin
 
+# The service runs as admin (non-root). Root stays available for debugging —
+# it is merely password-locked, and container exec needs no password:
+#   kubectl exec -it <pod> -u 0 -- bash    (then apt-get install ...)
+# Root password stays unset on purpose: no secret ships in image layers.
 USER admin
 
 EXPOSE 21000
