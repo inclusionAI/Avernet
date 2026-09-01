@@ -1,8 +1,8 @@
 """OpenClawSkillsPort — native port for bulk symlink-based skills management.
 
 Skills operations are local-infra: they reconcile symlinks on the pod
-filesystem (``$SKILLS_LINK_BASE_DIR``) and rsync from a NAS source — no
-gateway, no pool, no token.  The port impl owns all FS/subprocess logic;
+filesystem (``$SKILLS_LINK_BASE_DIR``) and validate the provisioned Center
+mount — no gateway, no pool, no token.  The port impl owns filesystem logic;
 the adapter builds core DTOs from the primitive dicts returned here.
 
 Decision 5 (leaf-safety): ``CapabilityNotSupportedError`` and ``Capability``
@@ -49,8 +49,9 @@ class OpenClawSkillsPort(Protocol):
           ``failed`` (list[dict] each with ``skill_uuid``, ``version``,
           ``reason``).
 
-        Individual item failures do not abort the batch.  Items already
-        present locally are returned in ``ok`` without IO.
+        Individual item failures do not abort the batch. The operation is
+        read-only; runtime provisioning owns Center corpus delivery. Failed
+        items may include a stable ``code`` for callers to map to guidance.
         """
         ...
 

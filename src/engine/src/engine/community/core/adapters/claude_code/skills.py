@@ -357,6 +357,7 @@ class ClaudeCodeSkillsAdapter(SkillsService):
                 skill_uuid=d.get("skill_uuid", ""),
                 version=str(d.get("version", "")),
                 reason=d.get("reason", ""),
+                code=d.get("code"),
             )
             for d in raw.get("failed", [])
             if isinstance(d, dict)
