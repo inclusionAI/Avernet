@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
@@ -15,6 +16,13 @@ from agentclaw.community.core.skills_pool.models import (
 )
 from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupResult
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
+
+
+class RuntimeMappingApplyMode(StrEnum):
+    """The mapping contract's closed apply-mode vocabulary."""
+
+    STRICT = "STRICT"
+    BEST_EFFORT = "BEST_EFFORT"
 
 
 @runtime_checkable
@@ -68,7 +76,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = "skills-pool-mapping-v2",
-        apply_mode: str = "STRICT",
+        apply_mode: RuntimeMappingApplyMode = RuntimeMappingApplyMode.STRICT,
     ) -> bool: ...
 
     async def verify_mappings(
@@ -80,11 +88,12 @@ class SkillsPoolRuntimeProtocol(Protocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = "skills-pool-mapping-v2",
-        apply_mode: str = "STRICT",
+        apply_mode: RuntimeMappingApplyMode = RuntimeMappingApplyMode.STRICT,
     ) -> bool: ...
 
 
 __all__ = [
+    "RuntimeMappingApplyMode",
     "SkillsPoolRuntimeProtocol",
     "SkillsPoolSkillRepositoryProtocol",
 ]
