@@ -75,16 +75,16 @@ Conventions from `plan.md` that every task assumes:
   - [x] Phase A's own record is untouched by the carry.
 - **Depends on:** Task 2
 
-## [ ] Task 4: `materialised_constructs()`
+## [x] Task 4: `materialised_constructs()`
 - **Files:** the apply service and its protocol
 - **Done when:**
-  - [ ] The protocol declares `materialised_constructs() -> frozenset[ApplyConstruct]`
+  - [x] The protocol declares `materialised_constructs() -> frozenset[ApplyConstruct]`
         as an `@abstractmethod`; the service returns
         `frozenset(build_materialisers(...).keys())` — the same registry
         `_orchestrator()` builds, not a second list.
-  - [ ] A test asserts it equals `{script, mcp}` **today**, and that registering a
+  - [x] A test asserts it equals `{script, mcp}` **today**, and that registering a
         stub materialiser widens it with no edit to the gate.
-  - [ ] The docstring says why it is derived: a hand-written set drifts, and the
+  - [x] The docstring says why it is derived: a hand-written set drifts, and the
         drift is only observable as a failed apply on a bot that already exists.
 - **Depends on:** —
 

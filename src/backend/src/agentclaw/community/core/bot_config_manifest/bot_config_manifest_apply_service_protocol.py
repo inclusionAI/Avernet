@@ -30,6 +30,7 @@ from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+    ApplyConstruct,
     ApplyReport,
     ApplyStatus,
 )
@@ -85,14 +86,26 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         *,
         entity_id: str,
         bot_id: str,
-        bot: dict,
+        bot: Optional[dict] = None,
         owner_id: str,
         actor_id: str,
         audit_actor: Optional[str] = None,
         trigger: str = "explicit",
         phases: Optional[frozenset[ApplyPhase]] = None,
+        engine_type: Optional[str] = None,
+        bot_type: Optional[str] = None,
+        carry_from_apply_id: Optional[str] = None,
     ) -> ApplyAccepted:
         """Take the lock, validate, record ``RUNNING``, start the work, return.
+
+        ``bot`` is optional for one caller: W13 applies the pre-container phase
+        **before** the bot record exists, and passes ``engine_type`` /
+        ``bot_type`` from the creation request instead. Every other caller has a
+        record and passes it.
+
+        ``carry_from_apply_id`` folds an earlier apply's categories into this
+        one's report, so a creation's two phases read as one story. A missing or
+        foreign id is ignored rather than fatal.
 
         **Does not wait for the apply.** Applying is device I/O today and
         network fetching from W5; a caller must never hold an HTTP connection
@@ -151,6 +164,23 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         ``None`` when this bot has no such apply — including when the id belongs
         to a *different* bot, because the lookup is scoped to the bot key. The
         id is the caller's handle, never what authorizes the read.
+        """
+        ...
+
+    @abstractmethod
+    def materialised_constructs(self) -> frozenset["ApplyConstruct"]:
+        """Which constructs some shipped code can actually act on, right now.
+
+        **Derived from the registry, never a list written by hand.** The
+        implementation returns the keys of the same registry the orchestrator
+        builds, so the two cannot disagree — and W5 or W6 widen every caller of
+        this by registering a materialiser, with no edit anywhere else.
+
+        The alternative was a constant naming ``{script, mcp}``. It would drift,
+        and the drift is invisible until the worst moment: a creation endpoint
+        that gates on it would accept a category nothing can apply, spend a
+        Passport application, take a user through authorization, create the bot,
+        and only then fail the apply.
         """
         ...
 

@@ -64,6 +64,7 @@ from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
     ApplyOrchestrator,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+    ApplyConstruct,
     ApplyReport,
     ApplyStatus,
     CategoryResult,
@@ -799,21 +800,39 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
 
     # ── internals ───────────────────────────────────────────────────────────
 
+    def materialised_constructs(self) -> frozenset[ApplyConstruct]:
+        """The constructs something can actually apply in this build.
+
+        The keys of the very registry ``_orchestrator`` builds, so a caller
+        gating on this and the engine executing the apply can never disagree —
+        and W5/W6 widen it by registering a materialiser rather than by anyone
+        remembering to update a list. A hand-written set would drift, and the
+        drift is only observable as a failed apply on a bot that already exists.
+        """
+        return frozenset(self._build_materialisers().keys())
+
+    def _build_materialisers(self):
+        """The one construction site for the registry.
+
+        Named rather than inlined into ``_orchestrator`` so
+        ``materialised_constructs`` reads the *same* registry the engine runs,
+        instead of a second list that would drift from it.
+        """
+        return build_materialisers(
+            script_service=self._script_service_provider(),
+            activation_service=self._activation_service_provider(),
+            mcp_auth_service=self._mcp_auth_service_provider(),
+            identity_service=self._identity_service_provider(),
+            upload_service=self._upload_service_provider(),
+            capability_reader=self._capability_reader_provider(),
+            package_validator=self._package_validator_provider(),
+            entry_fetcher=self._entry_fetcher_provider(),
+            resource_service=self._resource_service_provider(),
+        )
+
     def _orchestrator(self) -> ApplyOrchestrator:
         """A fresh orchestrator over the registry. Holds no state between calls."""
-        return ApplyOrchestrator(
-            build_materialisers(
-                script_service=self._script_service_provider(),
-                activation_service=self._activation_service_provider(),
-                mcp_auth_service=self._mcp_auth_service_provider(),
-                identity_service=self._identity_service_provider(),
-                upload_service=self._upload_service_provider(),
-                capability_reader=self._capability_reader_provider(),
-                package_validator=self._package_validator_provider(),
-                entry_fetcher=self._entry_fetcher_provider(),
-                resource_service=self._resource_service_provider(),
-            )
-        )
+        return ApplyOrchestrator(self._build_materialisers())
 
     def _context(
         self,

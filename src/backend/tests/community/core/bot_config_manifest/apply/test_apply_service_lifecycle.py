@@ -850,3 +850,52 @@ def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(worl
         "union; a caller would be told the script landed when it did not"
     )
     assert merged.status is ApplyStatus.FAILED
+
+
+# ── What can actually be applied in this build (W13) ───────────────────────
+
+
+def test_materialised_constructs_reports_what_is_registered_today(world):
+    """W4 registered two; W5 brought the count to four.
+
+    Pinned as an equality rather than a subset so a materialiser that lands
+    without its documentation, its ordering entry or its capability gate is
+    caught here — the set is a published contract, not an accident of imports.
+    """
+    service, *_ = world
+    assert {c.value for c in service.materialised_constructs()} == {
+        "script",
+        "mcp",
+        "identity",
+        "skills",
+    }
+
+
+def test_registering_a_materialiser_widens_it_with_no_edit_to_any_caller(world):
+    """The property W5 and W6 depend on.
+
+    A hand-written set would need an edit here when they land, and forgetting it
+    is invisible until a creation accepts a category nothing can apply — after a
+    Passport application, a user's click, and a live bot. Deriving it from the
+    registry makes landing a materialiser the whole change.
+    """
+    service, *_ = world
+    from agentclaw.community.core.bot_config_manifest.capabilities import (
+        ManifestCategory,
+    )
+
+    real = service._build_materialisers
+
+    class _StubResourcesMaterialiser:
+        construct = ManifestCategory.RESOURCES
+
+    def _widened():
+        built = dict(real())
+        built[ManifestCategory.RESOURCES] = _StubResourcesMaterialiser()
+        return built
+
+    service._build_materialisers = _widened
+    try:
+        assert ManifestCategory.RESOURCES in service.materialised_constructs()
+    finally:
+        service._build_materialisers = real
