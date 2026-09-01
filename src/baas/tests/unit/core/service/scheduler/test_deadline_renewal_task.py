@@ -1939,8 +1939,10 @@ class TestProcessOneIsolation:
 
 
 class TestStoppedTransitionMetric:
-    """WR-GAP-03: threshold crossing emits a scrapeable metrics line — the
-    persisted STOPPED state alone is transient (revive oscillation)."""
+    """WR-GAP-03: threshold crossing emits a scrapeable metrics line — after
+    phase 85's any-status anti-join, threshold-STOPPED is terminal (revival
+    only via the device-lifecycle register() upsert); the metrics line is the
+    durable alarm."""
 
     @pytest.mark.asyncio
     async def test_stopped_transition_emits_metrics_line(self, caplog):

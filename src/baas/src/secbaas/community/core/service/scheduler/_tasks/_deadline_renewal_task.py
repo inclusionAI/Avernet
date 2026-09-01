@@ -885,11 +885,13 @@ class DeadlineRenewalScheduler:
                 record["source_id"],
                 self._config.max_fail_count,
             )
-            # The persisted STOPPED state is transient: the next round's
-            # discovery scan can revive threshold-STOPPED rows (the
-            # anti-join matches only ACTIVE cold rows and
-            # register_if_missing upserts back to ACTIVE), so the durable
-            # alarm signal is this metrics line, not the row status.
+            # The persisted STOPPED state is now terminal: after the phase 85
+            # anti-join fix, the discovery scan excludes any cold-table row
+            # regardless of status, so the next round cannot revive
+            # threshold-STOPPED rows. The only revival path is the
+            # device-lifecycle register() upsert (restart / destroy+create),
+            # which is by design. The durable alarm signal remains this
+            # metrics line, not the row status.
             log.info(
                 "[arca_ttl_metrics] stopped_transition=1 sandbox_id=%s "
                 "source_table=%s source_id=%s fail_count=%d",
