@@ -242,6 +242,36 @@ class TestStep0GapDetection:
         assert report.gap_records_registered >= 1
 
     @pytest.mark.asyncio
+    async def test_terminal_stopped_gap_never_reregisters(self):
+        """85-02: a persistent gap post-fix scans empty and registers nothing.
+
+        Terminal model: a threshold-STOPPED row stays out of the discovery
+        anti-join result (any-status suppression), so the gap never collapses
+        (cold < hot forever) and the resurrect loop's write — register_if_missing
+        — never fires.
+        """
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 45000  # cold
+        mock_repo.count_hot_arca_devices.return_value = 40000
+        mock_repo.count_hot_arca_bindings.return_value = 10000  # hot total = 50000
+        mock_repo.list_due_for_renewal.return_value = []
+        # Post-fix model: every suppressed STOPPED row stays out of discovery,
+        # so the scan comes back empty on both sides.
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.register_if_missing = MagicMock()
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        # The scan still ran for the persistent gap...
+        assert mock_repo.find_unregistered.call_count >= 1
+        # ...but the gap does NOT collapse — terminal rows keep cold < hot.
+        assert report.gap_detected is True
+        assert report.gap_records_registered == 0
+        # The resurrect loop's write never fires.
+        assert mock_repo.register_if_missing.call_count == 0
+
+    @pytest.mark.asyncio
     async def test_anti_join_periodic_verify_triggers_every_48_rounds(self):
         """Test 8: anti-join periodic verify fires on round 48 regardless of COUNT."""
         scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
