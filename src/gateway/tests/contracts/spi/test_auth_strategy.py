@@ -110,7 +110,9 @@ class TestGoogleUserStrategy(AuthStrategyContract):
 
 class TestOauthSessionStrategy(AuthStrategyContract):
     def setup_method(self) -> None:
-        self.strategy = OauthSessionStrategy(jwt_secret="test-bcs-session-secret-32-bytes!!")
+        self.strategy = OauthSessionStrategy(
+            jwt_secret="test-bcs-session-secret-32-bytes!!"
+        )
         now = datetime.now(tz=UTC)
         token = jwt.encode(
             {
