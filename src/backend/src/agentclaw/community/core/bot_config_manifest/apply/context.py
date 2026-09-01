@@ -1,10 +1,16 @@
 """Who and what one apply runs as.
 
 Built once at the top of an apply and handed to every materialiser, so that a
-materialiser never re-derives an identity or a coordinate. The coordinates come
-from **W10's seam** (``core/bot_config_surface``) — the same functions the
-public API's routers call — which is what makes "apply enforces what the API
-enforces" a property of the code rather than a claim in a review.
+materialiser never re-derives an identity.
+
+It carries identity and resolved capabilities, and nothing else. A ``coords_for``
+helper wrapping W10's ``CONFIG_SURFACE`` lived here and has been removed: no
+materialiser called it. The two that ship reach their area through the owning
+service (``BotStartupScriptService``, ``DirectActivationService``), which is
+where the write and its guards already live, so a second addressing path was
+speculative. W5/W6 can reach ``CONFIG_SURFACE`` directly when a materialiser
+genuinely needs a coordinate — importing it lazily, because that table indexes
+six core packages and one of them reaches the DI container at import time.
 """
 from __future__ import annotations
 
@@ -14,7 +20,6 @@ from typing import Any
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
 )
-from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
 
 
 @dataclass(frozen=True)
@@ -39,7 +44,8 @@ class ApplyContext:
     tenant: str
     engine_type: str
     bot_type: str
-    #: The bot record, for the seam constructors that read one.
+    #: The bot record. Carried rather than re-fetched so a materialiser that
+    #: needs engine or template facts has them; unread by the two that ship.
     bot: dict[str, Any]
     #: Resolved once per apply and carried, rather than re-resolved per
     #: materialiser. Two reasons: the resolver needs the teclaw engine test
@@ -51,29 +57,6 @@ class ApplyContext:
     #: the document: a bot's engine can change after a manifest is stored, and
     #: the construct that was appliable then may not be now.
     capabilities: ManifestCapabilities
-
-    def coords_for(self, category: str, **extra: Any) -> BotConfigCoords:
-        """This bot's write address for one category, via W10's seam.
-
-        Never computed here. ``CONFIG_SURFACE`` holds the same function object
-        the category's router calls, so a rule that moves stays in one place —
-        which is the whole reason that seam exists (#1509).
-
-        **The import is lazy, and that is not style.** ``bot_config_surface.table``
-        is an index over six core packages, and one of them
-        (``core/services/engine_config``) reaches ``bot_service``, which pulls in
-        the DI container at import time — so a module-level import here closes a
-        cycle and fails with a partially-initialised ``BotService``. That
-        package's own ``__init__`` records the same hazard about re-exporting its
-        submodules, and ``schema/entries.py`` imports ``core/services/identity``
-        this way for exactly this reason. ``coords`` stays a module-level import
-        because it is a genuine leaf: a frozen dataclass and nothing else.
-        """
-        from agentclaw.community.core.bot_config_surface.table import CONFIG_SURFACE
-
-        return CONFIG_SURFACE[category].from_record(
-            self.bot_id, self.owner_id, **extra
-        )
 
 
 __all__ = ["ApplyContext"]

@@ -52,36 +52,36 @@ AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
 
 
 class BotConfigManifestApplyRecord(BaseModel):
-    """一次 apply 的记录（对应 ac_bot_config_manifest_apply 表）。"""
+    """One apply's record — the ``ac_bot_config_manifest_apply`` row."""
 
-    id: Optional[int] = Field(default=None, description="主键ID")
-    apply_id: str = Field(..., description="本次 apply 的公开标识")
-    env: str = Field(default="dev", description="环境标识")
-    entity_id: str = Field(..., description="实体ID（bot 的 entity_id）")
+    id: Optional[int] = Field(default=None, description="Primary key")
+    apply_id: str = Field(..., description="This apply's public handle")
+    env: str = Field(default="dev", description="Environment")
+    entity_id: str = Field(..., description="Entity id (the bot's entity_id)")
     bot_id: str = Field(..., description="Bot ID")
-    trigger: str = Field(..., description="触发来源：explicit/create/republish/restart")
-    status: str = Field(..., description="RUNNING 或三个终态之一")
-    report: str = Field(..., description="逐条明细（JSON）")
-    actor: str = Field(..., description="审计：发起者")
-    started_at: datetime = Field(..., description="开始时间")
+    trigger: str = Field(..., description="What started it: explicit/create/republish/restart")
+    status: str = Field(..., description="RUNNING, or one of the three terminal statuses")
+    report: str = Field(..., description="The per-entry report (JSON)")
+    actor: str = Field(..., description="Audit: who started it")
+    started_at: datetime = Field(..., description="When the apply began")
     finished_at: Optional[datetime] = Field(
-        default=None, description="结束时间；RUNNING 期间为空"
+        default=None, description="When it ended; null while RUNNING"
     )
-    gmt_create: datetime = Field(default_factory=datetime.now, description="创建时间")
-    gmt_modified: datetime = Field(default_factory=datetime.now, description="修改时间")
+    gmt_create: datetime = Field(default_factory=datetime.now, description="Row created")
+    gmt_modified: datetime = Field(default_factory=datetime.now, description="Row last modified")
 
 
 class BotConfigManifestApplyLockRecord(BaseModel):
-    """apply 串行锁（对应 ac_bot_config_manifest_apply_lock 表）。"""
+    """The apply serialization lock — the ``ac_bot_config_manifest_apply_lock`` row."""
 
-    id: Optional[int] = Field(default=None, description="主键ID")
-    env: str = Field(default="dev", description="环境标识")
-    entity_id: str = Field(..., description="实体ID（bot 的 entity_id）")
+    id: Optional[int] = Field(default=None, description="Primary key")
+    env: str = Field(default="dev", description="Environment")
+    entity_id: str = Field(..., description="Entity id (the bot's entity_id)")
     bot_id: str = Field(..., description="Bot ID")
-    holder_user_id: str = Field(..., description="持锁者（发起 apply 的人）")
-    lock_token: str = Field(..., description="持锁令牌（fencing token，释放时比对）")
-    gmt_create: datetime = Field(default_factory=datetime.now, description="创建时间")
-    gmt_modified: datetime = Field(default_factory=datetime.now, description="修改时间")
+    holder_user_id: str = Field(..., description="Lock holder (whoever started the apply)")
+    lock_token: str = Field(..., description="Fencing token, compared on release")
+    gmt_create: datetime = Field(default_factory=datetime.now, description="Row created")
+    gmt_modified: datetime = Field(default_factory=datetime.now, description="Row last modified")
 
 
 class BotConfigManifestApplyModel(Base):
@@ -99,20 +99,20 @@ class BotConfigManifestApplyModel(Base):
     # NOT a lookup key on its own: every read filters on the bot key as well, so
     # an id guessed or leaked from another bot resolves to nothing. The id is a
     # handle, never the authorization.
-    apply_id = Column(String(64), nullable=False, comment="本次 apply 的公开标识")
+    apply_id = Column(String(64), nullable=False, comment="This apply's public handle")
 
     env = Column(
         String(20),
         nullable=False,
         default=get_current_env,
-        comment="环境标识: prod/pre/dev",
+        comment="Environment: prod/pre/dev",
     )
     # 256 for the index-budget reason ``ac_bot_config_manifest`` records: this
     # column is in both indexes below, InnoDB caps a key at 3072 bytes, and
     # utf8mb4 counts 4 bytes per character. ``ac_bots.entity_id`` is 1024, which
     # would be 4096 bytes on its own.
     entity_id = Column(
-        String(256), nullable=False, comment="实体ID（bot 的 entity_id）"
+        String(256), nullable=False, comment="Entity id (the bot's entity_id)"
     )
     bot_id = Column(String(256), nullable=False, comment="Bot ID")
 
@@ -120,30 +120,30 @@ class BotConfigManifestApplyModel(Base):
     # is the explicit POST. W8 adds republish/restart and W13 adds create, and
     # neither needs a migration to do it.
     trigger = Column(
-        String(32), nullable=False, comment="触发来源：explicit/create/republish/restart"
+        String(32), nullable=False, comment="What started it: explicit/create/republish/restart"
     )
     # RUNNING on insert, terminal on completion — the two-write lifecycle apply's
     # async shape requires. Denormalised out of ``report`` so "show me failed
     # applies" is a query rather than a scan of JSON, and so a poll is one
     # indexed read.
-    status = Column(String(16), nullable=False, comment="RUNNING 或三个终态之一")
+    status = Column(String(16), nullable=False, comment="RUNNING, or one of the three terminal statuses")
     # ``MEDIUMTEXT`` on MySQL for the reason ``ac_bot_config_manifest.document``
     # records: plain ``Text`` renders as MySQL ``TEXT`` at 65,535 bytes, and a
     # report over a large manifest has no such cap to lean on.
     report = Column(
         Text().with_variant(mysql.MEDIUMTEXT(), "mysql"),
         nullable=False,
-        comment="逐条明细（JSON）",
+        comment="The per-entry report (JSON)",
     )
     # Bounded the way ``MAX_MODIFIER_CHARS`` bounds the manifest's ``modifier``,
     # and for the same reason: an application actor composes a prefix onto a
     # 1024-character user id, so the composed value can legitimately exceed any
     # narrower width without anything being malformed.
-    actor = Column(String(1024), nullable=False, comment="审计：发起者")
+    actor = Column(String(1024), nullable=False, comment="Audit: who started it")
 
-    started_at = Column(DateTime, nullable=False, comment="开始时间")
+    started_at = Column(DateTime, nullable=False, comment="When the apply began")
     # Null exactly while ``status`` is RUNNING. The two move together.
-    finished_at = Column(DateTime, nullable=True, comment="结束时间；RUNNING 期间为空")
+    finished_at = Column(DateTime, nullable=True, comment="When it ended; null while RUNNING")
 
     # Data-isolation tenant. Load-bearing for the reason the manifest table
     # records: ``ac_bots`` is itself tenant-guarded, so a bot_id is unique only
@@ -151,14 +151,14 @@ class BotConfigManifestApplyModel(Base):
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     gmt_create = Column(
-        DateTime, default=func.now(), nullable=False, comment="创建时间"
+        DateTime, default=func.now(), nullable=False, comment="Row created"
     )
     gmt_modified = Column(
         DateTime,
         default=func.now(),
         onupdate=func.now(),
         nullable=False,
-        comment="修改时间",
+        comment="Row last modified",
     )
 
     # Two indexes, one per read. There are exactly two reads and no others.
@@ -223,30 +223,30 @@ class BotConfigManifestApplyLockModel(Base):
         String(20),
         nullable=False,
         default=get_current_env,
-        comment="环境标识: prod/pre/dev",
+        comment="Environment: prod/pre/dev",
     )
     entity_id = Column(
-        String(256), nullable=False, comment="实体ID（bot 的 entity_id）"
+        String(256), nullable=False, comment="Entity id (the bot's entity_id)"
     )
     bot_id = Column(String(256), nullable=False, comment="Bot ID")
     holder_user_id = Column(
-        String(1024), nullable=False, comment="持锁者（发起 apply 的人）"
+        String(1024), nullable=False, comment="Lock holder (whoever started the apply)"
     )
     lock_token = Column(
-        String(256), nullable=False, comment="持锁令牌（fencing token，释放时比对）"
+        String(256), nullable=False, comment="Fencing token, compared on release"
     )
 
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     gmt_create = Column(
-        DateTime, default=func.now(), nullable=False, comment="创建时间"
+        DateTime, default=func.now(), nullable=False, comment="Row created"
     )
     gmt_modified = Column(
         DateTime,
         default=func.now(),
         onupdate=func.now(),
         nullable=False,
-        comment="修改时间",
+        comment="Row last modified",
     )
 
     __table_args__ = (

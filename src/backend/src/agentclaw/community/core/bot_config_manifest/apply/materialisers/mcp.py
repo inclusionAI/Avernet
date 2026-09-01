@@ -1,7 +1,7 @@
 """``mcp`` → ``DirectActivationService``. Converges the enabled-server set.
 
-The area this overwrites is the one work-items §3.2 names for this category:
-**已启用的 server 集合** — the set of MCP servers active on *this bot*, stored in
+The area this overwrites is the one work-items §3.2 names for this category —
+"the enabled-server set" — the MCP servers active on *this bot*, stored in
 ``ac_bot_mcp_installation`` and keyed ``(bot_id, owner_id, env, server_code)``.
 Declared and not active ⇒ activated. Active and no longer declared ⇒
 deactivated. Already active ⇒ ``unchanged``, and nothing is called.

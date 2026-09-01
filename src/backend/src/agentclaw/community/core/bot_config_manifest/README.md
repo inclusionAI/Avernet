@@ -361,8 +361,7 @@ provides:
 consumes:
   - "BotConfigManifestRepositoryProtocol (core.repository) — persistence for the one table"
   - "BotConfigManifestApplyRepositoryProtocol / BotConfigManifestApplyLockRepositoryProtocol (core.repository) — the apply record and its serialization lock"
-  - "CONFIG_SURFACE (core.bot_config_surface) — W10's seam; apply reaches each category's rules through the same function objects its router calls"
-  - "BotStartupScriptServiceProtocol (api) — the `script` materialiser's only write"
+  - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the `script` materialiser's only write"
   - "DirectActivationServiceProtocol (core.skill_center) — the `mcp` materialiser's per-bot activation writes"
   - "MCPAuthServiceProtocol (api) — the same permission check DirectActivationService consults, asked up front so a category is all-or-nothing"
   - "TeclawEngineTestProtocol (core.bot_startup_script, bound to core.bot_management TeclawProvisionService) — the single definition of 'runs in a teclaw container'"
@@ -376,8 +375,6 @@ consumed_by:
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base
-  - agentclaw.community.core.bot_config_surface.coords  # W10's seam: the coordinate type
-  - agentclaw.community.core.bot_config_surface.table  # W10's seam: imported lazily — it indexes six core packages, one of which reaches the DI container
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_management.token_vault
   - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults

@@ -49,7 +49,7 @@ def _as_naive(dt: datetime) -> datetime:
 
 
 class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol):
-    """apply 记录 Repository 实现。"""
+    """The apply record's repository."""
 
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
@@ -82,7 +82,7 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
         actor: str,
         report: str,
     ) -> BotConfigManifestApplyRecord:
-        """插入 RUNNING 行；apply 开始前调用。"""
+        """Insert the ``RUNNING`` row. Called before an apply begins."""
         with self._db.orm_session() as db:
             row = self._Apply(
                 apply_id=apply_id,
@@ -123,7 +123,11 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
         status: str,
         report: str,
     ) -> Optional[BotConfigManifestApplyRecord]:
-        """写入终态与完整报告；apply 结束时调用（成功或失败）。"""
+        """Write the terminal status and the full report.
+
+        Called when an apply ends, whether it succeeded or failed — the second
+        of the record's two writes.
+        """
         with self._db.orm_session() as db:
             row = (
                 db.query(self._Apply)
@@ -166,7 +170,7 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
     def get(
         self, *, env: str, entity_id: str, bot_id: str, apply_id: str
     ) -> Optional[BotConfigManifestApplyRecord]:
-        """按 apply_id 读取；**同时**按 bot 键过滤。
+        """Read one apply by id, filtered by the bot key **as well**.
 
         The bot key is part of the filter on purpose: an ``apply_id`` guessed or
         leaked from another bot must not resolve here. The id is the caller's
@@ -186,7 +190,10 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
     def latest(
         self, *, env: str, entity_id: str, bot_id: str
     ) -> Optional[BotConfigManifestApplyRecord]:
-        """最近一次 apply；从未 apply 过返回 None（不是错误）。"""
+        """The newest apply for this bot, or ``None`` if it never applied.
+
+        ``None`` is an ordinary answer here, not an error.
+        """
         with self._db.orm_session() as db:
             row = (
                 db.query(self._Apply)
@@ -200,7 +207,7 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
 class BotConfigManifestApplyLockRepository(
     BotConfigManifestApplyLockRepositoryProtocol
 ):
-    """apply 串行锁 Repository 实现（形态沿用 ac_bot_restart_lock）。"""
+    """The apply serialization lock, shaped after ``ac_bot_restart_lock``."""
 
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
@@ -217,7 +224,11 @@ class BotConfigManifestApplyLockRepository(
     def acquire(
         self, *, env: str, entity_id: str, bot_id: str, holder_user_id: str
     ) -> Optional[BotConfigManifestApplyLockRecord]:
-        """获取 apply 锁（INSERT 一行，UNIQUE 冲突即返回 None）。"""
+        """Take the lock: INSERT one row; a UNIQUE conflict returns ``None``.
+
+        The database arbitrates concurrent inserts, so the constraint *is* the
+        lock — no read-then-write race to lose.
+        """
         with self._db.orm_session() as db:
             row = self._Lock(
                 env=env,
@@ -257,7 +268,7 @@ class BotConfigManifestApplyLockRepository(
     def release(
         self, *, env: str, entity_id: str, bot_id: str, lock_token: str
     ) -> bool:
-        """释放锁（比对令牌后硬删除）。
+        """Release the lock: compare the fencing token, then hard-delete.
 
         The token comparison is what stops this deleting a *later* holder's
         lock: if this apply's lock was reaped as stale and another apply took a
@@ -285,7 +296,7 @@ class BotConfigManifestApplyLockRepository(
     def get(
         self, *, env: str, entity_id: str, bot_id: str
     ) -> Optional[BotConfigManifestApplyLockRecord]:
-        """查询锁记录。"""
+        """Read the lock row, if one is held."""
         with self._db.orm_session() as db:
             row = (
                 db.query(self._Lock)
@@ -297,10 +308,11 @@ class BotConfigManifestApplyLockRepository(
     def get_if_stale(
         self, *, env: str, entity_id: str, bot_id: str, ttl_seconds: int
     ) -> Optional[BotConfigManifestApplyLockRecord]:
-        """仅当锁存在且已超过 ttl_seconds 时返回记录，否则 None。
+        """The lock row only if it exists and is older than ``ttl_seconds``.
 
-        判定完全基于数据库时钟：行的 ``gmt_create`` 与 "now" 都取自 DB，
-        因此不受应用与数据库之间的时钟漂移影响。
+        Judged entirely on the database clock: both the row's ``gmt_create``
+        and "now" come from the DB, so clock drift between the application and
+        the database cannot make a live lock look stale.
         """
         with self._db.orm_session() as db:
             row = (
