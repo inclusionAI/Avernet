@@ -132,8 +132,8 @@ consumed, and no stored manifest.
 
 - [ ] Submission enqueues **one durable job** on the existing task queue, and that
       job — not the caller's polling — drives the creation to a terminal state:
-      it waits for authorization, creates the bot, runs phase A before the start
-      command is composed, waits for the container, runs phase B, and finishes.
+      it waits for authorization, runs phase A, creates the bot, waits for the
+      container, runs phase B, and finishes.
 - [ ] A caller who stops polling still gets a fully configured bot. Polling
       observes; it never drives.
 - [ ] The job has a **configurable wall-clock deadline**, defaulting to ten
@@ -199,15 +199,22 @@ consumed, and no stored manifest.
 
 ### The two phases, in the creation sequence
 
-- [ ] **Phase A** runs after the bot record exists and **before the start command
-      is composed**, and creation does not proceed to provisioning until it has
-      finished. A row written after the payload is composed cannot reach the first
-      boot, so this ordering is the item, not an optimisation.
+- [ ] **Phase A runs before the bot record is created at all.** It needs nothing
+      from the bot: the startup-script row is keyed by `(entity_id, bot_id)`,
+      both known at submission, and the only placeholders the schema admits
+      (`BOT_ENGINE_TYPE`, `BOT_ENV`, `BOT_TENANT`, `BOT_ARCH` — there is
+      deliberately no `BOT_ID` or `BOT_NAME`) all resolve from the creation
+      request. Ordering it ahead of creation makes "the row exists before the
+      start command is composed" true **by construction** rather than by landing
+      a hook in the right place inside `create_bot`.
 - [ ] **Phase B** runs once the container is up, and the job is what notices.
 - [ ] A **failing phase A does not fail creation.** The bot is still created and
       provisioned; the failure is recorded and surfaces in the poll's terminal
       report. §2.7's boundary holds: apply records delivery, and a manifest-layer
       failure never mutates the bot record.
+- [ ] A creation that ends without a bot takes the **startup-script row** with it
+      as well as the manifest — phase A can write that row before anyone knows the
+      creation will complete, so it is cleaned up on the same terminal paths.
 - [ ] `script`'s materialisation stays exactly what it is today: apply writes the
       `ac_bot_startup_script` row and stops. **No new execution machinery is
       built here** — the platform already composes that row into the start command

@@ -2,9 +2,11 @@
 
 Spec: `spec.md` in this directory. Work item W13, issue #1696.
 
-> **Revision 2** — reworked after review on PR #1791. The creation is carried by a
-> task-queue job instead of by a device-activation listener; the poll takes only a
-> `bot_id`; the feature switch is gone. `spec.md`'s D-3, D-4 and D-7 record why.
+> **Revision 3** — reworked after two review rounds on PR #1791. Rev 2 moved the
+> creation onto a task-queue job (`spec.md` D-3/D-4/D-7). Rev 3 answers "do we
+> really need `apply_now`?" and "why a seam inside `create_bot`?" with: we need
+> neither. Phase A runs **before** `create_bot`, and the job's own reschedule
+> idiom waits for it. See K-2 and K-5.
 
 ## What already exists, and what that leaves
 
@@ -36,9 +38,10 @@ wall-clock deadline."
 | Claim CAS + lease reclaim | Survives a pod restart; exactly one worker runs it |
 | `wake_on_enqueue` | The job starts at submission instead of waiting out an idle poll |
 
-So the work is **sequencing, a job handler, and a public surface**. Four things do
-not exist: a preflight that also demands a materialiser, a seam in `create_bot`
-between the row and the container, the job handler, and the endpoint pair.
+So the work is **sequencing, a job handler, and a public surface**. Three things do
+not exist: a preflight that also demands a materialiser, the job handler, and the
+endpoint pair. Note what is *not* on that list any more — nothing inside
+`create_bot`, and no new apply entry point (K-2, K-5).
 
 ## Architecture
 
@@ -57,14 +60,13 @@ TaskWorker ──► BotCreateWithManifestHandler       ← NEW   (reschedules i
   │
   ├─ with avernet_tenant_scope(payload["tenant"]):
   ├─ 1. Passport not ISSUED?  PENDING → Reschedule ; declined → Fail(+cleanup)
-  ├─ 2. no bot record?        create_bot(..., pre_provision=phase_a)
-  │                             ├─ row insert + template        (existing)
-  │                             ├─ pre_provision(bot) ← NEW SEAM  phase A, sync
-  │                             └─ device provisioning          (existing)
-  ├─ 3. container not up?     Reschedule
-  ├─ 4. phase B not started?  start_apply(ON_CONTAINER, carry_from=<phase A>)
-  ├─ 5. phase B running?      Reschedule
-  └─ 6. terminal              Complete
+  ├─ 2. phase A not done?     start_apply(PRE_CONTAINER) → Reschedule until terminal
+  ├─ 3. no bot record?        complete_bot_authorization(...)  ← unmodified
+  │                             └─ create_bot → provisioning   (existing, untouched)
+  ├─ 4. container not up?     Reschedule
+  ├─ 5. phase B not started?  start_apply(ON_CONTAINER, carry_from=<phase A>)
+  ├─ 6. phase B running?      Reschedule
+  └─ 7. terminal              Complete
         deadline elapses at any point → TIMED_OUT (+cleanup)
 
 GET /openapi/v1/bots/{bot_id}/with-manifest/status
@@ -92,25 +94,39 @@ absent from it, where "declares" is `declared_entries(parsed, construct) is not
 None` walked over `APPLY_ORDER` (so a declared-empty category, which *removes*,
 counts as declared).
 
-### K-2 One seam in `create_bot`, and it is generic
+### K-2 No seam in `create_bot` — phase A runs before it
 
-`BaasService._build_create_bot_payload` reads `ac_bot_startup_script` while
-composing the start command, inside device provisioning, which `create_bot` calls
-after inserting the row. Phase A's window is therefore *inside* `create_bot`:
+The first two revisions put a `pre_provision` callback inside `create_bot`,
+between the row insert and provisioning, because that looked like the only window
+before `BaasService._build_create_bot_payload` composes the start command.
 
-```python
-pre_provision: Callable[[dict], None] | None = None
-```
+It is not. **Phase A needs nothing from the bot record**, checked rather than
+assumed:
 
-invoked once, after the row (and any template) exists and before any provisioning
-branch, taking the bot record.
+- `BotStartupScriptService.put` is keyed by `(entity_id, bot_id)` and reads no bot
+  record — it validates size and encoding and upserts.
+- Both key parts are known at submission: `bot_id` is allocated by
+  `generate_bot_id`, `entity_id` by the same rule `create_bot` will apply.
+- The placeholder whitelist is exactly four names — `BOT_ENGINE_TYPE`, `BOT_ENV`,
+  `BOT_TENANT`, `BOT_ARCH` — and `placeholders.py` says there is **deliberately no
+  `BOT_ID`**; there is no `BOT_NAME` either. Every one resolves from the creation
+  request, so nothing waits on `_resolve_bot_name`'s defaulting inside
+  `create_bot`.
 
-- **Generic, not manifest-shaped.** A manifest dependency on `BotService` would
-  put a second copy of "does this bot have a manifest" beside the one the apply
-  service owns.
-- **It must not raise.** `create_bot` wraps and logs — spec D-5 enforced
-  mechanically.
-- `BotServiceProtocol.create_bot` is `(*args, **kwargs)`, so no protocol change.
+So the job runs phase A **before** it calls creation at all. "The row exists
+before the start command is composed" becomes true *by construction* — there is no
+hook that could be placed in the wrong function, and no ordering test that could
+pass today and rot later. `bot_service.py` is untouched by this item.
+
+The one cost: phase A can write a startup-script row for a bot that never gets
+created. That is the same orphan class as the stored manifest and is cleaned on
+the same terminal paths (K-8).
+
+Phase A needs an `ApplyContext` without a record, which is the `(engine_type,
+bot_type)` capability entry point W1 built for W13 — so the apply service grows a
+way to build a context from the creation attributes instead of a bot dict. That
+is a smaller change than the callback it replaces, and it uses a seam that already
+exists for this caller.
 
 ### K-3 The job handler is a state machine over observed facts
 
@@ -144,13 +160,38 @@ the report phase B finishes with, and the summary re-derived over the union — 
 failed phase A plus a clean phase B terminates `PARTIAL`, which the poll reports as
 `FAILED`.
 
-### K-5 Phase A is synchronous; `start_apply` is not
+### K-5 No `apply_now` — the job reschedules instead
 
-`start_apply` returns as soon as its thread starts, which is wrong for phase A —
-provisioning must not begin until the script row exists. The service grows a
-sibling, `apply_now(...)`, with the same body minus the thread: lock, validate,
-record `RUNNING`, run inline, finish, release. Phase A is a database write with no
-fetch and no device, so it is bounded work.
+Rev 2 added a synchronous `apply_now` so phase A could finish before provisioning
+began. With phase A moved ahead of `create_bot` (K-2), the job can simply use the
+queue's own idiom:
+
+```text
+phase A not started?   start_apply(phases={PRE_CONTAINER}) → Reschedule(5s)
+phase A still RUNNING? Reschedule(5s)
+phase A terminal?      → create the bot
+```
+
+`start_apply` already does everything needed; nothing new goes on the service's
+contract. The handler finds phase A's record with `last_apply(entity_id, bot_id)`
+and recognises it by its `create:pre_container` trigger — the same read the poll
+makes, and the same value it later passes as `carry_from_apply_id`, so no
+repository method is added either.
+
+The cost is one reschedule interval (5 s) added to a creation, immediately after a
+step that waited on a **human clicking a link**. It is not measurable against
+that.
+
+Rejected alternatives, recorded because "why not just X" is the obvious question:
+
+- **`start_apply` + poll the record inside the request** — a busy-wait in the
+  creation path.
+- **A `wait=True` flag on `start_apply`** — the return type is what actually
+  differs (`ApplyAccepted` handle vs. a finished `ApplyReport`), so a boolean
+  would make the return type conditional at every call site.
+- **Write the startup-script row directly, skipping the apply engine** — no apply
+  record, no per-entry report, no lock, and category knowledge leaks back out of
+  the registry. W4's design exists to prevent exactly this.
 
 ### K-6 The tenant rides in the payload
 
@@ -202,10 +243,9 @@ jobs.
 
 | File | Change |
 | --- | --- |
-| `core/bot_management/services/bot_service.py` | `create_bot(..., pre_provision=None)`; invoked after row/template, before provisioning, non-raising. |
-| `core/bot_management/create_flow.py` | An optional creation-manifest seam, called at preflight and persist. |
-| `core/bot_config_manifest/services/config_manifest_apply_service.py` | `apply_now`, `carry_from_apply_id`, `materialised_constructs`. |
-| `core/bot_config_manifest/bot_config_manifest_apply_service_protocol.py` | The three new members. |
+| `core/bot_management/create_flow.py` | An optional creation-manifest seam, called at preflight and persist. **`bot_service.py` is not touched.** |
+| `core/bot_config_manifest/services/config_manifest_apply_service.py` | `carry_from_apply_id`, `materialised_constructs`, and a record-free apply context. |
+| `core/bot_config_manifest/bot_config_manifest_apply_service_protocol.py` | The two new members. |
 | `di/modules/bot_management_module.py` | Bind the creation service; register the handler in the task-queue registry. |
 | `adapters/http/openapi_v1/__init__.py` | Mount the new router. |
 | `di/config.py` (or the module that owns it) | The configurable creation deadline, default 600 s. |
@@ -213,9 +253,10 @@ jobs.
 
 ## Risks
 
-1. **The seam lands in the wrong place in `create_bot`.** The whole item is worth
-   nothing if the script row is written after the payload is composed. Pinned by a
-   test asserting call order.
+1. ~~**The seam lands in the wrong place in `create_bot`.**~~ Retired by K-2:
+   phase A precedes creation entirely, so there is no hook to misplace. A test
+   still asserts the ordering, but it is now asserting a property of the sequence
+   rather than guarding a fragile insertion point.
 2. **A re-run of the handler double-creates or double-applies.** Every step is
    written as "is this already done?" and the two underlying operations are
    already idempotent (`create_bot` on a supplied id, `start_apply` under its
@@ -225,8 +266,9 @@ jobs.
    docs say the registry is empty until an adopter registers handlers, so the
    wiring (bootstrap-time registration, `app_name` config) needs checking against a
    running app, not just unit tests.
-5. **`create_bot`'s many other callers.** The new parameter is keyword-only with a
-   `None` default; the existing suites run unedited as the check.
+5. **Phase A writes a startup-script row for a bot that may never exist.**
+   Bounded by the same deadline and cleaned on the same terminal paths as the
+   stored manifest (K-8).
 
 ## Testing strategy
 
