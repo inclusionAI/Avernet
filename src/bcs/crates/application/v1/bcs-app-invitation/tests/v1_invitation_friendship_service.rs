@@ -237,6 +237,22 @@ impl Fixture {
     }
 
     async fn create_session(&self, group_id: &str, driver: &str) -> String {
+        self.create_session_with_participants(
+            group_id,
+            driver,
+            vec![Participant::bot(driver, ParticipantRole::Driver)],
+        )
+        .await
+    }
+
+    /// Like `create_session`, but seeds the session with the given
+    /// participants (the driver is always included first).
+    async fn create_session_with_participants(
+        &self,
+        group_id: &str,
+        driver: &str,
+        participants: Vec<Participant>,
+    ) -> String {
         let group = self
             .groups
             .get(group_id)
@@ -244,7 +260,7 @@ impl Fixture {
             .expect("group exists for session");
         let params = NewSessionParams {
             session_kind: SessionKind::Chat,
-            participants: vec![Participant::bot(driver, ParticipantRole::Driver)],
+            participants,
             group_version: Some(group.version),
             caller_id: Some(driver.to_string()),
             caller_principal: Some(driver.to_string()),
@@ -508,21 +524,36 @@ async fn create_group_invitation_dm_group_rejected() {
 }
 
 #[tokio::test]
-async fn create_session_invitation_manager_ok() {
+async fn create_session_invitation_session_participant_ok() {
+    // Session invitations are gated on session membership only: a Human
+    // Consultant participant — not the group driver, originator, or a bot
+    // owner — may mint. staff-9 holds no group-level privilege on grp-1.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
     fx.store_group("grp-1", "bot-a").await;
-    let session_id = fx.create_session("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![
+                Participant::bot("bot-a", ParticipantRole::Driver),
+                Participant::human(
+                    Fixture::human_actor_id("staff-9"),
+                    ParticipantRole::Consultant,
+                ),
+            ],
+        )
+        .await;
 
     let invitation = fx
         .service
         .create_session_invitation(CreateSessionInvitation {
-            caller: Fixture::bot_principal("bot-a"),
+            caller: Fixture::human_principal("staff-9"),
             session_id: session_id.clone(),
             expires_in_seconds: None,
         })
         .await
-        .expect("group manager may create session invitation");
+        .expect("session participant may create session invitation");
 
     assert_eq!(invitation.target_type, InvitationTargetType::Session);
     assert_eq!(invitation.target_id, session_id);
@@ -534,14 +565,17 @@ async fn create_session_invitation_manager_ok() {
 }
 
 #[tokio::test]
-async fn human_owner_of_legacy_group_driver_bot_can_create_session_invitation() {
+async fn create_session_invitation_non_participant_forbidden() {
+    // The owner of the group's driver Bot (and of the group via
+    // originator-ownership) is still NOT a session participant, and
+    // group-level privilege no longer substitutes for session membership.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
     fx.store_legacy_group("grp-1", "bot-a", "human_other")
         .await;
     let session_id = fx.create_session("grp-1", "bot-a").await;
 
-    let invitation = fx
+    let error = fx
         .service
         .create_session_invitation(CreateSessionInvitation {
             caller: Fixture::human_principal("staff-1"),
@@ -549,10 +583,13 @@ async fn human_owner_of_legacy_group_driver_bot_can_create_session_invitation() 
             expires_in_seconds: None,
         })
         .await
-        .expect("Human owner may act for the session's group driver Bot");
+        .expect_err("non-participant is forbidden even when owning the driver Bot");
 
-    assert_eq!(invitation.target_type, InvitationTargetType::Session);
-    assert_eq!(invitation.target_id, session_id);
+    assert!(
+        matches!(error, ApplicationError::Forbidden(_)),
+        "expected Forbidden, got {error:?}",
+    );
+    assert_eq!(error.code(), "forbidden");
 }
 
 #[tokio::test]
@@ -870,12 +907,25 @@ async fn accept_invitation_session_target_joins() {
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
     fx.store_group("grp-1", "bot-a").await;
-    let session_id = fx.create_session("grp-1", "bot-a").await;
+    // staff-9 is the session participant who mints; staff-1 is the invitee.
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![
+                Participant::bot("bot-a", ParticipantRole::Driver),
+                Participant::human(
+                    Fixture::human_actor_id("staff-9"),
+                    ParticipantRole::Consultant,
+                ),
+            ],
+        )
+        .await;
 
     let invitation = fx
         .service
         .create_session_invitation(CreateSessionInvitation {
-            caller: Fixture::bot_principal("bot-a"),
+            caller: Fixture::human_principal("staff-9"),
             session_id: session_id.clone(),
             expires_in_seconds: None,
         })
