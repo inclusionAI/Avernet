@@ -15,7 +15,7 @@
 |---|---|---|
 | GitHub source remote verified | `git ls-remote` and `gh repo view` | Push and PR use `inclusionAI/Avernet`, not the internal mirror. |
 | Existing PR | none | No open PR matches this head branch and base `dev`. |
-| Local validation | focused backend tests | `85 passed`; test-file ruff, service compilation, and diff check passed. |
+| Local validation | focused backend tests | BCN-focused suite: `85 passed`; task queue worker/wakeup suite: `30 passed`; both touched test files pass Ruff; service compilation and diff check passed. |
 | PR created | GitHub #1777 | Open PR targets `dev`; title and Problem / Solution / Validation sections match the verified diff. |
 | Rebase pass | `git rebase origin/dev` | Unpublished task commit was replayed without conflict onto GitHub `dev@a7caaf39a`. |
 
@@ -25,16 +25,20 @@ Round 1: no review, inline comment, or ordinary comment was returned by GitHub.
 
 ## ACI/CI
 
-All eight observed checks are `PENDING`: BCS e2e, Singlebox coverage, BCS unit tests, Backend unit tests, Engine unit tests, BaaS unit tests, Gateway unit tests, and Sandbox-proxy unit tests.
+Round 1 completed with seven passing checks: BCS e2e, Singlebox coverage, BCS unit tests, Engine unit tests, BaaS unit tests, Gateway unit tests, and Sandbox-proxy unit tests.
+
+The Backend unit-test job failed with `1 failed, 16222 passed, 59 skipped`. Its only failure was `test_idle_worker_loop_wakes_on_an_opted_in_enqueue`, outside the BCN DRM change. The test raced a fixed sleep and used one StaticPool SQLite connection concurrently from the event-loop and enqueue threads. The failure was reproduced locally (including a SQLite cross-thread `InterfaceError`). The test now waits for the worker's real idle latch, keeps its SQLite interaction on one thread, and uses a handler completion event to assert the actual wake-to-claim path. Cross-thread `WorkerWakeup` delivery remains covered by its dedicated unit test. The revised test passed ten consecutive runs and the full related suite (`30 passed`).
+
+Round 2 will begin after the stabilization commit is pushed.
 
 ## Human Comments
 
-Round 1: no human review, inline comment, or ordinary comment was returned by GitHub.
+Round 1: reviewer `totalfrank` approved the PR with `LGTM`; no inline comments were returned.
 
 ## Current Conclusion
 
 - PR: OPEN
 - Automated comments: CLEAR (round 1)
-- ACI/CI: PENDING
-- Human comments: CLEAR (round 1)
-- Next: monitor the current head's checks and each new review/comment; investigate and minimally fix any reproducible task-related failure.
+- ACI/CI: ROUND 2 PENDING AFTER A MINIMAL TEST-STABILITY FIX
+- Human comments: APPROVED (round 1)
+- Next: push the stabilization commit and monitor its checks and each new review/comment.
