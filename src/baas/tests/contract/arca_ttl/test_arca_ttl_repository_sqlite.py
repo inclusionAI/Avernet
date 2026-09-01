@@ -677,7 +677,9 @@ class TestFindUnregistered:
 
         rows = repo.find_unregistered(ENV, "baas_device", 500)
 
-        assert [(r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows] == [
+        assert [
+            (r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows
+        ] == [
             (41, "sb-41", "baas_device", 1788192000000),
         ]
 
@@ -924,9 +926,7 @@ class TestHotRowExists:
     no is_deleted, D-16')."""
 
     def test_soft_deleted_device_reads_absent(self, repo):
-        _seed_hot_device(
-            id_val=401, env=ENV, provider_device_id="sb-401", is_deleted=1
-        )
+        _seed_hot_device(id_val=401, env=ENV, provider_device_id="sb-401", is_deleted=1)
 
         assert repo.hot_row_exists(ENV, "baas_device", 401) is False
 

@@ -110,11 +110,12 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                 TtlRenewalScheduleModel.source_table == "baas_device",
                 TtlRenewalScheduleModel.source_id == DeviceModel.id,
                 TtlRenewalScheduleModel.env == env,
-                TtlRenewalScheduleModel.sandbox_id
-                == DeviceModel.provider_device_id,
+                TtlRenewalScheduleModel.sandbox_id == DeviceModel.provider_device_id,
             )
             if cold_status is not None:
-                join_cond = and_(join_cond, TtlRenewalScheduleModel.status == cold_status)
+                join_cond = and_(
+                    join_cond, TtlRenewalScheduleModel.status == cold_status
+                )
             stmt = (
                 select(func.count())
                 .select_from(DeviceModel)
@@ -132,14 +133,15 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                 DeviceBindingModel.device_props, "$.sandbox_id"
             )
             join_cond = and_(
-                TtlRenewalScheduleModel.source_table
-                == "ac_entity_device_binding",
+                TtlRenewalScheduleModel.source_table == "ac_entity_device_binding",
                 TtlRenewalScheduleModel.source_id == DeviceBindingModel.id,
                 TtlRenewalScheduleModel.env == env,
                 TtlRenewalScheduleModel.sandbox_id == binding_sandbox,
             )
             if cold_status is not None:
-                join_cond = and_(join_cond, TtlRenewalScheduleModel.status == cold_status)
+                join_cond = and_(
+                    join_cond, TtlRenewalScheduleModel.status == cold_status
+                )
             stmt = (
                 select(func.count())
                 .select_from(DeviceBindingModel)

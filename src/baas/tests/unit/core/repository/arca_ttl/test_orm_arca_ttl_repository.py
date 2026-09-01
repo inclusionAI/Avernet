@@ -980,9 +980,7 @@ class TestCountSuppressedTerminal:
         )
         sql_text = str(compiled)
         assert "baas_bot_ttl_renewal_schedule.status = %s" in sql_text
-        status_binds = [
-            v for k, v in compiled.params.items() if k.startswith("status")
-        ]
+        status_binds = [v for k, v in compiled.params.items() if k.startswith("status")]
         assert sorted(status_binds) == ["ACTIVE", "STOPPED"]
 
     def test_count_suppressed_terminal_binding_side_both_dialects(self):
@@ -1030,9 +1028,7 @@ class TestHotRowExists:
         assert repo.hot_row_exists("test", "baas_device", 42) is True
 
         mock_session.execute.assert_called_once()
-        compiled = mock_session.execute.call_args[0][0].compile(
-            dialect=mysql.dialect()
-        )
+        compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
         assert "baas_device.id = %s" in sql_text
         assert "baas_device.env = %s" in sql_text
@@ -1047,9 +1043,7 @@ class TestHotRowExists:
 
         assert repo.hot_row_exists("test", "ac_entity_device_binding", 7) is False
 
-        compiled = mock_session.execute.call_args[0][0].compile(
-            dialect=mysql.dialect()
-        )
+        compiled = mock_session.execute.call_args[0][0].compile(dialect=mysql.dialect())
         sql_text = str(compiled)
         assert "ac_entity_device_binding.id = %s" in sql_text
         assert "ac_entity_device_binding.env = %s" in sql_text
