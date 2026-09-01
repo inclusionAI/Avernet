@@ -89,18 +89,3 @@ spec:
       - name: header-rules
         configMap:
           name: envoy-header-rules-{{ uid }}
----
-# ===== 3. NetworkPolicy (deny all ingress) =====
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: avernet-agent-netpol-{{ uid }}
-  namespace: {{ namespace }}
-spec:
-  podSelector:
-    matchLabels:
-      app: avernet-agent
-      biz-id: "{{ uid }}"
-  policyTypes:
-  - Ingress
-  ingress: []
