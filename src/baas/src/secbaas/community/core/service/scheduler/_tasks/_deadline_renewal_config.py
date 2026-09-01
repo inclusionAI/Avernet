@@ -73,8 +73,7 @@ class DeadlineRenewalSchedulerConfig:
         """
         if self.clock_tol_minutes < 0:
             raise ValueError(
-                "clock_tol_minutes must be non-negative, "
-                f"got {self.clock_tol_minutes}"
+                f"clock_tol_minutes must be non-negative, got {self.clock_tol_minutes}"
             )
 
     @property
