@@ -39,7 +39,7 @@ class StaticPlanRuntime:
                 metadata=Metadata(task_id=task_id, title=(item.title or item.task or item.name), instruction=item.name),
                 context=Context(background=root_spec.context.background,
                                 extend_props={"static_input": dict(item.input)}),
-                goal=Goal(objective=item.name, acceptances=[]),
+                goal=Goal(objective=(item.title or item.name), acceptances=[]),
             )
             result.append(TaskNode(
                 node_id=item.node_id, task_id=task_id, status=Status.PENDING,
@@ -97,7 +97,7 @@ class StaticPlanRuntime:
             # V2 接力输入: 框架下发"# 接自 / ## 群组成(仅 collab) / ## 上游产出正文 / ## 本角色任务"。
             # 不做摘要/合成;rule(怎么分析/输出/接力交接)归各 bot 的 skill/rule,不在此注入。
             node.task_spec.metadata.instruction = self._relay_instruction(definition, resolved)
-            node.task_spec.goal = Goal(objective=definition.task, acceptances=[])
+            node.task_spec.goal = Goal(objective=(definition.title or definition.name), acceptances=[])
             logger.info(
                 "[task][static-plan-runtime] relay v2 injected task=%s node=%s type=%s task_head=%r",
                 graph.task_id, node.node_id, definition.node_type, definition.task[:40],
