@@ -210,7 +210,7 @@ POST /openapi/v1/bots/20260813_a7k2m9p1/auth-status
 - **混传**：完整工厂快照（双键身份）+ 手填专用键（`devflow_workflow` / `code_repos` / `yuque_kb_repos`）→ 422 `template factory snapshot must not mix application-coding fields: [...]`。工厂路径不解读手填键，两种形态**二选一**。只带零散工厂键（缺 `template_uid`）混有手填键 → 走手填路径，工厂键按未知键存活。
 - **组合约束（工厂与手填同受约束）**：`engine` 必须 `claude_code` + `bot_type=personal` + 个人空间 + 云端。违反 → 409（`BotCombinationUnsupportedError`，既语文案如 `application coding is cloud-only` / `application coding does not support engine: ...`）。
 
-**密钥落库口径**：顶层 `token` 出现即按既有策略加密落密文；`bot_template_config.ext_config.thetaKey` 后端无加密入口，密文由调用方产生、原样落库。两者在查询面**永不回显**（密文也不回，见 §1.4）。
+**密钥落库口径**：顶层 `token` 出现即按既有策略加密落密文；`bot_template_config.ext_config.thetaKey` 后端无加密入口，密文由调用方产生、原样落库。查询面按 #1785 verbatim 决策随存随显（见 §1.4）。
 
 ### 1.4 查询接口（创建后核对 / 列表展示）
 
@@ -220,9 +220,7 @@ POST /openapi/v1/bots/20260813_a7k2m9p1/auth-status
 | `GET /openapi/v1/bots/{bot_id}` | 单个 bot 详情 |
 | `GET /openapi/v1/bots/all`（Header `X-Space-Id` 可选） | 统一卡片列表（个人云/服务/本地） |
 
-响应中的模板相关字段（三个端点一致），按存档快照是否带工厂标记键（`template_key` / `template_uid` / `template_version` / `template_version_id` 任一）**双轨投影**：
-
-**工厂 bot —— 整段落库快照透传，只减两个敏感位置：**
+响应中的模板相关字段（三个端点一致）——**整段落库快照 verbatim 回显**（REL20260901 #1785 决策：查询面 owner-scoped，回显的是创建者自己的输入，不做投影过滤）：
 
 ```json
 "template_type": "normalCC",
@@ -237,23 +235,10 @@ POST /openapi/v1/bots/20260813_a7k2m9p1/auth-status
 }
 ```
 
-- 顶层 `token` 与 `bot_template_config.ext_config.thetaKey` **永不返回**（密文也不返回）；**其余全回**——`image` / `resource_spec` / `envs` / `capabilities` / `template_name` / `custom_field_values` 及 `bot_template_config` 的其余嵌套键。创建时存进去什么，查询就回什么。
-- `template_type` = 创建时的透传值。
-- 老 TC 链路落的存量工厂 bot，三个查询面同样切到透传投影（**有意变更，非回归**）。
+- **创建时存进去什么，查询就回什么**——包括调用方自己传入的 `token` / `bot_template_config.ext_config.thetaKey`（按 #1785 的 owner-scoped 决策随存随显）；`token` 落库时按既有策略存的是密文。
+- `template_type` = 创建时的值（透传值或手填形态的 `applicationCoding`）。
+- 工厂 bot 与手填 applicationCoding bot 查询行为一致，无分轨。
 
-**无工厂标记的 bot（含手填 applicationCoding）—— 仍走原白名单投影（原 6 键）：**
-
-```json
-"template_type": "applicationCoding",        // 无模板为 null
-"template_config": {
-  "template_key": "...", "template_uid": "...",
-  "code_repos": [...], "yuque_kb_repos": [...], "devflow_workflow": "...",
-  "engine_form": "aicoding"                   // 仅 aicoding 形态 bot 带 markers
-}
-```
-
-> `token`、`ext_config.thetaKey` 等密钥在两条投影轨**都**永不回显。
->
 > **前端判据**：**识别工厂 bot**——`template_config.template_uid` 非空（或 `template_key` / `template_version` / `template_version_id` 任一存在）。**判定 aicoding 形态**——`template_config.engine_form == "aicoding"`，或 `template_type` 非空且不等于 `"normalCC"`（任一命中即 aicoding 运行时；`normalCC` 是纯 claude_code 模板）。`engine` 字段只可能是真实引擎。
 
 ---

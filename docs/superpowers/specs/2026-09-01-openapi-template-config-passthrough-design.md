@@ -88,7 +88,9 @@ Front-end 映射:`engine ← item.engine_type`,`bot_type ← item.bot_type`,`eng
 
 `support_engines` 不做校验(透传信任;顶层 `engine` 的真实引擎/cluster 匹配校验既有逻辑不变)。
 
-## 6. 查询投影(bots/{id}/all 三面)
+## 6. 查询投影(bots/{id}/all 三面)——【已被 REL #1785 取代】
+
+> **状态更新(2026-09-01,实施期)**:REL20260901 上的 PR #1785(`template_config_for_public` verbatim 决策)已把三个查询面改为**全量 verbatim 回显**(含密钥,owner-scoped rationale)。本节的 dispatch/工厂透传投影设计随之作废,本 PR 只保留创建面/b 契约与文档;查询行为以 REL 现状为准。
 
 现状三面共用 `project_template_config_for_public`(`template_public_view.py`,allowlist 6 键)。设计:**dispatch,不改 allowlist 语义**——
 
@@ -105,7 +107,9 @@ def project_template_config_for_public(config):
 - 投影后空 dict → 返回 None,与现有行为一致。
 - **有意变更(非回归)**:老 TC 链路已落库的工厂 bot(快照带工厂标记,如 `template_key="applicationCoding"` 的 aicoding 模板)在三个查询面会从 6 键 allowlist 切到透传投影——这正是本设计要的效果;无工厂标记的老公行为不变。
 
-## 7. 密钥处理(不透传的底线)
+## 7. 密钥处理——【查询面条款已被 REL #1785 取代】
+
+> **状态更新(2026-09-01,实施期)**:创建侧的落库加密口径不变(token 密文);查询侧"永不回显"底线被 #1785 的 owner-scoped verbatim 决策取代——随存随显,包含调用方自传密钥。回退过滤是产品决策,须另行拍板(REL 文件头注明)。
 
 落库加密:
 
