@@ -739,6 +739,59 @@ class TestFindUnregistered:
         # Four-key contract (Pitfall 4).
         assert sorted(rows[0].keys()) == ["id", "sandbox_id", "source_table", "ttl"]
 
+    def test_stopped_cold_row_same_sandbox_suppresses_hot_binding(self, repo):
+        """IN-01 row-level pin (binding side): a STOPPED binding cold row
+        matching (env, source_table, source_id, sandbox_id) suppresses the
+        hot binding row — threshold-STOPPED is terminal, no resurrection
+        loop from discovery. Closes the R5 gap: binding suppression was
+        provable only via mocked compiled-SQL asserts (13b/13c); this pins
+        the real-SQLite row-level truth."""
+        _seed_hot_binding(
+            id_val=50,
+            env=ENV,
+            device_props=('{"sandbox_id": "sb-b-50", ' + PROPS_TTL + "}"),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=50,
+            sandbox_id="sb-b-50",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        rows = repo.find_unregistered(ENV, "ac_entity_device_binding", 500)
+
+        assert rows == []
+
+    def test_stopped_cold_row_stale_sandbox_does_not_suppress_hot_binding(self, repo):
+        """IN-01 row-level pin (binding side): a STOPPED cold row for an
+        OLD sandbox (destroy+create swap) does not match the anti-join —
+        the swapped-in hot binding row stays discoverable as the safety net."""
+        _seed_hot_binding(
+            id_val=51,
+            env=ENV,
+            device_props=('{"sandbox_id": "sb-b-51", ' + PROPS_TTL + "}"),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=51,
+            sandbox_id="sb-b-old",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        rows = repo.find_unregistered(ENV, "ac_entity_device_binding", 500)
+
+        assert [
+            (r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows
+        ] == [
+            (51, "sb-b-51", "ac_entity_device_binding", 1788969600000),
+        ]
+        # Four-key contract (Pitfall 4).
+        assert sorted(rows[0].keys()) == ["id", "sandbox_id", "source_table", "ttl"]
+
     def test_legacy_ttl_expiration_time_key_falls_back_in_discovery(self, repo):
         """WR-02: pre-release rows persisted only the legacy integer-ms
         ttl_expiration_time key (no ttl_expiration_timestamp) — the
