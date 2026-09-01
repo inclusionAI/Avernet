@@ -28,6 +28,10 @@ from agentclaw.community.core.task.repository.types import (
     TaskNodeRecord,
     TaskNodeRunInfoRecord,
 )
+from agentclaw.community.core.task.task_center.task_service import TaskService
+from agentclaw.community.core.task.task_context.task_graph_service import (
+    TaskGraphService,
+)
 
 _TASK_SPEC = {
     "metadata": {"task_id": "bbs-1", "title": "BBS 任务标题", "instruction": "执行"},
@@ -138,3 +142,31 @@ def test_list_bbs_tasks_overview_publisher_none_when_task_info_missing(db):
     assert len(rows) == 1
     assert rows[0].task_id == "orphan-1"
     assert rows[0].publisher is None
+
+
+def test_graph_service_list_bbs_tasks_overview_forwards_to_repo(db):
+    """TaskGraphService 转发 graph_repo.list_bbs_tasks_overview(repo 绑定分支)。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs")
+    _seed_task(db, task_id="single-1", node_id="n1", run_mode="single_bot")
+
+    rows = TaskGraphService(graph_repo=TaskGraphRepository(db)).list_bbs_tasks_overview()
+
+    assert [r.task_id for r in rows] == ["bbs-1"]
+
+
+def test_graph_service_list_bbs_tasks_overview_empty_when_no_repo():
+    """无 graph_repo 绑定(纯内核/测试)→ [],不阻断(None 守卫分支)。"""
+    assert TaskGraphService().list_bbs_tasks_overview() == []
+
+
+def test_task_service_facade_list_bbs_tasks(db):
+    """TaskService facade 转发到 graph service → repo(repo 绑定路径,端到端无 stub)。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs", publisher="pub-1")
+
+    service = TaskService(TaskGraphService(graph_repo=TaskGraphRepository(db)))
+
+    rows = service.list_bbs_tasks()
+    assert len(rows) == 1
+    assert rows[0].task_id == "bbs-1"
+    assert rows[0].publisher == "pub-1"
+
