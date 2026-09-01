@@ -145,16 +145,16 @@ Conventions from `plan.md` that every task assumes:
 
 ## Group C — Creation, and the job that carries it
 
-## [ ] Task 8: Submission, without inline creation
+## [x] Task 8: Submission, without inline creation
 - **Files:** `core/bot_management/create_flow.py`
 - **Done when:**
-  - [ ] Submission runs policy, preflight (manifest **beside** quota/name/engine,
+  - [x] Submission runs policy, preflight (manifest **beside** quota/name/engine,
         **before** Passport), persist, then the Passport application — and
         **stops**. It does not take `create_bot_with_authorization`'s
         inline-create branch (`plan.md` K-9).
-  - [ ] `complete_bot_authorization` and `bot_service.create_bot` are **not
+  - [x] `complete_bot_authorization` and `bot_service.create_bot` are **not
         modified at all**.
-  - [ ] Existing callers of `create_bot_with_authorization` behave exactly as
+  - [x] Existing callers of `create_bot_with_authorization` behave exactly as
         today.
 - **Depends on:** Task 6
 

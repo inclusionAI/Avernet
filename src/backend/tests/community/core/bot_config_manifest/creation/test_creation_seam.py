@@ -128,8 +128,9 @@ def test_discard_of_a_failing_delete_does_not_raise():
 
 def test_persist_goes_through_the_ordinary_manifest_service():
     manifests = _Manifests()
-    _seam(manifests=manifests).persist(
-        entity_id="e",
+    entity_id = _seam(manifests=manifests).persist(
+        spec_entity_id="e",
+        user_id="u1",
         bot_id="b",
         document="schema_version: 1\n",
         modifier="someone",
@@ -139,3 +140,20 @@ def test_persist_goes_through_the_ordinary_manifest_service():
     (put,) = manifests.puts
     assert put["entity_id"] == "e" and put["bot_id"] == "b"
     assert put["active_engine"] == "claude_code"
+    assert entity_id == "e", "the caller needs the key it was stored under"
+
+
+def test_persist_applies_create_bots_entity_id_default():
+    """The key must be the one the bot record will carry, not the raw request."""
+    manifests = _Manifests()
+    entity_id = _seam(manifests=manifests).persist(
+        spec_entity_id=None,
+        user_id="u1",
+        bot_id="b",
+        document="schema_version: 1\n",
+        modifier="someone",
+        engine_type="claude_code",
+        bot_type="personal",
+    )
+    assert entity_id == "staff_u1"
+    assert manifests.puts[0]["entity_id"] == "staff_u1"

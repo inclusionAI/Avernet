@@ -636,6 +636,132 @@ def create_bot_with_authorization(
     )
 
 
+@dataclass(frozen=True)
+class ManifestCreationSubmitted:
+    """What submitting a create-from-manifest request answers with.
+
+    No state field, deliberately: the state vocabulary belongs to the poll and
+    appears nowhere else, so no terminal value can ever be returned by
+    submission. A caller that has just submitted is, by construction, awaiting
+    authorization.
+    """
+
+    bot_id: str
+    iframe_url: str | None
+    redirect_url: str | None
+
+
+def submit_bot_creation_with_manifest(
+    *,
+    user_id: str,
+    bot_id: str,
+    document: str,
+    modifier: str,
+    spec: BotCreateSpec,
+    context: BotCreateContext,
+    bot_service: BotService,
+    passport_plugin: PassportPlugin,
+    skill_set_factory: SkillSetServiceFactory,
+    manifest_seam: Any,
+) -> ManifestCreationSubmitted:
+    """Validate, store the manifest, apply for a Passport — and stop.
+
+    **This never creates the bot**, which is the difference from
+    :func:`create_bot_with_authorization`. That function creates inline when
+    Passport hands back a token immediately; here the creation job owns creation
+    on every path, so there is one sequence rather than two and the
+    pre-container phase cannot be skipped by a lucky Passport response. If a
+    token does come back at once, the job's first run simply sees ``ISSUED`` and
+    proceeds — no special case.
+
+    **The manifest is validated before Passport is applied for**, in the same
+    breath as quota, name and engine. A caller must never complete an
+    authorization only to be told their document was invalid: that wastes their
+    time and burns a Passport application. It is stored immediately afterwards,
+    which is what makes "the manifest that was validated is the manifest that is
+    applied" structural — the caller submits it once and the poll never accepts
+    another.
+
+    Ordering, and every line of it matters:
+
+    1. ``_prepare_create`` — the shared creation policy, which may rewrite the
+       engine (legacy aliases), so everything after it sees the engine the bot
+       will actually run.
+    2. the name check, then the platform preflight (quota, reserved engines).
+    3. the manifest preflight, against **the prepared spec's** engine.
+    4. persist, keyed by the same ``entity_id`` ``create_bot`` will resolve.
+    5. the Passport application.
+    """
+    spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
+    bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
+    is_first_bot = bot_service.is_first_bot(user_id)
+    use_first_passport = is_first_bot or (
+        spec.bot_type == "personal"
+        and bot_service.is_first_personal_bot(user_id)
+    )
+    bot_service.check_create_bot_preflight(
+        user_id=user_id,
+        bot_id=bot_id,
+        engine_type=spec.engine_type,
+        bot_name=bot_name,
+    )
+
+    # Raises ManifestValidationError with every reason at once. Before Passport.
+    manifest_seam.preflight(
+        document=document,
+        engine_type=spec.engine_type,
+        bot_type=spec.bot_type,
+    )
+    # The seam resolves the storage key and returns it: this module must not
+    # import the manifest package (that closes a cycle through the creation
+    # graph), and the key's rule belongs with the storage that depends on it.
+    manifest_seam.persist(
+        spec_entity_id=spec.entity_id,
+        user_id=user_id,
+        bot_id=bot_id,
+        document=document,
+        modifier=modifier,
+        engine_type=spec.engine_type,
+        bot_type=spec.bot_type,
+    )
+
+    passport_result = _apply_passport(
+        passport_plugin,
+        bot_id=bot_id,
+        user_id=user_id,
+        bot_name=bot_name,
+        spec=spec,
+        mcp_codes=_get_bot_mcp_codes(
+            skill_set_factory, user_id, bot_id, spec.entity_id, spec.entity_type,
+            engine_type=spec.engine_type,
+        ),
+        cli_items=get_default_cli_items(
+            spec.engine_type,
+            spec.template_type,
+            ext_info={"template_config": spec.template_config}
+            if spec.template_config is not None
+            else None,
+        ),
+        use_first_passport=use_first_passport,
+    )
+
+    iframe_url = passport_result.get("iframe_url") if passport_result else None
+    redirect_url = passport_result.get("redirect_url") if passport_result else None
+    token = passport_result.get("token") if passport_result else None
+    if not token and not iframe_url and not redirect_url:
+        # Neither a token nor anywhere to send the user. Unlike the inline flow
+        # there is nothing to roll back — no bot was created — but the caller
+        # would be left polling a creation that can never be authorized.
+        raise PassportError(
+            f"Passport returned no token and no authorization URL for bot {bot_id}"
+        )
+    return ManifestCreationSubmitted(
+        bot_id=bot_id,
+        iframe_url=iframe_url,
+        redirect_url=redirect_url,
+    )
+
+
 def complete_bot_authorization(
     *,
     user_id: str,

@@ -216,13 +216,14 @@ class BotCreationManifestSeam:
     def persist(
         self,
         *,
-        entity_id: str,
+        spec_entity_id: Optional[str],
+        user_id: str,
         bot_id: str,
         document: str,
         modifier: str,
         engine_type: Optional[str],
         bot_type: Optional[str],
-    ) -> None:
+    ) -> str:
         """Store the submitted document against the allocated ``bot_id``.
 
         Through the ordinary manifest service, so the same validation and the
@@ -233,7 +234,15 @@ class BotCreationManifestSeam:
         This is what makes "the manifest that was validated is the manifest that
         is applied" structural — the caller submits it once and never re-sends
         it.
+
+        Resolves the key here rather than taking it, and returns it: the caller
+        is ``create_flow``, which must not import this package (that closes a
+        cycle through the creation graph), and the resolution belongs with the
+        storage that depends on it anyway.
         """
+        entity_id = resolve_manifest_entity_id(
+            spec_entity_id=spec_entity_id, user_id=user_id
+        )
         self._manifests.put(
             entity_id=entity_id,
             bot_id=bot_id,
@@ -242,6 +251,7 @@ class BotCreationManifestSeam:
             active_engine=engine_type,
             bot_type=bot_type,
         )
+        return entity_id
 
     def phase_a(
         self,
