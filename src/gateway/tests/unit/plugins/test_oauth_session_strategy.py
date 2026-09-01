@@ -47,6 +47,50 @@ async def test_valid_cookie_builds_user_principal() -> None:
     assert result.subject.display_name is None
 
 
+class _MissingSecretResolver:
+    def get_secret(self, name: str):
+        return None
+
+
+class _EmptySecretResolver:
+    class _Secret:
+        secret_value = "   "
+
+    def get_secret(self, name: str):
+        return self._Secret()
+
+
+@pytest.mark.asyncio
+async def test_missing_secret_resolver_raises_auth_error() -> None:
+    strategy = OauthSessionStrategy(secret_resolver=_MissingSecretResolver())
+
+    with pytest.raises(AuthError):
+        await strategy.build(_creds(_token()))
+
+
+@pytest.mark.asyncio
+async def test_empty_secret_value_raises_auth_error() -> None:
+    strategy = OauthSessionStrategy(secret_resolver=_EmptySecretResolver())
+
+    with pytest.raises(AuthError):
+        await strategy.build(_creds(_token()))
+
+
+@pytest.mark.asyncio
+async def test_missing_sub_claim_raises_auth_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    strategy = OauthSessionStrategy(jwt_secret=_TEST_SECRET)
+    token = _token()
+
+    monkeypatch.setattr(
+        jwt, "decode", lambda *args, **kwargs: {"src": "google", "iat": 1, "exp": 2}
+    )
+
+    with pytest.raises(AuthError):
+        await strategy.build(_creds(token))
+
+
 @pytest.mark.asyncio
 async def test_invalid_cookie_raises_auth_error() -> None:
     strategy = OauthSessionStrategy(jwt_secret=_TEST_SECRET)

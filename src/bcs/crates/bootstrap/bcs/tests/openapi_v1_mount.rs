@@ -357,7 +357,7 @@ async fn register_routes_have_the_expected_security_boundary() {
     // principal boundary — an anonymous POST reaches the handler and gets a
     // 400 (missing params) instead of the boundary's 401.
     let anonymous = client
-        .post(format!("http://{addr}/openapi/v1/collaboration/register"))
+        .post(format!("http://{addr}/register"))
         .send()
         .await
         .expect("anonymous register request");

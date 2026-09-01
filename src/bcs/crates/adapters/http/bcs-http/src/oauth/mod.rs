@@ -116,7 +116,7 @@ impl AuthService for OAuthRouteState {
         &self,
         request: BuildLoginUrls,
     ) -> Result<AuthProviderUrlList, ApplicationError> {
-        let callback_base_url = request.callback_base_url.trim_end_matches('/');
+        let callback_base_url = request.callback_base_url.trim().trim_end_matches('/');
         if callback_base_url.is_empty() {
             return Err(ApplicationError::invalid(
                 "invalid_callback_base_url",
@@ -144,7 +144,7 @@ impl AuthService for OAuthRouteState {
         &self,
         request: CompleteOAuthLogin,
     ) -> Result<AuthRedirect, ApplicationError> {
-        let callback_base_url = request.callback_base_url.trim_end_matches('/');
+        let callback_base_url = request.callback_base_url.trim().trim_end_matches('/');
         if callback_base_url.is_empty() {
             return Err(ApplicationError::invalid(
                 "invalid_callback_base_url",
