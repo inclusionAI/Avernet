@@ -23,9 +23,6 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionStore,
 )
-from agentclaw.community.core.skill_center.materialization_contract import (
-    SkillVersionScannerProtocol,
-)
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.testing.draft_content_store import (
@@ -34,9 +31,6 @@ from agentclaw.community.testing.draft_content_store import (
 from agentclaw.community.plugins.local.oss_storage import MockObjectStoragePlugin
 from agentclaw.community.testing.canonical_center_store import (
     LocalCanonicalCenterVersionStore,
-)
-from agentclaw.community.testing.skill_version_scanner import (
-    FakeSkillVersionScanner,
 )
 
 logger = get_logger()
@@ -69,11 +63,6 @@ class TestingSkillCenterModule(Module):
         binder.bind(
             DraftContentStore,
             to=LocalDraftContentStore,
-            scope=singleton,
-        )
-        binder.bind(
-            SkillVersionScannerProtocol,
-            to=FakeSkillVersionScanner,
             scope=singleton,
         )
 

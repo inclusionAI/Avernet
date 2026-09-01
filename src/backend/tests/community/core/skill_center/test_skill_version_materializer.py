@@ -9,7 +9,6 @@ import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -37,11 +36,9 @@ from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
     SkillVersionMaterializationError,
     SkillVersionMaterializationRequest,
-    SkillVersionScanResult,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.services.skill_version_materializer import (
-    SdkSkillVersionScanner,
     SkillVersionMaterializer,
 )
 from agentclaw.community.core.skill_center.services.published_version_draft import (
@@ -53,6 +50,7 @@ from agentclaw.community.core.skill_center.services.space_skill_offline_service 
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterExactDownload,
+    SkillCenterMcpService,
     SkillCenterReadScope,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
@@ -98,8 +96,14 @@ class _Http:
 
 
 class _Gateway:
-    def __init__(self, package: bytes) -> None:
+    def __init__(
+        self,
+        package: bytes,
+        *,
+        mcp_services: tuple[SkillCenterMcpService, ...] = (),
+    ) -> None:
         self.package = package
+        self.mcp_services = mcp_services
         self.calls = []
 
     def get_exact_download(self, request):
@@ -109,24 +113,7 @@ class _Gateway:
             version_number=request.version_number,
             download_url="https://download.example/exact.zip",
             sha256=hashlib.sha256(self.package).hexdigest(),
-            mcp_services=(),
-        )
-
-
-class _Scanner:
-    def __init__(self, *, fail: bool = False, expected_name: str = "weather") -> None:
-        self.fail = fail
-        self.expected_name = expected_name
-        self.calls = 0
-
-    def scan(self, package):
-        self.calls += 1
-        if self.fail:
-            raise RuntimeError("scanner unavailable")
-        assert package.name == self.expected_name
-        return SkillVersionScanResult(
-            risk_tags=({"name": "network", "level": "LOW"},),
-            mcp_dependencies=({"code": "mcp.weather", "name": "Weather MCP"},),
+            mcp_services=self.mcp_services,
         )
 
 
@@ -174,13 +161,17 @@ def _target() -> MaterializingSkillVersion:
     )
 
 
-def _materializer(*, package: bytes, scanner: _Scanner, versions: _Versions):
+def _materializer(
+    *,
+    package: bytes,
+    versions: _Versions,
+    mcp_services: tuple[SkillCenterMcpService, ...] = (),
+):
     return SkillVersionMaterializer(
         versions=versions,
-        gateway=_Gateway(package),
+        gateway=_Gateway(package, mcp_services=mcp_services),
         http=_Http(package),
         validator=SkillPackageValidator(SkillParser()),
-        scanner=scanner,
         store=LocalCanonicalCenterVersionStore(),
         clock=lambda: datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
     )
@@ -189,8 +180,18 @@ def _materializer(*, package: bytes, scanner: _Scanner, versions: _Versions):
 def test_exact_package_becomes_published_only_after_all_ready_inputs_exist() -> None:
     package = _package()
     versions = _Versions(_target())
-    scanner = _Scanner()
-    materializer = _materializer(package=package, scanner=scanner, versions=versions)
+    materializer = _materializer(
+        package=package,
+        versions=versions,
+        mcp_services=(
+            SkillCenterMcpService(
+                server_code="mcp.weather",
+                name="Weather MCP",
+                icon_url="https://example.com/weather.png",
+                description="Weather tools",
+            ),
+        ),
+    )
 
     published = materializer.materialize(
         SkillVersionMaterializationRequest(
@@ -204,13 +205,19 @@ def test_exact_package_becomes_published_only_after_all_ready_inputs_exist() -> 
     assert published.status == "PUBLISHED"
     assert published.skill_uuid == "00000000-0000-4000-8000-000000000010"
     assert published.sc_version_number == "1.0.0"
-    assert scanner.calls == 1
     assert versions.published is not None
     metadata = json.loads(versions.published["metadata_json"])
     assert metadata == {
         "config": [{"name": "city", "required": True}],
-        "mcp_dependencies": [{"code": "mcp.weather", "name": "Weather MCP"}],
-        "risk_tags": [{"level": "LOW", "name": "network"}],
+        "mcp_dependencies": [
+            {
+                "code": "mcp.weather",
+                "description": "Weather tools",
+                "icon_url": "https://example.com/weather.png",
+                "name": "Weather MCP",
+            }
+        ],
+        "risk_tags": [],
     }
     assert "sc_sha256" not in versions.published
 
@@ -226,7 +233,6 @@ def test_public_exact_package_uses_manifest_name_and_ignores_opaque_wrapper() ->
     )
     materializer = _materializer(
         package=package,
-        scanner=_Scanner(expected_name="dima"),
         versions=versions,
     )
 
@@ -244,29 +250,62 @@ def test_public_exact_package_uses_manifest_name_and_ignores_opaque_wrapper() ->
     assert versions.published["name"] == "dima"
 
 
-@pytest.mark.parametrize(
-    ("package", "scanner"),
-    [(_package(), _Scanner(fail=True))],
-    ids=("scanner-failure",),
-)
-def test_validation_or_scanner_failure_never_publishes(
-    package: bytes, scanner: _Scanner
-) -> None:
+def test_public_exact_package_accepts_empty_sc_mcp_metadata_without_scanner() -> None:
+    package = _package()
     versions = _Versions(_target())
-    materializer = _materializer(package=package, scanner=scanner, versions=versions)
+    materializer = _materializer(
+        package=package,
+        versions=versions,
+        mcp_services=(),
+    )
 
-    with pytest.raises(SkillVersionMaterializationError) as failure:
-        materializer.materialize(
-            SkillVersionMaterializationRequest(
-                env="pre",
-                skill_id=10,
-                skill_version_id=101,
-                scope=SkillCenterReadScope.PUBLIC,
-            )
+    materializer.materialize(
+        SkillVersionMaterializationRequest(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            scope=SkillCenterReadScope.PUBLIC,
         )
+    )
 
-    assert failure.value.stage == "scanner"
-    assert versions.published is None
+    assert versions.published is not None
+    metadata = json.loads(versions.published["metadata_json"])
+    assert metadata["mcp_dependencies"] == []
+    assert metadata["risk_tags"] == []
+
+
+def test_team_exact_package_uses_sc_mcp_metadata_without_scanner() -> None:
+    package = _package()
+    versions = _Versions(_target())
+    materializer = _materializer(
+        package=package,
+        versions=versions,
+        mcp_services=(
+            SkillCenterMcpService(
+                server_code="mcp.team",
+                name="Team MCP",
+                icon_url=None,
+                description="Team tools",
+            ),
+        ),
+    )
+
+    materializer.materialize(
+        SkillVersionMaterializationRequest(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            scope=SkillCenterReadScope.TEAM,
+            team_id="team-a",
+        )
+    )
+
+    assert versions.published is not None
+    metadata = json.loads(versions.published["metadata_json"])
+    assert metadata["mcp_dependencies"] == [
+        {"code": "mcp.team", "description": "Team tools", "name": "Team MCP"}
+    ]
+    assert metadata["risk_tags"] == []
 
 
 def test_download_failure_logs_safe_structured_diagnostics(caplog) -> None:
@@ -291,7 +330,6 @@ def test_download_failure_logs_safe_structured_diagnostics(caplog) -> None:
         gateway=_Gateway(package),
         http=_FailedHttp(),
         validator=SkillPackageValidator(SkillParser()),
-        scanner=_Scanner(),
         store=LocalCanonicalCenterVersionStore(),
     )
 
@@ -321,11 +359,12 @@ def test_team_exact_package_still_rejects_manifest_name_mismatch() -> None:
     versions = _Versions(_target())
     materializer = _materializer(
         package=_package(name="different-name"),
-        scanner=_Scanner(expected_name="different-name"),
         versions=versions,
     )
 
-    with pytest.raises(SkillVersionMaterializationError, match="name changed") as failure:
+    with pytest.raises(
+        SkillVersionMaterializationError, match="name changed"
+    ) as failure:
         materializer.materialize(
             SkillVersionMaterializationRequest(
                 env="pre",
@@ -343,8 +382,9 @@ def test_team_exact_package_still_rejects_manifest_name_mismatch() -> None:
 def test_team_exact_package_ignores_opaque_sc_wrapper() -> None:
     versions = _Versions(_target())
     materializer = _materializer(
-        package=_package(name="weather", wrapper="00000000-0000-4000-8000-000000000010"),
-        scanner=_Scanner(expected_name="weather"),
+        package=_package(
+            name="weather", wrapper="00000000-0000-4000-8000-000000000010"
+        ),
         versions=versions,
     )
 
@@ -360,54 +400,6 @@ def test_team_exact_package_ignores_opaque_sc_wrapper() -> None:
 
     assert published.status == "PUBLISHED"
     assert versions.published is not None
-
-
-def test_sdk_scanner_reads_only_the_validated_exact_package() -> None:
-    package = SkillPackageValidator(SkillParser()).validate_zip(_package())
-
-    class _Scan:
-        risk_tags = [{"name": "filesystem", "level": "MEDIUM"}]
-
-    class _Sdk:
-        def scan(self, skill_path: str):
-            package_dir = Path(skill_path)
-            assert package_dir.is_dir()
-            assert (package_dir / "SKILL.md").read_bytes().startswith(b"---\n")
-            assert sorted(
-                path.relative_to(package_dir).as_posix()
-                for path in package_dir.rglob("*")
-                if path.is_file()
-            ) == ["SKILL.md", "scripts/fetch.py"]
-            return _Scan()
-
-        def get_mcp_dependencies(self, *, skill_path, base_dir, min_confidence):
-            assert skill_path == base_dir
-            assert Path(skill_path).is_dir()
-            assert (Path(skill_path) / "SKILL.md").is_file()
-            assert min_confidence == 0.8
-            return [{"code": "mcp.fs", "name": "FS"}]
-
-    class _Plugin:
-        def create_sdk(self):
-            return _Sdk()
-
-    result = SdkSkillVersionScanner(_Plugin()).scan(package)
-
-    assert result == SkillVersionScanResult(
-        risk_tags=({"name": "filesystem", "level": "MEDIUM"},),
-        mcp_dependencies=({"code": "mcp.fs", "name": "FS"},),
-    )
-
-
-def test_sdk_scanner_unavailable_fails_closed() -> None:
-    package = SkillPackageValidator(SkillParser()).validate_zip(_package())
-
-    class _Plugin:
-        def create_sdk(self):
-            return None
-
-    with pytest.raises(SkillVersionMaterializationError, match="unavailable"):
-        SdkSkillVersionScanner(_Plugin()).scan(package)
 
 
 class _RecoveryDatabase:
@@ -561,7 +553,6 @@ def test_offline_vn_plus_one_recovers_through_unified_materializer() -> None:
         gateway=_Gateway(package),
         http=_Http(package),
         validator=SkillPackageValidator(SkillParser()),
-        scanner=_Scanner(),
         store=LocalCanonicalCenterVersionStore(),
         clock=lambda: datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
     ).materialize(

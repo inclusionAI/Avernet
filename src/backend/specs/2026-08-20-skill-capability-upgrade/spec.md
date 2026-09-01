@@ -724,6 +724,11 @@ Center 缺 `skill_uuid`、PUBLISHED Version、`sc_version_number` 或合法 depe
 投影半套运行时。一次 Runtime projection 只能消费 Reader/Resolver 返回的同一份不可变 assets
 tuple，避免 Skill mapping 与 MCP dependency 跨版本。
 
+单 Skill add/remove、Direct activate/deactivate 和 Default exclusion/un-exclusion 在声明本次
+`ProjectionScope` 时必须遵循同一依赖来源：Local/Repo 读取 `ac_skill.mcp_dependencies`，Center
+读取最高 ordinal 的 PUBLISHED `ac_skill_version.metadata_json.mcp_dependencies`。不得因为
+Center 的资产级依赖列为空而把一次实际包含 MCP 变化的命令误报成 Skill-only projection。
+
 Space 发布产生的 `ac_skill_version.publication_attempt_id` 非空；SC Public 懒物化没有
 TeamClaw Publication Attempt，因此该列必须允许 NULL，不能伪造 Attempt。Published Service
 历史实例不解析 latest，只读取冻结 Artifact 中的 exact Version。
@@ -983,7 +988,13 @@ Artifact build 都消费同一已解析值对象；Published Service 历史实�
 
 所有 Skill 都有 `mcp_dependencies`；Local/Repo 从当前兼容投影读取，Center 的权威是 exact
 `ac_skill_version.metadata_json.mcp_dependencies`（或等价版本级列/子表）。Materializer 只有在
-依赖解析、metadata 和所有 Canonical Store 完整后才能 PUBLISHED；扫描失败不能降级为空依赖。
+依赖解析、metadata 和所有 Canonical Store 完整后才能 PUBLISHED。所有由 SkillCenter exact
+download 进入的版本（Public 懒物化/同步和 TeamClaw Space/Team 发布）都以返回的
+`mcpServices` 为版本依赖权威：`null`、缺失或空数组都表示无依赖，非空数组按 `serverCode`
+规范化到 `mcp_dependencies[].code`。SkillCenter 的公共市场或 Team 发布流程已完成安全检查，
+TeamClaw 的 exact Version Materializer 不再重复调用 Scanner，`risk_tags` 固定为空；但仍继续
+执行 SHA256、ZIP 安全、`SKILL.md`、Team name 一致性和 Canonical Store 完整性校验。Local/Repo
+的既有 Scanner 链路不在本规则范围内，保持不变。
 
 SC Public 不接 Webhook。周期巡检与手动同步复用一个新的 exact-version
 `SkillCenterSyncService.sync()` 深模块：

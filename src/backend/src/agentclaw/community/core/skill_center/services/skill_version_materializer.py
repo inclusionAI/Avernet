@@ -7,13 +7,9 @@ from datetime import UTC, datetime
 import hashlib
 import json
 import logging
-from pathlib import Path
-import tempfile
 import time
 from typing import Callable
 from urllib.parse import urlsplit
-
-from injector import inject
 
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersion,
@@ -27,8 +23,6 @@ from agentclaw.community.core.skill_center.materialization_contract import (
     SkillVersionMaterializationError,
     SkillVersionMaterializationRequest,
     SkillVersionMaterializerProtocol,
-    SkillVersionScannerProtocol,
-    SkillVersionScanResult,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillVersionMaterializationRepositoryProtocol,
@@ -48,7 +42,6 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterExactDownloadRequest,
     SkillCenterReadScope,
 )
-from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
 
 logger = logging.getLogger(__name__)
@@ -124,63 +117,6 @@ def _dependencies(*groups: tuple[object, ...]) -> list[dict[str, object]]:
     return result
 
 
-def _mapping_tuple(values: object, *, field: str) -> tuple[Mapping[str, object], ...]:
-    if values is None:
-        return ()
-    if not isinstance(values, (list, tuple)):
-        raise ValueError(f"scanner {field} must be a list")
-    normalized: list[Mapping[str, object]] = []
-    for value in values:
-        if hasattr(value, "model_dump"):
-            value = value.model_dump()
-        if not isinstance(value, Mapping) or any(
-            not isinstance(key, str) for key in value
-        ):
-            raise ValueError(f"scanner {field} entries must be objects")
-        normalized.append(dict(value))
-    return tuple(normalized)
-
-
-class SdkSkillVersionScanner:
-    """Adapt the configured Scanner SDK to one validated exact package."""
-
-    @inject
-    def __init__(self, scanner: SkillScannerPlugin) -> None:
-        self._scanner = scanner
-
-    def scan(self, package: ValidatedSkillPackage) -> SkillVersionScanResult:
-        try:
-            sdk = self._scanner.create_sdk()
-            if sdk is None:
-                raise RuntimeError("Skill Scanner is unavailable")
-            with tempfile.TemporaryDirectory(prefix="skill-version-scan-") as root:
-                base = Path(root)
-                for relative, content in package.files:
-                    target = base.joinpath(*relative.split("/"))
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(content)
-                scan_result = sdk.scan(str(base))
-                dependencies = sdk.get_mcp_dependencies(
-                    skill_path=str(base),
-                    base_dir=str(base),
-                    min_confidence=0.8,
-                )
-                return SkillVersionScanResult(
-                    risk_tags=_mapping_tuple(
-                        getattr(scan_result, "risk_tags", None),
-                        field="risk_tags",
-                    ),
-                    mcp_dependencies=_mapping_tuple(
-                        dependencies,
-                        field="mcp_dependencies",
-                    ),
-                )
-        except SkillVersionMaterializationError:
-            raise
-        except Exception as exc:
-            raise SkillVersionMaterializationError(str(exc)) from exc
-
-
 class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
     """Publish only after every immutable consumer input verifies successfully."""
 
@@ -191,7 +127,6 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         gateway: SkillCenterGatewayServiceProtocol,
         http: HttpClient,
         validator: SkillPackageValidator,
-        scanner: SkillVersionScannerProtocol,
         store: CanonicalCenterVersionStore,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -199,7 +134,6 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         self._gateway = gateway
         self._http = http
         self._validator = validator
-        self._scanner = scanner
         self._store = store
         self._clock = clock
 
@@ -297,11 +231,8 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 and package.name != target.name
             ):
                 raise ValueError("materialized SKILL.md name changed")
-            advance_stage("scanner")
-            scan = self._scanner.scan(package)
             advance_stage("metadata_build")
             dependencies = _dependencies(
-                tuple(scan.mcp_dependencies),
                 tuple(
                     {
                         "code": item.server_code,
@@ -312,17 +243,11 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                     for item in exact.mcp_services
                 ),
             )
-            risk_tags = [_json_value(item) for item in scan.risk_tags]
-            if any(not isinstance(item, dict) for item in risk_tags):
-                raise ValueError("scanner risk tags must be objects")
             metadata_json = json.dumps(
                 {
                     "config": [_json_value(item) for item in package.config],
                     "mcp_dependencies": dependencies,
-                    "risk_tags": sorted(
-                        risk_tags,
-                        key=lambda item: json.dumps(item, sort_keys=True),
-                    ),
+                    "risk_tags": [],
                 },
                 ensure_ascii=True,
                 separators=(",", ":"),
@@ -507,4 +432,4 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         )
 
 
-__all__ = ["SdkSkillVersionScanner", "SkillVersionMaterializer"]
+__all__ = ["SkillVersionMaterializer"]
