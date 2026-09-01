@@ -997,13 +997,30 @@ class DeadlineRenewalScheduler:
 
         if new_fail_count >= self._config.max_fail_count:
             if stop_reason is not None:
-                self._schedule_repo.set_status(
-                    self._config.env,
-                    record["source_table"],
-                    record["source_id"],
-                    "STOPPED",
-                    stop_reason=stop_reason,
-                )
+                try:
+                    self._schedule_repo.set_status(
+                        self._config.env,
+                        record["source_table"],
+                        record["source_id"],
+                        "STOPPED",
+                        stop_reason=stop_reason,
+                    )
+                except Exception:
+                    # WR-01 (85-86 deep review): a failed terminal write must
+                    # not leak into _process_one's secondary routing, which
+                    # would downgrade this platform-confirmed verdict to a
+                    # non-confirming cap-and-hold and drop the
+                    # stopped_transition signal. The verdict and its metrics
+                    # are retained this round; the row stays ACTIVE with the
+                    # 9+-signature and the write is re-attempted next round.
+                    log.exception(
+                        "[DeadlineRenewalScheduler] terminal STOPPED write "
+                        "failed source=%s:%s stop_reason=%s — verdict "
+                        "retained, write re-attempted next round",
+                        record["source_table"],
+                        record["source_id"],
+                        stop_reason,
+                    )
                 log.warning(
                     "[DeadlineRenewalScheduler] sandbox_id=%s "
                     "source=%s:%s reached max_fail_count=%d, marked STOPPED "
