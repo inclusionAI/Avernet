@@ -411,7 +411,7 @@ async fn post_register_is_anonymous_and_returns_created_envelope() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/register?token=abc123&bot-name=%E6%B5%8B%E8%AF%95%E6%9C%BA%E5%99%A8%E4%BA%BA")
+                .uri("/openapi/v1/collaboration/register?token=abc123&bot-name=%E6%B5%8B%E8%AF%95%E6%9C%BA%E5%99%A8%E4%BA%BA")
                 .header("x-request-id", "request-123")
                 .body(Body::empty())
                 .expect("request"),
@@ -435,7 +435,7 @@ async fn post_register_rejects_missing_token_and_name() {
     let app = test_router(service);
     let response = app
         .clone()
-        .oneshot(bare_request("POST", "/register"))
+        .oneshot(bare_request("POST", "/openapi/v1/collaboration/register"))
         .await
         .expect("missing params response");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -443,7 +443,7 @@ async fn post_register_rejects_missing_token_and_name() {
     assert_eq!(body["code"], 40_000);
 
     let response = app
-        .oneshot(bare_request("POST", "/register?token=abc123"))
+        .oneshot(bare_request("POST", "/openapi/v1/collaboration/register?token=abc123"))
         .await
         .expect("missing name response");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -454,7 +454,7 @@ async fn post_register_maps_unauthenticated_token_failures() {
     let service = fake_service(true);
     let app = test_router(service);
     let response = app
-        .oneshot(bare_request("POST", "/register?token=abc123&bot_name=tester"))
+        .oneshot(bare_request("POST", "/openapi/v1/collaboration/register?token=abc123&bot_name=tester"))
         .await
         .expect("401 response");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
