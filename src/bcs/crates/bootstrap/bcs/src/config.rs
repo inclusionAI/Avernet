@@ -3105,4 +3105,40 @@ base_url = "https://directory.example.com"
         assert!(config.eventing.enabled);
         assert!(config.eventing.dispatcher_enabled);
     }
+
+    /// Regression guard for the `issuer` → `issuers` field rename: the
+    /// checked-in configs must parse under `deny_unknown_fields`, and the old
+    /// scalar `issuer` key must not reappear. See PR #1799 follow-up.
+    #[test]
+    fn checked_in_configs_parse_with_array_issuers_and_reject_legacy_scalar() {
+        let targets: &[(&str, &str)] = &[
+            ("example", concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../configs/bcs-config-example.toml"
+            )),
+            ("local", concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../configs/bcs-config-local.toml"
+            )),
+            ("prod", concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../configs/bcs-config-prod.toml"
+            )),
+        ];
+        for (label, path) in targets {
+            let source = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("read {label} config {path}: {e}"));
+            let config: BcsConfig = toml::from_str(&source)
+                .unwrap_or_else(|e| panic!("parse {label} config {path}: {e}"));
+            assert_eq!(
+                config.gateway_principal.issuers,
+                vec!["gateway".to_string(), "backend".to_string()],
+                "{label} config gateway_principal.issuers must accept both issuers"
+            );
+            assert!(
+                !source.contains("issuer = "),
+                "{label} config {path} still carries the legacy scalar `issuer` key",
+            );
+        }
+    }
 }

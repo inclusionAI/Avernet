@@ -213,7 +213,7 @@ type = "url"
 url = "https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/bcs-panel/1.2.0/dist/index.umd.js"
 
 [gateway_principal]
-issuer = "gateway"
+issuers = ["gateway", "backend"]
 audience = "bcs"
 key_id = "bare"
 signing_key_env = "PRINCIPAL_SIGNING_KEY"
