@@ -40,7 +40,8 @@ api_keys = []
 allowed_switch_provider_ids = []
 
 [gateway_principal]
-issuer = "gateway"
+# Accept tokens minted by either the gateway or the backend (shared key).
+issuers = ["gateway", "backend"]
 audience = "bcs"
 key_id = "bare"
 # Local launchers inject an explicit test value; every other deployment must
