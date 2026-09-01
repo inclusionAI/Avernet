@@ -1,53 +1,55 @@
 template_id: okr-implementation-relay
 entry_bot_id: 20260828_8azkbtgs
 task_type: static_plan
-# 串行接力版(与 okr-implementation 并存,本模板暂由内容路由切换前不触发):
-# 入口(20260828_8azkbtgs,总结需求+问题形成 handoff) -> 1 大促营销策略专家
-# -> 2 圈人选品群(协作) -> 3 风险评估群(协作)
-# -> 4 不可实现任务转BBS广场+自动研发bot(串行腿,非旁路)
-# -> 5 营销策略审核(读 3 risk_result + 4 handoff) -> 6 投放实施 -> 7 通知
-# 接力承载:"handoff" output 用 $.result(取整个上报内容),pre-键统一真实模式也能携带;
-# 与各 bot 的 rule 约定"产上下文总结+剩余问题"共同形成接力包。
+# 串行接力 V2。链:
+# 入口(20260828_8azkbtgs,图前:分析OKR→决定找营销策略专家)
+# -> ① 营销策略专家(20260828_whd6nx7x,单独:产出策略方向+判定信息不够,决定拉圈人选品)
+# -> ② 策略生成群(driver 专家 20260828_whd6nx7x + 圈人 20260828_6snfeiq0 + 选品 20260828_roqtqqkx:
+#      专家驱动,圈人/选品细化,专家汇成完整营销策略)
+# -> ③ 风险评估群(业务风控 20260828_7q4cbeze+合规 20260828_jbadndne)
+# -> ④ 不可实现任务转BBS广场+自动研发(20260828_f7wfi27d,串行腿非旁路;须把上游策略/风险全料一并带到正文供⑤审核)
+# -> ⑤ 营销策略审核(20260828_9rgd70li)
+# -> ⑥ 投放实施(20260828_k9c2slro)
+# -> ⑦ 通知(notify,负责人)
+#
+# 接力承载:"handoff" output 用 $.result 取整个上报产出正文;每跳 input 仅透传上游"产出正文"块,
+# 框架不再做摘要/合成;⑤只读④handoff,不做跨跳 fan-in risk_result(全料随4 carry-forward).
 input_schema:
   okr:
     type: string
     required: true
 nodes:
   - id: marketing_strategy
-    name: 大促营销策略专家
+    name: 营销策略专家
     type: bot
     bot_id: 20260828_whd6nx7x
     depends_on: []
     input:
       okr: $.input.okr
     output:
-      strategy_result: $.result
       handoff: $.result
-  - id: crowd_product_group
-    name: 圈人选品群
+  - id: strategy_generation_group
+    name: 策略生成群
     type: collaboration
     depends_on: [marketing_strategy]
     collaboration:
-      bot_ids: [20260828_6snfeiq0, 20260828_roqtqqkx]
+      bot_ids: [20260828_whd6nx7x, 20260828_6snfeiq0, 20260828_roqtqqkx]
       mode: chat
       completion: report
     input:
-      strategy_result: $.marketing_strategy.output.strategy_result
       handoff: $.marketing_strategy.output.handoff
     output:
-      strategy_result: $.report.result
       handoff: $.result
   - id: risk_assessment
     name: 风险评估群
     type: collaboration
-    depends_on: [crowd_product_group]
+    depends_on: [strategy_generation_group]
     collaboration:
       bot_ids: [20260828_7q4cbeze, 20260828_jbadndne]
       mode: chat
       completion: report
     input:
-      strategy_result: $.crowd_product_group.output.strategy_result
-      handoff: $.crowd_product_group.output.handoff
+      handoff: $.strategy_generation_group.output.handoff
     output:
       risk_result: $.report.result
       unhandled_tasks: $.result.unhandled_tasks
@@ -69,7 +71,6 @@ nodes:
     bot_id: 20260828_9rgd70li
     depends_on: [risk_unhandled_to_bbs]
     input:
-      risk_result: $.risk_assessment.output.risk_result
       handoff: $.risk_unhandled_to_bbs.output.handoff
     output:
       approval_result: $.result
@@ -80,7 +81,6 @@ nodes:
     bot_id: 20260828_k9c2slro
     depends_on: [strategy_approval]
     input:
-      approval_result: $.strategy_approval.output.approval_result
       handoff: $.strategy_approval.output.handoff
     output:
       implementation_result: $.result
@@ -90,5 +90,4 @@ nodes:
     type: notify
     depends_on: [implementation]
     input:
-      implementation_result: $.implementation.output.implementation_result
       handoff: $.implementation.output.handoff
