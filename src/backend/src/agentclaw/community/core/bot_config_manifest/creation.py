@@ -66,6 +66,27 @@ def _no_materialiser_refusal(construct: ApplyConstruct) -> str:
     )
 
 
+def resolve_manifest_entity_id(
+    *, spec_entity_id: Optional[str], user_id: str
+) -> str:
+    """The storage key's ``entity_id``, resolved exactly as creation will.
+
+    **One definition, because a second one is silent.** The manifest is stored
+    before the bot record exists, keyed by ``(tenant, sha256(env, entity_id,
+    bot_id))``; the bot record is written later by ``BotService.create_bot``,
+    which resolves ``entity_id or f"staff_{user_id}"``. If the two ever
+    disagreed, submission would store a document at one key and everything
+    afterwards would look for it at another — and nothing would raise. The apply
+    would find no manifest, report that it applied nothing, and be *correct*
+    about what it did. The bot would simply come up unconfigured.
+
+    Mirroring the rule here rather than importing ``BotService`` keeps this
+    module free of the creation graph; the pairing is held by a test that runs
+    both.
+    """
+    return spec_entity_id or f"staff_{user_id}"
+
+
 def declared_constructs(parsed: dict[str, Any]) -> tuple[ApplyConstruct, ...]:
     """Every construct the document declares, in apply order.
 
@@ -308,4 +329,5 @@ __all__ = [
     "BotCreationManifestSeam",
     "declared_constructs",
     "preflight_creation_manifest",
+    "resolve_manifest_entity_id",
 ]

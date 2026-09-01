@@ -129,15 +129,15 @@ Conventions from `plan.md` that every task assumes:
         wrote**, idempotently.
 - **Depends on:** Tasks 2, 5
 
-## [ ] Task 7: `entity_id` is resolved once
+## [x] Task 7: `entity_id` is resolved once
 - **Files:** `core/bot_config_manifest/creation.py`, `core/bot_management/create_flow.py`
 - **Done when:**
-  - [ ] The `entity_id` the manifest is stored under at submission is the value
+  - [x] The `entity_id` the manifest is stored under at submission is the value
         `create_bot` will resolve — taken from the **prepared** spec, after
         `_prepare_create`, not from the raw request.
-  - [ ] The poll resolves the same value the same way, from the authenticated
+  - [x] The poll resolves the same value the same way, from the authenticated
         caller, never from a request parameter.
-  - [ ] A test creates through the public surface and asserts the submitted row is
+  - [x] A test creates through the public surface and asserts the submitted row is
         found by the job's later read.
 - **Depends on:** Task 6
 
