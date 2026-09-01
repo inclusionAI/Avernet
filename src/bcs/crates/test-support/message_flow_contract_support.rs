@@ -338,38 +338,18 @@ impl FakeRoutingCoreService {
 
 #[async_trait]
 impl RoutingCoreService for FakeRoutingCoreService {
+    /// Mirrors the production legacy `route()`: text @-mentions are resolved
+    /// against participants (including Humans, which `route()` does not
+    /// classify), so this delegates to the overlay variant with an empty
+    /// overlay — actor kind/mode/status then fall back to the participant
+    /// rows, matching the production router's defensive default.
     async fn route(
         &self,
         group: &Group,
         message: &str,
         sender_bot_id: Option<&str>,
     ) -> RoutingDecision {
-        self.route_calls.write().await.push((
-            group.id.clone(),
-            message.to_string(),
-            sender_bot_id.map(str::to_string),
-        ));
-        let targets = group
-            .participants
-            .iter()
-            .filter(|participant| participant.is_bot())
-            .map(|participant| RoutingTarget {
-                bot_uuid: participant.bot_uuid.clone(),
-                url: String::new(),
-                is_driver: participant.bot_uuid == group.driver_bot,
-                delivery_type: if participant.bot_uuid == group.driver_bot {
-                    bcs_service_api::DeliveryType::Send
-                } else {
-                    bcs_service_api::DeliveryType::Inject
-                },
-            })
-            .collect();
-        RoutingDecision {
-            targets,
-            mentions: Vec::new(),
-            cleaned_message: message.to_string(),
-            hidden_mentions: vec![],
-        }
+        self.route_with_overlay(group, message, sender_bot_id, &[]).await
     }
 
     /// Mirrors the production router contract for text @-mentions so message
@@ -582,14 +562,62 @@ impl RoutingCoreService for FakeRoutingCoreService {
         }
     }
 
+    /// Minimal faithful stand-in for the production structured router:
+    /// resolves `bot`/`name` selectors by participant uuid or display name and
+    /// mirrors the production compatibility behavior of copying the resolved
+    /// responder ids into `decision.mentions` (which may name Humans — the
+    /// field is a routing transcript, not a text-mention signal).
     async fn route_structured(
         &self,
-        _group: &Group,
-        _routing: &bcs_service_api::ChatEventRouting,
-        _sender_bot_id: &str,
+        group: &Group,
+        routing: &bcs_service_api::ChatEventRouting,
+        sender_bot_id: &str,
         _registry: &dyn BotRegistryCoreService,
     ) -> Result<RoutingDecision, StructuredRoutingError> {
-        Err(StructuredRoutingError::NoTargetMatched)
+        let mut resolved: Vec<String> = Vec::new();
+        for selector in &routing.responders {
+            let Some(value) = selector.value.as_deref() else {
+                continue;
+            };
+            if selector.selector_type != "bot" && selector.selector_type != "name" {
+                continue;
+            }
+            if let Some(participant) = group
+                .participants
+                .iter()
+                .find(|p| p.bot_uuid == value || p.bot_name.as_deref() == Some(value))
+            {
+                if !resolved.contains(&participant.bot_uuid) {
+                    resolved.push(participant.bot_uuid.clone());
+                }
+            }
+        }
+        if resolved.is_empty() {
+            return Err(StructuredRoutingError::NoTargetMatched);
+        }
+        let include_self = routing.include_self.unwrap_or(false);
+        let targets = group
+            .participants
+            .iter()
+            .filter(|p| p.is_bot())
+            .filter(|p| p.bot_uuid != sender_bot_id || (include_self && resolved.contains(&p.bot_uuid)))
+            .map(|p| RoutingTarget {
+                bot_uuid: p.bot_uuid.clone(),
+                url: String::new(),
+                is_driver: p.bot_uuid == group.driver_bot,
+                delivery_type: if resolved.contains(&p.bot_uuid) {
+                    bcs_service_api::DeliveryType::Send
+                } else {
+                    bcs_service_api::DeliveryType::Inject
+                },
+            })
+            .collect();
+        Ok(RoutingDecision {
+            targets,
+            mentions: resolved,
+            cleaned_message: String::new(),
+            hidden_mentions: vec![],
+        })
     }
 }
 

@@ -19,6 +19,5 @@ inventory = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-bcs-service-api = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio = { workspace = true }

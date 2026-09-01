@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
+use bcs_human_notify_api::{MentionNotification, MentionedHuman};
 use bcs_human_notify_dummy::DummyHumanMentionNotifier;
-use bcs_service_api::port::human_notify::{MentionNotification, MentionedHuman};
 use bcs_test_support::contract::port::{
     human_mention_notifier_contract_tests, HumanNotifyContractHarness,
 };

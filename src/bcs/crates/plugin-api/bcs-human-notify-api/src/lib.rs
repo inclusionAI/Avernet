@@ -8,6 +8,11 @@
 //!
 //! Provider crates receive only their own config table from
 //! `human_notify.providers.<provider>`.
+//!
+//! The Plugin API owns its notification schema ([`MentionNotification`] /
+//! [`MentionedHuman`]) so the plugin contract evolves independently from the
+//! Service API port that produces it; the bootstrap adapter translates
+//! between the two.
 
 use std::sync::Arc;
 
@@ -15,7 +20,32 @@ use bcs_config_api::HumanNotifyProviderConfig;
 use futures::future::BoxFuture;
 use thiserror::Error;
 
-pub use bcs_service_api::port::human_notify::{MentionNotification, MentionedHuman};
+/// A single @-mentioned human participant (plugin contract schema).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MentionedHuman {
+    /// Human participant actor id, shaped as `human_{staff_no}`.
+    pub actor_id: String,
+    /// Display name used at mention time (participant `bot_name`).
+    pub display_name: String,
+}
+
+/// One @-human mention event (plugin contract schema). One message maps to
+/// one event carrying every human mentioned by that message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MentionNotification {
+    /// Session id; empty string for group-level messages without a session.
+    pub session_id: String,
+    pub group_id: String,
+    /// Sender actor id (`bot_x` or `human_y`).
+    pub sender_actor_id: String,
+    /// Sender display name.
+    pub sender_label: String,
+    /// Every human @-mentioned by this message (sender excluded).
+    pub mentioned: Vec<MentionedHuman>,
+    /// Message text shown to the mentioned human.
+    pub message_text: String,
+    pub timestamp_ms: u64,
+}
 
 /// Error returned by human-mention notification backends.
 #[derive(Debug, Error)]
@@ -40,9 +70,11 @@ pub trait HumanMentionNotifier: Send + Sync {
     fn backend_name(&self) -> &'static str;
 
     /// Deliver one notification. Implementations decide per-recipient
-    /// delivery; aggregation semantics are defined by the design spec:
-    /// at least one recipient delivered (or no recipients) -> `Ok`,
-    /// all recipients failed -> `Err(HumanNotifyError::Delivery)`.
+    /// delivery; the aggregation contract is:
+    /// a recipient whose `actor_id` the backend cannot parse is skipped and
+    /// does not count as a failure; at least one recipient delivered (or no
+    /// recipients at all, or all skipped) -> `Ok`; every recipient failed ->
+    /// `Err(HumanNotifyError::Delivery)`.
     async fn notify(&self, notification: &MentionNotification) -> HumanNotifyResult<()>;
 }
 

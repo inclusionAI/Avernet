@@ -6390,3 +6390,101 @@ async fn bot_event_structured_routing_does_not_notify() {
         "non-mention routing paths must not notify"
     );
 }
+
+#[tokio::test]
+async fn bot_event_sender_routes_do_not_notify() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    group_with_present_human(&support).await;
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.routing_policy = Some(RoutingPolicy {
+        sender_routes: std::collections::HashMap::from([(
+            "bot-driver".to_string(),
+            vec!["bot-observer".to_string()],
+        )]),
+        ..Default::default()
+    });
+    support.group.upsert(group).await.unwrap();
+
+    flow.handle_bot_event(bot_event_with_text("@Human One 请确认")).await.unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(
+        notifications.is_empty(),
+        "sender-routes path does not parse text mentions and must not notify"
+    );
+}
+
+#[tokio::test]
+async fn bot_event_structured_compat_mentions_do_not_notify() {
+    // Structured routing copies the resolved *responder selection* into
+    // `decision.mentions` for backward compatibility; that field may name
+    // humans without any text @-mention and must not trigger notifications.
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    group_with_present_human(&support).await;
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.routing_policy = Some(RoutingPolicy {
+        mode: RoutingMode::Structured,
+        ..Default::default()
+    });
+    support.group.upsert(group).await.unwrap();
+
+    let mut cmd = bot_event_with_text("请确认");
+    cmd.event_payload["routing"] = json!({
+        "responders": [{"type": "bot", "value": "human_1"}],
+        "reason": "contract test: compat mention names a human",
+    });
+    flow.handle_bot_event(cmd).await.unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(
+        notifications.is_empty(),
+        "structured routing compat mentions must not notify"
+    );
+}
+
+#[tokio::test]
+async fn bot_event_policy_blocked_message_does_not_notify() {
+    // The notification must go through the same outbound policy as bot
+    // deliveries: when the chain blocks the content, humans must not receive
+    // it out-of-band either.
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    group_with_present_human(&support).await;
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_interceptor(BlockingInterceptor)
+    .with_human_mention_notify(recorder.clone());
+
+    flow.handle_bot_event(bot_event_with_text("@Human One 请确认")).await.unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(
+        notifications.is_empty(),
+        "policy-blocked content must not reach humans via notifications"
+    );
+}

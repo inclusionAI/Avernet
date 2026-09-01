@@ -317,7 +317,7 @@ pub async fn build_human_mention_notify_port(
                 .await
                 .map_err(human_notify_build_error)?;
             tracing::info!(provider, "human_notify backend selected");
-            return Ok(Arc::new(HumanMentionNotifyAdapter { notifier }));
+            return Ok(Arc::new(HumanMentionNotifyAdapter::new(notifier)));
         }
     }
     Err(crate::BcsError::InvalidConfig(format!(
@@ -330,6 +330,9 @@ fn human_notify_build_error(error: bcs_human_notify_api::HumanNotifyError) -> cr
         bcs_human_notify_api::HumanNotifyError::Config(message) => {
             crate::BcsError::InvalidConfig(message)
         }
+        // A factory is expected to fail with `Config`; a `Delivery` here means
+        // the backend could not be initialized (e.g. reachability self-check),
+        // which is the same failure class as other plugin init failures.
         bcs_human_notify_api::HumanNotifyError::Delivery(message) => {
             crate::BcsError::StorageInitError(message)
         }
@@ -339,9 +342,20 @@ fn human_notify_build_error(error: bcs_human_notify_api::HumanNotifyError) -> cr
 const HUMAN_NOTIFY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Adapts a selected [`bcs_human_notify_api::HumanMentionNotifier`] to the
-/// service port. Swallows errors into logs and bounds runtime with a timeout.
+/// service port: translates the port DTO into the plugin-owned schema, logs
+/// errors, and bounds runtime with a timeout.
 pub struct HumanMentionNotifyAdapter {
     pub notifier: Arc<dyn bcs_human_notify_api::HumanMentionNotifier>,
+    pub timeout: std::time::Duration,
+}
+
+impl HumanMentionNotifyAdapter {
+    pub fn new(notifier: Arc<dyn bcs_human_notify_api::HumanMentionNotifier>) -> Self {
+        Self {
+            notifier,
+            timeout: HUMAN_NOTIFY_TIMEOUT,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -357,7 +371,28 @@ impl bcs_service_api::port::HumanMentionNotifyPort for HumanMentionNotifyAdapter
         let backend = self.notifier.backend_name();
         let group_id = notification.group_id.clone();
         let session_id = notification.session_id.clone();
-        match tokio::time::timeout(HUMAN_NOTIFY_TIMEOUT, self.notifier.notify(&notification)).await
+        let mentioned_actors: Vec<String> = notification
+            .mentioned
+            .iter()
+            .map(|human| human.actor_id.clone())
+            .collect();
+        let plugin_notification = bcs_human_notify_api::MentionNotification {
+            session_id: notification.session_id,
+            group_id: notification.group_id,
+            sender_actor_id: notification.sender_actor_id,
+            sender_label: notification.sender_label,
+            mentioned: notification
+                .mentioned
+                .into_iter()
+                .map(|human| bcs_human_notify_api::MentionedHuman {
+                    actor_id: human.actor_id,
+                    display_name: human.display_name,
+                })
+                .collect(),
+            message_text: notification.message_text,
+            timestamp_ms: notification.timestamp_ms,
+        };
+        match tokio::time::timeout(self.timeout, self.notifier.notify(&plugin_notification)).await
         {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => {
@@ -365,6 +400,7 @@ impl bcs_service_api::port::HumanMentionNotifyPort for HumanMentionNotifyAdapter
                     backend,
                     group_id = %group_id,
                     session_id = %session_id,
+                    mentioned = ?mentioned_actors,
                     "human mention notification failed: {error}"
                 );
                 Err(bcs_service_api::ServiceError::InternalError(error.to_string()))
@@ -374,6 +410,7 @@ impl bcs_service_api::port::HumanMentionNotifyPort for HumanMentionNotifyAdapter
                     backend,
                     group_id = %group_id,
                     session_id = %session_id,
+                    mentioned = ?mentioned_actors,
                     "human mention notification timed out"
                 );
                 Err(bcs_service_api::ServiceError::InternalError(
@@ -1018,6 +1055,7 @@ mod tests {
 #[cfg(test)]
 mod human_notify_selection_tests {
     use super::*;
+    use bcs_service_api::port::HumanMentionNotifyPort;
 
     fn failing_notifier_factory(
         _config: bcs_config_api::HumanNotifyProviderConfig,
@@ -1112,5 +1150,98 @@ mod human_notify_selection_tests {
             .await
             .unwrap();
         assert!(port.is_available());
+    }
+
+    struct SlowNotifier;
+
+    #[async_trait::async_trait]
+    impl bcs_human_notify_api::HumanMentionNotifier for SlowNotifier {
+        fn backend_name(&self) -> &'static str {
+            "slow"
+        }
+
+        async fn notify(
+            &self,
+            _notification: &bcs_human_notify_api::MentionNotification,
+        ) -> bcs_human_notify_api::HumanNotifyResult<()> {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            Ok(())
+        }
+    }
+
+    fn port_notification() -> bcs_service_api::port::human_notify::MentionNotification {
+        bcs_service_api::port::human_notify::MentionNotification {
+            session_id: "group-1:s1".to_string(),
+            group_id: "group-1".to_string(),
+            sender_actor_id: "human_1".to_string(),
+            sender_label: "Human One".to_string(),
+            mentioned: vec![bcs_service_api::port::human_notify::MentionedHuman {
+                actor_id: "human_2".to_string(),
+                display_name: "Human Two".to_string(),
+            }],
+            message_text: "hello".to_string(),
+            timestamp_ms: 1_700_000_000_000,
+        }
+    }
+
+    #[tokio::test]
+    async fn adapter_bounds_runtime_with_timeout() {
+        let adapter = HumanMentionNotifyAdapter {
+            notifier: Arc::new(SlowNotifier),
+            timeout: std::time::Duration::from_millis(50),
+        };
+        let error = adapter
+            .notify_mentioned_humans(port_notification())
+            .await
+            .expect_err("slow backend must hit the timeout");
+        assert!(
+            error.to_string().contains("timed out"),
+            "timeout must surface as the error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn adapter_translates_port_dto_into_plugin_schema() {
+        use std::sync::Mutex;
+
+        #[derive(Default)]
+        struct RecordingNotifier {
+            received: Mutex<Vec<bcs_human_notify_api::MentionNotification>>,
+        }
+
+        #[async_trait::async_trait]
+        impl bcs_human_notify_api::HumanMentionNotifier for RecordingNotifier {
+            fn backend_name(&self) -> &'static str {
+                "recording"
+            }
+
+            async fn notify(
+                &self,
+                notification: &bcs_human_notify_api::MentionNotification,
+            ) -> bcs_human_notify_api::HumanNotifyResult<()> {
+                self.received.lock().unwrap().push(notification.clone());
+                Ok(())
+            }
+        }
+
+        let recorder = Arc::new(RecordingNotifier::default());
+        let adapter = HumanMentionNotifyAdapter::new(recorder.clone());
+        adapter
+            .notify_mentioned_humans(port_notification())
+            .await
+            .expect("recording backend succeeds");
+
+        let received = recorder.received.lock().unwrap();
+        assert_eq!(received.len(), 1);
+        let notification = &received[0];
+        assert_eq!(notification.session_id, "group-1:s1");
+        assert_eq!(notification.group_id, "group-1");
+        assert_eq!(notification.sender_actor_id, "human_1");
+        assert_eq!(notification.sender_label, "Human One");
+        assert_eq!(notification.mentioned.len(), 1);
+        assert_eq!(notification.mentioned[0].actor_id, "human_2");
+        assert_eq!(notification.mentioned[0].display_name, "Human Two");
+        assert_eq!(notification.message_text, "hello");
+        assert_eq!(notification.timestamp_ms, 1_700_000_000_000);
     }
 }

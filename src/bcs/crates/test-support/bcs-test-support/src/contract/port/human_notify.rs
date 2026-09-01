@@ -68,5 +68,10 @@ pub async fn human_mention_notifier_contract_tests<T>(
         actor_id: "not-a-human-prefix".to_string(),
         display_name: "Invalid".to_string(),
     }];
-    let _ = notifier.notify(&invalid).await;
+    // Aggregation contract: recipient ids the backend cannot parse are
+    // skipped and logged, and must not count as delivery failures.
+    notifier
+        .notify(&invalid)
+        .await
+        .expect("invalid recipient ids must be skipped, not failed");
 }

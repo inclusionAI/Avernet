@@ -3523,6 +3523,15 @@ impl BcsServer {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        if config.human_notify.provider.is_some() {
+            // This synchronous construction path cannot await the notifier
+            // factory build; keep the configured backend from being silently
+            // ignored.
+            tracing::warn!(
+                "human_notify.provider is configured but ignored in this construction path; \
+                 use BcsServer::new_with_storage to enable human mention notifications"
+            );
+        }
         let message_flow_builder = create_message_flow_builder(
             bot_registry.clone(),
             sessions.clone(),

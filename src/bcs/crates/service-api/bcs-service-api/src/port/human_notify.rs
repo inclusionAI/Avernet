@@ -24,13 +24,15 @@ pub struct MentionNotification {
     /// 本条消息中被 @ 的全部人类（已排除发送者自身与 Hidden 状态人类）。
     pub mentioned: Vec<MentionedHuman>,
     /// 消息文本：文本路由为 `RoutingDecision.cleaned_message`，
-    /// 显式 mention 路径为原始消息文本（契约 6.1）。
+    /// 显式 mention 路径为原始消息文本。
     pub message_text: String,
     pub timestamp_ms: u64,
 }
 
 /// @ 人类提醒通知端口。核心消息流只依赖本 trait；bootstrap 组合根把选中的
 /// 通知后端（`bcs-human-notify-api` 的 `HumanMentionNotifier`）适配为端口。
+/// 插件契约拥有独立的 `MentionNotification` schema（Plugin API 与 Service API
+/// 分别演化），端口 DTO 到插件 DTO 的翻译由 bootstrap 适配层完成。
 #[async_trait]
 pub trait HumanMentionNotifyPort: Send + Sync {
     /// 后端是否可用。未配置后端时为 `false`，消息流零开销跳过。

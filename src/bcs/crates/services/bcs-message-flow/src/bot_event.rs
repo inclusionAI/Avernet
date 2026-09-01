@@ -574,21 +574,6 @@ async fn relay_final_chat_event(
         message_text
     };
     let sender_display_name = sender_display_name(flow, &cmd.bot_id).await;
-    if routing_source == RequestSource::LegacyMention && group.group_kind != GroupKind::Dm {
-        crate::human_notify_hook::spawn_human_mention_notify(
-            &flow.human_mention_notify,
-            Some(decision.mentions.as_slice()),
-            &overlay,
-            crate::human_notify_hook::MentionNotifyContext {
-                session_id: cmd.bcs_session_id.clone().unwrap_or_default(),
-                group_id: cmd.group_id.clone(),
-                sender_actor_id: cmd.bot_id.clone(),
-                sender_label: sender_display_name.clone(),
-                message_text: decision.cleaned_message.clone(),
-                timestamp_ms: now_ms(),
-            },
-        );
-    }
     let from_bot_owner = from_bot_owner(flow, &cmd.bot_id).await;
     let routing_mode = routing_meta
         .as_ref()
@@ -609,6 +594,35 @@ async fn relay_final_chat_event(
     // as ONE row, using the final frame's complete text. (Final-only runs with
     // no buffered deltas just insert the final text.)
     persist_final_chat(flow, &cmd, cleaned.clone()).await?;
+
+    // Notify @-mentioned humans only after the message is persisted, and only
+    // if the content passes the outbound policy that governs bot deliveries
+    // of the same message.
+    if routing_source == RequestSource::LegacyMention && group.group_kind != GroupKind::Dm {
+        if let Some(notify_text) = crate::group_flow::apply_notify_outbound_policy(
+            flow,
+            &cmd.group_id,
+            &cmd.bot_id,
+            &decision.cleaned_message,
+            &decision.targets,
+        )
+        .await
+        {
+            crate::human_notify_hook::spawn_human_mention_notify(
+                &flow.human_mention_notify,
+                Some(decision.mentions.as_slice()),
+                &overlay,
+                crate::human_notify_hook::MentionNotifyContext {
+                    session_id: cmd.bcs_session_id.clone().unwrap_or_default(),
+                    group_id: cmd.group_id.clone(),
+                    sender_actor_id: cmd.bot_id.clone(),
+                    sender_label: sender_display_name.clone(),
+                    message_text: notify_text,
+                    timestamp_ms: now_ms(),
+                },
+            );
+        }
+    }
 
     for target in &decision.targets {
         let directive = build_response_directive(
