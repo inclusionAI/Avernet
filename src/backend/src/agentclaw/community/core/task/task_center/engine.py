@@ -1436,6 +1436,29 @@ class ExecutionEngine:
         )
         with self._lock_for(patch.task_id):
             logger.info("[task_callback][on_report] begin update task node info, task=%s,", patch.task_id)
+            # 固定 plan 的"执行报错(exec_error)"不进 harness 重投/HUNG:V2 relay 下发给 bot 的是纯
+            # 交接正文(无 {success,data,gaps} poller 协议),bot 常回自然语言 → poller 误判 exec_error
+            # (terminal_result_invalid)。若仍 reset+重派×MAX_HARNESS→HUNG,会在 80s 兜底
+            # (_static_auto_report)之前把节点挂死,整固定流程读不往下走(等同 on_harness 入口守卫
+            # 39636835f 的意图,补在 poller→on_report 这条未守的路径上)。此处对固定 plan 的
+            # exec_error:不翻 FAILED、不重派,保持节点 RUNNING,仅记 last_exec_error 留痕,让
+            # 80s 兜底推进 DONE;真实 {success} 回投先到则走下方 acceptance DONE 自跳过。
+            if (
+                self._static_runtime(patch.task_id) is not None
+                and patch.exec_error is not None
+            ):
+                logger.info(
+                    "[task_callback][on_report] task=%s node=%s 固定 plan exec_error=%s 忽略翻态/重派,交给 static fallback 兜底",
+                    patch.task_id, patch.node_id, patch.exec_error,
+                )
+                patch.status = None  # 保持 RUNNING,不落 FAILED
+                patch.acceptance_result = None
+                _ep = dict(patch.extend_props_patch) if patch.extend_props_patch else {}
+                _ep.setdefault("last_exec_error", patch.exec_error)
+                patch.extend_props_patch = _ep
+                result = self._graph.update_task_node_info(patch)
+                self._reconcile_root_hung_if_blocked(patch.task_id)
+                return result
             # 乙' a+R1 动态验收 FAIL 叶折叠 HUNG(纯语义归并):跳过 RUNNING→FAILED 瞬态,一次写直驱
             # RUNNING→HUNG(节点 status 翻 HUNG;acceptance_result+gaps+hung_reason 同时落库)。
             # **verdict 不改**:acceptance_result.verdict 仍记 FAILED(验收结论留痕),仅节点 status→HUNG
