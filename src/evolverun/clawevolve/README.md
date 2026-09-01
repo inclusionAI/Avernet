@@ -12,9 +12,20 @@ import {
   quoteCommandArgument,
   renderCommand,
 } from "@avernet/clawevolve/server/services/evolve/command";
+
+import {
+  createEvolveNodeRegistry,
+  EVOLVE_TASK_REGISTRY,
+} from "@avernet/clawevolve/server/services/evolve/task-registry";
+
+import {
+  createTaskDefinitionsResponse,
+} from "@avernet/clawevolve/server/routes/evolve";
 ```
 
-The first extraction contains only command helpers that have no dependency on private infrastructure. Command YAML policy that contains host-specific system arguments remains in the private host until a public contract can be extracted without changing behavior.
+The public registry contains only ClawEvolve task types. Host-only task types and integrations remain outside the package. Public command templates use placeholders; a host can provide its own reviewed command defaults through `createEvolveNodeRegistry()`.
+
+Command YAML policy that contains host-specific system arguments remains in the private host until a public contract can be extracted without changing behavior.
 
 ## Development
 

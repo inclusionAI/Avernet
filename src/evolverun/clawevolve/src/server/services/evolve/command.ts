@@ -2,6 +2,8 @@ const MAX_RENDERED_COMMAND_BYTES = 64 * 1024;
 const MAX_EVOLUTION_GOAL_LENGTH = 2000;
 const MAX_DIAGNOSE_INTENT_LENGTH = 4000;
 
+export type NodeCommandKey = "diagnose" | "plan" | "bench" | "bench_plan" | "optimize";
+export type NodeCommandYamls = Partial<Record<NodeCommandKey, string>>;
 export type DiagnoseJudgeBackend = "subagent" | "api";
 export type OpenClawExecutionMode = "local" | "gateway";
 

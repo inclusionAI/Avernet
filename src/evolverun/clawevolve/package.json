@@ -16,9 +16,17 @@
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
     },
+    "./server/routes/evolve": {
+      "types": "./dist/server/routes/evolve.d.ts",
+      "import": "./dist/server/routes/evolve.js"
+    },
     "./server/services/evolve/command": {
       "types": "./dist/server/services/evolve/command.d.ts",
       "import": "./dist/server/services/evolve/command.js"
+    },
+    "./server/services/evolve/task-registry": {
+      "types": "./dist/server/services/evolve/task-registry.d.ts",
+      "import": "./dist/server/services/evolve/task-registry.js"
     }
   },
   "files": [

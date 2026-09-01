@@ -1,0 +1,46 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createTaskDefinitionsResponse } from "../src/server/routes/evolve.js";
+import {
+  createEvolveNodeRegistry,
+  EVOLVE_TASK_REGISTRY,
+  isEvolveTaskType,
+  taskNodeKeys,
+} from "../src/server/services/evolve/task-registry.js";
+
+test("publishes only the public Clawevolve task set", () => {
+  assert.deepEqual(Object.keys(EVOLVE_TASK_REGISTRY), [
+    "diagnose",
+    "optimize",
+    "apply",
+    "full",
+    "bench",
+    "bench_optimize",
+    "pack",
+    "pack_restore",
+    "runtime_cleanup",
+  ]);
+  assert.equal(isEvolveTaskType("full"), true);
+  assert.equal(isEvolveTaskType("repair"), false);
+  assert.equal(isEvolveTaskType("run_analysis"), false);
+  assert.deepEqual(taskNodeKeys("bench_optimize"), ["bench_plan", "optimize"]);
+});
+
+test("keeps private hosted defaults outside the public registry", () => {
+  const registry = createEvolveNodeRegistry();
+  assert.equal(registry.bench.defaultCommand, "/clawevolve-bench --model {{model}} --suite all");
+  assert.equal(registry.optimize.defaultCommand.includes("antchat/"), false);
+
+  const hosted = createEvolveNodeRegistry({ bench: "/clawevolve-bench --model hosted-model --suite all" });
+  assert.equal(hosted.bench.defaultCommand, "/clawevolve-bench --model hosted-model --suite all");
+});
+
+test("builds task definitions while allowing host-only variants", () => {
+  const response = createTaskDefinitionsResponse({ variants: { hosted_variant: ["plan", "optimize"] } });
+  assert.deepEqual(
+    response.tasks.find((item) => item.type === "bench_optimize")?.nodes.map((node) => node.key),
+    ["bench_plan", "optimize"],
+  );
+  assert.deepEqual(response.variants.hosted_variant.map((node) => node.key), ["plan", "optimize"]);
+});
