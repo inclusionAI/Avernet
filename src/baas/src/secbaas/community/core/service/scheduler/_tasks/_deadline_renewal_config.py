@@ -31,6 +31,11 @@ class DeadlineRenewalSchedulerConfig:
         ttl_safety_margin_minutes: Safety buffer subtracted from ttl_minutes.
         post_extend_consistency_tol_minutes: Upper-bound tolerance for the
             post-extend TTL consistency watermark (D1).
+        clock_tol_minutes: Host-clock grace margin for the threshold_expired
+            verdict (WR-02). Only a remaining below -(clock_tol_minutes/60)
+            hours confirms expiry; readings within +/-clock_tol_minutes of
+            zero route through non-confirming failure handling. Non-negative;
+            0 disables the margin.
         anti_join_verify_interval_cycles: Periodic anti-join verification interval.
         engine: Config switch — "legacy" or "deadline".
         env: Deployment environment identifier ('pre', 'prod', or '' for test).
@@ -51,8 +56,26 @@ class DeadlineRenewalSchedulerConfig:
     ttl_safety_margin_minutes: int = 1
     anti_join_verify_interval_cycles: int = 48
     post_extend_consistency_tol_minutes: int = 5
+    # WR-02 (86-REVIEW, option 1): host-clock grace margin for the
+    # threshold_expired verdict — see the class docstring. 0 disables it.
+    clock_tol_minutes: int = 5
     engine: str = "legacy"
     env: str = ""
+
+    def __post_init__(self) -> None:
+        """Reject a negative grace margin (WR-02).
+
+        A negative clock_tol_minutes would move the expired threshold into
+        positive remaining time and let a skewed host clock confirm live
+        containers as expired. The DI path validates the value earlier via
+        the renewal_scheduler schema (ge=0); this guard covers direct
+        construction (tests, callers outside the DI container).
+        """
+        if self.clock_tol_minutes < 0:
+            raise ValueError(
+                "clock_tol_minutes must be non-negative, "
+                f"got {self.clock_tol_minutes}"
+            )
 
     @property
     def renew_threshold_minutes(self) -> int:
