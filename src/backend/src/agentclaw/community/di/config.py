@@ -783,3 +783,26 @@ class EconomyGovernanceConfig:
     # ``economy_governance.iframe_callback_url_pre`` (pre-env).
     # Empty ⇒ the detailLink carries no callbackUrl (feedback form non-functional).
     iframe_callback_url: str = ""
+
+
+@dataclass(frozen=True)
+class BotConfigManifestConfig:
+    """Manifest composition config (the ``user_config.bot_config_manifest``
+    block).
+
+    Both fields are consumed by apply's machine parts, each through its own
+    pure parser: the guarded fetcher (W2) takes the transport allowlist, the
+    content store (W11) takes the blob tree root. Neutral defaults ship with
+    the neutral base — a deployment's env overlay decides a mirror or a NAS
+    volume.
+
+    Attributes:
+        fetch_transport_allowlist: Hosts exempt from the https-only and
+            public-only transport rules (exact-host matches, sorted for a
+            stable resolution order).
+        content_store_dir: The content store's blob root — relative paths
+            resolve against the process working directory, ``~`` expands.
+    """
+
+    fetch_transport_allowlist: tuple[str, ...] = ()
+    content_store_dir: str = "./data/manifest_content"

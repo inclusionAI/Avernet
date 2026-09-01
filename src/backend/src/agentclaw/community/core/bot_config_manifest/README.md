@@ -471,7 +471,10 @@ internal_dependencies:
   - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults
   - agentclaw.community.core.repository
   - agentclaw.community.core.services.identity
+  - agentclaw.community.core.skill_center.capability_state_contract  # the flush-then-read active-set the `skills` materialiser enumerates (W5)
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the `mcp` materialiser's per-bot activation writes
+  - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # the upload road a manifest skill travels (W5)
+  - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)
   - agentclaw.community.core.workspace.constants
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database

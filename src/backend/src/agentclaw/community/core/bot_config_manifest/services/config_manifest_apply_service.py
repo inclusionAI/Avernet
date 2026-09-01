@@ -22,6 +22,12 @@ from typing import Any, Callable, Optional
 from injector import inject
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    EntryFetcher,
+)
+from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
+    ManifestIdentityPort,
+)
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     ApplyPhase,
 )
@@ -65,6 +71,15 @@ from agentclaw.community.core.repository.protocols.bot.config_manifest_apply imp
 from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
     DirectActivationServiceProtocol,
 )
+from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageValidator,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
@@ -99,11 +114,11 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
-        identity_service_provider: Callable[[], Any],
-        upload_service_provider: Callable[[], Any],
-        capability_reader_provider: Callable[[], Any],
-        package_validator_provider: Callable[[], Any],
-        entry_fetcher_provider: Callable[[], Any],
+        identity_service_provider: Callable[[], ManifestIdentityPort],
+        upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
+        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
+        package_validator_provider: Callable[[], SkillPackageValidator],
+        entry_fetcher_provider: Callable[[], EntryFetcher],
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_repository
@@ -118,9 +133,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # W5's two fetch-consuming materialisers take their services the same
         # way — each sits deeper in the bot-configuration graph, and holding
         # one directly would close the same cycles. The identity service is
-        # ``Any`` deliberately: it has no Protocol (one implementation, the
-        # waiver the identity router records), so a protocol invented here
-        # would be speculative abstraction rather than a seam.
+        # named by its narrow apply-side key (``apply/identity_port.py``): the
+        # real service has no Protocol (one implementation, the waiver the
+        # identity router records), and the port exists to key a lazy
+        # provider without importing the device graph.
         self._identity_service_provider = identity_service_provider
         self._upload_service_provider = upload_service_provider
         self._capability_reader_provider = capability_reader_provider
