@@ -548,39 +548,73 @@ class TaskExecutor:
         )
         _task_instruction = str(gf.extend_props.get("task_instruction") or "")
         if _task_objective or _task_instruction or _loop_task_id:
-            req_kwargs["context"] = (
-                "[task-execute]\n"
-                "execution_mode=coop_group\n"
-                f"reporter_bot_id={_reporter_bot_id}\n"
-                f"reporter_role={_reporter_role}\n"
-                "只有 reporter_bot_id 对应的 Bot（本群唯一 master/driver）可以调用 "
-                "task-loop 的任务验收(acceptance)逻辑。所有 worker 完成或明确失败后，"
-                "reporter 必须立即逐条检查当前节点 goal.acceptances，汇总完整执行输出，"
-                "生成 DONE/FAILED，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
-                "验收步骤不可跳过：执行→逐条校验→生成结论→HTTP上报→确认HTTP 200。\n"
-                "只有在上述完成条件满足后才触发 task-acceptance；建群初始上下文不触发验收。\n"
-                f"目标:{_task_objective}\n"
-                f"指令:{_task_instruction}\n"
-                f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}\n"
-                f"任务上下文:{_task_context or ''}"
-            )
-            if _loop_task_id:
-                try:
-                    _task_id, _node_id = _loop_task_id.split("::", 1)
-                except ValueError:
-                    _task_id, _node_id = "<task_id>", "<node_id>"
-                req_kwargs["context"] += (
-                    "\n回投请求体只能包含以下节点级字段；callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段："
-                    + json.dumps({
-                        "task_id": _task_id,
-                        "node_id": _node_id,
-                        "status": "DONE",
-                        "output": "完整协作群执行输出",
-                        "acceptance_result": {},
-                        "extend_props": {},
-                    }, ensure_ascii=False)
-                    + "\nFAILED 时只将 status 改为 FAILED，并在 acceptance_result.gaps 填写具体差距。"
+            if str(_task_instruction).lstrip().startswith("# 接自"):
+                # 接力协作群:群成员收到的 context 以"# 接自/## 群组成/## 上游产出正文/## 本群任务"
+                # 接力交接正文先导(与 single_bot format_execute 直发交接同口径),再附 driver 回投定位
+                # 协议作脚注;不再重复注入验收叙事/目标/字段要求/禁联网——回收与验收由各 bot 的
+                # skill/rule + 框架 80s 兜底承托,与 single_bot 接力保持一致。
+                _rfooter = [
+                    "---",
+                    "[协作群回投协议 — 仅 driver/reporter bot 上报回投,其它成员只提供产出,不得重复回调]",
+                    f"reporter_bot_id={_reporter_bot_id}; reporter_role={_reporter_role}",
+                    f"目标:{_task_objective}",
+                    f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}",
+                ]
+                if _task_context:
+                    _rfooter.append(f"任务上下文:{_task_context}")
+                if _loop_task_id:
+                    try:
+                        _task_id, _node_id = _loop_task_id.split("::", 1)
+                    except ValueError:
+                        _task_id, _node_id = "<task_id>", "<node_id>"
+                    _rfooter.append(
+                        "回投请求体只能包含以下节点级字段;callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段:"
+                        + json.dumps({
+                            "task_id": _task_id,
+                            "node_id": _node_id,
+                            "status": "DONE",
+                            "output": "完整协作群执行输出",
+                            "acceptance_result": {},
+                            "extend_props": {},
+                        }, ensure_ascii=False)
+                        + "\nFAILED 时只将 status 改为 FAILED,并在 acceptance_result.gaps 填写具体差距。"
+                    )
+                req_kwargs["context"] = f"{_task_instruction.rstrip()}\n" + "\n".join(_rfooter)
+            else:
+                # 非接力协作群:保留原 [task-execute] reporter/目标/指令/验收/任务上下文/回投体验收信封。
+                req_kwargs["context"] = (
+                    "[task-execute]\n"
+                    "execution_mode=coop_group\n"
+                    f"reporter_bot_id={_reporter_bot_id}\n"
+                    f"reporter_role={_reporter_role}\n"
+                    "只有 reporter_bot_id 对应的 Bot（本群唯一 master/driver）可以调用 "
+                    "task-loop 的任务验收(acceptance)逻辑。所有 worker 完成或明确失败后，"
+                    "reporter 必须立即逐条检查当前节点 goal.acceptances，汇总完整执行输出，"
+                    "生成 DONE/FAILED，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
+                    "验收步骤不可跳过：执行→逐条校验→生成结论→HTTP上报→确认HTTP 200。\n"
+                    "只有在上述完成条件满足后才触发 task-acceptance；建群初始上下文不触发验收。\n"
+                    f"目标:{_task_objective}\n"
+                    f"指令:{_task_instruction}\n"
+                    f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}\n"
+                    f"任务上下文:{_task_context or ''}"
                 )
+                if _loop_task_id:
+                    try:
+                        _task_id, _node_id = _loop_task_id.split("::", 1)
+                    except ValueError:
+                        _task_id, _node_id = "<task_id>", "<node_id>"
+                    req_kwargs["context"] += (
+                        "\n回投请求体只能包含以下节点级字段；callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段："
+                        + json.dumps({
+                            "task_id": _task_id,
+                            "node_id": _node_id,
+                            "status": "DONE",
+                            "output": "完整协作群执行输出",
+                            "acceptance_result": {},
+                            "extend_props": {},
+                        }, ensure_ascii=False)
+                        + "\nFAILED 时只将 status 改为 FAILED，并在 acceptance_result.gaps 填写具体差距。"
+                    )
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(
             "[task][task_executor] form_coop_group create_group request collab=%s driver_bot=%s participants=%s group_strategy=%s has_definition=%s has_bindings=%s",
