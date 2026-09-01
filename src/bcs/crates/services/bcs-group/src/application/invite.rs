@@ -72,6 +72,30 @@ impl InviteServiceImpl {
         ))
     }
 
+    /// Session invite tokens are gated on session membership only: any
+    /// participant of the session (any role, bot or human) may mint one.
+    /// Group-level roles (driver, originator, manager) are intentionally NOT
+    /// required here.
+    fn ensure_session_member(
+        &self,
+        cmd: &CreateInviteTokenCommand,
+        session: &bcs_service_api::Session,
+    ) -> Result<(), InviteUseCaseError> {
+        let is_member =
+            |actor_id: &str| session.participants.iter().any(|p| p.bot_uuid == actor_id);
+        if cmd.caller_actor_id.as_deref().is_some_and(is_member) {
+            return Ok(());
+        }
+        if let Some(staff_no) = cmd.caller_staff_no.as_deref() {
+            if is_member(&format!("human_{}", staff_no)) {
+                return Ok(());
+            }
+        }
+        Err(InviteUseCaseError::Forbidden(
+            "only session participants can generate session invite links".to_string(),
+        ))
+    }
+
     fn make_token(&self, target_id: &str, ttl_seconds: Option<u64>) -> (String, u64) {
         let ttl = ttl_seconds.unwrap_or(self.default_ttl_seconds);
         let now = std::time::SystemTime::now()
@@ -189,7 +213,7 @@ impl InviteService for InviteServiceImpl {
             ));
         }
 
-        self.authorize_group_invite(&cmd, &group).await?;
+        self.ensure_session_member(&cmd, &session)?;
         let (token, exp) = self.make_token(&cmd.target_id, cmd.ttl_seconds);
         let join_url = match &self.session_link_url {
             Some(url) => format!("{}/{}", url.trim_end_matches('/'), token),
