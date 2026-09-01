@@ -266,8 +266,10 @@ class DeadlineRenewalScheduler:
             )
         except Exception:
             log.warning(
-                "[DeadlineRenewalScheduler] covered-count query failed — "
-                "gap falls back to legacy hot-minus-cold"
+                "[DeadlineRenewalScheduler] covered/gauge count query failed — "
+                "the failed part degraded: gap keeps covered math when the "
+                "covered count succeeded, otherwise falls back to "
+                "hot-minus-cold (suppressed_terminal_count kept at 0)"
             )
         report.suppressed_terminal_count = suppressed_terminal
 
