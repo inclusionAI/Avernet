@@ -344,3 +344,360 @@ def a_bot_id_with_no_creation_is_a_404():
     post-container apply, which is the shape of `CREATING`. Answering `404` is
     the difference between "no idea what you are asking about" and inventing a
     state for a bot this endpoint never created."""
+
+
+# ── the whole flow ─────────────────────────────────────────────────────────
+#
+# Written as ordinary tests against the same per-test app and world the
+# declarative cases use, because a creation is not one request: it is a
+# submission, a job that runs between polls, and a poll whose answer changes
+# each time. The declarative runner drives exactly one request, so a flow
+# expressed there could only ever assert the first answer.
+#
+# The job is driven by hand rather than by a worker. The endpoint app never runs
+# lifecycle ``bootstrap()``, so no task-queue handler is registered in it — the
+# same reason ``test_openapi_config_manifest_apply.py`` drains apply tasks
+# instead of starting one. Driving the real handler with the real payload is
+# exactly what a worker that *had* registered it would do, and it is
+# deterministic: no poll interval, no lease, nothing racing the fixture's engine
+# disposal.
+
+import pytest
+from fastapi.testclient import TestClient
+
+from agentclaw.community.api.bot_config_manifest_apply_service import (
+    BotConfigManifestApplyServiceProtocol,
+)
+from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.api.bot_startup_script_service import (
+    BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+    APPLY_TASK_TYPE,
+)
+from agentclaw.community.core.bot_config_manifest.create_job import (
+    BotCreateWithManifestHandler,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManifestRepositoryProtocol,
+)
+from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
+
+_SCRIPT = "echo provisioned"
+_FLOW_DOCUMENT = f'schema_version: 1\nscript:\n  body: "{_SCRIPT}"\n'
+#: Declares nothing at all. Valid, and the closest this endpoint has to "no
+#: manifest" — the field is required, so an empty document is how a caller says
+#: they want the bot and no configuration.
+_EMPTY_DOCUMENT = "schema_version: 1\n"
+#: ``identity`` has no materialiser in this build. A category nothing can apply
+#: is refused *here* rather than stored inert, because accepting it would mean
+#: authorizing, creating the bot, and only then failing to configure it.
+_UNBACKED_DOCUMENT = (
+    "schema_version: 1\nmanifest:\n  identity:\n"
+    '    - type: "CLAUDE.md"\n      content: "hello"\n'
+)
+
+
+def _stand_in_for_provisioning(world, *, status: str = "ACTIVE") -> list[dict]:
+    """Persist the row ``create_bot`` would, without allocating a device.
+
+    The one collaborator a request cannot drive: allocation posts to BaaS and
+    the local ``HttpClient`` seam refuses an unstubbed call. Everything above it
+    stays real — the engine registry check, the engine/cluster pairing, the
+    quota preflight, the Passport application, the manifest preflight, the
+    storage write and the owner-relationship write all run.
+    """
+    created: list[dict] = []
+    bot_repo = world.get(BotRepository)
+
+    def create_bot(_self, **kwargs):
+        record = bot_repo.insert(
+            {
+                "bot_id": kwargs["bot_id"],
+                "bot_name": kwargs.get("bot_name") or kwargs["bot_id"],
+                "bot_desc": kwargs.get("bot_desc"),
+                "owner_id": kwargs["user_id"],
+                "owner_name": kwargs["user_id"],
+                "entity_id": kwargs.get("entity_id") or kwargs["user_id"],
+                "entity_type": kwargs.get("entity_type") or "staff",
+                "creator_id": kwargs["user_id"],
+                "bot_type": kwargs.get("bot_type") or "personal",
+                "status": status,
+                "active_engine": kwargs.get("engine_type") or "claude_code",
+            }
+        )
+        created.append(record)
+        return record
+
+    # Bound under both keys: the routers reach this service as its Protocol and
+    # the creation job reaches it as its concrete class, so substituting only
+    # one leaves the other on the real device-allocating path.
+    bind_overrides(
+        world,
+        BotServiceProtocol,
+        {"create_bot": create_bot},
+        also_bind=(BotService,),
+    )
+    return created
+
+
+class _Worker:
+    """A worker, reduced to one deployment and driven a turn at a time.
+
+    It claims, dispatches and **applies the outcome to the row**, because that
+    last part is what the poll reads: a job that returned ``Fail`` but whose row
+    was never transitioned still looks live, and the poll would go on reporting
+    `AWAITING_AUTHORIZATION` for a creation that had already been declined.
+    Running the handlers without the transitions would have made these cases
+    assert against a state the real system never produces.
+
+    Two liberties, both deliberate. Rescheduled tasks come back immediately
+    rather than after the job's five-second poll delay — the delay is latency,
+    not sequencing, and waiting it out would only make the suite slow. And a
+    task type this file does not drive is put back far enough not to return,
+    rather than completed, so nothing else in the app is quietly retired.
+    """
+
+    _WORKER = "test-worker"
+
+    def __init__(self, world) -> None:
+        self._world = world
+        self._repo = world.get(TaskQueueRepositoryProtocol)
+
+    def _dispatch(self, task):
+        if task.task_type == CREATE_JOB_TASK_TYPE:
+            return self._world.get(BotCreateWithManifestHandler).handle(task.payload)
+        if task.task_type == APPLY_TASK_TYPE:
+            self._world.get(BotConfigManifestApplyServiceProtocol).run_apply_task(
+                task.payload
+            )
+            return Complete()
+        return None
+
+    def _settle(self, task, outcome) -> None:
+        if outcome is None or isinstance(outcome, Reschedule):
+            self._repo.reschedule(
+                task_id=task.id,
+                worker_id=self._WORKER,
+                delay_seconds=0 if outcome is not None else 3600,
+            )
+        elif isinstance(outcome, Fail):
+            self._repo.fail(
+                task_id=task.id, worker_id=self._WORKER, error=outcome.error
+            )
+        else:
+            self._repo.complete(task_id=task.id, worker_id=self._WORKER)
+
+    def turn(self) -> list:
+        claimed = self._repo.claim_batch(
+            worker_id=self._WORKER,
+            env=get_current_env(),
+            app=DEFAULT_APP,
+            limit=10,
+            lease_seconds=300,
+        )
+        settled = []
+        for task in claimed:
+            outcome = self._dispatch(task)
+            self._settle(task, outcome)
+            if task.task_type == CREATE_JOB_TASK_TYPE:
+                settled.append(outcome)
+        return settled
+
+    def run_to_the_end(self, *, turns: int = 8):
+        for _ in range(turns):
+            for outcome in self.turn():
+                if isinstance(outcome, (Complete, Fail)):
+                    # Drain whatever this last turn enqueued — the
+                    # post-container apply is started by the job's final turn.
+                    self.turn()
+                    return outcome
+        raise AssertionError("the creation never reached a terminal outcome")
+
+
+@pytest.fixture
+def client(app_with_testing_modules):
+    return TestClient(app_with_testing_modules)
+
+
+def _submit(client, document: str = _FLOW_DOCUMENT, engine: str = "claude_code"):
+    return client.post(
+        "/openapi/v1/bots/with-manifest",
+        params=_QUERY,
+        headers=_HEADERS,
+        json=_body(document, engine=engine),
+    )
+
+
+def _poll(client, bot_id: str):
+    return client.get(
+        f"/openapi/v1/bots/{bot_id}/with-manifest/status",
+        params=_QUERY,
+        headers=_HEADERS,
+    )
+
+
+def test_a_creation_runs_from_submission_to_ready(client, world):
+    """The whole path, and the report at the end carries **both** phases.
+
+    That last part is the one a reader should not skip. The script is delivered
+    before the container exists and everything else after it, so a report built
+    only from the second phase would name whatever landed post-container and
+    silently omit the script — which is exactly what a caller would look for
+    first.
+    """
+    _seed_verifier(world)
+    _stand_in_for_provisioning(world)
+
+    submitted = _submit(client)
+    assert submitted.status_code == 202, submitted.text
+    bot_id = submitted.json()["data"]["bot_id"]
+    assert bot_id
+    # No state on submission: the vocabulary belongs to the poll, so a terminal
+    # value cannot be returned by a request where nothing has happened yet.
+    assert "state" not in submitted.json()["data"]
+
+    awaiting = _poll(client, bot_id).json()["data"]
+    assert awaiting["state"] == "AWAITING_AUTHORIZATION"
+    assert awaiting["bot"] is None
+
+    outcome = _Worker(world).run_to_the_end()
+    assert isinstance(outcome, Complete), outcome
+
+    ready = _poll(client, bot_id).json()["data"]
+    assert ready["state"] == "READY", ready
+    assert ready["bot"]["bot_id"] == bot_id
+    assert ready["apply"]["result"] == "SUCCEEDED"
+    assert any(
+        entry["category"] == "script" for entry in ready["apply"]["entries"]
+    ), (
+        "the pre-container phase is missing from the report: a caller would "
+        "think the script never ran"
+    )
+    # And it really was delivered before the bot existed, which is the whole
+    # point of the two phases.
+    assert (
+        world.get(BotStartupScriptServiceProtocol).get_body(
+            entity_id=_OWNER, bot_id=bot_id
+        )
+        == _SCRIPT
+    )
+
+
+def test_a_creation_declaring_nothing_is_still_ready(client, world):
+    """An empty manifest is not an error, and not a special case either.
+
+    Both phases run and apply nothing, which is what makes the endpoint usable
+    as a plain create: a caller should not have to choose a different address
+    because they have no configuration yet.
+    """
+    _seed_verifier(world)
+    _stand_in_for_provisioning(world)
+
+    bot_id = _submit(client, _EMPTY_DOCUMENT).json()["data"]["bot_id"]
+    _Worker(world).run_to_the_end()
+
+    ready = _poll(client, bot_id).json()["data"]
+    assert ready["state"] == "READY", ready
+
+
+def test_a_construct_with_no_materialiser_is_refused_at_submission(client, world):
+    _seed_verifier(world)
+    _refuse_passport(world)
+
+    refused = _submit(client, _UNBACKED_DOCUMENT)
+
+    assert refused.status_code == 422, refused.text
+    assert "identity" in refused.text, (
+        "the refusal must name the category, or a caller cannot tell which "
+        "part of their document to remove"
+    )
+
+
+def test_a_declined_authorization_is_terminal_and_leaves_nothing(client, world):
+    """No bot, and no rows either.
+
+    The manifest and any startup-script row are keyed by a ``bot_id`` that will
+    never become a bot, so nothing else can ever reach them: ordinary deletion
+    needs a bot record. Cleaning up here is what replaced the feature switch
+    this item was originally going to ship behind.
+    """
+    _seed_verifier(world)
+    _stand_in_for_provisioning(world)
+
+    bot_id = _submit(client).json()["data"]["bot_id"]
+
+    def _declined(_self, **_kwargs):
+        return {"status": "REJECTED"}
+
+    bind_overrides(world, PassportPlugin, {"query_auth_status": _declined})
+
+    outcome = _Worker(world).run_to_the_end()
+    assert isinstance(outcome, Fail), outcome
+
+    declined = _poll(client, bot_id).json()["data"]
+    assert declined["state"] == "AUTHORIZATION_REJECTED", declined
+    assert declined["bot"] is None
+
+    assert (
+        world.get(BotConfigManifestRepositoryProtocol).get(
+            env=get_current_env(), entity_id=_OWNER, bot_id=bot_id
+        )
+        is None
+    ), "the manifest of a bot that will never exist was left behind"
+    assert not world.get(BotStartupScriptServiceProtocol).get_body(
+        entity_id=_OWNER, bot_id=bot_id
+    ), "a startup-script row was left behind"
+    assert world.get(BotRepository).get_by_id_and_entity(bot_id, _OWNER) is None
+
+
+def test_an_abandoned_creation_expires_rather_than_reading_as_declined(
+    client, world, monkeypatch
+):
+    """A user who never clicked did not decide anything.
+
+    The window is the handler's own rather than only the queue's, because a task
+    retired in the claim scan never runs again — so nothing would delete the
+    rows submission wrote.
+    """
+    _seed_verifier(world)
+    _stand_in_for_provisioning(world)
+
+    bot_id = _submit(client).json()["data"]["bot_id"]
+
+    def _never_answers(_self, **_kwargs):
+        return {"status": "PENDING"}
+
+    bind_overrides(world, PassportPlugin, {"query_auth_status": _never_answers})
+
+    # Move the clock rather than sleep: the window is ten minutes by default and
+    # the handler compares ``now()`` against the ``submitted_at`` in its payload,
+    # so advancing time is the only way to reach the expiry without either
+    # waiting or reaching into a row.
+    import datetime as _datetime
+
+    class _LaterClock(_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return _datetime.datetime.now(tz) + _datetime.timedelta(hours=1)
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_config_manifest.create_job.datetime",
+        _LaterClock,
+        raising=True,
+    )
+
+    outcome = _Worker(world).run_to_the_end()
+    assert isinstance(outcome, Fail), outcome
+
+    expired = _poll(client, bot_id).json()["data"]
+    assert expired["state"] == "AUTHORIZATION_EXPIRED", expired
+    assert expired["state"] != "AUTHORIZATION_REJECTED"
+    assert expired["bot"] is None
+    assert (
+        world.get(BotConfigManifestRepositoryProtocol).get(
+            env=get_current_env(), entity_id=_OWNER, bot_id=bot_id
+        )
+        is None
+    )

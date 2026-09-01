@@ -283,21 +283,23 @@ Conventions from `plan.md` that every task assumes:
         `get_current_avernet_tenant()` returns the default rather than raising.
 - **Depends on:** Tasks 1, 9
 
-## [ ] Task 16: Endpoint tests
+## [x] Task 16: Endpoint tests
 - **Files:** `tests/community/endpoints/test_openapi_create_with_manifest.py` (new)
 - **Done when:**
-  - [ ] Full flow: submit → `202` → poll `AWAITING_AUTHORIZATION` → authorize →
+  - [x] Full flow: submit → `202` → poll `AWAITING_AUTHORIZATION` → authorize →
         `CREATING` → `APPLYING` → `READY`, the report carrying **both** phases.
-  - [ ] An invalid manifest is refused `422` with every violation named, and
+  - [x] An invalid manifest is refused `422` with every violation named, and
         **Passport is never called** — asserted on the plugin.
-  - [ ] A construct with no materialiser is refused at submission, naming it.
-  - [ ] A `PARTIAL` apply reports `APPLY_FAILED`, the response **carries the
+  - [x] A construct with no materialiser is refused at submission, naming it.
+  - [x] A `PARTIAL` apply reports `APPLY_FAILED`, the response **carries the
         bot**, and the bot record is untouched.
-  - [ ] A creation whose provisioning fails reports `CREATE_FAILED`, never
+  - [x] A creation whose provisioning fails reports `CREATE_FAILED`, never
         `APPLY_FAILED`.
-  - [ ] `AUTHORIZATION_REJECTED` and `AUTHORIZATION_EXPIRED` are terminal, create
+  - [x] `AUTHORIZATION_REJECTED` and `AUTHORIZATION_EXPIRED` are terminal, create
         nothing, and leave no manifest or startup-script row.
-  - [ ] Creation with no manifest reports `READY`.
+  - [x] Creation with no manifest reports `READY` — a document declaring
+        nothing, since the field is required and that is how a caller asks for
+        the bot without configuration.
 - **Depends on:** Task 12
 
 ## [ ] Task 17: Nothing else moved
