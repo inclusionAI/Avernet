@@ -12,6 +12,14 @@
       "template_uuid": "${BAAS_TEMPLATE_ID:-}",
       "tenant": "${BAAS_TENANT:-}"
     },
+    "bcn": {
+      "base_url": "${BCS_URL}",
+      "base_url_pre": "${BCS_URL}",
+      "provider_admin_token_pre": "${BCS_ADMIN_TOKEN}",
+      "provider_admin_token_prod": "${BCS_ADMIN_TOKEN}",
+      "provider_id_pre": "${BCS_PROVIDER_ID}",
+      "provider_id_prod": "${BCS_PROVIDER_ID}"
+    },
     "bcs": {
       "base_url": "${BCS_URL:-}",
       "operator_subjects": [],
@@ -158,12 +166,12 @@
       "tenant": "${BAAS_TENANT:-}"
     },
     "bcn": {
-      "base_url": "",
-      "base_url_pre": "",
-      "provider_admin_token_pre": "",
-      "provider_admin_token_prod": "",
-      "provider_id_pre": "",
-      "provider_id_prod": ""
+      "base_url": "${BCS_URL}",
+      "base_url_pre": "${BCS_URL}",
+      "provider_admin_token_pre": "${BCS_ADMIN_TOKEN}",
+      "provider_admin_token_prod": "${BCS_ADMIN_TOKEN}",
+      "provider_id_pre": "${BCS_PROVIDER_ID}",
+      "provider_id_prod": "${BCS_PROVIDER_ID}"
     },
     "bcsfuse": {
       "base_url": "${BCS_FUSE_URL:-}",

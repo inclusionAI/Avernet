@@ -210,16 +210,22 @@ class TestLoadYamlConfigsOverlaySelection:
 
 @pytest.fixture(autouse=True)
 def _community_database_url(monkeypatch):
-    """The community overlay requires a deployment-supplied ``DATABASE_URL``.
+    """The community overlay requires deployment-supplied placeholders.
 
-    It is the Aliyun/OceanBase profile, so its ``database.url`` placeholder has
-    no inline default and strict expansion raises without one. These tests are
-    about overlay *merging*, not the DSN, so they supply what a deployment would.
-    The tests that assert the requirement itself set or clear it explicitly.
+    The Aliyun/OceanBase ``database.url`` and the new ``user_config.bcn``
+    block (``BCS_URL`` / ``BCS_PROVIDER_ID`` / ``BCS_ADMIN_TOKEN``) use
+    strict ``${VAR}`` placeholders with no inline default, so strict
+    expansion raises without them. These tests are about overlay
+    *merging*, not the DSN or BCS endpoints, so they supply what a
+    deployment would. The tests that assert the requirement itself set or
+    clear the vars explicitly.
     """
     monkeypatch.setenv(
         "DATABASE_URL", "mysql+pymysql://t:t@127.0.0.1:3306/agentclaw"
     )
+    monkeypatch.setenv("BCS_URL", "http://bcs.example.test:21000")
+    monkeypatch.setenv("BCS_PROVIDER_ID", "bcs-provider-test")
+    monkeypatch.setenv("BCS_ADMIN_TOKEN", "bcs-admin-token-test")
 
 
 class TestCommunityOverlaySelection:
@@ -232,7 +238,13 @@ class TestCommunityOverlaySelection:
         # bcs 块只在 community overlay 里（不在 base application.yaml）。
         bcs = user_config.get("bcs", {})
         assert bcs.get("user_path") == "/auth/user"
-        assert bcs.get("base_url", "") == ""  # ${BCS_URL:-} defaults to empty
+        # ${BCS_URL:-} inline-defaults to empty; the autouse fixture supplies a
+        # BCS_URL for the bcn block, so it expands through instead.
+        assert bcs.get("base_url", "") == "http://bcs.example.test:21000"
+        # bcn 块（新）也只在 community overlay，strict 占位符来自同一 fixture。
+        bcn = user_config.get("bcn", {})
+        assert bcn.get("base_url") == "http://bcs.example.test:21000"
+        assert bcn.get("provider_admin_token_prod") == "bcs-admin-token-test"
         # 证明基座确实被合并进来了：一个只在中性 base 里的块（device_provider）出现。
         assert user_config.get("device_provider") == "local"
         assert cfg.get("app_name") == "agentclaw"
