@@ -906,6 +906,14 @@ def _mapping_plan(
                 }
             )
     for target in external:
+        if target in desired:
+            conflicts.append(
+                {
+                    "target": str(target),
+                    "requested_source": str(desired[target]),
+                    "existing_source": "<external-symlink>",
+                }
+            )
         desired.pop(target, None)
     return _MappingPlan(
         managed=desired,
@@ -2334,7 +2342,14 @@ def verify_skill_mappings(
             failures.append(failure)
     conflict_targets = {Path(item["target"]) for item in plan.conflicts}
     for conflict in plan.conflicts:
-        issue = {**conflict, "reason": "managed_source_conflict"}
+        issue = {
+            **conflict,
+            "reason": (
+                "EXTERNAL_ACTIVE_ENTRY_RETAINED"
+                if conflict["existing_source"] == "<external-symlink>"
+                else "UNMANAGED_ACTIVE_ENTRY_RETAINED"
+            ),
+        }
         if apply_mode is MappingApplyMode.BEST_EFFORT:
             pending.append(issue)
         else:
@@ -2419,7 +2434,17 @@ def publish_pool_mappings(
         )
 
     if best_effort:
-        issues.extend({**item, "reason": "managed_active_entry_conflict"} for item in plan.conflicts)
+        issues.extend(
+            {
+                **item,
+                "reason": (
+                    "EXTERNAL_ACTIVE_ENTRY_RETAINED"
+                    if item["existing_source"] == "<external-symlink>"
+                    else "UNMANAGED_ACTIVE_ENTRY_RETAINED"
+                ),
+            }
+            for item in plan.conflicts
+        )
         issues.extend(retirement.failures)
         issues.extend(plan.failures)
     conflict_targets = {Path(item["target"]) for item in plan.conflicts}
@@ -2445,7 +2470,9 @@ def publish_pool_mappings(
     kept: list[str] = []
     removed: list[str] = []
     try:
-        for target in (() if retirement.failures and best_effort else retirement.remove):
+        # A malformed or occupied retired entry never authorizes touching that
+        # entry, but it must not strand a different exact managed retirement.
+        for target in retirement.remove:
             target.unlink()
             removed.append(str(target))
         for target, source in managed.items():

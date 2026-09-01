@@ -57,6 +57,10 @@ def test_best_effort_keeps_unmanaged_directory_and_publishes_safe_entries(
     assert blocked.is_dir() and not blocked.is_symlink()
     assert verified.valid
     assert any(item["reason"] == "source_missing" for item in verified.evidence["pending"])
+    assert any(
+        item["reason"] == "UNMANAGED_ACTIVE_ENTRY_RETAINED"
+        for item in result.evidence["issues"]
+    )
 
 
 @pytest.mark.parametrize("engine", ["openclaw", "claude_code", "aicoding", "hermes"])
