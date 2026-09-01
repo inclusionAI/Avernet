@@ -216,6 +216,7 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "Collaboration / Sessions"
     ]
     assert [tag["name"] for tag in document["tags"]] == [
+        "Authentication",
         "Collaboration / Bots",
         "Collaboration / Friendships",
         "Collaboration / Groups",
