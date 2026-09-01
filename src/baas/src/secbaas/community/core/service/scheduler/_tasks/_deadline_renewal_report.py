@@ -16,6 +16,9 @@ class GapDetectionResult:
 
     cold_count: int = 0
     hot_count: int = 0
+    # 86-02 (R3): gap = hot - covered. "Covered" counts hot rows matched by
+    # ANY cold row (ACTIVE or STOPPED), so terminal rows keep covering their
+    # hot rows and can no longer latch the gap alarm at 1.
     gap: int = 0
     records_registered: int = 0
     register_error: int = 0
@@ -42,6 +45,9 @@ class RenewalRunReport:
     skipped: int = 0
     failure: int = 0
     stopped: int = 0
+    # 86-02 (R3): suppressed-but-hot-ACTIVE rows (hot rows covered by a
+    # STOPPED cold row) — the standalone alertable gauge dimension.
+    suppressed_terminal_count: int = 0
 
     def to_log(self) -> str:
         """Single-line comma-separated report for monitor scraping.
