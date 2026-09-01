@@ -107,18 +107,37 @@ def test_bcn_signer_reads_the_same_installed_key():
 
 
 def test_bcn_trust_values_are_fixed_in_code():
-    """BCN's half of the contract, pinned to the defaults BCN ships.
+    """The envelope a token addressed to BCN carries.
 
     ``aud=bcs`` is what makes the friend-approval callback verifiable there at
-    all; ``kid=bare`` is checked before the signature is; ``iss`` names the
-    gateway both components trust. All three are BCN's requirements, and this
-    test is the record that changing them there means changing them here.
+    all and ``kid=bare`` is checked before the signature is — both are BCN's
+    requirements, so changing them there means changing them here.
+
+    ``iss`` runs the other way: it names the component that signed this copy,
+    which is us, so it is the name the gateway knows us by rather than the
+    gateway's own. BCN has to be configured to trust it.
     """
     signer = get_bcn_principal_signer_config()
 
     assert signer.audience == "bcs"
-    assert signer.issuer == "gateway"
+    assert signer.issuer == "backend"
     assert signer.key_id == "bare"
+
+
+def test_the_issuer_we_assert_is_the_name_the_gateway_knows_us_by():
+    """One spelling for "this component", used in both directions.
+
+    The gateway addresses us as ``backend`` (its ``servers:`` key, which its
+    forwarder signs into ``aud``), so that is the audience we accept — and the
+    identity we issue under when we sign a token of our own. Deriving both from
+    one constant keeps a rename from changing only half of it.
+    """
+    init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False)
+
+    assert (
+        get_bcn_principal_signer_config().issuer
+        == get_principal_verifier_config().audience
+    )
 
 
 def test_re_addressing_produces_a_token_bcn_accepts():
@@ -128,7 +147,7 @@ def test_re_addressing_produces_a_token_bcn_accepts():
     what made every friend-approval callback fail. The re-addressed copy is
     judged here exactly as BCN judges it — ``alg``/``typ``/``kid`` on the header,
     ``iss``/``aud`` and the time claims under the shared key — with the caller
-    unchanged.
+    unchanged. ``iss`` is this component, since this component signed it.
     """
     init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False)
     principals = [
@@ -163,7 +182,7 @@ def test_re_addressing_produces_a_token_bcn_accepts():
         KEY,
         algorithms=["HS256"],
         audience="bcs",
-        issuer="gateway",
+        issuer="backend",
         options={"require": ["exp", "iat", "iss", "aud"]},
     )
     assert claims["principals"] == principals

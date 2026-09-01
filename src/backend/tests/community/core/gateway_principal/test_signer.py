@@ -4,12 +4,19 @@ The tests mint tokens the way the gateway's ``BarePrincipalSigner`` does (via
 :func:`mint` from the verifier suite, so both files exercise one spelling of the
 contract) and then judge the re-addressed copy against **BCN's** published
 requirements — ``src/bcs/api-contracts/v1/gateway-principal/contract.md``:
-``alg=HS256``, ``typ=JWT``, ``kid=bare``, ``iss=gateway``, ``aud=bcs``, integer
-``iat``/``exp``, a non-empty ``principals`` array.
+``alg=HS256``, ``typ=JWT``, ``kid=bare``, ``aud=bcs``, integer ``iat``/``exp``,
+a non-empty ``principals`` array.
 
-That contract is the whole reason this module exists, so the assertions here are
-deliberately literal about it: a re-addressed token that satisfies these checks
-is one BCN accepts, and one that does not is the bug this fixes coming back.
+``iss`` is the one field that is ours rather than BCN's. BCN checks it against
+the issuer it is configured to trust, and for a token this component signs that
+is this component's own name — the gateway's ``servers:`` key for us,
+``backend`` — not the gateway's. The assertions here pin that value, so a change
+of who we claim to be cannot pass unnoticed on the side that has to trust it.
+
+The rest of the contract is the whole reason this module exists, so the
+assertions are deliberately literal about it: a re-addressed token that
+satisfies these checks is one BCN accepts, and one that does not is the bug this
+fixes coming back.
 """
 
 from __future__ import annotations
@@ -37,10 +44,11 @@ from tests.community.core.gateway_principal.test_verifier import (
     user_principal,
 )
 
-# What BCN requires of a token addressed to it. Mirrors the shipped defaults of
-# ``gateway_principal.{issuer,audience,key_id}`` on the BCN side.
+# The envelope a token addressed to BCN carries. ``aud``/``kid`` mirror BCN's
+# shipped ``gateway_principal.{audience,key_id}``; ``iss`` is this component's
+# own name, which BCN has to be configured to trust.
 BCN_AUDIENCE = "bcs"
-BCN_ISSUER = "gateway"
+BCN_ISSUER = "backend"
 BCN_KEY_ID = "bare"
 
 VERIFIER = PrincipalVerifierConfig(signing_key=KEY, audience=AUDIENCE, issuer=ISSUER)
@@ -73,7 +81,11 @@ def bcn_verify(token: str, *, key: str = KEY) -> dict:
 
 
 def test_readdressed_token_satisfies_the_bcn_contract():
-    """The point of the module: BCN accepts what the backend could not forward."""
+    """The point of the module: BCN accepts what the backend could not forward.
+
+    ``iss`` names this component, not the gateway — the claims are still the
+    gateway's assertions, but the signature over this copy is the backend's.
+    """
     original = mint([user_principal()])
 
     readdressed = resign_principal_token(original, verifier=VERIFIER, signer=SIGNER)
@@ -95,8 +107,13 @@ def test_the_inbound_token_is_the_one_bcn_refuses():
     Without it the suite could pass while the header the backend actually
     forwards is still addressed to ``backend`` — which is exactly the state the
     friend-approval callback was in.
+
+    Both halves of the envelope are wrong on the inbound token: it is addressed
+    to us rather than to BCN, and it was issued by the gateway rather than by
+    the component making this call. PyJWT reports whichever it checks first, so
+    the assertion names the pair.
     """
-    with pytest.raises(jwt.InvalidAudienceError):
+    with pytest.raises((jwt.InvalidAudienceError, jwt.InvalidIssuerError)):
         bcn_verify(mint([user_principal()]))
 
 

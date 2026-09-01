@@ -84,12 +84,16 @@ re-addresses a verified token so the backend can call BCN as the caller
 survive any change to it: the original is fully verified — signature, `aud`,
 `exp`, *and* the identity-set admission — before anything is signed; the copy
 carries the original's `principals` and `exp` unchanged, so it names the same
-caller and dies at the same moment; and the target's `iss`/`aud`/`kid` come from
-config rather than from the inbound token. Relaxing the first turns this
-component into a token-minting oracle for everything that trusts the shared key.
-BCN's requirements are pinned in `utils/gateway_principal_config.py` and
-published in `src/bcs/api-contracts/v1/gateway-principal/contract.md`; the two
-must move together.
+caller and dies at the same moment; and the new envelope comes from config
+rather than from the inbound token. Relaxing the first turns this component into
+a token-minting oracle for everything that trusts the shared key.
+
+`aud` and `kid` are the target's requirements; `iss` is **ours** — a token this
+component signs is issued by this component, whatever the claims inside assert —
+so the target has to trust that issuer. Both ends are pinned in
+`utils/gateway_principal_config.py`, against BCN's contract in
+`src/bcs/api-contracts/v1/gateway-principal/contract.md`; the two must move
+together.
 
 The DTOs mirror the gateway's `spi/authn/_models.py` wire shape. Unknown fields
 are ignored, so the gateway can add one freely; a **rename or removal** on its

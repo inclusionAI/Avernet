@@ -52,12 +52,13 @@ What comes from where:
   ``/openapi/v1`` request answers 401. If that ever needs to vary per
   deployment, this is the line to revisit.
 
-- **BCN's ``aud``/``iss``/``kid``** are fixed in code too, next to ours, and for
-  the same reason. They are not a second contract but the other end of this one:
-  the backend re-addresses a verified principal token when it calls BCN on the
-  caller's behalf (:func:`resign_principal_for_bcn`), and BCN's trust config
-  decides what that copy has to say. See the constants below for the coupling
-  that creates.
+- **The envelope we put on a token addressed to BCN** — ``aud``/``iss``/``kid``
+  — is fixed in code too, next to ours, and for the same reason. It is not a
+  second contract but the other end of this one: the backend re-addresses a
+  verified principal token when it calls BCN on the caller's behalf
+  (:func:`resign_principal_for_bcn`). ``aud`` is BCN's name; ``iss`` is **ours**,
+  because we are the component that signed that copy. See the constants below
+  for the coupling that creates on BCN's side.
 
 Resolved once, at boot: the key is deployment configuration, and a per-request
 secret-store round trip on the hot path buys nothing. There is deliberately no
@@ -79,33 +80,43 @@ from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
 logger = get_logger()
 
-# The ``aud`` we accept: this component's name under ``servers:`` in the
-# gateway's ``configs/application.yaml``, which is what its forwarder signs the
-# token's audience as (``adapters/web/_forward.py``). A token minted for another
-# upstream must not verify here, so these two spellings have to match.
-_AUDIENCE = "backend"
+# What the gateway calls this component: our key under ``servers:`` in its
+# ``configs/application.yaml``. Its forwarder signs a token's audience as
+# exactly that name (``adapters/web/_forward.py`` → ``audience=server.name``),
+# so this one spelling is both the ``aud`` we accept from the gateway and the
+# name we issue under when we mint a token ourselves — see :data:`_BCN_ISSUER`.
+_COMPONENT_NAME = "backend"
+
+# The ``aud`` we accept. A token minted for another upstream must not verify
+# here, so this and the gateway's server name have to match.
+_AUDIENCE = _COMPONENT_NAME
 
 # The ``iss`` we accept. Matches the default of the gateway's
 # ``user_config.principal_signer.issuer``, which is configurable on that side —
 # so this constant and that setting must move together or every request 401s.
 _ISSUER = "gateway"
 
-# BCN's half of the same contract, for the one flow that has to call it on the
-# caller's behalf (``core/work_orders/callbacks.py`` → the friend accept/reject
-# routes). These are BCN's requirements, not ours: it verifies the same shared
-# key but refuses a token addressed to ``backend``, so the credential has to be
-# re-addressed before it is forwarded — see ``core/gateway_principal/signer.py``.
+# The envelope we put on a token addressed to BCN, for the one flow that has to
+# call it on the caller's behalf (``core/work_orders/callbacks.py`` → the friend
+# accept/reject routes). The gateway addresses each token to a single upstream,
+# so the one that arrives here says ``aud=backend`` and BCN refuses it; the
+# credential is re-addressed before it is forwarded (see
+# ``core/gateway_principal/signer.py``).
 #
-# Fixed in code for the same reason ``aud``/``iss`` above are, and pinned to the
-# defaults BCN ships (``gateway_principal.{issuer,audience,key_id}`` in
-# ``src/bcs/crates/bootstrap/bcs/src/config.rs``, spelled out in
-# ``src/bcs/api-contracts/v1/gateway-principal/contract.md``). BCN can override
-# all three per deployment, so the same coupling the ``iss`` note above
-# describes applies here in both directions: **changing BCN's trust config
-# requires changing these constants in the same release**, or every friend
-# approval fails its callback with a 401 from BCN.
+# ``aud`` is BCN's name under the gateway's ``servers:`` map, the same way
+# :data:`_AUDIENCE` is ours — it names who the token is *for*.
 _BCN_AUDIENCE = "bcs"
-_BCN_ISSUER = "gateway"
+
+# ``iss`` names who *issued* it, and for a token we mint that is this component,
+# not the gateway: the claims are the gateway's assertions, but the signature
+# over this copy is ours. So it is :data:`_COMPONENT_NAME` — the name the
+# gateway knows us by, which is the name BCN's operators configure to trust.
+#
+# **BCN must trust that issuer.** Its verifier compares ``iss`` against a single
+# configured value (``gateway_principal.issuer`` in
+# ``src/bcs/crates/bootstrap/bcs/src/config.rs``), so the two must move
+# together: a BCN that trusts only the gateway answers 401 to this callback.
+_BCN_ISSUER = _COMPONENT_NAME
 
 # The ``kid`` BCN requires on the JOSE header. It names the key the token is
 # signed with — the gateway's ``bare`` signer and the shared secret resolved

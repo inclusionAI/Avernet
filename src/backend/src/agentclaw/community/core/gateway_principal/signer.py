@@ -9,10 +9,10 @@ for another component.
 Which leaves a gap the moment a component has to call a second one *on the
 caller's behalf*. The friend-approval flow is exactly that: the decision arrives
 at ``/openapi/v1`` with a token addressed to ``backend``, and applying it means
-calling BCN, which verifies the same shared key but requires ``aud=bcs`` (and
-its own ``iss``/``kid`` — see ``src/bcs/api-contracts/v1/gateway-principal/
-contract.md``). Forwarding the inbound header verbatim therefore fails at BCN's
-audience check, every time, and no amount of retrying changes that.
+calling BCN, which verifies the same shared key but requires ``aud=bcs`` (see
+``src/bcs/api-contracts/v1/gateway-principal/contract.md``). Forwarding the
+inbound header verbatim therefore fails at BCN's audience check, every time, and
+no amount of retrying changes that.
 
 This module re-addresses the token: same identities, same lifetime, new
 envelope. What it deliberately does not do is *mint* one. The original must
@@ -31,8 +31,13 @@ What survives the re-addressing, and why:
   fresh one on every hop, which is a lifetime extension nobody asked for.
 - every other claim — untouched, because a claim we do not understand is one
   BCN might, and dropping it is a decision this module has no basis to make.
-- ``iss``/``aud`` — replaced with what the target requires. These two *are* the
-  re-addressing.
+- ``aud`` — replaced with the target's name. Together with ``iss`` below, this
+  *is* the re-addressing.
+- ``iss`` — replaced with **the signing component's own name**, because that is
+  what an issuer claim means: the claims inside are still the gateway's
+  assertions, but the signature over this copy is ours, and a token that named
+  the gateway as its issuer would be claiming a provenance it does not have.
+  The target has to trust that issuer for the call to be accepted.
 - ``kid`` — set from the target's config rather than copied, because it names
   the key the target should verify with, and the key is ours, not the inbound
   token's to assert.
@@ -75,10 +80,12 @@ class PrincipalSignerConfig:
     deployment resolved none, and :func:`resign_principal_token` then refuses to
     sign rather than emitting a token signed with nothing.
 
-    ``audience``, ``issuer`` and ``key_id`` are the target's half of the
-    contract: what *it* requires to accept a token, not what we require to
-    accept one. They are fixed in code beside the verifier's own constants —
-    see ``utils/gateway_principal_config.py`` for why that is a deliberate call
+    ``audience`` and ``key_id`` are the target's half of the contract: what *it*
+    requires to accept a token, not what we require to accept one. ``issuer`` is
+    the other way round — it names the component doing the signing, so it is our
+    identity, and the target has to be configured to trust it. All three are
+    fixed in code beside the verifier's own constants — see
+    ``utils/gateway_principal_config.py`` for why that is a deliberate call
     rather than a missing knob.
     """
 
