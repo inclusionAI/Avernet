@@ -87,6 +87,105 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
             return expr
         return func.json_unquote(expr)
 
+    def _count_hot_with_cold(
+        self,
+        env: str,
+        hot_side: str,
+        *,
+        cold_status: str | None = None,
+    ) -> int:
+        """Count hot-table ACTIVE ARCA rows for one side joined to a
+        matching cold schedule row.
+
+        The INNER JOIN expresses the covered predicate: a hot row with no
+        matching cold row falls out of the join. ``uk_source`` guarantees
+        at most one cold row per (env, source_table, source_id) hot row,
+        so no fan-out can inflate the count (the same reasoning the
+        anti-join null-test relies on). ``cold_status`` restricts the
+        covering cold row's status (the suppressed-terminal variant);
+        None means any-status coverage.
+        """
+        if hot_side == "baas_device":
+            join_cond = and_(
+                TtlRenewalScheduleModel.source_table == "baas_device",
+                TtlRenewalScheduleModel.source_id == DeviceModel.id,
+                TtlRenewalScheduleModel.env == env,
+                TtlRenewalScheduleModel.sandbox_id
+                == DeviceModel.provider_device_id,
+            )
+            if cold_status is not None:
+                join_cond = and_(join_cond, TtlRenewalScheduleModel.status == cold_status)
+            stmt = (
+                select(func.count())
+                .select_from(DeviceModel)
+                .join(TtlRenewalScheduleModel, join_cond)
+                .where(
+                    DeviceModel.provider_type == "ARCA",
+                    DeviceModel.status == "ACTIVE",
+                    DeviceModel.is_deleted == 0,
+                    DeviceModel.env == env,
+                    DeviceModel.provider_device_id.isnot(None),
+                )
+            )
+        elif hot_side == "ac_entity_device_binding":
+            binding_sandbox = self._json_unquote(
+                DeviceBindingModel.device_props, "$.sandbox_id"
+            )
+            join_cond = and_(
+                TtlRenewalScheduleModel.source_table
+                == "ac_entity_device_binding",
+                TtlRenewalScheduleModel.source_id == DeviceBindingModel.id,
+                TtlRenewalScheduleModel.env == env,
+                TtlRenewalScheduleModel.sandbox_id == binding_sandbox,
+            )
+            if cold_status is not None:
+                join_cond = and_(join_cond, TtlRenewalScheduleModel.status == cold_status)
+            stmt = (
+                select(func.count())
+                .select_from(DeviceBindingModel)
+                .join(TtlRenewalScheduleModel, join_cond)
+                .where(
+                    DeviceBindingModel.device_provider.in_(("arca", "ARCA")),
+                    DeviceBindingModel.status == "ACTIVE",
+                    DeviceBindingModel.env == env,
+                    self._json_unquote(
+                        DeviceBindingModel.device_props, "$.sandbox_id"
+                    ).isnot(None),
+                )
+            )
+        else:
+            raise ValueError(f"Unsupported hot_side: {hot_side}")
+        return self._session.execute(stmt).scalar()
+
+    def _hot_row_exists(
+        self,
+        env: str,
+        source_table: str,
+        source_id: int,
+    ) -> bool:
+        """Whether a renewably-alive hot row exists for the schedule source.
+
+        Mirrors list_due_for_renewal's JOIN conditions per side: the
+        device side requires is_deleted == 0 (a soft-deleted device reads
+        as absent); the binding side carries no is_deleted filter because
+        production ac_entity_device_binding has no such column (D-16').
+        Both sides are env-scoped.
+        """
+        if source_table == "baas_device":
+            stmt = select(DeviceModel.id).where(
+                DeviceModel.id == source_id,
+                DeviceModel.env == env,
+                DeviceModel.is_deleted == 0,
+            )
+        elif source_table == "ac_entity_device_binding":
+            stmt = select(DeviceBindingModel.id).where(
+                DeviceBindingModel.id == source_id,
+                DeviceBindingModel.env == env,
+            )
+        else:
+            raise ValueError(f"Unsupported source_table: {source_table}")
+        return self._session.execute(stmt).scalar() is not None
+
     @with_orm_session
     def register(
         self,
@@ -634,4 +733,67 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         )
         result = self._session.execute(stmt).scalar()
         log.info("[arca_ttl:count_hot_arca_bindings] result: %s", result)
+        return result
+
+    @with_orm_session
+    def count_hot_covered(self, env: str) -> int:
+        """Count hot-table ARCA rows covered by ANY cold schedule row
+        (ACTIVE or STOPPED), both source tables (WR-01 gap semantics).
+
+        An INNER JOIN expresses the covered predicate: a hot row with no
+        matching cold row — whatever the cold status — falls out of the
+        join. This is the coverage numerator for the status-aware gap
+        (gap = hot - covered), so terminal STOPPED rows keep covering
+        their hot rows instead of latching the gap. Env-scoped on both
+        sides of the join.
+        """
+        log.info("count_hot_covered: env=%s", env)
+        result = self._count_hot_with_cold(
+            env, "baas_device"
+        ) + self._count_hot_with_cold(env, "ac_entity_device_binding")
+        log.info("[arca_ttl:count_hot_covered] result: %s", result)
+        return result
+
+    @with_orm_session
+    def count_suppressed_terminal(self, env: str) -> int:
+        """Count hot-table ACTIVE ARCA rows covered by a STOPPED cold row,
+        both source tables (R3 suppressed-but-hot-ACTIVE population).
+
+        The cold-status-restricted variant of count_hot_covered — the
+        standalone alertable counter for hot rows whose renewal was
+        terminal-suppressed. Env-scoped on both sides; the binding side
+        carries no is_deleted filter (D-16').
+        """
+        log.info("count_suppressed_terminal: env=%s", env)
+        result = self._count_hot_with_cold(
+            env, "baas_device", cold_status="STOPPED"
+        ) + self._count_hot_with_cold(
+            env, "ac_entity_device_binding", cold_status="STOPPED"
+        )
+        log.info("[arca_ttl:count_suppressed_terminal] result: %s", result)
+        return result
+
+    @with_orm_session
+    def hot_row_exists(
+        self,
+        env: str,
+        source_table: str,
+        source_id: int,
+    ) -> bool:
+        """Whether a renewably-alive hot row exists for the schedule
+        source (WR-02 orphan recheck probe).
+
+        Mirrors list_due_for_renewal's JOIN conditions: the device side
+        requires is_deleted == 0 so a soft-deleted device reads as
+        absent; the binding side has no is_deleted filter (D-16').
+        Env-scoped on the hot row.
+        """
+        log.info(
+            "hot_row_exists: env=%s, source_table=%s, source_id=%s",
+            env,
+            source_table,
+            source_id,
+        )
+        result = self._hot_row_exists(env, source_table, source_id)
+        log.info("[arca_ttl:hot_row_exists] result: %s", result)
         return result
