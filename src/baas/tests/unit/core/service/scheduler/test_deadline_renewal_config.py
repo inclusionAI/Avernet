@@ -186,6 +186,10 @@ class TestSchedulerSkeleton:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 0
         mock_repo.count_hot_arca_bindings.return_value = 0
+        # 86-02 covered-math Step 0 calls these two; explicit values keep
+        # MagicMocks out of the gap arithmetic (gap = hot - covered == 0).
+        mock_repo.count_hot_covered.return_value = 0
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
 
         scheduler = DeadlineRenewalScheduler(
