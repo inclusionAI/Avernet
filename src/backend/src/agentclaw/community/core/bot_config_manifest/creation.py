@@ -151,10 +151,161 @@ def _location_for(construct: ApplyConstruct) -> str:
     return f"manifest.{construct.value}"
 
 
+class BotCreationManifestSeam:
+    """The four things bot creation asks of the manifest layer.
+
+    Deliberately small and free of creation policy: creation decides *when* to
+    call these, this decides what each one means. Everything underneath is W1's
+    and W4's — the same validator, the same storage, the same apply engine — so
+    a manifest submitted through creation cannot end up held to different rules
+    than one submitted through ``PUT``.
+    """
+
+    def __init__(
+        self,
+        *,
+        manifest_service: Any,
+        apply_service: Any,
+        script_service_provider: Callable[[], Any],
+        is_teclaw: Callable[[Optional[str]], bool],
+    ) -> None:
+        self._manifests = manifest_service
+        self._applies = apply_service
+        self._script_service_provider = script_service_provider
+        self._is_teclaw = is_teclaw
+
+    def preflight(
+        self, *, document: str, engine_type: Optional[str], bot_type: Optional[str]
+    ) -> dict[str, Any]:
+        """Refuse now, or never. Raises ``ManifestValidationError``.
+
+        Called **before Passport is applied for**, so a caller with an invalid
+        manifest never completes an authorization only to be told their document
+        was wrong — that wastes their time and burns a Passport application.
+        """
+        return preflight_creation_manifest(
+            document=document,
+            engine_type=engine_type,
+            bot_type=bot_type,
+            validate=self._manifests.validate,
+            materialised=self._applies.materialised_constructs(),
+            is_teclaw=self._is_teclaw,
+        )
+
+    def persist(
+        self,
+        *,
+        entity_id: str,
+        bot_id: str,
+        document: str,
+        modifier: str,
+        engine_type: Optional[str],
+        bot_type: Optional[str],
+    ) -> None:
+        """Store the submitted document against the allocated ``bot_id``.
+
+        Through the ordinary manifest service, so the same validation and the
+        same all-or-nothing rule apply, and the same storage key: no schema
+        change, because ``(tenant, sha256(env, entity_id, bot_id))`` has all
+        three parts in hand before the bot record exists.
+
+        This is what makes "the manifest that was validated is the manifest that
+        is applied" structural — the caller submits it once and never re-sends
+        it.
+        """
+        self._manifests.put(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            document=document,
+            modifier=modifier,
+            active_engine=engine_type,
+            bot_type=bot_type,
+        )
+
+    def phase_a(
+        self,
+        *,
+        entity_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        engine_type: Optional[str],
+        bot_type: Optional[str],
+    ) -> Optional[str]:
+        """Apply the pre-container phase. Returns its ``apply_id``.
+
+        **Runs before the bot record exists**, which is what makes the ordering
+        guarantee structural rather than a hook in the right place: the
+        startup-script row is keyed by ``(entity_id, bot_id)`` and needs no
+        record, so the row is written before anything composes a start command.
+
+        **Never raises.** A manifest-layer failure must not abort creation
+        (§2.7): the bot is still created, and the failure surfaces in the poll's
+        terminal report. Returning ``None`` means the phase could not even be
+        started, which the caller treats the same way — it does not stop
+        creation.
+
+        **Runs even when the document declares no script.** The record it writes
+        is what tells the creation job and the poll that this phase is done, so
+        skipping it as an apparent no-op would break both.
+        """
+        try:
+            accepted = self._applies.start_apply(
+                entity_id=entity_id,
+                bot_id=bot_id,
+                bot=None,
+                owner_id=owner_id,
+                actor_id=actor_id,
+                trigger=CREATE_PRE_CONTAINER_TRIGGER,
+                phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+                engine_type=engine_type,
+                bot_type=bot_type,
+            )
+            return accepted.apply_id
+        except Exception:  # noqa: BLE001 — §2.7: never abort creation
+            logger.exception(
+                "[manifest_creation] pre-container phase could not start for "
+                "bot_id=%s; creation continues and the report will say so",
+                bot_id,
+            )
+            return None
+
+    def discard(self, *, entity_id: str, bot_id: str) -> None:
+        """Remove what submission and the pre-container phase wrote.
+
+        Called when a creation ends **without a bot** — declined or expired. Both
+        deletes are idempotent, and both are needed: the manifest row is keyed by
+        a ``bot_id`` that will never become a bot, and the pre-container phase
+        may already have written a startup-script row for the same id. Nothing
+        else would ever reach either, because ordinary bot deletion needs a bot
+        record and allocating a ``bot_id`` consumes no quota.
+
+        Never raises: cleanup failing must not turn an already-terminal creation
+        into an error.
+        """
+        for what, delete in (
+            ("manifest", lambda: self._manifests.delete(
+                entity_id=entity_id, bot_id=bot_id
+            )),
+            ("startup script", lambda: self._script_service_provider().delete(
+                entity_id=entity_id, bot_id=bot_id
+            )),
+        ):
+            try:
+                delete()
+            except Exception:  # noqa: BLE001 — see docstring
+                logger.exception(
+                    "[manifest_creation] could not discard the %s for bot_id=%s",
+                    what,
+                    bot_id,
+                )
+
+
 __all__ = [
     "CREATE_ON_CONTAINER_TRIGGER",
     "CREATE_PRE_CONTAINER_TRIGGER",
     "ApplyPhase",
+    "BotCreationManifestSeam",
     "declared_constructs",
     "preflight_creation_manifest",
 ]

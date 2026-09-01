@@ -112,20 +112,20 @@ Conventions from `plan.md` that every task assumes:
         (`plan.md` K-9a).
 - **Depends on:** Task 4
 
-## [ ] Task 6: The creation seam object
+## [x] Task 6: The creation seam object
 - **Files:** `core/bot_config_manifest/creation.py`
 - **Done when:**
-  - [ ] Four operations: `preflight(engine, bot_type)`, `persist(entity_id, bot_id)`,
+  - [x] Four operations: `preflight(engine, bot_type)`, `persist(entity_id, bot_id)`,
         `phase_a(...)` and `discard(entity_id, bot_id)`.
-  - [ ] `persist` writes through the existing manifest service — same validation,
+  - [x] `persist` writes through the existing manifest service — same validation,
         same all-or-nothing, same storage key.
-  - [ ] `phase_a` calls `start_apply(phases={PRE_CONTAINER}, trigger="create:pre_container")`
+  - [x] `phase_a` calls `start_apply(phases={PRE_CONTAINER}, trigger="create:pre_container")`
         with the creation attributes rather than a bot record, and **never
         raises** — a failure becomes a report.
-  - [ ] `phase_a` runs even when the document declares no `script`; the record is
+  - [x] `phase_a` runs even when the document declares no `script`; the record is
         what tells the job phase A is done. A test pins this — it looks like a
         no-op worth optimising away.
-  - [ ] `discard` deletes the stored manifest **and any startup-script row phase A
+  - [x] `discard` deletes the stored manifest **and any startup-script row phase A
         wrote**, idempotently.
 - **Depends on:** Tasks 2, 5
 
