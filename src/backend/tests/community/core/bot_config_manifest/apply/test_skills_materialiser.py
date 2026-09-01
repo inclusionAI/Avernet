@@ -452,3 +452,24 @@ def _manifest_bytes(name: str) -> bytes:
     return (
         f"---\nname: {name}\ndescription: {name} test skill.\n---\n# {name}\n"
     ).encode()
+
+
+def test_an_unpinned_skill_source_defaults_to_keep_last():
+    """Omitted ``on_fetch_failure`` means ``keep_last`` (schema §2): a source
+    that has since died still delivers the platform's own copy, and the
+    entry materialises from it."""
+    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
+        packages={QC_URL: QZ}
+    )
+    # First apply with an unpinned entry (no digest declared on identity-style
+    # freedom is not allowed for skills — the validator pins URL sources — so
+    # pin it and file the receipt, then kill the source).
+    entries = [_declared()]
+    _run(_apply(materialiser, _ctx(), entries))
+    fetcher.failures[QC_URL] = FetchFailedError("source transport failed")
+    qc_id = uploads.rows["quality-check"]["id"]
+    reader.assets = (skill_asset(qc_id, "quality-check"),)
+
+    _, _, second = _run(_apply(materialiser, _ctx(), entries))
+    assert [e.outcome.value for e in second] == ["unchanged"]
+    assert len(uploads.uploads) == 1  # the store's copy answered, no re-upload

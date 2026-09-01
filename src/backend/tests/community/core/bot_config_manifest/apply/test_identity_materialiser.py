@@ -348,3 +348,28 @@ def test_the_identity_materialiser_cannot_reach_restart_or_device_internals():
     for module in imported:
         assert "restart" not in module, module
         assert "device" not in module, module
+
+
+def test_an_omitted_on_fetch_failure_defaults_to_keep_last():
+    """The schema doc's default is ``keep_last`` (§2): an entry that omits
+    the field must behave like one that wrote it — the minimal, conforming
+    declaration reuses the platform's own copy when the source is down."""
+    identity = FakeIdentityService()
+    content = FakeManifestContent()
+    content.store(
+        fetched_object(SOUL_BODY, url=SOUL_URL, content_type="text/markdown"),
+        scope=None,
+        source_url=SOUL_URL,
+    )
+    failing = FakeGuardedFetcher(
+        failures={SOUL_URL: FetchFailedError("source transport failed")}
+    )
+    materialiser = IdentityMaterialiser(
+        identity, EntryFetcher(failing, content, FakeCredentials())
+    )
+
+    result, _, written = _run(
+        _apply(materialiser, _ctx(), [DECLARED])  # no on_fetch_failure key
+    )
+    assert result.ok
+    assert identity.files["SOUL.md"] == SOUL_BODY.decode("utf-8")

@@ -609,3 +609,30 @@ def test_crashed_write_temp_files_are_age_swept_but_fresh_ones_kept(tmp_path):
     assert not orphan.exists()  # collected by the next store into the shard
     assert live.exists()  # fresh tmp untouched — not ours to judge
     assert service.read(BODY_SHA) == BODY  # and the store itself landed
+
+
+def test_latest_receipt_keys_the_url_the_rows_were_filed_under(tmp_path):
+    """The lookup sanitizes its input the way ``store`` sanitized the row —
+    the two ends of one key. A declaration carrying a signed query string
+    (a perfectly legal schema §2 URL) stores without the query; a later
+    lookup with the query must still find that row, or pinned store-hits
+    and ``keep_last`` would never fire for exactly the sources most likely
+    to expire."""
+    service, _ = _service(tmp_path)
+    signed = "https://content.example/a.bin?sig=one-time-token"
+    service.store(
+        _fetched(),
+        scope=SCOPE,
+        source_url=signed,
+    )
+    # What the row actually holds: scheme://host/path — no query, no fragment.
+    assert service.latest_receipt(scope=SCOPE, source_url=signed) is not None
+    assert service.latest_receipt(
+        scope=SCOPE, source_url="https://content.example/a.bin"
+    ) is not None
+    assert service.latest_receipt(
+        scope=SCOPE, source_url="https://content.example/a.bin?sig=another"
+    ) is not None
+    assert service.latest_receipt(
+        scope=SCOPE, source_url="https://content.example/other.bin"
+    ) is None

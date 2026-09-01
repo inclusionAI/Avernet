@@ -363,6 +363,12 @@ below.
 
 ## Known gaps, recorded rather than discovered
 
+- **The apply-scope fetch budget is defined, not enforced** —
+  `APPLY_FETCH_TOTAL_LIMIT` / `APPLY_BUDGET_S` have no mechanism behind
+  them. Per-entry caps, per-hop timeouts and the apply-lock TTL bound one
+  apply today; the ledger lands with the wave that owns more fetch
+  consumers (W6/W7), threaded once through the entry fetcher.
+
 - **Deleting a bot does not delete its manifest.** Bot deletion is a soft update
   and no cascade reaches this table. The row cannot be inherited (the key names
   one bot for the life of the data), so nothing will read it, but a caller's

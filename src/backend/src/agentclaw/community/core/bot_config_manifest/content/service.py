@@ -355,15 +355,19 @@ class ManifestContentService:
         """The bot's newest receipt for one source URL, or ``None``.
 
         The fetch pipeline's lookup — "does this bot's newest receipt for
-        *this* URL hold these bytes?" — delegated whole: the repository
-        filters and orders, this layer adds nothing, so the answer cannot
-        disagree with the audit read over the same rows.
+        *this* URL hold these bytes?" — keying exactly as ``store`` keyed:
+        the input is sanitized by the same rule before the exact-equality
+        match, so a documented URL form the writer of a row can never store
+        (a query string, a fragment) still finds the row it filed. Without
+        this, signed-URL declarations would keep their platform copies but
+        never consult them — re-fetching every apply and losing ``keep_last``
+        for exactly the sources most likely to expire.
         """
         return self._repository.latest_for(
             env=scope.env,
             entity_id=scope.entity_id,
             bot_id=scope.bot_id,
-            source_url=source_url,
+            source_url=_sanitized_url(source_url),
         )
 
     # --- the blob tree ----------------------------------------------------

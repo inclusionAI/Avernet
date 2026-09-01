@@ -58,6 +58,18 @@ registry wiring and its DI (`ManifestFetchModule`, the narrow identity port
 that keys the lazy provider); the `content`-on-skills PUT refusal (a skill is
 a package, inline text cannot be one); the module README and this spec set.
 
+**Out (a recorded deferral, not a gap in intent):** the apply-scope fetch
+budget — `APPLY_FETCH_TOTAL_LIMIT` / `APPLY_BUDGET_S` in `fetch/limits.py` —
+is defined but enforced nowhere: W4 never threaded a budget through the
+engine, and this wave puts real fetches behind the promise while leaving it
+unwired. Per-entry caps (100 MiB skills / 1 MiB identity), the per-hop 60 s
+timeout, and the 30-minute apply lock TTL bound a single apply today; the
+total/wall-clock ledger is consciously deferred to the wave that owns the
+second and third fetch consumers (W6's `resources`, W7's named sources), at
+which point it threads one shared budget object through `EntryFetcher`
+rather than through any materialiser. Recorded here so the constants are
+read as a promise with an owner, not as dead code.
+
 **Out:** `resources` (W6 — its area is declared-path subtrees and needs its
 own materialiser); named and git sources (W7; the validator already refuses
 `from`/git forms); apply-on-lifecycle (W8 — apply remains

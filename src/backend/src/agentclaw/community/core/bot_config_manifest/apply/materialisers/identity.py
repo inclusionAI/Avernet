@@ -33,6 +33,7 @@ property only this category has an opinion about.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any, Sequence
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
@@ -151,13 +152,19 @@ class IdentityMaterialiser(Materialiser):
                 continue
 
             try:
-                fetched = self._fetcher.fetch(
+                # The fetch is blocking network I/O (W2's sync transport) and
+                # runs off the event loop — the repo's idiom for a blocking
+                # call from a coroutine. It matters on the `dry_run` path,
+                # which the adapter awaits inline; a hung source must not
+                # park every concurrent request.
+                fetched = await asyncio.to_thread(
+                    self._fetcher.fetch,
                     ctx,
                     source_url=source_url,
                     digest=entry.get("digest"),
                     auth=entry.get("auth"),
                     category=_FETCH_CATEGORY,
-                    keep_last=entry.get("on_fetch_failure") == "keep_last",
+                    keep_last=entry.get("on_fetch_failure", "keep_last") == "keep_last",
                 )
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(file_type, exc.reason))

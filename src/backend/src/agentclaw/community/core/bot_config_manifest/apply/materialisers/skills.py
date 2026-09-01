@@ -33,6 +33,7 @@ report honestly as ``partially_written``.
 """
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
@@ -221,13 +222,18 @@ class SkillsMaterialiser(Materialiser):
                 continue
 
             try:
-                fetched = self._fetcher.fetch(
+                # Blocking network + disk I/O (W2's sync transport, W11's
+                # blob write) off the event loop — see the identity
+                # materialiser's note; a dry run must not park the server on
+                # a hung source.
+                fetched = await asyncio.to_thread(
+                    self._fetcher.fetch,
                     ctx,
                     source_url=source_url,
                     digest=entry.get("digest"),
                     auth=entry.get("auth"),
                     category=_FETCH_CATEGORY,
-                    keep_last=entry.get("on_fetch_failure") == "keep_last",
+                    keep_last=entry.get("on_fetch_failure", "keep_last") == "keep_last",
                 )
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(name, exc.reason))
