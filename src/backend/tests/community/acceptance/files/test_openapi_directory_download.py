@@ -82,7 +82,10 @@ def test_workspace_directory_download(live_backend):
         bot = create_live_personal_bot(
             client,
             user_id=user_id,
-            bot_name_prefix="Files Download Acceptance",
+            # Prefix short on purpose: fresh_id appends "_<12 hex>", and the
+            # bot name cap is 32 — "Files DL" lands at 21, the long spelling
+            # above 400s on create before the story does anything.
+            bot_name_prefix="Files DL",
             bot_desc="workspace directory download bot",
         )
         bot_id = bot["bot_id"]
