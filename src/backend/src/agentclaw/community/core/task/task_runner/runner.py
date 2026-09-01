@@ -166,7 +166,7 @@ class TaskRunner:
             return {
                 "mode": "verify",
                 "child_outputs": {
-                    c.node_id: c.run_info.output for c in children if c.status == Status.DONE
+                    c.node_id: c.run_info.output for c in children if c.status == Status.SUCCESS
                 },
                 "goal": node.task_spec.goal if node else None,
                 "acceptances": node.task_spec.goal.acceptances if node else None,
@@ -179,7 +179,7 @@ class TaskRunner:
         sibling_outputs = {
             s.node_id: s.run_info.output
             for s in siblings
-            if s.status == Status.DONE and s.node_id != node_id
+            if s.status == Status.SUCCESS and s.node_id != node_id
         }
         return {
             "mode": "execute",

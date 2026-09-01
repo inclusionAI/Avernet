@@ -77,12 +77,12 @@ class TaskInfoRepositoryProtocol(Protocol):
     @abstractmethod
     def list_by_status(
         self,
-        status: "Status",
+        status: "Status | Sequence[Status]",
         *,
         gmt_modified_since: Optional[datetime] = None,
         limit: int = 100,
     ) -> list["TaskInfoRecord"]:
-        """Rows in ``status``, newest ``gmt_modified`` first (dashboard query)."""
+        """Rows in one or more statuses, newest ``gmt_modified`` first (dashboard query)."""
         ...
 
 
@@ -114,11 +114,11 @@ class TaskNodeRepositoryProtocol(Protocol):
     def list_by_status(
         self,
         task_id: Optional[str],
-        status: "Status",
+        status: "Status | Sequence[Status]",
         *,
         limit: int = 100,
     ) -> list["TaskNodeRecord"]:
-        """Nodes in ``status``; optionally scoped to ``task_id``."""
+        """Nodes in one or more statuses; optionally scoped to ``task_id``."""
         ...
 
 

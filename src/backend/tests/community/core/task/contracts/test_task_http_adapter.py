@@ -575,7 +575,7 @@ class TestTaskCallbackReport:
         # 断言翻态
         g = graph_svc.query_task_dashboard("t_http")
         n = next(n for n in g.tasks if n.node_id == "N_http")
-        assert n.status == Status.DONE, f"回投未翻 DONE: {n.status}"
+        assert n.status == Status.SUCCESS, f"回投未翻 SUCCESS: {n.status}"
         # dashboard DTO 透传 relations 分解树:http 边界 graph_to_dto 不再丢 relations(回归 guard)
         d = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": "t_http"})
         assert d.status_code == 200, d.text

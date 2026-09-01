@@ -46,27 +46,27 @@ from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 _LOG = logging.getLogger(__name__)
 
 # 合法状态转换(PLANNING/RUNNING 解耦:PLANNING=规划中(显式委托态),RUNNING=执行中(子执行/自身执行))
-# acceptance 驱动(skill 验收回投):仅 RUNNING->DONE(PASS)/FAILED(FAIL+gaps);FAILED 不再经 acceptance 翻
+# acceptance 驱动(skill 验收回投):RUNNING->SUCCESS(PASS)/FAILED(FAIL+gaps);FAILED 不再经 acceptance 翻
 _ACCEPTANCE_TRANSITIONS: dict[Status, set[Status]] = {
-    Status.RUNNING: {Status.DONE, Status.FAILED},
+    Status.RUNNING: {Status.SUCCESS, Status.FAILED},
 }
-# status 直驱(框架内部:派发/复位/传播/HUNG)。v4:父节点规划出子由 add_task_nodes 直置 PLANNING(不走此表),
-#   故 PLANNING->RUNNING 已废弃;RUNNING 已不再表示委托态(委托态=PLANNING),RUNNING->PLANNING 已废弃。
+# status 直驱(框架内部:派发/复位/传播/HUNG)。DONE 只表示执行完成,
+# SUCCESS 只表示验收通过。框架在 gap 闭合时使用 SUCCESS,执行实体/BBS 仅能写 DONE。
 #   PENDING->PLANNING(初始根/MISS 叶进入规划) / PENDING->RUNNING(叶子派发执行) /
-#   RUNNING->PENDING(harness 复位重投) / RUNNING->DONE(gap 闭) / RUNNING->HUNG
-#   PLANNING->DONE(gap 闭传播) / PLANNING->HUNG(depth>=MAX 拆不动)
+#   RUNNING->PENDING(harness 复位重投) / RUNNING->DONE(执行完成但未验收) / RUNNING->SUCCESS(框架确认验收通过) / RUNNING->HUNG
+#   PLANNING->DONE(仅执行完成直驱) / PLANNING->SUCCESS(gap 闭合验收通过) / PLANNING->HUNG(depth>=MAX 拆不动)
 #   FAILED->PENDING(harness 重新派发执行重试) / FAILED->HUNG(重试达上限)
 _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
-    Status.PENDING: {Status.PLANNING, Status.RUNNING, Status.HUNG, Status.DONE},
-    Status.PLANNING: {Status.DONE, Status.HUNG},
-    Status.RUNNING: {Status.PENDING, Status.DONE, Status.HUNG},
+    Status.PENDING: {Status.PLANNING, Status.RUNNING, Status.HUNG, Status.DONE, Status.SUCCESS},
+    Status.PLANNING: {Status.DONE, Status.SUCCESS, Status.HUNG},
+    Status.RUNNING: {Status.PENDING, Status.DONE, Status.SUCCESS, Status.HUNG},
     Status.FAILED: {Status.PENDING, Status.HUNG},
 }
 # 可委托(add_task_nodes 时 parent 允许的态):PENDING(初始/根)/FAILED(补救)/PLANNING(前向重规划)
 _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNING, Status.HUNG}
 
-# 终态集(无出边):acceptance 回投到终态节点 → 幂等拒绝(DONE/FAILED/HUNG/CANCELLED)。
-_TERMINAL_STATUSES: set[Status] = {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}
+# 终态集(无出边):已完成/失败/挂起/取消节点不再接受重复验收回投。
+_TERMINAL_STATUSES: set[Status] = {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG, Status.CANCELLED}
 
 _DEFAULT_MAX_DEPTH = 2
 _DEFAULT_MAX_LOOP = 3  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
@@ -427,10 +427,11 @@ class TaskGraphService:
 
     def update_task_node_info(self, patch: TaskNodePatch) -> NodeOpResult:
         """节点级原子状态流转网关。双模式:
-        ① acceptance_result 驱动(skill 回投):PASS→DONE / FAIL→(折叠)HUNG(动态)或 FAILED(外部;
-           gaps 可空,verdict=FAILED 即统一收口,不强制要求 gaps 非空);
+        ① acceptance_result 驱动(skill 回投):PASS→SUCCESS / FAIL→DONE(记录未通过验收);
+           FAILED 仅表示执行失败(exec_error);gaps 可空,verdict=FAILED 仅作为验收留痕;
         ② status 直驱(框架内部):PENDING→RUNNING(派发) / RUNNING→PENDING(Harness 复位) /
-           PLANNING→DONE(传播)。两者都校验状态机。无 acceptance_result 且无 status 只 fold 不翻态。
+           DONE(执行完成但未验收) / SUCCESS(框架确认验收通过) / PLANNING→SUCCESS(传播)。
+           两者都校验状态机。无 acceptance_result 且无 status 只 fold 不翻态。
         派发写:patch.run_mode(str)/assignee 落库 + 置 RUNNING。
         """
         def mutation(graph):
@@ -444,13 +445,11 @@ class TaskGraphService:
                     )
                 verdict = patch.acceptance_result.verdict
                 if verdict == AcceptanceVerdict.DONE:
-                    new_status = Status.DONE
+                    new_status = Status.SUCCESS
                 else:
-                    new_status = (
-                        Status.HUNG
-                        if patch.status == Status.HUNG
-                        else Status.FAILED
-                    )
+                    # 验收未通过仍代表执行已经结束,状态保持 DONE;验收结论和 gaps
+                    # 记录在 acceptance_result 中。FAILED 仅用于执行失败(exec_error)。
+                    new_status = Status.DONE
                 node.run_info.acceptance_result = patch.acceptance_result
             elif patch.exec_error is not None:
                 if patch.extend_props_patch is not None:
@@ -475,7 +474,7 @@ class TaskGraphService:
             if new_status == Status.RUNNING and prev_status != Status.RUNNING:
                 node.run_info.start_time = int(time.time() * 1000)
                 node.run_info.end_time = None
-            elif new_status in {Status.DONE, Status.FAILED, Status.HUNG}:
+            elif new_status in {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG}:
                 node.run_info.end_time = int(time.time() * 1000)
             elif new_status == Status.PENDING:
                 node.run_info.start_time = None
@@ -556,9 +555,8 @@ class TaskGraphService:
         先 hydrate 最新图(他实例可能已 claim),再做 DB CAS;赢者更新本地缓存,输者抛 ``TaskStateError``。
         无仓储(lightweight/单测)走原 in-mem CAS(仅 ``_lock_for`` 进程内串行)。
 
-        **recover 清理**:CAS 占根成功后,先把图中所有 ``HUNG`` 子树(每个 HUNG 节点及其 DEPENDENCY 后代)
-        删除——这些是 planner 规划不合理 / 派发全 MISS 造的死分支,BBS 接力视为推倒重做,清掉让根回到
-        干净委托点(根 ``task_id`` 永不清)。不区分 ``hung_reason``/checkpoint(按 recover 语义)。
+        **recover 语义**:CAS 只负责占有根节点,不修改或删除现有任务节点。
+        HUNG 节点及其运行记录保留,由后续 BBS 接力结果和正常图状态流转决定任务如何继续。
         """
         with self._lock_for(task_id):
             graph = self._graphs.get(task_id)
@@ -589,17 +587,10 @@ class TaskGraphService:
                 root.run_info.extend_props["bbs_owner"] = bot_id
                 root.run_info.extend_props["bbs_claim_at"] = now
                 self._graph_versions[task_id] = self._graph_repo.get_version(task_id) or 0
-                pruned = self._prune_hung_subtrees(graph, task_id)
-                if pruned:
-                    _LOG.info("[bbs-claim] task=%s recover 清理 HUNG 死子树 %d 个", task_id, pruned)
-                    self._persist_locked(graph)
                 return NodeOpResult(
                     task_id=task_id, node_id=task_id, success=True,
                     prev_status=root.status, new_status=root.status,
                 )
-            pruned = self._prune_hung_subtrees(graph, task_id)
-            if pruned:
-                _LOG.info("[bbs-claim] task=%s recover 清理 HUNG 死子树 %d 个", task_id, pruned)
             return self.update_task_node_info(
                 TaskNodePatch(
                     task_id=task_id,
@@ -608,42 +599,13 @@ class TaskGraphService:
                 )
             )
 
-    def _prune_hung_subtrees(self, graph: TaskExecutionGraph, task_id: str) -> int:
-        """删除图中所有 ``HUNG`` 子树(每个 HUNG 节点 + 其 DEPENDENCY 后代),返回删除节点数。
-
-        根(``task_id``)永不清。调用方须持 ``_lock_for(task_id)``。recover 语义:清掉 planner 造的
-        HUNG 死分支(规划不合理 / 派发全 MISS),不区分 ``hung_reason``/checkpoint。
-        """
-        children: dict[str, list[str]] = {}
-        for rel in graph.relations:
-            if rel.type == RelationType.DEPENDENCY:
-                children.setdefault(rel.src_id, []).append(rel.dst_id)
-        prune: set[str] = set()
-        stack = [n.node_id for n in graph.tasks
-                 if n.status == Status.HUNG and n.node_id != task_id]
-        while stack:
-            nid = stack.pop()
-            if nid in prune:
-                continue
-            prune.add(nid)
-            for child in children.get(nid, []):
-                if child not in prune:
-                    stack.append(child)
-        if not prune:
-            return 0
-        graph.tasks = [n for n in graph.tasks if n.node_id not in prune]
-        graph.relations = [
-            r for r in graph.relations
-            if r.src_id not in prune and r.dst_id not in prune
-        ]
-        return len(prune)
-
     def delete_task_node(self, task_id: str, node_id: str) -> None:
         """删除单个节点(及其 DEPENDENCY 后代子树 + 相关边)。根(``task_id``)永不可删。
 
-        用于 ``on_bbs_report`` 收到 verdict=FAILED:丢弃本次接力尝试(不翻 FAILED、不 fold output_patch),
-        图回到 root PLANNING + bbs_mode 可恢复态等下段重新 claim/attach。bbs scoped 节点是叶子,但实现按
-        子树删(节点 + DEPENDENCY 后代)以通用。锁:再取同 task 的 RLock(re-entrant 安全,调用方通常已持)。
+        用于 ``on_bbs_report`` 收到 verdict=FAILED:逻辑删除本次接力尝试的 scoped 节点
+        (不物理删除 task_node；不翻 FAILED、不 fold output_patch)，图回到 root PLANNING + bbs_mode 可恢复态等下段
+        重新 claim/attach。逻辑删除会保留节点行、运行记录和审计历史；bbs scoped 节点是叶子,但实现按子树标记
+        (节点 + DEPENDENCY 后代)以通用。锁:再取同 task 的 RLock(re-entrant 安全,调用方通常已持)。
         """
         with self._lock_for(task_id):
             graph = self._require_graph(task_id)

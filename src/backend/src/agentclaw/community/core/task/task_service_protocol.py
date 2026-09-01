@@ -40,7 +40,7 @@ class TaskServiceProtocol(Protocol):
         status: "str | None" = None,
         owner_user_id: "str | None" = None,
     ) -> list[TaskInfoRecord]:
-        """列持久化任务记录,可选按状态和 owner 过滤。"""
+        """列持久化任务记录,可选按状态(单值或逗号分隔多值)和 owner 过滤。"""
         ...
 
     def list_tasks_page(
@@ -50,7 +50,7 @@ class TaskServiceProtocol(Protocol):
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[TaskInfoRecord], int]:
-        """列持久化任务记录的一页(1-based),可选按状态和 owner 过滤,返回 (items, total)。"""
+        """列持久化任务记录的一页(1-based),可选按状态(单值或逗号分隔多值)和 owner 过滤,返回 (items, total)。"""
         ...
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
@@ -75,7 +75,7 @@ class TaskServiceProtocol(Protocol):
     ) -> NodeOpResult:
         """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim;收口由框架经 owner 复核根 gap 自行收口(非 bot 声明)。
 
-        acceptance_result(PASS→DONE / FAIL+gaps→FAILED)/ output_patch(checkpoint fold)/
+        acceptance_result(PASS→SUCCESS / FAIL+gaps→DONE)/ output_patch(checkpoint fold)/
         exec_error(执行报错 fold)。bot_id 须为当前 bbs_owner,否则 TaskStateError。委托 ExecutionEngine.on_bbs_report。
         """
         ...

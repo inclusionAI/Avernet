@@ -145,7 +145,7 @@ def _done_children(graph: TaskExecutionGraph, target: TaskNode) -> list[dict]:
     ]
     out: list[dict] = []
     for n in graph.tasks:
-        if n.node_id in child_ids and n.status == Status.DONE:
+        if n.node_id in child_ids and n.status == Status.SUCCESS:
             out.append({
                 "node_id": n.node_id,
                 "title": n.task_spec.metadata.title,

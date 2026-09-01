@@ -184,7 +184,10 @@ async def get_task_dashboard_internal(
 @envelope_errors
 async def list_tasks_internal(
     request: Request,
-    status: str | None = None,
+    status: str | None = Query(
+        None,
+        description="可选 status 过滤:支持单个或逗号分隔多值(如 DONE,FAILED);非法值 → 400",
+    ),
     user_id: str | None = Query(
         None,
         description="可选:按 owner_user_id 过滤;为空返回全量。与公开面 "
@@ -198,7 +201,7 @@ async def list_tasks_internal(
     ),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]]:
-    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态/owner 过滤)。
+    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选单状态/多状态/owner 过滤)。
 
     非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。
     ``user_id`` 为空时不按 owner 过滤(返回全量,供内部可信调用方);传入则按 ``owner_user_id``

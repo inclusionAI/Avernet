@@ -59,7 +59,7 @@ class StaticPlanRuntime:
         may decorate in-memory dispatch metadata, but status/output changes are
         returned to the engine and persisted through ``update_task_node_info``.
         """
-        done = {n.node_id for n in graph.tasks if n.status == Status.DONE}
+        done = {n.node_id for n in graph.tasks if n.status == Status.SUCCESS}
         logger.info(
             "[task][static-plan-runtime] readiness task=%s done=%s states=%s",
             graph.task_id,

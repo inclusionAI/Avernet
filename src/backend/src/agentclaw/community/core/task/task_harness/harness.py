@@ -1,6 +1,6 @@
 """TaskHarness 旁路常驻:周期巡检 SLA 超时/崩溃 → 复位 PENDING 重投。对齐 plan §3.6。
 
-harness 三路巡检——① RUNNING 真执行叶子超 SLA → 复位重投(bbs 走 lease-expire 终态不重派);② status=FAILED(执行层失败)真执行叶子 → re-dispatch 重试;③ PENDING 未派发超时 → 重搜推。acceptance-FAIL 不入 harness:验收 verdict FAILED 经 on_report 折叠成节点 HUNG→升 BBS(内容 gap,重派同一执行体多为无效重试),故 Scan② 扫到的 FAILED 仅执行层失败、不含验收不通过。经编排核 on_harness 计 harness_retries:<MAX 重派 / >=MAX HUNG→升 BBS。不抢正向驱动。
+harness 三路巡检——① RUNNING 真执行叶子超 SLA → 复位重投(bbs 走 lease-expire 终态不重派);② status=FAILED(执行层失败)真执行叶子 → re-dispatch 重试;③ PENDING 未派发超时 → 重搜推。acceptance-FAIL 不入 harness:验收 verdict FAILED 经 on_report 记录为节点 DONE(内容未通过验收,不重派),故 Scan② 扫到的 FAILED 仅执行层失败、不含验收不通过。经编排核 on_harness 计 harness_retries:<MAX 重派 / >=MAX HUNG→升 BBS。不抢正向驱动。
 不直接写 HUNG(HUNG 由编排核 _hung_and_escalate 落:on_miss 深度闸门 / on_harness 重试达 MAX_HARNESS → 节点 HUNG + 升 BBS)。复位阈值从 execution_config/extend_props 读(SLA 不在 TaskSpec)。
 Avernet:in-memory 巡检(注入 clock);prod 接真实定时器/崩溃探针不变编排口。
 """
@@ -21,7 +21,7 @@ from agentclaw.community.core.task.domain.models import (
 
 _DEFAULT_SLA_TIMEOUT = 1200.0  # RUNNING 卡死 backstop(>poller execute SLA 600s,poller 先判 FAIL 走正常重试;此仅兜底 poller 漏判)
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
-_DEFAULT_INTERVAL = 120.0        # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已折叠 HUNG 不在此,external FAILED 由 on_harness 入口跳过)
+_DEFAULT_INTERVAL = 120.0        # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已记录 DONE 不在此,external FAILED 由 on_harness 入口跳过)
 
 
 class TaskHarness:
@@ -119,7 +119,7 @@ class TaskHarness:
                     if n.run_info.run_mode == "bbs":
                         # BBS lease 到期(FR-EXT-06):owner bot 崩溃/挂起导致 RUNNING 超 SLA。
                         # 直写图(self._graph),不走 on_harness_fn:后者复位 RUNNING→PENDING 重派,
-                        # 与"标终态不重派"语义相反。① scoped 节点验收 FAIL→FAILED(终态);
+                        # 与"标终态不重派"语义相反。① scoped 节点验收 FAIL→DONE(终态);
                         # ② 清根 bbs_owner(root node_id == task_id)释放接力所有权;continue 跳过 PENDING reset。
                         self._graph.update_task_node_info(TaskNodePatch(
                             task_id=task_id, node_id=n.node_id,
@@ -141,8 +141,8 @@ class TaskHarness:
             # 淘汰已非 RUNNING 的记时项
             self._dispatched_at = {k: v for k, v in self._dispatched_at.items() if k in seen}
         # Scan②:扫描 status=FAILED(执行层失败:terminal_invalid/exec 报错等)真执行叶子 → harness
-        # 重新派发执行重试。**验收不过(verdict FAILED)已由 on_report 折叠成节点 HUNG,不在此扫**——
-        # 故此处 FAILED 仅执行层失败,与验收 gap(HUNG→升 BBS)语义不同。FAILED 不走 SLA 计时,
+        # 重新派发执行重试。**验收不过(verdict FAILED)已由 on_report 记录为节点 DONE,不在此扫**——
+        # 故此处 FAILED 仅执行层失败,与验收 gap(DONE,不重派)语义不同。FAILED 不走 SLA 计时,
         # 立即交 on_harness(计数 harness_retries:<MAX 复位重派 / >=MAX HUNG 升 BBS)。
         failed_resets: list[TaskNodePatch] = []
         _EXEC_MODES = ("single_bot", "coop_group", "bbs")

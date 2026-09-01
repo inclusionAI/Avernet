@@ -551,9 +551,9 @@ class TaskService:
         if output is not None:
             result["data"] = output
         if not success:
-            # 失败收敛须带 gaps:CallbackAdapter.adapt 对"success=False 且无 gaps"会产出
-            # exec_error(→ harness 重投),而非验收 FAIL(→ 终态 FAILED)。补一个 gap 让失败
-            # 正确翻态为 FAILED(失败详情已随 output 落 run_info.output)。
+            # 未通过验收的收敛须带 gaps:CallbackAdapter.adapt 对"success=False 且无 gaps"会产出
+            # exec_error(→ harness 重投),而非验收 FAIL(→ DONE)。补一个 gap 让结果
+            # 正确记录为 DONE(失败详情已随 output 落 run_info.output)。
             result["gaps"] = ["external collaboration ended without success"]
         data = TaskCallbackData(
             data={
@@ -922,7 +922,7 @@ class TaskService:
     ) -> NodeOpResult:
         """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim(经 ``on_bbs_report``);收口由框架自行判定(非 bot 声明)。
 
-        供 bbs 接力执行实体(FR-PICK-05)回投:``acceptance_result``(PASS→DONE / FAIL+gaps→FAILED)/
+        供 bbs 接力执行实体(FR-PICK-05)回投:``acceptance_result``(PASS→SUCCESS / FAIL+gaps→DONE)/
         ``output_patch``(checkpoint fold)/``exec_error``(执行报错 fold)。根目标是否满足由框架经 owner
         复核(``on_bbs_report``→``_on_pass_collect``→``plan(root)``→``_maybe_finish_graph``)判定,
         **非 bot 自报**(故无 ``root_verified``)。``bot_id`` 须为当前 ``bbs_owner``(经 on_bbs_report 持有者校验),
@@ -954,7 +954,7 @@ class TaskService:
         """内部节点写口:透传 ``TaskNodePatch`` 经 ``ExecutionEngine.on_report`` 落库(+触发翻态/验收/收敛旁路)。
 
         与回投同一入口(``on_report``):
-        ① ``acceptance_result`` 非空 → 验收驱动(PASS→DONE / FAIL+gaps→FAILED)+ 收敛传播;
+        ① ``acceptance_result`` 非空 → 验收驱动(PASS→SUCCESS / FAIL+gaps→DONE);仅 PASS 进入收敛传播;
         ② ``exec_error`` 非空 → 执行报错(→ on_harness 复位重投,计数达上限 HUNG);
         ③ ``status`` 非空(无前两者)→ 框架直驱(``_DIRECT_TRANSITIONS`` 约束 + 收敛旁路,如根子节点全终态收敛);
         三者全空 → 仅 fold 非状态字段(``output_patch``/``run_mode``/``assignee``/``extend_props_patch``)。

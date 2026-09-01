@@ -577,7 +577,7 @@ class TaskExecutor:
                             "acceptance_result": {},
                             "extend_props": {},
                         }, ensure_ascii=False)
-                        + "\nFAILED 时只将 status 改为 FAILED,并在 acceptance_result.gaps 填写具体差距。"
+                        + "\n验收未通过时将 status 改为 DONE,并在 acceptance_result.gaps 填写具体差距;只有执行失败才使用 FAILED。"
                     )
                 req_kwargs["context"] = f"{_task_instruction.rstrip()}\n" + "\n".join(_rfooter)
             else:
@@ -613,7 +613,7 @@ class TaskExecutor:
                             "acceptance_result": {},
                             "extend_props": {},
                         }, ensure_ascii=False)
-                        + "\nFAILED 时只将 status 改为 FAILED，并在 acceptance_result.gaps 填写具体差距。"
+                        + "\n验收未通过时将 status 改为 DONE，并在 acceptance_result.gaps 填写具体差距;只有执行失败才使用 FAILED。"
                     )
         req = BcsCreateGroupRequest(**req_kwargs)
         logger.info(

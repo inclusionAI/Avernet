@@ -34,7 +34,7 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
 _GRAPH_STATUS_KEY = "__graph_status"
-_TERMINAL = {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}
+_TERMINAL = {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG, Status.CANCELLED}
 
 
 class TaskGraphRepository(TaskGraphRepositoryProtocol):
@@ -101,7 +101,10 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                 return None
             node_rows = (
                 db.query(TaskNodeModel)
-                .filter(TaskNodeModel.task_id == task_id)
+                .filter(
+                    TaskNodeModel.task_id == task_id,
+                    TaskNodeModel.is_deleted.is_(False),
+                )
                 .order_by(TaskNodeModel.id.asc())
                 .all()
             )
@@ -281,7 +284,9 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             .all()
         ):
             if row.node_id not in current_node_ids:
-                db.delete(row)
+                # Logical delete: retain the node row for audit/history and keep
+                # task_node_run_info linked to the original execution attempt.
+                row.is_deleted = True
         current_relation_keys = {(rel.src_id, rel.dst_id) for rel in graph.relations}
         for row in (
             db.query(TaskNodeRelationModel)
@@ -304,6 +309,7 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                 db.add(row)
             row.task_spec = json.dumps(task_spec_to_dict(node.task_spec), ensure_ascii=False)
             row.status = node.status.value
+            row.is_deleted = False
             retry = int(node.run_info.extend_props.get("retry", 0))
             run_row = (
                 db.query(TaskNodeRunInfoModel)
@@ -576,14 +582,20 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             total = (
                 db.query(func.count(TaskNodeRunInfoModel.task_id))
                 .join(TaskNodeModel, join_clause)
-                .filter(TaskNodeRunInfoModel.run_mode == "bbs")
+                .filter(
+                    TaskNodeRunInfoModel.run_mode == "bbs",
+                    TaskNodeModel.is_deleted.is_(False),
+                )
                 .scalar()
             ) or 0
 
             joined = (
                 db.query(TaskNodeRunInfoModel, TaskNodeModel)
                 .join(TaskNodeModel, join_clause)
-                .filter(TaskNodeRunInfoModel.run_mode == "bbs")
+                .filter(
+                    TaskNodeRunInfoModel.run_mode == "bbs",
+                    TaskNodeModel.is_deleted.is_(False),
+                )
                 .order_by(TaskNodeRunInfoModel.id.desc())
                 .limit(page_size)
                 .offset(offset)

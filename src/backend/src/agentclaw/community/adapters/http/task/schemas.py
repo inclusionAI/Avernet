@@ -175,7 +175,7 @@ class TaskNodeUpdateDTO(BaseModel):
 
     task_id: str = Field(..., description="任务ID")
     node_id: str = Field(..., description="节点ID")
-    status: str | None = Field(None, description="框架直驱状态(HUNG/DONE/PENDING/RUNNING 等)")
+    status: str | None = Field(None, description="框架直驱状态(HUNG/DONE/SUCCESS/PENDING/RUNNING 等)")
     run_mode: str | None = Field(None, description="执行模态(single_bot / bbs 等)")
     assignee: str | None = Field(None, description="承接者(bot_id 或 group_id)")
     output_patch: dict[str, Any] | None = Field(None, description="增量输出(fold 进 run_info.output)")
@@ -316,7 +316,7 @@ class BbsTaskItemDTO(BaseModel):
     run_mode: str | None = Field(None, description="执行模态(r.run_mode;bbs)")
     retry: int = Field(0, description="重试序号(r.retry;当前恒 0)")
     assignee_id: str | None = Field(None, description="承接者ID(r.assignee → assignee_id)")
-    status: str | None = Field(None, description="节点运行态(n.status 原值,如 RUNNING/DONE/…)")
+    status: str | None = Field(None, description="节点运行态(n.status 原值,如 RUNNING/DONE/SUCCESS/…)")
     acceptance_result: dict[str, Any] | None = Field(None, description="验收结论(r.acceptance_result)")
     extend_props: dict[str, Any] | None = Field(None, description="运行扩展属性(r.extend_props)")
     relay_create_time: datetime | None = Field(None, description="节点建表时间(n.gmt_create)")
@@ -378,6 +378,7 @@ def runtime_status_to_product_status(status: Any) -> str:
         "PENDING": "DEFINED",
         "HUNG": "REVIEWING",
         "DONE": "DONE",
+        "SUCCESS": "SUCCESS",
         "FAILED": "FAILED",
         "CANCELLED": "CANCELLED",
     }.get(value, "EXECUTING")

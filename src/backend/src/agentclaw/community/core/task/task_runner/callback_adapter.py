@@ -156,9 +156,9 @@ class CallbackAdapter:
         A) poller 形态(single_bot/BCN 翻译器产出的 ``result`` 是 dict 且含 ``success``):
            result.success/data/gaps/_ext_info/exec_error 组装;三段互斥(对齐 on_report 分流):
            ① exec_error 非空 → 执行报错(bot 没跑通)→ patch.exec_error(无 acceptance,→ on_harness 重投);
-           ② success=True → 验收 DONE → content=_unwrap_poller_content(data)(展平 {"result":<str>})
+           ② success=True → 验收 SUCCESS → content=_unwrap_poller_content(data)(展平 {"result":<str>})
            + output_patch={"output": content};
-           ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAILED(→ harness 重派);
+           ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAILED,状态为 DONE(不重派);
            ④ success 非布尔/失败无 gaps → exec_error=terminal_result_invalid。
 
         B) common_task 形态(skill HTTP 上报 ``/callback/report`` 翻译后 ``result`` 非上述 dict,
@@ -200,7 +200,7 @@ class CallbackAdapter:
                 exec_error="terminal_result_invalid: success must be bool",
                 extend_props_patch=ext_patch,
             )
-        # ② success=True → 验收 DONE。
+        # ② success=True → 验收 SUCCESS。
         if success:
             return TaskNodePatch(
                 task_id=task_id,

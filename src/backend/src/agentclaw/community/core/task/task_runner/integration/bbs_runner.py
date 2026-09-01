@@ -133,11 +133,6 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             # (claim_bbs_owner 已置根 bbs_owner=winner_bot_id;此处同源补齐,校验才放行)。
             assignee=winner_bot_id,
             output_patch={"output": _bbs_output},
-            acceptance_result=AcceptanceResult(
-                verdict=AcceptanceVerdict.DONE,
-                acceptances_metric=list(),
-                gaps=list(),
-            ),
             extend_props_patch={
                 "output": _bbs_output,
                 "assignee_bot_id": winner_bot_id,
@@ -146,7 +141,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             },
         )
         if on_bbs_report is not None:
-            # 收口走引擎:翻 scoped DONE → finally 释放 bbs_owner → _on_pass_collect 驱动根重算 gap
+            # 收口走引擎:记录 scoped DONE → finally 释放 bbs_owner → 继续既有图收敛
             # (plan(root)→_maybe_finish_graph/HUNG)。不再直写根 status=PLANNING(收敛自驱根态),
             # 也不再裸写 scoped —— 全部由 on_bbs_report 一次落入 SSOT 并触发收敛。
             await on_bbs_report(_scoped_patch)
@@ -176,7 +171,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     except Exception as exc:
         logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
         # send 失败 → 回收 claim(释放 bbs_owner,避免泄漏挡住后续重升 BBS)。
-        # 注:FAIL 收口(删 scoped 节点 + 图回可恢复态)语义待定,此处仅做无歧义的 claim 释放。
+        # send 失败不产生 BBS 回投，保留节点与运行记录，仅释放 claim。
         graph.update_task_node_info(
             TaskNodePatch(
                 task_id=task_id,

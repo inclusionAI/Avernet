@@ -80,61 +80,36 @@ def test_claim_writes_owner_and_claim_at_on_root():
     assert root.run_info.extend_props.get("bbs_claim_at") >= before
 
 
-def _hung_leaf(tid, node_id, parent_id, graph):
-    """白盒构造一个 HUNG 叶子节点 + DEPENDENCY 边(parent_id→node_id)。"""
-    return TaskNode(
-        node_id=node_id,
-        task_id=tid,
+def test_claim_preserves_existing_hung_subtrees():
+    """claim 只做根级 CAS，不裁剪已有 HUNG 节点或其依赖关系。"""
+    svc = TaskGraphService()
+    _bbs_task(svc, "p7")
+    graph = svc._require_graph("p7")
+    graph.tasks[0].status = Status.PLANNING
+
+    node = TaskNode(
+        node_id="h1",
+        task_id="p7",
         status=Status.HUNG,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=node_id, title="hung", instruction="i"),
+            metadata=Metadata(task_id="h1", title="hung", instruction="i"),
             context=Context(background="", extend_props={}),
             goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="a1", description="d")]),
         ),
         run_info=RuntimeInfo(),
         node_run_graph=graph,
-    ), Relation(src_id=parent_id, dst_id=node_id, type=RelationType.DEPENDENCY)
-
-
-def test_claim_prunes_hung_subtrees_on_recover():
-    """claim 成功即 recover:清掉图中所有 HUNG 子树(HUNG 节点 + 其 DEPENDENCY 后代),
-    非 HUNG 兄弟(DONE/PLANNING/PENDING)与根保留。planner 规划不合理的死分支不残留。"""
-    svc = TaskGraphService()
-    _bbs_task(svc, "p7")
-    graph = svc._require_graph("p7")
-    graph.tasks[0].status = Status.PLANNING  # 根进可委托态(白盒,同 _bbs_root_planning)
-    # 构造:HUNG 子树 h1 → h1c(HUNG 后代);DONE 兄弟 d1(应保留);PENDING 兄弟 s1(应保留)
-    h1, r_h1 = _hung_leaf("p7", "h1", "p7", graph)
-    h1c, r_h1c = _hung_leaf("p7", "h1c", "h1", graph)
-    d1, r_d1 = _hung_leaf("p7", "d1", "p7", graph)
-    d1.status = Status.DONE  # 非 HUNG,应保留
-    s1, r_s1 = _hung_leaf("p7", "s1", "p7", graph)
-    s1.status = Status.PENDING  # 非 HUNG,应保留
-    for n, rel in ((h1, r_h1), (h1c, r_h1c), (d1, r_d1), (s1, r_s1)):
-        graph.tasks.append(n)
-        graph.relations.append(rel)
+    )
+    graph.tasks.append(node)
+    graph.relations.append(Relation(src_id="p7", dst_id="h1", type=RelationType.DEPENDENCY))
 
     svc.claim_bbs_owner("p7", "botA")
 
     g = svc.query_task_dashboard("p7")
-    ids = {n.node_id for n in g.tasks}
-    assert ids == {"p7", "d1", "s1"}, f"HUNG 子树未清干净 / 非 HUNG 被误删:remainder={ids}"
-    # DEPENDENCY 边里不再触 h1/h1c
-    assert all(r.src_id not in {"h1", "h1c"} and r.dst_id not in {"h1", "h1c"} for r in g.relations)
-    # 根仍可委托 + 已 claim
+    assert {n.node_id for n in g.tasks} == {"p7", "h1"}
+    assert any(r.src_id == "p7" and r.dst_id == "h1" for r in g.relations)
     root = next(n for n in g.tasks if n.node_id == "p7")
     assert root.status == Status.PLANNING
     assert root.run_info.extend_props.get("bbs_owner") == "botA"
-
-
-def test_claim_prune_keeps_root_even_if_root_hung():
-    """根(= task_id)永不被 recover 清理(即使被白盒置 HUNG,虽非正常态)。"""
-    svc = TaskGraphService()
-    _bbs_task(svc, "p8")
-    graph = svc._require_graph("p8")
-    graph.tasks[0].status = Status.HUNG  # 异常态,仅验证根不被删
-    svc.claim_bbs_owner("p8", "botA")
-    assert any(n.node_id == "p8" for n in svc.query_task_dashboard("p8").tasks)
 
 
 def test_claim_concurrent_exactly_one_wins():

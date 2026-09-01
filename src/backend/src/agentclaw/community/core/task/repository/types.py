@@ -60,6 +60,7 @@ class TaskNodeRecord:
     node_id: str
     task_spec: dict[str, Any]
     status: Status
+    is_deleted: bool = False
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
 

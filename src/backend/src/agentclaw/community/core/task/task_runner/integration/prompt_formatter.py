@@ -18,7 +18,7 @@ from agentclaw.community.core.task.task_runner.integration.ports import (
 def _skill_report_instruction(context: dict[str, Any], *, task_id: str, node_id: str) -> str:
     """skill HTTP 上报协议块:bot 主动 POST /callback/report 回投(与 poller 互斥)。
 
-    用于 coop_group / state_machine / 开了开关的 single_bot。status=验收通过 DONE / 不通过 FAILED;
+    用于 coop_group / state_machine / 开了开关的 single_bot。status=验收通过 SUCCESS / 不通过 DONE;
     verdict 同步 DONE/FAILED;产出放 output 字符串。
     """
     backend = str(context.get("backend") or "{backend}")
@@ -32,7 +32,7 @@ def _skill_report_instruction(context: dict[str, Any], *, task_id: str, node_id:
         "【强制执行闭环，不得跳过】",
         "阶段1 执行：先完成上面的任务指令，形成完整执行产出。",
         "阶段2 校验：执行完成后，必须逐条对照当前 goal.acceptances，明确判断每条是否满足；不能只凭‘看起来完成’结束。",
-        "阶段3 验收：整理完整 output；验收全部满足则 status=DONE，否则 status=FAILED，并在 acceptance_result.gaps 写明差距。",
+        "阶段3 验收：整理完整 output；验收全部满足则 status=SUCCESS，否则 status=DONE，并在 acceptance_result.gaps 写明差距；只有执行失败才使用 status=FAILED。",
         "阶段4 上报：必须真正发起 HTTP POST，不能只在对话中输出‘完成’或只返回 JSON。",
         reporter_line,
         f"回调地址: POST {backend}/api/v1/collaboration/tasks/callback/report",
