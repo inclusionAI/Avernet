@@ -124,6 +124,41 @@ class _ManifestService:
         )
 
 
+class _FakeBotRepository:
+    """Just the one lookup ``run_apply_task`` makes to rebuild its context."""
+
+    def __init__(self, record: dict | None) -> None:
+        self._record = record
+
+    def get_by_id_and_entity(self, bot_id: str, entity_id: str):
+        return self._record
+
+
+class _FakeTaskQueue:
+    """A worker that claims immediately, which is what these tests need.
+
+    Applying moved off a daemon thread onto the task queue, so the service now
+    *enqueues* rather than runs. These tests are about what happens **around** the
+    engine — the lock, the two writes, what a poller sees — and all of that still
+    happens, just on a worker. Running the handler inline on enqueue keeps every
+    assertion below testing the same lifecycle rather than testing the queue.
+
+    It is also a faithful stand-in: the real type is registered with
+    ``wake_on_enqueue=True`` precisely so a due apply is claimed at once instead
+    of waiting out an idle poll.
+    """
+
+    def __init__(self) -> None:
+        self.service = None
+        self.enqueued: list[tuple[str, dict]] = []
+
+    def enqueue(self, task_type, payload, deadline_seconds, **kwargs):
+        self.enqueued.append((task_type, payload))
+        if self.service is not None:
+            self.service.run_apply_task(payload)
+        return (None, True)
+
+
 @pytest.fixture
 def world():
     # StaticPool, and it is load-bearing rather than incidental: apply does its
@@ -141,6 +176,7 @@ def world():
     Base.metadata.create_all(engine)
     db = InMemorySqliteDB(engine)
 
+    queue = _FakeTaskQueue()
     scripts = FakeStartupScriptService()
     applies = BotConfigManifestApplyRepository(db)
     locks = BotConfigManifestApplyLockRepository(db)
@@ -169,7 +205,11 @@ def world():
         # so the client is never *used* — it is constructed per apply and
         # must never be fetched through, which FakeGitClient enforces.
         git_client_provider=lambda: FakeGitClient(),
+        task_queue_provider=lambda: queue,
+        bot_repository=_FakeBotRepository(_BOT_RECORD),
     )
+    # Closes the loop: the fake worker needs the service it runs work for.
+    queue.service = service
     return service, applies, locks, scripts, BotConfigManifestRepository(db)
 
 

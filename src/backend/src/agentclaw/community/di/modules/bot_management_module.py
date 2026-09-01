@@ -84,6 +84,9 @@ from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
     DirectActivationServiceProtocol,
 )
+from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+    ApplyTaskLifecycle,
+)
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
     BotConfigManifestApplyService,
 )
@@ -354,16 +357,14 @@ class BotManagementModule(Module):
             to=BotConfigManifestApplyLockRepository,
             scope=singleton,
         )
-        binder.bind(
-            BotConfigManifestApplyService,
-            to=BotConfigManifestApplyService,
-            scope=singleton,
-        )
-        binder.bind(
-            BotConfigManifestApplyServiceProtocol,
-            to=BotConfigManifestApplyService,
-            scope=singleton,
-        )
+        # ``BotConfigManifestApplyService`` is built by the provider below rather
+        # than auto-constructed: its task-queue dependency is a lazy callable, and
+        # the queue module imports the DI container at module scope, so the
+        # annotation the injector would have to resolve cannot be imported here.
+        # The Protocol is bound through a provider too: ``bind(Protocol,
+        # to=ConcreteClass)`` builds a ClassProvider that instantiates the class
+        # *directly*, bypassing the provider below and failing on the same
+        # annotation.
         # TemplateService: constructed with injected TemplateRepository.
         binder.bind(TemplateService, to=TemplateService, scope=singleton)
         # CronAutoSetupService: constructed with injected dependencies.
@@ -660,6 +661,75 @@ class BotManagementModule(Module):
         construction — the same shape ``teclaw_engine_test_factory`` above uses.
         """
         return lambda: injector.get(BotStartupScriptServiceProtocol)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_task_queue_factory(
+        self, injector: Injector
+    ) -> Callable[[], TaskQueueService]:
+        """The queue every apply now runs on.
+
+        Lazy for a hard reason rather than symmetry with its neighbours:
+        ``task_queue_service`` imports ``community.di`` at module scope, so an
+        eager import from the apply service closes a cycle through the whole
+        container graph.
+        """
+        return lambda: injector.get(TaskQueueService)
+
+    @singleton
+    @provider
+    @inject
+    def bot_config_manifest_apply_service(
+        self,
+        manifest_service: BotConfigManifestServiceProtocol,
+        apply_repository: BotConfigManifestApplyRepositoryProtocol,
+        lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
+        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
+        activation_service_provider: Callable[[], DirectActivationServiceProtocol],
+        mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
+        task_queue_provider: Callable[[], TaskQueueService],
+        bot_repository: BotRepository,
+    ) -> BotConfigManifestApplyService:
+        return BotConfigManifestApplyService(
+            manifest_service,
+            apply_repository,
+            lock_repository,
+            script_service_provider,
+            activation_service_provider,
+            mcp_auth_service_provider,
+            task_queue_provider,
+            bot_repository,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bot_config_manifest_apply_service_protocol(
+        self, service: BotConfigManifestApplyService
+    ) -> BotConfigManifestApplyServiceProtocol:
+        """The Protocol every adapter injects, delegated to the one instance."""
+        return service
+
+    @singleton
+    @provider
+    @inject
+    def manifest_apply_task_lifecycle(
+        self,
+        registry: HandlerRegistry,
+        injector: Injector,
+    ) -> ApplyTaskLifecycle:
+        """Registers the apply handler at boot.
+
+        The service is resolved lazily for the same cycle reason as its own queue
+        dependency, and because the lifecycle is discovered by walking the
+        injector's bindings — building the apply graph while that walk is in
+        progress is exactly the ordering this avoids.
+        """
+        return ApplyTaskLifecycle(
+            registry=registry,
+            apply_service_provider=lambda: injector.get(BotConfigManifestApplyService),
+        )
 
     @singleton
     @provider

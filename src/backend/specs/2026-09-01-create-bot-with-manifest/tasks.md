@@ -7,7 +7,7 @@ Spec: `spec.md` · Plan: `plan.md` · Issue #1696.
 > the submit response carries no state, and the endpoint refuses teclaw. Rev 4
 > moved apply execution onto the task queue. Nothing adds a table or a column.
 
-Six groups. A→B→C are a chain; D needs C; E proves the lot.
+Five groups. A→B→C are a chain; D needs C; E proves the lot.
 
 Conventions from `plan.md` that every task assumes:
 
@@ -22,23 +22,23 @@ Conventions from `plan.md` that every task assumes:
 
 ## Group A — Applying becomes durable work
 
-## [ ] Task 1: The apply task handler
+## [x] Task 1: The apply task handler
 - **Files:** `core/bot_config_manifest/apply/apply_task.py` (new),
   `di/modules/bot_management_module.py`
 - **Done when:**
-  - [ ] One `TaskHandler` serves all three cases (spec D-10), registered into the
+  - [x] One `TaskHandler` serves all three cases (spec D-10), registered into the
         `HandlerRegistry` at bootstrap with `wake_on_enqueue`.
-  - [ ] Its whole body runs inside `avernet_tenant_scope(payload["tenant"])`.
-  - [ ] It rebuilds the context rather than reading it from the payload: the bot
+  - [x] Its whole body runs inside `avernet_tenant_scope(payload["tenant"])`.
+  - [x] It rebuilds the context rather than reading it from the payload: the bot
         record is re-read by `(entity_id, bot_id)`; for phase A there is no
         record, so `engine_type` / `bot_type` come from the payload and
         capabilities resolve from those.
-  - [ ] It re-reads and re-validates the document through `_parsed_or_empty`. A
+  - [x] It re-reads and re-validates the document through `_parsed_or_empty`. A
         comment records why it is not in the payload: `MAX_DOCUMENT_BYTES` is
         64 KB and `ac_task_queue.payload` is `Text`, also 64 KB, so a large
         manifest would not fit — and the behaviour change this implies (read at
         execution rather than snapshot at enqueue) is stated there too.
-  - [ ] It writes the terminal record and releases the lock by token, on **every**
+  - [x] It writes the terminal record and releases the lock by token, on **every**
         path including a raising orchestrator — the same `finally` discipline
         `_run` has today.
 - **Depends on:** —

@@ -18,14 +18,19 @@ import time
 import threading
 import uuid
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from injector import inject
 
 from agentclaw.community.core.bot_config_manifest.apply.budget import (
     ApplyFetchBudget,
 )
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+    APPLY_TASK_DEADLINE_SECONDS,
+    APPLY_TASK_TYPE,
+    build_apply_task_payload,
+    phases_from_payload,
+)
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
@@ -81,6 +86,7 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
     MCPAuthServiceProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
     BotConfigManifestApplyLockRepositoryProtocol,
     BotConfigManifestApplyRepositoryProtocol,
@@ -99,10 +105,16 @@ from agentclaw.community.core.skill_center.skill_package import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import (
+    avernet_tenant_scope,
     bind_current_avernet_tenant,
     get_current_avernet_tenant,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+
+if TYPE_CHECKING:  # pragma: no cover - import-time cycle, see below
+    from agentclaw.community.core.task_queue.services.task_queue_service import (
+        TaskQueueService,
+    )
 
 logger = get_logger()
 
@@ -119,10 +131,30 @@ logger = get_logger()
 APPLY_LOCK_TTL_SECONDS = 30 * 60
 
 
+def _engine_and_bot_type(
+    bot: Optional[dict],
+    engine_type: Optional[str],
+    bot_type: Optional[str],
+) -> tuple[str, str]:
+    """The two values every capability question is answered from.
+
+    One helper because the record and record-free paths must not drift: a bot
+    whose engine is read one way here and another way there would validate
+    against one set of capabilities and apply against a different one.
+    """
+    if bot is not None:
+        return str(bot.get("active_engine") or ""), str(bot.get("bot_type") or "")
+    return str(engine_type or ""), str(bot_type or "")
+
+
 class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
     """Start applies, and read what they did."""
 
-    @inject
+    # Deliberately **not** ``@inject``: ``task_queue_provider`` is annotated with a
+    # ``TYPE_CHECKING``-only name (the queue module imports the DI container at
+    # module scope, so it cannot be imported here), and ``@inject`` would make the
+    # injector resolve these hints at construction and fail on it. The DI module
+    # builds this service with an explicit provider instead.
     def __init__(
         self,
         manifest_service: BotConfigManifestServiceProtocol,
@@ -138,6 +170,8 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         entry_fetcher_provider: Callable[[], EntryFetcher],
         resource_service_provider: Callable[[], ManifestResourcePort],
         git_client_provider: Callable[[], GitSourceClient],
+        task_queue_provider: Callable[[], "TaskQueueService"],
+        bot_repository: BotRepository,
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_repository
@@ -173,6 +207,16 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # TYPE_CHECKING one because the injector resolves this constructor's
         # string annotations against this module's globals.
         self._git_client_provider = git_client_provider
+        # The queue that now runs the work, and the reader that rebuilds what the
+        # payload deliberately does not carry.
+        #
+        # The queue is **lazy, and must stay that way**:
+        # ``task_queue_service`` imports ``community.di`` at module scope, which
+        # pulls the whole container graph, which reaches back here — importing it
+        # eagerly from this module is a circular import, not a style preference.
+        # The repository has no such problem and is injected directly.
+        self._task_queue_provider = task_queue_provider
+        self._bots = bot_repository
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -485,6 +529,67 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 bot_id=bot_id,
                 lock_token=lock_token,
             )
+    def run_apply_task(self, payload: dict) -> None:
+        """Execute one apply from its task payload. Called only by the handler.
+
+        Rebuilds what the payload deliberately does not carry — the bot record and
+        the parsed document (see ``build_apply_task_payload``) — then runs the same
+        ``_run`` body the daemon thread used to.
+
+        **The tenant is re-established here, from the payload.** The queue has no
+        tenant column and no request context survives to handler time, so
+        ``bind_current_avernet_tenant`` cannot help. Getting this wrong fails
+        *silently*: ``get_current_avernet_tenant()`` is a total function that
+        returns the **default** tenant outside a request rather than raising, so a
+        handler that dropped this scope would not crash — it would substitute the
+        wrong ``${BOT_TENANT}`` and read and write the manifest tables under the
+        wrong tenant. That is an isolation failure with nothing raised anywhere to
+        announce it, which is why it is pinned by a test rather than a comment.
+        """
+        tenant = str(payload.get("tenant") or "")
+        with avernet_tenant_scope(tenant):
+            entity_id = str(payload["entity_id"])
+            bot_id = str(payload["bot_id"])
+            # Re-read rather than trust a serialised copy: the record may have
+            # moved since the enqueue, and for the pre-container phase there is
+            # no record at all yet.
+            bot = self._bot_or_none(entity_id=entity_id, bot_id=bot_id)
+            ctx = self._context(
+                bot_id=bot_id,
+                bot=bot,
+                owner_id=str(payload["owner_id"]),
+                actor_id=str(payload["actor_id"]),
+                entity_id=entity_id,
+                env=str(payload["env"]),
+                engine_type=payload.get("engine_type"),
+                bot_type=payload.get("bot_type"),
+            )
+            parsed = self._parsed_or_empty(
+                entity_id=entity_id,
+                bot_id=bot_id,
+                bot=bot,
+                engine_type=payload.get("engine_type"),
+                bot_type=payload.get("bot_type"),
+            )
+            self._run(
+                ctx=ctx,
+                parsed=parsed,
+                apply_id=str(payload["apply_id"]),
+                trigger=str(payload["trigger"]),
+                started_at=datetime.now(),
+                phases=phases_from_payload(payload.get("phases")),
+                lock_token=str(payload["lock_token"]),
+            )
+
+    def _bot_or_none(self, *, entity_id: str, bot_id: str) -> Optional[dict]:
+        """The bot record, or ``None`` when it does not exist yet.
+
+        ``None`` is an ordinary state, not an error: W13's pre-container phase
+        runs before the record is written, which is the whole reason that phase
+        can guarantee the startup-script row exists before the start command is
+        composed.
+        """
+        return self._bots.get_by_id_and_entity(bot_id, entity_id)
 
     def _record_engine_failure(self, report: ApplyReport, exc: Exception) -> None:
         """Log the cause; the stored report says FAILED with no entries.
@@ -619,7 +724,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         self,
         *,
         bot_id: str,
-        bot: dict,
+        bot: Optional[dict],
         owner_id: str,
         actor_id: str,
         entity_id: str,
@@ -627,7 +732,21 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         apply_id: Optional[str] = None,
         budget: Optional[ApplyFetchBudget] = None,
         source_session: Optional[SourceSession] = None,
+        engine_type: Optional[str] = None,
+        bot_type: Optional[str] = None,
     ) -> ApplyContext:
+        """The identity one apply runs under, with or without a bot record.
+
+        ``bot`` is ``None`` on exactly one path: W13 runs the pre-container phase
+        **before** the bot is created, so there is no record to read. That case
+        supplies ``engine_type`` / ``bot_type`` from the creation request and
+        resolves capabilities from those — which is the second entry point W1
+        built for this caller, not a parallel implementation. ``ApplyContext.bot``
+        is then a minimal stand-in; the two shipped materialisers do not read it,
+        and the one that runs in this phase (``script``) reads only the engine,
+        env and tenant.
+        """
+        engine, kind = _engine_and_bot_type(bot, engine_type, bot_type)
         return ApplyContext(
             bot_id=bot_id,
             owner_id=owner_id,
@@ -635,20 +754,34 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             entity_id=entity_id,
             env=env,
             tenant=get_current_avernet_tenant(),
-            engine_type=str(bot.get("active_engine") or ""),
-            bot_type=str(bot.get("bot_type") or ""),
-            bot=bot,
-            capabilities=self._manifests.capabilities_for_bot(bot),
-            # A dry run mints no id (its own documented rule) and writes no
-            # report row; its fetches' receipts therefore carry NULL linkage
-            # rather than an id nothing joins to.
+            engine_type=engine,
+            bot_type=kind,
+            bot=bot if bot is not None else {
+                "bot_id": bot_id,
+                "entity_id": entity_id,
+                "active_engine": engine,
+                "bot_type": kind,
+            },
+            capabilities=(
+                self._manifests.capabilities_for_bot(bot)
+                if bot is not None
+                else self._manifests.resolve_capabilities(
+                    active_engine=engine, bot_type=kind
+                )
+            ),
             apply_id=apply_id,
             budget=budget,
             source_session=source_session,
         )
 
     def _parsed_or_empty(
-        self, *, entity_id: str, bot_id: str, bot: dict
+        self,
+        *,
+        entity_id: str,
+        bot_id: str,
+        bot: Optional[dict],
+        engine_type: Optional[str] = None,
+        bot_type: Optional[str] = None,
     ) -> dict:
         """The stored document, re-validated, or ``{}`` when there is none.
 
@@ -663,10 +796,11 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         record = self._manifests.get(entity_id=entity_id, bot_id=bot_id)
         if record is None:
             return {}
+        engine, kind = _engine_and_bot_type(bot, engine_type, bot_type)
         result = self._manifests.validate(
             document=record.document,
-            active_engine=bot.get("active_engine"),
-            bot_type=bot.get("bot_type"),
+            active_engine=engine,
+            bot_type=kind,
         )
         return result.parsed
 

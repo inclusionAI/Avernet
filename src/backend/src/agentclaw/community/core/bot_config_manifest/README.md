@@ -535,7 +535,9 @@ internal_dependencies:
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the `mcp` materialiser's per-bot activation writes
   - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # the upload road a manifest skill travels (W5)
   - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)
+  - agentclaw.community.core.task_queue  # applying runs as a queue task, not a daemon thread (W13) — the queue module imports the DI container at module scope, so TaskQueueService is a TYPE_CHECKING-only annotation behind a lazy provider
   - agentclaw.community.core.workspace.constants
+  - agentclaw.community.kernel.lifecycle  # the apply handler registers itself at boot
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database
   - agentclaw.community.utils.avernet_tenant
