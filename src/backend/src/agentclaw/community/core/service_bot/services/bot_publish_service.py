@@ -656,10 +656,14 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
 
             # 路径二：评测沙箱绑定驱动（stage 格式 "eval"，或 Quality Task 降级）
             # 从 ac_entity_device_binding 中按 default_tag 查询
+            # 当 task_uuid 是 Quality Task UUID（非 "eval" 字面量）时，
+            # 降级查询用 "eval" 而非 task_uuid——因为 binding 表中不存在
+            # default_tag=task_uuid 的记录（Phase 2 后才会补写）
+            fallback_tag = PublishStage.EVAL.value
             eval_binding = self._find_eval_binding_by_default_tag(
                 bot_id=bot_id,
                 owner_id=owner_id,
-                default_tag=task_uuid if task_uuid and task_uuid != PublishStage.EVAL.value else PublishStage.EVAL.value,
+                default_tag=fallback_tag,
             )
             if eval_binding:
                 return {
