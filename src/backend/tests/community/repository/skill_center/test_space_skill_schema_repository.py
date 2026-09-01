@@ -175,7 +175,6 @@ def test_space_skill_enums_match_the_final_phase2_contract():
         "SC_SUBMITTING",
         "WAITING_SC",
         "MATERIALIZING",
-        "MATERIALIZATION_FAILED",
         "SUCCEEDED",
         "FAILED",
         "RESULT_UNKNOWN",

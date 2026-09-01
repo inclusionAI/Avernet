@@ -68,7 +68,6 @@ class SkillPublicationAttemptStatus(StrEnum):
     SC_SUBMITTING = "SC_SUBMITTING"
     WAITING_SC = "WAITING_SC"
     MATERIALIZING = "MATERIALIZING"
-    MATERIALIZATION_FAILED = "MATERIALIZATION_FAILED"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     RESULT_UNKNOWN = "RESULT_UNKNOWN"
@@ -267,7 +266,7 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
         ),
         CheckConstraint(
             "status IN ('PREPARING', 'SC_SUBMITTING', 'WAITING_SC', "
-            "'RESULT_UNKNOWN', 'MATERIALIZING', 'MATERIALIZATION_FAILED', 'SUCCEEDED', 'FAILED')",
+            "'RESULT_UNKNOWN', 'MATERIALIZING', 'SUCCEEDED', 'FAILED')",
             name="ck_skill_publication_attempt_status",
         ),
         CheckConstraint(
@@ -301,9 +300,6 @@ class SkillPublicationAttempt(_ScopedDomainFact, Base):
     error_message = Column(Text, nullable=True)
     recovery_state = Column(String(24), nullable=True)
     recovery_kind = Column(String(24), nullable=True)
-    materialization_retry_count = Column(
-        UnsignedInteger, nullable=False, server_default="0"
-    )
     sc_post_started_at = Column(DateTime, nullable=True)
     sc_accepted_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)

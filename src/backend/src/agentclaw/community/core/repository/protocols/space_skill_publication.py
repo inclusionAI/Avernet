@@ -130,17 +130,6 @@ class SpaceSkillPublicationRepositoryProtocol(Protocol):
     ) -> PublicationAttemptRecord: ...
 
     @abstractmethod
-    def record_materialization_failure(
-        self,
-        *,
-        attempt_id: int,
-        error_code: str,
-        error_message: str,
-        max_auto_retries: int,
-        env: str,
-    ) -> PublicationAttemptRecord: ...
-
-    @abstractmethod
     def restart_recovery(
         self,
         *,

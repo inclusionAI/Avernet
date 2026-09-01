@@ -964,20 +964,15 @@ class _Materializer:
         db: _Database,
         *,
         fail_once: bool = False,
-        fail_times: int = 0,
         fail_message: str = "canonical store unavailable",
     ) -> None:
         self.db = db
         self.fail_once = fail_once
-        self.fail_times = fail_times
         self.fail_message = fail_message
         self.version_ids: list[int] = []
 
     def materialize(self, request):
         self.version_ids.append(request.skill_version_id)
-        if self.fail_times > 0:
-            self.fail_times -= 1
-            raise SkillVersionMaterializationError(self.fail_message)
         if self.fail_once:
             self.fail_once = False
             raise SkillVersionMaterializationError(self.fail_message)
@@ -1328,7 +1323,7 @@ def test_exhausted_materialization_exposes_same_attempt_retry() -> None:
     gateway = _Gateway()
     materializer = _Materializer(
         db,
-        fail_times=4,
+        fail_once=True,
         fail_message="https://sc.invalid/exact.zip?signature=do-not-leak",
     )
     handler = _handler(
@@ -1336,11 +1331,11 @@ def test_exhausted_materialization_exposes_same_attempt_retry() -> None:
         repository,
         gateway,
         materializer,
+        auto_retry_seconds=0,
     )
 
     handler.handle(publication_task_payload(attempt.attempt_id))
-    for _ in range(4):
-        terminal_task = handler.handle(publication_task_payload(attempt.attempt_id))
+    terminal_task = handler.handle(publication_task_payload(attempt.attempt_id))
     available = repository.get_attempt(
         space_id=space_id,
         skill_id=skill_id,
@@ -1348,13 +1343,12 @@ def test_exhausted_materialization_exposes_same_attempt_retry() -> None:
         env="test",
     )
 
-    assert isinstance(terminal_task, Complete)
-    assert available.status == "MATERIALIZATION_FAILED"
+    assert terminal_task.error == "Exact Version materialization failed"
+    assert available.status == "MATERIALIZING"
     assert available.error_message == "Exact Version materialization failed"
     assert "signature" not in available.error_message
     assert available.recovery.state == "AVAILABLE"
     assert available.recovery.kind == "MATERIALIZATION"
-    assert available.materialization_retry_count == 3
 
     recovery = repository.restart_recovery(
         space_id=space_id,
