@@ -704,9 +704,10 @@ GET/PUT 分别服务编辑器目录、内容读取和保存。
 exact version 下载并修复 Store，再创建 Vn+1 Draft。禁止使用 current/latest、旧 Draft 或历史
 package URL。发布成功后不保留 Draft；只有再次点击升级才创建下一版 Draft。
 
-DELETE 要求 `expected_revision_id`，Team Lease 必须 FREE/HELD_BY_ME；无 Published Version 且
-无 Attempt/Version/Installation/Membership/Artifact 等外部事实时删除整个 Skill 聚合，否则只
-放弃升级 Draft。FROZEN 永不允许删除。DB 事实先提交，OSS 做 best-effort 清理。
+DELETE 要求 `expected_revision_id`，Team Lease 必须 FREE/HELD_BY_ME；无 Published Version，且
+除终态 FAILED Attempt 外不存在 Version/Installation/Membership/Artifact 等外部事实时，删除
+整个从未发布的 Skill 聚合及其 FAILED Attempt，否则只放弃升级 Draft。FROZEN 永不允许删除。
+DB 事实先提交，OSS 做 best-effort 清理；只放弃 Draft 时同步失效当前 Lease/fencing token。
 
 URL 中 `{version}` 是业务序号 `1/2/3`，不是 `ac_skill_version.id`。Published Version 不可修改、删除或单独下线。
 
@@ -747,9 +748,10 @@ TeamClaw Publication Attempt，因此该列必须允许 NULL，不能伪造 Atte
 - 本期只有 Owner/Manager 两种 Skill Grant，不新增 Editor 或普通 Skill Member。
 - Owner 直接 `PUT/DELETE managers` 不生成 Work Order。移除当前 Lease holder 的
   Manager Grant 时，必须在同一事务内使该 Lease/fencing token 失效。
-- 删除升级 Draft 只放弃本次升级；首次从未发布的 Draft 在没有 Attempt、Version、
-  Installation、SkillSet Membership、Artifact 或其他外部历史事实时，可以在同一事务中
-  删除 Draft 事实、Owner/Manager Grant、该 Skill 自己的 Space Binding 和 Skill Identity。
+- 删除升级 Draft 只放弃本次升级；首次从未发布的 Draft 在除终态 FAILED Attempt 外没有
+  Version、Installation、SkillSet Membership、Artifact 或其他外部历史事实时，可以在同一
+  事务中删除 FAILED Attempt、Draft 事实、Lease、Owner/Manager Grant、该 Skill 自己的 Space
+  Binding 和 Skill Identity。
 - FROZEN Draft 不能放弃，必须先由 Attempt 收敛到明确结果。
 
 编辑权申请 body：
