@@ -92,22 +92,22 @@ Conventions from `plan.md` that every task assumes:
 
 ## Group B — The creation seam
 
-## [ ] Task 5: The creation preflight
+## [x] Task 5: The creation preflight
 - **Files:** `core/bot_config_manifest/creation.py` (new)
 - **Done when:**
-  - [ ] One function validates a document against an **engine type and bot type**
+  - [x] One function validates a document against an **engine type and bot type**
         (never a record) via `validate`, then refuses any **declared** construct
         absent from `materialised_constructs()`.
-  - [ ] "Declared" is `declared_entries(parsed, construct) is not None` walked
+  - [x] "Declared" is `declared_entries(parsed, construct) is not None` walked
         over `APPLY_ORDER`, so a declared-empty category counts — it removes,
         which is a write.
-  - [ ] Every violation is reported in one pass, naming the construct and what
+  - [x] Every violation is reported in one pass, naming the construct and what
         would apply it.
-  - [ ] **A teclaw engine is refused** by the same function, naming W8 as where
+  - [x] **A teclaw engine is refused** by the same function, naming W8 as where
         teclaw creation lives. The check goes through `is_teclaw` — the engine
         authority the capability resolver already takes — never a hand-rolled
         `== "teclaw"`.
-  - [ ] The module docstring states why this is stricter than `PUT`, and why the
+  - [x] The module docstring states why this is stricter than `PUT`, and why the
         teclaw refusal is structural rather than a missing materialiser
         (`plan.md` K-9a).
 - **Depends on:** Task 4
