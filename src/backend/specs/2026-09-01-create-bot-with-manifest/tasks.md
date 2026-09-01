@@ -318,5 +318,14 @@ Conventions from `plan.md` that every task assumes:
   - [ ] The README's Context Boundary block lists the creation seam, the apply
         task and the creation job.
   - [ ] W13's row in both work-items documents records what shipped, including
-        that applying moved onto the queue for every path.
+        that applying moved onto the queue for every path, and that this endpoint
+        is **ARCA-only**.
+  - [ ] **W8's criteria are corrected in the same edit.** Its second acceptance
+        criterion says bots created via W13 complete apply inside the creation
+        flow, "so this item covers the *other* apply points — republish,
+        rebuild-restart"; that is now true only for ARCA. W8's scope line already
+        claims teclaw creation-time apply, so the two disagree. The correction
+        states that W8 owns teclaw creation, **including lifting this endpoint's
+        teclaw refusal and giving the creation job a teclaw-shaped sequence** —
+        the one piece that would otherwise fall between the two items.
 - **Depends on:** Task 16
