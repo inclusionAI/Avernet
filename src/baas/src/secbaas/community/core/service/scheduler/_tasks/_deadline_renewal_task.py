@@ -236,6 +236,24 @@ class DeadlineRenewalScheduler:
 
         hot_count = hot_count_device + hot_count_binding
 
+        # R3 covered math: covered = hot rows matched by ANY cold row
+        # (ACTIVE or STOPPED); suppressed = the STOPPED-covered subset.
+        # A raised count degrades to the legacy formula with a warning —
+        # never a crash (the warning keeps the degradation observable).
+        covered_hot: int | None = None
+        suppressed_terminal = 0
+        try:
+            covered_hot = self._schedule_repo.count_hot_covered(self._config.env)
+            suppressed_terminal = self._schedule_repo.count_suppressed_terminal(
+                self._config.env
+            )
+        except Exception:
+            log.warning(
+                "[DeadlineRenewalScheduler] covered-count query failed — "
+                "gap falls back to legacy hot-minus-cold"
+            )
+        report.suppressed_terminal_count = suppressed_terminal
+
         should_scan = False
         gap_result = None
         if cold_count is None:
@@ -245,7 +263,10 @@ class DeadlineRenewalScheduler:
             # (due query + renewal) run unaffected.
             report.gap_detected = False
         else:
-            gap = hot_count - cold_count
+            if covered_hot is not None:
+                gap = hot_count - covered_hot
+            else:
+                gap = hot_count - cold_count
             gap_result = GapDetectionResult(
                 cold_count=cold_count,
                 hot_count=hot_count,
@@ -319,25 +340,68 @@ class DeadlineRenewalScheduler:
             return report
 
         # ---- Orphan Detection within Step 1 ----
+        # R4 (WR-02) hot-row recheck: hot_id IS NULL can also mean the hot
+        # row simply reappeared since the due JOIN ran. Before writing the
+        # terminal STOPPED, re-check hot-row existence with the same JOIN
+        # conditions: reappeared (or recheck-failed — never STOP on doubt)
+        # rows postpone; genuinely absent rows write STOPPED stamped
+        # stop_reason='orphan'.
 
         processing_list: list[dict] = []
         for row in all_rows:
             if row.get("hot_id") is None:
+                # Alive on recheck / failed recheck → postpone (never STOP
+                # a possibly-live row); False → terminal STOPPED.
+                alive: bool | None = None
                 try:
-                    self._schedule_repo.set_status(
+                    alive = self._schedule_repo.hot_row_exists(
                         self._config.env,
                         row["source_table"],
                         row["source_id"],
-                        "STOPPED",
                     )
-                    report.orphan_count += 1
                 except Exception:
-                    log.exception(
-                        "[DeadlineRenewalScheduler] Failed to mark orphan "
-                        "source=%s:%s as STOPPED",
+                    log.warning(
+                        "[DeadlineRenewalScheduler] hot_row_exists recheck "
+                        "failed source=%s:%s — postponing instead of STOPPED "
+                        "(never STOP on doubt)",
                         row["source_table"],
                         row["source_id"],
                     )
+
+                if alive is False:
+                    try:
+                        self._schedule_repo.set_status(
+                            self._config.env,
+                            row["source_table"],
+                            row["source_id"],
+                            "STOPPED",
+                            stop_reason="orphan",
+                        )
+                        report.orphan_count += 1
+                    except Exception:
+                        log.exception(
+                            "[DeadlineRenewalScheduler] Failed to mark orphan "
+                            "source=%s:%s as STOPPED",
+                            row["source_table"],
+                            row["source_id"],
+                        )
+                else:
+                    next_renew = naive_cst_now() + timedelta(
+                        minutes=self._config.retry_delay_minutes
+                    )
+                    self._schedule_repo.postpone_renewal(
+                        self._config.env,
+                        row["source_table"],
+                        row["source_id"],
+                        next_renew,
+                    )
+                    if alive is True:
+                        log.info(
+                            "[DeadlineRenewalScheduler] orphan source=%s:%s "
+                            "hot row reappeared — postponed instead of STOPPED",
+                            row["source_table"],
+                            row["source_id"],
+                        )
             else:
                 processing_list.append(row)
 
@@ -1030,10 +1094,12 @@ class DeadlineRenewalScheduler:
 
         log.info(
             "[arca_ttl_metrics] last_run_timestamp=%d remaining_hours_min=%.1f "
-            "renew_failure_rate=%.3f due_count=%d gap_detected=%d",
+            "renew_failure_rate=%.3f due_count=%d gap_detected=%d "
+            "suppressed_terminal_count=%d",
             int(time.time()),
             remaining_val,
             failure_rate,
             report.due_count,
             1 if report.gap_detected else 0,
+            report.suppressed_terminal_count,
         )
