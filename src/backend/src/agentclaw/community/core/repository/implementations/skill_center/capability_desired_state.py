@@ -344,32 +344,47 @@ class CapabilityDesiredStateRepository(
                 return DesiredStateMutation(_item(row), False, old)
             # R3 covers ANY of the Bot's Sets — the Default included, its
             # members excluded or not.
-            reachable_ids = {
-                int(candidate.id)
-                for candidate in self._bot_sets(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    engine_type=engine_type,
-                    default_engine_types=default_engine_types,
-                )
-            } - {int(row.id)}
+            bot_sets = self._bot_sets(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
+            reachable_ids = {int(candidate.id) for candidate in bot_sets} - {
+                int(row.id)
+            }
             identity = [SkillSetSkill.skill_id == skill.id]
             if skill.skill_uuid:
                 identity.append(SkillSetSkill.skill_uuid == skill.skill_uuid)
-            membership = (
+            memberships = (
                 self._scope(session.query(SkillSetSkill), SkillSetSkill)
                 .filter(
                     SkillSetSkill.skill_set_id.in_(reachable_ids),
                     or_(*identity),
                 )
-                .first()
+                .all()
                 if reachable_ids
-                else None
+                else []
+            )
+            # Installation is the effective-capability SSOT, not its
+            # provenance.  An active Default/ordinary Set legitimately
+            # materializes an Installation row, so row existence alone must
+            # not turn a Set-managed Skill into a Direct-active Skill.
+            active_set_claim = self._has_active_skill_set_claim(
+                session,
+                bot_sets=bot_sets,
+                membership_set_ids={int(item.skill_set_id) for item in memberships},
+                skill_id=int(skill.id),
+                bot_id=bot_id,
+                owner_id=owner_id,
             )
             require_can_join_set(
-                is_directly_active=skill.id in old.installations,
-                is_in_another_set=membership is not None,
+                is_directly_active=(
+                    skill.id in old.installations
+                    and not active_set_claim
+                ),
+                is_in_another_set=bool(memberships),
             )
             if row.is_active:
                 self._require_unique_runtime_names(

@@ -334,7 +334,55 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
 
     assert response.success is True
     assert response.data["success"] == []
-    assert response.data["failed"][0]["skill_id"] == "7"
+    assert response.data["failed"] == [
+        {
+            "skill_id": "7",
+            "error": "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+            "error_code": "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+            "message": "该 Skill 已由其他能力集管理，不能重复添加。",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_legacy_skill_set_batch_keeps_direct_error_code_and_adds_message() -> None:
+    class _ControlPlane:
+        def get_set(self, **_kwargs):
+            return {"id": "set-1", "is_default": False}
+
+        def resolve_legacy_skill_id(self, **kwargs):
+            return kwargs["identifier"]
+
+        async def add_skills(self, **_kwargs):
+            return [
+                SkillSetSkillOutcome(
+                    skill_id="7",
+                    error=SkillSetControlPlaneConflictError(
+                        "RESOURCE_DIRECT_ACTIVE"
+                    ),
+                )
+            ]
+
+    response = await add_skills_to_set(
+        "set-1",
+        AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
+        entity_id=None,
+        entity_type=None,
+        bot_id=None,
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+        bot_repo=_Bots(),
+        control_plane=_ControlPlane(),
+    )
+
+    assert response.data["failed"] == [
+        {
+            "skill_id": "7",
+            "error": "RESOURCE_DIRECT_ACTIVE",
+            "error_code": "RESOURCE_DIRECT_ACTIVE",
+            "message": "该 Skill 已单独激活，请先停用后再加入能力集。",
+        }
+    ]
 
 
 @pytest.mark.asyncio

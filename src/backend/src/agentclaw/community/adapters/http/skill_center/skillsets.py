@@ -99,6 +99,12 @@ _LEGACY_SKILL_SET_BATCH_PARTIAL_CONFLICTS = frozenset(
         "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
     }
 )
+_LEGACY_SKILL_SET_BATCH_ERROR_MESSAGES = {
+    "RESOURCE_DIRECT_ACTIVE": "该 Skill 已单独激活，请先停用后再加入能力集。",
+    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (
+        "该 Skill 已由其他能力集管理，不能重复添加。"
+    ),
+}
 
 
 # ==================== Helper Functions ====================
@@ -112,6 +118,20 @@ def _is_legacy_skill_set_batch_partial_failure(error: Exception) -> bool:
         isinstance(error, SkillSetControlPlaneConflictError)
         and str(error) in _LEGACY_SKILL_SET_BATCH_PARTIAL_CONFLICTS
     )
+
+
+def _legacy_skill_set_batch_failure(skill_id: str, error: Exception) -> dict[str, str]:
+    """Preserve the legacy error code while providing display-safe text."""
+    error_code = str(error)
+    return {
+        "skill_id": skill_id,
+        "error": error_code,
+        "error_code": error_code,
+        "message": _LEGACY_SKILL_SET_BATCH_ERROR_MESSAGES.get(
+            error_code,
+            "暂时无法添加该 Skill，请刷新后重试。",
+        ),
+    }
 
 
 def _legacy_actor(ctx: RequestContext, requested_user_id: str | None) -> str:
@@ -812,7 +832,9 @@ async def add_skills_to_set(
         ) as exc:
             if not _is_legacy_skill_set_batch_partial_failure(exc):
                 raise
-            results["failed"].append({"skill_id": skill_id, "error": str(exc)})
+            results["failed"].append(
+                _legacy_skill_set_batch_failure(str(skill_id), exc)
+            )
     if resolved:
         outcomes = await control_plane.add_skills(
             bot_id=effective_bot_id,
@@ -830,7 +852,7 @@ async def add_skills_to_set(
             assert outcome.error is not None
             if _is_legacy_skill_set_batch_partial_failure(outcome.error):
                 results["failed"].append(
-                    {"skill_id": legacy_skill_id, "error": str(outcome.error)}
+                    _legacy_skill_set_batch_failure(legacy_skill_id, outcome.error)
                 )
                 continue
             raise outcome.error

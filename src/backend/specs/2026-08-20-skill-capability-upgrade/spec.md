@@ -198,6 +198,9 @@ PUT/GET/DELETE /bots/{bot_id}/skills/{skill_id}/installation
 - 同一 Bot 下，同一 Skill/MCP 最多属于一个 SkillSet，System Default 包含在内；excluded
   仍然属于 Default。
 - Direct active 资源不能加入任何 SkillSet；必须先 Direct deactivate。
+- Installation 行存在本身不证明 Direct：若该行可由 active ordinary SkillSet 或未 exclusion
+  的 System Default Membership 解释，则资源是 Set-managed，加入第二个 Set 时返回
+  `RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET`，而不是 `RESOURCE_DIRECT_ACTIVE`。
 - 已属于任何 reaching SkillSet 的资源不能单独 activate/deactivate；Default exclusion 只能
   通过 Default Set-scoped add/remove 命令切换。
 - 激活/停用 SkillSet 原子批量增删成员对应的 Installation 行。
