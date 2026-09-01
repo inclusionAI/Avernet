@@ -346,6 +346,26 @@ class ManifestContentService:
             limit=DEFAULT_RECORD_LIMIT if limit is None else limit,
         )
 
+    def latest_receipt(
+        self,
+        scope: ContentScope,
+        *,
+        source_url: str,
+    ) -> Optional[StoredContentRecord]:
+        """The bot's newest receipt for one source URL, or ``None``.
+
+        The fetch pipeline's lookup — "does this bot's newest receipt for
+        *this* URL hold these bytes?" — delegated whole: the repository
+        filters and orders, this layer adds nothing, so the answer cannot
+        disagree with the audit read over the same rows.
+        """
+        return self._repository.latest_for(
+            env=scope.env,
+            entity_id=scope.entity_id,
+            bot_id=scope.bot_id,
+            source_url=source_url,
+        )
+
     # --- the blob tree ----------------------------------------------------
 
     def _blob_path(self, digest: str) -> Path:

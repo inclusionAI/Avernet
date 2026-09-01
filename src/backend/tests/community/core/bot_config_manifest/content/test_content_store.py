@@ -69,6 +69,15 @@ class _FakeRepository:
         ]
         return list(reversed(matched))[:max(0, limit)]
 
+    def latest_for(self, *, env, entity_id, bot_id, source_url):
+        matched = [
+            r
+            for r in self.rows
+            if (r.env, r.entity_id, r.bot_id, r.source_url)
+            == (env, entity_id, bot_id, source_url)
+        ]
+        return matched[-1] if matched else None
+
 
 def _fetched(body: bytes = BODY, *, url: str = "https://content.example/a.bin",
             sha: str | None = None, size: int | None = None,
@@ -120,6 +129,35 @@ def test_records_limit_none_defaults_and_an_explicit_value_bounds(tmp_path):
                   source_url="https://mirror.example/a.bin")
     assert len(service.records(scope=SCOPE)) == 2
     assert len(service.records(scope=SCOPE, limit=1)) == 1
+
+
+def test_latest_receipt_answers_the_newest_row_for_one_source(tmp_path):
+    # The per-source lookup the fetch pipeline asks. Two store events for one
+    # URL (a re-fetch of the same pin) and one for another source: the answer
+    # is the newest of *this* source's rows — the audit read's ordering with
+    # a source filter, agreeing with `records` over the same rows.
+    service, _ = _service(tmp_path)
+    url = "https://content.example/a.bin"
+    service.store(_fetched(), scope=SCOPE, source_url=url)
+    other = b"other-bytes"
+    service.store(
+        _fetched(other, url=url, sha="sha256:" + hashlib.sha256(other).hexdigest()),
+        scope=SCOPE,
+        source_url=url,
+    )
+    service.store(_fetched(), scope=SCOPE, source_url="https://other.example/x.bin")
+
+    latest = service.latest_receipt(scope=SCOPE, source_url=url)
+    assert latest is not None
+    assert latest.digest == "sha256:" + hashlib.sha256(other).hexdigest()
+
+    missing = service.latest_receipt(
+        scope=SCOPE, source_url="https://never.example/a.bin"
+    )
+    assert missing is None
+
+    other_scope = ContentScope(env="dev", entity_id="ent_a", bot_id="bot_2")
+    assert service.latest_receipt(scope=other_scope, source_url=url) is None
 
 
 def test_a_receipt_that_disagrees_with_its_bytes_is_refused(tmp_path):

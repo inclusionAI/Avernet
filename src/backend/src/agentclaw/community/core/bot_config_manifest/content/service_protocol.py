@@ -105,3 +105,19 @@ class ManifestContentServiceProtocol(Protocol):
         this file carries no drifting copy of its value.
         """
         ...
+
+    @abstractmethod
+    def latest_receipt(
+        self,
+        scope: ContentScope,
+        *,
+        source_url: str,
+    ) -> Optional[StoredContentRecord]:
+        """The bot's newest receipt for one source URL, or ``None``.
+
+        The per-lookup twin of ``records`` the fetch pipeline needs: that one
+        bounds at ``DEFAULT_RECORD_LIMIT`` and returns every source, so a busy
+        bot can evict the very row a category asks about. Same exact-equality
+        source matching as the repository beneath; never re-fetches.
+        """
+        ...
