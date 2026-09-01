@@ -62,12 +62,22 @@ def test_enrich_stringifies_bot_id_and_does_not_mutate_input() -> None:
 
 
 @pytest.mark.unit
+def test_enrich_eval_stage_maps_to_eval() -> None:
+    out = enrich_engine_ext(
+        {}, bot_id="b1", owner_id="u1", bot_name="Eval Bot", stage=PublishStage.EVAL
+    )
+    assert out["stage"] == "eval"
+
+
+@pytest.mark.unit
 def test_stage_value_mapping() -> None:
-    # The deliberate translation: enum verify/online → engine canary/release.
+    # The deliberate translation: enum verify/online → engine canary/release,
+    # enum eval → engine eval (评测沙箱场景).
     assert STAGE_VALUE == {
         PublishStage.DRAFT: "draft",
         PublishStage.VERIFY: "canary",
         PublishStage.ONLINE: "release",
+        PublishStage.EVAL: "eval",
     }
 
 
@@ -78,6 +88,7 @@ def test_stage_value_mapping() -> None:
         (PublishStage.DRAFT, "draft"),
         (PublishStage.VERIFY, "canary"),
         (PublishStage.ONLINE, "release"),
+        (PublishStage.EVAL, "eval"),
     ],
 )
 def test_restamp_sets_stage(stage: PublishStage, expected: str) -> None:
@@ -252,3 +263,14 @@ def test_compose_does_not_mutate_input() -> None:
     base = {"engine_ext": engine_ext, "engine_overrides": {}}
     DeliveryArtifact.compose(base, PublishStage.VERIFY, _VERIFY_CHANNELS)
     assert engine_ext == {"bot_id": "b", "stage": "draft"}  # input untouched
+
+
+@pytest.mark.unit
+def test_compose_eval_stage_restamps_to_eval() -> None:
+    # 评测沙箱场景：stage=EVAL 时 engine_ext.stage 应重标记为 "eval"
+    base = {
+        "engine_ext": {"bot_id": "b", "stage": "draft"},
+        "engine_overrides": {},
+    }
+    out = DeliveryArtifact.compose(base, PublishStage.EVAL, None)
+    assert out.config_artifact["engine_ext"]["stage"] == "eval"
