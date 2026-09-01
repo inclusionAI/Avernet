@@ -605,6 +605,60 @@ class TestFindUnregistered:
             (12, "sb-12", "baas_device", 1788192000000),
         ]
 
+    def test_stopped_cold_row_same_sandbox_suppresses_hot(self, repo):
+        """D-85-AJ1 row-level pin (device side): a STOPPED cold row matching
+        (env, source_table, source_id, sandbox_id) suppresses the hot row —
+        threshold-STOPPED is terminal, no resurrection loop from discovery."""
+        _seed_hot_device(
+            id_val=40,
+            env=ENV,
+            provider_device_id="sb-40",
+            provider_device_props=(
+                '{"ttl_expiration_time":"2026-09-01T00:00:00",'
+                '"ttl_expiration_timestamp":1788192000000}'
+            ),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=40,
+            sandbox_id="sb-40",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        rows = repo.find_unregistered(ENV, "baas_device", 500)
+
+        assert rows == []
+
+    def test_stopped_cold_row_stale_sandbox_does_not_suppress_hot(self, repo):
+        """D-85-AJ1 row-level pin (device side): a STOPPED cold row for an
+        OLD sandbox (destroy+create swap) does not match the anti-join —
+        the swapped-in hot row stays discoverable as the safety net."""
+        _seed_hot_device(
+            id_val=41,
+            env=ENV,
+            provider_device_id="sb-41",
+            provider_device_props=(
+                '{"ttl_expiration_time":"2026-09-01T00:00:00",'
+                '"ttl_expiration_timestamp":1788192000000}'
+            ),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=41,
+            sandbox_id="sb-old",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        rows = repo.find_unregistered(ENV, "baas_device", 500)
+
+        assert [(r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows] == [
+            (41, "sb-41", "baas_device", 1788192000000),
+        ]
+
     def test_binding_side_anti_join_json_equality(self, repo):
         # Found: 20 (unregistered), 22 (stale cold sandbox).
         _seed_hot_binding(
