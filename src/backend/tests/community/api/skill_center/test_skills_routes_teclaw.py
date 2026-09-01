@@ -18,6 +18,7 @@ from agentclaw.community.adapters.http.dependencies import (
 from agentclaw.community.adapters.http.skill_center.skills import (
     router as skills_router,
 )
+from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 
 pytestmark = pytest.mark.unit
 
@@ -80,6 +81,8 @@ def _app(skill_service):
         "has_permission": True,
         "level": "ADMIN",
     }
+    query_service = MagicMock()
+    query_service.get_readme_by_skill = AsyncMock()
 
     app = FastAPI()
     app.include_router(skills_router)
@@ -92,6 +95,9 @@ def _app(skill_service):
             )
             from agentclaw.community.api.skill_parameter_service_factory import (
                 SkillParameterServiceFactoryProtocol,
+            )
+            from agentclaw.community.api.skill_query_service import (
+                SkillQueryServiceProtocol,
             )
             from agentclaw.community.core.repository.protocols.bot import BotRepository
             from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
@@ -116,6 +122,7 @@ def _app(skill_service):
 
             binder.bind(SkillServiceFactory, to=factory)
             binder.bind(SkillServiceFactoryProtocol, to=factory)
+            binder.bind(SkillQueryServiceProtocol, to=query_service)
             binder.bind(WorkspacePathFactory, to=path_factory)
             binder.bind(BotRepository, to=bot_repo)
             binder.bind(DeviceContextResolver, to=resolver)
@@ -372,6 +379,92 @@ def test_readme_route_rejects_local_skill_when_owning_bot_is_missing():
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Skill's owning bot was not found"
     assert factory.create.call_count == 1
+
+
+def test_readme_route_reads_git_skill_without_owning_bot():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "shared-skill",
+        "git_path": "git://infra/shared-skill",
+        "bolt_id": "deleted-bot",
+    }
+
+    client, factory, _ = _app(lookup_svc)
+    bot_repo = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.core.repository.protocols.bot",
+            fromlist=["BotRepository"],
+        ).BotRepository
+    )
+    bot_repo.get_unique_by_id.return_value = None
+    bot_repo.get_live_by_id_owner_and_env.return_value = []
+    query_service = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.api.skill_query_service",
+            fromlist=["SkillQueryServiceProtocol"],
+        ).SkillQueryServiceProtocol
+    )
+    query_service.get_readme_by_skill = AsyncMock(return_value="# Shared Skill")
+
+    resp = client.get("/api/skills/1/readme", params=_Q)
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["content"] == "# Shared Skill"
+    assert factory.create.call_count == 1
+    bot_repo.get_live_by_id_owner_and_env.assert_not_called()
+    bot_repo.get_unique_by_id.assert_not_called()
+    query_service.get_readme_by_skill.assert_awaited_once_with(
+        skill_id="1", actor_id="u1"
+    )
+
+
+def test_readme_route_returns_not_found_when_git_content_is_missing():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "shared-skill",
+        "git_path": "git://infra/shared-skill",
+        "bolt_id": "deleted-bot",
+    }
+    client, _, _ = _app(lookup_svc)
+    query_service = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.api.skill_query_service",
+            fromlist=["SkillQueryServiceProtocol"],
+        ).SkillQueryServiceProtocol
+    )
+    query_service.get_readme_by_skill = AsyncMock(
+        side_effect=LocalSkillNotFoundError()
+    )
+
+    resp = client.get("/api/skills/1/readme", params=_Q)
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Skill or README not found"
+
+
+def test_readme_route_rejects_empty_git_content():
+    lookup_svc = MagicMock()
+    lookup_svc.get_skill.return_value = {
+        "id": "1",
+        "name": "shared-skill",
+        "git_path": "git://infra/shared-skill",
+        "bolt_id": "deleted-bot",
+    }
+    client, _, _ = _app(lookup_svc)
+    query_service = client.app.state.injector.get(
+        __import__(
+            "agentclaw.community.api.skill_query_service",
+            fromlist=["SkillQueryServiceProtocol"],
+        ).SkillQueryServiceProtocol
+    )
+    query_service.get_readme_by_skill = AsyncMock(return_value="")
+
+    resp = client.get("/api/skills/1/readme", params=_Q)
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Skill or README not found"
 
 
 def test_readme_route_resolves_default_bot_by_env_owner_and_bot_id():
