@@ -17603,6 +17603,7 @@
         "description": "One safe, actionable runtime observation without infrastructure paths.",
         "properties": {
           "code": {
+            "description": "Stable, machine-readable Runtime observation code.",
             "title": "Code",
             "type": "string"
           },
@@ -17615,6 +17616,7 @@
                 "type": "null"
               }
             ],
+            "description": "Skill corpus such as LOCAL, REPO, or CENTER.",
             "title": "Corpus"
           },
           "expected_entry_type": {
@@ -17626,6 +17628,7 @@
                 "type": "null"
               }
             ],
+            "description": "Expected active entry classification.",
             "title": "Expected Entry Type"
           },
           "logical_location": {
@@ -17637,6 +17640,7 @@
                 "type": "null"
               }
             ],
+            "description": "Logical Runtime location without an absolute filesystem path.",
             "title": "Logical Location"
           },
           "name": {
@@ -17648,6 +17652,7 @@
                 "type": "null"
               }
             ],
+            "description": "Safe display name of the affected capability.",
             "title": "Name"
           },
           "observed_entry_type": {
@@ -17659,9 +17664,11 @@
                 "type": "null"
               }
             ],
+            "description": "Safe classification of the existing active entry.",
             "title": "Observed Entry Type"
           },
           "reason": {
+            "description": "Safe human-readable explanation without infrastructure details.",
             "title": "Reason",
             "type": "string"
           },
@@ -17674,6 +17681,7 @@
                 "type": "null"
               }
             ],
+            "description": "Requested Runtime action when the engine reported one.",
             "title": "Requested Action"
           },
           "resource_id": {
@@ -17685,9 +17693,11 @@
                 "type": "null"
               }
             ],
+            "description": "Stable capability identifier when available.",
             "title": "Resource Id"
           },
           "resource_type": {
+            "description": "The affected capability domain.",
             "enum": [
               "SKILL",
               "MCP",
@@ -17697,10 +17707,12 @@
             "type": "string"
           },
           "retryable": {
+            "description": "Whether a later projection attempt may resolve the issue.",
             "title": "Retryable",
             "type": "boolean"
           },
           "status": {
+            "description": "Whether the observation is transient or requires user intervention.",
             "enum": [
               "PENDING",
               "DEGRADED"
@@ -17717,6 +17729,7 @@
                 "type": "null"
               }
             ],
+            "description": "Safe next action suggested to the caller.",
             "title": "Suggested Action"
           }
         },
@@ -17749,10 +17762,12 @@
           },
           "degraded_count": {
             "default": 0,
+            "description": "Number of non-destructive degraded observations.",
             "title": "Degraded Count",
             "type": "integer"
           },
           "issues": {
+            "description": "Per-capability safe diagnostic details.",
             "items": {
               "$ref": "#/components/schemas/RuntimeProjectionIssue"
             },
@@ -17761,6 +17776,7 @@
           },
           "pending_count": {
             "default": 0,
+            "description": "Number of retryable pending observations.",
             "title": "Pending Count",
             "type": "integer"
           },
@@ -17773,9 +17789,11 @@
                 "type": "null"
               }
             ],
+            "description": "Reason for a skipped or aggregate Runtime observation.",
             "title": "Reason"
           },
           "status": {
+            "description": "Aggregate Runtime observation for this command.",
             "enum": [
               "CONVERGED",
               "PENDING",
@@ -20402,7 +20420,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Durable Desired State result when returned by a mutation."
           },
           "id": {
             "description": "Decimal SkillSet identifier.",
@@ -20432,7 +20451,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Observed Runtime convergence when returned by a mutation."
           }
         },
         "required": [
@@ -20577,7 +20597,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Durable Desired State result for this membership command."
           },
           "runtime_projection": {
             "anyOf": [
@@ -20587,7 +20608,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Observed Runtime convergence for this membership command."
           }
         },
         "required": [
@@ -20658,7 +20680,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Durable Desired State result for this mutation."
           },
           "runtime_projection": {
             "anyOf": [
@@ -20668,7 +20691,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Observed Runtime convergence for this mutation."
           },
           "skill": {
             "$ref": "#/components/schemas/Skill",
@@ -23181,7 +23205,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Durable Desired State result when returned by a mutation."
           },
           "id": {
             "description": "Decimal SkillSet identifier.",
@@ -23220,7 +23245,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Observed Runtime convergence when returned by a mutation."
           }
         },
         "required": [

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from agentclaw.community.adapters.http.openapi_v1.runtime_projection import (
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
     DesiredStateResult,
     RuntimeProjectionResult,
 )
@@ -18,8 +18,12 @@ class SkillSetItem(BaseModel):
     description: str | None = Field(default=None, description="Optional SkillSet description.")
     is_default: bool = Field(description="Whether this is the immutable System Default set.")
     is_active: bool = Field(description="Whole-set desired state; ordinary sets never expose partial activation.")
-    desired_state: DesiredStateResult | None = None
-    runtime_projection: RuntimeProjectionResult | None = None
+    desired_state: DesiredStateResult | None = Field(
+        default=None, description="Durable Desired State result when returned by a mutation."
+    )
+    runtime_projection: RuntimeProjectionResult | None = Field(
+        default=None, description="Observed Runtime convergence when returned by a mutation."
+    )
 
 
 class CreateSkillSetRequest(BaseModel):
@@ -42,8 +46,12 @@ class SkillSetMembershipResult(BaseModel):
     changed: bool = Field(description="False when the requested membership state already existed.")
     # Canonical handlers populate both. They stay optional at the schema
     # boundary so this additive diagnostic does not break older clients.
-    desired_state: DesiredStateResult | None = None
-    runtime_projection: RuntimeProjectionResult | None = None
+    desired_state: DesiredStateResult | None = Field(
+        default=None, description="Durable Desired State result for this membership command."
+    )
+    runtime_projection: RuntimeProjectionResult | None = Field(
+        default=None, description="Observed Runtime convergence for this membership command."
+    )
 
 
 class SkillSetSkillItem(BaseModel):

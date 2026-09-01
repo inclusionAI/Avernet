@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentclaw.community.adapters.http.openapi_v1.runtime_projection import (
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
     DesiredStateResult,
     RuntimeProjectionResult,
 )

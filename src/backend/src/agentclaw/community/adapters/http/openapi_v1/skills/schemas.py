@@ -13,7 +13,7 @@ from typing import Any, Literal
 from fastapi import UploadFile
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
-from agentclaw.community.adapters.http.openapi_v1.runtime_projection import (
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
     DesiredStateResult,
     RuntimeProjectionResult,
 )
@@ -236,8 +236,12 @@ class SkillState(BaseModel):
     # Additive response fields: canonical handlers always populate both, but
     # keeping them optional in the published schema preserves older generated
     # clients that only understand ``skill`` and ``changed``.
-    desired_state: DesiredStateResult | None = None
-    runtime_projection: RuntimeProjectionResult | None = None
+    desired_state: DesiredStateResult | None = Field(
+        default=None, description="Durable Desired State result for this mutation."
+    )
+    runtime_projection: RuntimeProjectionResult | None = Field(
+        default=None, description="Observed Runtime convergence for this mutation."
+    )
 
 
 class SkillContent(BaseModel):

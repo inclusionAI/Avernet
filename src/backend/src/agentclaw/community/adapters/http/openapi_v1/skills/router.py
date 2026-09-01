@@ -41,7 +41,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
-from agentclaw.community.adapters.http.openapi_v1.runtime_projection import (
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
     desired_state_from,
     runtime_projection_from,
 )
