@@ -111,9 +111,8 @@ class _TrackLatest:
 
 
 class _Cache:
-    def __init__(self, *, lock_value="lock-token", renew_ok=True) -> None:
+    def __init__(self, *, lock_value="lock-token") -> None:
         self.lock_value = lock_value
-        self.renew_ok = renew_ok
         self.released = []
         self.renewed = []
 
@@ -126,7 +125,7 @@ class _Cache:
 
     def renew_lock_strict(self, key, value, ttl):
         self.renewed.append((key, value, ttl))
-        return self.renew_ok
+        return True
 
 
 class _UnavailableCache(_Cache):
@@ -135,18 +134,13 @@ class _UnavailableCache(_Cache):
 
 
 class _RenewUnavailableCache(_Cache):
-    def renew_lock_strict(self, key, value, ttl):
-        raise CacheLockInfrastructureError("redis renew endpoint details")
-
-
-class _SequencedRenewCache(_Cache):
-    def __init__(self, renewals: list[bool]) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._renewals = iter(renewals)
+        self.renew_attempts = 0
 
     def renew_lock_strict(self, key, value, ttl):
-        self.renewed.append((key, value, ttl))
-        return next(self._renewals)
+        self.renew_attempts += 1
+        raise CacheLockInfrastructureError("redis renew endpoint details")
 
 
 def test_sync_continues_after_one_failure_and_tracks_only_new_published_version() -> None:
@@ -172,7 +166,7 @@ def test_sync_continues_after_one_failure_and_tracks_only_new_published_version(
     assert summary.failures[0].skill_id == "20"
     assert len(materializer.calls) == 1
     assert len(track_latest.calls) == 1
-    assert len(service._cache.renewed) == 2
+    assert service._cache.renewed == []
 
 
 def test_manual_sync_returns_stable_conflict_when_distributed_lock_is_held() -> None:
@@ -221,52 +215,43 @@ def test_startup_cache_outage_is_deferred_to_periodic_retry() -> None:
     assert summary.scanned == summary.failed == 0
 
 
-def test_manual_sync_maps_cache_renewal_outage_to_stable_unavailable_error() -> None:
+def test_sync_does_not_require_unsupported_lock_renewal() -> None:
+    materializer = _Materializer()
     service = SkillCenterSyncService(
         assets=_Assets(),
         gateway=_Gateway(),
-        materializer=_Materializer(),
+        materializer=materializer,
         track_latest=_TrackLatest(),
         cache=_RenewUnavailableCache(),
         env_provider=lambda: "pre",
     )
 
-    with pytest.raises(SkillCenterSyncUnavailableError):
-        service.sync()
+    summary = service.sync()
 
-
-def test_sync_stops_before_the_first_item_when_lease_loss_is_observed() -> None:
-    materializer = _Materializer()
-    service = SkillCenterSyncService(
-        assets=_Assets(),
-        gateway=_Gateway(),
-        materializer=materializer,
-        track_latest=_TrackLatest(),
-        cache=_Cache(renew_ok=False),
-        env_provider=lambda: "pre",
-    )
-
-    with pytest.raises(SkillCenterSyncInProgressError, match="SYNC_LOCK_LOST"):
-        service.sync()
-
-    assert materializer.calls == []
-
-
-def test_sync_allows_current_idempotent_item_then_stops_after_lease_loss() -> None:
-    materializer = _Materializer()
-    service = SkillCenterSyncService(
-        assets=_Assets(),
-        gateway=_Gateway(),
-        materializer=materializer,
-        track_latest=_TrackLatest(),
-        cache=_SequencedRenewCache([True, False]),
-        env_provider=lambda: "pre",
-    )
-
-    with pytest.raises(SkillCenterSyncInProgressError, match="SYNC_LOCK_LOST"):
-        service.sync()
-
+    assert summary.scanned == 2
     assert len(materializer.calls) == 1
+    assert service._cache.renew_attempts == 0
+    assert service._cache.renewed == []
+
+
+def test_sync_defers_remaining_assets_after_fixed_lease_expires() -> None:
+    materializer = _Materializer()
+    ticks = iter((0.0, 0.0, float(30 * 60)))
+    service = SkillCenterSyncService(
+        assets=_Assets(),
+        gateway=_Gateway(),
+        materializer=materializer,
+        track_latest=_TrackLatest(),
+        cache=_Cache(),
+        env_provider=lambda: "pre",
+        monotonic=lambda: next(ticks),
+    )
+
+    summary = service.sync()
+
+    assert summary.scanned == 1
+    assert len(materializer.calls) == 1
+    assert service._cache.released == []
 
 
 def test_published_exact_version_reensures_track_latest_before_unchanged() -> None:
@@ -321,9 +306,7 @@ def test_lifecycle_bootstrap_reconciles_once_then_starts_and_stops_periodic_task
         assert service._periodic_task is None
 
     asyncio.run(run_lifecycle())
-    assert cache.released == [
-        ("skill-center-public-sync:pre", "lock-token")
-    ]
+    assert cache.released == []
 
 
 @pytest.mark.parametrize(
@@ -350,6 +333,4 @@ def test_sync_propagates_persistence_failure_instead_of_returning_success(
     with pytest.raises(type(error), match="database unavailable"):
         service.sync()
 
-    assert cache.released == [
-        ("skill-center-public-sync:pre", "lock-token")
-    ]
+    assert cache.released == []
