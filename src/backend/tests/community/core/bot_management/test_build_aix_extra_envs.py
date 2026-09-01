@@ -106,3 +106,111 @@ class TestRelayDefaultRuntime:
     def test_none_template_config_no_runtime(self):
         envs = build_aix_extra_envs(None, template_type="applicationCoding")
         assert envs == {"BOT_TYPE": "application"}
+
+
+class TestDevflowWorkflows:
+    """``AIX_DEVFLOW_INFO``（兼容首项单值）+ ``AIX_DEVFLOW_INFO_LIST``（全量 JSON 数组）—— RFC 220 UQ-16a。"""
+
+    def test_plural_list_emits_single_value_and_list(self):
+        cfg = {"devflow_workflows": ["workflows/a/workflow.yaml", "workflows/b/workflow.yaml"]}
+        envs = build_aix_extra_envs(cfg, template_type="applicationCoding")
+        assert envs["AIX_DEVFLOW_INFO"] == "workflows/a/workflow.yaml"
+        assert json.loads(envs["AIX_DEVFLOW_INFO_LIST"]) == [
+            "workflows/a/workflow.yaml",
+            "workflows/b/workflow.yaml",
+        ]
+
+    def test_plural_dict_items(self):
+        """前端把每条选择持久化成 ``{"path": ...}``；要抽 path 而非整 dict 透传。"""
+        cfg = {
+            "devflow_workflows": [
+                {"path": "workflows/a/workflow.yaml"},
+                {"path": "workflows/b/workflow.yaml"},
+            ]
+        }
+        envs = build_aix_extra_envs(cfg, template_type="applicationCoding")
+        assert envs["AIX_DEVFLOW_INFO"] == "workflows/a/workflow.yaml"
+        assert json.loads(envs["AIX_DEVFLOW_INFO_LIST"]) == [
+            "workflows/a/workflow.yaml",
+            "workflows/b/workflow.yaml",
+        ]
+
+    def test_plural_dedupes_preserving_order(self):
+        cfg = {
+            "devflow_workflows": [
+                "workflows/a/workflow.yaml",
+                "workflows/b/workflow.yaml",
+                "  workflows/a/workflow.yaml  ",
+            ]
+        }
+        envs = build_aix_extra_envs(cfg, template_type="applicationCoding")
+        assert json.loads(envs["AIX_DEVFLOW_INFO_LIST"]) == [
+            "workflows/a/workflow.yaml",
+            "workflows/b/workflow.yaml",
+        ]
+
+    def test_plural_single_selection_still_emits_list(self):
+        cfg = {"devflow_workflows": ["workflows/a/workflow.yaml"]}
+        envs = build_aix_extra_envs(cfg, template_type="applicationCoding")
+        assert envs["AIX_DEVFLOW_INFO"] == "workflows/a/workflow.yaml"
+        assert json.loads(envs["AIX_DEVFLOW_INFO_LIST"]) == ["workflows/a/workflow.yaml"]
+
+    def test_singular_string_falls_back(self):
+        """无复数 key → 旧单数字符串仍可用；list 带这一条。"""
+        cfg = {"devflow_workflow": "devflow/app.yaml"}
+        envs = build_aix_extra_envs(cfg, template_type="applicationCoding")
+        assert envs["AIX_DEVFLOW_INFO"] == "devflow/app.yaml"
+        assert json.loads(envs["AIX_DEVFLOW_INFO_LIST"]) == ["devflow/app.yaml"]
+
+    def test_singular_dict_extracts_path(self):
+        cfg = {"devflow_workflow": {"path": "devflow/v2/app.yaml"}}
+        envs = build_aix_extra_envs(cfg, template_type="applicationCoding")
+        assert envs["AIX_DEVFLOW_INFO"] == "devflow/v2/app.yaml"
+        assert json.loads(envs["AIX_DEVFLOW_INFO_LIST"]) == ["devflow/v2/app.yaml"]
+
+    def test_plural_wins_over_singular(self):
+        """前端双写（复数全量 + 单数首项）→ 取复数，单数忽略不重复。"""
+        cfg = {
+            "devflow_workflows": ["workflows/a/workflow.yaml", "workflows/b/workflow.yaml"],
+            "devflow_workflow": "workflows/a/workflow.yaml",
+        }
+        envs = build_aix_extra_envs(cfg, template_type="applicationCoding")
+        assert json.loads(envs["AIX_DEVFLOW_INFO_LIST"]) == [
+            "workflows/a/workflow.yaml",
+            "workflows/b/workflow.yaml",
+        ]
+
+    def test_empty_selection_emits_nothing(self):
+        envs = build_aix_extra_envs({"devflow_workflows": []}, template_type="applicationCoding")
+        assert "AIX_DEVFLOW_INFO" not in envs
+        assert "AIX_DEVFLOW_INFO_LIST" not in envs
+
+    def test_no_devflow_keys_emits_nothing(self):
+        envs = build_aix_extra_envs({"model": "m1"}, template_type="applicationCoding")
+        assert "AIX_DEVFLOW_INFO" not in envs
+        assert "AIX_DEVFLOW_INFO_LIST" not in envs
+
+    def test_personal_coding_multiselect(self):
+        """personalCoding 与 applicationCoding 同口径享多选契约。"""
+        cfg = {"devflow_workflows": ["workflows/a/workflow.yaml", "workflows/b/workflow.yaml"]}
+        envs = build_aix_extra_envs(cfg, template_type="personalCoding")
+        assert envs["BOT_TYPE"] == "personal"
+        assert json.loads(envs["AIX_DEVFLOW_INFO_LIST"]) == [
+            "workflows/a/workflow.yaml",
+            "workflows/b/workflow.yaml",
+        ]
+
+    def test_multiselect_coexists_with_git_and_model(self):
+        cfg = {
+            "devflow_workflows": ["workflows/a/workflow.yaml", "workflows/b/workflow.yaml"],
+            "backend_repo": [{"repo_url": "git@x/y.git"}],
+            "model": "m1",
+        }
+        envs = build_aix_extra_envs(cfg, template_type="applicationCoding")
+        assert envs["AIX_DEVFLOW_INFO"] == "workflows/a/workflow.yaml"
+        assert json.loads(envs["AIX_DEVFLOW_INFO_LIST"]) == [
+            "workflows/a/workflow.yaml",
+            "workflows/b/workflow.yaml",
+        ]
+        assert json.loads(envs["GIT_ADDRESSES"]) == ["git@x/y.git"]
+        assert envs["RELAY_DEFAULT_MODEL"] == "m1"
