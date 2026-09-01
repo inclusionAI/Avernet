@@ -35,7 +35,7 @@
 -- read each other's apply reports.
 
 CREATE TABLE `ac_bot_config_manifest_apply` (
-  `id`             bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `id`             bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'Primary key',
   -- The report's public identity: returned by the 202 from POST .../apply and
   -- polled on by GET .../applies/{apply_id}.
   --
@@ -43,37 +43,37 @@ CREATE TABLE `ac_bot_config_manifest_apply` (
   -- well, so an apply_id guessed or leaked from another bot resolves to
   -- nothing. The id is a handle the caller polls with; it never authorizes the
   -- read. That is why there is no UNIQUE KEY on apply_id alone.
-  `apply_id`       varchar(64)   NOT NULL COMMENT '本次 apply 的公开标识',
-  `env`            varchar(20)   NOT NULL COMMENT '环境标识: prod/pre/dev',
+  `apply_id`       varchar(64)   NOT NULL COMMENT 'Public handle for this apply',
+  `env`            varchar(20)   NOT NULL COMMENT 'Environment: prod/pre/dev',
   -- 256, not ac_bots' 1024 — see the index-budget note above.
-  `entity_id`      varchar(256)  NOT NULL COMMENT '实体ID（bot 的 entity_id）',
+  `entity_id`      varchar(256)  NOT NULL COMMENT 'Entity id: the bot entity_id',
   `bot_id`         varchar(256)  NOT NULL COMMENT 'Bot ID',
   -- 'explicit' is the only value this wave writes: W4's single entry point is
   -- the explicit POST. W8 adds 'republish'/'restart' and W13 adds 'create',
   -- neither of which needs a migration.
-  `trigger`        varchar(32)   NOT NULL COMMENT '触发来源：explicit/create/republish/restart',
+  `trigger`        varchar(32)   NOT NULL COMMENT 'What started it: explicit/create/republish/restart',
   -- RUNNING on insert, terminal on completion — the two-write lifecycle apply's
   -- async shape requires, since the route answers 202 and the work continues on
   -- a background thread.
   --
   -- Denormalised out of `report` so "show me failed applies" is a query rather
   -- than a scan of JSON, and so a poll is one indexed read.
-  `status`         varchar(16)   NOT NULL COMMENT 'RUNNING 或 SUCCEEDED/PARTIAL/FAILED',
+  `status`         varchar(16)   NOT NULL COMMENT 'RUNNING, or SUCCEEDED/PARTIAL/FAILED',
   -- mediumtext, not text: a report over a large manifest has no small cap to
   -- lean on, and text's 65,535 bytes is close enough to matter. Same divergence
   -- ac_bot_config_manifest.document records.
-  `report`         mediumtext    NOT NULL COMMENT '逐条明细（JSON）',
+  `report`         mediumtext    NOT NULL COMMENT 'The per-entry report (JSON)',
   -- Bounded the way the manifest's `modifier` is, and for the same reason: an
   -- application actor composes a prefix onto a 1024-character user id
   -- ("app:7:on-behalf-of:<...>"), so the composed value can legitimately be
   -- long without anything being malformed.
-  `actor`          varchar(1024) NOT NULL COMMENT '审计：发起者',
-  `started_at`     datetime      NOT NULL COMMENT '开始时间',
+  `actor`          varchar(1024) NOT NULL COMMENT 'Audit: who started it',
+  `started_at`     datetime      NOT NULL COMMENT 'When the apply began',
   -- NULL exactly while status is RUNNING. The two move together.
-  `finished_at`    datetime      NULL     COMMENT '结束时间；RUNNING 期间为空',
-  `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
-  `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  `finished_at`    datetime      NULL     COMMENT 'When it ended; NULL while RUNNING',
+  `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT 'Tenant, for data isolation',
+  `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Row created',
+  `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Row last modified',
   PRIMARY KEY (`id`),
   -- Two indexes, one per read. There are exactly two reads on this table.
   --
@@ -81,7 +81,7 @@ CREATE TABLE `ac_bot_config_manifest_apply` (
   KEY `idx_manifest_apply_latest` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `id`),
   -- GET .../applies/{apply_id} — the poll by id, scoped to the bot.
   KEY `idx_manifest_apply_by_id` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `apply_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot 配置清单 apply 记录';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot config manifest apply record';
 
 -- NO dry_run COLUMN, deliberately. A dry run mints no apply_id and writes no
 -- row at all, so there is nothing here to mark. A flag would invite a future
@@ -89,17 +89,17 @@ CREATE TABLE `ac_bot_config_manifest_apply` (
 -- to make; the test asserts this table is untouched by a dry run instead.
 
 CREATE TABLE `ac_bot_config_manifest_apply_lock` (
-  `id`             bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `env`            varchar(20)   NOT NULL COMMENT '环境标识: prod/pre/dev',
-  `entity_id`      varchar(256)  NOT NULL COMMENT '实体ID（bot 的 entity_id）',
+  `id`             bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'Primary key',
+  `env`            varchar(20)   NOT NULL COMMENT 'Environment: prod/pre/dev',
+  `entity_id`      varchar(256)  NOT NULL COMMENT 'Entity id: the bot entity_id',
   `bot_id`         varchar(256)  NOT NULL COMMENT 'Bot ID',
-  `holder_user_id` varchar(1024) NOT NULL COMMENT '持锁者（发起 apply 的人）',
+  `holder_user_id` varchar(1024) NOT NULL COMMENT 'Lock holder (whoever started the apply)',
   -- Fencing token, compared on release. Without it, an apply whose lock was
   -- reaped as stale could delete the lock a *later* apply legitimately took.
-  `lock_token`     varchar(256)  NOT NULL COMMENT '持锁令牌（释放时比对）',
-  `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
-  `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  `lock_token`     varchar(256)  NOT NULL COMMENT 'Fencing token, compared on release',
+  `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT 'Tenant, for data isolation',
+  `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Row created',
+  `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Row last modified',
   PRIMARY KEY (`id`),
   -- THE UNIQUE CONSTRAINT IS THE LOCK. One row per bot; concurrent INSERTs are
   -- arbitrated by the database, exactly one wins, and the losers see the
@@ -108,4 +108,4 @@ CREATE TABLE `ac_bot_config_manifest_apply_lock` (
   -- gmt_create is what get_if_stale measures against, on the DB clock, so a
   -- process killed mid-apply cannot hold this forever.
   UNIQUE KEY `uk_manifest_apply_lock` (`avernet_tenant`, `env`, `entity_id`, `bot_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot 配置清单 apply 串行锁';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot config manifest apply serialization lock';
