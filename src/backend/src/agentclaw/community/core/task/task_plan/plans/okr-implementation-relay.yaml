@@ -1,19 +1,22 @@
 template_id: okr-implementation-relay
 entry_bot_id: 20260828_8azkbtgs
+entry_name: 入口 OKR实现Bot
 task_type: static_plan
 # 串行接力 V2。链:
 # 入口(20260828_8azkbtgs,图前:分析OKR→决定找营销策略专家)
 # -> ① 营销策略专家(20260828_whd6nx7x,单独:产出策略方向+判定信息不够,决定拉圈人选品)
 # -> ② 策略生成群(driver 专家 20260828_whd6nx7x + 圈人 20260828_6snfeiq0 + 选品 20260828_roqtqqkx:
 #      专家驱动,圈人/选品细化,专家汇成完整营销策略)
-# -> ③ 风险评估群(业务风控 20260828_7q4cbeze+合规 20260828_jbadndne)
+# -> ③'业务风控专家(20260828_7q4cbeze,单独:拿到②策略→定风险点与范围→启动风险评审,框架据此拉下一节点的风险评审群)
+# -> ③ 风险评审群(业务风控 20260828_7q4cbeze driver+合规 20260828_jbadndne)
 # -> ④ 不可实现任务转BBS广场+自动研发(20260828_f7wfi27d,串行腿非旁路;须把上游策略/风险全料一并带到正文供⑤审核)
 # -> ⑤ 营销策略审核(20260828_9rgd70li)
 # -> ⑥ 投放实施(20260828_k9c2slro)
 # -> ⑦ 通知(notify,负责人)
 #
-# 接力承载:"handoff" output 用 $.result 取整个上报产出正文;每跳 input 仅透传上游"产出正文"块,
-# 框架不再做摘要/合成;⑤只读④handoff,不做跨跳 fan-in risk_result(全料随4 carry-forward).
+# 接力承载: 每个节点 input 只透传上游"产出正文"(handoff=$.result / 入口=okr 原文);
+# 框架在 _decorate 注入 V2 输入三段(# 接自 / ## 群组成 / ## 上游产出正文 / ## 本角色任务),不做摘要/合成。
+# rule(怎么分析/输出格式/接力交接)不归框架,由各 bot 的 skill/rule 配置。
 input_schema:
   okr:
     type: string
@@ -28,32 +31,53 @@ nodes:
       okr: $.input.okr
     output:
       handoff: $.result
+    task: |
+      产出双十一大促营销策略。遇到你无法独立闭环的部分,按你的判断决定如何推进。
   - id: strategy_generation_group
     name: 策略生成群
     type: collaboration
     depends_on: [marketing_strategy]
     collaboration:
       bot_ids: [20260828_whd6nx7x, 20260828_6snfeiq0, 20260828_roqtqqkx]
+      bot_names: [营销策略专家, 圈人 specialist, 选品 specialist]
       mode: chat
       completion: report
     input:
       handoff: $.marketing_strategy.output.handoff
     output:
       handoff: $.result
-  - id: risk_assessment
-    name: 风险评估群
-    type: collaboration
+    task: |
+      专家驱动:向圈人/选品派活 → 两人按你的专长各自细化 → 专家汇成完整营销策略。处理不了的问题,按你的判断标明。
+  - id: risk_lead
+    name: 业务风控专家
+    type: bot
+    bot_id: 20260828_7q4cbeze
     depends_on: [strategy_generation_group]
+    input:
+      handoff: $.strategy_generation_group.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      拿到上家完整营销策略,据你的风控专长识别需重点评估的风险点与范围,启动风险评审(下一步会拉合规专家进群一起评审)。
+      处理不了的问题,按你的判断标明。
+  - id: risk_assessment
+    name: 风险评审群
+    type: collaboration
+    depends_on: [risk_lead]
     collaboration:
       bot_ids: [20260828_7q4cbeze, 20260828_jbadndne]
+      bot_names: [业务风控, 合规]
       mode: chat
       completion: report
     input:
-      handoff: $.strategy_generation_group.output.handoff
+      handoff: $.risk_lead.output.handoff
     output:
       risk_result: $.report.result
       unhandled_tasks: $.result.unhandled_tasks
       handoff: $.result
+    task: |
+      评估双十一大促业务/合规风险。处理不了的问题,按你的判断标明。
+      (硬字段:driver output JSON 须带 unhandled_tasks 数组,供框架路由后续;叙述用职能词)
   - id: risk_unhandled_to_bbs
     name: 不可实现任务转BBS广场
     type: bbs_handoff
@@ -65,6 +89,10 @@ nodes:
     output:
       bbs_handed: $.result
       handoff: $.result
+    task: |
+      把上家识别出无人承接的任务组织成研发需求并交付。其余信息按你的判断决定如何推进。
+      (硬约束:你必在本跳产出正文里 carry-forward 上游全料,供下游审核审齐。
+       框架兜底:上家真实上报未带 unhandled_tasks,按占位 mock)
   - id: strategy_approval
     name: 营销策略审核
     type: bot
@@ -75,6 +103,8 @@ nodes:
     output:
       approval_result: $.result
       handoff: $.result
+    task: |
+      对双十一大促营销策略做结构化审核。需要退回或流转的,按你的判断给建议。
   - id: implementation
     name: 投放实施
     type: bot
@@ -85,9 +115,13 @@ nodes:
     output:
       implementation_result: $.result
       handoff: $.result
+    task: |
+      把已批准方案落为各平台/时段/资源位执行动作并跟踪。异常按你的判断决定处置方式。
   - id: notify_done
     name: 通知完成
     type: notify
     depends_on: [implementation]
     input:
       handoff: $.implementation.output.handoff
+    task: |
+      把"大促已实施 + 进展/风险 + 各跳交接摘要"通知负责人。

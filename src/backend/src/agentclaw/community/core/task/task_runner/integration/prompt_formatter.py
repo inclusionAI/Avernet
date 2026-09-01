@@ -72,6 +72,13 @@ def _poller_content_instruction() -> str:
 class PromptFormatterImpl(PromptFormatter):
     def format_execute(self, context: dict[str, Any], node: TaskNode) -> str:
         instr = context.get("node_instruction") or node.task_spec.metadata.instruction
+        # 接力交接节点:instruction 由 static_plan_runtime._decorate 注入 "# 接自 ..." 三段
+        # (# 接自 / ## 群组成 / ## 上游产出正文 / ## 本角色任务)。此时直接下发交接正文即可——
+        # bot 收到的是"从 X 接过来一个任务,情况是…",不再套派单/目标/验收/回收协议/字段要求/禁联网;
+        # 回收(末尾 JSON / HTTP 上报)与验收、禁联网由各 bot 的 skill/rule 配置保回流,
+        # 框架兜底(single_bot poller / 80s auto-mock)承托,流程不卡。
+        if str(instr).lstrip().startswith("# 接自"):
+            return str(instr)
         goal = node.task_spec.goal.objective
         siblings = context.get("sibling_outputs") or {}
         acceptances = [
