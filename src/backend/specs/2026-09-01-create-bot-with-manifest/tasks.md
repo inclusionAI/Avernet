@@ -272,12 +272,13 @@ Conventions from `plan.md` that every task assumes:
         convergence and the lock, **not** an absence of retry.
 - **Depends on:** Tasks 1, 9
 
-## [ ] Task 15: Tenancy
-- **Files:** `tests/community/bot_config_manifest/test_creation_tenancy.py` (new)
+## [x] Task 15: Tenancy
+- **Files:** `tests/community/core/bot_config_manifest/creation/test_creation_tenancy.py`
+  (new)
 - **Done when:**
-  - [ ] The tenant observed inside the apply handler and inside the creation job
+  - [x] The tenant observed inside the apply handler and inside the creation job
         equals the submitting request's.
-  - [ ] Each test uses a payload tenant that differs from the process default, so
+  - [x] Each test uses a payload tenant that differs from the process default, so
         dropping the scope makes it **fail** rather than pass by coincidence —
         `get_current_avernet_tenant()` returns the default rather than raising.
 - **Depends on:** Tasks 1, 9
