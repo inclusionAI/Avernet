@@ -52,6 +52,13 @@ What comes from where:
   ``/openapi/v1`` request answers 401. If that ever needs to vary per
   deployment, this is the line to revisit.
 
+- **BCN's ``aud``/``iss``/``kid``** are fixed in code too, next to ours, and for
+  the same reason. They are not a second contract but the other end of this one:
+  the backend re-addresses a verified principal token when it calls BCN on the
+  caller's behalf (:func:`resign_principal_for_bcn`), and BCN's trust config
+  decides what that copy has to say. See the constants below for the coupling
+  that creates.
+
 Resolved once, at boot: the key is deployment configuration, and a per-request
 secret-store round trip on the hot path buys nothing. There is deliberately no
 re-read, so rotating the shared secret requires a restart on both sides.
@@ -61,9 +68,11 @@ from __future__ import annotations
 
 from agentclaw.community.core.gateway_principal import (
     MIN_SIGNING_KEY_BYTES,
+    PrincipalSignerConfig,
     PrincipalVerifierConfig,
     is_weak_signing_key,
     key_fingerprint,
+    resign_principal_token,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -80,6 +89,29 @@ _AUDIENCE = "backend"
 # ``user_config.principal_signer.issuer``, which is configurable on that side —
 # so this constant and that setting must move together or every request 401s.
 _ISSUER = "gateway"
+
+# BCN's half of the same contract, for the one flow that has to call it on the
+# caller's behalf (``core/work_orders/callbacks.py`` → the friend accept/reject
+# routes). These are BCN's requirements, not ours: it verifies the same shared
+# key but refuses a token addressed to ``backend``, so the credential has to be
+# re-addressed before it is forwarded — see ``core/gateway_principal/signer.py``.
+#
+# Fixed in code for the same reason ``aud``/``iss`` above are, and pinned to the
+# defaults BCN ships (``gateway_principal.{issuer,audience,key_id}`` in
+# ``src/bcs/crates/bootstrap/bcs/src/config.rs``, spelled out in
+# ``src/bcs/api-contracts/v1/gateway-principal/contract.md``). BCN can override
+# all three per deployment, so the same coupling the ``iss`` note above
+# describes applies here in both directions: **changing BCN's trust config
+# requires changing these constants in the same release**, or every friend
+# approval fails its callback with a 401 from BCN.
+_BCN_AUDIENCE = "bcs"
+_BCN_ISSUER = "gateway"
+
+# The ``kid`` BCN requires on the JOSE header. It names the key the token is
+# signed with — the gateway's ``bare`` signer and the shared secret resolved
+# below are the same key — so a re-addressed token carries it too, or BCN
+# rejects the header before it ever checks the signature.
+_BCN_KEY_ID = "bare"
 
 # What every unresolved deployment gets: an empty key, which the verifier treats
 # as "trust nothing" and answers 401 to everything. Also the pre-boot value, so
@@ -180,6 +212,46 @@ def get_principal_verifier_config() -> PrincipalVerifierConfig:
     without finding a key — this is the deny config.
     """
     return _config
+
+
+def get_bcn_principal_signer_config() -> PrincipalSignerConfig:
+    """Return the config for re-addressing a principal token to BCN.
+
+    Reads the same installed key the verifier uses — one shared secret, not a
+    second credential — so a deployment that cannot verify a principal cannot
+    re-address one either, and both fail closed on the same missing value.
+
+    Derived per call rather than assembled at boot beside ``_config``, so that
+    the two can never disagree about which key is installed: there is one
+    source, and this is a view onto it.
+    """
+    return PrincipalSignerConfig(
+        signing_key=_config.signing_key,
+        audience=_BCN_AUDIENCE,
+        issuer=_BCN_ISSUER,
+        key_id=_BCN_KEY_ID,
+    )
+
+
+def resign_principal_for_bcn(token: str) -> str:
+    """Re-address a verified inbound principal token to BCN.
+
+    This is what the composition root hands ``core/work_orders/callbacks.py``:
+    that seam needs "turn this header value into one BCN will accept" and has no
+    business knowing which key or which audience that takes. Resolving both
+    configs here — at call time, from the process-wide install — also keeps it
+    correct regardless of whether the caller was constructed before or after
+    :func:`init_principal_verifier_config` ran.
+
+    Raises:
+        PrincipalVerificationError: when the inbound token does not verify, or
+            when this deployment has no signing key.
+    """
+    return resign_principal_token(
+        token,
+        verifier=get_principal_verifier_config(),
+        signer=get_bcn_principal_signer_config(),
+    )
 
 
 def _resolve_signing_key(resolver: SecretResolver, secret_name: str) -> str:

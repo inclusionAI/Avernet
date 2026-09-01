@@ -9,24 +9,33 @@ These tests are the record of that wiring, of ``aud``/``iss`` being fixed in cod
 rather than configurable, and of the deliberate choice to deny rather than invent
 a fallback key: every way the key can fail to resolve ends in an empty key, and
 the verifier answers 401 to everything on an empty key.
+
+The same install also feeds the other direction — re-addressing a verified
+principal to BCN when the backend calls it on the caller's behalf — so BCN's
+trust values are pinned here too, and an unresolved key denies that as well.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 
+import jwt
 import pytest
 
 from agentclaw.community.core.gateway_principal import (
     MIN_SIGNING_KEY_BYTES,
+    PrincipalVerificationError,
     is_weak_signing_key,
     key_fingerprint,
 )
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils.gateway_principal_config import (
+    get_bcn_principal_signer_config,
     get_principal_verifier_config,
     init_principal_verifier_config,
     reset_principal_verifier_config_cache,
+    resign_principal_for_bcn,
 )
 
 SECRET_NAME = "the-registered-secret-name"
@@ -85,6 +94,86 @@ def test_audience_and_issuer_are_fixed_in_code():
 
     assert config.audience == "backend"
     assert config.issuer == "gateway"
+
+
+def test_bcn_signer_reads_the_same_installed_key():
+    """One shared secret, two views of it — never a second credential."""
+    init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False)
+
+    signer = get_bcn_principal_signer_config()
+
+    assert signer.signing_key == get_principal_verifier_config().signing_key
+    assert signer.key_fingerprint == key_fingerprint(KEY)
+
+
+def test_bcn_trust_values_are_fixed_in_code():
+    """BCN's half of the contract, pinned to the defaults BCN ships.
+
+    ``aud=bcs`` is what makes the friend-approval callback verifiable there at
+    all; ``kid=bare`` is checked before the signature is; ``iss`` names the
+    gateway both components trust. All three are BCN's requirements, and this
+    test is the record that changing them there means changing them here.
+    """
+    signer = get_bcn_principal_signer_config()
+
+    assert signer.audience == "bcs"
+    assert signer.issuer == "gateway"
+    assert signer.key_id == "bare"
+
+
+def test_re_addressing_produces_a_token_bcn_accepts():
+    """The whole fix, through the installed configuration rather than around it.
+
+    The inbound token is addressed to ``backend``, which is what BCN refuses and
+    what made every friend-approval callback fail. The re-addressed copy is
+    judged here exactly as BCN judges it — ``alg``/``typ``/``kid`` on the header,
+    ``iss``/``aud`` and the time claims under the shared key — with the caller
+    unchanged.
+    """
+    init_principal_verifier_config(_FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False)
+    principals = [
+        {
+            "type": "user",
+            "subject": {"id": "u-1", "username": "alice@example.com"},
+        }
+    ]
+    now = int(time.time())
+    inbound = jwt.encode(
+        {
+            "iss": "gateway",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + 60,
+            "principals": principals,
+        },
+        KEY,
+        algorithm="HS256",
+        headers={"kid": "bare"},
+    )
+
+    readdressed = resign_principal_for_bcn(inbound)
+
+    assert jwt.get_unverified_header(readdressed) == {
+        "alg": "HS256",
+        "typ": "JWT",
+        "kid": "bare",
+    }
+    claims = jwt.decode(
+        readdressed,
+        KEY,
+        algorithms=["HS256"],
+        audience="bcs",
+        issuer="gateway",
+        options={"require": ["exp", "iat", "iss", "aud"]},
+    )
+    assert claims["principals"] == principals
+    assert (claims["iat"], claims["exp"]) == (now, now + 60)
+
+
+def test_re_addressing_to_bcn_denies_before_boot():
+    """No key, no re-addressed credential — the same fail-closed as verifying."""
+    with pytest.raises(PrincipalVerificationError, match="no principal signing key"):
+        resign_principal_for_bcn("any.token.value")
 
 
 def test_before_boot_the_config_denies():
