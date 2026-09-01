@@ -142,6 +142,23 @@ logger = get_logger()
 APPLY_LOCK_TTL_SECONDS = 30 * 60
 
 
+class ManifestApplyBotMissingError(RuntimeError):
+    """The bot a queued apply targets no longer exists."""
+
+    def __init__(self, bot_id: str) -> None:
+        super().__init__(f"bot {bot_id} not found for a queued apply")
+
+
+def _parse_started_at(value: Optional[str]) -> datetime:
+    """The apply's own start time, or now if the payload predates the field."""
+    if not value:
+        return datetime.now()
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.now()
+
+
 def _engine_and_bot_type(
     bot: Optional[dict],
     engine_type: Optional[str],
@@ -354,6 +371,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                     tenant=get_current_avernet_tenant(),
                     trigger=trigger,
                     lock_token=lock.lock_token,
+                    started_at=started_at.isoformat(),
                     phases=phases,
                     engine_type=engine_type,
                     bot_type=bot_type,
@@ -611,70 +629,133 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         """
         tenant = str(payload.get("tenant") or "")
         with avernet_tenant_scope(tenant):
-            entity_id = str(payload["entity_id"])
             bot_id = str(payload["bot_id"])
-            # Re-read rather than trust a serialised copy: the record may have
-            # moved since the enqueue, and for the pre-container phase there is
-            # no record at all yet.
-            bot = self._bot_or_none(entity_id=entity_id, bot_id=bot_id)
-            apply_id = str(payload["apply_id"])
-            parsed = self._parsed_or_empty(
-                entity_id=entity_id,
-                bot_id=bot_id,
-                bot=bot,
-                engine_type=payload.get("engine_type"),
-                bot_type=payload.get("bot_type"),
-            )
-            ctx = self._context(
-                bot_id=bot_id,
-                bot=bot,
-                owner_id=str(payload["owner_id"]),
-                actor_id=str(payload["actor_id"]),
-                entity_id=entity_id,
-                env=str(payload["env"]),
-                engine_type=payload.get("engine_type"),
-                bot_type=payload.get("bot_type"),
-                # The id this context's fetch pipeline stamps into every receipt,
-                # so the linkage column answers "what did THIS apply fetch" as an
-                # indexed read.
-                apply_id=apply_id,
-                # The two apply-scope promises of fetch/limits.py, made real: one
-                # ledger per apply, consulted before each entry's fetch and charged
-                # after. It is built here rather than at the enqueue because its
-                # deadline is a monotonic reading of *this* process' clock, and
-                # because the apply's duration is the handler's, not the caller's.
-                budget=ApplyFetchBudget(
-                    deadline=time.monotonic() + APPLY_BUDGET_S,
-                    total_bytes=APPLY_FETCH_TOTAL_LIMIT,
-                ),
-                # W7 built this in the request thread "so the worker never
-                # races a baseline read". It is built here instead, for the
-                # same two reasons the budget is: the session owns checkout
-                # trees on disk, and they belong to the process that applies
-                # them, not to the one that enqueued — across a restart the
-                # request process may not even exist. The race W7 named is
-                # still closed, by the lock rather than by the thread: it is
-                # acquired before the enqueue and released by this handler, so
-                # this baseline read happens inside the same held lock the
-                # request thread's did, and no second apply can be between
-                # them.
-                source_session=SourceSession(
-                    sources=parsed.get("sources") or {},
-                    baselines=self._last_resolutions(
-                        entity_id=entity_id, bot_id=bot_id
-                    ),
-                    git=self._git_client_provider(),
-                ),
-            )
+            try:
+                ctx, parsed = self._rebuild(payload)
+            except Exception as exc:  # noqa: BLE001 - see below
+                # The rebuild can fail for reasons a retry cannot fix: the bot's
+                # engine changed since the enqueue and the stored document no
+                # longer validates for it, or the row is corrupt. Letting that
+                # escape would hand the worker an exception it treats as a retry,
+                # and the apply would loop until its deadline with the lock still
+                # held and the record still RUNNING. Terminate it here instead —
+                # the same outcome ``_run`` gives a raising orchestrator.
+                logger.exception(
+                    "[manifest_apply] could not rebuild apply_id=%s for bot_id=%s",
+                    payload.get("apply_id"),
+                    bot_id,
+                )
+                self._terminate_unstartable(payload, exc)
+                return
             self._run(
                 ctx=ctx,
                 parsed=parsed,
-                apply_id=apply_id,
+                apply_id=str(payload["apply_id"]),
                 trigger=str(payload["trigger"]),
-                started_at=datetime.now(),
+                started_at=_parse_started_at(payload.get("started_at")),
                 phases=phases_from_payload(payload.get("phases")),
                 lock_token=str(payload["lock_token"]),
                 carry_from_apply_id=payload.get("carry_from_apply_id"),
+            )
+
+    def _rebuild(self, payload: dict) -> tuple[ApplyContext, dict]:
+        """The context and document the payload deliberately does not carry."""
+        entity_id = str(payload["entity_id"])
+        bot_id = str(payload["bot_id"])
+        # Re-read rather than trust a serialised copy: the record may have
+        # moved since the enqueue, and for the pre-container phase there is
+        # no record at all yet.
+        bot = self._bot_or_none(entity_id=entity_id, bot_id=bot_id)
+        if bot is None and not payload.get("engine_type"):
+            # No record and nothing to stand in for one. That is not the
+            # pre-container phase — it is a bot that went away between the
+            # enqueue and now, and applying against defaulted capabilities
+            # would be a guess.
+            raise ManifestApplyBotMissingError(bot_id)
+        parsed = self._parsed_or_empty(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            bot=bot,
+            engine_type=payload.get("engine_type"),
+            bot_type=payload.get("bot_type"),
+        )
+        ctx = self._context(
+            bot_id=bot_id,
+            bot=bot,
+            owner_id=str(payload["owner_id"]),
+            actor_id=str(payload["actor_id"]),
+            entity_id=entity_id,
+            env=str(payload["env"]),
+            engine_type=payload.get("engine_type"),
+            bot_type=payload.get("bot_type"),
+            # The id this context's fetch pipeline stamps into every receipt, so
+            # the linkage column answers "what did THIS apply fetch" as an
+            # indexed read.
+            apply_id=str(payload["apply_id"]),
+            # The two apply-scope promises of fetch/limits.py, made real: one
+            # ledger per apply, consulted before each entry's fetch and charged
+            # after. It is built here rather than at the enqueue because its
+            # deadline is a monotonic reading of *this* process' clock, and
+            # because the apply's duration is the handler's, not the caller's.
+            budget=ApplyFetchBudget(
+                deadline=time.monotonic() + APPLY_BUDGET_S,
+                total_bytes=APPLY_FETCH_TOTAL_LIMIT,
+            ),
+            # W7 built this in the request thread "so the worker never races a
+            # baseline read". It is built here for the same two reasons the
+            # budget is: the session owns checkout trees on disk, and those
+            # belong to the process that applies them rather than to the one
+            # that enqueued — across a restart the request process may not
+            # exist. The race W7 named is still closed, by the lock rather than
+            # by the thread: it is acquired before the enqueue and released by
+            # this handler, so the baseline read happens inside the same held
+            # lock the request thread's did, with no second apply between them.
+            source_session=SourceSession(
+                sources=parsed.get("sources") or {},
+                baselines=self._last_resolutions(
+                    entity_id=entity_id, bot_id=bot_id
+                ),
+                git=self._git_client_provider(),
+            ),
+        )
+        return ctx, parsed
+
+    def _terminate_unstartable(self, payload: dict, exc: Exception) -> None:
+        """Record a FAILED report and release the lock for an apply that cannot run.
+
+        Both halves matter. Without the report the row polls ``RUNNING`` until
+        its lock goes stale; without the release the bot is locked against every
+        future apply for the whole TTL.
+        """
+        env = str(payload["env"])
+        entity_id = str(payload["entity_id"])
+        bot_id = str(payload["bot_id"])
+        apply_id = str(payload["apply_id"])
+        report = ApplyReport(
+            apply_id=apply_id,
+            bot_id=bot_id,
+            trigger=str(payload["trigger"]),
+            status=ApplyStatus.FAILED,
+            started_at=_parse_started_at(payload.get("started_at")),
+            finished_at=datetime.now(),
+            categories=(),
+        )
+        self._record_engine_failure(report, exc)
+        try:
+            self._applies.finish(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                apply_id=apply_id,
+                status=report.status.value,
+                report=json.dumps(report.as_payload()),
+            )
+        finally:
+            self._locks.release(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                lock_token=str(payload["lock_token"]),
             )
 
     def _bot_or_none(self, *, entity_id: str, bot_id: str) -> Optional[dict]:

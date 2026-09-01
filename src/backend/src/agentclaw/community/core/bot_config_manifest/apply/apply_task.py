@@ -61,6 +61,7 @@ def build_apply_task_payload(
     tenant: str,
     trigger: str,
     lock_token: str,
+    started_at: str,
     phases: Optional[frozenset[ApplyPhase]] = None,
     carry_from_apply_id: Optional[str] = None,
     engine_type: Optional[str] = None,
@@ -100,6 +101,10 @@ def build_apply_task_payload(
         "tenant": tenant,
         "trigger": trigger,
         "lock_token": lock_token,
+        # When the apply *started*, not when its task was claimed. The RUNNING
+        # row already holds this; carrying it keeps the finished report's own
+        # copy from disagreeing with the row it belongs to.
+        "started_at": started_at,
         # Sorted for a stable payload: two enqueues of the same apply must not
         # differ only by set iteration order.
         "phases": sorted(p.value for p in phases) if phases is not None else None,

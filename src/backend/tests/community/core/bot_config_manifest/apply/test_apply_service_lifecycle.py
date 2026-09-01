@@ -24,6 +24,7 @@ from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ManifestApplyInProgressError,
@@ -899,3 +900,66 @@ def test_registering_a_materialiser_widens_it_with_no_edit_to_any_caller(world):
         assert ManifestCategory.RESOURCES in service.materialised_constructs()
     finally:
         service._build_materialisers = real
+
+
+def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
+    """A rebuild failure is terminal, not a retry.
+
+    The document is re-read at execution rather than carried in the payload, so
+    it can fail to validate then — the bot's engine changed since the enqueue,
+    say. Letting that escape hands the worker an exception it treats as a retry,
+    and the apply would loop until its deadline with the lock still held and the
+    record still RUNNING. Both halves are asserted here because leaving either
+    out is the bug: no report means a poller waits, no release means the bot is
+    locked against every future apply.
+    """
+    service, _applies, locks, _scripts, _manifests = world
+
+    accepted = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+    )
+    # A second apply, whose rebuild will fail.
+    def _refuse(**_kwargs):
+        raise RuntimeError("the stored document no longer validates")
+
+    service._parsed_or_empty = _refuse
+    payload = {
+        "apply_id": "apply-that-cannot-start",
+        "entity_id": _ENTITY,
+        "bot_id": _BOT,
+        "owner_id": _ENTITY,
+        "actor_id": _ENTITY,
+        "env": get_current_env(),
+        "tenant": "",
+        "trigger": "explicit",
+        "lock_token": "no-such-token",
+        "started_at": None,
+        "phases": None,
+        "carry_from_apply_id": None,
+        "engine_type": None,
+        "bot_type": None,
+    }
+    service._applies.start(
+        env=get_current_env(),
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        apply_id="apply-that-cannot-start",
+        trigger="explicit",
+        actor=_ENTITY,
+        report="{}",
+    )
+
+    # Must not raise: raising is what the worker turns into a doomed retry.
+    service.run_apply_task(payload)
+
+    stranded = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id="apply-that-cannot-start"
+    )
+    assert stranded.status is ApplyStatus.FAILED, (
+        "an apply that cannot be rebuilt must terminate, not poll forever"
+    )
+    assert accepted.apply_id  # the first apply is untouched
