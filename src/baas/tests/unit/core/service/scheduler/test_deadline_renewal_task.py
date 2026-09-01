@@ -1507,6 +1507,45 @@ class TestStep4FailureHandling:
         mock_repo.update_after_failure.assert_not_called()
         assert result == "stopped"
 
+    @pytest.mark.asyncio
+    async def test_threshold_set_status_failure_retains_stopped_verdict(self, caplog):
+        """WR-01 (85-86 deep review): a set_status raise at the cap must not
+        leak into _process_one's secondary routing — the confirming verdict
+        stays "stopped", the stopped_transition metric still fires, the
+        "marked STOPPED" warning is kept, and the write failure is logged
+        with its exception traceback (write re-attempted next round)."""
+        import logging
+
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1))
+        )
+        mock_repo.set_status = MagicMock(side_effect=Exception("Unknown column"))
+        mock_repo.update_after_failure = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        with caplog.at_level(logging.INFO, logger="core-scheduler"):
+            result = await scheduler._renew_one(record)
+
+        # The platform-confirmed verdict is retained — no downgrade to a
+        # non-confirming cap-and-hold via _process_one's failure routing.
+        assert result == "stopped"
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_expired"
+        )
+        mock_repo.update_after_failure.assert_not_called()
+        messages = [r.message for r in caplog.records]
+        # The verdict signal and the durable alarm both fire as usual.
+        assert any("marked STOPPED" in m for m in messages)
+        assert any("stopped_transition=1" in m for m in messages)
+        # The write failure itself stays observable, with its traceback.
+        failed_lines = [
+            r for r in caplog.records if "terminal STOPPED write failed" in r.message
+        ]
+        assert len(failed_lines) == 1
+        assert failed_lines[0].levelno == logging.ERROR
+        assert failed_lines[0].exc_info is not None
+
 
 class TestStep5ReportAndMetrics:
     """Tests for Step 5 — report aggregation + metrics logging."""
