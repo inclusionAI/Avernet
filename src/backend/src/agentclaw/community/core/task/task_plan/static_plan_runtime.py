@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import logging
 from typing import Any
 
@@ -92,7 +93,13 @@ class StaticPlanRuntime:
     def _decorate(self, node: TaskNode, definition: StaticPlanNodeDefinition, graph) -> None:
         resolved = {key: self.resolve(value, graph) for key, value in definition.input.items()}
         node.task_spec.context.extend_props["static_input"] = resolved
-        node.task_spec.metadata.instruction = f"{node.task_spec.metadata.instruction}\n输入: {resolved}"
+        if definition.task:
+            # V2 接力输入: 框架下发"# 接自 / ## 群组成(仅 collab) / ## 上游产出正文 / ## 本角色任务"。
+            # 不做摘要/合成;rule(怎么分析/输出/接力交接)归各 bot 的 skill/rule,不在此注入。
+            node.task_spec.metadata.instruction = self._relay_instruction(definition, resolved)
+            node.task_spec.goal = Goal(objective=definition.task, acceptances=[])
+        else:
+            node.task_spec.metadata.instruction = f"{node.task_spec.metadata.instruction}\n输入: {resolved}"
         node.run_info.extend_props["static_bot_id"] = definition.bot_id
         logger.info(
             "[task][static-plan-runtime] node ready task=%s node=%s type=%s depends_on=%s bot_id=%s bot_ids=%s input_keys=%s",
@@ -105,6 +112,43 @@ class StaticPlanRuntime:
                 group_name=f"{graph.task_id}-{node.node_id}",
                 extend_props={"static_input": resolved},
             )
+
+    def _upstream_identity(self, definition: StaticPlanNodeDefinition) -> str:
+        deps = list(definition.depends_on)
+        if not deps:
+            return f"{self.definition.entry_name or '入口'}({self.definition.entry_bot_id})"
+        up = self.by_id.get(deps[0])
+        if not up:
+            return "上游"
+        if up.node_type == "collaboration" and up.bot_ids:
+            return f"{up.name}(driver {up.bot_ids[0]})"
+        return f"{up.name}({up.bot_id})"
+
+    def _upstream_output_text(self, resolved: dict[str, Any]) -> str:
+        values = list(resolved.values())
+        if len(values) == 1:
+            v = values[0]
+            return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
+        if not values:
+            return "(无)"
+        return json.dumps(resolved, ensure_ascii=False, default=str)
+
+    def _relay_instruction(self, definition: StaticPlanNodeDefinition, resolved: dict[str, Any]) -> str:
+        parts = [f"# 接自:{self._upstream_identity(definition)}"]
+        if definition.node_type == "collaboration" and definition.bot_names:
+            ids = definition.bot_ids
+            names = definition.bot_names
+            group_lines = ["## 群组成"]
+            if ids and names:
+                group_lines.append(f"- {names[0]}({ids[0]}) = driver / 总结者")
+                for nm, bid in zip(names[1:], ids[1:]):
+                    group_lines.append(f"- {nm}({bid})")
+            parts.append("\n".join(group_lines))
+        parts.append("## 上游产出正文")
+        parts.append(self._upstream_output_text(resolved))
+        parts.append("## 本群任务" if definition.node_type == "collaboration" else "## 本角色任务")
+        parts.append(definition.task)
+        return "\n".join(parts)
 
     def resolve(self, value: Any, graph) -> Any:
         if not isinstance(value, str) or not value.startswith("$."):
