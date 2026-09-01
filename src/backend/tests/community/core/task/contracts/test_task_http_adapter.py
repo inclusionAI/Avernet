@@ -348,6 +348,34 @@ class TestTaskExecute:
         assert isinstance(body["data"]["task_id"], str) and body["data"]["task_id"]
         assert body["data"]["success"] is True
 
+    def test_execute_routes_merchant_operations_template_by_business_content(self, client):
+        # 商家经营语义通过 execute 内容路由命中新模板，并在持久化 execution_config 中 materialize。
+        c, inj = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json={
+                "task_spec": {
+                    "metadata": {
+                        "title": "门店经营目标",
+                        "instruction": "制定店庆经营方案和执行SOP",
+                    },
+                    "context": {"background": "护理门店周年庆", "extend_props": {}},
+                    "goal": {"objective": "提升到店复购", "acceptances": []},
+                },
+                "source_type": "api",
+                "owner_user_id": "owner_user",
+                "owner_bot_id": "owner_bot",
+                "execution_config": {"task_type": "dynamic"},
+            },
+        )
+        assert r.status_code == 200, r.text
+        task_id = r.json()["data"]["task_id"]
+        record = inj.get(TaskInfoRepositoryProtocol).get(task_id)
+        assert record is not None
+        assert record.execution_config["static_plan_id"] == "merchant-operations-goal-to-sop"
+        assert record.execution_config["static_plan_yaml"]
+        assert record.execution_config["template_input"]["okr"] == "提升到店复购"
+
     def test_execute_static_plan_fills_template_input_from_task_spec_when_absent(self, client):
         # 内容路由命中预置模板但调用方未传 template_input(模拟 bot 动态调用):materialize 应按模板必填 input
         # 用 task_spec objective 兜底补齐,返 200 而非 409(missing static plan input)。

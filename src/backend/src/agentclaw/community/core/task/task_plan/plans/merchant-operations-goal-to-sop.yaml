@@ -1,0 +1,118 @@
+template_id: merchant-operations-goal-to-sop
+entry_bot_id: 店主Bot-20260901_kcvvkqqs
+entry_name: 店主Bot
+# execute 会根据 task_spec 的经营语义自动补入 static_plan_id；调用方无需传模板 id。
+task_type: static_plan
+input_schema:
+  okr:
+    type: string
+    required: true
+
+# 每个节点只描述本角色的工作边界；上游正文由 StaticPlanRuntime 统一透传，
+# 不在 input/task 中替下游预写专业 checklist。
+nodes:
+  - id: frame_goal
+    name: 明确经营目标
+    title: 明确经营目标与约束
+    type: bot
+    bot_id: 店主Bot-20260901_kcvvkqqs
+    depends_on: []
+    input:
+      okr: $.input.okr
+    output:
+      handoff: $.result
+    task: |
+      你是店主侧经营负责人。接收店主的原始经营目标，整理为目标卡：明确结果、周期、门店、客群、服务范围、已知约束，以及事实、假设和未知。只做目标澄清，不替营销、会员、产能、供应或风险角色预先完成专业判断。\n\n      输出必须包含：\n      ### 背景、目标与我的分析\n      ### 我的产出摘要\n      ### 处理不了的问题(每条带背景 + 给下家的目标)\n      ### 本跳产出正文(完整)
+
+  - id: design_marketing
+    name: 设计营销打法
+    title: 设计营销打法与公开承诺
+    type: bot
+    bot_id: 营销Bot-20260901_mylvdi1o
+    depends_on: [frame_goal]
+    input:
+      handoff: $.frame_goal.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接店主Bot的目标卡。把经营目标转成可解释、可公开的营销打法，并标出关键假设、依赖和无法确认的问题。你的职责是营销机制与公开承诺，不替会员服务、客流产能、供应履约或风险角色下结论。\n\n      输出必须包含：\n      ### 背景、目标与我的分析\n      - 接谁的任务\n      - 上游已完成什么\n      - 当前问题及为什么不能由我闭环\n      ### 我的产出摘要\n      ### 处理不了的问题(每条带背景 + 给下家的目标)\n      ### 本跳产出正文(完整)
+
+  - id: design_membership_service
+    name: 设计会员与服务承接
+    title: 设计会员与服务承接
+    type: bot
+    bot_id: 会员与服务Bot-20260901_5r6cdh02
+    depends_on: [design_marketing]
+    input:
+      handoff: $.design_marketing.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接营销Bot的营销方向与公开机制。判断这些承诺如何由会员分层、服务组合、权益兑现和服务边界承接；自行决定需要核验的专业信息，不假定上游已经列全。无法确认的内容保留为条件或待决策，不替客流、供应或风险角色完成判断。\n\n      输出必须包含：\n      ### 背景、目标与我的分析\n      - 接谁的任务\n      - 上游已完成什么\n      - 当前问题及为什么需要我处理\n      ### 我的产出摘要\n      ### 处理不了的问题(每条带背景 + 给下家的目标)\n      ### 本跳产出正文(完整)
+
+  - id: assess_capacity
+    name: 核验客流产能与排班
+    title: 核验客流、产能与排班
+    type: bot
+    bot_id: 客流与产能Bot-20260901_sesl8hmo
+    depends_on: [design_membership_service]
+    input:
+      handoff: $.design_membership_service.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接会员与服务Bot的服务承接方案。判断门店在目标周期内能否接住承诺，并提出必要的投放、预约、每日承接量或排班节奏调整。请自行拆解客流与产能侧所需事实；不要替供应履约确认资源，也不要替风险角色下最终结论。\n\n      输出必须包含：\n      ### 背景、目标与我的分析\n      - 接谁的任务\n      - 上游已完成什么\n      - 当前产能问题及为什么不能由我闭环\n      ### 我的产出摘要\n      ### 处理不了的问题(每条带背景 + 给下家的目标)\n      ### 本跳产出正文(完整)
+
+  - id: assess_fulfillment
+    name: 核验供应履约
+    title: 核验供应、品质与履约
+    type: bot
+    bot_id: 供应履约Bot-20260901_4tn4mnnj
+    depends_on: [assess_capacity]
+    input:
+      handoff: $.assess_capacity.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接客流与产能Bot已经调整过的服务承诺、投放节奏或预约上限。判断当前方案能承诺到什么程度，哪些承诺需要条件、替代路径或延后确认。请自行决定供应履约侧的核验范围和专业方法，不接受上游替你列好的清单，也不能用猜测补齐未知事实。\n\n      输出必须包含：\n      ### 背景、目标与我的分析\n      - 接谁的任务\n      - 上游已完成什么\n      - 当前履约问题及为什么需要风险角色继续判断\n      ### 我的产出摘要\n      ### 处理不了的问题(每条带背景 + 给下家的目标)\n      ### 本跳产出正文(完整)
+
+  - id: review_business_risk
+    name: 评审业务风险
+    title: 评审业务、质量与内部运营风险
+    type: bot
+    bot_id: 业务风险Bot-20260901_rpc6nx1i
+    depends_on: [assess_fulfillment]
+    input:
+      handoff: $.assess_fulfillment.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接供应履约Bot带条件的经营承诺。判断方案在财务、合规、服务质量、履约失败和内部运营条件下是否可接受，识别产能、质量、供应、财务或合规等具有业务后果的风险。可给出阻断、条件通过、调整建议或待店主决策项，但不泄露店主私有阈值，也不替舆情Bot完成公开传播判断。\n\n      输出必须包含：\n      ### 背景、目标与我的分析\n      - 接谁的任务\n      - 上游已完成什么\n      - 当前风险及为什么需要店主汇总或其他专业判断\n      ### 我的产出摘要\n      ### 处理不了的问题(每条带背景 + 给下家的目标)\n      ### 本跳产出正文(完整)
+
+  - id: review_public_risk
+    name: 评审舆情与平台风险
+    title: 评审舆情、投诉与平台风险
+    type: bot
+    bot_id: 舆情Bot-20260901_5rjroor8
+    depends_on: [assess_fulfillment]
+    input:
+      handoff: $.assess_fulfillment.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接供应履约Bot带条件的经营承诺。判断公开传播、消费者预期、投诉差评、平台规则和舆情扩散是否会改变方案的可执行性或经营结果。请自行确定舆情侧评审范围，输出风险、触发条件、监测和处置方向；不要替业务风险Bot裁决财务、质量或内部运营风险。\n\n      输出必须包含：\n      ### 背景、目标与我的分析\n      - 接谁的任务\n      - 上游已完成什么\n      - 当前公开风险及为什么需要店主汇总\n      ### 我的产出摘要\n      ### 处理不了的问题(每条带背景 + 给下家的目标)\n      ### 本跳产出正文(完整)
+
+  - id: synthesize_sop
+    name: 汇总经营方案与SOP
+    title: 汇总经营方案与执行SOP
+    type: bot
+    bot_id: 店主Bot-20260901_kcvvkqqs
+    depends_on: [review_business_risk, review_public_risk]
+    input:
+      business_risk: $.review_business_risk.output.handoff
+      public_risk: $.review_public_risk.output.handoff
+    output:
+      handoff: $.result
+      final_result: $.result
+    task: |
+      你接业务风险Bot和舆情Bot的两路评审，同时可结合完整经营链路上下文。作为店主侧最终决策与汇总者，形成经营方案和 SOP。不要强行把分歧全部收敛：明确已确认事实、假设、条件通过、执行前置条件、阻断项、待店主决策事项，以及活动前、活动中、异常时的动作。\n\n      输出必须包含：\n      ### 背景、目标与我的分析\n      - 接谁的任务：业务风险Bot、舆情Bot\n      - 上游已完成什么：两路风险评审及其条件/阻断/待决策项\n      - 当前问题：哪些事项仍需店主决策，哪些可以形成 SOP\n      ### 我的产出摘要\n      ### 处理不了的问题(每条带背景 + 给下家的目标)\n      ### 本跳产出正文(完整)
