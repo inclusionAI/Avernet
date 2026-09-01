@@ -328,48 +328,6 @@ class _LocalSkillInvalidPackage(Exception):
     """The shape LocalSkillInvalidPackageError takes in these tests."""
 
 
-class FakeSkillActivation:
-    """Stands in for ``DirectActivationService``'s skill pair.
-
-    ``governed`` are the skill ids a SkillSet or the default set supplies —
-    the R1 refusal: activate/deactivate raise, exactly where the real
-    commands do, so a materialiser that forgot to pre-narrow the removals
-    would half-write a category here before failing in production.
-    """
-
-    def __init__(self, governed: set[int] | None = None) -> None:
-        self.governed = set(governed or ())
-        self.installed: set[int] = set()
-        self.activations: list[dict[str, Any]] = []
-        self.deactivations: list[dict[str, Any]] = []
-
-    async def activate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
-    ) -> dict[str, Any]:
-        if int(skill_id) in self.governed:
-            raise _PlatformSkillConflict("RESOURCE_MANAGED_BY_SKILL_SET")
-        self.installed.add(int(skill_id))
-        self.activations.append({"skill_id": int(skill_id), "bot_id": bot_id})
-        return {"id": skill_id, "changed": True}
-
-    async def deactivate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
-    ) -> dict[str, Any]:
-        if int(skill_id) in self.governed:
-            raise _PlatformSkillConflict("RESOURCE_MANAGED_BY_SKILL_SET")
-        self.installed.discard(int(skill_id))
-        self.deactivations.append({"skill_id": int(skill_id), "bot_id": bot_id})
-        return {"id": skill_id, "changed": True}
-
-    @property
-    def writes(self) -> int:
-        return len(self.activations) + len(self.deactivations)
-
-
-class _PlatformSkillConflict(Exception):
-    """The shape SkillSetControlPlaneConflictError takes in these tests."""
-
-
 class FakeCapabilityReader:
     """Stands in for ``BotCapabilityStateReader``: the active set + governance.
 
@@ -491,23 +449,34 @@ class PlatformPolicyConflict(Exception):
 class FakeActivationService:
     """Stands in for ``DirectActivationService``, recording every call.
 
+    Both pairs the real service owns — the MCP pair and the skill pair —
+    because both materialisers share one service instance and a fake split by
+    pair would pass the registry while failing the first apply that touched
+    the other half.
+
     ``platform_defaults`` models the guard the real service runs *before* the
     permission check: ``activate_mcp``/``deactivate_mcp`` raise
     ``SkillSetControlPlaneConflictError`` on an engine/template default code.
     The fake raises too — without that, a materialiser that forgot to ask about
     platform defaults would pass every test here while half-writing the category
-    in production, which is exactly the gap this models.
+    in production, which is exactly the gap this models. ``governed_skills``
+    models the same refusal for skills: ids a Set or the default set supplies.
     """
 
     def __init__(
         self,
         installed: set[str] | None = None,
         platform_defaults: set[str] | None = None,
+        governed_skills: set[int] | None = None,
     ) -> None:
         self.installed = set(installed or ())
         self.platform_defaults = set(platform_defaults or ())
+        self.governed_skills = set(governed_skills or ())
         self.activated: list[str] = []
         self.deactivated: list[str] = []
+        self.installed_skills: set[int] = set()
+        self.skill_activations: list[int] = []
+        self.skill_deactivations: list[int] = []
 
     def list_installed_mcps(
         self, *, bot_id: str, owner_id: str, actor_id: str
@@ -535,13 +504,38 @@ class FakeActivationService:
         self.installed.discard(server_code)
         return {}
 
+    async def activate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        self._refuse_if_governed(skill_id)
+        self.installed_skills.add(int(skill_id))
+        self.skill_activations.append(int(skill_id))
+        return {"id": skill_id, "changed": True}
+
+    async def deactivate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        self._refuse_if_governed(skill_id)
+        self.installed_skills.discard(int(skill_id))
+        self.skill_deactivations.append(int(skill_id))
+        return {"id": skill_id, "changed": True}
+
     def _refuse_if_platform_owned(self, server_code: str) -> None:
         if server_code in self.platform_defaults:
             raise PlatformPolicyConflict("RESOURCE_MANAGED_BY_PLATFORM_POLICY")
 
+    def _refuse_if_governed(self, skill_id: str) -> None:
+        if int(skill_id) in self.governed_skills:
+            raise PlatformPolicyConflict("RESOURCE_MANAGED_BY_SKILL_SET")
+
     @property
     def writes(self) -> int:
-        return len(self.activated) + len(self.deactivated)
+        return (
+            len(self.activated)
+            + len(self.deactivated)
+            + len(self.skill_activations)
+            + len(self.skill_deactivations)
+        )
 
 
 class FakeMcpAuth:

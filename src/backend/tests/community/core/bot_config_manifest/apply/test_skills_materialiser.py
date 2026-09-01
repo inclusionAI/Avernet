@@ -29,11 +29,11 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
 )
 
 from ._fakes import (
+    FakeActivationService,
     FakeCapabilityReader,
     FakeCredentials,
     FakeGuardedFetcher,
     FakeManifestContent,
-    FakeSkillActivation,
     FakeSkillUploadService,
     build_skill_tgz,
     build_skill_zip,
@@ -85,7 +85,7 @@ def skill_rig(
     )
 
     uploads = FakeSkillUploadService()
-    activation = FakeSkillActivation()
+    activation = FakeActivationService()
     reader = FakeCapabilityReader(assets=assets, member_ids=member_ids)
     types = content_types or {}
     fetcher = FakeGuardedFetcher(
@@ -132,7 +132,7 @@ def test_a_declared_skill_uploads_the_validated_package_and_activates():
     real_validator().validate_zip(uploads.uploads[0]["package"])
     assert [call["actor_id"] for call in uploads.uploads] == ["u_actor"]
     # And one activation, of the id the upload created.
-    activated_id = activation.activations[0]["skill_id"]
+    activated_id = activation.skill_activations[0]
     assert activated_id == uploads.rows["quality-check"]["id"]
 
 
@@ -165,7 +165,7 @@ def test_an_inactive_same_name_skill_is_reinstated_as_created():
     materialiser, uploads, activation, _, _, _ = skill_rig(packages={QC_URL: QZ})
     result, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
     assert [e.outcome.value for e in written] == ["created"]
-    assert uploads.uploads and activation.activations
+    assert uploads.uploads and activation.skill_activations
 
 
 def test_one_failed_fetch_aborts_the_whole_category_no_writes():
@@ -348,7 +348,7 @@ def test_skills_empty_removes_every_directly_active_skill():
     )
     _, plan, written = _run(_apply(materialiser, _ctx(), []))
     assert plan.removals == ("alpha", "beta")
-    assert [d["skill_id"] for d in activation.deactivations] == [11, 12]
+    assert activation.skill_deactivations == [11, 12]
     assert uploads.uploads == []
 
 
@@ -364,7 +364,7 @@ def test_set_governed_skills_are_never_removals():
     )
     _, plan, _ = _run(_apply(materialiser, _ctx(), []))
     assert plan.removals == ("alpha",)
-    assert [d["skill_id"] for d in activation.deactivations] == [11]
+    assert activation.skill_deactivations == [11]
 
 
 def test_a_declared_name_matching_a_set_governed_skill_fails_at_resolve():
@@ -408,9 +408,9 @@ def test_undeclared_members_of_the_area_are_removed_by_name():
     _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
     assert [e.outcome.value for e in written] == ["updated"]
     assert plan.removals == ("some-other-skill",)
-    assert [d["skill_id"] for d in activation.deactivations] == [11]
+    assert activation.skill_deactivations == [11]
     assert uploads.uploads[0]["name"] == "quality-check"
-    assert activation.activations == []  # already active: not re-activated
+    assert activation.skill_activations == []  # already active: not re-activated
 
 
 # ── parity with the upload path, by construction ───────────────────────────
