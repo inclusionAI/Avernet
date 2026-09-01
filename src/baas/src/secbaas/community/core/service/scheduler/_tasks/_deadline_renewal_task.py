@@ -1,9 +1,13 @@
 """DeadlineRenewalScheduler — implementing ScheduledTask Protocol.
 
-Implements the full deadline-driven ARCA container TTL renewal scheduler:
+Implements the full five-step deadline-driven ARCA container TTL renewal
+engine:
   - run(): lock acquisition + dispatch to _run_once()
-  - _run_once(): Steps 0-2 (gap detection, cold-table query, concurrent renewal)
-  - Steps 3-5 (single renewal decision, failure handling, report) deferred to Plan 05-04.
+  - _run_once(): Steps 0-2 (gap detection + discovery scan, cold-table
+    due query, concurrent renewal)
+  - per record: Step 3 single renewal decision (_renew_one), Step 4
+    liveness-gated failure handling (_handle_failure), Step 5 metrics
+    logging (_log_metrics) + structured run report (RenewalRunReport).
 """
 
 from __future__ import annotations
@@ -183,7 +187,10 @@ class DeadlineRenewalScheduler:
                 self._running = False
 
     # ------------------------------------------------------------------
-    # _run_once — main loop (Steps 0-2). Steps 3-5 deferred to Plan 05-04.
+    # _run_once — main loop: Step 0 gap detection + discovery scan, Step 1
+    # cold-table due query (+ orphan recheck), Step 2 concurrent renewal;
+    # Steps 3-5 (single renewal decision, liveness-gated failure handling,
+    # metrics) run per record via _renew_one/_handle_failure/_log_metrics.
     # ------------------------------------------------------------------
 
     async def _run_once(
