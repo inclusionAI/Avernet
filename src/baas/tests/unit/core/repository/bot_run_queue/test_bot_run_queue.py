@@ -337,3 +337,91 @@ def test_find_terminal_by_session_returns_done_only(
     # no-terminal session -> empty
     assert repo.find_terminal_by_session("no-such-session") == []
     assert repo.find_terminal_by_session("") == []
+
+
+# ---------------------------------------------------------------------------
+# find_running_by_bot_session / find_terminal_by_bot_session —— 群聊 bot 维度
+# ---------------------------------------------------------------------------
+
+
+def test_find_running_by_bot_session_only_returns_target_bot_running(
+    repo: OrmBotRunQueueRepository,
+):
+    """群聊多 bot 共 session：仅返回目标 bot 的 RUNNING，其它 bot 的 PENDING/RUNNING 不命中。"""
+    ra = _insert(repo, "bot-A", session_id="sess-group")
+    rb = _insert(repo, "bot-B", session_id="sess-group")
+    rc = _insert(repo, "bot-A", session_id="sess-group")  # 第二个 bot-A PENDING
+    # claim 各 bot 的第一条 -> RUNNING
+    claimed_a = repo.claim_pending_by_bot("bot-A", "wA")
+    claimed_b = repo.claim_pending_by_bot("bot-B", "wB")
+    assert claimed_a is not None and claimed_a.run_id == ra
+    assert claimed_b is not None and claimed_b.run_id == rb
+
+    running_a = repo.find_running_by_bot_session("sess-group", "bot-A")
+    assert [r.run_id for r in running_a] == [ra]
+    assert all(r.status == "RUNNING" for r in running_a)
+
+    running_b = repo.find_running_by_bot_session("sess-group", "bot-B")
+    assert [r.run_id for r in running_b] == [rb]
+
+    # 不存在的 bot
+    assert repo.find_running_by_bot_session("sess-group", "bot-none") == []
+    # 空入参
+    assert repo.find_running_by_bot_session("", "bot-A") == []
+    assert repo.find_running_by_bot_session("sess-group", "") == []
+
+
+def test_find_running_by_bot_session_excludes_pending_and_done(
+    repo: OrmBotRunQueueRepository,
+):
+    """find_running_by_bot_session 仅命中 RUNNING；PENDING 不动，DONE 不命中。"""
+    r_pending = _insert(repo, "bot-1", session_id="sess-abort")
+    r_running = _insert(repo, "bot-1", session_id="sess-abort")
+    r_done = _insert(repo, "bot-1", session_id="sess-abort")
+    # claim 顺序 FIFO：r_pending 先入队，先被 claim → RUNNING
+    claimed1 = repo.claim_pending_by_bot("bot-1", "w")
+    assert claimed1 is not None and claimed1.run_id == r_pending
+    claimed2 = repo.claim_pending_by_bot("bot-1", "w")
+    assert claimed2 is not None and claimed2.run_id == r_running
+    claimed3 = repo.claim_pending_by_bot("bot-1", "w")
+    assert claimed3 is not None and claimed3.run_id == r_done
+    # 把 r_done 置 DONE
+    assert repo.mark_done(r_done, "w") == 1
+
+    running = repo.find_running_by_bot_session("sess-abort", "bot-1")
+    run_ids = {r.run_id for r in running}
+    # 仅 RUNNING（r_pending, r_running），DONE 排除；PENDING 在此例被 claim 走了
+    assert run_ids == {r_pending, r_running}
+    assert all(r.status == "RUNNING" for r in running)
+
+
+def test_find_running_by_bot_session_pending_only_returns_empty(
+    repo: OrmBotRunQueueRepository,
+):
+    """PENDING-only record (not claimed) 命中空：超时扫描兜底，abort 不处理 PENDING。"""
+    _insert(repo, "bot-1", session_id="sess-abort")  # PENDING
+
+    assert repo.find_running_by_bot_session("sess-abort", "bot-1") == []
+
+
+def test_find_terminal_by_bot_session_returns_target_bot_done_only(
+    repo: OrmBotRunQueueRepository,
+):
+    """find_terminal_by_bot_session 维度收窄到目标 bot；其它 bot 的 DONE 不命中。"""
+    r_a = _insert(repo, "bot-A", session_id="sess-group")
+    r_b = _insert(repo, "bot-B", session_id="sess-group")
+    claimed_a = repo.claim_pending_by_bot("bot-A", "wA")
+    claimed_b = repo.claim_pending_by_bot("bot-B", "wB")
+    assert claimed_a is not None and claimed_a.run_id == r_a
+    assert claimed_b is not None and claimed_b.run_id == r_b
+    assert repo.mark_done(r_a, "wA") == 1
+    assert repo.mark_done(r_b, "wB") == 1
+
+    terminals_a = repo.find_terminal_by_bot_session("sess-group", "bot-A")
+    assert [r.run_id for r in terminals_a] == [r_a]
+    terminals_b = repo.find_terminal_by_bot_session("sess-group", "bot-B")
+    assert [r.run_id for r in terminals_b] == [r_b]
+    # 不存在 / 空入参
+    assert repo.find_terminal_by_bot_session("sess-group", "bot-none") == []
+    assert repo.find_terminal_by_bot_session("", "bot-A") == []
+    assert repo.find_terminal_by_bot_session("sess-group", "") == []

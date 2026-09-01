@@ -619,3 +619,45 @@ class TestChatAbort:
         assert body["ok"] is True
         assert body["aborted"] is False
         assert body["aborted_run_ids"] == []
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_group_chat_passes_provider_bot_ref(
+        self, api: APITestHelper, _testclient_app
+    ) -> None:
+        """群聊 abort：router 透传 to_bot.provider_bot_ref，service 收到的 ChatAbortInput.to_bot.provider_bot_ref 与 body 一致。"""
+        from secbaas.community.api.bcn import ChatAbortResult
+
+        class _CapturingService:
+            async def handle_chat_abort(self, input_):
+                captured["input"] = input_
+                return ChatAbortResult(aborted=True, aborted_run_ids=["run-a"])
+
+        captured: dict = {}
+        downlink_route = next(
+            route
+            for route in iter_api_routes(_testclient_app)
+            if route.path == _BCN_DOWNLINK_URL
+        )
+        dep_key = next(
+            dependency.call
+            for dependency in downlink_route.dependant.dependencies
+            if dependency.name == "service"
+        )
+        _testclient_app.dependency_overrides[dep_key] = lambda: _CapturingService()
+        body = dict(self._CHAT_ABORT_BODY)
+        body["to_bot"] = {
+            "provider_id": "baas",
+            "provider_bot_ref": "bot-A",
+        }
+        try:
+            response = await api.client.post(
+                _BCN_DOWNLINK_URL,
+                json=body,
+                headers=_VALID_HEADERS,
+            )
+        finally:
+            _testclient_app.dependency_overrides.pop(dep_key, None)
+
+        assert response.status_code == 200, response.text[:200]
+        assert captured["input"].to_bot.provider_bot_ref == "bot-A"
+        assert captured["input"].session_id == body["session_id"]
