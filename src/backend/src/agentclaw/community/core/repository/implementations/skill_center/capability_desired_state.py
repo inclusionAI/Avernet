@@ -33,6 +33,8 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 )
 from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
     BotSkillSetInstallations,
+    CENTER_MEMBERSHIP_IDENTITY_MISSING,
+    center_membership_skill_uuid,
     set_member_skill_ids,
 )
 from agentclaw.community.core.repository.implementations.skill_center.default_exclusion_commands import (
@@ -329,6 +331,7 @@ class CapabilityDesiredStateRepository(
             ):
                 raise SkillSetControlPlaneNotFoundError()
             require_skill_online(skill)
+            membership_skill_uuid = center_membership_skill_uuid(skill)
             old = self._snapshot(
                 session, bot_id, owner_id, engine_type=engine_type
             )
@@ -341,6 +344,13 @@ class CapabilityDesiredStateRepository(
                 .first()
             )
             if current is not None:
+                if (
+                    membership_skill_uuid is not None
+                    and current.skill_uuid != membership_skill_uuid
+                ):
+                    raise SkillSetControlPlaneConflictError(
+                        CENTER_MEMBERSHIP_IDENTITY_MISSING
+                    )
                 return DesiredStateMutation(_item(row), False, old)
             # R3 covers ANY of the Bot's Sets — the Default included, its
             # members excluded or not.
@@ -382,6 +392,7 @@ class CapabilityDesiredStateRepository(
                 SkillSetSkill(
                     skill_set_id=row.id,
                     skill_id=skill.id,
+                    skill_uuid=membership_skill_uuid,
                     user_id=row.user_id,
                     env=get_current_env(),
                     avernet_tenant=get_current_avernet_tenant(),
