@@ -51,6 +51,9 @@ from agentclaw.community.api.bot_config_manifest_service import (
     ManifestTooLargeError,
     ManifestValidationError,
 )
+from agentclaw.community.api.bot_config_manifest_apply_service import (
+    ManifestApplyInProgressError,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotAccessRefusedError,
     BotEditLockCheckError,
@@ -655,6 +658,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         f"Config manifest exceeds the {MAX_DOCUMENT_BYTES}-byte limit",
     ),
     ManifestNotEncodableError: (400, "Config manifest is not valid UTF-8"),
+    # Applies are serialized per bot, so a second one arriving while the first
+    # holds the lock is an ordinary, retryable state — not an internal error.
+    # Unregistered, ``@envelope_errors`` re-raised it and the caller got a 500
+    # where the route's own documentation promises a 409.
+    ManifestApplyInProgressError: (409, "An apply is already running for this bot"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
@@ -810,6 +818,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
+    ManifestApplyInProgressError: 409109,
     LocalSkillRuntimeSyncError: 502102,
     SkillRuntimeNameConflictError: 409106,
     SkillEngineNotSupportedError: 409107,

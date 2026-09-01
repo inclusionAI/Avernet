@@ -90,6 +90,10 @@ provides:
   - BotCollabLogRepositoryProtocol
   - BotConfigManifestRepositoryProtocol
   - BotConfigManifestRepository
+  - BotConfigManifestApplyRepositoryProtocol
+  - BotConfigManifestApplyRepository
+  - BotConfigManifestApplyLockRepositoryProtocol
+  - BotConfigManifestApplyLockRepository
   - BotFriendRepositoryProtocol
   - BotRepository
   - BotRestartLockRepositoryProtocol

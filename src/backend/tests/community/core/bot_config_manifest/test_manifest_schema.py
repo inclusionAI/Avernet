@@ -66,8 +66,6 @@ def test_a_full_first_wave_document_is_accepted():
 manifest:
   mcp:
     - server_code: github
-      config:
-        scope: repo
   identity:
     - type: SOUL.md
       content: |
@@ -747,6 +745,34 @@ manifest:
         "reserved_identity_type",
         "source_url_has_userinfo",
     } <= codes
+
+
+def test_the_retired_mcp_config_field_is_refused_rather_than_ignored():
+    """``mcp[].config`` was defined as per-bot configuration "the same shape as
+    the existing MCP config API" — but that API writes ``ac_user_mcp_config``,
+    keyed ``(user_id, server_code)``, and its write fans out via
+    ``sync_mcp_detail_to_all_bots``. Applying one bot's manifest would have
+    changed MCP configuration for every bot its owner has; its payload is also
+    api_key and custom_headers, which design §4.5 keeps out of a manifest
+    entirely. A v1 entry is a bare ``server_code``, and the field is refused by
+    name rather than silently ignored — same treatment as the retired
+    ``cli_tools.entrypoints`` above, for the same reason."""
+    document = """schema_version: 1
+manifest:
+  mcp:
+    - server_code: github
+      config:
+        endpoint_env: PROD
+"""
+    assert (
+        "manifest.mcp[0].config",
+        "unknown_field",
+    ) in _reject(document)
+
+
+def test_an_mcp_entry_is_accepted_as_a_bare_server_code():
+    """The narrowing removed a field; it did not narrow the category itself."""
+    assert _accept("schema_version: 1\nmanifest:\n  mcp:\n    - server_code: github\n")
 
 
 def test_a_refusal_always_names_a_location():

@@ -117,6 +117,26 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/bots/{bot_id}/config-manifest/capabilities",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # Apply's mode is not a free choice — it FOLLOWS from its Check(...) row.
+    # ``require_check``'s gate declares OwnerIdDep -> resolve_owner_id ->
+    # AddressedBotGrantDep, so any row carrying Check(...) pulls in
+    # require_granted_addressed_bot, and test_admission_inventory holds each
+    # route to the dependency its mode calls for. The surface has exactly two
+    # coherent pairings, and mixing one from each is what principal.py calls its
+    # oldest defect. Naming it because the pairing looks like two decisions and
+    # is one.
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/config-manifest/apply",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skill-sets",

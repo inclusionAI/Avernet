@@ -225,6 +225,20 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "DELETE",
         "/openapi/v1/bots/{bot_id}/config-manifest",
     ): Check(PermissionLevel.ADMIN),
+    # Apply takes its own bar rather than the document group's: it rewrites a
+    # bot's whole configuration, which is owner-level on its own terms, and it
+    # is a broad mutation so it carries the lock. Decided on apply's shape, not
+    # derived from the categories it touches. Three of the six are owner-only
+    # through their own endpoints and a manifest must not be the way around
+    # them — held per category by the dominance test in
+    # ``test_config_manifest_apply_bars.py``, which is also where the full
+    # reasoning lives (W10's spec, *Apply Declares Its Own Bars*).
+    ("POST", "/openapi/v1/bots/{bot_id}/config-manifest/apply"):
+        Check(PermissionLevel.OWNER, EDIT_LOCK),
+    # The reads sit at MEMBER beside GET .../config-manifest: reading how a bot
+    # is configured is part of working on it, and a report carries no secret.
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest/last-apply"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),

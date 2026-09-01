@@ -1393,8 +1393,15 @@ manifest 概念。
   「摘标记」；§3.2 改为覆盖之后那个用途消失了。）
 - apply 报告的存储与 `GET .../config-manifest/last-apply`，形状按设计 §7。
 - `POST .../config-manifest/apply`，含 `dry_run=true`——返回计划但不动手。
-- 第一期两个免取源类目的物化器：`mcp`（注册表引用 → 既有的启用 + 配置服务）与
+- 第一期两个免取源类目的物化器：`mcp`（注册表引用 → 既有的 per-bot 启用服务
+  `DirectActivationService`，收敛「已启用 server 集合」这个 §3.2 定义的区域）与
   `script`（→ `BotStartupScriptService`）。
+  **`mcp[].config` 已从 schema v1 移除**（W4 评审结论，见 manifest-schema §3.1）：
+  它被定义成「per-bot 配置，形状同现有 MCP config API」，而那个 API 写的是
+  `ac_user_mcp_config`（键 `(user_id, server_code)`），写入路径调用
+  `sync_mcp_detail_to_all_bots` **扇出到该 owner 的所有 bot**；它装的又正是
+  `api_key` / `custom_headers`，design §4.5 明令不得进 manifest。账号级配置继续
+  走既有的 `/openapi/v1/bots/mcp/servers/{server_code}/config`。
 
 **范围外。**拉取。生命周期触发（W8）——本项唯一的入口是显式 apply。
 **`engine_config` 按 X2/T3 的决定排除在第一期之外**（§4）；它回来时，其物化器是

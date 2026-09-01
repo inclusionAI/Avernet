@@ -19,6 +19,10 @@ from agentclaw.community.core.repository.protocols.bot.bot import (
 from agentclaw.community.core.repository.protocols.bot.config_manifest import (
     BotConfigManifestRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+    BotConfigManifestApplyLockRepositoryProtocol,
+    BotConfigManifestApplyRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot.friend import (
     BotFriendRepositoryProtocol,
 )
@@ -39,6 +43,8 @@ from agentclaw.community.core.repository.protocols.bot.source_credential import 
 
 __all__ = [
     "BotAppGrantRepositoryProtocol",
+    "BotConfigManifestApplyLockRepositoryProtocol",
+    "BotConfigManifestApplyRepositoryProtocol",
     "BotCollabLockRepositoryProtocol",
     "BotCollabLogRepositoryProtocol",
     "BotConfigManifestRepositoryProtocol",

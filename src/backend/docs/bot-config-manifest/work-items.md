@@ -1710,8 +1710,17 @@ categories that need no fetching.
 - `POST .../config-manifest/apply`, including `dry_run=true` returning the plan
   without acting.
 - Materialisers for the two no-fetch categories in iteration 1: `mcp` (registry
-  reference → the existing enable + configure service) and `script` (→
-  `BotStartupScriptService`).
+  reference → the existing **per-bot** activation service,
+  `DirectActivationService`, converging the enabled-server set that §3.2 names as
+  this category's area) and `script` (→ `BotStartupScriptService`).
+  **`mcp[].config` is removed from schema v1** (W4 review; see manifest-schema
+  §3.1). It was defined as per-bot configuration "the same shape as the existing
+  MCP config API", and those two halves cannot both be true: that API writes
+  `ac_user_mcp_config`, keyed `(user_id, server_code)`, and its write calls
+  `sync_mcp_detail_to_all_bots` — **fanning out to every bot the owner has**. Its
+  payload is also `api_key` and `custom_headers`, which design §4.5 keeps out of
+  a manifest. Account-scoped configuration stays on the existing
+  `/openapi/v1/bots/mcp/servers/{server_code}/config`.
 
 **Out of scope.** Fetching. Lifecycle triggers (W8) — explicit apply is the only
 entry point in this item. **`engine_config` is out of iteration 1** by the X2/T3
