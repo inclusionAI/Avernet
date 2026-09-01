@@ -262,6 +262,37 @@ def test_the_store_receives_the_actor_as_modifier(rig):
     assert content.store_calls[0]["modifier"] == "u_actor"
 
 
+def test_a_prefix_escape_refusal_becomes_the_same_entry_error(rig):
+    """W3's policy refuses per hop — the substituted URL or a redirect
+    stepping outside the credential's prefixes. That refusal reaches the
+    materialiser as the entry's own failure, reason intact: the entry fails
+    like a refused address, with the credential *named* (never valued)."""
+    _, _, _, _ = rig
+    from agentclaw.community.core.bot_config_manifest.credentials.policy import (
+        PrefixAuthorizationError,
+    )
+
+    refusing = FakeGuardedFetcher(
+        failures={
+            URL: PrefixAuthorizationError(
+                "credential 'mirror' is not authorized to leave "
+                "https://mirror.example/prefix"
+            )
+        }
+    )
+    pipeline = EntryFetcher(refusing, FakeManifestContent(), FakeCredentials())
+
+    with pytest.raises(EntryFetchError) as excinfo:
+        pipeline.fetch(
+            make_context(),
+            source_url=URL,
+            auth="mirror",
+            category="identity",
+        )
+    assert "not authorized" in excinfo.value.reason
+    assert "mirror" in excinfo.value.reason
+
+
 def test_a_refused_transport_becomes_the_same_entry_error(rig):
     content, _, credentials, _ = rig
     refused = FakeGuardedFetcher(

@@ -43,6 +43,9 @@ from agentclaw.community.core.bot_config_manifest.content.models import (
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialError,
 )
+from agentclaw.community.core.bot_config_manifest.credentials.policy import (
+    PrefixAuthorizationError,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
     FetchRefusedError,
@@ -181,6 +184,13 @@ class EntryFetcher:
                 )
             raise EntryFetchError(str(exc)) from exc
         except CredentialError as exc:
+            raise EntryFetchError(str(exc)) from exc
+        except PrefixAuthorizationError as exc:
+            # Raised per hop by the W3 policy (the initial target and every
+            # redirect): the substituted URL, or a redirect, stepped outside
+            # the credential's authorized prefixes. It is a refusal with a
+            # report-safe reason (W3 names the credential, never the value)
+            # — the entry fails, exactly like a refused address.
             raise EntryFetchError(str(exc)) from exc
 
         self._content.store(
