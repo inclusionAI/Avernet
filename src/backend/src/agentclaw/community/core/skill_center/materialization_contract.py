@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol, runtime_checkable
 
-from agentclaw.community.core.skill_center.skill_package import (
-    ValidatedSkillPackage,
-)
 from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterReadScope,
 )
@@ -64,14 +60,6 @@ class MaterializingSkillVersion:
 
 
 @dataclass(frozen=True, slots=True)
-class SkillVersionScanResult:
-    """Scanner-owned immutable facts frozen into Version metadata."""
-
-    risk_tags: tuple[Mapping[str, object], ...]
-    mcp_dependencies: tuple[Mapping[str, object], ...]
-
-
-@dataclass(frozen=True, slots=True)
 class PublishedMaterializedSkillVersion:
     """The stable Version-Published application seam."""
 
@@ -90,12 +78,6 @@ class PublishedMaterializedSkillVersion:
 
 
 @runtime_checkable
-class SkillVersionScannerProtocol(Protocol):
-    @abstractmethod
-    def scan(self, package: ValidatedSkillPackage) -> SkillVersionScanResult: ...
-
-
-@runtime_checkable
 class SkillVersionMaterializerProtocol(Protocol):
     """Consumer-first seam reused by future Publication and Reference flows."""
 
@@ -111,6 +93,4 @@ __all__ = [
     "SkillVersionMaterializationError",
     "SkillVersionMaterializationRequest",
     "SkillVersionMaterializerProtocol",
-    "SkillVersionScannerProtocol",
-    "SkillVersionScanResult",
 ]

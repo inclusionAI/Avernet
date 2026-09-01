@@ -20,6 +20,7 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_
 )
 from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
+    mcp_dependency_codes_from_version_metadata,
 )
 
 
@@ -53,6 +54,11 @@ class TestStoredShapes:
     def test_order_and_duplicates_are_preserved(self):
         """Callers collect into a set; this one does not decide dedup for them."""
         assert mcp_dependency_codes(["b", "a", "b"]) == ("b", "a", "b")
+
+    def test_exact_version_metadata_uses_the_same_decoder(self):
+        assert mcp_dependency_codes_from_version_metadata(
+            '{"mcp_dependencies":[{"code":"mcp.center"}]}'
+        ) == ("mcp.center",)
 
 
 class TestUnrecognisedShapes:

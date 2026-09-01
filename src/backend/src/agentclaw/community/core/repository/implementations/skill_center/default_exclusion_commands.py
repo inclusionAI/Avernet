@@ -12,7 +12,7 @@ from agentclaw.community.core.repository.implementations.skill_center.bot_skills
     set_member_skill_ids,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
-    skill_mcp_dependency_codes,
+    skill_projection_mcp_dependency_codes,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_set_projection import (
     skill_set_item as _item,
@@ -35,7 +35,13 @@ class DefaultExclusionCommands:
     """Mixed into the control-plane repository; uses its ``_db``, ``_scope``,
     ``_set``, ``_snapshot`` and ``_require_unique_runtime_names``."""
 
-    def _skill_mcp_codes(self, session, skill_id: str) -> frozenset[str]:
+    def _skill_mcp_codes(
+        self,
+        session,
+        skill_id: str,
+        *,
+        allow_unresolvable_center: bool = False,
+    ) -> frozenset[str]:
         """The MCP dependencies the excluded/restored member carries.
 
         Exclusion is the Default Set's per-Bot deactivation, so it moves this
@@ -43,10 +49,13 @@ class DefaultExclusionCommands:
         ordinary add/remove does — and the command has to name them to scope
         its projection.
         """
-        return skill_mcp_dependency_codes(
+        return skill_projection_mcp_dependency_codes(
+            session,
             self._scope(session.query(Skill), Skill)
             .filter(Skill.id == int(skill_id))
-            .one_or_none()
+            .with_for_update()
+            .one_or_none(),
+            allow_unresolvable_center=allow_unresolvable_center,
         )
 
     def exclude_default_skill(
@@ -89,7 +98,9 @@ class DefaultExclusionCommands:
             )
             if not created:
                 return DesiredStateMutation(_item(row), False, old)
-            released = self._skill_mcp_codes(session, skill_id)
+            released = self._skill_mcp_codes(
+                session, skill_id, allow_unresolvable_center=True
+            )
             skill_installations.uninstall(
                 session, bot_id=bot_id, owner_id=owner_id,
                 env=get_current_env(), skill_ids={int(skill_id)},

@@ -47,7 +47,7 @@ from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_
     McpSkillSetControlPlaneCommands,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
-    skill_mcp_dependency_codes,
+    skill_projection_mcp_dependency_codes,
 )
 from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import LegacySkillSetScopeQueries
 from agentclaw.community.core.repository.capability_desired_state_types import (
@@ -431,7 +431,11 @@ class CapabilityDesiredStateRepository(
                 _item(row),
                 True,
                 old,
-                mcp_codes=skill_mcp_dependency_codes(skill),
+                mcp_codes=skill_projection_mcp_dependency_codes(
+                    session,
+                    skill,
+                    allow_unresolvable_center=not bool(row.is_active),
+                ),
             )
 
     def remove_skill(
@@ -473,6 +477,7 @@ class CapabilityDesiredStateRepository(
             skill = (
                 self._scope(session.query(Skill), Skill)
                 .filter(Skill.id == int(skill_id))
+                .with_for_update()
                 .one_or_none()
             )
             # The difference is what this membership was providing.
@@ -496,7 +501,9 @@ class CapabilityDesiredStateRepository(
                 _item(row),
                 True,
                 old,
-                mcp_codes=skill_mcp_dependency_codes(skill),
+                mcp_codes=skill_projection_mcp_dependency_codes(
+                    session, skill, allow_unresolvable_center=True
+                ),
             )
 
     def set_skill_set_active(
