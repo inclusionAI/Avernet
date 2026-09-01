@@ -86,7 +86,8 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         return
     logger.info("[task][bbs_mode] bid winner is=%s, task_id=%s", winner_bot_id, task_id)
 
-    msg = _task_msg(skill_name, execution_graph, backend_url, winner_bot_id)
+    msg = _task_msg(skill_name, execution_graph, backend_url, winner_bot_id,
+                    title=winner.get("title", ""), goal=winner.get("goal", ""))
 
     # 先增加一个bbs节点,RUNNING
     bbs_task_node = TaskNode(
@@ -94,9 +95,9 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         task_id=task_id,
         status=Status.RUNNING,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title="BBS 接力", instruction=""),
+            metadata=Metadata(task_id=task_id, title=winner.get("title", msg), instruction=""),
             context=Context(background=""),
-            goal=Goal(objective=msg, acceptances=[]),
+            goal=Goal(objective=winner.get("goal", msg), acceptances=[]),
         ),
         run_info=RuntimeInfo(
             run_mode="bbs",
@@ -224,7 +225,7 @@ async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
 
 
 async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
-    """一发一收:发给 bot 评估 prompt,取回复 content JSON {completion_rate, relay_reason}。"""
+    """一发一收:发给 bot 评估 prompt,取回复 content JSON {completion_rate, relay_reason, title, goal}。"""
     task_id = execution_graph.task_id
     bot_id = rost_entry["bot_id"]
     prompt = _bid_prompt(execution_graph, bot_id)
@@ -241,7 +242,7 @@ async def _bid_one(bot, rost_entry, execution_graph) -> dict | None:
 
 
 def _parse_bid(bid_result: Any) -> dict | None:
-    """从 _bid_one 返回 {bot_id, run} 中解析 completion_rate + relay_reason(bot 未给则空串)。"""
+    """从 _bid_one 返回 {bot_id, run} 中解析 completion_rate + relay_reason + title + goal(bot 未给则空串)。"""
     if not isinstance(bid_result, dict):
         return None
     run = bid_result.get("run")
@@ -268,8 +269,18 @@ def _parse_bid(bid_result: Any) -> dict | None:
         return None
     reason = obj.get("relay_reason")
     reason = reason if isinstance(reason, str) else ""
+    title = obj.get("title")
+    title = title if isinstance(title, str) else ""
+    goal = obj.get("goal")
+    goal = goal if isinstance(goal, str) else ""
     bot_id = bid_result.get("bot_id", "")
-    return {"bot_id": bot_id, "completion_rate": int(rate), "relay_reason": reason}
+    return {
+        "bot_id": bot_id,
+        "completion_rate": int(rate),
+        "relay_reason": reason,
+        "title": title,
+        "goal": goal,
+    }
 
 
 def _build_task_snapshot(execution_graph) -> dict:
@@ -326,32 +337,48 @@ def _bid_prompt(execution_graph, bot_id: str) -> str:
     """让 bot 据内联任务快照自评能完成多少剩余事项,输出 JSON。
 
     snapshot 内联(参考 task_plan._compose_planning_prompt),免 bot 再读 dashboard;``task_id`` 仅作引用,
-    可选深读 dashboard URL。返回格式 ``{"completion_rate": <0-100整数>, "relay_reason": "<可完成理由与依据>"}``。
+    可选深读 dashboard URL。返回格式
+    ``{"completion_rate": <0-100整数>, "relay_reason": "<可完成理由与依据>",
+       "title": "<你能完成的这部分事项的标题>", "goal": "<你能完成的这部分事项的目标/目标成果>"}``。
+    title/goal 圈定该 bot 承诺能完成的那部分事项,后续带入真正执行的任务消息。
     """
     task_id = getattr(execution_graph, "task_id", "") or ""
     snapshot = _build_task_snapshot(execution_graph)
     return (
         "[bbs-bid] 请基于以下任务快照自评:你能完成该任务**剩余事项的百分比**(0-100),"
-        "并给出 relay_reason(你为什么觉得自己能完成该任务、依据是什么)。\n"
+        "并给出 relay_reason(你为什么觉得自己能完成该任务、依据是什么),"
+        "同时给出**你能完成的这一部分事项**的 title(该部分事项的标题)与 goal(该部分事项的目标/目标成果)。\n"
         f"你自身 bot_id={bot_id};task_id={task_id}(仅作引用)。\n"
         "快照含根 goal/验收项/已 DONE 子节点产出/gaps;据 goal 与已完成产出算剩余 gap,"
-        "基于自身能力(不联网)自评能补完的剩余事项占比,并说明判断依据(可完成理由 + 对应 snapshot 字段),输出 JSON: "
-        '{"completion_rate": <0-100整数>, "relay_reason": "<可完成理由与依据>"}\n'
+        "基于自身能力(不联网)自评能补完的剩余事项占比,并说明判断依据(可完成理由 + 对应 snapshot 字段),"
+        "再圈定你承诺能完成的那部分事项并给出其 title 与 goal,输出 JSON: "
+        '{"completion_rate": <0-100整数>, "relay_reason": "<可完成理由与依据>", '
+        '"title": "<你能完成的这部分事项的标题>", "goal": "<你能完成的这部分事项的目标/目标成果>"}\n'
         f"任务态快照\n{json.dumps(snapshot, ensure_ascii=False)}\n"
     )
 
 
-def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str) -> str:
+def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str,
+              *, title: str = "", goal: str = "") -> str:
     """给胜出 bot 的任务消息:内联任务态快照,skill 据快照归纳剩余事项(免读 dashboard)→ attach → 执行 → result。
 
     task_id/backend_url/bot_id 仍保留供步骤② attach / 步骤④ result 的 API 调用;dashboard 仅作可选兜底深读。
+    ``title``/``goal`` 为胜出 bot bid 时承诺能完成的这部分事项的标题/目标,带入执行消息(置顶)让 bot
+    按其中标的子任务范围执行,而非仅据全量快照自行裁剪。
     """
     snapshot = _build_task_snapshot(execution_graph)
-    return (
-        f"请为我执行一下任务。\n"
+    parts = ["请为我执行一下任务。\n"]
+    if title or goal:
+        parts.append("**你计划能完成的事项如下):\n")
+        if title:
+            parts.append(f"- title: {title}\n")
+        if goal:
+            parts.append(f"- goal: {goal}\n")
+    parts.append(
         "**任务态快照已内联**(下方 JSON):含根 goal(objective+acceptances)、instruction、background、"
         "done_children(已 DONE 子节点+产出)、gaps、loop_round。**直接据快照归纳剩余事项**"
         "(剩余 = goal.acceptances 全集 − done_children 产出并集,再按 gaps 细化),无需先读 dashboard;\n"
         "然后请为我完成基于剩余事项\n"
         f"任务态快照如下：\n{json.dumps(snapshot, ensure_ascii=False)}"
     )
+    return "".join(parts)

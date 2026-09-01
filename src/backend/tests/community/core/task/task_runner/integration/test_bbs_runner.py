@@ -43,9 +43,11 @@ class _FakeBot:
     ``dispatch_raises``: 若为真,dispatch 抛异常 → 走 notify except 收口分支(释放 claim)。
     """
 
-    def __init__(self, rates, *, dispatch_raises: bool = False, reasons=None):
+    def __init__(self, rates, *, dispatch_raises: bool = False, reasons=None, titles=None, goals=None):
         self._rates = rates
         self._reasons = reasons or {}
+        self._titles = titles or {}
+        self._goals = goals or {}
         self.dispatch_raises = dispatch_raises
         self.sent_messages: list[tuple] = []   # dispatch 消息(给胜出 bot)
         self.bid_prompts: list[str] = []        # bid prompt
@@ -58,8 +60,15 @@ class _FakeBot:
             if rate is None:
                 raise RuntimeError("bot error")
             reason = self._reasons.get(bot_id, f"reason-{bot_id}")
+            bid_obj: dict = {"completion_rate": rate, "relay_reason": reason}
+            title = self._titles.get(bot_id, "")
+            goal = self._goals.get(bot_id, "")
+            if title:
+                bid_obj["title"] = title
+            if goal:
+                bid_obj["goal"] = goal
             return {"status": "COMPLETED",
-                    "result": {"content": json.dumps({"completion_rate": rate, "relay_reason": reason})}}
+                    "result": {"content": json.dumps(bid_obj, ensure_ascii=False)}}
         # Phase 2: dispatch(给胜出 bot 发任务,等结果)
         self.sent_messages.append((bot_id, message, metadata))
         if self.dispatch_raises:
@@ -324,7 +333,8 @@ def test_parse_bid_extracts_relay_reason():
         "run": {"status": "COMPLETED",
                 "result": {"content": json.dumps({"completion_rate": 90, "relay_reason": "已有相关产出,可补完剩余 gap"})}},
     })
-    assert bid == {"bot_id": "B", "completion_rate": 90, "relay_reason": "已有相关产出,可补完剩余 gap"}
+    assert bid == {"bot_id": "B", "completion_rate": 90, "relay_reason": "已有相关产出,可补完剩余 gap",
+                   "title": "", "goal": ""}
 
 
 def test_parse_bid_relay_reason_defaults_empty_when_missing():
@@ -334,7 +344,7 @@ def test_parse_bid_relay_reason_defaults_empty_when_missing():
         "run": {"status": "COMPLETED",
                 "result": {"content": json.dumps({"completion_rate": 50})}},
     })
-    assert bid == {"bot_id": "A", "completion_rate": 50, "relay_reason": ""}
+    assert bid == {"bot_id": "A", "completion_rate": 50, "relay_reason": "", "title": "", "goal": ""}
 
 
 def test_notify_records_winner_relay_reason_in_scoped_extend_props():
@@ -356,3 +366,61 @@ def test_notify_records_winner_relay_reason_in_scoped_extend_props():
     assert len(on_bbs_report.calls) == 1
     patch = on_bbs_report.calls[0]
     assert patch.extend_props_patch["relay_reason"] == "已产出相关交付,可补完剩余 gap"
+
+
+def test_bid_prompt_asks_for_title_and_goal_of_completable_part():
+    """bid prompt 除 completion_rate/relay_reason 外,还要求 bot 输出它能完成的那部分事项的 title 与 goal。"""
+    prompt = _bid_prompt(_execution_graph("t1", _GOAL), "B")
+    assert "completion_rate" in prompt
+    assert "relay_reason" in prompt
+    assert "title" in prompt
+    assert "goal" in prompt
+
+
+def test_parse_bid_extracts_title_and_goal():
+    """_parse_bid 从 bot 回复 JSON 解析它能完成的这部分事项的 title + goal。"""
+    bid = _parse_bid({
+        "bot_id": "B",
+        "run": {"status": "COMPLETED",
+                "result": {"content": json.dumps({
+                    "completion_rate": 90,
+                    "relay_reason": "已产出相关交付,可补完剩余 gap",
+                    "title": "补完架构师名册剩余 2 位",
+                    "goal": "给出剩余 2 位架构师姓名/角色/职责",
+                }, ensure_ascii=False)}},
+    })
+    assert bid == {
+        "bot_id": "B",
+        "completion_rate": 90,
+        "relay_reason": "已产出相关交付,可补完剩余 gap",
+        "title": "补完架构师名册剩余 2 位",
+        "goal": "给出剩余 2 位架构师姓名/角色/职责",
+    }
+
+
+def test_notify_brings_winner_title_goal_into_execution_message():
+    """胜出 bot 的 bid title/goal(它能完成的这部分事项)带入真正执行的任务消息(dispatch msg)。
+
+    非胜出 bot 的 title/goal 不得泄进执行消息。"""
+    roster = _roster("A", "B")
+    bot = _FakeBot(
+        rates={"A": 50, "B": 90},
+        reasons={"A": "A 理由", "B": "B 理由"},
+        titles={"A": "A 部分标题", "B": "B 部分标题"},
+        goals={"A": "A 部分目标", "B": "B 部分目标"},
+    )
+    bcn = _FakeBcn(roster)
+    graph = _FakeGraph()
+    g = _execution_graph("t1", _GOAL)
+    on_bbs_report = _FakeOnBbsReport(graph)
+
+    _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s",
+                on_bbs_report=on_bbs_report))
+
+    assert graph.claimed == "B"  # 最高 completion_rate 胜出
+    assert len(bot.sent_messages) == 1
+    msg_bot, msg_text, msg_meta = bot.sent_messages[0]
+    assert msg_bot == "B"
+    assert "B 部分标题" in msg_text  # 胜出 bot 的 bid title 进执行消息
+    assert "B 部分目标" in msg_text  # 胜出 bot 的 bid goal 进执行消息
+    assert "A 部分" not in msg_text  # 未胜出 bot 的 title/goal 不进执行消息
