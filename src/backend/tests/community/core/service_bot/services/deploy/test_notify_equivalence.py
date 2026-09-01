@@ -20,10 +20,9 @@ elsewhere and intentionally not duplicated here:
 """
 from __future__ import annotations
 
-from typing import Any
-
-import pytest
-
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+)
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifact,
     DeployArtifactProducer,
@@ -35,7 +34,7 @@ class _StubProducer(DeployArtifactProducer):
     def __init__(self, tag: str) -> None:
         self.tag = tag
 
-    def produce_artifact(self, bot: dict[str, Any], version: int) -> DeployArtifact:
+    def produce_artifact(self, request: ArtifactBuildRequest) -> DeployArtifact:
         return DeployArtifact(success=True, ext={"by": self.tag})
 
 

@@ -154,8 +154,14 @@ class TeclawProvisionService:
         #    publish snapshot. (``owner_id`` is spliced in for the producer's
         #    ``_compose_request``, which reads the bot row's ``owner_id``.) Runtime
         #    edits later push updates via the teclaw device-sync variant.
+        from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+            ArtifactBuildRequest,
+        )
+
         deploy = self._producer_router.resolve(TECLAW_DEVICE_PROVIDER).produce_artifact(
-            {**bot, "owner_id": owner_id}, version=None
+            ArtifactBuildRequest.create(
+                bot={**bot, "owner_id": owner_id}, version=None
+            )
         )
         config_artifact = deploy.ext["config_artifact"]
 
