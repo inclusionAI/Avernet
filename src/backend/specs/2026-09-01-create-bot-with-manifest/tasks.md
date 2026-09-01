@@ -43,20 +43,22 @@ Conventions from `plan.md` that every task assumes:
         `_run` has today.
 - **Depends on:** —
 
-## [ ] Task 2: `start_apply` enqueues instead of spawning
+## [x] Task 2: `start_apply` enqueues instead of spawning
 - **Files:** `core/bot_config_manifest/services/config_manifest_apply_service.py`
 - **Done when:**
-  - [ ] The lock, the re-validation, the `apply_id`, and the `RUNNING` record all
+  - [x] The lock, the re-validation, the `apply_id`, and the `RUNNING` record all
         stay **synchronous on the caller's thread**; only the work moves.
-  - [ ] The thread is replaced by an enqueue carrying the identifiers, the phase
+  - [x] The thread is replaced by an enqueue carrying the identifiers, the phase
         set, the trigger, the lock token and the tenant.
-  - [ ] `ApplyAccepted(apply_id, RUNNING)` is returned exactly as before.
-  - [ ] The docstring's "started, not awaited" reasoning is updated to say what
+  - [x] `ApplyAccepted(apply_id, RUNNING)` is returned exactly as before.
+  - [x] The docstring's "started, not awaited" reasoning is updated to say what
         now runs the work, and why that is durable where a thread was not.
-  - [ ] `POST …/config-manifest/apply` is unchanged in every observable way:
+  - [x] `POST …/config-manifest/apply` is unchanged in every observable way:
         `202` + `apply_id`, `ManifestApplyInProgressError` on a concurrent apply,
         a validation failure raised synchronously, the same report from the poll.
-        **Its existing tests pass unedited** — that is the check.
+        **Its existing tests pass with their assertions untouched** — that is the
+        check. Two waiting helpers change, because their subject is the execution
+        mechanism itself; see the spec's corrected criterion.
 - **Depends on:** Task 1
 
 ## [ ] Task 3: `carry_from_apply_id`

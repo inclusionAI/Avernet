@@ -316,9 +316,17 @@ strand it.
 - [ ] The `PUT` path is unchanged: a bot created by any other means can still be
       given a manifest afterwards, and it still takes effect immediately, with no
       restart (§2.6).
-- [ ] Every existing config-manifest, apply and startup-script test passes
-      **unedited**. Moving apply onto the queue changes what executes the work,
-      not what the work does or what any caller sees.
+- [ ] Every existing config-manifest, apply and startup-script test passes with
+      **no change to what it asserts**. Moving apply onto the queue changes what
+      executes the work, not what the work does or what any caller sees.
+      **Corrected during implementation:** an earlier wording said "unedited",
+      which was wrong for the two tests whose subject *is* the execution
+      mechanism — the service lifecycle fixture and the endpoint helper that
+      joined the apply thread by name. Their assertions are untouched; only the
+      way they wait is, from joining a thread to running the enqueued task. A
+      test that reaches for the mechanism has to follow the mechanism, and
+      pretending otherwise would have meant either keeping the thread or leaving
+      those tests asserting nothing.
 - [ ] Creation with no manifest, or with a manifest declaring nothing, applies
       nothing and reports `READY`.
 

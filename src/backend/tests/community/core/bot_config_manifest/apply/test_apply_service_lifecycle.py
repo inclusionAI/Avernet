@@ -543,41 +543,28 @@ def test_partially_written_survives_the_storage_round_trip(world):
     )
 
 
-def test_a_thread_that_cannot_start_terminates_the_report_and_frees_the_lock(
+def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
     world, monkeypatch
 ):
-    """The launch-failure window the audit found: the RUNNING row was already
-    written when ``Thread.start`` raises — thread exhaustion under load is
-    exactly its trigger — leaving the bot locked for the 30-minute TTL while
-    a poller waits on an apply that never existed. The window must close the
-    same way ``_run``'s finally closes everything else: FAILED row, lock
-    released, caller hears the original error."""
-    import threading
-
-    # Captured BEFORE the patch: reading ``threading.Thread`` after it would
-    # return the patched class (the module alias sees the same global), and
-    # "restoring" ExplodingThread to itself is exactly the trap.
-    original_thread_cls = threading.Thread
-
+    """The launch-failure window the audit found, on the queue: the RUNNING row
+    is already written when the handoff raises, leaving the bot locked for the
+    30-minute TTL while a poller waits on an apply that never existed. Thread
+    exhaustion used to be the trigger; a queue write that cannot land is the
+    same shape of failure and gets the same answer — FAILED row, lock released,
+    caller hears the original error."""
     service, applies, locks, scripts, _ = world
+    queue = service._task_queue_provider()
+    original_enqueue = queue.enqueue
 
-    class _NoThreadsLeftError(RuntimeError):
+    class _QueueUnavailableError(RuntimeError):
         pass
 
-    class ExplodingThread:
-        def __init__(self, *args, **kwargs):
-            pass
+    def _explode(*args, **kwargs):
+        raise _QueueUnavailableError("could not reach the queue")
 
-        def start(self):
-            raise _NoThreadsLeftError("can't start new thread")
+    monkeypatch.setattr(queue, "enqueue", _explode)
 
-    monkeypatch.setattr(
-        "agentclaw.community.core.bot_config_manifest.services."
-        "config_manifest_apply_service.threading.Thread",
-        ExplodingThread,
-    )
-
-    with pytest.raises(_NoThreadsLeftError):
+    with pytest.raises(_QueueUnavailableError):
         service.start_apply(
             entity_id=_ENTITY,
             bot_id=_BOT,
@@ -592,11 +579,7 @@ def test_a_thread_that_cannot_start_terminates_the_report_and_frees_the_lock(
     assert report.status is ApplyStatus.FAILED
 
     # And the bot is immediately re-applyable — no TTL wait.
-    monkeypatch.setattr(
-        "agentclaw.community.core.bot_config_manifest.services."
-        "config_manifest_apply_service.threading.Thread",
-        original_thread_cls,
-    )
+    monkeypatch.setattr(queue, "enqueue", original_enqueue)
     accepted = service.start_apply(
         entity_id=_ENTITY,
         bot_id=_BOT,

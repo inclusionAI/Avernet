@@ -1,21 +1,31 @@
 """Applying a bot's configuration manifest (issue #1472).
 
 Owns the lifecycle around the orchestrator: the lock, the re-validation, the
-record's two writes, and the background thread the work actually runs on.
+record's two writes, and handing the work to the queue that runs it.
 
 **Apply is started, not awaited.** :meth:`start_apply` answers as soon as it can
-answer — with an ``apply_id`` — and the orchestrator runs on a daemon thread.
-Applying is device I/O today and network fetching from W5, so a caller holding
-an HTTP connection across it would be a caller timing out. It is also the shape
-W13's ``APPLYING`` poll state needs: a state you can observe only exists if the
-work is something you start and then ask about.
+answer — with an ``apply_id`` — and the orchestrator runs elsewhere. Applying is
+device I/O today and network fetching from W5, so a caller holding an HTTP
+connection across it would be a caller timing out. It is also the shape W13's
+``APPLYING`` poll state needs: a state you can observe only exists if the work is
+something you start and then ask about.
+
+**Where "elsewhere" is changed with W13, and the difference is durability.** W4
+ran the orchestrator on a daemon thread; it now runs as a ``config_manifest.apply``
+task (see ``apply/apply_task.py``). A thread dies with its pod and takes the apply
+with it, which stopped being merely untidy once creation began to *depend* on an
+apply completing — the startup-script row must exist before the start command is
+composed. A task is re-claimed after its lease expires and finishes.
+
+Nothing above the enqueue moved, and that is deliberate: the lock, the
+re-validation and the ``RUNNING`` row all still happen on the caller's thread, so
+every observable behaviour of ``POST …/config-manifest/apply`` is what it was.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import time
-import threading
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -106,7 +116,6 @@ from agentclaw.community.core.skill_center.skill_package import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import (
     avernet_tenant_scope,
-    bind_current_avernet_tenant,
     get_current_avernet_tenant,
 )
 from agentclaw.community.utils.env_utils import get_current_env
@@ -225,17 +234,37 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         *,
         entity_id: str,
         bot_id: str,
-        bot: dict,
+        bot: Optional[dict] = None,
         owner_id: str,
         actor_id: str,
         audit_actor: Optional[str] = None,
         trigger: str = "explicit",
         phases: Optional[frozenset[ApplyPhase]] = None,
+        engine_type: Optional[str] = None,
+        bot_type: Optional[str] = None,
     ) -> ApplyAccepted:
-        """Lock, validate, record ``RUNNING``, start the thread, return the id.
+        """Lock, validate, record ``RUNNING``, enqueue the work, return the id.
 
         The order is the contract. Both refusals happen **before** an id exists,
         so a caller never holds a handle to an apply that never ran.
+
+        **What runs where, and why the split is here.** Everything above the
+        enqueue is synchronous on the caller's thread — the lock (so a concurrent
+        apply still raises ``ManifestApplyInProgressError``), the re-validation
+        (so an invalid stored document still raises *to the caller*), the
+        ``apply_id`` and the ``RUNNING`` row. Only the work is handed off. That
+        is what keeps ``POST …/config-manifest/apply``'s contract identical to
+        what W4 shipped while the executor underneath it changed from a daemon
+        thread to a durable task.
+
+        **The lock spans the handoff**: acquired here, released by the handler
+        using the token in the payload. A task that never runs — a deployment
+        with the worker disabled — leaves a lock the TTL reaps, which is the same
+        outcome a dead thread had.
+
+        ``bot`` is optional. It is ``None`` on exactly one path: W13 applies the
+        pre-container phase **before** the bot record is created, and supplies
+        ``engine_type`` / ``bot_type`` from the creation request instead.
 
         ``actor_id`` and ``audit_actor`` are two different things and must not be
         collapsed. ``actor_id`` is the **principal** every downstream
@@ -249,14 +278,6 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         caller with nothing to distinguish keeps the obvious behaviour.
         """
         env = get_current_env()
-        # The two apply-scope promises of fetch/limits.py, made real: one
-        # ledger per apply, consulted before each entry's fetch and charged
-        # after — bounded apply duration is what keeps the TTL-based lock
-        # reaper from ever being right about a live apply.
-        budget = ApplyFetchBudget(
-            deadline=time.monotonic() + APPLY_BUDGET_S,
-            total_bytes=APPLY_FETCH_TOTAL_LIMIT,
-        )
         lock = self._locks.acquire(
             env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id
         )
@@ -269,25 +290,17 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             if lock is None:
                 raise ManifestApplyInProgressError(bot_id)
 
-        session: Optional[SourceSession] = None
         try:
             # Raises ManifestValidationError, before an id is minted, if the
-            # stored document no longer validates for this bot.
-            parsed = self._parsed_or_empty(
-                entity_id=entity_id, bot_id=bot_id, bot=bot
-            )
-            # W7's per-apply source session: the document's ``sources``
-            # declarations, frozen at apply start, against the strict-mode
-            # baselines read back from the LAST apply's report (before this
-            # apply runs, so a re-apply while an apply is in flight cannot
-            # read its own future resolutions). Built here in the request
-            # thread, so the worker never races a baseline read.
-            session = SourceSession(
-                sources=parsed.get("sources") or {},
-                baselines=self._last_resolutions(
-                    entity_id=entity_id, bot_id=bot_id
-                ),
-                git=self._git_client_provider(),
+            # stored document no longer validates for this bot. Kept here rather
+            # than left to the handler so the failure still reaches the caller
+            # synchronously, as it did before the work moved to the queue.
+            self._parsed_or_empty(
+                entity_id=entity_id,
+                bot_id=bot_id,
+                bot=bot,
+                engine_type=engine_type,
+                bot_type=bot_type,
             )
             apply_id = uuid.uuid4().hex
             started_at = datetime.now()
@@ -311,12 +324,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 ),
             )
         except Exception:
-            # Nothing started, so the lock must not be left behind — and any
-            # session already built must not keep whatever it fetched (it
-            # cannot have fetched, but the close is the invariant, not the
-            # schedule).
-            if session is not None:
-                session.close()
+            # Nothing started, so the lock must not be left behind.
             self._locks.release(
                 env=env,
                 entity_id=entity_id,
@@ -326,59 +334,38 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             raise
 
         try:
-            ctx = self._context(
-                bot_id=bot_id,
-                bot=bot,
-                owner_id=owner_id,
-                actor_id=actor_id,
-                entity_id=entity_id,
-                env=env,
-                # The id this context's fetch pipeline stamps into every receipt —
-                # minted above, so the linkage column answers "what did THIS
-                # apply fetch" as an indexed read.
-                apply_id=apply_id,
-                budget=budget,
-                source_session=session,
+            # Handed to the queue, not to a thread. The tenant is read here,
+            # inside the request, and carried in the payload: the queue has no
+            # tenant column and no request context survives to handler time, so
+            # the thread-era ``bind_current_avernet_tenant`` wrapper has nothing
+            # to wrap. The handler opens its own scope from the payload.
+            self._task_queue_provider().enqueue(
+                APPLY_TASK_TYPE,
+                build_apply_task_payload(
+                    apply_id=apply_id,
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    actor_id=actor_id,
+                    env=env,
+                    tenant=get_current_avernet_tenant(),
+                    trigger=trigger,
+                    lock_token=lock.lock_token,
+                    phases=phases,
+                    engine_type=engine_type,
+                    bot_type=bot_type,
+                ),
+                APPLY_TASK_DEADLINE_SECONDS,
             )
-
-            # ``bind_current_avernet_tenant`` captures the tenant AT WRAP TIME —
-            # here, inside the request thread — and re-establishes it inside the
-            # new one. Wrapped inline at the construction site, never as an
-            # @decorator: it looks like one (it uses functools.wraps) but a
-            # decorator on a module-level function would capture at *import*,
-            # when there is no request, and bind the default tenant forever.
-            #
-            # This is an isolation control, not a nicety. A wrong tenant here
-            # substitutes the wrong ${BOT_TENANT} *and* reads and writes the
-            # manifest tables under the wrong tenant.
-            threading.Thread(
-                target=bind_current_avernet_tenant(self._run),
-                kwargs={
-                    "ctx": ctx,
-                    "parsed": parsed,
-                    "apply_id": apply_id,
-                    "trigger": trigger,
-                    "started_at": started_at,
-                    "phases": phases,
-                    "lock_token": lock.lock_token,
-                },
-                daemon=True,
-                name=f"manifest-apply-{bot_id}",
-            ).start()
         except BaseException as exc:
-            # The RUNNING row exists but the work never started — a thread
-            # that cannot be created (``Thread.start`` raises exactly when
-            # load would exhaust the process) leaves this state otherwise
-            # stuck until the *stale* lock derivation kicks in, which is 30
-            # minutes of ManifestApplyInProgressError for a bot whose apply
-            # never ran. So the apply is terminally FAILED here, the lock is
-            # released for the next attempt, and the caller hears the
-            # original failure rather than a later poll's mystery.
-            if session is not None:
-                # ``_run``'s finally would have closed it; this apply has no
-                # _run, so the close belongs here — before the terminal write,
-                # so the report is never mistaken for a live session's owner.
-                session.close()
+            # The RUNNING row exists but the work never started. Written for a
+            # thread that could not be created; an enqueue that fails leaves the
+            # identical state, so it keeps the identical answer — and that answer
+            # is the better one: without the terminal write a poller sees a
+            # lock-less RUNNING row, and the next apply waits out the stale-lock
+            # TTL (30 minutes of ManifestApplyInProgressError) for work that never
+            # ran. The apply is terminally FAILED here, the lock released for the
+            # next attempt, and the caller hears the original failure.
             self._terminate_on_launch_failure(
                 env=env,
                 entity_id=entity_id,
@@ -529,6 +516,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 bot_id=bot_id,
                 lock_token=lock_token,
             )
+
     def run_apply_task(self, payload: dict) -> None:
         """Execute one apply from its task payload. Called only by the handler.
 
@@ -554,6 +542,14 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             # moved since the enqueue, and for the pre-container phase there is
             # no record at all yet.
             bot = self._bot_or_none(entity_id=entity_id, bot_id=bot_id)
+            apply_id = str(payload["apply_id"])
+            parsed = self._parsed_or_empty(
+                entity_id=entity_id,
+                bot_id=bot_id,
+                bot=bot,
+                engine_type=payload.get("engine_type"),
+                bot_type=payload.get("bot_type"),
+            )
             ctx = self._context(
                 bot_id=bot_id,
                 bot=bot,
@@ -563,18 +559,42 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 env=str(payload["env"]),
                 engine_type=payload.get("engine_type"),
                 bot_type=payload.get("bot_type"),
-            )
-            parsed = self._parsed_or_empty(
-                entity_id=entity_id,
-                bot_id=bot_id,
-                bot=bot,
-                engine_type=payload.get("engine_type"),
-                bot_type=payload.get("bot_type"),
+                # The id this context's fetch pipeline stamps into every receipt,
+                # so the linkage column answers "what did THIS apply fetch" as an
+                # indexed read.
+                apply_id=apply_id,
+                # The two apply-scope promises of fetch/limits.py, made real: one
+                # ledger per apply, consulted before each entry's fetch and charged
+                # after. It is built here rather than at the enqueue because its
+                # deadline is a monotonic reading of *this* process' clock, and
+                # because the apply's duration is the handler's, not the caller's.
+                budget=ApplyFetchBudget(
+                    deadline=time.monotonic() + APPLY_BUDGET_S,
+                    total_bytes=APPLY_FETCH_TOTAL_LIMIT,
+                ),
+                # W7 built this in the request thread "so the worker never
+                # races a baseline read". It is built here instead, for the
+                # same two reasons the budget is: the session owns checkout
+                # trees on disk, and they belong to the process that applies
+                # them, not to the one that enqueued — across a restart the
+                # request process may not even exist. The race W7 named is
+                # still closed, by the lock rather than by the thread: it is
+                # acquired before the enqueue and released by this handler, so
+                # this baseline read happens inside the same held lock the
+                # request thread's did, and no second apply can be between
+                # them.
+                source_session=SourceSession(
+                    sources=parsed.get("sources") or {},
+                    baselines=self._last_resolutions(
+                        entity_id=entity_id, bot_id=bot_id
+                    ),
+                    git=self._git_client_provider(),
+                ),
             )
             self._run(
                 ctx=ctx,
                 parsed=parsed,
-                apply_id=str(payload["apply_id"]),
+                apply_id=apply_id,
                 trigger=str(payload["trigger"]),
                 started_at=datetime.now(),
                 phases=phases_from_payload(payload.get("phases")),
@@ -747,6 +767,16 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         env and tenant.
         """
         engine, kind = _engine_and_bot_type(bot, engine_type, bot_type)
+        # The stand-in the docstring describes, named rather than inlined so the
+        # "no record yet" case reads as one thing.
+        record = bot
+        if record is None:
+            record = {
+                "bot_id": bot_id,
+                "entity_id": entity_id,
+                "active_engine": engine,
+                "bot_type": kind,
+            }
         return ApplyContext(
             bot_id=bot_id,
             owner_id=owner_id,
@@ -756,12 +786,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             tenant=get_current_avernet_tenant(),
             engine_type=engine,
             bot_type=kind,
-            bot=bot if bot is not None else {
-                "bot_id": bot_id,
-                "entity_id": entity_id,
-                "active_engine": engine,
-                "bot_type": kind,
-            },
+            bot=record,
             capabilities=(
                 self._manifests.capabilities_for_bot(bot)
                 if bot is not None
