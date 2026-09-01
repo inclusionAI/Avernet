@@ -98,6 +98,10 @@ class StaticPlanRuntime:
             # 不做摘要/合成;rule(怎么分析/输出/接力交接)归各 bot 的 skill/rule,不在此注入。
             node.task_spec.metadata.instruction = self._relay_instruction(definition, resolved)
             node.task_spec.goal = Goal(objective=definition.task, acceptances=[])
+            logger.info(
+                "[task][static-plan-runtime] relay v2 injected task=%s node=%s type=%s task_head=%r",
+                graph.task_id, node.node_id, definition.node_type, definition.task[:40],
+            )
         else:
             node.task_spec.metadata.instruction = f"{node.task_spec.metadata.instruction}\n输入: {resolved}"
         node.run_info.extend_props["static_bot_id"] = definition.bot_id
