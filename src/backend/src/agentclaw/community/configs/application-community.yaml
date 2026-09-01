@@ -289,3 +289,10 @@ user_config:
   #   llm:
   #     base_url: "https://your-openai-compatible-endpoint"
   #     secret_name: "AGENTCLAW_SECRET_..."
+  bcn:
+    base_url: "${BCS_URL}"
+    base_url_pre: "${BCS_URL}"
+    provider_id_prod: "${BCS_PROVIDER_ID}"
+    provider_id_pre: "${BCS_PROVIDER_ID}"
+    provider_admin_token_prod: "${BCS_ADMIN_TOKEN}"
+    provider_admin_token_pre: "${BCS_ADMIN_TOKEN}"
