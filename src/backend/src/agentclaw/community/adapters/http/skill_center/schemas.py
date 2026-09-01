@@ -478,6 +478,8 @@ class AddSkillsResult(BaseModel):
 class AddSkillsFailedResult(BaseModel):
     skill_id: str
     error: str
+    error_code: Optional[str] = None
+    message: Optional[str] = None
 
 
 class AddSkillsResponse(BaseModel):

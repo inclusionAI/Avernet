@@ -245,6 +245,60 @@ class BotSkillSetInstallations:
             mcps_to_uninstall=frozenset(inactive_mcps - active_mcps),
         )
 
+    def _has_active_skill_set_claim(
+        self,
+        session,
+        *,
+        bot_sets: list[SkillSet],
+        membership_set_ids: set[int],
+        skill_id: int,
+        bot_id: str,
+        owner_id: str,
+    ) -> bool:
+        """Whether an existing membership, rather than Direct, explains a Skill Installation."""
+        for row in bot_sets:
+            if int(row.id) not in membership_set_ids:
+                continue
+            if row.is_default:
+                excluded = default_exclusions.excluded_skill_ids(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    set_id=int(row.id),
+                )
+                if skill_id not in excluded:
+                    return True
+            elif row.is_active:
+                return True
+        return False
+
+    def _has_active_mcp_set_claim(
+        self,
+        session,
+        *,
+        bot_sets: list[SkillSet],
+        membership_set_ids: set[int],
+        server_code: str,
+        bot_id: str,
+        owner_id: str,
+    ) -> bool:
+        """Whether an existing membership, rather than Direct, explains an MCP Installation."""
+        for row in bot_sets:
+            if int(row.id) not in membership_set_ids:
+                continue
+            if row.is_default:
+                excluded = default_exclusions.excluded_mcp_codes(
+                    session,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    set_id=int(row.id),
+                )
+                if server_code not in excluded:
+                    return True
+            elif row.is_active:
+                return True
+        return False
+
     def _bot_sets(
         self,
         session,
