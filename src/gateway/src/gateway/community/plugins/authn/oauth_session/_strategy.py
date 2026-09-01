@@ -13,7 +13,7 @@ from __future__ import annotations
 import jwt
 
 from gateway.community.logger import get_logger
-from gateway.community.spi.auth import AuthError, AuthenticatedUser
+from gateway.community.spi.auth import AuthenticatedUser, AuthError
 from gateway.community.spi.authn import (
     CredentialBundle,
     Principal,

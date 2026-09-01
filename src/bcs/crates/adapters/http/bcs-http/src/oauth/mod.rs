@@ -822,6 +822,86 @@ mod tests {
         assert!(result.set_cookie.contains("SameSite=Lax"));
     }
 
+
+    #[tokio::test]
+    async fn login_urls_rejects_empty_callback_base_url() {
+        let mut providers: HashMap<String, Arc<dyn OAuthProvider>> = HashMap::new();
+        providers.insert(
+            "google".to_string(),
+            Arc::new(MockOAuthProvider::new("google", "external-123")),
+        );
+        let state = OAuthRouteState::new(
+            "test-secret-key-at-least-32-bytes!!",
+            Arc::new(NoopUserIdentityPort),
+            providers,
+            OAuthConfig {
+                jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
+                idle_timeout_minutes: 30,
+                base_url: "https://bcs.example.com".to_string(),
+                cookie_secure: false,
+                env: "test".to_string(),
+            },
+            None,
+        );
+
+        let err = state
+            .login_urls(BuildLoginUrls {
+                callback_base_url: "   ".to_string(),
+            })
+            .await
+            .expect_err("empty callback base url should fail");
+
+        assert_eq!(err.code(), "invalid_callback_base_url");
+    }
+
+    #[tokio::test]
+    async fn complete_login_rejects_missing_code() {
+        let mut providers: HashMap<String, Arc<dyn OAuthProvider>> = HashMap::new();
+        providers.insert(
+            "google".to_string(),
+            Arc::new(MockOAuthProvider::new("google", "external-123")),
+        );
+        let state = OAuthRouteState::new(
+            "test-secret-key-at-least-32-bytes!!",
+            Arc::new(NoopUserIdentityPort),
+            providers,
+            OAuthConfig {
+                jwt_secret: "test-secret-key-at-least-32-bytes!!".to_string(),
+                idle_timeout_minutes: 30,
+                base_url: "https://bcs.example.com".to_string(),
+                cookie_secure: false,
+                env: "test".to_string(),
+            },
+            None,
+        );
+
+        let urls = state
+            .login_urls(BuildLoginUrls {
+                callback_base_url: "https://bcs.example.com/openapi/v1/auth/callback".to_string(),
+            })
+            .await
+            .expect("login urls");
+        let provider_url = &urls.providers[0].url;
+        let state_param = provider_url
+            .split('&')
+            .find_map(|part| part.strip_prefix("state="))
+            .expect("state query param")
+            .to_string();
+
+        let err = state
+            .complete_login(CompleteOAuthLogin {
+                provider: "google".to_string(),
+                code: None,
+                auth_code: None,
+                state: state_param,
+                callback_base_url: "https://bcs.example.com/openapi/v1/auth/callback".to_string(),
+            })
+            .await
+            .expect_err("missing code should fail");
+
+        assert_eq!(err.code(), "missing_code");
+    }
+
     /// A principal whose `user_id` is `None` is not a human login — `/auth/user`
     /// must NOT return 200 with an empty user_id.
     #[tokio::test]
