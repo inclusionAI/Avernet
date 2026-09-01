@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,7 @@ class SkillSetSkillOutcome:
     skill_id: str
     changed: bool = False
     error: Exception | None = None
+    runtime_projection: dict | None = field(default=None, compare=False)
 
     @property
     def succeeded(self) -> bool:

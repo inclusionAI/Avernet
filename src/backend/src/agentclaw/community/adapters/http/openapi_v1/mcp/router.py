@@ -48,6 +48,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page,
 )
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
+    desired_state_from,
+    runtime_projection_from,
+)
 from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
@@ -119,7 +123,9 @@ ServerCodePath = Annotated[
 _ENTITY_TYPE = "staff"
 
 
-@bot_mcp_router.get("", response_model=Envelope[list[BotMcpItem]])
+@bot_mcp_router.get(
+    "", response_model=Envelope[list[BotMcpItem]], response_model_exclude_none=True
+)
 @envelope_errors
 async def list_bot_mcps(
     bot_id: BotIdPath,
@@ -157,13 +163,21 @@ async def activate_bot_mcp(
         DirectActivationServiceProtocol
     ),
 ) -> Envelope[BotMcpItem]:
-    await service.activate_mcp(
+    result = await service.activate_mcp(
         bot_id=bot_id,
         owner_id=owner_id,
         actor_id=user_id,
         server_code=server_code,
     )
-    return envelope(BotMcpItem(server_code=server_code, active=True), request)
+    return envelope(
+        BotMcpItem(
+            server_code=server_code,
+            active=True,
+            desired_state=desired_state_from(result),
+            runtime_projection=runtime_projection_from(result),
+        ),
+        request,
+    )
 
 
 @bot_mcp_router.post("/{server_code}/deactivate", response_model=Envelope[BotMcpItem])
@@ -178,13 +192,21 @@ async def deactivate_bot_mcp(
         DirectActivationServiceProtocol
     ),
 ) -> Envelope[BotMcpItem]:
-    await service.deactivate_mcp(
+    result = await service.deactivate_mcp(
         bot_id=bot_id,
         owner_id=owner_id,
         actor_id=user_id,
         server_code=server_code,
     )
-    return envelope(BotMcpItem(server_code=server_code, active=False), request)
+    return envelope(
+        BotMcpItem(
+            server_code=server_code,
+            active=False,
+            desired_state=desired_state_from(result),
+            runtime_projection=runtime_projection_from(result),
+        ),
+        request,
+    )
 
 
 # ── MCP Center dict → public model adapters ─────────────────────────

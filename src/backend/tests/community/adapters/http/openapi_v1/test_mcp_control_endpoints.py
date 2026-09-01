@@ -53,7 +53,19 @@ def test_bot_mcp_direct_activation_and_deactivation_are_bot_scoped():
 
     activated = client.post("/openapi/v1/bots/bot-1/mcps/mcp.weather/activate")
     assert activated.status_code == 200
-    assert activated.json()["data"] == {"server_code": "mcp.weather", "active": True}
+    assert activated.json()["data"] == {
+        "server_code": "mcp.weather",
+        "active": True,
+        "desired_state": {"changed": True, "status": "COMMITTED"},
+        "runtime_projection": {
+            "status": "SKIPPED",
+            "components": {},
+            "pending_count": 0,
+            "degraded_count": 0,
+            "issues": [],
+            "reason": "RUNTIME_RESULT_NOT_AVAILABLE",
+        },
+    }
 
     listed = client.get("/openapi/v1/bots/bot-1/mcps")
     assert listed.status_code == 200
@@ -61,4 +73,16 @@ def test_bot_mcp_direct_activation_and_deactivation_are_bot_scoped():
 
     deactivated = client.post("/openapi/v1/bots/bot-1/mcps/mcp.weather/deactivate")
     assert deactivated.status_code == 200
-    assert deactivated.json()["data"] == {"server_code": "mcp.weather", "active": False}
+    assert deactivated.json()["data"] == {
+        "server_code": "mcp.weather",
+        "active": False,
+        "desired_state": {"changed": True, "status": "COMMITTED"},
+        "runtime_projection": {
+            "status": "SKIPPED",
+            "components": {},
+            "pending_count": 0,
+            "degraded_count": 0,
+            "issues": [],
+            "reason": "RUNTIME_RESULT_NOT_AVAILABLE",
+        },
+    }

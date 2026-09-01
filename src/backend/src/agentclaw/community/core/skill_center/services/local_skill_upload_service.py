@@ -31,7 +31,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillInvalidPackageError,
     LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
-    LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
     LocalSkillTooLargeError,
 )
@@ -41,6 +40,7 @@ from agentclaw.community.core.skill_center.factories import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
     ProjectionScope,
+    RuntimeProjectionResult,
 )
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
@@ -363,8 +363,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
             runtime_sync_attempted = True
-            if not await self._sync_runtime(owner_id, bot_id):
-                raise LocalSkillRuntimeSyncError()
+            runtime_projection = await self._sync_runtime(owner_id, bot_id)
             self._audit_log_repo.insert(
                 {
                     "bot_id": bot_id,
@@ -375,20 +374,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     ),
                 }
             )
-        except LocalSkillRuntimeSyncError:
-            await self._restore_replacement(
-                skill=skill,
-                old_metadata=old_metadata,
-                owner_id=owner_id,
-                bot_id=bot_id,
-                staged=staged,
-                canonical=canonical,
-                backup=backup,
-                canonical_published=canonical_published,
-                switched=switched,
-                runtime_sync_attempted=runtime_sync_attempted,
-            )
-            raise
         except Exception as exc:
             if switched or canonical_published:
                 await self._restore_replacement(
@@ -440,6 +425,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 "user_id": owner_id,
             },
             "actor_id": actor_id,
+            "runtime_projection": runtime_projection.to_dict(),
         }
 
     async def _restore_replacement(
@@ -467,10 +453,8 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             restored = self._skill_repo.update(skill["id"], old_metadata)
             if restored is None:
                 raise LocalSkillStorageError()
-            if runtime_sync_attempted and not await self._sync_runtime(
-                owner_id, bot_id
-            ):
-                raise LocalSkillRuntimeSyncError()
+            if runtime_sync_attempted:
+                await self._sync_runtime(owner_id, bot_id)
         if backup is not None:
             await self._discard(backup)
         await self._discard(staged)
@@ -521,7 +505,9 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             matches.append({**row, "active": bool(current["active"])})
         return matches
 
-    async def _sync_runtime(self, owner_id: str, bot_id: str) -> bool:
+    async def _sync_runtime(
+        self, owner_id: str, bot_id: str
+    ) -> RuntimeProjectionResult:
         try:
             # Skills only. Both callers are the Local Skill *replace* flow
             # (and its compensating restore), and a replace cannot move the
@@ -531,14 +517,17 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             # here rescans them either. The projected MCP codes are therefore
             # identical before and after, so claiming or releasing anything
             # would be a device write to restate what is already true.
-            await self._runtime_reconciler.project(
+            result = await self._runtime_reconciler.project(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 scope=ProjectionScope(skills=True),
             )
-            return True
+            return result or RuntimeProjectionResult.converged()
         except Exception:
-            return False
+            return RuntimeProjectionResult.pending(
+                code="SKILL_RUNTIME_UNAVAILABLE",
+                reason="Skill 运行环境当前不可连接，内容已更新但尚未同步",
+            )
 
     @staticmethod
     def _scope_for(bot: dict[str, Any], bot_id: str) -> BotSkillLayoutScope:

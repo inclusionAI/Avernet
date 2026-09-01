@@ -403,3 +403,35 @@ async def test_claude_code_port_runs_pool_filesystem_operations_off_loop(
         ],
         "source_layout": MappingSourceLayout.POOL,
     }
+
+
+@pytest.mark.asyncio
+async def test_claude_code_port_forwards_best_effort_apply_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.claude_code import _skills
+
+    received: list[dict] = []
+
+    def publish(**kwargs):
+        received.append(kwargs)
+        return MappingPublishResult(True, {"total": 1})
+
+    def verify(**kwargs):
+        received.append(kwargs)
+        return MappingVerificationResult(True, {"checked": 1})
+
+    monkeypatch.setattr(_skills, "publish_claude_code_pool_mappings", publish)
+    monkeypatch.setattr(_skills, "verify_claude_code_pool_mappings", verify)
+    params = {
+        "apply_mode": "BEST_EFFORT",
+        "mappings": [{"source": "/pool/a", "target": "/skills/a"}],
+    }
+
+    await ClaudeCodePluginImpl().publish_pool_mappings(params)
+    await ClaudeCodePluginImpl().verify_pool_mappings(params)
+
+    assert [kwargs["apply_mode"].value for kwargs in received] == [
+        "BEST_EFFORT",
+        "BEST_EFFORT",
+    ]

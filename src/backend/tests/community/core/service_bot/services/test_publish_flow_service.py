@@ -1126,7 +1126,7 @@ async def test_build_phase_projects_everything_before_artifact_build():
 
 
 @pytest.mark.asyncio
-async def test_build_phase_fails_without_artifact_when_full_projection_fails():
+async def test_build_phase_continues_when_runtime_projection_is_unavailable():
     arca = _StubProducer({"migration_path": "/m/3"})
     router = DeployArtifactProducerRouter(
         providers={"baas": arca}, default_provider_key="baas"
@@ -1149,8 +1149,12 @@ async def test_build_phase_fails_without_artifact_when_full_projection_fails():
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
     result = await svc.execute_build_phase(record, "op")
 
-    assert result.status == PublishStatus.FAILED
-    assert arca.calls == []
+    # Service Artifact is a frozen published deliverable; it must not be
+    # blocked by transient current-runtime projection drift.
+    assert result.status == PublishStatus.BUILT
+    assert len(arca.calls) == 1
+    assert arca.calls[0][0]["bot_id"] == "b1"
+    assert arca.calls[0][1] == 3
 
 
 @pytest.mark.asyncio

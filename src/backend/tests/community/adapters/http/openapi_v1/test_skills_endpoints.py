@@ -250,6 +250,27 @@ def test_upload_replacement_returns_200_and_updated_operation():
     class _UpdatedUpload(_Upload):
         operation = "updated"
 
+        async def upload_local_skill(self, **kwargs):
+            result = await super().upload_local_skill(**kwargs)
+            return {
+                **result,
+                "runtime_projection": {
+                    "status": "PENDING",
+                    "components": {"skills": "PENDING"},
+                    "pending_count": 1,
+                    "degraded_count": 0,
+                    "issues": [
+                        {
+                            "resource_type": "RUNTIME",
+                            "code": "SKILL_RUNTIME_UNAVAILABLE",
+                            "reason": "Skill 运行环境当前不可连接",
+                            "status": "PENDING",
+                            "retryable": True,
+                        }
+                    ],
+                },
+            }
+
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(SkillQueryServiceProtocol, to=_Query())
@@ -270,6 +291,11 @@ def test_upload_replacement_returns_200_and_updated_operation():
     assert response.status_code == 200
     assert response.json()["code"] == 200000
     assert response.json()["data"]["operation"] == "updated"
+    assert response.json()["data"]["desired_state"] == {
+        "changed": True,
+        "status": "COMMITTED",
+    }
+    assert response.json()["data"]["runtime_projection"]["status"] == "PENDING"
 
 
 def test_upload_rejects_multipart_and_other_content_types_before_service_call():
@@ -370,6 +396,15 @@ def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state()
             "updated_at": "2026-08-04T00:00:00",
         },
         "changed": False,
+        "desired_state": {"changed": False, "status": "UNCHANGED"},
+        "runtime_projection": {
+            "status": "SKIPPED",
+            "components": {},
+            "pending_count": 0,
+            "degraded_count": 0,
+            "issues": [],
+            "reason": "RUNTIME_RESULT_NOT_AVAILABLE",
+        },
     }
     assert state.command == "activate"
     assert state.args == {

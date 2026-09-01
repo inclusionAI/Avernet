@@ -10,9 +10,6 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
-from agentclaw.community.core.bot_collaborator.protocols import (
-    CollaboratorServiceProtocol,
-)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
@@ -144,7 +141,7 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 "active_engine": "openclaw",
             }
         )
-        skill_set = world.get(SkillSetRepository).create(
+        world.get(SkillSetRepository).create(
             {
                 "name": "Default",
                 "description": "Default Skill Set",
@@ -247,24 +244,26 @@ def activate_local_skill_reconciles_runtime():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
-    scenario="runtime_failure_returns_fixed_error",
+    scenario="runtime_failure_keeps_committed_state_and_reports_pending",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
     seed=_seed_runtime_failure,
-    expect=ExpectError(
-        status=502,
+    expect=ExpectSuccess(
+        status=200,
         json_contains={
-            "code": 502102,
-            "message": "Skill runtime synchronization failed",
-            "data": None,
+            "code": 200000,
+            "data": {
+                "desired_state": {"status": "COMMITTED"},
+                "runtime_projection": {"status": "PENDING"},
+            },
         },
     ),
 )
 def activate_local_skill_runtime_failure_is_publicly_safe():
-    """The activation command maps a runtime transport failure to the fixed envelope."""
+    """The activation command keeps Desired State and reports a safe Pending result."""
 
 
 @endpoint_test(
@@ -312,7 +311,7 @@ def deactivate_inactive_local_skill_is_an_idempotent_happy_path():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
-    scenario="runtime_failure_compensates_with_fixed_error",
+    scenario="runtime_failure_keeps_deactivated_state_and_reports_pending",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID, "skill_id": "1"},
         query_params={"user_id": _OWNER},
@@ -320,17 +319,32 @@ def deactivate_inactive_local_skill_is_an_idempotent_happy_path():
     ),
     seed=_seed_runtime_failure,
     extra_assertions=(_assert_skill_remains_inactive,),
-    expect=ExpectError(
-        status=502,
+    expect=ExpectSuccess(
+        status=200,
         json_contains={
-            "code": 502102,
-            "message": "Skill runtime synchronization failed",
-            "data": None,
+            "code": 200000,
+            "data": {"runtime_projection": {"status": "PENDING"}},
         },
     ),
 )
 def deactivate_local_skill_runtime_failure_is_publicly_safe():
-    """The public fixed runtime failure never exposes transport details."""
+    """The public Pending result never exposes runtime transport details."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",
+    scenario="set_managed_skill_refuses_direct_control",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectError(status=409, json_contains={"code": 409202}),
+)
+def deactivate_set_managed_skill_is_refused():
+    """A Set-managed Skill can only be changed through its SkillSet command."""
 
 
 # The retiring addresses. `POST /openapi/v1/bots/skills/{skill_id}/activate`
@@ -365,24 +379,39 @@ def legacy_activate_resolves_the_bot_from_the_skill():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/skills/{skill_id}/activate",
-    scenario="legacy_address_maps_runtime_failure_identically",
+    scenario="legacy_address_reports_runtime_pending_without_failing_command",
     input=CaseInput(
         path_params={"skill_id": "1"},
         query_params={"user_id": _OWNER},
         headers=_HEADERS,
     ),
     seed=_seed_runtime_failure,
-    expect=ExpectError(
-        status=502,
+    expect=ExpectSuccess(
+        status=200,
         json_contains={
-            "code": 502102,
-            "message": "Skill runtime synchronization failed",
-            "data": None,
+            "code": 200000,
+            "data": {"runtime_projection": {"status": "PENDING"}},
         },
     ),
 )
 def legacy_activate_runtime_failure_is_publicly_safe():
-    """The shim adds no new failure shape of its own."""
+    """The shim keeps the canonical Pending result shape."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/activate",
+    scenario="legacy_address_refuses_set_managed_direct_control",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectError(status=409, json_contains={"code": 409202}),
+)
+def legacy_activate_set_managed_skill_is_refused():
+    """The legacy address preserves the canonical ownership restriction."""
 
 
 @endpoint_test(
@@ -410,7 +439,7 @@ def legacy_deactivate_inactive_local_skill_is_an_idempotent_happy_path():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/skills/{skill_id}/deactivate",
-    scenario="legacy_address_compensates_identically",
+    scenario="legacy_address_keeps_committed_state_when_runtime_is_pending",
     input=CaseInput(
         path_params={"skill_id": "1"},
         query_params={"user_id": _OWNER},
@@ -418,14 +447,29 @@ def legacy_deactivate_inactive_local_skill_is_an_idempotent_happy_path():
     ),
     seed=_seed_runtime_failure,
     extra_assertions=(_assert_skill_remains_inactive,),
-    expect=ExpectError(
-        status=502,
+    expect=ExpectSuccess(
+        status=200,
         json_contains={
-            "code": 502102,
-            "message": "Skill runtime synchronization failed",
-            "data": None,
+            "code": 200000,
+            "data": {"runtime_projection": {"status": "PENDING"}},
         },
     ),
 )
 def legacy_deactivate_runtime_failure_is_publicly_safe():
-    """Compensation happens behind the retiring address exactly as behind the new one."""
+    """The retiring address also keeps Desired State on Runtime drift."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/skills/{skill_id}/deactivate",
+    scenario="legacy_address_refuses_set_managed_direct_control",
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_excluded_default_member,
+    expect=ExpectError(status=409, json_contains={"code": 409202}),
+)
+def legacy_deactivate_set_managed_skill_is_refused():
+    """The legacy address preserves the canonical ownership restriction."""

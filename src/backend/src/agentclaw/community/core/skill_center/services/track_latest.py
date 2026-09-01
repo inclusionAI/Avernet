@@ -19,6 +19,7 @@ from agentclaw.community.core.skill_center.materialization_contract import (
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
+    RuntimeProjectionStatus,
 )
 from agentclaw.community.core.skill_center.track_latest_service_protocol import (
     TrackLatestServiceProtocol,
@@ -32,11 +33,13 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
 )
 from agentclaw.community.core.task_queue.types import Complete, Fail, Retry, TaskOutcome
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.log import get_logger
 
 
 TRACK_LATEST_FANOUT_TASK = "skill_center.track_latest_fanout"
 BOT_TRACK_LATEST_RECONCILE_TASK = "skill_center.bot_track_latest_reconcile"
 TRACK_LATEST_DEADLINE_SECONDS = 30 * 60
+logger = get_logger()
 
 
 class TrackLatestService(TrackLatestServiceProtocol):
@@ -158,7 +161,7 @@ class BotTrackLatestReconcileTaskHandler:
         before = await self._projector.snapshot_skill_mappings(
             bot_id=bot_id, owner_id=owner_id
         )
-        await self._projector.project(
+        projection = await self._projector.project(
             bot_id=bot_id,
             owner_id=owner_id,
             scope=ProjectionScope(
@@ -168,6 +171,22 @@ class BotTrackLatestReconcileTaskHandler:
                 released_mcp=delta.released_mcp,
             ),
         )
+        if (
+            projection is not None
+            and projection.status is RuntimeProjectionStatus.PENDING
+        ):
+            return Retry("Track Latest runtime projection pending")
+        if (
+            projection is not None
+            and projection.status is RuntimeProjectionStatus.DEGRADED
+        ):
+            logger.warning(
+                "[TrackLatest] runtime projection degraded without retry "
+                "owner_id=%s bot_id=%s skill_id=%s",
+                owner_id,
+                bot_id,
+                skill_id,
+            )
         after = await self._projector.snapshot_skill_mappings(
             bot_id=bot_id, owner_id=owner_id
         )

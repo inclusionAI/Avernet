@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from agentclaw.community.adapters.http.skill_center.schemas import (
     AddSkillsRequest,
+    ActivateSkillSetRequest,
     DeactivateSkillSetRequest,
     SearchRequest,
     UpdateSkillSetRequest,
@@ -23,6 +24,7 @@ from agentclaw.community.adapters.http.skill_center.skillsets import (
     update_skill_set,
 )
 from agentclaw.community.adapters.http.skill_center.skills import (
+    activate_skill_set,
     deactivate_skill_set,
     get_market_tree,
     list_local_market_skills,
@@ -117,6 +119,30 @@ class _LegacySetScopeControlPlane:
         assert kwargs["owner_id"] == "owner"
         return {"id": "set-1", "changed": True}
 
+    async def activate(self, **kwargs):
+        self.calls.append(("activate", kwargs))
+        assert kwargs["bot_id"] == "persisted-bot"
+        assert kwargs["owner_id"] == "owner"
+        return {
+            "id": "set-1",
+            "changed": True,
+            "runtime_projection": {
+                "status": "DEGRADED",
+                "components": {"skills": "DEGRADED"},
+                "pending_count": 0,
+                "degraded_count": 1,
+                "issues": [
+                    {
+                        "resource_type": "SKILL",
+                        "code": "UNMANAGED_ACTIVE_ENTRY_RETAINED",
+                        "reason": "Bot 生效目录中存在同名实体目录",
+                        "status": "DEGRADED",
+                        "retryable": False,
+                    }
+                ],
+            },
+        }
+
 
 @pytest.mark.asyncio
 async def test_legacy_mcp_read_recovers_non_default_bot_from_exact_set_id() -> None:
@@ -207,6 +233,42 @@ async def test_legacy_deactivate_recovers_non_default_bot_from_exact_set_id() ->
             "owner_id_hint": None,
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_legacy_activate_keeps_success_wire_and_adds_degraded_diagnostics() -> None:
+    control_plane = _LegacySetScopeControlPlane()
+
+    response = await activate_skill_set(
+        ActivateSkillSetRequest(skill_set_id="set-1"),
+        ctx=SimpleNamespace(user_id="owner", bot_id="default"),
+        bot_repo=_AddressedBots(),
+        control_plane=control_plane,
+    )
+
+    assert response.model_dump() == {
+        "success": True,
+        "message": "能力集状态已保存，但部分 Skill 未完成运行时收敛",
+        "data": {
+            "activated": ["set-1"],
+            "failed": [],
+            "runtime_projection": {
+                "status": "DEGRADED",
+                "components": {"skills": "DEGRADED"},
+                "pending_count": 0,
+                "degraded_count": 1,
+                "issues": [
+                    {
+                        "resource_type": "SKILL",
+                        "code": "UNMANAGED_ACTIVE_ENTRY_RETAINED",
+                        "reason": "Bot 生效目录中存在同名实体目录",
+                        "status": "DEGRADED",
+                        "retryable": False,
+                    }
+                ],
+            },
+        },
+    }
 
 
 @pytest.mark.asyncio

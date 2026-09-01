@@ -148,7 +148,12 @@ class DirectActivationService(DirectActivationServiceProtocol):
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
             action="skill_direct_activate" if active else "skill_direct_deactivate",
         )
-        return {**skill, "active": active, "changed": result["changed"]}
+        return {
+            **skill,
+            "active": active,
+            "changed": result["changed"],
+            "runtime_projection": result["runtime_projection"],
+        }
 
     def _resolve_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
