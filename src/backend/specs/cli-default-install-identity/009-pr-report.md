@@ -27,4 +27,10 @@ created: 2026-09-01T00:00:00+08:00
 
 ## PR status
 
-Not created yet. This report will be updated after rebase, push, PR creation, and CI observation.
+Created: [#1796](https://github.com/inclusionAI/Avernet/pull/1796)
+
+- Title: `feat(backend): manage default CLI passport scopes`.
+- Base: `dev`.
+- Head: `rebase/cli-default-install-identity-on-dev` at `580db7e19c49adce2e684449a7edb093bdac2f74` when the PR was created.
+- Initial GitHub checks: eight required suites started and were `IN_PROGRESS` (Backend, BCS, Engine, BaaS, Gateway, Sandbox-proxy, Singlebox coverage, and BCS E2E).
+- PR is open and awaiting both CI completion and review. No merge, deployment, or force-push was performed.
