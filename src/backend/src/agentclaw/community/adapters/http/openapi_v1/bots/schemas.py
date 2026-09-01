@@ -182,7 +182,7 @@ class BotCreateEngineProperties(BaseModel):
     template_type: str | None = Field(
         description=(
             "Template type declared with the config. Required for template-"
-            "factory snapshots (any value, echoed from available-t-templates); "
+            "factory snapshots (any value, echoed from available-tc-list); "
             "for hand-written application-coding configs omit it or pass "
             "'applicationCoding'."
         ),
