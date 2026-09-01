@@ -792,6 +792,10 @@ class BotManagementModule(Module):
             complete_authorization=_complete,
             passport_plugin_provider=lambda: passport_plugin,
             bot_service_provider=lambda: injector.get(BotService),
+            # Read-only here: the job asks whether the owner relationship
+            # actually landed, because completion writes it *after* the bot
+            # record and a failure there would otherwise never be retried.
+            auth_relationship_provider=lambda: auth_rel_plugin,
         )
 
     @singleton

@@ -32,6 +32,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplySta
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
     _CONTAINER_FAILED_STATUSES,
+    _CONTAINER_READY_STATUSES,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
@@ -159,6 +160,43 @@ def test_a_job_that_gave_up_before_a_container_is_create_failed():
         job=_Job(TaskStatus.FAILED, "the bot could not be provisioned: FAILED"),
     )
     assert state is CreationState.CREATE_FAILED
+
+
+def test_a_job_that_gave_up_with_the_bot_running_is_an_apply_failure():
+    """The bot exists and works, so `CREATE_FAILED` would be a lie with a cost.
+
+    A job can go terminal after the bot is up — starting the post-container
+    phase keeps failing, say, until the queue's deadline retires it. Telling the
+    caller their creation failed makes them create a second bot while the first
+    is already running and billable. Under this API a usable bot means the
+    failure was on the configuration side, whatever stopped the job.
+    """
+    (state, _), _ = _state(
+        bot={"status": "ACTIVE"},
+        job=_Job(TaskStatus.TIMED_OUT),
+    )
+    assert state is CreationState.APPLY_FAILED
+    assert create_with_manifest._bot_is_shown(state), (
+        "the response must carry the bot, or the caller cannot see it exists"
+    )
+
+
+def test_a_ready_status_is_read_positively_not_as_not_failed():
+    """A status nobody anticipated is not reported as a working bot."""
+    (state, _), _ = _state(
+        bot={"status": "SOMETHING_NEW"},
+        job=_Job(TaskStatus.TIMED_OUT),
+    )
+    assert state is CreationState.CREATE_FAILED
+
+
+def test_the_poll_and_the_job_agree_on_what_is_running():
+    """The mirror of the failed-status pinning below, and for the same reason.
+
+    A status added to the job's ready set and not the poll's would leave a bot
+    the job is happily configuring reported as a creation that failed.
+    """
+    assert create_with_manifest._CONTAINER_READY == _CONTAINER_READY_STATUSES
 
 
 def test_a_running_post_container_apply_is_applying():

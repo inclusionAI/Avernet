@@ -415,6 +415,15 @@ def _stand_in_for_provisioning(world, *, status: str = "ACTIVE") -> list[dict]:
     bot_repo = world.get(BotRepository)
 
     def create_bot(_self, **kwargs):
+        # Idempotent on a supplied bot_id, exactly as the real one is — it
+        # returns the existing bot rather than inserting a second. The job
+        # relies on that: a re-claimed task, and the owner-relationship repair,
+        # both call completion again on a bot that already exists.
+        existing = bot_repo.get_by_id_and_entity(
+            kwargs["bot_id"], kwargs.get("entity_id") or kwargs["user_id"]
+        )
+        if existing is not None:
+            return existing
         record = bot_repo.insert(
             {
                 "bot_id": kwargs["bot_id"],

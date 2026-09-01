@@ -362,7 +362,7 @@ class BotCreationManifestSeam:
             bot_id=bot_id,
         )
 
-    def discard(self, *, entity_id: str, bot_id: str) -> None:
+    def discard(self, *, entity_id: str, bot_id: str) -> bool:
         """Remove what submission and the pre-container phase wrote.
 
         Called when a creation ends **without a bot** — declined or expired. Both
@@ -372,9 +372,17 @@ class BotCreationManifestSeam:
         else would ever reach either, because ordinary bot deletion needs a bot
         record and allocating a ``bot_id`` consumes no quota.
 
-        Never raises: cleanup failing must not turn an already-terminal creation
-        into an error.
+        **Never raises, but says whether it succeeded**, and the caller is
+        expected to act on that. Both deletes are attempted even when the first
+        fails, so one broken store does not hide the other's outcome.
+
+        Returning ``False`` rather than raising is deliberate: this runs on a
+        path that is already ending, and an exception here would be indistinguishable
+        from the creation itself failing. But swallowing the answer would be
+        worse — the caller would report the creation terminal while the rows are
+        still there, and this is the only thing that can ever reach them.
         """
+        discarded = True
         for what, delete in (
             ("manifest", lambda: self._manifests.delete(
                 entity_id=entity_id, bot_id=bot_id
@@ -386,11 +394,13 @@ class BotCreationManifestSeam:
             try:
                 delete()
             except Exception:  # noqa: BLE001 — see docstring
+                discarded = False
                 logger.exception(
                     "[manifest_creation] could not discard the %s for bot_id=%s",
                     what,
                     bot_id,
                 )
+        return discarded
 
 
 __all__ = [

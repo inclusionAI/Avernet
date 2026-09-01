@@ -231,7 +231,13 @@ def _job(passport):
         complete_authorization=lambda _payload: None,
         passport_plugin_provider=lambda: passport,
         bot_service_provider=lambda: None,
+        auth_relationship_provider=lambda: _RecordedRelationship(),
     )
+
+
+class _RecordedRelationship:
+    def query_relationships(self, *, agent_code, work_no):
+        return [{"auth_id": 1}]
 
 
 class _RecordingBots:

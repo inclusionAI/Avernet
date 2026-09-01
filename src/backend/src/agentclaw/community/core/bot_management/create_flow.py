@@ -722,7 +722,7 @@ def submit_bot_creation_with_manifest(
     # The seam resolves the storage key and returns it: this module must not
     # import the manifest package (that closes a cycle through the creation
     # graph), and the key's rule belongs with the storage that depends on it.
-    manifest_seam.persist(
+    entity_id = manifest_seam.persist(
         spec_entity_id=spec.entity_id,
         user_id=user_id,
         bot_id=bot_id,
@@ -732,6 +732,58 @@ def submit_bot_creation_with_manifest(
         bot_type=spec.bot_type,
     )
 
+    # Everything after the manifest is stored is one unit, and it has to be.
+    #
+    # The document is now on disk under a ``bot_id`` the caller has not been told
+    # about yet. If the Passport application raises, or returns nowhere to send
+    # the user, or the durable handoff fails, the request ends in an error and
+    # that row is unreachable: no bot record for ordinary deletion to find, and
+    # no job to expire and clean it up. Compensating here is what keeps "the
+    # rows this endpoint creates are bounded by their own jobs" true — before a
+    # job exists there is no job to bound them, so this is the only place that
+    # can.
+    try:
+        return _apply_and_hand_off(
+            manifest_seam=manifest_seam,
+            passport_plugin=passport_plugin,
+            skill_set_factory=skill_set_factory,
+            user_id=user_id,
+            bot_id=bot_id,
+            entity_id=entity_id,
+            bot_name=bot_name,
+            spec=spec,
+            context=context,
+            use_first_passport=use_first_passport,
+        )
+    except Exception:
+        # Best-effort by construction: ``discard`` never raises, so a cleanup
+        # that cannot run does not replace the caller's real error with its own.
+        manifest_seam.discard(entity_id=entity_id, bot_id=bot_id)
+        raise
+
+
+def _apply_and_hand_off(
+    *,
+    manifest_seam: Any,
+    passport_plugin: PassportPlugin,
+    skill_set_factory: SkillSetServiceFactory,
+    user_id: str,
+    bot_id: str,
+    entity_id: str,
+    bot_name: str | None,
+    spec: BotCreateSpec,
+    context: BotCreateContext,
+    use_first_passport: bool,
+) -> ManifestCreationSubmitted:
+    """Apply for the Passport, then hand the creation to its durable job.
+
+    Split out so the compensating cleanup above wraps exactly the steps that can
+    strand the stored manifest, and nothing else.
+
+    The job is started **here** rather than by the caller: it is the last step of
+    submission, and a route that started it would be the one place a failure
+    could leave a stored manifest with nothing to clean it up.
+    """
     passport_result = _apply_passport(
         passport_plugin,
         bot_id=bot_id,
@@ -756,12 +808,25 @@ def submit_bot_creation_with_manifest(
     redirect_url = passport_result.get("redirect_url") if passport_result else None
     token = passport_result.get("token") if passport_result else None
     if not token and not iframe_url and not redirect_url:
-        # Neither a token nor anywhere to send the user. Unlike the inline flow
-        # there is nothing to roll back — no bot was created — but the caller
-        # would be left polling a creation that can never be authorized.
+        # Neither a token nor anywhere to send the user. No bot was created, but
+        # the stored manifest is real — the caller above discards it — and the
+        # caller would otherwise be left polling a creation nobody can authorize.
         raise PassportError(
             f"Passport returned no token and no authorization URL for bot {bot_id}"
         )
+
+    # The durable job, last: its first step reads the authorization that the
+    # application above has only just made, so starting it earlier would only
+    # buy a first run that finds nothing.
+    manifest_seam.start_job(
+        bot_id=bot_id,
+        entity_id=entity_id,
+        user_id=user_id,
+        document_owner=user_id,
+        spec=creation_spec_to_payload(spec, context),
+        iframe_url=iframe_url,
+        redirect_url=redirect_url,
+    )
     return ManifestCreationSubmitted(
         bot_id=bot_id,
         iframe_url=iframe_url,

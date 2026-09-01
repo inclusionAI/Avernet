@@ -8,10 +8,12 @@ handler ever asks for a retry. Each step is therefore driven twice here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
+    CREATE_DEADLINE_ENV,
     CREATE_JOB_TASK_TYPE,
     CREATE_QUEUE_DEADLINE_MARGIN_SECONDS,
     POLL_DELAY_SECONDS,
@@ -36,6 +38,16 @@ _PAYLOAD = {
     "spec": {"engine_type": "claude_code", "bot_type": "personal"},
     "iframe_url": "https://auth.example/consent",
     "redirect_url": None,
+}
+
+
+#: A bot as ``complete_bot_authorization`` leaves it: ACTIVE, with the
+#: ``agent_code`` in ``ext`` that the owner-relationship lookup keys on.
+_ISSUED_BOT = {
+    "bot_id": "b_1",
+    "entity_id": "u_owner",
+    "status": "ACTIVE",
+    "ext": {"passport": {"agent_code": "agent-b1", "status": "ISSUED"}},
 }
 
 
@@ -65,10 +77,11 @@ class _Applies:
 
 
 class _Seam:
-    def __init__(self, applies: _Applies) -> None:
+    def __init__(self, applies: _Applies, *, discard_succeeds: bool = True) -> None:
         self._applies = applies
         self.phase_a_calls = 0
         self.discards = 0
+        self.discard_succeeds = discard_succeeds
 
     def phase_a(self, **_kwargs):
         self.phase_a_calls += 1
@@ -79,6 +92,7 @@ class _Seam:
 
     def discard(self, **_kwargs):
         self.discards += 1
+        return self.discard_succeeds
 
 
 class _Bots:
@@ -89,6 +103,23 @@ class _Bots:
         return self.record
 
 
+class _Relationships:
+    """The owner→bot relationship, as much of it as the job reads.
+
+    Defaults to "recorded", because that is the ordinary case: completion writes
+    the relationship right after the bot record, and only a failure between the
+    two leaves it absent.
+    """
+
+    def __init__(self, existing=None) -> None:
+        self.existing = [{"auth_id": 1}] if existing is None else existing
+        self.queries = 0
+
+    def query_relationships(self, *, agent_code, work_no):
+        self.queries += 1
+        return self.existing
+
+
 class _Passport:
     def __init__(self, status) -> None:
         self.status = status
@@ -97,10 +128,14 @@ class _Passport:
         return {"status": self.status} if self.status else None
 
 
-def _handler(*, passport_status="PENDING", applies=None, bots=None, seam=None):
+def _handler(
+    *, passport_status="PENDING", applies=None, bots=None, seam=None,
+    relationships=None,
+):
     applies = applies or _Applies()
     seam = seam or _Seam(applies)
     created: list[dict] = []
+    relationships = relationships if relationships is not None else _Relationships()
     handler = BotCreateWithManifestHandler(
         manifest_seam_provider=lambda: seam,
         apply_service_provider=lambda: applies,
@@ -108,6 +143,7 @@ def _handler(*, passport_status="PENDING", applies=None, bots=None, seam=None):
         complete_authorization=created.append,
         passport_plugin_provider=lambda: _Passport(passport_status),
         bot_service_provider=lambda: None,
+        auth_relationship_provider=lambda: relationships,
     )
     return handler, applies, seam, created
 
@@ -366,3 +402,137 @@ def test_the_creation_is_enqueued_under_a_key_scoped_the_way_its_rows_are():
     )
     assert "t1" in key and "u_owner" in key and "b_1" in key
     assert queue.calls[0]["task_type"] == CREATE_JOB_TASK_TYPE
+
+
+def test_a_cleanup_that_did_not_land_keeps_the_task_retryable():
+    """Going terminal here would strand the rows this job alone can reach.
+
+    Ordinary bot deletion needs a bot record, and this creation will never have
+    one, so a manifest or startup-script row left behind by a failed delete is
+    permanent. Rescheduling retries it; the queue's own deadline still bounds
+    how long, so a store that stays broken gives up rather than spinning.
+    """
+    applies = _Applies()
+    seam = _Seam(applies, discard_succeeds=False)
+    handler, _applies, _seam, created = _handler(
+        passport_status="REJECTED", applies=applies, seam=seam
+    )
+
+    outcome = handler.handle(dict(_PAYLOAD))
+
+    assert isinstance(outcome, Reschedule), outcome
+    assert seam.discards == 1
+    assert not created
+
+    # And once the store recovers, the same step goes terminal as it should.
+    seam.discard_succeeds = True
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Fail)
+
+
+def test_the_window_is_the_one_frozen_at_enqueue_not_the_current_setting(
+    monkeypatch,
+):
+    """A setting changed mid-flight must not desynchronise a task's two horizons.
+
+    The queue's deadline is computed from the window once, at enqueue. If the
+    handler re-read the environment it could enforce a *longer* window than the
+    deadline the database is holding — and the database would then retire the
+    task before the handler ever ran its cleanup, which is precisely the race
+    the margin exists to prevent.
+    """
+    handler, _applies, seam, _created = _handler(passport_status="PENDING")
+
+    # Enqueued under a one-second window, and long past it.
+    payload = dict(_PAYLOAD)
+    payload["window_seconds"] = 1
+    payload["submitted_at"] = "2020-01-01T00:00:00"
+
+    # The environment now says something far larger. It must not apply here.
+    monkeypatch.setenv(CREATE_DEADLINE_ENV, "86400")
+
+    assert isinstance(handler.handle(payload), Fail)
+    assert seam.discards == 1
+
+
+def test_a_payload_without_a_frozen_window_falls_back_rather_than_expiring(
+    monkeypatch,
+):
+    """A payload enqueued before the field existed is not instantly expired."""
+    handler, _applies, seam, _created = _handler(passport_status="PENDING")
+
+    payload = dict(_PAYLOAD)
+    payload.pop("window_seconds", None)
+    payload["submitted_at"] = datetime.now().isoformat()
+    monkeypatch.setenv(CREATE_DEADLINE_ENV, "600")
+
+    assert isinstance(handler.handle(payload), Reschedule)
+    assert seam.discards == 0
+
+
+def test_a_bot_whose_owner_relationship_never_landed_gets_it_retried():
+    """Completion is two writes, and the bot record is only the first.
+
+    ``complete_bot_authorization`` creates the bot and *then* records the owner
+    relationship. If the second raises, the task is re-claimed with a bot record
+    already present — and routing on "does a bot exist" would carry the creation
+    to READY without ever retrying the write, leaving the owner holding a bot
+    they cannot reach and nothing anywhere saying so.
+    """
+    bots = _Bots(_ISSUED_BOT)
+    missing = _Relationships(existing=[])
+    handler, applies, _seam, created = _handler(
+        passport_status="ISSUED", bots=bots, relationships=missing
+    )
+
+    outcome = handler.handle(dict(_PAYLOAD))
+
+    assert isinstance(outcome, Complete), outcome
+    assert created, "completion was not re-run to write the relationship"
+    # The repair happens *before* the post-container phase is started, which is
+    # the job's last act — so the creation is never declared done with the owner
+    # unable to reach their bot.
+    assert applies.started, "the manifest was not delivered"
+    assert missing.queries == 1, (
+        "the read must happen once per creation, not once per poll of a bot "
+        "waiting for its container"
+    )
+
+
+def test_an_unreadable_relationship_does_not_stall_a_working_creation():
+    """Only a definite absence is acted on.
+
+    A lookup that fails says nothing about whether the row is there, and the bot
+    is up: blocking delivery of its configuration behind a flaky read would
+    trade a rare, repairable gap for a common one.
+    """
+
+    class _Unreadable:
+        def query_relationships(self, *, agent_code, work_no):
+            raise RuntimeError("the relationship service is unreachable")
+
+    bots = _Bots(_ISSUED_BOT)
+    handler, applies, _seam, created = _handler(
+        passport_status="ISSUED", bots=bots, relationships=_Unreadable()
+    )
+
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Complete)
+    assert applies.started, "the post-container phase never started"
+    assert not created, "completion was re-run on an answer that was not an answer"
+
+
+def test_a_relationship_read_that_always_says_missing_does_not_stall():
+    """The local plugin answers ``[]`` unconditionally while its write reports
+    success, so "missing" is not a reliable fact everywhere.
+
+    Gating the creation on it would stall every local and singlebox creation
+    forever — trading a rare, repairable gap for a certain outage. The repair is
+    attempted and the creation continues either way.
+    """
+    bots = _Bots(_ISSUED_BOT)
+    always_missing = _Relationships(existing=[])
+    handler, applies, _seam, _created = _handler(
+        passport_status="ISSUED", bots=bots, relationships=always_missing
+    )
+
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Complete)
+    assert applies.started, "a stubbed read stopped the manifest being delivered"

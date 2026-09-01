@@ -244,8 +244,16 @@ def _build(db, *, scripts=None):
         complete_authorization=create,
         passport_plugin_provider=lambda: _IssuedPassport(),
         bot_service_provider=lambda: None,
+        auth_relationship_provider=_RecordedRelationship,
     )
     return handler, applies, order, seen_at_creation, scripts
+
+
+class _RecordedRelationship:
+    """The owner relationship, already written — the ordinary case here."""
+
+    def query_relationships(self, *, agent_code, work_no):
+        return [{"auth_id": 1}]
 
 
 class _IssuedPassport:

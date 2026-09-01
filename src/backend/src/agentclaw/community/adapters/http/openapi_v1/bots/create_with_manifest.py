@@ -68,7 +68,6 @@ from agentclaw.community.core.bot_management.create_flow import (
     BotCreateDeploymentMode,
     BotCreateSpec,
     BotCreateTemplateValidationMode,
-    creation_spec_to_payload,
     submit_bot_creation_with_manifest,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
@@ -103,6 +102,10 @@ from .schemas_create_with_manifest import (
 #: own step machine and this one to a reported state; they are pinned together
 #: by a test rather than shared, so neither can quietly widen the other.
 _PROVISIONING_FAILED = frozenset({"FAILED", "DELETED", "INACTIVE"})
+
+#: Bot statuses that mean the container is up and the bot is usable. Pinned to
+#: the job's own set by a test, for the same reason as the one above.
+_CONTAINER_READY = frozenset({"ACTIVE"})
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicAPIRoute)
 
@@ -199,18 +202,10 @@ async def create_bot_with_manifest(
         manifest_seam=manifest_seam,
     )
 
-    # Only now, because the job's first step is reading the authorization it
-    # cannot see until the application above has been made.
-    manifest_seam.start_job(
-        bot_id=submitted.bot_id,
-        entity_id=owner_id,
-        user_id=owner_id,
-        document_owner=owner_id,
-        spec=creation_spec_to_payload(submitted.spec, submitted.context),
-        iframe_url=submitted.iframe_url,
-        redirect_url=submitted.redirect_url,
-    )
-
+    # Starting the job is submission's last step, not the router's: it lives
+    # inside the same boundary that discards the stored manifest when anything
+    # after the persist fails. A route that started it would be a place where a
+    # failure could strand a document under a bot_id the caller never saw.
     return accepted(
         BotCreateWithManifestAccepted(
             bot_id=submitted.bot_id,
@@ -357,6 +352,19 @@ def _creation_state(*, bot, report, job) -> Optional[tuple[CreationState, Any]]:
         return None
     if str(bot.get("status") or "") in _PROVISIONING_FAILED:
         return (CreationState.CREATE_FAILED, record)
+    if record.status in TERMINAL_STATUSES and _bot_is_running(bot):
+        # The job gave up, but the bot is up. Whatever went wrong was on the
+        # configuration side — starting the post-container phase kept failing,
+        # say — and `CREATE_FAILED` would be a lie with a cost: a caller told
+        # their creation failed creates a second bot, and the first is already
+        # running and billable. Under this API a bot that exists and works is an
+        # apply failure, whatever stopped the job.
+        return (
+            CreationState.READY
+            if record.status is TaskStatus.SUCCEEDED
+            else CreationState.APPLY_FAILED,
+            record,
+        )
     if record.status is TaskStatus.SUCCEEDED:
         # The job finished, so the creation is over — even though the newest
         # apply record is not the post-container one. That happens when an
@@ -386,6 +394,16 @@ def _bot_less_terminal(record) -> CreationState:
     if (record.last_error or "") == AUTHORIZATION_WINDOW_ELAPSED:
         return CreationState.AUTHORIZATION_EXPIRED
     return CreationState.AUTHORIZATION_REJECTED
+
+
+def _bot_is_running(bot) -> bool:
+    """Whether this bot is usable, which is what separates the two failures.
+
+    Read positively — a status that is *known* to mean running — rather than as
+    "not in the failed set". A status nobody anticipated should not be reported
+    as a working bot.
+    """
+    return str(bot.get("status") or "") in _CONTAINER_READY
 
 
 def _bot_is_shown(state: CreationState) -> bool:

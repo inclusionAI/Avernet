@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_config_manifest.schema import (
     ManifestValidationError,
     Violation,
 )
+from agentclaw.community.plugin_api.passport import PassportError
 from agentclaw.community.core.bot_management.create_flow import (
     BotCreateContext,
     BotCreateDeploymentMode,
@@ -31,10 +32,13 @@ _DOCUMENT = 'schema_version: 1\nscript:\n  body: "echo hi"\n'
 
 
 class _Seam:
-    def __init__(self, *, refuse: bool = False) -> None:
+    def __init__(self, *, refuse: bool = False, job_fails: bool = False) -> None:
         self.refuse = refuse
+        self.job_fails = job_fails
         self.preflighted: list[dict] = []
         self.persisted: list[dict] = []
+        self.started: list[dict] = []
+        self.discarded: list[dict] = []
 
     def preflight(self, **kwargs):
         self.preflighted.append(kwargs)
@@ -47,6 +51,15 @@ class _Seam:
     def persist(self, **kwargs):
         self.persisted.append(kwargs)
         return kwargs["spec_entity_id"] or f"staff_{kwargs['user_id']}"
+
+    def start_job(self, **kwargs):
+        self.started.append(kwargs)
+        if self.job_fails:
+            raise RuntimeError("the queue is unreachable")
+
+    def discard(self, **kwargs):
+        self.discarded.append(kwargs)
+        return True
 
 
 def _submit(seam, apply_result=None, passport=None):
@@ -121,3 +134,54 @@ def test_the_manifest_is_preflighted_against_the_prepared_spec():
     (call,) = seam.preflighted
     assert call["engine_type"] == "openclaw"
     assert call["bot_type"] == "personal"
+
+
+def test_a_stored_manifest_is_discarded_when_the_handoff_fails():
+    """Submission is one unit from the persist onwards, and it has to be.
+
+    Once the document is stored it sits under a ``bot_id`` the caller has not
+    been told about. If the durable handoff fails, the request ends in an error
+    and that row is unreachable: no bot record for ordinary deletion to find,
+    and no job to expire and clean it up. "The rows this endpoint creates are
+    bounded by their own jobs" is only true once a job exists — before that,
+    this is the only thing that can bound them.
+    """
+    seam = _Seam(job_fails=True)
+
+    with pytest.raises(RuntimeError):
+        _submit(seam)
+
+    assert seam.persisted, "nothing was stored, so this proves nothing"
+    assert seam.discarded == [{"entity_id": "u1", "bot_id": "b_1"}], (
+        "the discard has to use the same key the persist did, or it deletes "
+        "nothing and the row survives anyway"
+    )
+
+
+def test_a_passport_that_answers_with_nowhere_to_go_also_discards():
+    """The other way the same window opens: the application itself is useless.
+
+    Neither a token nor a URL means nobody can ever authorize this creation, so
+    the caller gets an error — and the manifest must not outlive it.
+    """
+    seam = _Seam()
+
+    with pytest.raises(PassportError):
+        _submit(seam, apply_result={})
+
+    assert seam.persisted
+    assert seam.discarded, "the stored manifest outlived a submission that failed"
+
+
+def test_a_successful_submission_starts_the_job_and_discards_nothing():
+    seam = _Seam()
+
+    _submit(seam)
+
+    assert len(seam.started) == 1
+    assert not seam.discarded
+    started = seam.started[0]
+    # The job is handed the *prepared* spec, frozen, so nothing about the
+    # creation has to be supplied again by the poll.
+    assert started["bot_id"] == seam.persisted[0]["bot_id"]
+    assert started["spec"]["engine_type"]
