@@ -287,6 +287,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources/download"): OWNER_SCOPED,
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/download-dir"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources/preview"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/resources/stat"): OWNER_SCOPED,

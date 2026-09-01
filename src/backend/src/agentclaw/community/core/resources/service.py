@@ -41,6 +41,16 @@ class FileTooLargeError(ValueError):
     """Raised when a preview's content exceeds the configured max preview size."""
 
 
+class DirectoryTooLargeError(ValueError):
+    """Raised when a directory download exceeds the configured caps.
+
+    A separate class from ``FileTooLargeError`` because
+    ``responses.ENVELOPE_ERRORS`` maps types to fixed public messages, and
+    "file too large for preview" is the wrong answer for an archive that hit
+    the file-count or total-bytes cap.
+    """
+
+
 class InvalidResourcePathError(ValueError):
     """Raised when a caller-supplied path is not addressable inside the workspace.
 
