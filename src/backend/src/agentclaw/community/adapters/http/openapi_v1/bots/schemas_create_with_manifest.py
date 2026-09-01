@@ -2,37 +2,32 @@
 
 Two shapes and one enum. The enum is the whole vocabulary of the poll, and it
 appears on the poll's response and **nowhere else** — see
-:class:`BotCreateWithManifestAccepted` for why that is a property of the models
+``BotCreateWithManifestAccepted`` for why that is a property of the models
 rather than a convention.
 """
 
 from __future__ import annotations
 
-from enum import StrEnum
-
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..enums import _DocumentedEnum
 from .schemas import Bot, BotCreate
 from .schemas_config_manifest_apply import ConfigManifestApply
 
 
-class CreationState(StrEnum):
-    """Where a creation stands. Reported by the poll, and only by the poll.
-
-    Three failures, kept apart on purpose, because a caller has to tell them
-    apart without reading prose:
-
-    * an **invalid manifest** never reaches this vocabulary at all — it is a
-      `422` at submission, with no bot and no state;
-    * :attr:`CREATE_FAILED` — there is no usable bot, and the manifest is beside
-      the point;
-    * :attr:`APPLY_FAILED` — the bot is up and part of its configuration is
-      missing.
-
-    A single ``FAILED`` covering the last two was the real source of the "did I
-    get a bot or not?" ambiguity: the name now carries the answer instead of the
-    payload having to argue it.
-    """
+# Everything a class or field docstring says in this package is published
+# verbatim into the OpenAPI document external tenants read, so the reasoning for
+# the split below lives here rather than in the docstring:
+#
+# Three failures have to be tellable apart without reading prose. An invalid
+# manifest never reaches this vocabulary at all — it is a 422 at submission,
+# with no bot and no state. CREATE_FAILED means there is no usable bot and the
+# manifest is beside the point. APPLY_FAILED means the bot is up and part of
+# its configuration is missing. A single FAILED covering the last two was the
+# real source of the "did I get a bot or not?" ambiguity: the name now carries
+# the answer instead of the payload having to argue it.
+class CreationState(_DocumentedEnum):
+    """Where a creation stands. Reported by the status endpoint, and only there."""
 
     AWAITING_AUTHORIZATION = "AWAITING_AUTHORIZATION"
     AUTHORIZATION_REJECTED = "AUTHORIZATION_REJECTED"
@@ -42,6 +37,43 @@ class CreationState(StrEnum):
     APPLYING = "APPLYING"
     READY = "READY"
     APPLY_FAILED = "APPLY_FAILED"
+
+    __descriptions__ = {
+        "AWAITING_AUTHORIZATION": (
+            "Waiting for the user to open the authorization link. Nothing has "
+            "been created yet."
+        ),
+        "AUTHORIZATION_REJECTED": (
+            "Terminal. The user declined, and no bot was created. The submitted "
+            "manifest is deleted with the creation."
+        ),
+        "AUTHORIZATION_EXPIRED": (
+            "Terminal. Nobody responded within the authorization window, and no "
+            "bot was created. Distinct from a rejection: nothing was decided."
+        ),
+        "CREATING": (
+            "Authorized. The bot record exists and its container is being "
+            "provisioned."
+        ),
+        "CREATE_FAILED": (
+            "Terminal. There is no usable bot — it could not be created, or no "
+            "container ever came up. Nothing to do with the manifest."
+        ),
+        "APPLYING": (
+            "The bot is up and the post-container part of the manifest is being "
+            "applied."
+        ),
+        "READY": (
+            "Terminal. The bot is up and the whole manifest landed. The response "
+            "carries the bot and the apply report."
+        ),
+        "APPLY_FAILED": (
+            "Terminal. The bot is up and running, and part of its configuration "
+            "did not land. The response carries the bot as well as the report, "
+            "so this is visibly not the same as CREATE_FAILED. Fix the manifest "
+            "and apply it again; nothing needs recreating."
+        ),
+    }
 
 
 class BotCreateWithManifest(BotCreate):

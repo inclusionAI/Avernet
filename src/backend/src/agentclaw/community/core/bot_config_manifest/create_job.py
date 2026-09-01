@@ -58,6 +58,20 @@ DEFAULT_CREATE_DEADLINE_SECONDS = 10 * 60
 #: Environment override for the above.
 CREATE_DEADLINE_ENV = "BOT_CREATE_WITH_MANIFEST_DEADLINE_SECONDS"
 
+#: How much longer the queue's own deadline is than the authorization window.
+#:
+#: **The gap is load-bearing, not slack.** The queue retires a past-deadline task
+#: *in its claim scan*, DB-side, without ever running the handler — and the
+#: handler is the only thing that deletes the manifest and startup-script rows
+#: submission wrote. With both horizons equal the queue always won the race, the
+#: handler's own expiry check was unreachable, and an abandoned creation left its
+#: rows behind: exactly the orphan class the deadline exists to bound.
+#:
+#: So the handler notices first (within one ``POLL_DELAY_SECONDS`` of the window)
+#: and cleans up, and the queue's deadline stays what it was meant to be — the
+#: outer backstop for a job that somehow stops making progress.
+CREATE_QUEUE_DEADLINE_MARGIN_SECONDS = 5 * 60
+
 
 def create_deadline_seconds() -> int:
     """The window a user has to authorize, in seconds.
@@ -205,10 +219,11 @@ def enqueue_create_job(
     *submission* idempotent — a retry mints a fresh ``bot_id`` and so a fresh
     key, which is #1697's problem, not this one's.
 
-    The deadline is the queue's, enforced DB-side, and is the outer backstop
-    rather than the mechanism: the handler checks ``submitted_at`` itself,
-    because a task retired in the claim scan never runs again and so would never
-    delete the rows submission wrote.
+    The deadline handed to the queue is deliberately **longer** than the
+    authorization window — see ``CREATE_QUEUE_DEADLINE_MARGIN_SECONDS``. The
+    window is the handler's, checked against ``submitted_at``, because a task
+    retired in the claim scan never runs again and so would never delete the rows
+    submission wrote. The queue's deadline is the backstop behind that.
     """
     task_queue.enqueue(
         CREATE_JOB_TASK_TYPE,
@@ -223,7 +238,7 @@ def enqueue_create_job(
             iframe_url=iframe_url,
             redirect_url=redirect_url,
         ),
-        create_deadline_seconds(),
+        create_deadline_seconds() + CREATE_QUEUE_DEADLINE_MARGIN_SECONDS,
         idempotency_key=create_job_idempotency_key(
             tenant=tenant, entity_id=entity_id, bot_id=bot_id
         ),
@@ -492,6 +507,7 @@ __all__ = [
     "AUTHORIZATION_WINDOW_ELAPSED",
     "CREATE_DEADLINE_ENV",
     "CREATE_JOB_TASK_TYPE",
+    "CREATE_QUEUE_DEADLINE_MARGIN_SECONDS",
     "DEFAULT_CREATE_DEADLINE_SECONDS",
     "POLL_DELAY_SECONDS",
     "BotCreateWithManifestHandler",

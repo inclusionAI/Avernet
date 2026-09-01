@@ -12,7 +12,13 @@ from typing import Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
+    CREATE_JOB_TASK_TYPE,
+    CREATE_QUEUE_DEADLINE_MARGIN_SECONDS,
+    POLL_DELAY_SECONDS,
     BotCreateWithManifestHandler,
+    create_deadline_seconds,
+    create_job_idempotency_key,
+    enqueue_create_job,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
@@ -283,3 +289,80 @@ def test_the_deadline_is_configurable(monkeypatch):
     assert create_deadline_seconds() == 600
     monkeypatch.setenv(CREATE_DEADLINE_ENV, "not-a-number")
     assert create_deadline_seconds() == 600
+
+
+class _RecordingQueue:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def enqueue(self, task_type, payload, deadline_seconds, **kwargs):
+        self.calls.append(
+            {
+                "task_type": task_type,
+                "payload": payload,
+                "deadline_seconds": deadline_seconds,
+                **kwargs,
+            }
+        )
+        return (None, True)
+
+
+def _enqueue(queue):
+    enqueue_create_job(
+        queue,
+        bot_id="b_1",
+        entity_id="u_owner",
+        user_id="u_owner",
+        tenant="t1",
+        env="dev",
+        document_owner="u_owner",
+        spec={"engine_type": "claude_code", "bot_type": "personal"},
+        iframe_url=None,
+        redirect_url=None,
+    )
+
+
+def test_the_queues_deadline_is_longer_than_the_authorization_window():
+    """The handler has to reach its own expiry check first, and this is why.
+
+    A past-deadline task is retired **in the claim scan**, DB-side, without the
+    handler ever running — and the handler is the only thing that deletes the
+    manifest and startup-script rows submission wrote. With both horizons equal
+    the queue always won that race, so the cleanup was unreachable and an
+    abandoned creation left its rows behind: exactly the orphan class the
+    deadline exists to bound. Caught by the endpoint case for expiry, which
+    could not reach a terminal outcome at all.
+
+    The margin also has to leave room for the job to *notice*: it looks again
+    every ``POLL_DELAY_SECONDS``, so anything smaller than that would reopen the
+    same race from the other side.
+    """
+    queue = _RecordingQueue()
+    _enqueue(queue)
+
+    handed_to_the_queue = queue.calls[0]["deadline_seconds"]
+    assert handed_to_the_queue > create_deadline_seconds()
+    assert (
+        handed_to_the_queue - create_deadline_seconds()
+        == CREATE_QUEUE_DEADLINE_MARGIN_SECONDS
+    )
+    assert CREATE_QUEUE_DEADLINE_MARGIN_SECONDS > POLL_DELAY_SECONDS
+
+
+def test_the_creation_is_enqueued_under_a_key_scoped_the_way_its_rows_are():
+    """Same three parts as the manifest's own storage key, and for the reason.
+
+    The queue's dedup scope is ``(env, app, task_type)`` and knows nothing about
+    tenants or owners, so anything left out of the key is something the poll's
+    lookup does not scope by. Without ``entity_id`` another owner's ``bot_id``
+    would find their pending creation — and its authorization URL.
+    """
+    queue = _RecordingQueue()
+    _enqueue(queue)
+
+    key = queue.calls[0]["idempotency_key"]
+    assert key == create_job_idempotency_key(
+        tenant="t1", entity_id="u_owner", bot_id="b_1"
+    )
+    assert "t1" in key and "u_owner" in key and "b_1" in key
+    assert queue.calls[0]["task_type"] == CREATE_JOB_TASK_TYPE

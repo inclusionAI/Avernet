@@ -196,7 +196,14 @@ strand it.
       and finishes; phase B is then observed the same way any other apply is.
 - [x] The job has a **configurable wall-clock deadline**, defaulting to ten
       minutes, measured from submission. Past it the creation is terminal and
-      reported as expired.
+      reported as expired. *Implementation note, found by the endpoint case for
+      expiry: the deadline handed to the **queue** must be longer than the
+      window the handler enforces. A past-deadline task is retired in the claim
+      scan, DB-side, without the handler ever running — and the handler is the
+      only thing that deletes the rows submission wrote. With both horizons
+      equal the queue always won, so the cleanup was unreachable. The queue now
+      gets the window plus a five-minute margin and is what it was meant to be:
+      the outer backstop. The caller-visible window is unchanged.*
 - [x] The job is **re-entrant**: every step asks "is this already done?" against
       durable state, because the queue guarantees a single claimer but
       at-least-once invocation.

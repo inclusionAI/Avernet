@@ -362,6 +362,8 @@ def a_bot_id_with_no_creation_is_a_404():
 # deterministic: no poll interval, no lease, nothing racing the fixture's engine
 # disposal.
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -377,6 +379,7 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_TYPE,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
+    CREATE_DEADLINE_ENV,
     BotCreateWithManifestHandler,
 )
 from agentclaw.community.core.repository.protocols.bot import (
@@ -653,42 +656,41 @@ def test_a_declined_authorization_is_terminal_and_leaves_nothing(client, world):
 
 
 def test_an_abandoned_creation_expires_rather_than_reading_as_declined(
-    client, world, monkeypatch
+    client, world
 ):
     """A user who never clicked did not decide anything.
 
     The window is the handler's own rather than only the queue's, because a task
     retired in the claim scan never runs again — so nothing would delete the
     rows submission wrote.
+
+    The window is shortened through **the knob a deployment turns**, not by
+    patching a clock: `create_deadline_seconds()` reads its environment variable
+    on every call, deliberately, so that a deployment can change it without a
+    rebuild. Setting it here configures the system rather than substituting part
+    of it, which is what keeps this case on the real path — and it costs one real
+    second, because the window is wall-clock and nothing about it is fake.
     """
     _seed_verifier(world)
     _stand_in_for_provisioning(world)
-
-    bot_id = _submit(client).json()["data"]["bot_id"]
 
     def _never_answers(_self, **_kwargs):
         return {"status": "PENDING"}
 
     bind_overrides(world, PassportPlugin, {"query_auth_status": _never_answers})
 
-    # Move the clock rather than sleep: the window is ten minutes by default and
-    # the handler compares ``now()`` against the ``submitted_at`` in its payload,
-    # so advancing time is the only way to reach the expiry without either
-    # waiting or reaching into a row.
-    import datetime as _datetime
+    previous = os.environ.get(CREATE_DEADLINE_ENV)
+    os.environ[CREATE_DEADLINE_ENV] = "1"
+    try:
+        bot_id = _submit(client).json()["data"]["bot_id"]
+        time.sleep(1.2)
+        outcome = _Worker(world).run_to_the_end()
+    finally:
+        if previous is None:
+            del os.environ[CREATE_DEADLINE_ENV]
+        else:
+            os.environ[CREATE_DEADLINE_ENV] = previous
 
-    class _LaterClock(_datetime.datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return _datetime.datetime.now(tz) + _datetime.timedelta(hours=1)
-
-    monkeypatch.setattr(
-        "agentclaw.community.core.bot_config_manifest.create_job.datetime",
-        _LaterClock,
-        raising=True,
-    )
-
-    outcome = _Worker(world).run_to_the_end()
     assert isinstance(outcome, Fail), outcome
 
     expired = _poll(client, bot_id).json()["data"]
@@ -784,3 +786,32 @@ def test_the_old_two_call_path_still_works_unchanged(client, world):
     )
     # And the poll for *creations* does not claim this one as its own.
     assert _poll(client, bot_id).status_code == 404
+
+
+def _seed_ready_to_create(world) -> None:
+    _seed_verifier(world)
+    _stand_in_for_provisioning(world)
+
+
+def _the_submission_allocated_a_bot_and_reported_no_state(response, _world) -> None:
+    data = response.json()["data"]
+    assert data["bot_id"], "the 202 carried no bot_id to poll with"
+    # The property the models make structural, asserted on the wire too: a
+    # caller cannot read a state off a submission, because there is none to read.
+    assert "state" not in data
+    assert set(data) == {"bot_id", "iframe_url", "redirect_url"}
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/with-manifest",
+    scenario="accepts_and_returns_a_bot_id_to_poll",
+    input=CaseInput(json_body=_body(), query_params=_QUERY, headers=_HEADERS),
+    seed=_seed_ready_to_create,
+    expect=ExpectSuccess(status=202, json_contains={"code": 202000}),
+    extra_assertions=(_the_submission_allocated_a_bot_and_reported_no_state,),
+)
+def submitting_a_creation_answers_202_with_an_id():
+    """Submission never waits and never creates: it validates the manifest,
+    stores it against the allocated id, applies for the authorization and stops.
+    The bot is created later, by the job, once the user has authorized."""
