@@ -738,7 +738,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         Returns:
             匹配的 DeviceBindingRecord，未找到返回 None
         """
-        from agentclaw.community.plugin_api.eval_env import DYNAMIC_ENV_TAG_KEY
+        # device_props 中 default_tag 的键名，与 plugin_api.eval_env.DYNAMIC_ENV_TAG_KEY 一致
+        _DEFAULT_TAG_KEY = "AGENTCLAW_DEFAULT_TAG"
 
         env = get_current_env()
         _page = 1
@@ -756,7 +757,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 if b.status == DeviceBindingStatus.RELEASED.value:
                     continue
                 device_props = b.device_props or {}
-                if device_props.get(DYNAMIC_ENV_TAG_KEY) != default_tag:
+                if device_props.get(_DEFAULT_TAG_KEY) != default_tag:
                     continue
                 # 按 bot_id 过滤：有 bot_id 字段必须匹配；无 bot_id 字段（存量数据）不过滤
                 if "bot_id" in device_props and device_props["bot_id"] != bot_id:
