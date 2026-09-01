@@ -69,9 +69,9 @@ Front-end 映射:`engine ← item.engine_type`,`bot_type ← item.bot_type`,`eng
 |---|---|---|---|---|
 | 普通 bot | `engine_properties` 为空 | — | — | 既有组合约束 |
 | 手填 applicationCoding(legacy 路径) | 有 `template_config`,无工厂标记,无(或不冲突的)`template_type` | 写死 `applicationCoding` | 按现有 `_validate_application_coding_config` 校验类型 | 既有 5 条(cloud/claude_code/personal bot_type/personal space)|
-| 工厂快照透传(新) | `template_config` 有工厂标记键 | 调用方透传值(校验非空) | 原样 deepcopy + 密钥加密(§7) | 同 5 条组合 gates(见 §5 冲突规则) |
+| 工厂快照透传(新) | `template_config` 是 dict 且 `template_key`+`template_uid` 双非空 | 调用方透传值(校验非空) | 原样 deepcopy + 密钥加密(§7) | 同 5 条组合 gates(见 §5 冲突规则) |
 
-判定用现有 `is_template_factory_config`(`capabilities.py:18`,键 `template_key/template_uid/template_version_id/template_version` 任一命中)。
+**判定对齐运行时消费**:创建分支的工厂判定与 `consumes_template_config`(strategy.py:316)完全一致——`template_key` 与 `template_uid` 双非空才走工厂路径。这与 `is_template_factory_config` 的"四键任一"不同是有意的:只带零散工厂键(无完整身份)的 config 走手填路径(工厂键按未知键存活,现状行为),避免建出"创建时按工厂处理、运行时却不消费"的半吊子 bot。查询投影侧(§6)的 dispatch 仍用四键任一(只影响回显,不涉及消费)。
 
 ## 5. 校验规则(键级,错误码)
 
@@ -80,7 +80,7 @@ Front-end 映射:`engine ← item.engine_type`,`bot_type ← item.bot_type`,`eng
 | 1 | `engine_properties` 出现 `template_type/template_config` 以外的键 | 422 `unsupported engine_properties fields: [...]`(沿用既有文案,键名集合更新) |
 | 2 | 工厂形态:`template_type` 缺失或空串 | 422 `engine_properties.template_type is required for template-config creates` |
 | 3 | 任何形态:`template_config` 缺失或空 | 422(沿用 `applicationCoding template_config must not be empty` 语义,文案去掉 applicationCoding 字样) |
-| 4 | 工厂标记与手填专用键(`devflow_workflow/code_repos/yuque_kb_repos` 等外层契约键)混传 | 422 工厂路径不解读手填键,明确拒绝 |
+| 4 | 完整工厂快照(双键)与手填专用键(`devflow_workflow/code_repos/yuque_kb_repos` 等外层契约键)混传 | 422 工厂路径不解读手填键,明确拒绝;不完整快照(缺 `template_uid`)混有手填键则走手填路径,工厂键按未知键存活(现状) |
 | 5 | 任何形态的 `template_config` 顶层出现拒收 server-managed 字段:`bot_id/workspace_id/workspace_status/workspace_state/start_status/engine_form` | 422 `template_config contains server-managed fields: [...]`(现有错误类型复用,放行清单新增工厂四键) |
 | 6 | 手填路径 `template_type` 传了且 ≠ `applicationCoding` | 422(防形态冒充;工厂值必须走工厂标记) |
 | 7 | 组合 gates 违反(cloud-only、engine 非 claude_code、bot_type 非 personal、非个人空间) | 409(沿用 `BotCombinationUnsupportedError` 既有文案与顺序) |
@@ -107,10 +107,10 @@ def project_template_config_for_public(config):
 
 ## 7. 密钥处理(不透传的底线)
 
-落库加密(工厂路径与 legacy 同一套):
+落库加密:
 
-- 顶层 `token`(str 非空,出现即校验)→ 复用现有加密(`enc:v1:`)。
-- `bot_template_config.ext_config.thetaKey`(strategy.py `_THETA_KEY_PATH` 已有路径常量)→ 复用现有加密。
+- 顶层 `token`(str 非空,出现即校验)→ 复用现有 `template_service._encrypt_token_field`(`enc:v1:`);其门控 `should_encrypt_template_token` → `consumes_template_config` 已覆盖工厂双键身份,零改动自动生效。
+- `bot_template_config.ext_config.thetaKey` → **后端无加密入口**(核实:源码只有 `build_extra_properties` 的运行时解密,密文由调用方链路产生),工厂路径原样落库,不新增加密。
 
 查询剔除(工厂投影专用,新常量):
 
