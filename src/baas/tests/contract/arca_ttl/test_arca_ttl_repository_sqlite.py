@@ -832,3 +832,121 @@ class TestCounts:
         _seed_hot_binding(id_val=6, env=ENV, device_props='{"other": 1}')
 
         assert repo.count_hot_arca_bindings(ENV) == 2
+
+    def test_count_hot_covered_any_status_coverage(self, repo):
+        """86-02 (WR-01): a hot device covered by a STOPPED cold row counts
+        as covered; an uncovered hot device does not; an ACTIVE-covered hot
+        device also counts — coverage is any-status, the STOPPED-only
+        variant is the suppressed-terminal population."""
+        # Covered by a STOPPED cold row (terminal suppression).
+        _seed_hot_device(id_val=101, env=ENV, provider_device_id="sb-101")
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=101,
+            sandbox_id="sb-101",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+        # Uncovered hot device (no cold row at all).
+        _seed_hot_device(id_val=102, env=ENV, provider_device_id="sb-102")
+
+        assert repo.count_hot_covered(ENV) == 1
+        assert repo.count_suppressed_terminal(ENV) == 1
+
+        # Extra hot device covered by an ACTIVE cold row: covered rises to
+        # 2 while the STOPPED-only count stays 1 (any-status vs stopped-only).
+        _seed_hot_device(id_val=103, env=ENV, provider_device_id="sb-103")
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=103,
+            sandbox_id="sb-103",
+            next_renew_at=datetime(2020, 1, 1),
+            status="ACTIVE",
+        )
+
+        assert repo.count_hot_covered(ENV) == 2
+        assert repo.count_suppressed_terminal(ENV) == 1
+
+    def test_count_covered_binding_side_through_json_sandbox(self, repo):
+        """86-02: the binding-side covered counts INNER JOIN on the JSON
+        sandbox equality — a STOPPED binding cold row covers its hot row,
+        a stale cold sandbox does not."""
+        _seed_hot_binding(
+            id_val=201, env=ENV, device_props='{"sandbox_id": "sb-b-201"}'
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=201,
+            sandbox_id="sb-b-201",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+        _seed_hot_binding(
+            id_val=202, env=ENV, device_props='{"sandbox_id": "sb-b-202"}'
+        )
+        # Stale cold row for an OLD sandbox must NOT cover 202.
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=202,
+            sandbox_id="sb-old",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        assert repo.count_hot_covered(ENV) == 1
+        assert repo.count_suppressed_terminal(ENV) == 1
+
+    def test_count_hot_covered_env_scoped_on_both_join_sides(self, repo):
+        """86-02: the coverage join is env-guarded — a prod-env hot row
+        matching a pre-env cold row is NOT counted as covered."""
+        _seed_hot_device(id_val=301, env="prod", provider_device_id="sb-301")
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=301,
+            sandbox_id="sb-301",
+            next_renew_at=datetime(2020, 1, 1),
+        )
+
+        # pre-env count: join env misses the prod hot row.
+        assert repo.count_hot_covered(ENV) == 0
+        # prod-env count: the cold row is pre-env, so the join still misses.
+        assert repo.count_hot_covered("prod") == 0
+
+
+class TestHotRowExists:
+    """86-02 (WR-02): the orphan-recheck existence probe — mirrors the due
+    JOIN conditions (soft-deleted device reads absent; binding side carries
+    no is_deleted, D-16')."""
+
+    def test_soft_deleted_device_reads_absent(self, repo):
+        _seed_hot_device(
+            id_val=401, env=ENV, provider_device_id="sb-401", is_deleted=1
+        )
+
+        assert repo.hot_row_exists(ENV, "baas_device", 401) is False
+
+    def test_live_device_and_binding_rows_exist(self, repo):
+        _seed_hot_device(id_val=402, env=ENV, provider_device_id="sb-402")
+        _seed_hot_binding(
+            id_val=403, env=ENV, device_props='{"sandbox_id": "sb-b-403"}'
+        )
+
+        assert repo.hot_row_exists(ENV, "baas_device", 402) is True
+        assert repo.hot_row_exists(ENV, "ac_entity_device_binding", 403) is True
+
+    def test_absent_id_and_foreign_env_read_absent(self, repo):
+        _seed_hot_device(id_val=404, env="prod", provider_device_id="sb-404")
+
+        assert repo.hot_row_exists(ENV, "baas_device", 999) is False
+        # Env-scoped: the prod row is invisible to a pre-env recheck.
+        assert repo.hot_row_exists(ENV, "baas_device", 404) is False
+        assert repo.hot_row_exists("prod", "baas_device", 404) is True
+
+    def test_unsupported_source_table_raises(self, repo):
+        with pytest.raises(ValueError, match="Unsupported source_table"):
+            repo.hot_row_exists(ENV, "bogus", 1)
