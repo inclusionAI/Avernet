@@ -7,12 +7,127 @@ nothing". Equal-looking output would prove neither.
 """
 from __future__ import annotations
 
+import hashlib
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     resolve_capabilities,
 )
+from agentclaw.community.core.bot_config_manifest.credentials.errors import (
+    CredentialNotFoundError,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+    FetchedObject,
+)
+
+
+def fetched_object(
+    body: bytes, *, url: str = "https://content.example/a.bin",
+    content_type: str | None = "application/octet-stream",
+) -> FetchedObject:
+    """A receipt-bearing fetch result, the shape ``GuardedFetcher`` returns."""
+    return FetchedObject(
+        bytes=body,
+        sha256="sha256:" + hashlib.sha256(body).hexdigest(),
+        url=url,
+        content_type=content_type,
+        fetched_at=datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc),
+        size_bytes=len(body),
+    )
+
+
+class FakeManifestContent:
+    """Stands in for the W11 store: receipts newest-last, blobs on demand.
+
+    ``store`` sanitizes nothing (W11's own tests pin that); this fake keeps
+    exactly the fields the pipeline consumes, plus every call for counting.
+    """
+
+    def __init__(self) -> None:
+        self.receipts: list[Any] = []
+        self.blobs: dict[str, bytes] = {}
+        self.store_calls: list[dict[str, Any]] = []
+
+    def store(self, fetched, *, scope, source_url, credential_name=None, modifier=""):
+        record = SimpleNamespace(
+            digest=fetched.sha256,
+            source_url=source_url,
+            credential_name=credential_name,
+            content_type=fetched.content_type,
+            bytes=fetched.bytes,
+        )
+        self.receipts.append(record)
+        self.blobs[fetched.sha256] = fetched.bytes
+        self.store_calls.append(
+            {
+                "scope": scope,
+                "source_url": source_url,
+                "credential_name": credential_name,
+                "modifier": modifier,
+                "digest": fetched.sha256,
+            }
+        )
+        return record
+
+    def read(self, digest: str) -> bytes:
+        if digest not in self.blobs:
+            raise AssertionError(f"no blob for {digest}")
+        return self.blobs[digest]
+
+    def latest_receipt(self, scope, *, source_url: str):
+        for record in reversed(self.receipts):
+            if record.source_url == source_url:
+                return record
+        return None
+
+
+class FakeGuardedFetcher:
+    """Stands in for the W2 transport: scripted successes or real error types.
+
+    Records every request so tests can assert what the wire actually saw —
+    the substituted URL, the declared digest, the credential binding.
+    """
+
+    def __init__(
+        self,
+        responses: dict[str, FetchedObject] | None = None,
+        failures: dict[str, Exception] | None = None,
+    ) -> None:
+        self.responses = dict(responses or {})
+        self.failures = dict(failures or {})
+        self.requests: list[Any] = []
+
+    def fetch(self, request):
+        self.requests.append(request)
+        failure = self.failures.get(request.url)
+        if failure is not None:
+            raise failure
+        return self.responses[request.url]
+
+
+class FakeCredentials:
+    """Stands in for W3: a named binding, live or missing.
+
+    The binding object duck-satisfies both fetcher seams (injector and policy)
+    in one, the way ``SourceCredentialBinding`` does.
+    """
+
+    def __init__(self, missing: set[str] | None = None) -> None:
+        self.missing = set(missing or ())
+        self.binding_calls: list[str] = []
+
+    def binding(self, *, name: str):
+        self.binding_calls.append(name)
+        if name in self.missing:
+            raise CredentialNotFoundError(f"credential '{name}' does not exist")
+        return SimpleNamespace(
+            headers_for=lambda url: {"X-Custom-Auth": f"payload-of-{name}"},
+            reauthorize=lambda url: None,
+        )
+
 
 
 class FakeStartupScriptService:
