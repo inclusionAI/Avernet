@@ -53,6 +53,36 @@ class TestConfigSchema:
         schema = schema_cls(engine="deadline")
         assert schema.engine == "deadline"
 
+    def test_clock_tol_minutes_schema_default_is_five(self):
+        """WR-02 (86-REVIEW, option 1): the schema defaults clock_tol_minutes
+        to 5 — an absent YAML key derives 5 for every deployment without
+        touching either YAML tree."""
+        schema = _CONFIG_SCHEMAS["renewal_scheduler"]()
+        assert schema.clock_tol_minutes == 5
+
+    def test_clock_tol_minutes_absent_yaml_derives_five_via_schema_defaults(self):
+        """WR-02 (86-REVIEW, option 1): the schema-seeded container defaults
+        (the mechanism init_container_config seeds absent YAML keys from)
+        carry clock_tol_minutes=5, so a YAML absent of the key derives 5."""
+        from secbaas.community.bootstrap._configs import _schema_defaults
+
+        assert _schema_defaults()["renewal_scheduler"]["clock_tol_minutes"] == 5
+
+    def test_clock_tol_minutes_accepts_non_negative_override(self):
+        """WR-02 (86-REVIEW, option 1): a YAML-set value overrides the
+        default; 0 is accepted (margin disabled)."""
+        schema_cls = _CONFIG_SCHEMAS["renewal_scheduler"]
+        assert schema_cls(clock_tol_minutes=2).clock_tol_minutes == 2
+        assert schema_cls(clock_tol_minutes=0).clock_tol_minutes == 0
+
+    def test_clock_tol_minutes_rejects_negative(self):
+        """WR-02 (86-REVIEW, option 1): negative margins are rejected at
+        validation time (ge=0) — a negative tolerance would move the expired
+        threshold into positive remaining time."""
+        schema_cls = _CONFIG_SCHEMAS["renewal_scheduler"]
+        with pytest.raises(Exception):
+            schema_cls(clock_tol_minutes=-1)
+
 
 class TestSchedulerConfig:
     """Tests for DeadlineRenewalSchedulerConfig enabled derivation."""
@@ -84,6 +114,55 @@ class TestSchedulerConfig:
         assert config.enabled is True
         assert config.engine == "deadline"
         assert config.env == ""
+
+    def test_post_extend_consistency_tol_defaults_to_five(self):
+        """D1/D-01 locked value: the post-extend consistency watermark
+        tolerance defaults to 5 minutes."""
+        config = DeadlineRenewalSchedulerConfig()
+        assert config.post_extend_consistency_tol_minutes == 5
+
+    def test_clock_tol_minutes_defaults_to_five(self):
+        """WR-02 (86-REVIEW, option 1): the threshold_expired grace margin
+        defaults to 5 minutes."""
+        config = DeadlineRenewalSchedulerConfig()
+        assert config.clock_tol_minutes == 5
+
+    def test_clock_tol_minutes_accepts_zero_and_rejects_negative(self):
+        """WR-02 (86-REVIEW, option 1): the grace margin is non-negative —
+        0 disables the margin; a negative value would move the expired
+        threshold into positive remaining time and is rejected."""
+        assert (
+            DeadlineRenewalSchedulerConfig(clock_tol_minutes=0).clock_tol_minutes == 0
+        )
+        with pytest.raises(ValueError):
+            DeadlineRenewalSchedulerConfig(clock_tol_minutes=-1)
+
+    def test_renew_threshold_minutes_defaults_to_half_default_ttl(self):
+        """EG-4 derivation: the default config's threshold is half the
+        default TTL period — 1440 // 2 == 720 minutes (12h)."""
+        config = DeadlineRenewalSchedulerConfig()
+        assert config.renew_threshold_minutes == 720
+
+    def test_renew_threshold_minutes_derives_for_custom_and_odd_ttl(self):
+        """EG-4 minute granularity: threshold follows default_ttl_minutes // 2
+        for custom periods, preserving odd half-periods (1500 -> 750)."""
+        cases = [
+            (2880, 1440),
+            (600, 300),
+            (1500, 750),
+        ]
+        for default_ttl_minutes, expected in cases:
+            config = DeadlineRenewalSchedulerConfig(
+                default_ttl_minutes=default_ttl_minutes,
+            )
+            assert config.renew_threshold_minutes == expected
+
+    def test_renew_threshold_hours_knob_retained_with_default_12(self):
+        """Keep-and-assert (EG-4/D-03): the renew_threshold_hours field stays
+        as the bootstrap assertion subject and the dual-track YAML test
+        input — default unchanged at 12."""
+        config = DeadlineRenewalSchedulerConfig()
+        assert config.renew_threshold_hours == 12
 
 
 class TestResolvedLockName:
