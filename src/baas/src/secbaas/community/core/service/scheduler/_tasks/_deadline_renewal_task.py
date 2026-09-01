@@ -794,6 +794,12 @@ class DeadlineRenewalScheduler:
         if remaining_hours < -(clock_tol_minutes / 60.0):
             # Confirmed expiry: the overshoot is beyond plausible host
             # clock drift — the sandbox's real TTL is gone.
+            # WR-02 (86-REVIEW, option 3): record the RAW remaining in
+            # seconds at verdict time — (ttl_ms/1000.0 - time.time()),
+            # NO clock-tolerance offset — as the closest observable
+            # approximation of the host/platform clock delta for
+            # post-hoc diagnosis of a skew-driven termination.
+            remain_sec = ttl_ms / 1000.0 - time.time()
             log.warning(
                 "[DeadlineRenewalScheduler] sandbox_id=%s TTL expired "
                 "(remaining=%.1fh)",
@@ -801,7 +807,9 @@ class DeadlineRenewalScheduler:
                 remaining_hours,
             )
             outcome = await self._handle_failure(
-                record, stop_reason="threshold_expired"
+                record,
+                stop_reason="threshold_expired",
+                remain_sec=remain_sec,
             )
             self._emit_renew_digest(
                 record, outcome, ttl_before_ms=ttl_ms, run_uuid=run_uuid
@@ -1062,7 +1070,11 @@ class DeadlineRenewalScheduler:
     # ------------------------------------------------------------------
 
     async def _handle_failure(
-        self, record: dict, *, stop_reason: str | None = None
+        self,
+        record: dict,
+        *,
+        stop_reason: str | None = None,
+        remain_sec: float | None = None,
     ) -> str:
         """Handle renewal failure with a liveness-gated STOPPED threshold.
 
@@ -1077,6 +1089,15 @@ class DeadlineRenewalScheduler:
             stop_reason: Keyword-only verdict threaded from the failure site
                 ("threshold_gone" | "threshold_expired"); None means the
                 failure was non-confirming.
+            remain_sec: Keyword-only raw remaining seconds at verdict time —
+                (ttl_ms/1000.0 - time.time()) with NO clock-tolerance
+                offset — threaded from the threshold_expired call site
+                (WR-02, option 3) and appended to the stopped_transition
+                metric line as the host/platform clock-delta diagnostic
+                approximation (the platform API exposes no "platform
+                current time" primitive, so a true delta cannot be read
+                directly). None when the verdict has no TTL reading
+                (threshold_gone) — the suffix is then omitted.
 
         Returns:
             "failed" or "stopped".
@@ -1134,14 +1155,28 @@ class DeadlineRenewalScheduler:
                 # recovers via a new binding record id (re-bind) or a
                 # device-side restart. The durable alarm signal remains this
                 # metrics line, not the row status.
+                # WR-02 (86-REVIEW, option 3): remain_sec is appended AFTER
+                # the existing fields (their order is unchanged) as the RAW
+                # remaining at verdict time — (ttl_ms/1000.0 - time.time()),
+                # NO clock-tolerance offset — the closest observable
+                # approximation of the host/platform clock delta. A
+                # skew-driven termination is diagnosable post-hoc: a
+                # threshold_expired line whose remain_sec sits inside the
+                # tolerance band marks a clock anomaly rather than a real
+                # expiry.
+                remain_tail = (
+                    f",remain_sec={remain_sec:.1f}" if remain_sec is not None else ""
+                )
                 log.info(
                     "[arca_ttl_metrics] stopped_transition=1 sandbox_id=%s "
-                    "source_table=%s source_id=%s fail_count=%d stop_reason=%s",
+                    "source_table=%s source_id=%s fail_count=%d "
+                    "stop_reason=%s%s",
                     record.get("sandbox_id"),
                     record["source_table"],
                     record["source_id"],
                     new_fail_count,
                     stop_reason,
+                    remain_tail,
                 )
                 return "stopped"
 

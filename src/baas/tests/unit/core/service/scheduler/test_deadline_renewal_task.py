@@ -2499,21 +2499,35 @@ class TestStoppedTransitionMetric:
     @pytest.mark.asyncio
     async def test_stopped_transition_emits_metrics_line(self, caplog):
         """WR-GAP-03: a platform-confirmed expired TTL crossing the threshold
-        emits [arca_ttl_metrics] stopped_transition=1 with fail_count and
-        the stop_reason=threshold_expired dimension."""
+        emits [arca_ttl_metrics] stopped_transition=1 with fail_count, the
+        stop_reason=threshold_expired dimension, and (WR-02, option 3) the
+        raw remain_sec appended last — pinned under a controlled clock so
+        the full-line equality stays deterministic."""
         import logging
+        from unittest.mock import patch
+
+        from secbaas.community.core.service.scheduler._tasks import (
+            _deadline_renewal_task,
+        )
 
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
-
-        mock_facade.get_device_info = AsyncMock(
-            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1))
-        )
         mock_repo.set_status = MagicMock()
         mock_repo.update_after_failure = MagicMock()
 
+        # Controlled clock: ttl seeded exactly 1h in the past, so the raw
+        # remaining (ttl_ms/1000.0 - time.time()) is exactly -3600.0.
+        fixed_now = 1_750_000_000.0
         record = _renewal_record(renew_fail_count=9)
         with caplog.at_level(logging.INFO, logger="core-scheduler"):
-            result = await scheduler._renew_one(record)
+            with patch.object(
+                _deadline_renewal_task.time, "time", return_value=fixed_now
+            ):
+                mock_facade.get_device_info = AsyncMock(
+                    return_value=MagicMock(
+                        ttl_timestamp=int((fixed_now - 3600.0) * 1000)
+                    )
+                )
+                result = await scheduler._renew_one(record)
 
         mock_repo.set_status.assert_called_once_with(
             "test", "baas_device", 1, "STOPPED", stop_reason="threshold_expired"
@@ -2529,7 +2543,7 @@ class TestStoppedTransitionMetric:
         assert msg == (
             "[arca_ttl_metrics] stopped_transition=1 sandbox_id=sb-1 "
             "source_table=baas_device source_id=1 fail_count=10 "
-            "stop_reason=threshold_expired"
+            "stop_reason=threshold_expired,remain_sec=-3600.0"
         )
 
         transition_records = [
@@ -2542,6 +2556,57 @@ class TestStoppedTransitionMetric:
         assert len(stopped_lines) == 1
         assert stopped_lines[0].levelno == logging.WARNING
         assert "threshold_expired" in stopped_lines[0].message
+
+    @pytest.mark.asyncio
+    async def test_stopped_transition_remain_sec_is_raw_unadjusted(self, caplog):
+        """WR-02 (86-REVIEW, option 3): remain_sec carries the RAW remaining
+        at verdict time — (ttl_ms/1000.0 - time.time()) with NO clock-
+        tolerance offset — verified against an injected ttl_ms under a
+        controlled clock; existing field order is preserved. (The platform
+        API offers no "platform current time" primitive, so this value is
+        the closest observable approximation of the host/platform clock
+        delta.)"""
+        import logging
+        from unittest.mock import patch
+
+        from secbaas.community.core.service.scheduler._tasks import (
+            _deadline_renewal_task,
+        )
+
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"clock_tol_minutes": 5},
+        )
+        mock_repo.set_status = MagicMock()
+        mock_repo.update_after_failure = MagicMock()
+
+        # Controlled clock: expiry 10 minutes in the past (beyond tol=5),
+        # so the raw remaining at verdict time is exactly -600.0s.
+        fixed_now = 1_750_000_000.0
+        expired_ms = int((fixed_now - 600.0) * 1000)
+        record = _renewal_record(renew_fail_count=9)
+        with caplog.at_level(logging.INFO, logger="core-scheduler"):
+            with patch.object(
+                _deadline_renewal_task.time, "time", return_value=fixed_now
+            ):
+                mock_facade.get_device_info = AsyncMock(
+                    return_value=MagicMock(ttl_timestamp=expired_ms)
+                )
+                result = await scheduler._renew_one(record)
+
+        assert result == "stopped"
+        stopped_lines = [
+            r.message for r in caplog.records if "stopped_transition=1" in r.message
+        ]
+        assert len(stopped_lines) == 1
+        # Field order preserved (fail_count before stop_reason) and the raw
+        # remainder appended last with no margin offset applied (the
+        # margin-adjusted verdict would read -10min past -5min tol, but the
+        # metric records the un-adjusted -600.0s).
+        assert (
+            "source_id=1 fail_count=10 stop_reason=threshold_expired,"
+            "remain_sec=-600.0" in stopped_lines[0]
+        )
 
 
 class TestRenewalDigestLogging:
