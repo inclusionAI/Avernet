@@ -36,7 +36,7 @@ class StaticPlanRuntime:
         result = []
         for item in self.definition.nodes:
             spec = TaskSpec(
-                metadata=Metadata(task_id=task_id, title=item.name, instruction=item.name),
+                metadata=Metadata(task_id=task_id, title=(item.task or item.name), instruction=item.name),
                 context=Context(background=root_spec.context.background,
                                 extend_props={"static_input": dict(item.input)}),
                 goal=Goal(objective=item.name, acceptances=[]),
