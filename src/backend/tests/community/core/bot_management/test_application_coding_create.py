@@ -740,3 +740,10 @@ def test_engine_properties_with_template_key_only_stays_handcrafted() -> None:
     )
     assert prepared.template_type == "applicationCoding"
     assert prepared.template_config["template_key"] == "applicationCoding"
+
+
+def test_legacy_application_coding_pair_is_wrapped_as_template_config() -> None:
+    prepared = _prepare_spec(_application_coding_spec())
+    # create_flow 把 legacy pair 归一成 strategy 的 v3 键域后消费
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config == {"devflow_workflow": "x"}
