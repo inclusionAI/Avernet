@@ -330,7 +330,7 @@ async fn register_routes_have_the_expected_security_boundary() {
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
     let client = reqwest::Client::new();
 
-    // GET /register/token sits on the protected router: missing or invalid
+    // GET /openapi/v1/collaboration/register/token sits on the protected router: missing or invalid
     // principal is rejected by the boundary before the handler runs.
     let missing = client
         .get(format!("http://{addr}/openapi/v1/collaboration/register/token"))
@@ -353,7 +353,7 @@ async fn register_routes_have_the_expected_security_boundary() {
     assert_eq!(body["code"], 20_000);
     assert!(body["data"]["token"].as_str().expect("token data").len() > 16);
 
-    // POST /register sits on the public router: it must NOT be gated by the
+    // POST /openapi/v1/collaboration/register sits on the public router: it must NOT be gated by the
     // principal boundary — an anonymous POST reaches the handler and gets a
     // 400 (missing params) instead of the boundary's 401.
     let anonymous = client

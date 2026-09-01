@@ -7,23 +7,25 @@ use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, rout
 use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptFriendConnectionRequest, AcceptInvitation, AddGroupParticipant,
-    AddSessionParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
-    BotRegistration, CancelFriendConnectionRequest, CompleteSession, CreateBotFriendRequest,
-    CreateFriendConnectionRequest, CreateGroup, CreateGroupInvitation, CreateSession,
-    CreateSessionInvitation, CreateSessionOutcome, DeleteFriendConnection,
-    DeleteGroup, DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant,
-    Friendship, FriendshipService, FriendConnectionActor, FriendConnectionActorType,
+    AddSessionParticipant, ApplicationError, AuthProviderUrlList, AuthRedirect,
+    AuthService as ApplicationAuthService, AuthUserInfo, AuthenticatedCaller,
+    AuthenticatedUserIdentity, BotRegistration, BuildLoginUrls, CancelFriendConnectionRequest,
+    CompleteOAuthLogin, CompleteSession, CreateBotFriendRequest, CreateFriendConnectionRequest,
+    CreateGroup, CreateGroupInvitation, CreateSession, CreateSessionInvitation,
+    CreateSessionOutcome, DeleteBotFriendship, DeleteFriendConnection, DeleteGroup,
+    DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, Friendship,
+    FriendshipService, FriendConnectionActor, FriendConnectionActorType,
     FriendConnectionCreateResult, FriendConnectionCreateStatus, FriendConnectionPage,
     FriendConnectionRequestDirection, FriendConnectionRequestPage,
     FriendConnectionRequestStatus, FriendConnectionRequestView, FriendConnectionService,
-    FriendConnectionView,
-    FriendRequest, FriendRequestDirection, FriendRequestStatus, GetGroup, GetSession, GroupDetail,
-    GroupService, GroupSummary, Invitation, InvitationAcceptResult, InvitationService,
-    IssueRegisterToken, ListGroups, ListBotFriendRequests, ListBotFriendships,
-    ListFriendConnectionRequests, ListFriendConnections, ListSessionMessages, ListSessions, Page,
+    FriendConnectionView, FriendRequest, FriendRequestDirection, FriendRequestStatus, GetGroup,
+    GetSession, GroupDetail, GroupService, GroupSummary, Invitation, InvitationAcceptResult,
+    InvitationService, IssueRegisterToken, ListBotFriendRequests, ListBotFriendships,
+    ListFriendConnectionRequests, ListFriendConnections, ListGroups, ListSessionMessages,
+    ListSessions, LogoutResult, LogoutSession, Page, ReadCurrentUser, RefreshSession,
     RegisterBot, RegisterService, RegisterTokenView, RejectFriendConnectionRequest,
-    RejectFriendRequest, DeleteBotFriendship, SessionCompletionResult, SessionDetail,
-    SessionMessageService, SessionParticipant, SessionService, SessionSummary, UpdateGroup,
+    RejectFriendRequest, SessionCompletionResult, SessionDetail, SessionMessageService,
+    SessionParticipant, SessionRenewal, SessionService, SessionSummary, UpdateGroup,
     UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
 };
 use serde_json::{Value, json};
@@ -868,6 +870,105 @@ fn openapi_test_router(service: Arc<FakeFriendConnectionService>) -> axum::Route
         }),
     )
     .with_friend_connection_service(service))
+}
+
+#[derive(Default)]
+struct CapturingAuthService {
+    current_user_request: Mutex<Option<ReadCurrentUser>>,
+}
+
+#[async_trait]
+impl ApplicationAuthService for CapturingAuthService {
+    async fn login_urls(
+        &self,
+        _request: BuildLoginUrls,
+    ) -> Result<AuthProviderUrlList, ApplicationError> {
+        Err(ApplicationError::internal("unused"))
+    }
+
+    async fn complete_login(
+        &self,
+        _request: CompleteOAuthLogin,
+    ) -> Result<AuthRedirect, ApplicationError> {
+        Err(ApplicationError::internal("unused"))
+    }
+
+    async fn current_user(&self, request: ReadCurrentUser) -> Result<AuthUserInfo, ApplicationError> {
+        *self
+            .current_user_request
+            .lock()
+            .expect("current user request lock") = Some(request);
+        Ok(AuthUserInfo {
+            user_id: "staff-1".to_string(),
+            name: Some("alice".to_string()),
+            provider: "chain".to_string(),
+            avatar: None,
+        })
+    }
+
+    async fn refresh_session(
+        &self,
+        _request: RefreshSession,
+    ) -> Result<SessionRenewal, ApplicationError> {
+        Err(ApplicationError::internal("unused"))
+    }
+
+    async fn logout(&self, _request: LogoutSession) -> Result<LogoutResult, ApplicationError> {
+        Err(ApplicationError::internal("unused"))
+    }
+}
+
+#[tokio::test]
+async fn openapi_auth_user_forwards_request_auth_headers_to_auth_service() {
+    let auth_service = Arc::new(CapturingAuthService::default());
+    let app = router(
+        ApiState::new(
+            Arc::new(NoopGroupService),
+            Arc::new(NoopSessionService),
+            Arc::new(NoopSessionMessageService),
+            Arc::new(NoopInvitationService),
+            Arc::new(NoopRegisterService),
+            Arc::new(FakeFriendshipService::default()),
+            Arc::new(HeaderVerifier { caller: caller() }),
+        )
+        .with_auth_service(auth_service.clone(), "http://127.0.0.1/openapi/v1/auth".to_string()),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/openapi/v1/auth/user")
+                .header("x-test-auth", "yes")
+                .header("authorization", "Bearer forwarded-user-token")
+                .header("cookie", "bcs_session=session-token")
+                .header("x-forwarded-for", "1.2.3.4")
+                .header("forwarded", "for=1.2.3.4")
+                .body(Body::empty())
+                .expect("auth user request"),
+        )
+        .await
+        .expect("auth user response");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let request = auth_service
+        .current_user_request
+        .lock()
+        .expect("current user request lock")
+        .clone()
+        .expect("captured auth request");
+    assert_eq!(request.headers.authorization.as_deref(), Some("Bearer forwarded-user-token"));
+    assert_eq!(request.headers.cookie.as_deref(), Some("bcs_session=session-token"));
+    let mut forwarded = request.headers.forwarded_headers.clone();
+    forwarded.sort();
+    assert_eq!(
+        forwarded,
+        vec![
+            ("forwarded".to_string(), "for=1.2.3.4".to_string()),
+            ("x-forwarded-for".to_string(), "1.2.3.4".to_string()),
+            ("x-test-auth".to_string(), "yes".to_string()),
+        ]
+    );
 }
 
 #[tokio::test]
