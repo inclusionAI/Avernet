@@ -22,10 +22,14 @@ if TYPE_CHECKING:
 @runtime_checkable
 class SpaceServiceProtocol(Protocol):
     @abstractmethod
-    def initialize_personal(self, *, user_id: str) -> tuple[SpaceRecord, bool]: ...
+    def initialize_personal(
+        self, *, user_id: str, create_sc_team: bool = True
+    ) -> tuple[SpaceRecord, bool]: ...
 
     @abstractmethod
-    def create_team(self, *, name: str, creator_id: str) -> SpaceRecord: ...
+    def create_team(
+        self, *, name: str, creator_id: str, create_sc_team: bool = True
+    ) -> SpaceRecord: ...
 
     @abstractmethod
     def repair_sc_team_binding(self, *, space_id: int) -> SpaceScTeamRepairResult: ...
