@@ -1,13 +1,15 @@
 """Endpoint-framework coverage for the source-credentials routes (W3, #1471).
 
-Four routes on a NEW public prefix, exercised through the assembled
-public app (real principal verification via a locally-minted gateway
-JWT, real DI graph, real repository) — the same shape as the
-startup-script and config-manifest cases. The coverage gate holds every
-public route to happy + error coverage; these are those rows.
+Four routes, exercised through the assembled public app (real principal
+verification via a locally-minted gateway JWT, real DI graph, real
+repository) — the same shape as the startup-script and config-manifest
+cases. The coverage gate holds every public route to happy + error
+coverage; these are those rows.
 
-A **user** principal suffices (the REFUSED admission does the
-human-gating); the tenant guard scopes the storage rows.
+This is an application-operated surface: every principal here carries an
+**app** identity (the edge requires one); the user riding along is
+attributed in the audit actor. Ownership rows cover the 403 the owner
+gate answers.
 """
 
 from __future__ import annotations
@@ -30,7 +32,9 @@ from tests.community.framework import (
 
 _OWNER = "credential-owner"
 _KEY = "source-credentials-framework-signing-key-32-bytes"
-_DIGEST = "sha256:" + "ab" * 32
+_TENANT = "teamclaw"
+APP_ID = 42
+OTHER_APP_ID = 43
 
 
 class _Secret:
@@ -43,20 +47,33 @@ class _Resolver:
         return _Secret()
 
 
-def _principal() -> str:
+def _principal(*, app_id: int = APP_ID, with_user: bool = True) -> str:
     now = int(time.time())
+    principals = []
+    if with_user:
+        principals.append(
+            {"type": "user", "subject": {"id": _OWNER, "username": "cred@example.test"}}
+        )
+    principals.append(
+        {
+            "type": "app",
+            "tenant": _TENANT,
+            "app": {
+                "app_id": app_id,
+                "app_name": "partner",
+                "owners": "platform-team",
+                "tenant": _TENANT,
+                "app_type": "integration",
+            },
+        }
+    )
     return jwt.encode(
         {
             "iss": "gateway",
             "aud": "backend",
             "iat": now,
             "exp": now + 3600,
-            "principals": [
-                {
-                    "type": "user",
-                    "subject": {"id": _OWNER, "username": "cred@example.test"},
-                }
-            ],
+            "principals": principals,
         },
         _KEY,
         algorithm="HS256",
@@ -64,7 +81,8 @@ def _principal() -> str:
 
 
 _HEADERS = {PRINCIPAL_HEADER: _principal()}
-_QUERY = {"user_id": _OWNER}
+_APP_ONLY_HEADERS = {PRINCIPAL_HEADER: _principal(with_user=False)}
+_OTHER_APP_HEADERS = {PRINCIPAL_HEADER: _principal(app_id=OTHER_APP_ID)}
 
 PUT_BODY = {
     "type": "header",
@@ -85,9 +103,10 @@ def _seed_verifier(_world) -> None:
 
 
 def _seed_credential(world) -> None:
-    """A verifier plus one stored credential, through the REAL service graph
-    (the assembled app's own DI: repository + TokenVault with the test
-    profile's empty master key — the singlebox passthrough path)."""
+    """A verifier plus one stored credential owned by APP_ID, through the
+    REAL service graph (the assembled app's own DI: repository +
+    TokenVault with the test profile's empty master key — the singlebox
+    passthrough path)."""
     _seed_verifier(world)
     from agentclaw.community.api.source_credential_service import (
         SourceCredentialServiceProtocol,
@@ -98,10 +117,11 @@ def _seed_credential(world) -> None:
         header_name="PRIVATE-TOKEN",
         secret="Bearer fw-secret",
         allowed_prefixes=PUT_BODY["allowed_prefixes"],
+        owner_app_id=APP_ID,
     )
 
 
-_BASE = "/openapi/v1/source-credentials"
+_BASE = "/openapi/v1/bots/source-credentials"
 
 
 # ── PUT ─────────────────────────────────────────────────────────────────────
@@ -113,7 +133,6 @@ _BASE = "/openapi/v1/source-credentials"
     scenario="registers_the_credential",
     input=CaseInput(
         path_params={"name": "corp-git"},
-        query_params=_QUERY,
         headers=_HEADERS,
         json_body=PUT_BODY,
     ),
@@ -127,6 +146,7 @@ _BASE = "/openapi/v1/source-credentials"
                 "has_secret": True,
                 "type": "header",
                 "header_name": "PRIVATE-TOKEN",
+                "owner_app_id": APP_ID,
             },
         },
     ),
@@ -138,10 +158,31 @@ def put_credential_ok():
 @endpoint_test(
     method="PUT",
     path=f"{_BASE}/{{name}}",
+    scenario="app_only_caller_registers_with_no_on_behalf_of",
+    input=CaseInput(
+        path_params={"name": "corp-git"},
+        headers=_APP_ONLY_HEADERS,
+        json_body=PUT_BODY,
+    ),
+    seed=_seed_verifier,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"name": "corp-git", "has_secret": True},
+        },
+    ),
+)
+def put_credential_app_only_ok():
+    """The app-only caller the edge admits: ownership without a riding user."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=f"{_BASE}/{{name}}",
     scenario="refuses_non_https_prefixes",
     input=CaseInput(
         path_params={"name": "corp-git"},
-        query_params=_QUERY,
         headers=_HEADERS,
         json_body=_BAD_PREFIX_BODY,
     ),
@@ -152,6 +193,23 @@ def put_credential_non_https_prefix_refused():
     """HTTPS-pinned, absolute prefixes — validation refused at write."""
 
 
+@endpoint_test(
+    method="PUT",
+    path=f"{_BASE}/{{name}}",
+    scenario="rotation_by_non_owner_is_refused",
+    input=CaseInput(
+        path_params={"name": "corp-git"},
+        headers=_OTHER_APP_HEADERS,
+        json_body=PUT_BODY,
+    ),
+    seed=_seed_credential,
+    expect=ExpectError(status=403, json_contains={"data": None}),
+)
+def put_credential_non_owner_refused():
+    """A re-PUT replaces the row every citation of the name rides on — the
+    owning application's call alone."""
+
+
 # ── GET ─────────────────────────────────────────────────────────────────────
 
 
@@ -159,9 +217,7 @@ def put_credential_non_https_prefix_refused():
     method="GET",
     path=f"{_BASE}/{{name}}",
     scenario="reads_masked_metadata",
-    input=CaseInput(
-        path_params={"name": "corp-git"}, query_params=_QUERY, headers=_HEADERS
-    ),
+    input=CaseInput(path_params={"name": "corp-git"}, headers=_HEADERS),
     seed=_seed_credential,
     expect=ExpectSuccess(
         status=200,
@@ -171,6 +227,7 @@ def put_credential_non_https_prefix_refused():
                 "name": "corp-git",
                 "has_secret": True,
                 "allowed_prefixes": PUT_BODY["allowed_prefixes"],
+                "owner_app_id": APP_ID,
             },
         },
     ),
@@ -183,9 +240,7 @@ def get_credential_ok():
     method="GET",
     path=f"{_BASE}/{{name}}",
     scenario="unknown_name",
-    input=CaseInput(
-        path_params={"name": "no-such-name"}, query_params=_QUERY, headers=_HEADERS
-    ),
+    input=CaseInput(path_params={"name": "no-such-name"}, headers=_HEADERS),
     seed=_seed_verifier,
     expect=ExpectError(status=404, json_contains={"data": None}),
 )
@@ -197,7 +252,7 @@ def get_credential_unknown():
     method="GET",
     path=_BASE,
     scenario="lists_the_tenant_inventory",
-    input=CaseInput(query_params=_QUERY, headers=_HEADERS),
+    input=CaseInput(headers=_HEADERS),
     seed=_seed_credential,
     expect=ExpectSuccess(
         status=200,
@@ -218,9 +273,7 @@ def list_credentials_ok():
     method="DELETE",
     path=f"{_BASE}/{{name}}",
     scenario="removes_the_credential",
-    input=CaseInput(
-        path_params={"name": "corp-git"}, query_params=_QUERY, headers=_HEADERS
-    ),
+    input=CaseInput(path_params={"name": "corp-git"}, headers=_HEADERS),
     seed=_seed_credential,
     expect=ExpectSuccess(
         status=200,
@@ -235,9 +288,7 @@ def delete_credential_ok():
     method="DELETE",
     path=f"{_BASE}/{{name}}",
     scenario="delete_of_an_absent_name_still_succeeds",
-    input=CaseInput(
-        path_params={"name": "no-such-name"}, query_params=_QUERY, headers=_HEADERS
-    ),
+    input=CaseInput(path_params={"name": "no-such-name"}, headers=_HEADERS),
     seed=_seed_verifier,
     expect=ExpectSuccess(
         status=200,
@@ -247,6 +298,17 @@ def delete_credential_ok():
 def delete_credential_idempotent():
     """Idempotent delete mirrors the group contract (deleted=True on re-delete)."""
 
+
+@endpoint_test(
+    method="DELETE",
+    path=f"{_BASE}/{{name}}",
+    scenario="delete_by_non_owner_is_refused",
+    input=CaseInput(path_params={"name": "corp-git"}, headers=_OTHER_APP_HEADERS),
+    seed=_seed_credential,
+    expect=ExpectError(status=403, json_contains={"data": None}),
+)
+def delete_credential_non_owner_refused():
+    """Delete is the owning application's alone — 403, storage untouched."""
 
 
 # ── Coverage-gate error shapes for the "cannot-fail" routes ──────────────────
@@ -262,7 +324,7 @@ def delete_credential_idempotent():
     method="GET",
     path=_BASE,
     scenario="unauthenticated_read_is_refused",
-    input=CaseInput(query_params=_QUERY, headers={}),
+    input=CaseInput(headers={}),
     seed=_seed_verifier,
     expect=ExpectError(status=401, json_contains={"data": None}),
 )
@@ -274,9 +336,7 @@ def list_credentials_unauthenticated_error_shape():
     method="DELETE",
     path=f"{_BASE}/{{name}}",
     scenario="unauthenticated_delete_is_refused",
-    input=CaseInput(
-        path_params={"name": "corp-git"}, query_params=_QUERY, headers={}
-    ),
+    input=CaseInput(path_params={"name": "corp-git"}, headers={}),
     seed=_seed_verifier,
     expect=ExpectError(status=401, json_contains={"data": None}),
 )

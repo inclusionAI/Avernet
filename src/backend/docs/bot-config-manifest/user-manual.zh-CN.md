@@ -283,7 +283,7 @@ team/content.git   ← tag: v1.2.0
 一次注册、所有 bot 的所有清单都能引用。
 
 ```text
-PUT /openapi/v1/source-credentials/corp-git-content
+PUT /openapi/v1/bots/source-credentials/corp-git-content
 {
   "type": "header",
   "header_name": "Authorization",
@@ -1034,7 +1034,7 @@ script:                                      # 仅 ARCA 系；不得依赖上面
 配套的两次凭证注册（一次性）：
 
 ```text
-PUT /openapi/v1/source-credentials/corp-git-content
+PUT /openapi/v1/bots/source-credentials/corp-git-content
 {
   "type": "header",
   "header_name": "Authorization",
@@ -1042,7 +1042,7 @@ PUT /openapi/v1/source-credentials/corp-git-content
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
 }
 
-PUT /openapi/v1/source-credentials/oss-artifacts
+PUT /openapi/v1/bots/source-credentials/oss-artifacts
 {
   "type": "header",
   "header_name": "Authorization",
@@ -1063,9 +1063,9 @@ PUT /openapi/v1/source-credentials/oss-artifacts
 | `GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities` | 该 bot 的逐类目支持表；与 `PUT` 判定同源 |
 | `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` | 显式 apply；`?dry_run=true` 只返回计划 |
 | `GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply` | 最近一次 apply 报告——**「生效了吗」的权威答案** |
-| `PUT /openapi/v1/source-credentials/{name}` | 注册/轮换租户级凭证 |
-| `GET /openapi/v1/source-credentials[/{name}]` | 列表/单个，**仅掩码元数据** |
-| `DELETE /openapi/v1/source-credentials/{name}` | 删除；仍被引用时下次 apply 该条目 `failed` |
+| `PUT /openapi/v1/bots/source-credentials/{name}` | 注册/轮换租户级凭证 |
+| `GET /openapi/v1/bots/source-credentials[/{name}]` | 列表/单个，**仅掩码元数据** |
+| `DELETE /openapi/v1/bots/source-credentials/{name}` | 删除；仍被引用时下次 apply 该条目 `failed` |
 | `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` | #935 老端点；对有清单的 bot 是 `script` 的别名视图 |
 | 用清单创建 bot | 异步创建 API，见 §4.5（端点路径以实现为准） |
 

@@ -17,9 +17,14 @@
 -- database never holds tenant tokens in the clear outside local runs.
 --
 -- The value never crosses back: GET surfaces has_secret/header_name/prefixes
--- only, and apply reports carry the *name*. Delete is unguarded on purpose —
--- a deleting-with-references policy belongs to the apply layer, where the
--- referencing entry fails next apply with "credential X does not exist".
+-- only, and apply reports carry the *name*. Deletion-with-references policy
+-- belongs to the apply layer, where the referencing entry fails next apply
+-- with "credential X does not exist" — what storage guards instead is
+-- ownership: this is an application-operated surface (the gateway requires
+-- an app credential on every call), and rotation/delete are the creating
+-- application's alone (owner_app_id, stamped at insert, never re-stamped).
+-- Every application of the tenant may read the masked inventory: the name
+-- is the shared reference namespace manifests cite.
 CREATE TABLE `ac_source_credential` (
   `id`            bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `avernet_tenant` varchar(64)  NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
@@ -28,7 +33,8 @@ CREATE TABLE `ac_source_credential` (
   `header_name`   varchar(256) NOT NULL COMMENT '注入的请求头名',
   `allowed_prefixes` text       NOT NULL COMMENT 'JSON 数组：绝对 https 前缀（授权出示范围）',
   `secret_ciphertext` text     NOT NULL COMMENT 'enc:v1:<AES-GCM 密文>（fail-closed profile 下明文写入被拒绝）',
-  `modifier`      varchar(1024) NOT NULL DEFAULT '' COMMENT '审计：最后写入者',
+  `owner_app_id`  bigint(20) NOT NULL COMMENT '归属应用（创建者 app id）：轮换与删除仅限它；插入时钉死，不再改写',
+  `modifier`      varchar(1024) NOT NULL DEFAULT '' COMMENT '审计：最后写入者（app:<id> / app:<id>:on-behalf-of:<user>）',
   `gmt_create`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   PRIMARY KEY (`id`),

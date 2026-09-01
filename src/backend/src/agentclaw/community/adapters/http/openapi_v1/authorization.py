@@ -398,17 +398,20 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # ── Operations that address no bot ────────────────────────────────────
     ("GET", "/openapi/v1/org/user"): NoCheck("the caller's own verified identity"),
     # Source credentials (W3, #1471): tenant-scoped by the request's
-    # tenant guard; the service resolves names within it and refuses on
-    # miss. No bot to address, no owner to pin — admission is the whole
-    # authorization story (human-only).
-    ("PUT", "/openapi/v1/source-credentials/{name}"):
-        NoCheck("tenant-guarded credential write; admission is human-only"),
-    ("GET", "/openapi/v1/source-credentials/{name}"):
-        NoCheck("tenant-guarded credential metadata; admission is human-only"),
-    ("GET", "/openapi/v1/source-credentials"):
-        NoCheck("tenant-guarded credential inventory; admission is human-only"),
-    ("DELETE", "/openapi/v1/source-credentials/{name}"):
-        NoCheck("tenant-guarded credential delete; admission is human-only"),
+    # tenant guard, no bot to address and no collaborator scenario to
+    # check — the callers this surface admits are applications (the edge
+    # requires an app credential), and applications are not a grant
+    # relationship. The one identity that matters, the owning
+    # application, is checked by the service against the stored row for
+    # exactly the two operations that mutate it.
+    ("PUT", "/openapi/v1/bots/source-credentials/{name}"):
+        NoCheck("tenant-guarded credential write; the owner-app check is the service's"),
+    ("GET", "/openapi/v1/bots/source-credentials/{name}"):
+        NoCheck("tenant-guarded masked metadata; every tenant app may read"),
+    ("GET", "/openapi/v1/bots/source-credentials"):
+        NoCheck("tenant-guarded inventory; every tenant app may read"),
+    ("DELETE", "/openapi/v1/bots/source-credentials/{name}"):
+        NoCheck("tenant-guarded credential delete; the owner-app check is the service's"),
     ("GET", "/openapi/v1/org/dept"):
         NoCheck("the caller's own directory record"),
     ("GET", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),

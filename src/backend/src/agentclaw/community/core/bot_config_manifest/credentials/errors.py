@@ -15,6 +15,17 @@ class CredentialNotFoundError(CredentialError):
     """The named credential does not exist (404)."""
 
 
+class CredentialNotOwnedError(CredentialError):
+    """The named credential belongs to another application (403).
+
+    Ownership is the creating application's id, stamped at insert and
+    immutable: rotation and delete are the owner's alone. A tenant
+    credential is readable by every application of the tenant (the name
+    is the shared reference namespace), so this is the one mutation
+    boundary the surface has.
+    """
+
+
 class MasterKeyUnavailableError(CredentialError):
     """Fail-closed refusal: the profile requires ciphertext at rest (503).
 

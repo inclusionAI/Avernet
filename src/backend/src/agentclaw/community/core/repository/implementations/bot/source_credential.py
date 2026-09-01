@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.bot_config_manifest.credentials.models import (
+    CredentialType,
     SourceCredentialModel,
     SourceCredentialRow,
 )
@@ -64,10 +65,11 @@ class SourceCredentialRepository(
         self,
         *,
         name: str,
-        credential_type: str,
+        credential_type: CredentialType,
         header_name: str,
         allowed_prefixes: list[str],
         secret_ciphertext: str,
+        owner_app_id: int,
         modifier: str,
     ) -> SourceCredentialRow:
         try:
@@ -77,6 +79,7 @@ class SourceCredentialRepository(
                 header_name=header_name,
                 allowed_prefixes=allowed_prefixes,
                 secret_ciphertext=secret_ciphertext,
+                owner_app_id=owner_app_id,
                 modifier=modifier,
             )
         except IntegrityError:
@@ -93,6 +96,7 @@ class SourceCredentialRepository(
                 header_name=header_name,
                 allowed_prefixes=allowed_prefixes,
                 secret_ciphertext=secret_ciphertext,
+                owner_app_id=owner_app_id,
                 modifier=modifier,
             )
 
@@ -100,10 +104,11 @@ class SourceCredentialRepository(
         self,
         *,
         name: str,
-        credential_type: str,
+        credential_type: CredentialType,
         header_name: str,
         allowed_prefixes: list[str],
         secret_ciphertext: str,
+        owner_app_id: int,
         modifier: str,
     ) -> SourceCredentialRow:
         with self._db.orm_session() as db:
@@ -119,6 +124,7 @@ class SourceCredentialRepository(
                     header_name=header_name,
                     allowed_prefixes=_encode_prefixes(allowed_prefixes),
                     secret_ciphertext=secret_ciphertext,
+                    owner_app_id=owner_app_id,
                     modifier=modifier,
                 )
                 db.add(row)
@@ -127,6 +133,10 @@ class SourceCredentialRepository(
                 row.header_name = header_name
                 row.allowed_prefixes = _encode_prefixes(allowed_prefixes)
                 row.secret_ciphertext = secret_ciphertext
+                # ``owner_app_id`` is deliberately NOT re-stamped on the
+                # replace branch: ownership is the creating application's,
+                # and the service has already refused the call outright
+                # when the caller is not that application.
                 row.modifier = modifier
                 # Stamped explicitly (never left to onupdate): a same-value
                 # re-PUT is still a write, and the audit contract records

@@ -10,6 +10,7 @@ from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_config_manifest.credentials.models import (
+        CredentialType,
         SourceCredentialRow,
     )
 
@@ -29,7 +30,7 @@ class SourceCredentialRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def list(self) -> "list[SourceCredentialRow]":
+    def list(self) -> list[SourceCredentialRow]:
         """Every row in the tenant, ordered by name."""
         ...
 
@@ -38,13 +39,31 @@ class SourceCredentialRepositoryProtocol(Protocol):
         self,
         *,
         name: str,
-        credential_type: str,
+        credential_type: CredentialType,
         header_name: str,
         allowed_prefixes: list[str],
         secret_ciphertext: str,
+        owner_app_id: int,
         modifier: str,
     ) -> SourceCredentialRow:
-        """Insert, or whole-replace the row with the same name (rotation)."""
+        """Insert, or whole-replace the row with the same name (rotation).
+
+        Params (beyond the keyed ones the row itself documents):
+
+        - ``credential_type`` — the validated presentation mechanism; the
+          service has already refused reserved/unknown values.
+        - ``allowed_prefixes`` — the validated list; storage encodes it as
+          the row's JSON array form.
+        - ``secret_ciphertext`` — TokenVault output, twice over: already
+          *encrypted* (or singlebox plaintext), never the raw secret —
+          no plaintext secret reaches this layer under any profile.
+        - ``owner_app_id`` — the creating application's registry id.
+          Stamped on insert and never re-stamped on replace; the *owner*
+          gate itself (refuse a non-owner's rotation before storage) is
+          the service's, which reads the row first.
+        - ``modifier`` — the audit actor the router composed off the
+          verified principal (``app:<id>`` / ``app:<id>:on-behalf-of:<user>``).
+        """
         ...
 
     @abstractmethod

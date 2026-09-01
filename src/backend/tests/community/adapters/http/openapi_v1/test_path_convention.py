@@ -116,6 +116,10 @@ _BOT_FREE = frozenset(
         # requested by its public contract: /bots/skills/repository/... .
         # It therefore does not name one concrete Bot in this segment.
         "skills",
+        # Tenant source credentials (W3, #1471): a tenant-level object — it
+        # shares the bots namespace the bots domain routes, but never
+        # names one bot, exactly like the other literal groups above.
+        "source-credentials",
         "work-order-notifications",
         "work-orders",
     }

@@ -142,17 +142,7 @@ _ALLOWLIST: dict[str, str] = {
         "~1504 lines — task center engine (run/dispatch/aggregation). Grew past the "
         "cap with the task-claim + stateless secbaas relay work; split run/dispatch "
         "and group-formation into sub-modules in a follow-up refactor.",
-        "adapters/http/openapi_v1/admission.py":
-        "~1009 lines — one-row-per-operation policy table; W1/W3 both grew it "
-        "toward the cap from ~999. Collapsing per-group blocks into merged "
-        "per-group modules is the follow-up (the IDs are stable keys, not "
-        "sprawl).",
-    "adapters/http/openapi_v1/responses.py":
-        "~1004 lines — the ENVELOPE_ERRORS fixed-message map plus builders; "
-        "pre-existing borderline at ~1000 before W3. New group rows merge from "
-        "their own modules (errors_source_credentials.py, following the "
-        "skill-center pattern); a wholesale table split is a separate refactor.",
-"adapters/http/task/router.py":
+    "adapters/http/task/router.py":
         "~1027 lines — internal task router (execute/dashboard/list + callback + the "
         "new grant/revoke/claim-join-filter surface). Borderline; split the claim-grant "
         "sub-router into its own module in a follow-up.",

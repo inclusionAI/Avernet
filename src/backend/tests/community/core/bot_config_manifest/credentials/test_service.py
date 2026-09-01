@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialError,
     CredentialNotFoundError,
+    CredentialNotOwnedError,
     MasterKeyUnavailableError,
 )
 from agentclaw.community.core.bot_config_manifest.credentials.policy import (
@@ -48,6 +49,9 @@ PREFIXES = ["https://git.example/team/content"]
 ROTATED = "Bearer rotated-token"
 INITIAL = "Bearer initial-token"
 
+OWNER_APP = 7
+OTHER_APP = 8
+
 
 @pytest.fixture
 def service() -> SourceCredentialService:
@@ -67,6 +71,7 @@ def _put(service, secret=INITIAL, name="corp-git", **overrides):
         header_name="PRIVATE-TOKEN",
         secret=secret,
         allowed_prefixes=PREFIXES,
+        owner_app_id=OWNER_APP,
         modifier="alice",
     )
     kwargs.update(overrides)
@@ -132,12 +137,57 @@ def test_binding_refuses_targets_outside_the_prefixes(service):
 def test_deleted_credential_bindings_fail_by_name_only(service):
     _put(service)
     binding = service.binding(name="corp-git")
-    service.delete(name="corp-git")
+    service.delete(name="corp-git", caller_app_id=OWNER_APP)
     with pytest.raises(CredentialNotFoundError, match="corp-git"):
         binding.headers_for("https://git.example/team/content")
     with pytest.raises(CredentialNotFoundError, match="corp-git"):
         service.binding(name="corp-git")
-    assert service.delete(name="corp-git") is False  # idempotent
+    assert (
+        service.delete(name="corp-git", caller_app_id=OWNER_APP) is False
+    )  # idempotent
+
+
+# --- ownership: rotation and delete are the creating application's --------
+
+
+def test_the_creating_application_owns_the_name(service):
+    public = _put(service)
+    assert public.owner_app_id == OWNER_APP
+    row = service._repository.get(name="corp-git")
+    assert row.owner_app_id == OWNER_APP
+    # 轮换不换归属:owner 在插入时钉死。
+    _put(service, secret=ROTATED, modifier="bob")
+    assert service._repository.get(name="corp-git").owner_app_id == OWNER_APP
+
+
+def test_rotation_by_another_application_is_refused_before_storage(service):
+    """整行替换的 re-PUT 是对名字所有引用的改写——非 owner 一律先拒后写。"""
+    _put(service, secret=INITIAL)
+    with pytest.raises(CredentialNotOwnedError, match="corp-git"):
+        _put(service, secret="Bearer hijack", owner_app_id=OTHER_APP)
+    # 存储未被触碰:值、审计行都还在原状。
+    row = service._repository.get(name="corp-git")
+    binding = service.binding(name="corp-git")
+    assert (
+        binding.headers_for("https://git.example/team/content")["PRIVATE-TOKEN"]
+        == INITIAL
+    )
+    assert row.modifier == "alice"
+
+
+def test_delete_by_another_application_is_refused(service):
+    _put(service)
+    with pytest.raises(CredentialNotOwnedError, match="corp-git"):
+        service.delete(name="corp-git", caller_app_id=OTHER_APP)
+    assert service._repository.get(name="corp-git") is not None
+    assert service.delete(name="corp-git", caller_app_id=OWNER_APP) is True
+
+
+def test_reads_belong_to_every_tenant_application(service):
+    """名字是租户共享的引用命名空间:读取不设 owner 门。"""
+    _put(service)
+    assert service.get(name="corp-git").owner_app_id == OWNER_APP
+    assert [item.name for item in service.list_credentials()] == ["corp-git"]
 
 
 def test_error_messages_never_carry_the_secret(service):

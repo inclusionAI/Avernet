@@ -13,14 +13,24 @@ from __future__ import annotations
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialError,
     CredentialNotFoundError,
+    CredentialNotOwnedError,
     MasterKeyUnavailableError,
 )
 
 SOURCE_CREDENTIALS_ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # ── Order is load-bearing: lookup is the first isinstance match, and
-    # both rows below subclass CredentialError — they must precede it. ──
+    # every row below but the last subclasses CredentialError — the base
+    # must come after its subclasses. ──
     # Named miss in the caller's tenant — masked like every 404 here.
     CredentialNotFoundError: (404, "Not found"),
+    # The one mutation boundary: rotation and delete are the owning
+    # application's alone. 403, not 404 — the caller can legitimately
+    # name the credential (reads are tenant-wide), it just cannot
+    # change it.
+    CredentialNotOwnedError: (
+        403,
+        "Source credential is owned by another application",
+    ),
     # Fail-closed production posture: no master key, no plaintext at rest.
     # 503, not 422: the input is fine; the platform's secret store is not
     # resolvable *right now* — an operator fixes the key store and retries.

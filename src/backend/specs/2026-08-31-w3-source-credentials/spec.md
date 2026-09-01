@@ -12,8 +12,9 @@
 - 仓储协议/实现(`core/repository/{protocols,implementations}/bot/source_credential.py`)
 - `ac_source_credential` DDL(uk `(avernet_tenant, name)`,无 env 轴)
 - DI:provider 按 profile 定 fail-closed(corp/community=True)
-- 公开面 4 路由(`/openapi/v1/source-credentials`,REFUSED 全组)+ ADMISSION/AUTHORIZATION
-  + gateway 新前缀 spec 文件 + 本仓 `application.yaml` 一行
+- 公开面 4 路由(`/openapi/v1/bots/source-credentials`,OPEN 全组)+ ADMISSION/AUTHORIZATION
+  + 并入 `bots.openapi.json`(不再单独 spec 文件)+ 本仓/ocb 两仓 `application.yaml`
+  的 route_security 行(`user: optional, app: required`)
 
 ## 验收 → 实现/测试映射
 
@@ -42,3 +43,13 @@
 - 全绿:policy 24 / service 23 / adapter 9 / endpoint-framework 9 / 门禁 battery
   (conformance、E3、oversized allowlist、schema-docs、admission-inventory、principal-seam、
   coverage gate 16)。
+- **CR 修订(架构师 totalfrank,2026-09-01)**:安全模型反转——本面是 **App 操作面**而非
+  人工面。路由前缀改 `/openapi/v1/bots/source-credentials`(字面量组,挂 `{bot_id}` 通配
+  之前);ADMISSION 全组 OPEN(REFUSED⟺`refuse_app_only_caller` 声明是 gate 双向锁,同步
+  摘除);网关 `user: optional, app: required`(同 `/bots/authorized` 形态,即彼时
+  AdmissionMode.REQUIRED 的边缘表达);DDL 增 `owner_app_id`(创建者归属,插入钉死):
+  轮换/删除仅 owner(403 `CredentialNotOwnedError`),读取全租户开放(名字是共享引用
+  命名空间);PUT 弃 `ActingCallerDep`(其对 app-only 调用者放行未校验的 user_id,是
+  fail-open 归因洞),改读 Principal 的 `app_id`,modifier 形如
+  `app:{id}[:on-behalf-of:{user}]`;`credential_type` 收敛为 `CredentialType` StrEnum;
+  schema 并入 `bots.openapi.json`(增量手合并,非全量 regen)+ ocb 两仓同步。

@@ -461,11 +461,13 @@ def build_public_router() -> APIRouter:
         dependencies=_PUBLIC_AUTH,
     )
     # Source credentials (W3, #1471): tenant-level named credentials
-    # referenced from manifests by name. No bot_id on the wire and no
-    # user_id parameter — the tenant guard scopes every row, and the
-    # admission mode (REFUSED, human-only) is the authorization posture:
-    # secret writes and the tenant's credential inventory are operator
-    # surfaces, not machine-grantable ones.
+    # referenced from manifests by name. A literal group under the bots
+    # namespace, mounted before the ``{bot_id}`` wildcard router like
+    # market/catalog — its path must not be captured as a bot id. No
+    # bot_id and no user_id: callers arrive as applications of the tenant
+    # (the edge requires an app credential), the tenant guard scopes
+    # every row, and the service enforces the owner-app boundary for
+    # rotation and delete.
     public.include_router(
         source_credentials_router,
         responses=ERROR_RESPONSES,

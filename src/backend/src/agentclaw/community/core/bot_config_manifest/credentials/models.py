@@ -10,6 +10,7 @@ row-splitting ``env`` column would silently answer that question wrong.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel
 from sqlalchemy import (
@@ -33,6 +34,25 @@ from agentclaw.community.utils.avernet_tenant_guard import (
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
 
 
+class CredentialType(StrEnum):
+    """The presentation mechanism carrying the secret (W3, #1471).
+
+    Members, not bare strings: 'header' is the one implemented mechanism
+    and the only value a write can store; 'oss_aksk'/'basic' are reserved
+    containers for future mechanisms — kept in the vocabulary so a caller
+    sending one is refused *by name* ("reserved") rather than as an
+    unknown value, per the one-endpoint-one-body discrimination.
+    """
+
+    HEADER = "header"
+    OSS_AKSK = "oss_aksk"
+    BASIC = "basic"
+
+
+#: The mechanisms with no implementation yet — refused at write.
+RESERVED_TYPES = (CredentialType.OSS_AKSK, CredentialType.BASIC)
+
+
 class SourceCredentialRecord(BaseModel):
     """The public, redacted view — the only shape the API ever returns.
 
@@ -43,10 +63,13 @@ class SourceCredentialRecord(BaseModel):
 
     id: int | None = None
     name: str
-    credential_type: str = "header"
+    credential_type: CredentialType = CredentialType.HEADER
     header_name: str
     allowed_prefixes: list[str]
     has_secret: bool = True
+    #: The owning application (registry id). Rotation and delete are its
+    #: alone; every tenant application may read the masked metadata.
+    owner_app_id: int
     updated_at: datetime
 
 
@@ -61,10 +84,13 @@ class SourceCredentialRow(BaseModel):
 
     id: int | None = None
     name: str
-    credential_type: str
+    credential_type: CredentialType
     header_name: str
     allowed_prefixes: str  # JSON array as stored
     secret_ciphertext: str
+    #: Set at insert, immutable after: the application whose PUT created
+    #: the name. Router-level ownership (rotation/delete) reads it.
+    owner_app_id: int
     modifier: str
     gmt_modified: datetime
 
@@ -89,6 +115,11 @@ class SourceCredentialModel(Base):
     #: ``enc:v1:<AES-GCM ciphertext>`` (or plaintext under a non fail-closed
     #: profile with no master key — never both meanings for one profile).
     secret_ciphertext = Column(Text, nullable=False)
+    #: The owning application — the creating PUT's caller app id. Written
+    #: at insert only and never re-stamped: rotation and delete are the
+    #: owner's alone, and a re-PUT by another application is refused
+    #: before storage.
+    owner_app_id = Column(BigInteger, nullable=False)
     modifier = Column(String(1024), nullable=False, server_default="")
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(
@@ -104,7 +135,7 @@ class SourceCredentialModel(Base):
         ),
     )
 
-    def to_row(self) -> "SourceCredentialRow":
+    def to_row(self) -> SourceCredentialRow:
         """Detachment-safe handoff: row attributes inside the session."""
         return SourceCredentialRow(
             id=self.id,
@@ -113,6 +144,7 @@ class SourceCredentialModel(Base):
             header_name=self.header_name,
             allowed_prefixes=self.allowed_prefixes,
             secret_ciphertext=self.secret_ciphertext,
+            owner_app_id=self.owner_app_id,
             modifier=self.modifier or "",
             gmt_modified=self.gmt_modified,
         )

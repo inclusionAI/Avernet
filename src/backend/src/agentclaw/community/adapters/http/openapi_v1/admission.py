@@ -589,15 +589,20 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
     # Department directory search — a tenant-wide catalogue read, not a user's.
-    # ── Source credentials (W3, #1471) — REFUSED, human-only ──────────────
-    # A secret write and the tenant's credential inventory are operator
-    # surfaces: this is the one group with no business running headless, so
-    # every operation refuses an application-only caller. The tenant guard
-    # scopes the rows; a named human principal is the identity on record.
-    ("PUT", "/openapi/v1/source-credentials/{name}"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/source-credentials/{name}"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/source-credentials"): AdmissionMode.REFUSED,
-    ("DELETE", "/openapi/v1/source-credentials/{name}"): AdmissionMode.REFUSED,
+    # ── Source credentials (W3, #1471) — OPEN, application-operated ─────────
+    # These are machine operations, and the *edge* is what makes them so:
+    # the gateway's route_security requires an app credential on every
+    # path of the group (`user: optional, app: required`, the same shape
+    # as /openapi/v1/bots/authorized), so the caller that arrives here is
+    # an application of the tenant — there is no user axis for this table
+    # to gate and no bot for a grant to address. The one identity that
+    # matters, the owning application (rotation and delete are the
+    # creating application's alone), is enforced in the service, against
+    # the row.
+    ("PUT", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/source-credentials"): AdmissionMode.OPEN,
+    ("DELETE", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,

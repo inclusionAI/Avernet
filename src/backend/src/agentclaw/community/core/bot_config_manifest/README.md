@@ -139,7 +139,14 @@ What `credentials/` owns:
   must never catch tenant tokens at rest;
 - **the rotation contract**: a rotation is a same-name re-PUT, no apply is
   triggered, and the binding re-reads per hop — "the next fetch uses the new
-  value" needs no signal.
+  value" needs no signal;
+- **the ownership boundary**: the surface is application-operated (the edge
+  requires an app credential on every route); a name belongs to the
+  application that created it, and rotation — a whole-row replace, of the
+  secret, the header, *and* the prefixes every manifest citation of the
+  name depends on — and delete are the owner's calls alone, refused with
+  403 before storage for any other application of the tenant. Reads stay
+  tenant-wide: the name is the shared reference namespace manifests cite.
 
 What it deliberately does not own:
 
@@ -282,7 +289,7 @@ consumes:
 consumed_by:
   - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface"
   - "the apply orchestration (W4, future) — constructor-injected transport_allowlist and FetchBudget"
-  - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (REFUSED admission, human-only)"
+  - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_startup_script

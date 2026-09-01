@@ -10,6 +10,12 @@ catastrophic for tenant tokens in production (one keystore misconfiguration
 = every tenant's tokens in the clear). The guard refuses the write before
 any persistence under fail-closed profiles; the decision is injected via
 DI (``SourceCredentialServiceBoot``), never a per-call argument.
+
+Ownership is this layer's boundary: the creating application owns the
+name, rotation and delete are its calls alone, and reads belong to every
+application of the tenant (the name is the reference namespace manifests
+cite). The check runs against the row, before any storage writes — a
+non-owner's re-PUT must leave the stored value untouched.
 """
 from __future__ import annotations
 
@@ -21,9 +27,12 @@ from injector import inject
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialError,
     CredentialNotFoundError,
+    CredentialNotOwnedError,
     MasterKeyUnavailableError,
 )
 from agentclaw.community.core.bot_config_manifest.credentials.models import (
+    RESERVED_TYPES,
+    CredentialType,
     SourceCredentialRecord,
     SourceCredentialRow,
 )
@@ -38,11 +47,6 @@ from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.repository.protocols.bot.source_credential import (
     SourceCredentialRepositoryProtocol,
 )
-
-#: Reserved per the one-endpoint-one-body discrimination: containers for
-#: future mechanisms, rejected at write so the stored ``type`` stays true
-#: from day one.
-_RESERVED_TYPES = ("oss_aksk", "basic")
 
 #: RFC 7230 token — one line of authority, no hand-rolled parsing.
 _HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
@@ -75,14 +79,15 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
         header_name: str,
         secret: str,
         allowed_prefixes: list[str],
-        credential_type: str = "header",
+        owner_app_id: int,
+        credential_type: CredentialType = CredentialType.HEADER,
         modifier: str = "",
     ) -> SourceCredentialRecord:
-        if credential_type in _RESERVED_TYPES:
+        if credential_type in RESERVED_TYPES:
             raise CredentialError(
                 f"credential type {credential_type!r} is reserved, not supported"
             )
-        if credential_type != "header":
+        if credential_type != CredentialType.HEADER:
             raise CredentialError("only header credentials are supported")
         if not name or len(name) > _NAME_MAX or any(c.isspace() for c in name):
             raise CredentialError("credential name must be a non-empty identifier")
@@ -108,12 +113,24 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
                 "credential storage requires a configured master key in this profile"
             )
 
+        # The owner gate — before any storage write. Rotation is a re-PUT,
+        # and a re-PUT by any application other than the name's owner is a
+        # cross-application hijack of every manifest citation of that name
+        # (whole-row replace: secret, header, and prefixes), so it is
+        # refused here rather than stamped over.
+        existing = self._repository.get(name=name)
+        if existing is not None and existing.owner_app_id != owner_app_id:
+            raise CredentialNotOwnedError(
+                f"credential {name!r} is owned by another application"
+            )
+
         row = self._repository.upsert(
             name=name,
             credential_type=credential_type,
             header_name=header_name,
             allowed_prefixes=allowed_prefixes,
             secret_ciphertext=self._vault.encrypt(secret),
+            owner_app_id=owner_app_id,
             modifier=modifier,
         )
         return self._masked(row)
@@ -124,10 +141,17 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
     def list_credentials(self) -> list[SourceCredentialRecord]:
         return [self._masked(row) for row in self._repository.list()]
 
-    def delete(self, *, name: str) -> bool:
+    def delete(self, *, name: str, caller_app_id: int) -> bool:
+        row = self._repository.get(name=name)
+        if row is None:
+            return False
+        if row.owner_app_id != caller_app_id:
+            raise CredentialNotOwnedError(
+                f"credential {name!r} is owned by another application"
+            )
         return self._repository.delete(name=name)
 
-    def binding(self, *, name: str) -> "SourceCredentialBinding":
+    def binding(self, *, name: str) -> SourceCredentialBinding:
         self._row_or_404(name)
         return SourceCredentialBinding(self, name)
 
@@ -151,6 +175,7 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
             header_name=row.header_name,
             allowed_prefixes=self._prefixes_of(row),
             has_secret=bool(row.secret_ciphertext),
+            owner_app_id=row.owner_app_id,
             updated_at=row.gmt_modified,
         )
 
