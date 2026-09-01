@@ -1,0 +1,40 @@
+{
+  "name": "@avernet/clawevolve",
+  "version": "0.1.0",
+  "description": "Public ClawEvolve core for Avernet",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./server/services/evolve/command": {
+      "types": "./dist/server/services/evolve/command.d.ts",
+      "import": "./dist/server/services/evolve/command.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "bash scripts/check-public-boundary.sh && tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "prepack": "npm run check && npm test && npm run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "tsx": "^4.19.2",
+    "typescript": "~6.0.2"
+  }
+}
