@@ -88,7 +88,7 @@ export const botWorkshopService = {
       },
       query.spaceId || undefined,
     );
-    const result = mapBotList(response.data);
+    const result = mapBotList(response.data, query.currentUserId);
     const visible = result.items.filter((item) => item.runtime.visibleInOpenCore);
     const pageNumber = query.page ?? result.page;
     const pageSize = query.pageSize ?? result.pageSize;
@@ -114,13 +114,11 @@ export const botWorkshopService = {
     localUserId?: string,
     currentSpace?: BotCreateSpace,
   ): BotCreateSpace[] {
+    if (currentSpace) return [currentSpace];
     const personal = personalSpace(localUserId);
     if (scenario === 'local') return [personal];
-    if (currentSpace?.ownership === 'personal') return [currentSpace];
     const spaces = personal.canCreate ? [personal] : [];
-    if (currentSpace && currentSpace.id !== personal.id) {
-      spaces.push(currentSpace);
-    } else if (currentSpaceId && currentSpaceId !== personal.id) {
+    if (currentSpaceId && currentSpaceId !== personal.id) {
       spaces.push({ id: currentSpaceId, name: '当前空间', ownership: 'team', canCreate: true });
     }
     return spaces;

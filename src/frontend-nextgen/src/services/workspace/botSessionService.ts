@@ -88,6 +88,7 @@ export function listChatBots(identityViews: IdentityView[]): ChatBotView[] {
         online: i.online,
         reachability: i.reachability,
         chatable: COMPOUND_ID_RE.test(i.id),
+        engine: i.engine,
       };
     });
 }

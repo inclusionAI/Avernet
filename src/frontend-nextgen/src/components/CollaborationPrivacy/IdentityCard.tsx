@@ -1,29 +1,29 @@
+import { Avatar } from '@/components/ui/Avatar';
 import { Card, CardContent } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
 import type { CurrentUserIdentity } from '@/domain/collaborationPrivacy/types';
-import { RefreshCw, UserRound } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 
 interface IdentityCardProps {
   identity: CurrentUserIdentity;
+  avatarUrl?: string;
   syncing: boolean;
   onSync: () => void;
 }
 
-export function IdentityCard({ identity, syncing, onSync }: IdentityCardProps) {
+export function IdentityCard({ identity, avatarUrl, syncing, onSync }: IdentityCardProps) {
   return (
     <Card>
       <CardContent>
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
-            <UserRound className="h-5 w-5" aria-hidden />
-          </div>
-          <div className="min-w-0">
+        <div className="flex min-w-0 items-start gap-3">
+          <Avatar name={identity.displayName} src={avatarUrl} size={44} />
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <p className="m-0 font-medium text-[var(--color-fg)]">{identity.displayName}</p>
-              <span className="text-xs text-[var(--color-muted)]">工号 {identity.employeeNumber}</span>
+              <p className="m-0 text-base font-semibold text-foreground">{identity.displayName}</p>
+              <span className="text-xs text-muted-foreground">工号 {identity.employeeNumber}</span>
             </div>
-            <div className="mt-1 flex items-center gap-1">
-              <p className="m-0 text-sm leading-6 text-[var(--color-muted)]">
+            <div className="mt-1 flex min-w-0 items-start gap-1">
+              <p className="m-0 min-w-0 break-words text-xs leading-5 text-muted-foreground">
                 {identity.departmentPath.length > 0 ? identity.departmentPath.join(' / ') : '暂无部门信息'}
               </p>
               <IconButton

@@ -1,4 +1,5 @@
 import type {
+  FriendRequestActor,
   HumanBotActionContext,
   PublicBotDiscoveryQuery,
   PublicBotSearchQuery,
@@ -33,6 +34,9 @@ export class CollaborationSquareService {
   listBots(query?: PublicBotSearchQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
     return this.gateway.listBots(query, context, signal);
   }
+  listBotPage(query?: PublicBotSearchQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
+    return this.gateway.listBotPage(query, context, signal);
+  }
   discoverBots(query: PublicBotDiscoveryQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
     return this.gateway.discoverBots(query, context, signal);
   }
@@ -41,6 +45,9 @@ export class CollaborationSquareService {
   }
   listGroups(query?: PublicGroupSearchQuery, signal?: AbortSignal) {
     return this.gateway.listGroups(query, signal);
+  }
+  listGroupPage(query?: PublicGroupSearchQuery, signal?: AbortSignal) {
+    return this.gateway.listGroupPage(query, signal);
   }
   listGroupMembers(groupId: string, signal?: AbortSignal) {
     return this.gateway.listGroupMembers(groupId, signal);
@@ -56,16 +63,24 @@ export class CollaborationSquareService {
     }
   }
 
-  requestBotFriendship(botId: string, context: HumanBotActionContext) {
-    return this.runTargetAction(`friend:${botId}`, () => this.gateway.requestBotFriendship(botId, context));
+  requestBotFriendship(
+    botId: string,
+    context: HumanBotActionContext,
+    friendRequestBotId?: string,
+    fromActor?: FriendRequestActor,
+  ) {
+    const targetId = friendRequestBotId?.trim() || botId;
+    return this.runTargetAction(`friend:${targetId}`, () =>
+      this.gateway.requestBotFriendship(botId, context, friendRequestBotId, fromActor),
+    );
   }
 
   openBotConversation(botId: string, context: HumanBotActionContext) {
     return this.runTargetAction(`conversation:${botId}`, () => this.gateway.openBotConversation(botId, context));
   }
 
-  createGroupSession(groupId: string) {
-    return this.runTargetAction(`session:${groupId}`, () => this.gateway.createGroupSession(groupId));
+  createGroupSession(groupId: string, context?: HumanBotActionContext, options?: { title?: string; query?: string }) {
+    return this.runTargetAction(`session:${groupId}`, () => this.gateway.createGroupSession(groupId, context, options));
   }
 }
 

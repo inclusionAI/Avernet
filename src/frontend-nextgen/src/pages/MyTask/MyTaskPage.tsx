@@ -1,26 +1,39 @@
 import { PageHeader } from '@/components/Common/PageHeader';
-import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Segmented } from '@/components/ui/Segmented';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
-import { History, RefreshCw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { MyTaskDrawers } from './components/MyTaskDrawers';
 import { RoutineTaskTab } from './components/RoutineTaskTab';
 import { UserTaskTab } from './components/UserTaskTab';
 import { useMyTaskTasks } from './hooks/useMyTaskTasks';
 import { ALL_ROUTINE_BOT_VALUE, makeRoutineKey, useRoutineTasks } from './hooks/useRoutineTasks';
+import type { UserTaskStatusFilter } from './userTaskUtils';
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 10;
+
+function normalizeBotNameKey(value?: string | null): string {
+  return value?.trim().toLowerCase() ?? '';
+}
 
 export default function MyTaskPage() {
   const { identity: humanIdentity } = useHumanIdentity();
   const ownerUserId = humanIdentity?.userId.trim() ?? '';
+  const [userTaskPage, setUserTaskPage] = useState(DEFAULT_PAGE);
+  const [userTaskPageSize, setUserTaskPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [userTaskStatusFilter, setUserTaskStatusFilter] = useState<UserTaskStatusFilter>('all');
+  const [routinePage, setRoutinePage] = useState(DEFAULT_PAGE);
+  const [routinePageSize, setRoutinePageSize] = useState(DEFAULT_PAGE_SIZE);
+
   const {
     taskRecords,
+    total: userTaskTotal,
     loading: userLoading,
     error: userError,
     refresh: refreshUserTasks,
-  } = useMyTaskTasks(ownerUserId);
+  } = useMyTaskTasks(ownerUserId, userTaskPage, userTaskPageSize, userTaskStatusFilter);
   const { chatBots, isLoading: ownedBotsLoading } = useOwnedBots(ownerUserId || null, Boolean(ownerUserId));
   const routineBots = useMemo(
     () =>
@@ -32,6 +45,17 @@ export default function MyTaskPage() {
         .filter((item) => Boolean(item.botId.trim())),
     [chatBots],
   );
+  const botNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    chatBots.forEach((bot) => {
+      const botName = bot.displayName || bot.botId;
+      const botIdKey = normalizeBotNameKey(bot.botId);
+      const realBotIdKey = normalizeBotNameKey(bot.realBotId);
+      if (botIdKey) map[botIdKey] = botName;
+      if (realBotIdKey) map[realBotIdKey] = botName;
+    });
+    return map;
+  }, [chatBots]);
   const routineBotOptions = useMemo(
     () => [
       { value: ALL_ROUTINE_BOT_VALUE, label: '全部' },
@@ -50,6 +74,7 @@ export default function MyTaskPage() {
     routines,
     loading: routineLoading,
     error: routineError,
+    total: routineTotal,
     refreshRoutines,
     selectedRoutine,
     selectedRoutineRuns,
@@ -62,9 +87,12 @@ export default function MyTaskPage() {
   } = useRoutineTasks(
     selectedRoutineBotId,
     routineBots,
+    routinePage,
+    routinePageSize,
     selectedRoutineKey,
     Boolean(selectedRoutineHistoryId),
-    activeTab === 'routine',
+    // Bot 身份没有可用的 user_id（owner 聚合接口与 per-bot 接口都按 user 鉴权），保持静默空列表。
+    activeTab === 'routine' && Boolean(ownerUserId),
   );
 
   const openRoutineFromHistory = (botId: string, routineId: string) => {
@@ -73,24 +101,10 @@ export default function MyTaskPage() {
     setActiveTab('routine');
   };
 
-  const handleRefresh = () => {
-    void Promise.all([refreshUserTasks(), refreshRoutines()]);
-  };
-
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
-        <PageHeader
-          title="我的任务"
-          description="汇总用户任务与定时任务两个 Tab 的执行进度、结果与详情入口。定时任务支持按单个 Bot 筛选，也可以选择「全部」查看当前用户拥有的所有 Bot 定时任务。"
-          actions={
-            <div className="flex items-end gap-2">
-              <Button variant="secondary" leftIcon={<RefreshCw className="size-4" />} onClick={handleRefresh}>
-                刷新
-              </Button>
-            </div>
-          }
-        />
+        <PageHeader title="我的任务" />
 
         <Card>
           <CardContent className="space-y-4 pt-5">
@@ -104,30 +118,37 @@ export default function MyTaskPage() {
                 ]}
                 className="w-full max-w-md"
               />
-              {activeTab === 'routine' ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  leftIcon={<History className="size-4" />}
-                  onClick={() => setSelectedRoutineHistoryId('overview')}
-                >
-                  历史任务
-                </Button>
-              ) : null}
             </div>
 
             {activeTab === 'user' ? (
               <UserTaskTab
                 taskRecords={taskRecords}
+                total={userTaskTotal}
+                page={userTaskPage}
+                pageSize={userTaskPageSize}
                 loading={userLoading}
                 error={userError}
+                statusFilter={userTaskStatusFilter}
+                onStatusFilterChange={(status) => {
+                  setUserTaskStatusFilter(status);
+                  setUserTaskPage(DEFAULT_PAGE);
+                }}
                 onRetry={() => void refreshUserTasks()}
                 onSelectTask={setSelectedTaskId}
                 selectedTaskId={selectedTaskId}
+                onPageChange={setUserTaskPage}
+                onPageSizeChange={(nextPageSize) => {
+                  setUserTaskPageSize(nextPageSize);
+                  setUserTaskPage(DEFAULT_PAGE);
+                }}
+                botNameMap={botNameMap}
               />
             ) : (
               <RoutineTaskTab
                 routines={routines}
+                total={routineTotal}
+                page={routinePage}
+                pageSize={routinePageSize}
                 loading={ownedBotsLoading || routineLoading}
                 error={routineError}
                 botOptions={routineBotOptions}
@@ -136,13 +157,22 @@ export default function MyTaskPage() {
                   setSelectedRoutineBotId(botId);
                   setSelectedRoutineKey(null);
                   setSelectedRoutineHistoryId(null);
+                  setRoutinePage(DEFAULT_PAGE);
                 }}
                 onRetry={() => void refreshRoutines()}
-                onSelectRoutine={(routine) => setSelectedRoutineKey(makeRoutineKey(routine.botId, routine.id))}
+                onSelectRoutine={(routine) =>
+                  setSelectedRoutineKey(makeRoutineKey(routine.botId, routine.id, routine.runtimeStage))
+                }
                 onRunRoutine={async (routine) => {
                   await runRoutine(routine);
                   await refreshRoutines();
                 }}
+                onPageChange={setRoutinePage}
+                onPageSizeChange={(nextPageSize) => {
+                  setRoutinePageSize(nextPageSize);
+                  setRoutinePage(DEFAULT_PAGE);
+                }}
+                botNameMap={botNameMap}
               />
             )}
           </CardContent>
@@ -166,6 +196,7 @@ export default function MyTaskPage() {
         historyLoading={historyLoading}
         historyError={historyError}
         onOpenRoutineFromHistory={openRoutineFromHistory}
+        botNameMap={botNameMap}
       />
     </main>
   );

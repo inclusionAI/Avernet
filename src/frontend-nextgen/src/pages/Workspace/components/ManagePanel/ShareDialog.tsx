@@ -30,13 +30,13 @@ export function ShareDialog({ open, title, inviting, invitationUrl, onClose }: S
     <Modal open={open} onOpenChange={(next) => !inviting && !next && onClose()}>
       <ModalContent size="md" closeLabel="关闭分享弹窗">
         <ModalHeader>
-          <ModalTitle className="m-0 flex items-center gap-2 text-base font-semibold text-[var(--color-fg)]">
+          <ModalTitle className="m-0 flex items-center gap-2 text-base font-semibold text-foreground">
             分享{title}
             {inviting && <Badge tone="warning">生成中</Badge>}
           </ModalTitle>
         </ModalHeader>
         <div className="space-y-3">
-          <p className="m-0 text-sm text-[var(--color-muted)]">分享链接生成后，将允许对应成员通过链接加入{title}。</p>
+          <p className="m-0 text-sm text-muted-foreground">分享链接生成后，将允许对应成员通过链接加入{title}。</p>
           <Input readOnly value={invitationUrl ?? ''} placeholder="点击下方按钮生成邀请链接" aria-label="邀请链接" />
           <div className="flex justify-end">
             <Button

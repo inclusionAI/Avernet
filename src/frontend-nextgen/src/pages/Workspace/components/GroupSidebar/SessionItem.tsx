@@ -31,8 +31,8 @@ export const SessionItem = React.memo(function SessionItem({
     onToggleFavorite(session.sessionId);
   };
   const memberCount = session.participantCount ?? session.participants.length;
-  const createdTime = formatMonthDayTime(session.createdAt);
-  const subtitle = memberCount > 0 ? `${memberCount} 位成员` : undefined;
+  const createdTime = formatMonthDayTime(session.lastMessageAt ?? session.createdAt);
+  const subtitle = memberCount > 0 ? `${memberCount} 个成员` : undefined;
 
   return (
     <SessionCard
@@ -47,12 +47,7 @@ export const SessionItem = React.memo(function SessionItem({
             label={favorite ? '取消收藏' : '收藏会话'}
             size="sm"
             icon={
-              <Star
-                className={cn(
-                  'h-3.5 w-3.5',
-                  favorite ? 'fill-[var(--color-warning)] text-[var(--color-warning)]' : 'text-[var(--color-muted)]',
-                )}
-              />
+              <Star className={cn('h-3.5 w-3.5', favorite ? 'fill-warning text-warning' : 'text-muted-foreground')} />
             }
             onClick={handleFavorite}
             className={cn(!favorite && 'opacity-0 transition-opacity group-hover:opacity-100')}

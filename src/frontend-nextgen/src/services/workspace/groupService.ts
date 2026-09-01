@@ -1,4 +1,11 @@
-import type { DeliveryPolicy, GroupKind, GroupView, IdentityView, ParticipantRole } from '@/domain/collaboration';
+import type {
+  DeliveryPolicy,
+  GroupKind,
+  GroupSessionPage,
+  GroupView,
+  IdentityView,
+  ParticipantRole,
+} from '@/domain/collaboration';
 import {
   createGroup as createGroupApi,
   deleteGroup,
@@ -12,6 +19,7 @@ import {
   createGroupViaExecute as execCreateGroupViaExecute,
   loadBcsGroupDetail as execLoadBcsGroupDetail,
   loadGroupDetailOrBcs as execLoadGroupDetailOrBcs,
+  loadGroupSessionsOrBcs as execLoadGroupSessionsOrBcs,
 } from './groupExecuteService';
 import type { DomainError, DomainResult } from './identityService';
 import { mapGroupListItem, mapSessionListItem } from './mappers';
@@ -26,6 +34,13 @@ export interface VisibleGroupsOpts {
   kind: 'all' | GroupKind;
   sort: 'lastActivity' | 'createdAt';
 }
+
+export interface SessionPageOpts {
+  offset?: number;
+  limit?: number;
+}
+
+const GROUP_SESSION_PAGE_SIZE = 10;
 
 const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
   driver: 'driver',
@@ -64,6 +79,41 @@ export const groupService = {
       return {
         ok: false,
         error: toDomainError('GROUPS_LOAD_FAILED', '加载协作群列表失败，请稍后重试。'),
+      };
+    }
+  },
+
+  /** 仅加载群的会话列表（/groups/{id}/sessions），不拉群详情。供侧栏选中/展开群填充会话；
+   *  群详情（participants/owner/driver）仅在管理面板查看/编辑时按需拉取（见 loadGroupDetail）。 */
+  async loadGroupSessions(
+    groupId: string,
+    viewBotId?: string,
+    pageOpts: SessionPageOpts = {},
+  ): Promise<DomainResult<GroupSessionPage>> {
+    try {
+      const offset = pageOpts.offset ?? 0;
+      const limit = pageOpts.limit ?? GROUP_SESSION_PAGE_SIZE;
+      const resp = await listGroupSessions(groupId, {
+        offset,
+        limit,
+        ...(viewBotId ? { view_bot_id: viewBotId } : {}),
+      });
+      const items = (resp.data?.items ?? []).map((s) => mapSessionListItem(s));
+      const total = resp.data?.total ?? offset + items.length;
+      return {
+        ok: true,
+        data: {
+          items,
+          offset: resp.data?.offset ?? offset,
+          limit: resp.data?.limit ?? limit,
+          total,
+          hasMore: offset + items.length < total,
+        },
+      };
+    } catch {
+      return {
+        ok: false,
+        error: toDomainError('GROUP_LOAD_FAILED', '加载会话列表失败，请稍后重试。'),
       };
     }
   },
@@ -129,6 +179,18 @@ export const groupService = {
    *  实现下沉 groupExecuteService（依赖注入通用 loadGroupDetail 规避循环依赖）。供 hook 选中补拉调用。 */
   loadGroupDetailOrBcs(groupId: string, viewBotId?: string): Promise<DomainResult<GroupView>> {
     return execLoadGroupDetailOrBcs(groupId, viewBotId, (id, vid) => this.loadGroupDetail(id, vid));
+  },
+
+  /** 选中/展开群填充会话列表的统一入口（仅会话，不含群详情）：BCS 群走 loadBcsGroupSessions，
+   *  预发群走 loadGroupSessions。供 useSessionMap 调用，避免选中群触发 GET /groups/{id} 详情请求。 */
+  loadGroupSessionsOrBcs(
+    groupId: string,
+    viewBotId?: string,
+    pageOpts?: SessionPageOpts,
+  ): Promise<DomainResult<GroupSessionPage>> {
+    return execLoadGroupSessionsOrBcs(groupId, viewBotId, pageOpts, (id, vid, opts) =>
+      this.loadGroupSessions(id, vid, opts),
+    );
   },
 
   /** 本地 BCS 群详情（execute 建群返回的群）：实现下沉 groupExecuteService。 */

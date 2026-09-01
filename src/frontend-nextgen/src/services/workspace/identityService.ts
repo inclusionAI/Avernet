@@ -1,4 +1,6 @@
 import type { IdentityView } from '@/domain/collaboration';
+import { normalizeOpenApiUserId } from '@/domain/userIdentity';
+import { listBots } from '@/services/backendApi/bots/botController';
 import { listMyBots } from '@/services/backendApi/collaboration/collaborationBotController';
 import { ENABLE_TEST_USER, TEST_USER_IDENTITY } from './testUser';
 
@@ -23,19 +25,186 @@ let inflight: Promise<DomainResult<LoadIdentitiesResult>> | null = null;
 // 注意：仅标记「曾经成功」，不保证 store 当前非空（store 可被外部清空再重载）。
 let resolved = false;
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim());
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function readString(value: unknown): string | undefined {
+  if (isNonEmptyString(value)) return value.trim();
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return [record.name, record.type, record.value, record.engine].find(isNonEmptyString)?.trim();
+}
+
+/**
+ * 引擎字段和展示名称不是同一个维度：
+ * engine={ name: 'TeamClaw网关', type: 'claude_code' } 时，必须取 type。
+ * 只有在没有真实引擎枚举时，才允许回退到 name（例如 provider.name）。
+ */
+function readEngineString(value: unknown): string | undefined {
+  if (isNonEmptyString(value)) return value.trim();
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return [
+    record.type,
+    record.engine,
+    record.value,
+    record.active_engine,
+    record.engine_type,
+    record.engine_name,
+    record.name,
+  ]
+    .find(isNonEmptyString)
+    ?.trim();
+}
+
+function readNestedString(
+  record: Record<string, unknown>,
+  path: string[],
+  reader: (value: unknown) => string | undefined = readString,
+): string | undefined {
+  let current: unknown = record;
+  for (const key of path) {
+    const currentRecord = asRecord(current);
+    if (!currentRecord) return undefined;
+    current = currentRecord[key];
+  }
+  return reader(current);
+}
+
+function readBotId(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return [record.bot_id, record.id, record.botId, record.uuid].find(isNonEmptyString)?.trim();
+}
+
+function readBotEngine(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return (
+    [record.engine, record.active_engine, record.engine_type, record.engine_name]
+      .map(readEngineString)
+      .find(isNonEmptyString) ??
+    readNestedString(record, ['engine_info'], readEngineString) ??
+    readNestedString(record, ['runtime', 'engine'], readEngineString) ??
+    readNestedString(record, ['provider', 'name'])
+  );
+}
+
+function readBotType(value: unknown): string | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return [record.bot_type, record.botType].find(isNonEmptyString)?.trim();
+}
+
+function readPageItems<T = unknown>(response: unknown): T[] {
+  const root = asRecord(response);
+  const data = root?.data;
+  if (Array.isArray(data)) return data as T[];
+  const dataRecord = asRecord(data);
+  if (Array.isArray(dataRecord?.items)) return dataRecord.items as T[];
+  if (Array.isArray(dataRecord?.bots)) return dataRecord.bots as T[];
+  if (Array.isArray(root?.items)) return root.items as T[];
+  if (Array.isArray(root?.bots)) return root.bots as T[];
+  return [];
+}
+
+function readBotSupplement(value: unknown): (BotSupplement & { botId: string }) | null {
+  const record = asRecord(value);
+  const botId = readBotId(value);
+  if (!record || !botId) return null;
+
+  // /openapi/v1/bots 的不同版本曾使用 engine、active_engine、engine_type 或嵌套引擎对象；
+  // 这里仅在传输层做兼容，不把版本差异泄漏给 IdentityView/UI。
+  return { botId, engine: readBotEngine(record), botType: readBotType(record) };
+}
+
+function normalizeBotId(botId: string) {
+  const separatorIndex = botId.indexOf(':');
+  return separatorIndex > 0 ? botId.slice(0, separatorIndex) : botId;
+}
+
+interface BotSupplement {
+  engine?: string;
+  botType?: string;
+}
+
+async function enrichBotMetadata<T extends { id: string; kind: string; engine?: string; botType?: string }>(
+  items: T[],
+  userId?: string,
+): Promise<T[]> {
+  const missingMetadata = items.some(
+    (item) => item.kind === 'bot' && (!isNonEmptyString(item.engine) || !isNonEmptyString(item.botType)),
+  );
+  if (!missingMetadata) return items;
+
+  try {
+    const response = await listBots({
+      page: 1,
+      page_size: 100,
+      ...(userId ? { user_id: userId } : {}),
+    });
+    const metadataByBotId = new Map<string, BotSupplement>();
+    readPageItems(response).forEach((summary) => {
+      const parsed = readBotSupplement(summary);
+      if (!parsed || (!parsed.engine && !parsed.botType)) return;
+      const { botId, ...metadata } = parsed;
+      metadataByBotId.set(botId, metadata);
+      const normalizedId = normalizeBotId(botId);
+      if (!metadataByBotId.has(normalizedId)) metadataByBotId.set(normalizedId, metadata);
+    });
+
+    return items.map((item) => {
+      if (item.kind !== 'bot' || (isNonEmptyString(item.engine) && isNonEmptyString(item.botType))) {
+        return item;
+      }
+      const metadata = metadataByBotId.get(item.id) ?? metadataByBotId.get(normalizeBotId(item.id));
+      if (!metadata) return item;
+      return {
+        ...item,
+        engine: isNonEmptyString(item.engine) ? item.engine : metadata.engine,
+        botType: isNonEmptyString(item.botType) ? item.botType : metadata.botType,
+      };
+    });
+  } catch {
+    // engine 仅为身份辅助展示信息；补充接口失败时保留 mine 结果，不阻断身份加载。
+    return items;
+  }
+}
+
 /** 实际拉取（无去重）；由 loadIdentities 单飞包装。 */
 async function doLoadIdentities(): Promise<DomainResult<LoadIdentitiesResult>> {
   try {
     const resp = await listMyBots({ offset: 0, limit: 50 });
-    const mapped: IdentityView[] = (resp.data?.items ?? []).map((b) => ({
-      id: b.bot_id,
-      kind: b.kind === 'human' ? 'user' : 'bot',
-      displayName: b.name ?? '未命名',
-      avatarUrl: b.avatar_url,
-      online: b.status === 'online',
-      status: b.status === 'online' ? 'online' : 'hidden',
-      reachability: b.reachability === 'unreachable' ? 'unreachable' : 'reachable',
-    }));
+    const mineItems = readPageItems(resp);
+    const humanItem = mineItems.find((item) => asRecord(item)?.kind === 'human');
+    const humanUserId = normalizeOpenApiUserId(readBotId(humanItem));
+    const mapped: IdentityView[] = await enrichBotMetadata(
+      mineItems.flatMap((value) => {
+        const b = asRecord(value);
+        const id = readBotId(value);
+        if (!b || !id) return [];
+        const status = readString(b.status);
+        return [
+          {
+            id,
+            kind: b.kind === 'human' ? 'user' : 'bot',
+            displayName: readString(b.name) ?? '未命名',
+            avatarUrl: readString(b.avatar_url),
+            online: status === 'online',
+            status: status === 'online' ? 'online' : 'hidden',
+            reachability: b.reachability === 'unreachable' ? 'unreachable' : 'reachable',
+            engine: readBotEngine(value),
+            botType: readBotType(value),
+          },
+        ];
+      }),
+      humanUserId,
+    );
     const humans = mapped.filter((i) => i.kind === 'user');
     const bots = mapped.filter((i) => i.kind === 'bot');
     // 真实「我」取自 mine 接口返回的 human 项（真实姓名/头像/在线状态）；

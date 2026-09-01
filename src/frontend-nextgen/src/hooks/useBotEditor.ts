@@ -22,6 +22,7 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
   const [availableMcps, setAvailableMcps] = useState<BotEditorMcp[]>([]);
   const [marketSkills, setMarketSkills] = useState<BotEditorSkill[]>([]);
   const [workshopSkills, setWorkshopSkills] = useState<BotEditorSkill[]>([]);
+  const [candidatesLoaded, setCandidatesLoaded] = useState(false);
   const [resources, setResources] = useState<BotEditorResource[]>([]);
   const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
@@ -35,13 +36,10 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
     if (!botId || !enabled) return;
     setLoading(true);
     try {
-      const data = await botEditorService.load(botId, serviceBot, spaceId);
+      const data = await botEditorService.load(botId, serviceBot);
       setSkills(data.skills);
       setSkillSets(data.skillSets);
       setMcps(data.mcps);
-      setAvailableMcps(data.availableMcps);
-      setMarketSkills(data.marketSkills);
-      setWorkshopSkills(data.workshopSkills);
       setResources(data.resources);
       setScreens(data.screens);
       setRoutines(data.routines);
@@ -56,8 +54,25 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
     }
   }, [botId, enabled, serviceBot, spaceId]);
   useEffect(() => {
+    setCandidatesLoaded(false);
+    setAvailableMcps([]);
+    setMarketSkills([]);
+    setWorkshopSkills([]);
     void load();
-  }, [load]);
+  }, [botId, load]);
+  const loadCapabilityCandidates = useCallback(async () => {
+    if (!botId || candidatesLoaded) return;
+    try {
+      const candidates = await botEditorService.loadCapabilityCandidates(botId, spaceId);
+      setAvailableMcps(candidates.availableMcps);
+      setMarketSkills(candidates.marketSkills);
+      setWorkshopSkills(candidates.workshopSkills);
+      setCandidatesLoaded(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '可选能力加载失败');
+      throw error;
+    }
+  }, [botId, candidatesLoaded, spaceId]);
   const act = useCallback(
     async (work: () => Promise<unknown>, message: string) => {
       try {
@@ -78,6 +93,7 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
     availableMcps,
     marketSkills,
     workshopSkills,
+    loadCapabilityCandidates,
     resources,
     screens,
     routines,

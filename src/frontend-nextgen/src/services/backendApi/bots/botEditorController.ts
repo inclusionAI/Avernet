@@ -1,6 +1,7 @@
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 import { userScopedParams } from './botController';
+import type { ChannelDto } from './botEditorChannelDtos';
 
 export interface SkillDto extends BackendUnknownRecord {
   skill_id: string;
@@ -65,6 +66,16 @@ export interface SkillSetDto extends BackendUnknownRecord {
   is_default: boolean;
   is_active: boolean;
 }
+export interface SkillSetResourceDto extends SkillSetDto {
+  mcps: Array<{ server_code: string; name?: string; description?: string }>;
+  clis: Array<{
+    cli_code?: string;
+    resource_code?: string;
+    code?: string;
+    name?: string;
+    description?: string;
+  }>;
+}
 export interface McpServerDto extends BackendUnknownRecord {
   server_code: string;
   name: string;
@@ -126,14 +137,6 @@ export interface IdentityFileDto {
   content: string;
   file_path: string;
 }
-export interface ChannelDto extends BackendUnknownRecord {
-  id: number;
-  type: 'dingding';
-  description?: string;
-  status: 'active' | 'inactive';
-  config: { client_id: string; has_client_secret: boolean; [key: string]: unknown };
-}
-
 const path = (botId: string, group: string) => `/openapi/v1/bots/${botId}/${group}`;
 const request = <T>(url: string, method = 'GET', params: BackendUnknownRecord = {}, data?: unknown) =>
   backendRequest<BackendApiEnvelope<T>>(url, { method, params: userScopedParams(params), data });
@@ -183,6 +186,7 @@ export const botEditorController = {
       'POST',
     ),
   listSkillSets: (botId: string) => request<SkillSetDto[]>(path(botId, 'skill-sets')),
+  listSkillSetResources: (botId: string) => request<SkillSetResourceDto[]>(path(botId, 'skill-sets/resources')),
   createSkillSet: (botId: string, body: { name: string; description?: string }) =>
     backendRequest<BackendApiEnvelope<SkillSetDto>>(path(botId, 'skill-sets'), {
       method: 'POST',
@@ -282,6 +286,9 @@ export const botEditorController = {
   deleteLifecycleDraft: (botId: string) => request(path(botId, 'lifecycle'), 'DELETE'),
   getEditLock: (botId: string, ownerId?: string) =>
     request<EditLockDto>(path(botId, 'edit-lock'), 'GET', { owner_id: ownerId }),
+  /** POST `/edit-lock` acquire（wire `acquire_edit_lock`）；contended 409 → 走 steal */
+  acquireEditLock: (botId: string, ownerId?: string) =>
+    request<EditLockDto>(path(botId, 'edit-lock'), 'POST', { owner_id: ownerId }),
   stealEditLock: (botId: string, ownerId?: string) =>
     request<EditLockDto>(path(botId, 'edit-lock/steal'), 'POST', { owner_id: ownerId }),
 };

@@ -76,7 +76,7 @@ export function GroupManageDrawer({ group, canManage, onClose, onUpdate, onDisso
     <Drawer open={!!group} onOpenChange={(open) => !open && onClose()}>
       <DrawerContent side="right" size="md" closeLabel="关闭群管理抽屉">
         <DrawerHeader>
-          <DrawerTitle className="flex items-center gap-2 text-base font-semibold text-[var(--color-fg)]">
+          <DrawerTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
             群管理
             {group && <Badge tone="neutral">{group.name}</Badge>}
           </DrawerTitle>
@@ -84,15 +84,13 @@ export function GroupManageDrawer({ group, canManage, onClose, onUpdate, onDisso
 
         {/* 权限提示 */}
         {disabled && disabledReason && (
-          <p className="mb-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)]">
-            {disabledReason}
-          </p>
+          <p className="mb-3 rounded-lg bg-warning/10 px-3 py-2 text-sm text-warning">{disabledReason}</p>
         )}
 
         {/* 公开性 */}
         <Card className="p-4">
-          <p className="m-0 text-sm font-medium text-[var(--color-fg)]">公开性</p>
-          <p className="mt-1 text-xs text-[var(--color-muted)]">私密群仅成员可见；公开群允许通过链接加入。</p>
+          <p className="m-0 text-sm font-medium text-foreground">公开性</p>
+          <p className="mt-1 text-xs text-muted-foreground">私密群仅成员可见；公开群允许通过链接加入。</p>
           <div className="mt-3">
             <Segmented<'private' | 'public'>
               value={visibilityValue}
@@ -105,10 +103,10 @@ export function GroupManageDrawer({ group, canManage, onClose, onUpdate, onDisso
         {/* 投递策略 */}
         <Card className="mt-3 p-4">
           <div className="flex items-center justify-between">
-            <p className="m-0 text-sm font-medium text-[var(--color-fg)]">投递策略</p>
+            <p className="m-0 text-sm font-medium text-foreground">投递策略</p>
             {group && group.kind !== 'free_chat' && <Badge tone="neutral">仅自由聊天可配置</Badge>}
           </div>
-          <p className="mt-1 text-xs text-[var(--color-muted)]">
+          <p className="mt-1 text-xs text-muted-foreground">
             自动回复：消息投递给 driver 触发回复；关闭自动回复：仅注入观察者不触发回复。
           </p>
           <div className="mt-3">
@@ -119,7 +117,7 @@ export function GroupManageDrawer({ group, canManage, onClose, onUpdate, onDisso
                 onChange={handleDeliveryChange}
               />
             ) : (
-              <p className="m-0 rounded-lg bg-[var(--color-panel-strong)] px-3 py-2 text-sm text-[var(--color-muted)]">
+              <p className="m-0 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
                 当前：{DELIVERY_LABEL[deliveryValue]}（只读）
               </p>
             )}
@@ -127,9 +125,9 @@ export function GroupManageDrawer({ group, canManage, onClose, onUpdate, onDisso
         </Card>
 
         {/* 危险操作 */}
-        <Card className="mt-3 border-[var(--color-error-soft)] p-4">
-          <p className="m-0 text-sm font-medium text-[var(--color-error)]">解散群</p>
-          <p className="mt-1 text-xs text-[var(--color-muted)]">该操作不可撤销，所有会话历史将一并清除。</p>
+        <Card className="mt-3 border-destructive/30 p-4">
+          <p className="m-0 text-sm font-medium text-destructive">解散群</p>
+          <p className="mt-1 text-xs text-muted-foreground">该操作不可撤销，所有会话历史将一并清除。</p>
           <div className="mt-3">
             <Button variant="destructive" size="md" disabled={disabled} onClick={() => setConfirmOpen(true)}>
               解散群

@@ -1,14 +1,20 @@
 /** @jest-environment jsdom */
 import {
   GroupDrillDownPanel,
+  GroupSessionView,
   filterGroupMessages,
   isNonMessageGroupContent,
   resolveMasterBot,
+  shouldCollapseMessage,
   type GroupMessage,
 } from '@/assets/TaskPanel/GroupDrillDown';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+jest.mock('@tc-chat/ui/es/MarkdownRender', () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
+}));
 
 function makeMessage(overrides: Partial<GroupMessage> = {}): GroupMessage {
   return {
@@ -105,5 +111,93 @@ describe('GroupDrillDownPanel tabs', () => {
     fireEvent.click(closeButton);
 
     await waitFor(() => expect(onClose).toHaveBeenCalledWith(node.id));
+  });
+});
+
+describe('GroupDrillDown message typography', () => {
+  it('只对超长消息启用收起态', () => {
+    expect(shouldCollapseMessage('短消息')).toBe(false);
+    expect(shouldCollapseMessage('一'.repeat(200))).toBe(false);
+    expect(shouldCollapseMessage('一'.repeat(201))).toBe(true);
+  });
+
+  it('消息正文保持与“对话消息”字段一致的紧凑字号', async () => {
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn<(...args: Parameters<typeof fetch>) => Promise<Response>>();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          group_id: 'group-1',
+          name: '执行会话',
+          status: 'active',
+          participants: [
+            {
+              actor_id: 'worker-bot:user-1',
+              actor_kind: 'bot',
+              name: '执行 Bot',
+              role: 'worker',
+              mode: 'auto',
+            },
+          ],
+        },
+      }),
+    } as Response);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          result: [
+            {
+              message_id: 'message-1',
+              role: 'assistant',
+              content: JSON.stringify({ data: { result: '一'.repeat(201) } }),
+              gmt_create: '2026-08-22T10:00:00+08:00',
+            },
+          ],
+        },
+      }),
+    } as Response);
+    global.fetch = fetchMock;
+
+    const node = {
+      id: 'node-1',
+      name: '执行会话',
+      sequence: 1,
+      status: 'done' as const,
+      executor: '执行 Bot',
+      executorColor: '#165DFF',
+      runMode: 'bot',
+      startedAt: null,
+      endAt: null,
+      timeConsuming: null,
+      output: null,
+      outputSummary: null,
+      artifacts: [],
+      groupId: 'group-1',
+      sessionId: 'session-1',
+      hasSubTask: false,
+      subTaskId: null,
+      stepTraces: [],
+      acceptanceResult: null,
+    };
+
+    try {
+      render(<GroupSessionView node={node} bcsBaseUrl="" apiBaseUrl="" userId="user-1" onBack={jest.fn()} />);
+      const content = await screen.findByTestId('task-panel-message-content');
+      expect(content).toHaveStyle('font-size: 12px');
+      expect(content).toHaveStyle('--aix-markdown-font-size: 12px');
+      expect(content).toHaveStyle('overflow: visible');
+      expect(content).not.toHaveStyle('max-height: 120px');
+      expect(screen.getByText(`${'一'.repeat(199)}…`)).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: '展开消息' }));
+      expect(screen.getByRole('button', { name: '收起消息' })).toBeInTheDocument();
+      expect(screen.getByText('一'.repeat(201))).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '收起消息' }));
+      expect(screen.getByRole('button', { name: '展开消息' })).toBeInTheDocument();
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 });

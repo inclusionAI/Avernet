@@ -56,13 +56,78 @@ describe('BotCard health check action', () => {
 
 describe('BotCard conversation action', () => {
   test('renders the conversation entry and delegates navigation', () => {
-    const bot = mapBotDto({ bot_id: 'b3', bot_name: 'Chat Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
+    const bot = mapBotDto({
+      bot_id: 'b3',
+      bot_name: 'Chat Bot',
+      engine: 'openclaw',
+      status: 'ACTIVE',
+      actions: ['chat', 'view'],
+    }).item;
     const onConversation = jest.fn();
 
-    render(<BotCard bot={bot} onView={noop} onConversation={onConversation} />);
+    render(
+      <BotCard
+        bot={bot}
+        onView={noop}
+        onConversation={onConversation}
+        inventoryActions={{ chat: { action: 'chat', visible: true, enabled: true } }}
+      />,
+    );
     fireEvent.click(screen.getByRole('button', { name: '对话' }));
 
     expect(onConversation).toHaveBeenCalledWith(bot);
+  });
+});
+
+describe('BotCard backend action contract', () => {
+  test('does not render chat or edit when backend only allows view', () => {
+    const bot = mapBotDto({
+      bot_id: 'offline-service',
+      bot_name: 'Offline Bot',
+      engine: 'openclaw',
+      kind: 'service',
+      display_state: 'service_offline',
+      actions: ['view'],
+    }).item;
+
+    render(
+      <BotCard
+        bot={bot}
+        onView={noop}
+        onConversation={noop}
+        onEdit={noop}
+        inventoryActions={{ view: { action: 'view', visible: true, enabled: true } }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '查看' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '对话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+  });
+
+  test('renders a disabled edit action with the backend reason', () => {
+    const bot = mapBotDto({
+      bot_id: 'local-offline',
+      bot_name: 'Local Offline Bot',
+      engine: 'openclaw',
+      kind: 'local',
+      display_state: 'local_offline',
+      actions: ['view'],
+      disabled_actions: { edit: 'device offline' },
+    }).item;
+
+    render(
+      <BotCard
+        bot={bot}
+        onView={noop}
+        onEdit={noop}
+        inventoryActions={{
+          edit: { action: 'edit', visible: true, enabled: false, disabledReason: 'device offline' },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '编辑' })).toBeDisabled();
   });
 });
 
@@ -110,5 +175,56 @@ describe('BotCard management actions', () => {
     fireEvent.click(screen.getByRole('button', { name: '抢锁并编辑' }));
 
     expect(onClaimLock).toHaveBeenCalledWith(bot);
+  });
+});
+
+describe('Agent Coding Bot card actions', () => {
+  test('只展示去使用，管理菜单仅保留指定操作', () => {
+    const bot = mapBotDto({
+      bot_id: 'agent-template',
+      bot_name: 'Agent Coding 模版 Bot',
+      active_engine: 'claude_code',
+      template_type: 'myTemplate',
+      bot_type: 'personal',
+      display_state: 'running',
+      actions: ['chat', 'view', 'edit', 'restart', 'engine_restart', 'delete'],
+    }).item;
+
+    render(
+      <BotCard
+        bot={bot}
+        onView={noop}
+        onConversation={noop}
+        onEdit={noop}
+        onHealthCheck={noop}
+        healthCheckAvailability={{ action: 'health-check', visible: true, enabled: true }}
+        logAction={{ action: 'logs', visible: true, enabled: true }}
+        onOpenLogs={noop}
+        onChangeSpace={noop}
+        onAuthorize={noop}
+        collaborationMode="authorize"
+        onAction={jest.fn().mockResolvedValue(undefined)}
+        inventoryActions={{
+          chat: { action: 'chat', visible: true, enabled: true },
+          view: { action: 'view', visible: true, enabled: true },
+          edit: { action: 'edit', visible: true, enabled: true },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '去使用' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '健康检查' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '日志' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 Agent Coding 模版 Bot' }));
+    expect(screen.getByText('开启服务化')).toBeInTheDocument();
+    expect(screen.getByText('重启 Bot')).toBeInTheDocument();
+    expect(screen.getByText('变更归属空间')).toBeInTheDocument();
+    expect(screen.getByText('删除')).toBeInTheDocument();
+    expect(screen.queryByText('重启引擎')).not.toBeInTheDocument();
+    expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
+    expect(screen.queryByText('授权')).not.toBeInTheDocument();
   });
 });

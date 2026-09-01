@@ -23,7 +23,7 @@ export interface UseCreateGroupResult {
   /** 进行中标记。 */
   creating: boolean;
   /** 触发创建；成功时返回 GroupView，失败时返回 undefined 并设置 friendlyError。 */
-  run: (input: CreateGroupInput) => Promise<DomainResult<GroupView>>;
+  run: (input: CreateGroupInput, options?: { viaExecute?: boolean }) => Promise<DomainResult<GroupView>>;
   /** 清空 inline 错误（用户修改表单时调用）。 */
   clearError: () => void;
 }
@@ -42,13 +42,15 @@ export function useCreateGroup(): UseCreateGroupResult {
   const [creating, setCreating] = useState(false);
 
   const run = useCallback(
-    async (input: CreateGroupInput): Promise<DomainResult<GroupView>> => {
+    async (input: CreateGroupInput, options?: { viaExecute?: boolean }): Promise<DomainResult<GroupView>> => {
       setCreating(true);
       setFriendlyError(undefined);
-      // 自定义协作群(state_machine)按开关走 task execute；chat / manager_worker 仍走原 createGroup 链路。
+      // 自定义协作群(state_machine)按「是否以任务执行」走 task execute；chat / manager_worker 仍走原 createGroup 链路。
+      // options.viaExecute 来自 发起协作弹窗 的勾选框(选择自定义协作时出现);缺省回落 GROUP_CREATE_VIA_EXECUTE 常量。
       // 执行使用方 owner_user_id 取 resolveUserId(activeIdentityId)，与任务 execute 链路同源。
+      const viaExecute = options?.viaExecute ?? GROUP_CREATE_VIA_EXECUTE;
       const res =
-        GROUP_CREATE_VIA_EXECUTE && input.strategy === 'state_machine'
+        viaExecute && input.strategy === 'state_machine'
           ? await groupService.createGroupViaExecute(input, resolveUserId(activeIdentityId ?? ''))
           : await groupService.createGroup(input);
       setCreating(false);

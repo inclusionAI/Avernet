@@ -13,11 +13,13 @@ interface ChatSessionSidebarSlotProps {
   view: WorkspaceView;
   onViewChange: (v: WorkspaceView) => void;
   availableViews: WorkspaceView[];
-  /** <lg 会话列表抽屉开关。≥lg 内流侧栏始终渲染，抽屉仅 <lg 由 IdentityBar 的「打开会话列表」触发。 */
+  /** <lg 会话列表抽屉开关。≥lg 内流侧栏始终渲染，抽屉仅 <lg 由移动端顶部的「打开会话列表」触发。 */
   mobileListOpen: boolean;
   onMobileListClose: () => void;
   onOpenCreateGroup: () => void;
   onOpenAddFriend: () => void;
+  onOpenPermissions: () => void;
+  userAvatarUrl?: string;
 }
 
 /**
@@ -33,12 +35,19 @@ export function ChatSessionSidebarSlot({
   onMobileListClose,
   onOpenCreateGroup,
   onOpenAddFriend,
+  onOpenPermissions,
+  userAvatarUrl,
 }: ChatSessionSidebarSlotProps) {
   const botSessions = workspace.botSessions;
   const botSidebarProps: BotSessionSidebarProps = {
     view,
     onViewChange,
     availableViews,
+    identities: workspace.identities,
+    activeIdentityId: workspace.activeIdentityId,
+    onChangeIdentity: workspace.setActiveIdentityId,
+    onOpenPermissions,
+    userAvatarUrl,
     chatBots: workspace.chatBots,
     friendBots: workspace.friendBots,
     isMyBotsLoading: workspace.isMyBotsLoading,

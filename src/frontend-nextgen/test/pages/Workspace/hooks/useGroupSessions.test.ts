@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import type { SessionView } from '@/domain/collaboration';
 import { useGroupSessions } from '@/pages/Workspace/hooks/useGroupSessions';
 import { groupService } from '@/services/workspace/groupService';
 import { sessionService } from '@/services/workspace/sessionService';
@@ -15,6 +16,20 @@ jest.mock('@/services/workspace/groupService');
 const ss = sessionService as unknown as Record<string, jest.Mock<any>>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const gs = groupService as unknown as Record<string, jest.Mock<any>>;
+
+function session(sessionId: string, groupId: string, title: string, favorite = false): SessionView {
+  return {
+    sessionId,
+    groupId,
+    title,
+    kind: 'chat',
+    status: 'running',
+    participants: [],
+    lastMessageAt: 1,
+    createdAt: 1,
+    favorite,
+  };
+}
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -38,39 +53,9 @@ beforeEach(() => {
 });
 
 it('auto-selects first session after load', async () => {
-  gs.loadGroupDetailOrBcs.mockResolvedValue({
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({
     ok: true,
-    data: {
-      groupId: 'g1',
-      name: 'X',
-      kind: 'free_chat',
-      status: 'active',
-      participants: [],
-      sessions: [
-        {
-          sessionId: 's1',
-          groupId: 'g1',
-          title: '一号',
-          kind: 'chat',
-          status: 'running',
-          participants: [],
-          lastMessageAt: 1,
-          createdAt: 1,
-          favorite: false,
-        },
-        {
-          sessionId: 's2',
-          groupId: 'g1',
-          title: '二号',
-          kind: 'chat',
-          status: 'running',
-          participants: [],
-          lastMessageAt: 2,
-          createdAt: 2,
-          favorite: false,
-        },
-      ],
-    },
+    data: [session('s1', 'g1', '一号'), session('s2', 'g1', '二号')],
   });
   renderHook(() => useGroupSessions('g1'));
   await waitFor(() => {
@@ -79,18 +64,54 @@ it('auto-selects first session after load', async () => {
   });
 });
 
-it('createSession appends and selects new session', async () => {
-  gs.loadGroupDetailOrBcs.mockResolvedValue({
-    ok: true,
-    data: {
-      groupId: 'g1',
-      name: 'X',
-      kind: 'free_chat',
-      status: 'active',
-      participants: [],
-      sessions: [],
-    },
+it('waits for an active identity and loads selected sessions once', async () => {
+  useWorkspaceStore.setState({ activeIdentityId: null });
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [] });
+
+  renderHook(() => useGroupSessions('g1'));
+  await act(async () => Promise.resolve());
+  expect(gs.loadGroupSessionsOrBcs).not.toHaveBeenCalled();
+
+  act(() => {
+    useWorkspaceStore.setState({ activeIdentityId: 'me' });
   });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(1));
+  expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledWith('g1', 'me');
+});
+
+it('loads the first 10 sessions and appends the next page without duplicates', async () => {
+  const firstPage = Array.from({ length: 10 }, (_, i) => session(`s${i + 1}`, 'g1', `会话${i + 1}`));
+  gs.loadGroupSessionsOrBcs.mockImplementation(
+    async (_gid: string, _identityId?: string, opts?: { offset?: number; limit?: number }) =>
+      opts
+        ? {
+            ok: true,
+            data: {
+              items: [session('s10', 'g1', '会话10'), session('s11', 'g1', '会话11'), session('s12', 'g1', '会话12')],
+              offset: opts.offset ?? 0,
+              limit: opts.limit ?? 10,
+              total: 12,
+              hasMore: false,
+            },
+          }
+        : { ok: true, data: { items: firstPage, offset: 0, limit: 10, total: 12, hasMore: true } },
+  );
+
+  const { result } = renderHook(() => useGroupSessions('g1', ['g1']));
+  await waitFor(() => expect(result.current.sessions).toHaveLength(10));
+  expect(result.current.hasMoreSessionsByGroupId.g1).toBe(true);
+
+  await act(async () => result.current.loadMoreSessions('g1'));
+
+  expect(gs.loadGroupSessionsOrBcs).toHaveBeenLastCalledWith('g1', 'me', { offset: 10, limit: 10 });
+  expect(result.current.sessions.map((item) => item.sessionId)).toEqual(
+    Array.from({ length: 12 }, (_, i) => `s${i + 1}`),
+  );
+  expect(result.current.hasMoreSessionsByGroupId.g1).toBe(false);
+});
+
+it('createSession appends and selects new session', async () => {
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [] });
   ss.createNewSession.mockResolvedValue({
     ok: true,
     data: {
@@ -106,53 +127,23 @@ it('createSession appends and selects new session', async () => {
     },
   });
   const { result } = renderHook(() => useGroupSessions('g1'));
-  await waitFor(() => expect(gs.loadGroupDetailOrBcs).toHaveBeenCalled());
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalled());
   const created = await act(async () => result.current.createSession('新会话'));
   expect(created).toBeTruthy();
   expect(useWorkspaceStore.getState().selectedSessionId).toBe('s9');
 });
 
 it('deleteSession rotates selection to next', async () => {
-  gs.loadGroupDetailOrBcs.mockResolvedValue({
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({
     ok: true,
-    data: {
-      groupId: 'g1',
-      name: 'X',
-      kind: 'free_chat',
-      status: 'active',
-      participants: [],
-      sessions: [
-        {
-          sessionId: 's1',
-          groupId: 'g1',
-          title: '一号',
-          kind: 'chat',
-          status: 'running',
-          participants: [],
-          lastMessageAt: 1,
-          createdAt: 1,
-          favorite: false,
-        },
-        {
-          sessionId: 's2',
-          groupId: 'g1',
-          title: '二号',
-          kind: 'chat',
-          status: 'running',
-          participants: [],
-          lastMessageAt: 2,
-          createdAt: 2,
-          favorite: false,
-        },
-      ],
-    },
+    data: [session('s1', 'g1', '一号'), session('s2', 'g1', '二号')],
   });
   // 删除发生在选中群的数据面：store 需先有 selectedGroupId（selectGroup 会清空 selectedSessionId，先调）。
   useWorkspaceStore.getState().selectGroup('g1');
   useWorkspaceStore.getState().selectSession('s1');
   ss.deleteSession.mockResolvedValue({ ok: true, data: null });
   const { result } = renderHook(() => useGroupSessions('g1'));
-  await waitFor(() => expect(gs.loadGroupDetailOrBcs).toHaveBeenCalled());
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalled());
   await act(async () => {
     await result.current.deleteSession('s1');
   });
@@ -160,31 +151,9 @@ it('deleteSession rotates selection to next', async () => {
 });
 
 it('toggleFavorite calls backend service and updates session map', async () => {
-  gs.loadGroupDetailOrBcs.mockResolvedValue({
-    ok: true,
-    data: {
-      groupId: 'g1',
-      name: 'X',
-      kind: 'free_chat',
-      status: 'active',
-      participants: [],
-      sessions: [
-        {
-          sessionId: 's1',
-          groupId: 'g1',
-          title: 'A',
-          kind: 'chat',
-          status: 'running',
-          participants: [],
-          lastMessageAt: 1,
-          createdAt: 1,
-          favorite: false,
-        },
-      ],
-    },
-  });
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [session('s1', 'g1', 'A')] });
   const { result } = renderHook(() => useGroupSessions('g1'));
-  await waitFor(() => expect(gs.loadGroupDetailOrBcs).toHaveBeenCalled());
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalled());
   await act(async () => {
     await result.current.toggleFavorite('s1');
   });
@@ -194,42 +163,12 @@ it('toggleFavorite calls backend service and updates session map', async () => {
 
 it('exposes favoriteSessionIds from session collected state and does not tab-filter sessions', async () => {
   // getVisibleSessions 透传：若仍按 tab 过滤会丢会话，这里验证不再 tab 过滤。
-  gs.loadGroupDetailOrBcs.mockResolvedValue({
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({
     ok: true,
-    data: {
-      groupId: 'g1',
-      name: 'X',
-      kind: 'free_chat',
-      status: 'active',
-      participants: [],
-      sessions: [
-        {
-          sessionId: 's1',
-          groupId: 'g1',
-          title: '一号',
-          kind: 'chat',
-          status: 'running',
-          participants: [],
-          lastMessageAt: 1,
-          createdAt: 1,
-          favorite: true,
-        },
-        {
-          sessionId: 's2',
-          groupId: 'g1',
-          title: '二号',
-          kind: 'chat',
-          status: 'running',
-          participants: [],
-          lastMessageAt: 2,
-          createdAt: 2,
-          favorite: false,
-        },
-      ],
-    },
+    data: [session('s1', 'g1', '一号', true), session('s2', 'g1', '二号', false)],
   });
   const { result } = renderHook(() => useGroupSessions('g1'));
-  await waitFor(() => expect(gs.loadGroupDetailOrBcs).toHaveBeenCalled());
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalled());
   // favoriteSessionIds 来源于后端 collected 字段
   await waitFor(() => expect(result.current.favoriteSessionIds).toEqual(['s1']));
   // sessions 不再按 tab 过滤：非收藏 s2 仍出现在 hook 输出中（search 为空）
@@ -244,58 +183,18 @@ it('exposes favoriteSessionIds from session collected state and does not tab-fil
 });
 
 it('leaveSession removes session from list and clears selection', async () => {
-  gs.loadGroupDetailOrBcs.mockResolvedValue({
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({
     ok: true,
-    data: {
-      groupId: 'g1',
-      name: 'X',
-      kind: 'free_chat',
-      status: 'active',
-      participants: [],
-      sessions: [
-        {
-          sessionId: 's1',
-          groupId: 'g1',
-          title: 'A',
-          kind: 'chat',
-          status: 'running',
-          participants: [],
-          lastMessageAt: 1,
-          createdAt: 1,
-          favorite: false,
-        },
-        {
-          sessionId: 's2',
-          groupId: 'g1',
-          title: 'B',
-          kind: 'chat',
-          status: 'running',
-          participants: [],
-          lastMessageAt: 2,
-          createdAt: 2,
-          favorite: false,
-        },
-      ],
-    },
+    data: [session('s1', 'g1', 'A'), session('s2', 'g1', 'B')],
   });
   ss.leaveSession.mockResolvedValue({
     ok: true,
-    data: {
-      sessionId: 's1',
-      groupId: 'g1',
-      title: 'A',
-      kind: 'chat',
-      status: 'running',
-      participants: [],
-      lastMessageAt: 1,
-      createdAt: 1,
-      favorite: false,
-    },
+    data: session('s1', 'g1', 'A'),
   });
   useWorkspaceStore.getState().selectGroup('g1');
   useWorkspaceStore.getState().selectSession('s1');
   const { result } = renderHook(() => useGroupSessions('g1'));
-  await waitFor(() => expect(gs.loadGroupDetailOrBcs).toHaveBeenCalled());
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalled());
   await act(async () => {
     await result.current.leaveSession('s1', 'me');
   });
@@ -306,4 +205,162 @@ it('leaveSession removes session from list and clears selection', async () => {
   expect(ids).toContain('s2');
   // Selection should rotate to the next session
   expect(useWorkspaceStore.getState().selectedSessionId).toBe('s2');
+});
+
+it('discards an in-flight load-more response after reload and clears loading state', async () => {
+  const firstPage = Array.from({ length: 10 }, (_, i) => session(`s${i + 1}`, 'g1', `旧会话${i + 1}`));
+  let resolveMore:
+    | ((value: {
+        ok: true;
+        data: { items: SessionView[]; offset: number; limit: number; total: number; hasMore: boolean };
+      }) => void)
+    | undefined;
+  let initialLoad = true;
+  gs.loadGroupSessionsOrBcs.mockImplementation(
+    async (_gid: string, _identityId?: string, opts?: { offset?: number; limit?: number }) => {
+      if (!opts && initialLoad) {
+        initialLoad = false;
+        return { ok: true, data: { items: firstPage, offset: 0, limit: 10, total: 20, hasMore: true } };
+      }
+      if (opts) {
+        return new Promise((resolve) => {
+          resolveMore = resolve;
+        });
+      }
+      return {
+        ok: true,
+        data: {
+          items: [session('fresh-1', 'g1', '刷新后的会话')],
+          offset: 0,
+          limit: 10,
+          total: 1,
+          hasMore: false,
+        },
+      };
+    },
+  );
+
+  const { result } = renderHook(() => useGroupSessions('g1', ['g1']));
+  await waitFor(() => expect(result.current.sessions).toHaveLength(10));
+
+  let morePromise: Promise<void> | undefined;
+  act(() => {
+    morePromise = result.current.loadMoreSessions('g1');
+  });
+  await waitFor(() =>
+    expect(gs.loadGroupSessionsOrBcs).toHaveBeenLastCalledWith('g1', 'me', { offset: 10, limit: 10 }),
+  );
+
+  await act(async () => {
+    await result.current.reloadSessions();
+  });
+  expect(result.current.sessions.map((item) => item.sessionId)).toEqual(['fresh-1']);
+  expect(result.current.isLoadingMoreSessionsByGroupId.g1).toBe(false);
+  resolveMore?.({
+    ok: true,
+    data: {
+      items: [session('stale-11', 'g1', '过期追加会话')],
+      offset: 10,
+      limit: 10,
+      total: 20,
+      hasMore: false,
+    },
+  });
+  await act(async () => {
+    await morePromise;
+  });
+  expect(result.current.sessions.map((item) => item.sessionId)).toEqual(['fresh-1']);
+  expect(result.current.isLoadingMoreSessionsByGroupId.g1).toBe(false);
+});
+
+it('does not let a previous identity request repopulate the new identity session map', async () => {
+  let resolveOld: ((value: { ok: true; data: SessionView[] }) => void) | undefined;
+  let resolveNew: ((value: { ok: true; data: SessionView[] }) => void) | undefined;
+  gs.loadGroupSessionsOrBcs.mockImplementation(async (_gid: string, identityId?: string) => {
+    if (identityId === 'me') {
+      return new Promise((resolve) => {
+        resolveOld = resolve;
+      });
+    }
+    return new Promise((resolve) => {
+      resolveNew = resolve;
+    });
+  });
+
+  const { result, rerender } = renderHook(() => useGroupSessions('g1', ['g1']));
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledWith('g1', 'me'));
+  act(() => {
+    useWorkspaceStore.setState({ activeIdentityId: 'bot-1' });
+  });
+  rerender();
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledWith('g1', 'bot-1'));
+
+  await act(async () => {
+    resolveOld?.({ ok: true, data: [session('old-1', 'g1', '旧身份会话')] });
+    await Promise.resolve();
+  });
+  expect(result.current.sessionsByGroupId.g1).toBeUndefined();
+  await act(async () => {
+    resolveNew?.({ ok: true, data: [session('new-1', 'g1', '新身份会话')] });
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(result.current.sessions.map((item) => item.sessionId)).toEqual(['new-1']));
+  expect(result.current.sessions.map((item) => item.sessionId)).not.toContain('old-1');
+});
+
+it('keeps the server offset after creating a session before loading the next page', async () => {
+  const firstPage = Array.from({ length: 10 }, (_, i) => session(`s${i + 1}`, 'g1', `会话${i + 1}`));
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({
+    ok: true,
+    data: { items: firstPage, offset: 0, limit: 10, total: 11, hasMore: true },
+  });
+  ss.createNewSession.mockResolvedValue({ ok: true, data: session('created', 'g1', '新建会话') });
+  const { result } = renderHook(() => useGroupSessions('g1', ['g1']));
+  await waitFor(() => expect(result.current.sessions).toHaveLength(10));
+
+  await act(async () => {
+    await result.current.createSession('新建会话');
+  });
+  await act(async () => {
+    await result.current.loadMoreSessions('g1');
+  });
+  expect(gs.loadGroupSessionsOrBcs).toHaveBeenLastCalledWith('g1', 'me', { offset: 10, limit: 10 });
+});
+
+it('clears the load-more state when a concurrent reload fails', async () => {
+  const firstPage = Array.from({ length: 10 }, (_, i) => session(`s${i + 1}`, 'g1', `会话${i + 1}`));
+  let resolveMore: ((value: { ok: true; data: SessionView[] }) => void) | undefined;
+  let initialLoad = true;
+  gs.loadGroupSessionsOrBcs.mockImplementation(
+    async (_gid: string, _identityId?: string, opts?: { offset?: number; limit?: number }) => {
+      if (!opts && initialLoad) {
+        initialLoad = false;
+        return { ok: true, data: { items: firstPage, offset: 0, limit: 10, total: 20, hasMore: true } };
+      }
+      if (opts) {
+        return new Promise((resolve) => {
+          resolveMore = resolve;
+        });
+      }
+      return { ok: false, error: { code: 'RELOAD_FAILED', friendlyMessage: '刷新失败', canRetry: true } };
+    },
+  );
+
+  const { result } = renderHook(() => useGroupSessions('g1', ['g1']));
+  await waitFor(() => expect(result.current.sessions).toHaveLength(10));
+  let morePromise: Promise<void> | undefined;
+  act(() => {
+    morePromise = result.current.loadMoreSessions('g1');
+  });
+  await waitFor(() => expect(result.current.isLoadingMoreSessionsByGroupId.g1).toBe(true));
+
+  await act(async () => {
+    await result.current.reloadSessions();
+  });
+  expect(result.current.isLoadingMoreSessionsByGroupId.g1).toBe(false);
+  resolveMore?.({ ok: true, data: [session('stale-11', 'g1', '过期会话')] });
+  await act(async () => {
+    await morePromise;
+  });
+  expect(result.current.isLoadingMoreSessionsByGroupId.g1).toBe(false);
 });

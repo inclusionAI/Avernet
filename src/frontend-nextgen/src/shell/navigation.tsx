@@ -1,5 +1,6 @@
+import { getCapabilities } from '@/capabilities';
 import type { LucideIcon } from 'lucide-react';
-import { Bot, Boxes, Compass, LayoutDashboard, ListTodo, MessagesSquare, ShieldCheck, Sparkles } from 'lucide-react';
+import { Bot, Compass, LayoutDashboard, ListTodo, MessagesSquare, ShieldCheck } from 'lucide-react';
 import { getRouteMeta, type RouteSection } from './routeMeta';
 
 export type NavigationArea = Extract<RouteSection, 'work' | 'manage'>;
@@ -13,6 +14,10 @@ export interface NavigationItem {
   description: string;
 }
 
+// Open Core 基线一级导航项。内部专属入口已剥离（capability 注入），
+// 由 internal overlay 经 capability `getInternalNavigationItems` 注入，
+// 字面量与图标实例随内部 overlay（.internal-paths）物理剥离，不进 Open Core 产物
+// （open-core-export-plan §5.2 / §5.6「导航中的内部入口」必须按开源模式分隔）。
 export const navigationItems: NavigationItem[] = [
   {
     id: 'workspace',
@@ -55,22 +60,6 @@ export const navigationItems: NavigationItem[] = [
     description: '创建、配置和发布 Bot',
   },
   {
-    id: 'capability-workshop',
-    label: '能力工坊',
-    path: '/capability-workshop',
-    icon: Sparkles,
-    area: 'manage',
-    description: '管理 Skill 与 MCP',
-  },
-  {
-    id: 'market',
-    label: '能力市场',
-    path: '/market',
-    icon: Boxes,
-    area: 'manage',
-    description: '发现和添加通用能力',
-  },
-  {
     id: 'admin',
     label: '管理后台',
     path: '/admin',
@@ -80,13 +69,34 @@ export const navigationItems: NavigationItem[] = [
   },
 ];
 
+/**
+ * 合并 Open Core 基线 navigationItems 与 internal overlay 注入的额外导航项。
+ * 合并策略：在「基线 manage 分区末项」之前 splice 插入内部项，
+ * 保持原版菜单业务序「bot-workshop → 能力工坊 → 能力市场 → 管理后台」。
+ * Open Core 形态下 capability 返回 []，结果 = Open Core 基线项。
+ */
+export function getMergedNavigationItems(): NavigationItem[] {
+  const internal = getCapabilities().getInternalNavigationItems();
+  if (internal.status !== 'available' || !internal.value.length) return navigationItems;
+  // 自尾向前找基线 manage 分区末项作为 anchor 位，internal 项插在其前。
+  let insertAt = navigationItems.length;
+  for (let i = navigationItems.length - 1; i >= 0; i--) {
+    if (navigationItems[i].area === 'manage') {
+      insertAt = i;
+      break;
+    }
+  }
+  return [...navigationItems.slice(0, insertAt), ...internal.value, ...navigationItems.slice(insertAt)];
+}
+
 export function getNavigationItem(pathname: string) {
   const meta = getRouteMeta(pathname);
+  const merged = getMergedNavigationItems();
   if (meta?.section === 'work' || meta?.section === 'manage') {
-    return navigationItems.find((item) => item.id === meta.navKey);
+    return merged.find((item) => item.id === meta.navKey);
   }
 
-  return [...navigationItems]
+  return [...merged]
     .sort((a, b) => b.path.length - a.path.length)
     .find((item) => pathname === item.path || pathname.startsWith(`${item.path}/`));
 }

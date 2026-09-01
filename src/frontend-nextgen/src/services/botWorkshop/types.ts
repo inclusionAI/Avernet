@@ -13,6 +13,7 @@ export type {
   BotDeployment,
   BotDomain,
   BotHarnessContext,
+  BotInventoryAction,
   BotLifecycle,
   BotListQuery,
   BotListResult,

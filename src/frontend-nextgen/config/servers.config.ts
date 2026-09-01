@@ -19,6 +19,9 @@ export interface ServerConfig {
   /** Clawweb 后端，承载 workflow 列表/详情 GET /api/workflows(/{id})。
    * 真实内部地址由 config/internal/servers.ts 注入；Open Core 占位 localhost。 */
   CLAWWEB: string;
+  /** MCP Center（MCP 详情页办公网权限申请状态 auth/tools 直连），经 /mcpcenter 前缀代理、
+   * pathRewrite 去前缀（可选，缺失时回退 localhost:8888）。Internal Only。 */
+  MCPCENTER?: string;
 }
 
 /** 全环境服务器配置 map。 */

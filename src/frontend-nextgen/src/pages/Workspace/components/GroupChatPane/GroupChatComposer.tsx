@@ -145,9 +145,10 @@ export function GroupChatComposer({
   );
 
   return (
-    <div className="border-t border-[var(--color-border)] bg-white px-6 py-4">
+    <div className="shrink-0 border-t border-border bg-background px-3 py-3 sm:px-6 sm:py-4">
       <Sender
         ref={inputRef}
+        className="w-full"
         value={draft}
         onChange={onDraftChange}
         onSubmit={(content, context) => {
@@ -179,7 +180,7 @@ export function GroupChatComposer({
         }}
         toolbar={{
           left: (
-            <span className="flex items-center gap-1.5 text-xs text-[var(--color-muted)]">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               {showReconnectToolbar ? (
                 <>
                   <Badge tone={connectionStatus === 'reconnecting' ? 'warning' : 'neutral'}>

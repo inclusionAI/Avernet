@@ -95,6 +95,7 @@ function normalizeListParams(query: SpaceListQuery, user_id: string): SpaceListP
   const p: SpaceListParams = { user_id, page_no: query.page ?? 1, page_size: query.pageSize ?? 20 };
   if (query.keyword?.trim()) p.keyword = query.keyword.trim();
   if (query.spaceType && query.spaceType !== 'UNKNOWN') p.space_type = query.spaceType;
+  if (query.scope) p.scope = query.scope;
   return p;
 }
 

@@ -1,7 +1,7 @@
 // @asset-migrated: teamclaw 自研适配层（路 A 本地注册胶水，非副屏 SDK 源码）
 /**
  * TaskPanelAdapter —— 引擎 PanelContentProps ↔ TaskPanel 业务 props 适配。
- * 设计与 BcsWorkflowPanelAdapter 对齐。
+ * 适配引擎 PanelContentProps 与 TaskPanel 业务 props。
  *
  * 数据流向：
  * - 入：PanelContentProps.params（openPanelTab({params:{apiBaseUrl, taskId, initialTab}}) 透传）
@@ -20,9 +20,17 @@ type TaskPanelParams = {
   onTogglePanelName?: string;
 };
 
-/** 兼容已落库的旧 AixUI 消息，避免历史 params 继续请求已删除的本地测试代理。 */
+/**
+ * 归一化副屏 apiBaseUrl:只保留可经前端网关/dev 代理同源转发的相对路径。
+ * - 空 / 已删除的本地测试代理(/__test_local__、/__test_bcs__) → '' (相对,走代理)。
+ * - 后端写死的绝对回调地址 → '' :浏览器直连会跨源 CORS,
+ *   统一改相对路径,由网关/代理把 /api 与 /openapi 内部 API 转发到对应后端。
+ */
 function normalizePanelBaseUrl(value?: string): string {
-  return value === '/__test_local__' || value === '/__test_bcs__' ? '' : value ?? '';
+  if (!value) return '';
+  if (value === '/__test_local__' || value === '/__test_bcs__') return '';
+  if (/^https?:\/\//i.test(value)) return '';
+  return value;
 }
 
 export function TaskPanelAdapter({

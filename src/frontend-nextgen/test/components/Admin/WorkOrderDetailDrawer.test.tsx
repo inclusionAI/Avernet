@@ -64,8 +64,20 @@ describe('WorkOrderDetailDrawer 审批类补充字段', () => {
     });
     render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
 
-    // body 合成文案；申请人 + 申请理由来自 content
-    expect(screen.getByText('申请加入空间「测试空间2」')).toBeInTheDocument();
+    // body content 为对象 → 抽屉改 JSON 原样展示，不再渲染合成文案
+    expect(document.body.textContent).toContain(
+      JSON.stringify(
+        {
+          space_id: 6,
+          space_name: '测试空间2',
+          applicant_user_id: '146836',
+          applicant_name: '146836',
+          reason: 'test',
+        },
+        null,
+        2,
+      ),
+    );
     expect(screen.getByText('申请人')).toBeInTheDocument();
     expect(screen.getByText('146836')).toBeInTheDocument();
     expect(screen.getByText('test')).toBeInTheDocument();

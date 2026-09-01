@@ -10,10 +10,22 @@ import type { AixContext } from '@tc-chat/core';
  * 从 useGroupChat 抽出为纯函数：控 useGroupChat ≤250 行门禁（design D1 / O3）。
  */
 
-/** 群聊用户消息 extra（本地回显）：displayTime + 附件内容地址（免鉴权 share_url 不直渲染，改走会话内容地址避免 CORS）。 */
-export function buildGroupUserMessageExtra(echoAttachments?: SessionMessageAttachment[]) {
+export interface GroupMessageActorEcho {
+  senderId?: string;
+  senderName?: string;
+  senderAvatarUrl?: string;
+}
+
+/** 群聊用户消息 extra（仅本地回显）：displayTime、发送者展示信息与附件内容地址。 */
+export function buildGroupUserMessageExtra(
+  echoAttachments?: SessionMessageAttachment[],
+  actor?: GroupMessageActorEcho,
+) {
   return {
     displayTime: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    ...(actor?.senderId ? { senderId: actor.senderId } : {}),
+    ...(actor?.senderName ? { senderName: actor.senderName } : {}),
+    ...(actor?.senderAvatarUrl ? { senderAvatarUrl: actor.senderAvatarUrl } : {}),
     ...(echoAttachments && echoAttachments.length > 0 ? { attachments: echoAttachments } : {}),
   };
 }
@@ -44,6 +56,7 @@ export function buildGroupChatBridgeRequest(
   sessionId: string,
   content: string,
   extra?: Record<string, unknown>,
+  actor?: GroupMessageActorEcho,
 ): GroupChatRequest & { userMessage: { content: string; extra: ReturnType<typeof buildGroupUserMessageExtra> } } {
   const trimmed = (content ?? '').trim();
   const attachments = extra?.attachments as SessionMessageAttachment[] | undefined;
@@ -63,7 +76,7 @@ export function buildGroupChatBridgeRequest(
       : {}),
     userMessage: {
       content: trimmed,
-      extra: buildGroupUserMessageExtra(echoAttachments),
+      extra: buildGroupUserMessageExtra(echoAttachments, actor),
     },
   };
 }

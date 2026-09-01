@@ -1,6 +1,10 @@
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useIdentityStore } from '@/stores/identityStore';
-import { extractFriendlyErrorMessage, formatApiPath } from '@/utils/requestErrorHandler';
+import { useLoginRedirectStore } from '@/stores/loginRedirectStore';
+import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
+import { buildToastKey, extractFriendlyErrorMessage, formatApiPath } from '@/utils/requestErrorHandler';
 import { retryOnTransient } from '@/utils/retryRequest';
+import { extractLoginUrl, isAceLoginResponse } from './aceLoginBody';
 
 export interface BackendRequestOptions {
   method?: string;
@@ -11,6 +15,8 @@ export interface BackendRequestOptions {
   retryOnTransient?: boolean;
   responseType?: 'json' | 'blob' | 'text';
   injectUserId?: boolean;
+  /** 操作语义标签(如 create-skill),参与 toastKey 去重键组成,保证同接口跨操作的独立失败不被误合并。 */
+  operation?: string;
   signal?: AbortSignal;
 }
 
@@ -18,14 +24,59 @@ export class BackendRequestError extends Error {
   status?: number;
   data?: unknown;
   apiPath: string;
+  /** 去重键(传给下游 notifyError 作 sonner 稳定 id);协议层已投递默认提示时设置。 */
+  toastKey?: string;
+  /** 协议层默认提示是否已投递;Hook 守卫 helper(safeReportError)据此跳过自有 toast 防重复。 */
+  alreadyHandled?: boolean;
 
-  constructor(message: string, options: { status?: number; data?: unknown; apiPath: string }) {
+  constructor(
+    message: string,
+    options: { status?: number; data?: unknown; apiPath: string; toastKey?: string; alreadyHandled?: boolean },
+  ) {
     super(message);
     this.name = 'BackendRequestError';
     this.status = options.status;
     this.data = options.data;
     this.apiPath = options.apiPath;
+    this.toastKey = options.toastKey;
+    this.alreadyHandled = options.alreadyHandled;
   }
+}
+
+/**
+ * 网关级 ACE 登录拦截体探测命中后抛出。携带网关下发的登录链接(若可从 body 取出);
+ * 跳转信号已在探测点经 loginRedirectStore 登记单飞,本错误用于让 awaiting 调用方停止,
+ * 不把登录体当作成功数据继续渲染(见 design.md D4)。面向用户信息即规范跳转文案。
+ */
+export class AceLoginRedirectError extends Error {
+  loginUrl?: string;
+  constructor(loginUrl?: string) {
+    super('登录态失效，正在跳转登录…');
+    this.name = 'AceLoginRedirectError';
+    this.loginUrl = loginUrl;
+  }
+}
+
+/**
+ * 由探测点(httpClient 内部 + raw-fetch 旁路:sessionService/groupExecuteService/副屏面板)统一调用,
+ * 登记单飞登录跳转信号。纯触发器——副作用(toast + 当前标签页跳转)由顶层观察者
+ * useGatewayLoginRedirect 在 Hook 层消费 store 的 pendingLogin 完成(守 Service 禁 toast/DOM)。
+ *
+ * 收口在此而非让各旁路各自 import store:src/assets/** 副屏资产目录按 lint 规则禁止 import stores,
+ * 只允许 import services,故把触发器收口在 service 层的 httpClient,旁路统一经此调用。
+ */
+export function triggerAceLoginRedirect(loginUrl?: string): void {
+  if (!loginUrl) return;
+  useLoginRedirectStore.getState().requestRedirect(loginUrl);
+}
+
+/**
+ * 外部 `oauth-provider` 策略下登记弹窗提示信号（与 `triggerAceLoginRedirect` 对偶）。
+ * 由 `httpClient` ACE 体探测（oauth 模式分支）/ raw-fetch 旁路 / `useExternalAuthGuard` 主动 401 调用，
+ * 副作用（弹 `ExternalLoginPromptModal`）在 Hook/组件层消费 `pendingLogin{mode:'prompt'}`（守分层）。
+ */
+export function triggerLoginPrompt(): void {
+  useLoginRedirectStore.getState().requestPrompt();
 }
 
 /**
@@ -90,14 +141,35 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
 
   if (!response.ok) {
     const apiPath = formatApiPath(requestUrl);
-    throw new BackendRequestError(
-      extractFriendlyErrorMessage({ response: { status: response.status, data: responseData } }),
-      {
-        status: response.status,
-        data: responseData,
-        apiPath,
-      },
-    );
+    const message = extractFriendlyErrorMessage({ response: { status: response.status, data: responseData } });
+    const operation = options.operation;
+    const toastKey = buildToastKey({ apiPath, operation, message });
+    // 默认提示投递(由顶层观察者 useErrorNotifyObserver 兜底发起):Service 层只 enqueue 上抛,不直接 toast,
+    // 守 `src/services` 禁 toast/DOM。Hook 可在 catch 中 cancel(toastKey) 静默,或经 safeReportError 跳过重复。
+    useErrorNotifyStore.getState().enqueue({ toastKey, message, apiPath, operation });
+    throw new BackendRequestError(message, {
+      status: response.status,
+      data: responseData,
+      apiPath,
+      toastKey,
+      alreadyHandled: true,
+    });
+  }
+
+  // 网关级 ACE 登录拦截体(HTTP 2xx + 登录 body):登记单飞跳转信号 + 抛 AceLoginRedirectError,
+  // 避免把登录体当作成功数据返回给无校验的调用方继续渲染。toast + window.location 由顶层观察者
+  // useGatewayLoginRedirect 消费 store 的 pendingLogin 完成（redirect 模式；prompt 模式由 ExternalLoginPromptModal 消费）。
+  if (isAceLoginResponse(responseData)) {
+    const loginUrl = extractLoginUrl(responseData);
+    // loginStrategy 分支：外部(oauth-provider)→弹窗信号(不携带 ACE pubLogin url，由 /auth/url 取 provider)；
+    // 内部(ace-gateway)现状→硬跳转。两者都抛 AceLoginRedirectError 阻止 stale 渲染。
+    if (useLoginStrategyStore.getState().loginStrategy === 'oauth-provider') {
+      triggerLoginPrompt();
+      // 外部模式不携带 ACE pubLogin url（provider url 由 /auth/url 取）；仍抛错阻止 stale 渲染。
+      throw new AceLoginRedirectError();
+    }
+    triggerAceLoginRedirect(loginUrl);
+    throw new AceLoginRedirectError(loginUrl);
   }
 
   return responseData as T;

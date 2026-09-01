@@ -6,8 +6,8 @@ import { getRouteMeta } from '../src/shell/routeMeta';
 
 describe('foundation architecture helpers', () => {
   test('通过显式 route meta 识别二级路由归属', () => {
-    expect(getRouteMeta('/market/mcp/detail')?.navKey).toBe('market');
-    expect(getRouteMeta('/market/mcp/detail')?.section).toBe('manage');
+    // Open Core 形态下 /market/mcp/* 已剥离到 internal overlay，基线不收录
+    expect(getRouteMeta('/market/mcp/detail')).toBeUndefined();
     expect(getRouteMeta('/collaboration-square/bots')?.section).toBe('work');
     expect(getRouteMeta('/bot-workshop/logs')?.navKey).toBe('bot-workshop');
     expect(getRouteMeta('/bot-workshop/logs')?.title).toBe('Bot 日志');
@@ -18,6 +18,7 @@ describe('foundation architecture helpers', () => {
       engine: 'OpenClaw',
       templateType: undefined,
       botType: undefined,
+      isAgentCodingBot: false,
       isDefaultBot: true,
     });
   });

@@ -3,6 +3,8 @@ import type { SessionView } from '@/domain/collaboration';
 import { GroupChatComposer } from '@/pages/Workspace/components/GroupChatPane/GroupChatComposer';
 import { describe, expect, it, jest } from '@jest/globals';
 import type { SenderRef } from '@tc-chat/ui/es/Sender';
+import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/jest-globals';
 import { render } from '@testing-library/react';
 import React from 'react';
 
@@ -11,13 +13,13 @@ import React from 'react';
 jest.mock('@tc-chat/ui/es/Sender', () => {
   const { forwardRef, useImperativeHandle } = require('react');
   return {
-    Sender: forwardRef((_props: unknown, ref: React.Ref<unknown>) => {
+    Sender: forwardRef((_props: { className?: string }, ref: React.Ref<unknown>) => {
       useImperativeHandle(
         ref,
         () => ({ focus: () => {}, insert: () => {}, clear: () => {}, getValue: () => '', blur: () => {} }),
         [],
       );
-      return <div data-testid="sender" />;
+      return <div data-testid="sender" className={_props.className} />;
     }),
     ToolbarButton: () => null,
   };
@@ -68,6 +70,26 @@ const session: SessionView = {
 };
 
 describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', () => {
+  it('输入区宽度使用容器全宽，不受固定 max-width 限制', () => {
+    render(
+      <GroupChatComposer
+        session={session}
+        isRequesting={false}
+        connectionStatus="connected"
+        mentionConfig={undefined}
+        showReconnectToolbar={false}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        draft=""
+        onDraftChange={() => {}}
+      />,
+    );
+    const sender = document.querySelector('[data-testid="sender"]');
+    expect(sender).toHaveClass('w-full');
+    expect(sender).not.toHaveClass('max-w-4xl');
+  });
+
   it('inputRef prop 绑定到 <Sender ref>(forwardRef),挂载后 inputRef.current 非 null 且暴露 insert', () => {
     const inputRef = React.createRef<SenderRef>();
     render(

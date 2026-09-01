@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import { GroupChatPane, resolveSender } from '@/pages/Workspace/components/GroupChatPane';
+import { GroupChatBubble, ThinkingBubble } from '@/pages/Workspace/components/GroupChatPane/GroupChatBubble';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import { describe, expect, it, jest } from '@jest/globals';
 import type { PanelHandle } from '@tc-chat/core';
@@ -11,7 +12,13 @@ import React from 'react';
 
 // Stub SDK UI primitives: tests focus on GroupChatPane header/empty dispatch + Sender presence,
 // not on SDK bubble/markdown rendering. Stubs avoid pulling ESM @tc-chat/ui into jsdom.
-jest.mock('@tc-chat/ui/es/Bubble', () => ({ Bubble: () => null }));
+let mockBubbleRenders: Array<Record<string, unknown>> = [];
+jest.mock('@tc-chat/ui/es/Bubble', () => ({
+  Bubble: (props: Record<string, unknown>) => {
+    mockBubbleRenders.push(props);
+    return null;
+  },
+}));
 jest.mock('@tc-chat/ui/es/BubbleList', () => ({
   BubbleList: ({ emptyPlaceholder }: { emptyPlaceholder?: React.ReactNode }) => (
     <div data-testid="bubble-list">{emptyPlaceholder}</div>
@@ -190,6 +197,49 @@ describe('GroupChatPane', () => {
   });
 });
 
+describe('GroupChatBubble', () => {
+  it('消息正文使用设计规范的 12px 字号变量', () => {
+    mockBubbleRenders.length = 0;
+    render(
+      <GroupChatBubble
+        message={{ id: 'm1', role: 'assistant', content: '协作结果', status: 'history' } as never}
+        isLastMessage
+        isRequesting={false}
+        group={group}
+        participants={[]}
+      />,
+    );
+    render(<ThinkingBubble />);
+
+    expect(mockBubbleRenders).toHaveLength(2);
+    expect(mockBubbleRenders.map((props) => props.className)).toEqual([
+      'mb-3 [--aix-markdown-font-size:12px] [--aix-font-size-base:12px]',
+      'mb-3 [--aix-markdown-font-size:12px] [--aix-font-size-base:12px]',
+    ]);
+  });
+});
+
+describe('GroupChatBubble avatar wiring', () => {
+  it('把顶栏用户头像传给用户消息，Bot 消息不复用该头像', () => {
+    mockBubbleRenders.length = 0;
+    render(
+      <GroupChatBubble
+        message={{ id: 'm-user', role: 'user', content: 'hi', status: 'history' } as never}
+        isLastMessage
+        isRequesting={false}
+        group={group}
+        participants={[]}
+        userAvatarUrl="https://example.test/current-user.png"
+      />,
+    );
+
+    const sender = mockBubbleRenders[0].sender as { avatar: React.ReactNode };
+    const avatar = render(<>{sender.avatar}</>);
+    expect(avatar.container.querySelector('img')).toHaveAttribute('src', 'https://example.test/current-user.png');
+    expect(avatar.container.querySelector('img')).toHaveClass('shrink-0');
+  });
+});
+
 describe('resolveSender', () => {
   const groupWithParticipants: GroupView = {
     ...group,
@@ -199,12 +249,77 @@ describe('resolveSender', () => {
     ],
   };
 
-  it('user message returns undefined (right-aligned "me")', () => {
+  it('user message resolves the human participant name instead of using ambiguous "你"', () => {
+    const groupWithHuman = {
+      ...groupWithParticipants,
+      participants: [
+        ...groupWithParticipants.participants,
+        { actorId: 'user-1', kind: 'human' as const, name: '章梧', role: 'member' as const, mode: 'present' as const },
+      ],
+    };
     const sender = resolveSender(
       { id: 'm1', role: 'user', content: 'hi', status: 'history', extra: { senderId: 'user-1' } } as never,
+      groupWithHuman,
+    );
+    expect(sender?.name).toBe('章梧');
+  });
+
+  it('user message prefers local echo senderName and senderAvatarUrl', () => {
+    const sender = resolveSender(
+      {
+        id: 'm1',
+        role: 'user',
+        content: 'hi',
+        status: 'history',
+        extra: { senderName: '当前身份', senderAvatarUrl: 'avatar-user' },
+      } as never,
       groupWithParticipants,
     );
-    expect(sender).toBeUndefined();
+    expect(sender?.name).toBe('当前身份');
+  });
+
+  it('当前用户消息优先使用顶栏真实用户头像，其他 human 成员保留自身头像', () => {
+    const userAvatarUrl = 'https://example.test/current-user.png';
+    const groupWithHumans = {
+      ...groupWithParticipants,
+      participants: [
+        ...groupWithParticipants.participants,
+        {
+          actorId: 'current-user',
+          kind: 'human' as const,
+          name: '当前身份',
+          role: 'member' as const,
+          mode: 'present' as const,
+        },
+        {
+          actorId: 'other-user',
+          kind: 'human' as const,
+          name: '其他成员',
+          avatarUrl: 'other-avatar',
+          role: 'member' as const,
+          mode: 'present' as const,
+        },
+      ],
+    };
+    const currentSender = resolveSender(
+      { id: 'm-current', role: 'user', content: 'hi', status: 'history', extra: { senderId: 'current-user' } } as never,
+      groupWithHumans,
+      undefined,
+      userAvatarUrl,
+      'current-user',
+    );
+    const otherSender = resolveSender(
+      { id: 'm-other', role: 'user', content: 'hi', status: 'history', extra: { senderId: 'other-user' } } as never,
+      groupWithHumans,
+      undefined,
+      userAvatarUrl,
+      'current-user',
+    );
+    const currentAvatar = render(<>{currentSender?.avatar}</>);
+    const otherAvatar = render(<>{otherSender?.avatar}</>);
+
+    expect(currentAvatar.container.querySelector('img')).toHaveAttribute('src', userAvatarUrl);
+    expect(otherAvatar.container.querySelector('img')).toHaveAttribute('src', 'other-avatar');
   });
 
   it('assistant message resolves name from participant by senderId, NOT group.name', () => {

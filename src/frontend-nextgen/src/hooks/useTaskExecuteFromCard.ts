@@ -72,7 +72,6 @@ export function useTaskExecuteFromCard({ context, submitPanelMessage }: UseTaskE
               userId: context.ownerUserId,
             }),
           );
-          toast.success('任务已提交，副屏已打开');
         })
         .catch((err) => {
           const msg = err instanceof Error ? err.message : '任务提交失败';

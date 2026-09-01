@@ -1,6 +1,5 @@
 import type { BotChatContext, BotChatDetail, BotChatFilters, BotChatRelationScope } from '@/domain/botChats';
 import { getBotChat, listBotChats, type BotChatListParams } from '@/services/backendApi/bots/botChatController';
-import { getGroupBotTrace } from '@/services/backendApi/bots/botLogController';
 import { useBotChatStore } from '@/stores/botChatStore';
 import { mapBotChatDetail, mapBotChatPage } from './botChatMapper';
 
@@ -62,24 +61,41 @@ export const botChatService = {
     }
   },
 
-  async detail(context: BotChatContext, traceId: string, groupId?: string) {
+  async detail(
+    context: BotChatContext,
+    traceId: string,
+    groupId?: string,
+    addressedBotId?: string,
+    sessionId?: string,
+  ) {
     const sequence = ++detailSequence;
     useBotChatStore.getState().setDetailState({ detailLoading: true, error: undefined });
     if (!groupId) {
       useBotChatStore.getState().setRelatedState({ related: undefined, relatedLoading: false, error: undefined });
     }
     try {
-      const response = groupId
-        ? await getGroupBotTrace(traceId, {
-            bot_id: context.botId,
-            group_id: groupId,
-            user_id: context.userId,
-            owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
-          })
-        : await getBotChat(context.botId, traceId, {
-            user_id: context.userId,
-            owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
-          });
+      // The OpenAPI route is bot-scoped. For a Group trace, use the source bot
+      // returned by the aggregated list; otherwise use the page Bot context.
+      const detailBotId = addressedBotId ?? context.botId;
+      let resolvedBotId = detailBotId;
+      if (sessionId) {
+        const history = await listBotChats(detailBotId, {
+          user_id: context.userId,
+          owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
+          session_id: sessionId,
+          match_mode: 'exact',
+          time_scope: 'all',
+          page: 1,
+          limit: 100,
+        });
+        const matchedTrace = history.data?.sessions.find((item) => item.id === traceId);
+        if (!matchedTrace) throw new Error('未找到对应的日志 Trace');
+        resolvedBotId = matchedTrace.bot_id ?? detailBotId;
+      }
+      const response = await getBotChat(resolvedBotId, traceId, {
+        user_id: context.userId,
+        owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
+      });
       if (!response.data) throw new Error(response.message || '日志详情为空');
       const detail = mapBotChatDetail(response.data);
       if (sequence === detailSequence && useBotChatStore.getState().open) {
@@ -105,7 +121,7 @@ export const botChatService = {
     });
     const relation: Partial<BotChatListParams> =
       scope === 'session'
-        ? { session_key: detail.sessionKey, session_id: detail.sessionKey ? undefined : detail.sessionId }
+        ? { session_id: detail.sessionId, session_key: detail.sessionId ? undefined : detail.sessionKey }
         : scope === 'task'
         ? { biz_scene: detail.bizScene, biz_task_id: detail.bizTaskId }
         : { group_id: detail.groupId };
@@ -115,7 +131,7 @@ export const botChatService = {
         owner_id: context.ownerId && context.ownerId !== context.userId ? context.ownerId : undefined,
         ...relation,
         match_mode: 'exact',
-        ...(scope === 'group' && detail.groupId ? { time_scope: 'all' } : {}),
+        ...(scope !== 'task' ? { time_scope: 'all' } : {}),
         page,
         limit: 100,
       });

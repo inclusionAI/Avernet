@@ -19,15 +19,8 @@ export interface ExecuteTaskRequest {
     metadata: { title: string; instruction: string };
     context: {
       background: string;
-      extend_props: {
-        teamclaw_context?: {
-          main_session_id?: string;
-          main_session_name?: string;
-          source_group_id?: string;
-          parent_task_id?: string | null;
-        };
-        [key: string]: unknown;
-      };
+      // 会话/群/父任务上下文已下沉 execution_config(扁平,不再用 teamclaw_context 包一层)。
+      extend_props: Record<string, unknown>;
     };
     goal: { objective: string; acceptances: Array<{ id: string; acceptance: string }> };
   };

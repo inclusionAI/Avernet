@@ -36,6 +36,8 @@ export interface SpaceListParams extends SpaceUserIdParams {
   space_type?: string; // TEAM / PERSONAL
   page_no?: number;
   page_size?: number;
+  /** 可访问范围：accessible=仅返回当前账号已加入空间（后端过滤，替代前端 filterJoinedSpaces）。 */
+  scope?: string;
 }
 
 export interface SpaceMemberListParams extends SpaceUserIdParams {

@@ -64,6 +64,10 @@ export interface GroupChatPaneProps {
    * SenderRef 是 BridgeInputRef 超集;Hook 层声明为 SenderRef,这里以 SenderRef 接收匹配 Sender ref 类型。
    */
   inputRef?: RefObject<SenderRef>;
+  /** 顶栏当前登录用户头像；用户消息优先复用此头像。 */
+  userAvatarUrl?: string;
+  /** 当前登录用户身份 ID，用于保留其他 human 成员自己的头像。 */
+  userIdentityId?: string | null;
   /** 主→副事件通道桥（经 <ChatLayout.Panel bridge=...> 注入；不传则不接主→副事件）。 */
   chatBridge?: ChatBridge;
 }
@@ -94,6 +98,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     panelRef,
     inputRef,
     chatBridge,
+    userAvatarUrl,
+    userIdentityId,
   } = props;
 
   const collabPanel = useCollabPanel(
@@ -120,7 +126,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     [activeIdentity?.kind, session?.participants],
   );
 
-  // 任务发起上下文（协作群）：owner_user_id=当前用户，owner_bot_id=群内首个 bot（群主/Master）。
+  // 任务发起上下文（协作群）：owner_user_id=当前查看用户身份，owner_bot_id=群内首个 bot（群主/Master）。
   const taskComposerContext = useMemo<TaskComposerContext | null>(() => {
     if (!group || !session || activeIdentity?.kind !== 'user') return null;
     const ownerBot = group.participants.find((p) => p.kind === 'bot');
@@ -159,7 +165,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
 
   if (!group) {
     return (
-      <section className="flex min-w-0 flex-1 items-center justify-center bg-white">
+      <section className="flex min-w-0 flex-1 items-center justify-center bg-background">
         <Empty
           title="欢迎进入协作群对话现场"
           description="在左侧选择一个协作群，开始与多个 Bot 和用户协同。"
@@ -174,8 +180,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     connectionStatus === 'error' || connectionStatus === 'disconnected' || connectionStatus === 'reconnecting';
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
-      <ChatLayout className="h-full">
+    <section className="flex min-w-0 flex-1 flex-col bg-background">
+      <ChatLayout className="min-h-0 flex-1">
         <GroupHeader
           selectedGroup={group}
           selectedSession={session}
@@ -193,7 +199,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         />
 
         {!session ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-4">
+          <div className="flex min-h-0 flex-1 items-center justify-center px-3 py-3 sm:px-6 sm:py-4">
             <Empty
               title="请选择或创建一个会话"
               description="从左侧选择一个会话，或为当前协作群创建新会话后再发送消息。"
@@ -201,7 +207,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
             />
           </div>
         ) : (
-          <div className="min-h-0 flex-1 px-6 py-4">
+          <div className="min-h-0 flex-1 bg-background px-3 py-3 sm:px-6 sm:py-4">
             {isLoadingHistory ? (
               <div className="space-y-3 py-6" aria-label="加载协作群会话历史">
                 <Skeleton.Block className="h-12 w-3/4 rounded-xl" />
@@ -241,6 +247,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
                     isRequesting={isRequesting}
                     group={group}
                     participants={session.participants}
+                    userAvatarUrl={userAvatarUrl}
+                    userIdentityId={userIdentityId}
                   />
                 )}
               />
@@ -272,7 +280,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         ) : null}
         <ChatLayout.Panel ref={panelRef} onAction={handlePanelAction} bridge={chatBridge} />
       </ChatLayout>
-      {session && <FuseSlot group={group} sessionId={session.sessionId} />}
+      {session && <FuseSlot group={group} sessionId={session.sessionId} viewerName={activeIdentity?.displayName} />}
     </section>
   );
 }

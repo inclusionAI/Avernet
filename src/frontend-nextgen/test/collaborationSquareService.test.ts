@@ -8,6 +8,7 @@ const humanContext = { actorId: 'human_327325', userId: '327325' };
 
 function createGateway(overrides: Partial<CollaborationSquareGateway> = {}): CollaborationSquareGateway {
   return {
+    listBotPage: jest.fn(async () => ({ items: [], total: 0 })),
     listBots: jest.fn(async () => []),
     discoverBots: jest.fn(async () => []),
     getBotProfile: jest.fn(async () => ({
@@ -19,13 +20,10 @@ function createGateway(overrides: Partial<CollaborationSquareGateway> = {}): Col
     })),
     requestBotFriendship: jest.fn(async () => ({ status: 'applying' as const })),
     openBotConversation: jest.fn(async () => ({ sessionId: 'bot-session' })),
+    listGroupPage: jest.fn(async () => ({ items: [], total: 0 })),
     listGroups: jest.fn(async () => []),
     listGroupMembers: jest.fn(async () => []),
-    createGroupSession: jest.fn(async () => ({
-      sessionId: 's1',
-      memberSource: 'session_temp' as const,
-      defaultRole: '参与者',
-    })),
+    createGroupSession: jest.fn(async () => ({ sessionId: 's1' })),
     ...overrides,
   };
 }
@@ -66,6 +64,36 @@ describe('collaboration square service', () => {
     await expect(first).resolves.toEqual({ status: 'applying' });
   });
 
+  test('重复原始 Bot ID 时按好友申请目标分别加锁', async () => {
+    let resolveFirst: ((value: { status: 'applying' }) => void) | undefined;
+    let resolveSecond: ((value: { status: 'applying' }) => void) | undefined;
+    const gateway = createGateway({
+      requestBotFriendship: jest
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveFirst = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveSecond = resolve;
+            }),
+        ),
+    });
+    const service = new CollaborationSquareService(gateway);
+    const first = service.requestBotFriendship('default', humanContext, 'default:entity-a');
+    const second = service.requestBotFriendship('default', humanContext, 'default:entity-b');
+
+    resolveFirst?.({ status: 'applying' });
+    resolveSecond?.({ status: 'applying' });
+    await expect(first).resolves.toEqual({ status: 'applying' });
+    await expect(second).resolves.toEqual({ status: 'applying' });
+    expect(gateway.requestBotFriendship).toHaveBeenCalledTimes(2);
+  });
+
   test('已是好友时只消费 Adapter 返回的唯一会话并锁定重复导航', async () => {
     let resolveConversation: ((value: { sessionId: string }) => void) | undefined;
     const gateway = createGateway({
@@ -83,21 +111,15 @@ describe('collaboration square service', () => {
     await expect(first).resolves.toEqual({ sessionId: 'conversation-from-adapter' });
   });
 
-  test('创建群会话只消费 Adapter 返回的临时成员来源和默认角色', async () => {
-    const service = new CollaborationSquareService(
-      createGateway({
-        createGroupSession: jest.fn(async () => ({
-          sessionId: 'session-42',
-          memberSource: 'session_temp' as const,
-          defaultRole: '观察者',
-        })),
-      }),
-    );
-    await expect(service.createGroupSession('g1')).resolves.toEqual({
-      sessionId: 'session-42',
-      memberSource: 'session_temp',
-      defaultRole: '观察者',
-    });
+  test('创建群会话透传 Human Bot 上下文、创建参数并返回 sessionId', async () => {
+    const createGroupSession = jest.fn(async () => ({ sessionId: 'session-42' }));
+    const service = new CollaborationSquareService(createGateway({ createGroupSession }));
+    await expect(service.createGroupSession('g1', humanContext)).resolves.toEqual({ sessionId: 'session-42' });
+    expect(createGroupSession).toHaveBeenCalledWith('g1', humanContext, undefined);
+
+    const options = { title: '测试会话', query: '测试协作目标' };
+    await expect(service.createGroupSession('g1', humanContext, options)).resolves.toEqual({ sessionId: 'session-42' });
+    expect(createGroupSession).toHaveBeenLastCalledWith('g1', humanContext, options);
   });
 
   test('unsupported 能力显式失败', async () => {
@@ -119,6 +141,18 @@ describe('collaboration square service', () => {
     await service.listBots({ search: 'workflow', page: 2, pageSize: 10 }, humanContext, signal);
 
     expect(listBots).toHaveBeenCalledWith({ search: 'workflow', page: 2, pageSize: 10 }, humanContext, signal);
+  });
+
+  test('分页查询保留 Gateway 返回的 total', async () => {
+    const listBotPage = jest.fn(async () => ({ items: [], total: 48 }));
+    const listGroupPage = jest.fn(async () => ({ items: [], total: 36 }));
+    const service = new CollaborationSquareService(createGateway({ listBotPage, listGroupPage }));
+
+    await expect(service.listBotPage({ page: 1, pageSize: 24 }, humanContext)).resolves.toEqual({
+      items: [],
+      total: 48,
+    });
+    await expect(service.listGroupPage({ offset: 0, limit: 24 })).resolves.toEqual({ items: [], total: 36 });
   });
 
   test('Bot Discovery 与公开群查询原样交给 Gateway', async () => {

@@ -246,6 +246,16 @@ button {
   border-radius: 999px;
 }
 
+/* 单行横滑的筛选 pill 行（收起态）：隐藏滚动条——展开入口是右侧 chevron，
+   横滑能力本身保留（触控板/拖拽）。对齐老平台 tailwind-scrollbar-hide 的效果。 */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* ==========================================================================
    组件交互类 — 来自 DESIGN-SYSTEM.md
    ========================================================================== */

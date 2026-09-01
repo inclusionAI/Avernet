@@ -16,11 +16,11 @@ export const botCollaborationController = {
     backendRequest<BackendApiEnvelope<{ total: number; items: BotEditorDto[] }>>(path(botId), {
       params: userScopedParams(),
     }),
-  add: (botId: string, editorUserId: string, role: BotEditorDto['role']) =>
+  add: (botId: string, editorUserId: string, userName: string | undefined, role: BotEditorDto['role']) =>
     backendRequest<BackendApiEnvelope<BotEditorDto>>(path(botId), {
       method: 'POST',
       params: userScopedParams(),
-      data: { editor_user_id: editorUserId, role },
+      data: { editor_user_id: editorUserId, user_name: userName, role },
     }),
   update: (botId: string, editorId: number, role: BotEditorDto['role']) =>
     backendRequest<BackendApiEnvelope<BotEditorDto>>(`${path(botId)}/${editorId}`, {

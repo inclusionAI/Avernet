@@ -8,8 +8,12 @@ export interface Identity {
   kind: 'user' | 'bot';
   avatar: string;
   status?: 'available' | 'unavailable';
-  /** bot 可聊天状态：online→可聊天，hidden→不可聊天。 */
+  /** bot 可群聊状态：online→可群聊，hidden→不可群聊。 */
   chatStatus?: IdentityStatus;
+  /** Bot 所使用的引擎类型；后端未返回时保持缺省。 */
+  engine?: string;
+  /** Bot 类型原始枚举值：personal / service / desktop。 */
+  botType?: string;
   /** bot 可达性：reachable→绿点，unreachable→红点。 */
   reachability?: IdentityReachability;
 }

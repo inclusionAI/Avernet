@@ -2,8 +2,17 @@
 /** DAG 视图（竖向）：节点自上而下分层排列，边为竖向正交折线。
  * 交互：拖拽节点 / 平移画布 / 滚轮缩放 / 双击重置 / 工具栏。
  * 视觉：节点卡片化（状态色 + 图标 + 标签），连线带流动动画，running 发光，背景网格。
+ *
+ * 居中策略（响应式）：
+ *  - 容器尺寸(view.w/view.h)在 useLayoutEffect + ResizeObserver 中实时测量，
+ *    「基准变换」在每次 render 由尺寸现算，所以缩放副屏/拉窗口都能即时把根节点
+ *    重新对到画布水平中心、图例栏下方。
+ *  - pan 仅承载「用户手动平移/缩放」的偏移，初值 {0,0}；不靠一次性 setPan 居中，
+ *    避免挂载时尺寸为 0 / rAF 抖动导致先左闪再回正。
+ *  - 世界坐标：根节点中心落在 world x=0、顶部落在 world y=0；旧「placedRef 锁定」
+ *    语义保持不变——节点一旦落位即不再重排。
  */
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { NodeStatusDot } from './icons';
 import { Empty } from './theme';
 import { C, NODE_STATUS_TONES } from './tokens';
@@ -13,13 +22,16 @@ const NODE_W = 150;
 const NODE_H = 52;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 2.5;
+// 给左上角图例留出的顶部带(legend top:12 + 自身高 + 间距)，节点顶部对齐到这里，避免与图例相互遮挡。
+const TOP_BAND = 56;
 
 // 节点状态 → 连线色
 const EDGE_COLORS: Record<string, string> = {
   done: C.success,
   running: C.warning,
   failed: C.danger,
-  skipped: C.textMuted,
+  hung: C.primary,
+  cancelled: C.border,
   pending: C.border,
 };
 
@@ -29,19 +41,136 @@ export const DagView: React.FC<{
   selectedNodeId?: string | null;
   onViewNodeDetail?: (node: DagNodeView) => void;
 }> = ({ dagNodes: propNodes, dagEdges, selectedNodeId, onViewNodeDetail }) => {
-  const [nodes, setNodes] = useState<DagNodeView[]>(propNodes);
   const [scale, setScale] = useState(1);
+  // pan 仅表示用户偏移；居中由 render 时的 base(view.w/2, TOP_BAND) 承担。
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  // 容器实时尺寸（用于 render 时算居中基准 + 缩放/下露坐标换算）。
+  const [view, setView] = useState({ w: 0, h: 0 });
+  // 用户是否手动平移/缩放过；为 true 后停止自动下露，点「重置」恢复。
+  const userInteractedRef = useRef(false);
+  // 已放置节点「世界坐标」缓存：id -> {x,y}。一旦落位即锁定。
+  const placedRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  // 根节点的原始 y（mapper 给根的 y 非零，如 Y_GAP=40）；用它把根顶部归零到 world y=0。
+  const originYRef = useRef<number | null>(null);
+  // 已「露过」的最底 world-y；仅当出现更底的节点才最小下露，避免空闲轮询/重置后乱动。
+  const lastBottomYRef = useRef(-Infinity);
+  // 拖拽改 placedRef 后用它强制重渲染。
+  const [tick, setTick] = useState(0);
 
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
   const nodePointerRef = useRef<{ node: DagNodeView; startX: number; startY: number; moved: boolean } | null>(null);
   const panRef = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
+  // 子 -> 父 列表（取首个父用于"父列偏移生长"）。
+  const childParents = React.useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const e of dagEdges) {
+      const arr = m.get(e.to);
+      if (arr) arr.push(e.from);
+      else m.set(e.to, [e.from]);
+    }
+    return m;
+  }, [dagEdges]);
+
+  // 合成「带锁定位」的展示节点。根节点中心对齐 world x=0、顶部对齐 world y=0；
+  // 子节点 = 父中心向右偏移 ord × SIBLING_STEP，层级沿 y 自上而下生长。
+  // 「已展示位置不再动」，只在顶部居中轴上自上而下动态生长。
+  const nodes: DagNodeView[] = React.useMemo(() => {
+    const step = NODE_W + 32;
+    const ids = new Set(propNodes.map((n) => n.id));
+    placedRef.current.forEach((_, id) => {
+      if (!ids.has(id)) placedRef.current.delete(id);
+    });
+    const byId = new Map(propNodes.map((n) => [n.id, n]));
+    const order = [...propNodes].sort((a, b) => a.y - b.y);
+    // 全新 DAG（placedRef 被清空，即切换了任务）：以最低 y 节点为根重新捕获 origin。
+    if (placedRef.current.size === 0 && order.length) {
+      originYRef.current = order[0].y;
+    }
+    for (const n of order) {
+      if (placedRef.current.has(n.id)) continue;
+      const pId = (childParents.get(n.id) ?? [])[0];
+      if (pId) {
+        if (!placedRef.current.has(pId)) {
+          const pp = byId.get(pId);
+          if (originYRef.current === null) originYRef.current = pp?.y ?? n.y;
+          placedRef.current.set(pId, {
+            x: -NODE_W / 2,
+            y: (pp?.y ?? n.y) - (originYRef.current ?? 0),
+          });
+        }
+        let ord = 0;
+        placedRef.current.forEach((_, idv) => {
+          if ((childParents.get(idv) ?? [])[0] === pId) ord += 1;
+        });
+        const pp = placedRef.current.get(pId)!;
+        placedRef.current.set(n.id, {
+          x: pp.x + ord * step,
+          y: n.y - (originYRef.current ?? n.y),
+        });
+      } else {
+        if (originYRef.current === null) originYRef.current = n.y;
+        placedRef.current.set(n.id, { x: -NODE_W / 2, y: n.y - originYRef.current });
+      }
+    }
+    return propNodes.map((n) => {
+      const pos = placedRef.current.get(n.id) ?? { x: n.x, y: n.y };
+      return { ...n, x: pos.x, y: pos.y };
+    });
+  }, [propNodes, dagEdges, childParents, tick]);
+
+  // 渲染基准：根中心 → 画布水平中心；根顶部 → TOP_BAND(图例栏下方)。
+  // 每次 render 都现算，所以容器尺寸一变就即时居中（响应式）。
+  const baseX = view.w / 2;
+  const baseY = TOP_BAND;
+
+  // 一次性在首次 paint 前测容器尺寸 + 监听 resize 持续更新；无一次性居中抖动。
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const measure = () => {
+      const r = svg.getBoundingClientRect();
+      if (r.width && r.height) setView({ w: r.width, h: r.height });
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(svg);
+    return () => ro.disconnect();
+  }, []);
+
+  // 出现更底层节点且被视口下边遮住时，最小化下滚让它露出；不改其它节点位置。
+  const revealLatest = useCallback(() => {
+    if (!view.w || !view.h) return;
+    let maxBottom = -Infinity;
+    for (const n of propNodes) {
+      const p = placedRef.current.get(n.id);
+      if (p) maxBottom = Math.max(maxBottom, p.y + NODE_H);
+    }
+    if (maxBottom === -Infinity) return;
+    if (lastBottomYRef.current >= maxBottom) return; // 无新增底层 → 不动（含重置/空闲轮询）
+    lastBottomYRef.current = maxBottom;
+    const screenBottomY = maxBottom * scale + baseY + pan.y;
+    const visibleBottom = view.h - 16;
+    if (screenBottomY <= visibleBottom) return;
+    setPan((p) => ({ ...p, y: p.y - (screenBottomY - visibleBottom) }));
+  }, [propNodes, pan, scale, view, baseY]);
+
+  // 图谱增长：执行中不跳；出现更底层且看不到时最小化下露。
   React.useEffect(() => {
-    setNodes(propNodes);
-  }, [propNodes]);
+    if (userInteractedRef.current) return;
+    if (!view.w || !view.h) return;
+    if (typeof requestAnimationFrame === 'undefined') {
+      revealLatest();
+      return;
+    }
+    const id = requestAnimationFrame(() => {
+      if (!userInteractedRef.current) revealLatest();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [revealLatest, view]);
 
   const toSvgPoint = useCallback(
     (clientX: number, clientY: number) => {
@@ -49,11 +178,11 @@ export const DagView: React.FC<{
       if (!svg) return null;
       const rect = svg.getBoundingClientRect();
       return {
-        x: (clientX - rect.left - pan.x) / scale,
-        y: (clientY - rect.top - pan.y) / scale,
+        x: (clientX - rect.left - baseX - pan.x) / scale,
+        y: (clientY - rect.top - baseY - pan.y) / scale,
       };
     },
-    [pan, scale],
+    [pan, scale, baseX, baseY],
   );
 
   const handleNodeMouseDown = useCallback(
@@ -64,6 +193,7 @@ export const DagView: React.FC<{
       if (!pt) return;
       dragRef.current = { id: node.id, offsetX: pt.x - node.x, offsetY: pt.y - node.y };
       nodePointerRef.current = { node, startX: e.clientX, startY: e.clientY, moved: false };
+      userInteractedRef.current = true;
       setIsDragging(true);
     },
     [toSvgPoint],
@@ -74,6 +204,7 @@ export const DagView: React.FC<{
       const tag = (e.target as SVGElement).tagName;
       if (tag === 'svg' || tag === 'rect' || tag === 'pattern' || tag === 'circle') {
         e.preventDefault();
+        userInteractedRef.current = true;
         panRef.current = { startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y };
       }
     },
@@ -90,9 +221,10 @@ export const DagView: React.FC<{
         }
         const pt = toSvgPoint(e.clientX, e.clientY);
         if (!pt) return;
-        setNodes((prev) =>
-          prev.map((n) => (n.id === drag.id ? { ...n, x: pt.x - drag.offsetX, y: pt.y - drag.offsetY } : n)),
-        );
+        if (placedRef.current.has(drag.id)) {
+          placedRef.current.set(drag.id, { x: pt.x - drag.offsetX, y: pt.y - drag.offsetY });
+          setTick((t) => t + 1);
+        }
         return;
       }
       const p = panRef.current;
@@ -115,8 +247,9 @@ export const DagView: React.FC<{
   }, [onViewNodeDetail]);
 
   const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+    (e: WheelEvent) => {
       e.preventDefault();
+      userInteractedRef.current = true;
       const svg = svgRef.current;
       if (!svg) return;
       const rect = svg.getBoundingClientRect();
@@ -124,19 +257,36 @@ export const DagView: React.FC<{
       const my = e.clientY - rect.top;
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
       const ns = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * delta));
-      const lx = (mx - pan.x) / scale;
-      const ly = (my - pan.y) / scale;
-      setPan({ x: mx - lx * ns, y: my - ly * ns });
+      // 缩放到光标处：保持光标下世界点不动。
+      const lx = (mx - baseX - pan.x) / scale;
+      const ly = (my - baseY - pan.y) / scale;
+      setPan({ x: mx - baseX - lx * ns, y: my - baseY - ly * ns });
       setScale(ns);
     },
-    [pan, scale],
+    [pan, scale, baseX, baseY],
   );
 
+  // React onWheel 为 passive 监听器,preventDefault 无效(滚轮缩放时无法阻止外层页面滚动)。
+  // 改用原生 addEventListener 注册非 passive wheel 监听,preventDefault 才生效。
+  React.useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    svg.addEventListener('wheel', handleWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
+
   const handleReset = useCallback(() => {
+    // 「重置」= 回到顶部居中的初始观感：清交互、缩放 1、pan 归零；render 自动重居中。
+    // 把已露的最底 y 标记为当前，避免重置完立刻被下露拉走。
+    userInteractedRef.current = false;
     setScale(1);
     setPan({ x: 0, y: 0 });
-    setNodes(propNodes);
-  }, [propNodes]);
+    let g = -Infinity;
+    placedRef.current.forEach((v) => {
+      g = Math.max(g, v.y + NODE_H);
+    });
+    lastBottomYRef.current = g;
+  }, []);
 
   if (!nodes.length) {
     return <Empty description="暂无 DAG 数据" minHeight={300} />;
@@ -150,7 +300,8 @@ export const DagView: React.FC<{
     { status: 'running', label: '执行中' },
     { status: 'failed', label: '失败' },
     { status: 'pending', label: '待执行' },
-    { status: 'skipped', label: '已跳过' },
+    { status: 'hung', label: '任务挂起' },
+    { status: 'cancelled', label: '已取消' },
   ];
 
   return (
@@ -172,7 +323,6 @@ export const DagView: React.FC<{
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
         onDoubleClick={handleReset}
       >
         <defs>
@@ -198,7 +348,7 @@ export const DagView: React.FC<{
 
         <rect width="100%" height="100%" fill="url(#dag-grid)" />
 
-        <g transform={`translate(${pan.x}, ${pan.y}) scale(${scale})`}>
+        <g transform={`translate(${baseX + pan.x}, ${baseY + pan.y}) scale(${scale})`}>
           {/* 连线 */}
           {dagEdges.map((e, i) => {
             const from = byId.get(e.from);
@@ -350,8 +500,10 @@ export const DagView: React.FC<{
                     ? C.warning
                     : item.status === 'failed'
                     ? C.danger
-                    : item.status === 'skipped'
-                    ? C.textMuted
+                    : item.status === 'hung'
+                    ? C.primary
+                    : item.status === 'cancelled'
+                    ? C.border
                     : C.textMuted,
               }}
             />
@@ -379,14 +531,17 @@ export const DagView: React.FC<{
         }}
       >
         {[
-          { label: '+', action: () => setScale((s) => Math.min(MAX_SCALE, s * 1.2)) },
-          { label: '−', action: () => setScale((s) => Math.max(MIN_SCALE, s * 0.83)) },
-          { label: '⊙', action: handleReset },
+          { label: '+', action: () => setScale((s) => Math.min(MAX_SCALE, s * 1.2)), interact: true },
+          { label: '−', action: () => setScale((s) => Math.max(MIN_SCALE, s * 0.83)), interact: true },
+          { label: '⊙', action: handleReset, interact: false },
         ].map((btn, i) => (
           <button
             key={i}
             type="button"
-            onClick={btn.action}
+            onClick={() => {
+              if (btn.interact) userInteractedRef.current = true;
+              btn.action();
+            }}
             style={{
               width: 30,
               height: 30,

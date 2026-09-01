@@ -40,10 +40,14 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
   private groups: PublicGroup[] = [];
 
   async listBots(_query?: PublicBotSearchQuery, _context?: HumanBotActionContext, signal?: AbortSignal) {
+    return (await this.listBotPage(_query, _context, signal)).items;
+  }
+
+  async listBotPage(_query?: PublicBotSearchQuery, _context?: HumanBotActionContext, signal?: AbortSignal) {
     this.bots = (await readJson<PublicBotTransport[]>('/api/mock/collaboration-square/bots', signal)).map(
       mapBotTransport,
     );
-    return structuredClone(this.bots);
+    return { items: structuredClone(this.bots), total: this.bots.length };
   }
 
   async discoverBots(query: PublicBotDiscoveryQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
@@ -56,8 +60,9 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
     );
   }
 
-  async requestBotFriendship(botId: string, _context: HumanBotActionContext) {
+  async requestBotFriendship(botId: string, _context: HumanBotActionContext, _friendRequestBotId?: string) {
     void _context;
+    void _friendRequestBotId;
     await delay(420);
     const bot = this.bots.find((item) => item.id === botId);
     if (!bot) throw new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问');
@@ -83,10 +88,15 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
   }
 
   async listGroups(query: PublicGroupSearchQuery = {}, signal?: AbortSignal) {
+    return (await this.listGroupPage(query, signal)).items;
+  }
+
+  async listGroupPage(query: PublicGroupSearchQuery = {}, signal?: AbortSignal) {
     this.groups = (await readJson<PublicGroupTransport[]>('/api/mock/collaboration-square/groups', signal)).map(
       mapGroupTransport,
     );
-    return structuredClone(filterPublicGroups(this.groups, query.search ?? ''));
+    const groups = filterPublicGroups(this.groups, query.search ?? '');
+    return { items: structuredClone(groups), total: groups.length };
   }
 
   async listGroupMembers(groupId: string, signal?: AbortSignal) {
@@ -106,8 +116,6 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
       throw new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问');
     return {
       sessionId: `square-${groupId}-${Date.now()}`,
-      memberSource: 'session_temp',
-      defaultRole: groupId === 'sample-engineering-group' ? '观察者' : '参与者',
     };
   }
 }

@@ -89,6 +89,7 @@ export async function listBindingsByTarget(query: {
   return backendRequest<BackendApiEnvelope<ChannelBindingPage>>(BY_TARGET, {
     method: 'GET',
     params: query as Record<string, unknown>,
+    injectUserId: false,
   });
 }
 
@@ -97,6 +98,7 @@ export async function createChannelBinding(body: CreateChannelBindingRequest) {
   return backendRequest<BackendApiEnvelope<ChannelBindingDto>>(BASE, {
     method: 'POST',
     data: body,
+    injectUserId: false,
   });
 }
 
@@ -105,6 +107,7 @@ export async function updateChannelBinding(id: string, body: UpdateChannelBindin
   return backendRequest<BackendApiEnvelope<null>>(`${BASE}/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     data: body,
+    injectUserId: false,
   });
 }
 
@@ -112,5 +115,6 @@ export async function updateChannelBinding(id: string, body: UpdateChannelBindin
 export async function deleteChannelBinding(id: string) {
   return backendRequest<BackendApiEnvelope<null>>(`${BASE}/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+    injectUserId: false,
   });
 }

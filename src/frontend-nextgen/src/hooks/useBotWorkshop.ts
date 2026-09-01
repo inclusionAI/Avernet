@@ -1,12 +1,12 @@
 import { getCapabilities } from '@/capabilities';
-import { useBotHealthCheck } from '@/hooks/useBotHealthCheck';
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { botHealthCheckService } from '@/services/botHealthCheck';
 import type { BotCreateInput, BotDomain } from '@/services/botWorkshop';
-import { botWorkshopService, getBotActionAvailability } from '@/services/botWorkshop';
+import { botWorkshopService, getBotActionAvailability, getInventoryActionAvailability } from '@/services/botWorkshop';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
+import { workspaceService } from '@/services/workspace';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
@@ -17,7 +17,6 @@ import { useBotWorkshopAccess } from './useBotWorkshopAccess';
 
 export function useBotWorkshop() {
   const state = useBotWorkshopStore();
-  const healthCheck = useBotHealthCheck();
   const requestIdentity = useBotWorkshopRequestIdentity();
   const activeIdentityId = useWorkspaceStore((workspace) => workspace.activeIdentityId);
   const currentSpaceId = useSpaceContext((space) => space.currentSpaceId);
@@ -31,8 +30,6 @@ export function useBotWorkshop() {
   const { keyword, engine, deployment, serviceMode, page, pageSize } = state;
   const currentUser = getCapabilities().getCurrentOpenApiUserId({ activeIdentityId });
   const currentOpenApiUserId = currentUser.status === 'available' ? currentUser.value?.trim() || undefined : undefined;
-  const currentUserIdRef = useRef(currentOpenApiUserId);
-  currentUserIdRef.current = currentOpenApiUserId;
   const load = useCallback(async () => {
     if (!requestIdentity.ready || !spaceInitialized || !spaceId) return;
     const sequence = ++loadSequence.current;
@@ -45,6 +42,7 @@ export function useBotWorkshop() {
     });
     try {
       const result = await botWorkshopService.list({
+        currentUserId: currentOpenApiUserId,
         spaceId,
         keyword,
         engine,
@@ -54,10 +52,8 @@ export function useBotWorkshop() {
         pageSize,
       });
       if (sequence !== loadSequence.current) return;
-      const items = await botManagementService.loadServiceLocks(result.items, currentUserIdRef.current);
-      if (sequence !== loadSequence.current) return;
       state.setResult({
-        items,
+        items: result.items,
         total: result.total,
         hasMore: result.hasMore,
         loading: false,
@@ -68,7 +64,18 @@ export function useBotWorkshop() {
       const message = error instanceof Error ? error.message : 'Bot 列表加载失败';
       state.setResult({ items: [], total: undefined, hasMore: undefined, loading: false, error: message });
     }
-  }, [deployment, engine, keyword, page, pageSize, requestIdentity.ready, serviceMode, spaceId, spaceInitialized]);
+  }, [
+    currentOpenApiUserId,
+    deployment,
+    engine,
+    keyword,
+    page,
+    pageSize,
+    requestIdentity.ready,
+    serviceMode,
+    spaceId,
+    spaceInitialized,
+  ]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -106,12 +113,13 @@ export function useBotWorkshop() {
     (bot: BotDomain) => {
       const target = botHealthCheckService.toTarget(bot, currentOpenApiUserId);
       if (!target) {
-        toast.error('缺少当前用户身份，无法发起健康检查');
+        const availability = botHealthCheckService.resolveAvailability(bot, currentOpenApiUserId);
+        toast.error(availability.disabledReason ?? '缺少当前用户身份，无法发起健康检查');
         return;
       }
-      healthCheck.openHealthCheck(target);
+      history.push(`/bot-workshop/health-check?id=${encodeURIComponent(target.botId)}`);
     },
-    [currentOpenApiUserId, healthCheck.openHealthCheck],
+    [currentOpenApiUserId],
   );
   const runAction = useCallback(
     async (action: 'delete' | 'restart' | 'engine_restart' | 'upgrade', bot: BotDomain) => {
@@ -157,6 +165,26 @@ export function useBotWorkshop() {
     history.push(`/bot-workshop/detail?${params.toString()}`);
   }, []);
 
+  const openConversation = useCallback((bot: BotDomain) => {
+    const current = useWorkspaceStore.getState();
+    const user = current.identities.find((identity) => identity.kind === 'user');
+    if (!user) {
+      toast.error('用户身份未加载完成，请稍后重试');
+      return;
+    }
+    const botId =
+      bot.id.includes(':') || !bot.ownerId ? bot.id : `${bot.id}:${bot.ownerId}`;
+    workspaceService.persistIdentity(user.id);
+    current.setActiveIdentityId(user.id);
+    const workspace = useWorkspaceStore.getState();
+    workspace.setView('chat');
+    workspace.selectBotSession(null);
+    if (!workspace.expandedBotIds[botId]) workspace.toggleBotExpanded(botId);
+    workspace.setBotExpandedSection(botId, 'mine');
+    const params = new URLSearchParams({ tab: 'chat', bot: botId });
+    history.push(`/workspace?${params.toString()}`);
+  }, []);
+
   return {
     ...state,
     spaceId,
@@ -164,8 +192,7 @@ export function useBotWorkshop() {
     error: requestIdentity.error ?? spaceError ?? state.error,
     retry: load,
     openDetail,
-    openConversation: () => history.push('/workspace?tab=chat'),
-    healthCheck,
+    openConversation,
     getHealthCheckAvailability: (bot: BotDomain) =>
       botHealthCheckService.resolveAvailability(bot, currentOpenApiUserId),
     openHealthCheck,
@@ -203,5 +230,6 @@ export function useBotWorkshop() {
     ...accessControl,
     logActionFor: (bot: BotDomain) =>
       getBotActionAvailability(bot, { apiReady: { logs: true } }).find((action) => action.action === 'logs'),
+    inventoryActionFor: getInventoryActionAvailability,
   };
 }

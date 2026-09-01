@@ -17,9 +17,8 @@
  *   引擎 resolveBusinessEntry CDN 分支命中 → 加载远程 UMD；远程 UMD 调 /bcnproxy/state-machine-runs/**
  *   （dev 由 config.local.ts 的 /bcnproxy 代理改写到 gateway；部署态需 CDN UMD 自身或调用方
  *   经 params.apiBaseUrl 注入 /api/v1/collaboration，属 CDN 侧事项）。
- * - manifest 未返回 bcsPanel 时回退方式③本地注册（见 src/assets/BcsWorkflowPanel，
- *   registerPanelContent('bcsPanel.StateMachineRunView')），本地组件 DEFAULT_BASE_URL 已迁到
- *   /api/v1/collaboration（与 manifest 同源反代一致），同样解包 {code,message,data} 信封。
+ * - bcsPanel 经 manifest 返回 CDN URL → 写入 aixLibraryCdnMap → 引擎 CDN 分支加载远程 UMD；
+   远程 UMD 的取数基址由 UmdPanel 经 bcsPanelBaseUrl 注入 /api/v1/collaboration（同源反代信封解包）。
  *
  * 合并优先级（与 ocb 一致）：Bot 配置 > BCS manifest 配置（同库名后者不覆盖前者）。
  *
@@ -92,7 +91,7 @@ function rebuildLibraryCdnMap(): void {
   syncToGlobalWindow();
 }
 
-/** 存储 BCS manifest 拉到的 CDN 配置（方案 B 去重后不含 bcsPanel），触发重建同步。 */
+/** 存储 BCS manifest 拉到的 CDN 配置（含 bcsPanel 等 CDN 库），触发重建同步。 */
 export function storeManifestBundles(bundles: BcsManifestBundle[]): void {
   manifestCdnMap.clear();
   collectLibraryCdnConfigs(bundles).forEach((cdnUrl, libraryName) => {

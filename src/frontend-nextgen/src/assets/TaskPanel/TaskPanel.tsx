@@ -216,7 +216,12 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
                     {tab === 'info' && <TaskInfoTab task={task} />}
                     {tab === 'artifacts' && <TaskArtifactsTab task={task} />}
                     {tab === 'progress' && (
-                      <TaskProgressTab task={task} onOpenSubTask={openSubTask} onOpenGroupSession={openGroupSession} />
+                      <TaskProgressTab
+                        task={task}
+                        userId={userId}
+                        onOpenSubTask={openSubTask}
+                        onOpenGroupSession={openGroupSession}
+                      />
                     )}
                   </>
                 )}

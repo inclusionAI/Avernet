@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import type { IdentityView } from '@/domain/collaboration';
+import { GROUP_CREATE_VIA_EXECUTE } from '@/services/workspace/groupCreateConfig';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAllAvailableBots } from '../../hooks/useAllAvailableBots';
 import { useCollaborationTemplates } from '../../hooks/useCollaborationTemplates';
@@ -36,7 +37,6 @@ function summarizeYaml(yaml: string): string[] {
   }
   return keys;
 }
-
 export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: CreateGroupModalProps) {
   const { run, friendlyError, creating, clearError } = useCreateGroup();
   const picker = useGroupCollaborationPicker(activeIdentity?.id, open, activeIdentity?.kind === 'user');
@@ -48,6 +48,7 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
   const [definitionYaml, setDefinitionYaml] = useState('');
   const [driverBotId, setDriverBotId] = useState('');
   const [managerBotId, setManagerBotId] = useState('');
+  const [enableTaskExecute, setEnableTaskExecute] = useState(GROUP_CREATE_VIA_EXECUTE);
   const wasOpenRef = useRef(false);
   const supportsStateMachine = activeIdentity?.kind === 'bot';
   const templates = useCollaborationTemplates(open && kind === 'task_dag', (yaml) => {
@@ -61,7 +62,6 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
     const keys = summarizeYaml(definitionYaml);
     return keys.filter((k) => k === 'participants' || k === 'roles');
   }, [kind, definitionYaml]);
-
   const selectedBots = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
     [...picker.friends, ...picker.mine, ...picker.candidates].forEach((bot) => {
@@ -82,7 +82,6 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
   }, [activeIdentity, selectedBots]);
 
   const allAvailableBots = useAllAvailableBots(activeIdentity, picker);
-
   const boundBotIds = useMemo(
     () => Array.from(new Set(Object.values(binding.participantBindings).filter(Boolean))),
     [binding.participantBindings],
@@ -105,6 +104,7 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
     setDefinitionYaml('');
     setDriverBotId(activeIdentity?.kind === 'bot' ? activeIdentity.id : '');
     setManagerBotId('');
+    setEnableTaskExecute(GROUP_CREATE_VIA_EXECUTE);
     resetTemplates();
     binding.reset();
   }, [activeIdentity?.id, activeIdentity?.kind, open, resetTemplates, binding.reset]);
@@ -185,32 +185,35 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
     const participantBindingsArr = Object.entries(binding.participantBindings)
       .filter(([, botId]) => Boolean(botId))
       .map(([binding, botId]) => ({ binding, actor_ids: [botId] }));
-    const res = await run({
-      name: name.trim(),
-      strategy: kind === 'free_chat' ? 'chat' : kind === 'task_master_slave' ? 'manager_worker' : 'state_machine',
-      deliveryPolicy,
-      definitionYaml,
-      driverBotUuid: effectiveLeader,
-      participants,
-      context: context.trim() || undefined,
-      participantBindings: kind === 'task_dag' ? participantBindingsArr : undefined,
-    });
+    const res = await run(
+      {
+        name: name.trim(),
+        strategy: kind === 'free_chat' ? 'chat' : kind === 'task_master_slave' ? 'manager_worker' : 'state_machine',
+        deliveryPolicy,
+        definitionYaml,
+        driverBotUuid: effectiveLeader,
+        participants,
+        context: context.trim() || undefined,
+        participantBindings: kind === 'task_dag' ? participantBindingsArr : undefined,
+      },
+      { viaExecute: enableTaskExecute },
+    );
     if (res.ok) onCreated(res.data.groupId);
   };
 
   return (
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
       <ModalContent size="lg" closeLabel="关闭发起协作弹窗" className="gap-0 overflow-hidden p-0">
-        <ModalHeader className="border-b border-[var(--color-border)] px-6 pb-4 pt-5">
+        <ModalHeader className="border-b border-border px-6 pb-4 pt-5">
           <div className="flex min-w-0 items-center gap-2">
-            <ModalTitle className="m-0 shrink-0 text-base font-semibold text-[var(--color-fg)]">发起协作</ModalTitle>
+            <ModalTitle className="m-0 shrink-0 text-base font-semibold text-foreground">发起协作</ModalTitle>
             {activeIdentity && (
               <>
-                <span className="text-xs text-[var(--color-muted)]">为</span>
-                <span className="shrink-0 rounded-full border border-[var(--color-primary)]/20 bg-[var(--color-primary-soft)] px-2 py-0.5 text-[11px] text-[var(--color-primary)]">
+                <span className="text-xs text-muted-foreground">为</span>
+                <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] text-primary">
                   {activeIdentity.kind === 'bot' ? 'Bot' : '用户'}
                 </span>
-                <span className="max-w-44 truncate rounded-full bg-[var(--color-panel-strong)] px-2 py-0.5 text-[11px] text-[var(--color-muted)]">
+                <span className="max-w-44 truncate rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
                   {activeIdentity.displayName}
                 </span>
               </>
@@ -231,6 +234,11 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
             yamlValidated={kind === 'task_dag' && binding.yamlValidation.isValidated}
             leaderOptions={leaderOptions}
             supportsStateMachine={supportsStateMachine}
+            viaExecute={enableTaskExecute}
+            onViaExecuteChange={(value) => {
+              clearError();
+              setEnableTaskExecute(value);
+            }}
             templateSlot={templateSlot}
             bindingSlot={bindingSlot}
             onKindChange={switchKind}
@@ -269,13 +277,11 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
           )}
 
           {friendlyError && (
-            <p className="rounded-lg bg-[var(--color-error-soft)] px-3 py-2 text-sm text-[var(--color-error)]">
-              {friendlyError}
-            </p>
+            <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{friendlyError}</p>
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] px-6 py-4">
+        <div className="flex items-center justify-end gap-2 border-t border-border px-6 py-4">
           <Button variant="secondary" size="md" disabled={creating} onClick={onClose}>
             取消
           </Button>

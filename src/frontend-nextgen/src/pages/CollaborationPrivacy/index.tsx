@@ -10,6 +10,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useCollaborationPrivacy } from '@/hooks/useCollaborationPrivacy';
+import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { RefreshCw, ShieldCheck } from 'lucide-react';
 
 function LoadingState() {
@@ -33,13 +34,14 @@ function LoadingState() {
 
 export default function CollaborationPrivacyPage() {
   const privacy = useCollaborationPrivacy();
+  const { identity: accountIdentity } = useHumanIdentity();
   const overview = privacy.overview;
   return (
     <main className="h-full w-full overflow-y-auto">
       <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6 lg:p-8">
         <PageHeader
           title="协作权限"
-          description="管理归属于当前用户的所有 Bot 在 BCN 网络中的各类协作状态及好友审批策略。"
+          description="管理用户信息，以及归属于当前用户的所有 Bot 在 BCN 网络中的各类协作状态及好友审批策略。"
         />
         {privacy.loading && <LoadingState />}
         {!privacy.loading && privacy.error && (
@@ -60,6 +62,7 @@ export default function CollaborationPrivacyPage() {
           <>
             <IdentityCard
               identity={overview.currentUser}
+              avatarUrl={accountIdentity?.avatarUrl}
               syncing={privacy.busyAction === 'syncDepartment'}
               onSync={() => void privacy.syncDepartment()}
             />
@@ -75,10 +78,12 @@ export default function CollaborationPrivacyPage() {
                     bot={bot}
                     busyAction={privacy.busyAction}
                     onCopyId={(botId) => void privacy.copyBotId(botId)}
+                    onRefresh={(targetBot) => void privacy.refreshBot(targetBot)}
                     onToggleDirect={privacy.toggleDirect}
                     onEditPublication={privacy.openPublicationEditor}
                     onEditFriendApproval={privacy.openFriendEditor}
                     onViewScope={privacy.openScopeViewer}
+                    onViewFriendApprovalScope={privacy.openFriendScopeViewer}
                   />
                 ))}
               </div>
@@ -124,14 +129,24 @@ export default function CollaborationPrivacyPage() {
             onSubmit={(config) => void privacy.submitFriendApproval(config)}
           />
         )}
-        {privacy.scopeViewer && privacy.scopeViewerBot && (
-          <ScopeViewer
-            open
-            audience={privacy.scopeViewer.audience}
-            config={privacy.scopeViewerBot.publication[privacy.scopeViewer.audience]}
-            onClose={privacy.closeScopeViewer}
-          />
-        )}
+        {privacy.scopeViewer &&
+          privacy.scopeViewerBot &&
+          (privacy.scopeViewer.kind === 'publication' ? (
+            <ScopeViewer
+              open
+              kind="publication"
+              audience={privacy.scopeViewer.audience}
+              config={privacy.scopeViewerBot.publication[privacy.scopeViewer.audience]}
+              onClose={privacy.closeScopeViewer}
+            />
+          ) : (
+            <ScopeViewer
+              open
+              kind="friendApproval"
+              config={privacy.scopeViewerBot.friendApproval}
+              onClose={privacy.closeScopeViewer}
+            />
+          ))}
       </div>
     </main>
   );

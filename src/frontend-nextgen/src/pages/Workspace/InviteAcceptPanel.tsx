@@ -29,18 +29,18 @@ export function InviteAcceptPanel() {
     if (status !== 'accepted' || navigated) return;
     setNavigated(true);
     if (targetType === 'group' && targetId) {
-      toast.info(alreadyJoined ? '你已加入该协作群' : '已加入协作群');
+      toast.info(alreadyJoined ? '已加入该协作群' : '已加入协作群');
       navigate(`/workspace?tab=group&group=${encodeURIComponent(targetId)}`);
       return;
     }
     if (targetType === 'session' && targetId) {
-      toast.info(alreadyJoined ? '你已加入该会话' : '已加入会话');
+      toast.info(alreadyJoined ? '已加入该会话' : '已加入会话');
       const groupParam = groupId ? `group=${encodeURIComponent(groupId)}&` : '';
       navigate(`/workspace?tab=group&${groupParam}session=${encodeURIComponent(targetId)}`);
       return;
     }
     if (alreadyJoined) {
-      toast.info('你已加入该协作邀请');
+      toast.info('已加入该协作邀请');
       navigate('/workspace?tab=group');
       return;
     }
@@ -105,14 +105,14 @@ export function InviteAcceptPanel() {
   // status === 'confirm'
   return (
     <div className="mx-auto flex max-w-md flex-col items-center gap-4 px-6 py-14 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
         <Sparkles className="h-5 w-5" />
       </div>
-      <h1 className="m-0 text-base font-semibold text-[var(--color-fg)]">是否确认加入{targetLabel}</h1>
-      <p className="m-0 text-sm leading-6 text-[var(--color-muted)]">
+      <h1 className="m-0 text-base font-semibold text-foreground">是否确认加入{targetLabel}</h1>
+      <p className="m-0 text-sm leading-6 text-muted-foreground">
         {inviteType === 'session'
-          ? '加入后你将作为成员参与该会话的对话与资源协作，可随时退出。'
-          : '加入后你将作为成员参与该协作群的对话与资源协作，可随时退出。'}
+          ? '加入后将作为成员参与该会话的对话与资源协作，可随时退出。'
+          : '加入后将作为成员参与该协作群的对话与资源协作，可随时退出。'}
       </p>
       <Button
         size="lg"

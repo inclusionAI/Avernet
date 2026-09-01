@@ -72,7 +72,7 @@ export interface TaskNodeDto {
   task_spec?: TaskSpecDto;
   run_info?: {
     run_mode?: 'single_bot' | 'coop_group' | 'bbs' | null;
-    assignee?: string | null;
+    assignee?: string | { type?: string; binding?: string } | null;
     assignee_name?: string | null;
     assignee_avatar_url?: string | null;
     start_time?: number | null;
@@ -82,13 +82,24 @@ export interface TaskNodeDto {
     artifacts?: TaskArtifactDto[];
     child_task_id?: string | null;
     acceptance_result?: {
-      verdict: 'PASS' | 'FAIL';
+      verdict: 'PASS' | 'FAIL' | 'DONE' | null;
       acceptances_metric: string[];
       gaps: string[];
     } | null;
     extend_props?: Record<string, unknown>;
     action_log?: NodeActionEventDto[];
   };
+}
+
+export interface TaskExecutionGraphDto {
+  run_id?: number;
+  task_id?: string;
+  loop_round?: number;
+  status?: TaskStatusCode;
+  output?: Record<string, unknown>;
+  extend_props?: Record<string, unknown>;
+  tasks?: TaskNodeDto[];
+  relations?: TaskRelationDto[];
 }
 
 export interface TaskDashboardResponse {
@@ -132,4 +143,5 @@ export interface TaskDashboardResponse {
   tasks: TaskNodeDto[];
   relations?: TaskRelationDto[];
   extend_props?: Record<string, unknown>;
+  execution_graph?: TaskExecutionGraphDto;
 }

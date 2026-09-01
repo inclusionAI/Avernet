@@ -114,6 +114,17 @@ describe('TaskProgressTab', () => {
     expect(onOpenSubTask).toHaveBeenCalledWith('task-child-1');
   });
 
+  it('节点提供会话入口并在新页面打开指定会话', () => {
+    const node = makeNode({ sessionId: 'session-node-1', assignee: 'bot-node-1' });
+    const task = makeTask([node]);
+
+    render(<TaskProgressTab task={task} userId="user-1" />);
+
+    const link = screen.getByRole('link', { name: '新开会话 异常检测' });
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('href', '/workspace?tab=chat&bot=bot-node-1%3Auser-1&session=session-node-1');
+  });
+
   it('coop_group 节点点击 Bot 名称查看执行会话', () => {
     const onOpenGroupSession = jest.fn();
     const node = makeNode({

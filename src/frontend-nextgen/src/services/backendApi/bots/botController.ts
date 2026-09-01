@@ -1,4 +1,5 @@
 import { getCapabilities } from '@/capabilities';
+import { normalizeOpenApiUserId } from '@/domain/userIdentity';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
@@ -52,13 +53,17 @@ export interface BotAuthStatusDto extends BackendUnknownRecord {
 }
 
 export function userScopedParams(params: BackendUnknownRecord = {}) {
-  if (params.user_id) return params;
+  const explicitUserId = typeof params.user_id === 'string' ? normalizeOpenApiUserId(params.user_id) : '';
+  if (explicitUserId) return { ...params, user_id: explicitUserId };
+  const safeParams = { ...params };
+  delete safeParams.user_id;
   const localUserId = typeof TEAMCLAW_OPENAPI_USER_ID === 'string' ? TEAMCLAW_OPENAPI_USER_ID.trim() : '';
-  if (localUserId) return { ...params, user_id: localUserId };
+  const normalizedLocalUserId = normalizeOpenApiUserId(localUserId);
+  if (normalizedLocalUserId) return { ...safeParams, user_id: normalizedLocalUserId };
   const activeIdentityId = useWorkspaceStore.getState().activeIdentityId;
   const currentUser = getCapabilities().getCurrentOpenApiUserId({ activeIdentityId });
-  const userId = currentUser.status === 'available' ? currentUser.value?.trim() : '';
-  return userId ? { ...params, user_id: userId } : params;
+  const userId = currentUser.status === 'available' ? normalizeOpenApiUserId(currentUser.value) : '';
+  return userId ? { ...safeParams, user_id: userId } : safeParams;
 }
 
 export const BOT_ENDPOINTS = {
@@ -96,10 +101,11 @@ export function listBotInventory(params?: BackendUnknownRecord, spaceId?: string
 }
 
 // 查询 Bot 列表。
-export function listBots(params?: BackendUnknownRecord) {
+export function listBots(params?: BackendUnknownRecord, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<OwnedBotDto>>>(BOT_ENDPOINTS.list, {
     method: 'GET',
     params: userScopedParams(params),
+    signal,
   });
 }
 

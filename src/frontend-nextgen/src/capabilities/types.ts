@@ -1,4 +1,6 @@
 import type { BotHealthCapability } from '@/domain/botHealthCheck';
+import type { NavigationItem } from '@/shell/navigation';
+import type { RouteMeta } from '@/shell/routeMeta';
 
 export type CapabilityStatus = 'available' | 'unsupported';
 
@@ -109,6 +111,14 @@ export interface MetricsDashboardSpec {
   url: string | null;
 }
 
+/**
+ * 登录策略：决定未登录处置走「ACE 网关登录」还是「外部 OAuth provider 登录」。见 `getLoginStrategy` capability。
+ * - `ace-gateway`：员工，跑在 ACE + Tern 后；未登录由 ACE 网关体触发硬跳转（`gateway-login-redirect`）。
+ * - `oauth-provider`：Open Core / 外部用户；经 `/auth/*` OAuth provider 登录，拿 `bcs_session` 会话。
+ * Open Core 默认 `oauth-provider`；internal overlay 经 `src/extensions/internal.ts` 覆盖为 `ace-gateway`。
+ */
+export type LoginStrategy = 'ace-gateway' | 'oauth-provider';
+
 export interface AppCapabilities {
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
@@ -133,9 +143,39 @@ export interface AppCapabilities {
    */
   getUserSearchCapability: () => CapabilityResult<UserSearchCapability | null>;
   /**
+   * 按 userId（工号）解析空间成员头像 URL。
+   * Open Core 默认返回 null（UI 回退首字母占位）；internal overlay 按工号拼 antwork 照片 URL，
+   * 与 getHumanIdentity 的头像兜底同源（buildAntworkAvatarUrl）——内网 URL 常量只在
+   * src/extensions/internal.ts（.internal-paths 剥离），不进 Open Core 产物。
+   * 返回 null = 当前形态无成员头像数据源，UI 走首字母占位。
+   */
+  getMemberAvatarUrl: (userId: string) => CapabilityResult<string | null>;
+  /**
    * 平台指标大盘。Open Core 默认 url=null（「平台指标」抽屉回退静态占位 4 区）；
    * internal overlay 注入 AntMonitor 监控大盘 URL（iframe 嵌入，复刻旧 ocb 指标大盘）。
    * 同步签名：capability 不发请求，直接返回当前形态的大盘 URL（或 null 回退）。
    */
   getMetricsDashboard: () => CapabilityResult<MetricsDashboardSpec>;
+  /**
+   * 登录策略（见 `LoginStrategy`）：Open Core 默认 `oauth-provider`；internal overlay `ace-gateway`。
+   * `status==='unsupported'` 时调用方按 `ace-gateway` 兜底。同步签名，不发请求。
+   */
+  getLoginStrategy: () => CapabilityResult<LoginStrategy>;
+  /**
+   * 内部专属侧栏一级导航项（Open Core 不应展示的内部入口）。
+   * Open Core 默认 `[]`（不渲染任何内部导航项，符合 open-core-export-plan §5.2
+   * 「导航中的内部入口」必须按开源模式分隔的强约束）；
+   * internal overlay 经 `src/extensions/internal.ts` 注入「能力工坊」「能力市场」两项，
+   * 字面量与图标实例随 overlay 物理剥离（`.internal-paths`），不进 Open Core 产物。
+   * AppShell 合并 `navigationItems`（Open Core 基线）与本能力返回值后渲染侧栏。
+   */
+  getInternalNavigationItems: () => CapabilityResult<NavigationItem[]>;
+  /**
+   * 内部专属 route meta 列表（Open Core 不应收录的内部路由元数据）。
+   * Open Core 默认 `[]`（与 `routeMetaList` 已剥离内部项一致）；
+   * internal overlay 注入 `/capability-workshop/*`、`/market/*` 等内部路由 meta，
+   * 字面量随 overlay 物理剥离，不进 Open Core 产物。
+   * `getRouteMeta` 消费本能力与基线 `routeMetaList` 合并后的链表做高亮/分组解析。
+   */
+  getInternalRouteMetas: () => CapabilityResult<RouteMeta[]>;
 }

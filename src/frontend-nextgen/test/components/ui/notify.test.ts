@@ -11,8 +11,8 @@ jest.mock('sonner', () => ({
   },
 }));
 
-import { toast } from 'sonner';
 import { notifyError, notifySuccess } from '@/components/ui/notify';
+import { toast } from 'sonner';
 
 const mockedError = toast.error as unknown as jest.Mock;
 const mockedSuccess = toast.success as unknown as jest.Mock;

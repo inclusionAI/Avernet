@@ -13,9 +13,9 @@ import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { buildSingleChatBridgeRequest } from './singleChatBridgeRequest';
+import { useHumanIdentity } from './useHumanIdentity';
 import { useWorkspaceIdentityBootstrap } from './useWorkspaceIdentityBootstrap';
 import { buildBotChatTarget, mapIdentityViewToIdentity } from './workspaceIdentityMapper';
-
 export interface UseWorkspaceOptions {
   /**
    * 副屏 onAction(send_message) 的自定义回流。
@@ -44,6 +44,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   } = useWorkspaceStore();
   const [supportState, setSupportState] = useState<SupportChatState>({ phase: 'idle', error: null });
   const [draft, setDraft] = useState('');
+  const { identity: humanIdentity } = useHumanIdentity();
   const panelRef = useRef<PanelHandle>(null);
   // 主屏输入框 ref(SenderRef⊇BridgeInputRef):经 useChatBridge.setInputRef 注册到全局桥,卡片填输入框生效;单聊/群聊均原生 Sender(forwardRef)绑定。design D2/O1。
   const inputRef = useRef<SenderRef | null>(null);
@@ -55,7 +56,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
 
   // IdentityView[] → Identity[]（IdentityBar 仍以 prop 驱动，不感知 Service/Store 类型）
   const identities = useMemo(() => identityViews.map(mapIdentityViewToIdentity), [identityViews]);
-
   const activeIdentityView = useMemo(
     () => identityViews.find((i) => i.id === activeIdentityId) ?? null,
     [identityViews, activeIdentityId],
@@ -77,7 +77,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const isTestUser = isTestUserIdentity(activeIdentityId);
   const isUserIdentity = activeIdentityView?.kind === 'user';
   const { chatBots, isLoading: isMyBotsLoading } = useOwnedBots(activeIdentityId, isUserIdentity);
-  const { friendBots, isLoading: isFriendBotsLoading } = useFriendBots(activeIdentityId, isUserIdentity);
+  const { friendBots, isLoading: isFriendBotsLoading } = useFriendBots(activeIdentityId, isUserIdentity, view !== 'group');
   const allChatBots = useMemo(
     () => [...chatBots, ...friendBots.filter((b) => !chatBots.some((m) => m.botId === b.botId))],
     [chatBots, friendBots],
@@ -205,7 +205,9 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
 
   return {
     identities,
+    currentUserAvatarUrl: humanIdentity?.avatarUrl,
     activeIdentityId,
+    activeIdentity: activeIdentityView,
     setActiveIdentityId: handleSelectIdentity,
     search,
     setSearch,

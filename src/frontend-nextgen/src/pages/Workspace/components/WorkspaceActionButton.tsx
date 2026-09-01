@@ -32,7 +32,7 @@ export function WorkspaceActionButton({ onAddFriend, onCreateGroup }: WorkspaceA
         <IconButton
           label="添加好友或发起协作"
           icon={<Plus className="h-5 w-5" />}
-          className="rounded-xl bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-hover)] hover:text-white"
+          className="h-9 w-9 rounded-md bg-primary text-primary-foreground hover:opacity-90"
         />
       </PopoverTrigger>
       <PopoverContent align="end" className="w-44 p-1">

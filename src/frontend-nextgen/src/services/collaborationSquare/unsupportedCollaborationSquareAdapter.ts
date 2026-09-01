@@ -6,6 +6,9 @@ function unsupported(): never {
 }
 
 export class UnsupportedCollaborationSquareAdapter implements CollaborationSquareGateway {
+  async listBotPage() {
+    return unsupported();
+  }
   async listBots() {
     return unsupported();
   }
@@ -19,6 +22,9 @@ export class UnsupportedCollaborationSquareAdapter implements CollaborationSquar
     return unsupported();
   }
   async openBotConversation() {
+    return unsupported();
+  }
+  async listGroupPage() {
     return unsupported();
   }
   async listGroups() {

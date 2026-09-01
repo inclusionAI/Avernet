@@ -18,9 +18,18 @@ describe('botLogController', () => {
       page: 2,
       limit: 100,
     });
-    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/logs/groups/group-a/traces', {
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/viewer/chats', {
       method: 'GET',
-      params: { bot_id: 'viewer', user_id: 'collaborator', owner_id: 'owner', page: 2, limit: 100 },
+      params: {
+        bot_id: 'viewer',
+        user_id: 'collaborator',
+        owner_id: 'owner',
+        page: 2,
+        limit: 100,
+        group_id: 'group-a',
+        match_mode: 'exact',
+        time_scope: 'all',
+      },
     });
   });
 
@@ -31,14 +40,17 @@ describe('botLogController', () => {
       user_id: 'collaborator',
       owner_id: 'owner',
     });
-    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/logs/traces/trace-a', {
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/viewer/chats/trace-a', {
       method: 'GET',
-      params: { bot_id: 'viewer', group_id: 'group-a', user_id: 'collaborator', owner_id: 'owner' },
+      params: { user_id: 'collaborator', owner_id: 'owner' },
     });
   });
 
   it('保留原 getBotTrace 的无参数调用契约', async () => {
-    await getBotTrace('trace-legacy');
-    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/logs/traces/trace-legacy', { method: 'GET' });
+    await getBotTrace('trace-legacy', { bot_id: 'legacy-bot' });
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/legacy-bot/chats/trace-legacy', {
+      method: 'GET',
+      params: { user_id: undefined, owner_id: undefined },
+    });
   });
 });

@@ -1,33 +1,36 @@
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
-import { Segmented } from '@/components/ui/Segmented';
+import { Pagination } from '@/components/ui/Pagination';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Spin } from '@/components/ui/Spin';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { TaskListItem } from '@/domain/tasks/models';
 import { cn } from '@/utils/cn';
-import { Eye, Search } from 'lucide-react';
+import { getCollaborationBotConversationUrl } from '@/utils/collaborationSquare';
+import { history } from '@umijs/max';
+import { Eye, MessageCircle, Search } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import {
   formatDateTime,
   formatDuration,
-  getUserTaskDescription,
+  getBotDisplayName,
   getUserTaskTitle,
-  matchUserTaskScope,
   sourceTypeBadge,
   taskStatusBadge,
   taskTypeBadge,
-  type UserTabFilter,
-  userTabOptions,
+  type UserTaskStatusFilter,
+  userTaskStatusOptions,
 } from '../userTaskUtils';
+import { UserTaskGoalMeta } from './UserTaskGoalMeta';
 
 function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
-  return <th className={cn('px-4 py-3 text-xs font-medium', className)} {...props} />;
+  return <th className={cn('h-10 px-4 py-3 text-xs font-medium text-muted-foreground', className)} {...props} />;
 }
 
 function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('border-t border-[var(--color-border)] px-4 py-4 align-top', className)} {...props} />;
+  return <td className={cn('border-t border-border px-4 py-3 align-top text-xs', className)} {...props} />;
 }
 
 function formatTaskTitle(title: string): string {
@@ -35,17 +38,58 @@ function formatTaskTitle(title: string): string {
   return chars.length > 8 ? `${chars.slice(0, 8).join('')}...` : title;
 }
 
+function ViewSessionButton({ record }: { record: TaskListItem }) {
+  const sessionId =
+    record.execution_config?.main_session_id?.trim() ||
+    record.task_spec?.context?.extend_props?.teamclaw_context?.main_session_id?.trim();
+  if (!record.owner_bot_id || !record.owner_user_id || !sessionId) return null;
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      leftIcon={<MessageCircle className="size-4" />}
+      onClick={() =>
+        history.push(getCollaborationBotConversationUrl(`${record.owner_bot_id}:${record.owner_user_id}`, sessionId))
+      }
+    >
+      查看会话
+    </Button>
+  );
+}
+
 export interface UserTaskTabProps {
   taskRecords: TaskListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
   loading: boolean;
   error: string | null;
+  statusFilter: UserTaskStatusFilter;
+  onStatusFilterChange: (status: UserTaskStatusFilter) => void;
   onRetry: () => void;
   onSelectTask: (taskId: string) => void;
   selectedTaskId: string | null;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  botNameMap: Record<string, string>;
 }
 
-export function UserTaskTab({ taskRecords, loading, error, onRetry, onSelectTask, selectedTaskId }: UserTaskTabProps) {
-  const [userFilter, setUserFilter] = useState<UserTabFilter>('all');
+export function UserTaskTab({
+  taskRecords,
+  total,
+  page,
+  pageSize,
+  loading,
+  error,
+  statusFilter,
+  onStatusFilterChange,
+  onRetry,
+  onSelectTask,
+  selectedTaskId,
+  onPageChange,
+  onPageSizeChange,
+  botNameMap,
+}: UserTaskTabProps) {
   const [userKeyword, setUserKeyword] = useState('');
 
   const filteredTaskRecords = useMemo(() => {
@@ -61,59 +105,56 @@ export function UserTaskTab({ taskRecords, loading, error, onRetry, onSelectTask
         taskId.includes(keyword) ||
         botId.includes(keyword) ||
         sourceType.includes(keyword);
-      return matchesKeyword && matchUserTaskScope(record.status, userFilter);
+      // 状态过滤已下沉到服务端(status 推送查询),这里只做关键字本地过滤。
+      return matchesKeyword;
     });
-  }, [taskRecords, userKeyword, userFilter]);
+  }, [taskRecords, userKeyword]);
 
   return (
     <section className="space-y-4">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle>用户任务</CardTitle>
-              <CardDescription>当前账号下由用户发起的任务列表，支持按状态筛选并查看详情抽屉。</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-center gap-2 xl:w-[26rem]">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted)]" />
-                <Input
-                  value={userKeyword}
-                  onChange={(event) => setUserKeyword(event.target.value)}
-                  placeholder="搜索任务标题 / ID / Bot / 来源"
-                  className="pl-9"
-                />
-              </div>
-            </div>
-            <Segmented
-              value={userFilter}
-              onChange={(value) => setUserFilter(value as UserTabFilter)}
-              options={userTabOptions.map((item) => ({ value: item.value, label: item.label }))}
-              className="w-full xl:max-w-2xl"
-            />
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid gap-3 border-y border-border py-3 md:grid-cols-3">
+        <div className="relative min-w-0">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={userKeyword}
+            onChange={(event) => {
+              setUserKeyword(event.target.value);
+              onPageChange(1);
+            }}
+            placeholder="搜索任务标题 / ID / Bot / 来源"
+            className="pl-9 text-xs"
+          />
+        </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">状态</span>
+          <Select value={statusFilter} onValueChange={(value) => onStatusFilterChange(value as UserTaskStatusFilter)}>
+            <SelectTrigger className="w-full text-xs">
+              <SelectValue placeholder="请选择状态" />
+            </SelectTrigger>
+            <SelectContent>
+              {userTaskStatusOptions.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
 
-      <Card>
-        <div className="overflow-hidden">
+      <Card className="overflow-hidden rounded-lg shadow-sm">
+        <div className="overflow-hidden bg-card">
           <div className="app-scrollbar overflow-x-auto">
             <table className="min-w-full border-separate border-spacing-0">
               <thead>
-                <tr className="bg-[var(--color-panel-strong)]/60 text-left text-xs font-medium text-[var(--color-muted)]">
-                  <Th className="rounded-tl-xl">任务</Th>
+                <tr className="bg-muted/30 text-left text-xs font-medium text-muted-foreground">
+                  <Th>任务</Th>
                   <Th>Owner Bot / 来源</Th>
                   <Th>类型</Th>
                   <Th>状态</Th>
                   <Th>创建时间</Th>
                   <Th>完成时间</Th>
-                  <Th className="rounded-tr-xl" style={{ textAlign: 'center' }}>
-                    操作
-                  </Th>
+                  <Th className="text-center">操作</Th>
                 </tr>
               </thead>
               <tbody>
@@ -143,7 +184,7 @@ export function UserTaskTab({ taskRecords, loading, error, onRetry, onSelectTask
                       <Empty
                         title="暂无符合条件的用户任务"
                         description={
-                          userKeyword || userFilter !== 'all'
+                          userKeyword || statusFilter !== 'all'
                             ? '请尝试清除筛选条件或刷新数据。'
                             : '当前账号下还没有任务记录。'
                         }
@@ -153,12 +194,13 @@ export function UserTaskTab({ taskRecords, loading, error, onRetry, onSelectTask
                 ) : (
                   filteredTaskRecords.map((record) => {
                     const active = record.task_id === selectedTaskId;
+                    const ownerBotName = getBotDisplayName(botNameMap, record.owner_bot_id);
                     return (
                       <tr
                         key={record.task_id}
                         className={cn(
-                          'border-b border-[var(--color-border)] text-xs transition-colors hover:bg-[var(--color-panel-muted)]/60',
-                          active && 'bg-[var(--color-primary-soft)]/35',
+                          'border-b border-border text-xs transition-colors hover:bg-muted/50',
+                          active && 'bg-secondary',
                         )}
                       >
                         <Td className="max-w-[22rem]">
@@ -167,57 +209,51 @@ export function UserTaskTab({ taskRecords, loading, error, onRetry, onSelectTask
                               <TooltipProvider delayDuration={300}>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <span className="shrink-0 font-medium text-[var(--color-fg)]">
+                                    <span className="shrink-0 font-medium text-foreground">
                                       {formatTaskTitle(getUserTaskTitle(record))}
                                     </span>
                                   </TooltipTrigger>
                                   <TooltipContent>{getUserTaskTitle(record)}</TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>
-                              <code className="min-w-0 truncate rounded bg-[var(--color-panel-strong)] px-1.5 py-0.5 text-xs text-[var(--color-muted)]">
+                              <code className="min-w-0 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                                 {record.task_id}
                               </code>
                             </div>
-                            <p className="m-0 line-clamp-2 text-xs leading-5 text-[var(--color-muted)]">
-                              {getUserTaskDescription(record)}
-                            </p>
-                            {record.task_spec?.goal?.objective ? (
-                              <div className="line-clamp-1 text-xs text-[var(--color-muted)]">
-                                目标：{record.task_spec.goal.objective}
-                              </div>
-                            ) : null}
+                            <UserTaskGoalMeta record={record} />
                           </div>
                         </Td>
-                        <Td>
+                        <Td className="text-center">
                           <div className="space-y-1">
-                            <div className="text-[var(--color-fg)]">
-                              <span className="font-medium">{record.owner_bot_id ?? '—'}</span>
+                            <div className="text-center text-foreground">
+                              <span className="font-medium">{ownerBotName}</span>
                             </div>
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
+                            <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
                               {sourceTypeBadge(record.source_type ?? '—')}
                             </div>
                           </div>
                         </Td>
                         <Td>
-                          <div className="space-y-2">
-                            {taskTypeBadge(record.execution_config?.task_type ?? '—')}
-                            <div className="text-xs text-[var(--color-muted)]">来源：{record.source_type ?? '—'}</div>
-                          </div>
+                          <div className="space-y-2">{taskTypeBadge(record.execution_config?.task_type ?? '—')}</div>
                         </Td>
                         <Td className="whitespace-nowrap">{taskStatusBadge(record.status)}</Td>
                         <Td>
-                          <div className="text-xs text-[var(--color-fg)]">{formatDateTime(record.gmt_create)}</div>
+                          <div className="text-xs text-foreground">{formatDateTime(record.gmt_create)}</div>
                         </Td>
                         <Td>
-                          <div className="space-y-1 text-xs text-[var(--color-fg)]">
+                          <div className="space-y-1 text-xs text-foreground">
                             <div>{formatDateTime(record.gmt_modified)}</div>
-                            <div className="text-xs text-[var(--color-muted)]">
+                            <div className="text-xs text-muted-foreground">
                               耗时：{formatDuration(record.gmt_create, record.gmt_modified)}
                             </div>
                           </div>
                         </Td>
                         <Td>
-                          <div className="flex justify-center gap-2" onClick={(event) => event.stopPropagation()}>
+                          <div
+                            className="flex flex-col items-center justify-center gap-2"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <ViewSessionButton record={record} />
                             <Button
                               variant="secondary"
                               size="sm"
@@ -235,6 +271,17 @@ export function UserTaskTab({ taskRecords, loading, error, onRetry, onSelectTask
               </tbody>
             </table>
           </div>
+        </div>
+        <div className="px-4 pb-4">
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={total}
+            onChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+            pageSizeOptions={[10, 20, 50]}
+            className="justify-end pt-4"
+          />
         </div>
       </Card>
     </section>

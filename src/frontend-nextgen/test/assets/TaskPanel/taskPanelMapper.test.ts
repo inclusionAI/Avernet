@@ -16,8 +16,48 @@ describe('taskPanelMapper status mapping', () => {
   });
 });
 
+describe('taskPanelMapper task description', () => {
+  it('任务描述使用 task_spec.context.background，不使用 metadata.instruction', () => {
+    const dashboard = {
+      task_id: 'task-description',
+      run_id: 1,
+      status: 'RUNNING',
+      needs_attention: false,
+      task_type: 'dynamic',
+      source_type: 'bot',
+      owner_user_id: 'user-1',
+      owner_bot_id: 'bot-1',
+      task_spec: {
+        metadata: { title: '任务标题', instruction: '不应展示的 instruction' },
+        context: { background: '任务背景描述' },
+        goal: { objective: '任务目标', acceptances: [] },
+      },
+      create_time: '2026-08-22T10:00:00+08:00',
+      finish_time: null,
+      loop_round: 1,
+      progress: { total: 0, pending: 0, planning: 0, running: 0, done: 0, failed: 0, hung: 0, skipped: 0, percent: 0 },
+      tasks: [
+        {
+          node_id: 'node-description',
+          task_id: 'task-description',
+          sequence: 1,
+          status: 'RUNNING',
+          task_spec: {
+            metadata: { title: '任务标题', instruction: '不应展示的 instruction' },
+            context: { background: '任务背景描述' },
+            goal: { objective: '任务目标', acceptances: [] },
+          },
+        },
+      ],
+      relations: [],
+    } as TaskDashboardResponse;
+
+    expect(mapDashboard(dashboard).description).toBe('任务背景描述');
+  });
+});
+
 describe('taskPanelMapper Task Spec', () => {
-  it('协作群节点优先展示 group_name，缺失时使用 BCS协作群且不展示 group_id', () => {
+  it('协作群节点优先展示自身 group_name，缺失时回退根节点 group_name', () => {
     const dashboard = {
       task_id: 'task-group',
       run_id: 1,
@@ -65,7 +105,7 @@ describe('taskPanelMapper Task Spec', () => {
 
     const task = mapDashboard(dashboard);
     expect(task.nodes[0].groupName).toBe('业务架构分析群');
-    expect(task.nodes[1].groupName).toBe('BCS协作群');
+    expect(task.nodes[1].groupName).toBe('业务架构分析群');
     expect(task.nodes[0].executor).toBeNull();
     expect(task.nodes[1].executor).toBeNull();
   });

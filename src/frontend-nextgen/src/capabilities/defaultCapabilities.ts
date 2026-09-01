@@ -1,9 +1,11 @@
-import { resolveOpenApiUserId } from '@/domain/userIdentity';
+import { normalizeOpenApiUserId, resolveOpenApiUserId } from '@/domain/userIdentity';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type {
   AppCapabilities,
   CapabilityResult,
   HumanIdentity,
+  LoginStrategy,
   MetricsDashboardSpec,
   ReleaseNotesCapability,
   UserSearchCapability,
@@ -36,13 +38,25 @@ export const defaultCapabilities: AppCapabilities = {
     },
   }),
   getCurrentOpenApiUserId: (context) => {
-    const normalized = context?.activeIdentityId ? resolveOpenApiUserId(context.activeIdentityId).trim() : '';
+    const normalized = normalizeOpenApiUserId(context?.activeIdentityId);
     if (!normalized) return unsupported(undefined, '缺少当前用户身份');
     return { status: 'available', value: normalized };
   },
-  // Open Core 默认：从 workspaceStore.identities 取 me（listMyBots human[0]）。
-  // 不读 cookie/__TERN__/内部 URL；未就绪返回 null（useHumanIdentity 会触发 loadIdentities）。
+  // Open Core（oauth-provider 策略）：优先用 /auth/user 解析的外部登录用户（externalAuthStore.user）；
+  // 未登录回退 listMyBots me（listMyBots human[0]）。不读 cookie/__TERN__/内部 URL（internal overlay 覆盖）。
   getHumanIdentity: () => {
+    const oauthUser = useExternalAuthStore.getState().user;
+    if (oauthUser) {
+      return {
+        status: 'available',
+        value: {
+          userId: oauthUser.userId,
+          displayName: oauthUser.displayName,
+          avatarUrl: oauthUser.avatarUrl,
+          online: true,
+        },
+      };
+    }
     const { identities } = useWorkspaceStore.getState();
     const me = identities.find((i) => i.kind === 'user') ?? identities[0] ?? null;
     if (!me) return { status: 'available', value: null };
@@ -71,4 +85,14 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: { url: null },
   }),
+  // Open Core 无内网 antwork 照片服务数据源 → 成员头像返回 null，成员行 UI 回退首字母占位。
+  // 真实 URL 拼接只在 internal overlay（src/extensions/internal.ts，.internal-paths 剥离）。
+  getMemberAvatarUrl: (): CapabilityResult<string | null> => ({ status: 'available', value: null }),
+  // Open Core 默认走外部 OAuth provider 登录（开源部署 = 外部用户，无 ACE）；internal overlay 覆盖为 'ace-gateway'（员工）。
+  getLoginStrategy: (): CapabilityResult<LoginStrategy> => ({ status: 'available', value: 'oauth-provider' }),
+  // Open Core 默认不暴露内部侧栏导航项（能力工坊/能力市场），符合 open-core-export-plan §5.2
+  // 「导航中的内部入口」按开源模式分隔的强约束。internal overlay 经 extensions/internal.ts 覆盖注入。
+  getInternalNavigationItems: () => ({ status: 'available', value: [] }),
+  // Open Core 默认不收录内部 route meta（/capability-workshop/*、/market/* 已从 routeMetaList 剥离）。
+  getInternalRouteMetas: () => ({ status: 'available', value: [] }),
 };

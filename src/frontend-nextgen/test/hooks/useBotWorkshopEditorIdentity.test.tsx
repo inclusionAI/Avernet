@@ -22,6 +22,7 @@ it('预发 Tern 身份就绪后同步 user_id 并开放编辑页请求', async (
   const { result } = renderHook(() => useBotWorkshopEditorIdentity());
 
   expect(result.current.ready).toBe(true);
+  expect(result.current.userId).toBe('327325');
   await waitFor(() => expect(useIdentityStore.getState().currentIdentityId).toBe('327325'));
 });
 

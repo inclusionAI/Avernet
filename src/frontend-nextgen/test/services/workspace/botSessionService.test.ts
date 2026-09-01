@@ -30,6 +30,7 @@ describe('listChatBots', () => {
       online: true,
       status: 'online',
       reachability: 'reachable',
+      engine: 'OpenClaw',
     },
     { id: 'plain-bot', kind: 'bot', displayName: '不可聊Bot', online: true },
   ];
@@ -41,6 +42,7 @@ describe('listChatBots', () => {
       realBotId: '20260402_ab',
       ownerId: '2088',
       chatable: true,
+      engine: 'OpenClaw',
     });
     expect(bots[1]).toMatchObject({ botId: 'plain-bot', realBotId: 'plain-bot', ownerId: undefined, chatable: false });
   });

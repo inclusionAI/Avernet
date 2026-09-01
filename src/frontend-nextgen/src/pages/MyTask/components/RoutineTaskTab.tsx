@@ -1,15 +1,18 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
+import { Pagination } from '@/components/ui/Pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import type { ScheduledRoutineRecord } from '@/services/scheduledTasks';
 import { cn } from '@/utils/cn';
 import { Eye, Play, Search } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { makeRoutineKey } from '../hooks/routineTaskUtils';
+import { formatDateTime, getBotDisplayName } from '../userTaskUtils';
 
 export interface RoutineBotOption {
   value: string;
@@ -18,6 +21,9 @@ export interface RoutineBotOption {
 
 export interface RoutineTaskTabProps {
   routines: ScheduledRoutineRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
   loading: boolean;
   error: string | null;
   botOptions: RoutineBotOption[];
@@ -26,31 +32,38 @@ export interface RoutineTaskTabProps {
   onRetry: () => void;
   onSelectRoutine: (routine: ScheduledRoutineRecord) => void;
   onRunRoutine: (routine: ScheduledRoutineRecord) => Promise<unknown>;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  botNameMap: Record<string, string>;
+}
+
+/** runtime_stage 标签颜色：draft 草稿 / verify 验证 / online 线上。 */
+function getRoutineStageTone(stage?: string): 'neutral' | 'warning' | 'success' | 'outline' {
+  switch (stage) {
+    case 'draft':
+      return 'neutral';
+    case 'verify':
+      return 'warning';
+    case 'online':
+      return 'success';
+    default:
+      return 'outline';
+  }
 }
 
 function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
-  return <th className={cn('px-4 py-3 text-xs font-medium', className)} {...props} />;
+  return <th className={cn('h-10 px-4 py-3 text-xs font-medium text-muted-foreground', className)} {...props} />;
 }
 
 function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('border-t border-[var(--color-border)] px-4 py-4 align-top', className)} {...props} />;
-}
-
-function formatDateTime(value?: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  return <td className={cn('border-t border-border px-4 py-3 align-top text-xs', className)} {...props} />;
 }
 
 export function RoutineTaskTab({
   routines,
+  total,
+  page,
+  pageSize,
   loading,
   error,
   botOptions,
@@ -59,6 +72,9 @@ export function RoutineTaskTab({
   onRetry,
   onSelectRoutine,
   onRunRoutine,
+  onPageChange,
+  onPageSizeChange,
+  botNameMap,
 }: RoutineTaskTabProps) {
   const [routineKeyword, setRoutineKeyword] = useState('');
 
@@ -77,82 +93,78 @@ export function RoutineTaskTab({
     });
   }, [routineKeyword, routines]);
 
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visibleRoutines = routineList;
+  const visibleTotal = total;
+
   return (
     <section className="space-y-4">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle>定时任务</CardTitle>
-              <CardDescription>
-                可选择「全部」查看当前账号下所有 Bot 的定时任务，也可以切换到单个 Bot 精确筛选。数据由后端 routines
-                接口按 Bot 维度拉取并合并。
-              </CardDescription>
-            </div>
-            <Badge tone="primary">实时接口</Badge>
+      <div className="space-y-3">
+        <div className="grid gap-3 border-y border-border py-3 md:grid-cols-3">
+          <div className="relative min-w-0">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={routineKeyword}
+              onChange={(event) => {
+                setRoutineKeyword(event.target.value);
+                onPageChange(1);
+              }}
+              placeholder="搜索任务名称 / 提示词 / 频率"
+              className="pl-9 text-xs"
+            />
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-center gap-2 xl:w-[26rem]">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted)]" />
-                <Input
-                  value={routineKeyword}
-                  onChange={(event) => setRoutineKeyword(event.target.value)}
-                  placeholder="搜索任务名称 / 提示词 / 频率"
-                  className="pl-9"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2 xl:min-w-[18rem] xl:justify-end">
-              <span className="shrink-0 text-sm text-[var(--color-muted)]">Bot</span>
-              <Select value={selectedBotId} onValueChange={onChangeBotId}>
-                <SelectTrigger className="w-full xl:w-[18rem]">
-                  <SelectValue placeholder="请选择 Bot" />
-                </SelectTrigger>
-                <SelectContent>
-                  {botOptions.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">Bot</span>
+            <Select
+              value={selectedBotId}
+              onValueChange={(value) => {
+                onChangeBotId(value);
+              }}
+            >
+              <SelectTrigger className="w-full text-xs">
+                <SelectValue placeholder="请选择 Bot" />
+              </SelectTrigger>
+              <SelectContent>
+                {botOptions.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          {error && routineList.length > 0 ? (
-            <div className="rounded-lg border border-[var(--color-warning-soft)] bg-[var(--color-warning-soft)]/40 px-3 py-2 text-sm text-[var(--color-warning)]">
-              {error}
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
+        </div>
+        {error && routineList.length > 0 ? (
+          <div className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">{error}</div>
+        ) : null}
+      </div>
 
-      <Card>
-        <div className="overflow-hidden">
+      <Card className="overflow-hidden rounded-lg shadow-sm">
+        <div className="overflow-hidden bg-card">
           <div className="app-scrollbar overflow-x-auto">
             <table className="min-w-full border-separate border-spacing-0">
               <thead>
-                <tr className="bg-[var(--color-panel-strong)]/60 text-left text-xs font-medium text-[var(--color-muted)]">
-                  <Th className="rounded-tl-xl">任务</Th>
+                <tr className="bg-muted/30 text-left text-xs font-medium text-muted-foreground">
+                  <Th>任务</Th>
                   <Th>Owner Bot / 模型</Th>
                   <Th>频率 / 时区</Th>
                   <Th>下次执行</Th>
                   <Th>最近执行</Th>
-                  <Th className="rounded-tr-xl text-right">操作</Th>
+                  <Th>是否启用</Th>
+                  <Th className="text-right">操作</Th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={6} className="p-0">
-                      <div className="py-16 text-center text-sm text-[var(--color-muted)]">定时任务加载中…</div>
+                    <td colSpan={7} className="p-0">
+                      <div className="py-16 text-center text-xs text-muted-foreground">定时任务加载中…</div>
                     </td>
                   </tr>
                 ) : error && routineList.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-0">
+                    <td colSpan={7} className="p-0">
                       <Empty
                         title="定时任务加载失败"
                         description={error}
@@ -164,88 +176,120 @@ export function RoutineTaskTab({
                       />
                     </td>
                   </tr>
-                ) : routineList.length === 0 ? (
+                ) : visibleRoutines.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-0">
+                    <td colSpan={7} className="p-0">
                       <Empty title="暂无符合条件的定时任务" description="当前账号下还没有可展示的定时任务。" />
                     </td>
                   </tr>
                 ) : (
-                  routineList.map((item) => (
-                    <tr
-                      key={`${item.botId}-${item.id}`}
-                      className="border-b border-[var(--color-border)] text-xs transition-colors hover:bg-[var(--color-panel-muted)]/60"
-                    >
-                      <Td className="max-w-[24rem]">
-                        <div className="space-y-1">
-                          <div className="truncate font-medium text-[var(--color-fg)]">{item.name}</div>
-                          {item.prompt ? (
-                            <p className="m-0 line-clamp-2 text-xs leading-5 text-[var(--color-muted)]">
-                              {item.prompt}
-                            </p>
-                          ) : null}
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
-                            <code className="rounded bg-[var(--color-panel-strong)] px-1.5 py-0.5">{item.id}</code>
+                  visibleRoutines.map((item) => {
+                    const ownerBotName = getBotDisplayName(botNameMap, item.botId, item.botName);
+                    return (
+                      <tr
+                        key={makeRoutineKey(item.botId, item.id, item.runtimeStage)}
+                        className="border-b border-border text-xs transition-colors hover:bg-muted/50"
+                      >
+                        <Td className="max-w-[24rem]">
+                          <div className="space-y-1">
+                            <div className="truncate font-medium text-foreground">{item.name}</div>
+                            {item.prompt ? (
+                              <p className="m-0 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.prompt}</p>
+                            ) : null}
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{item.id}</code>
+                              {item.runtimeStage ? (
+                                <Badge tone={getRoutineStageTone(item.runtimeStage)} className="px-1.5 text-[10px]">
+                                  {item.runtimeStage}
+                                </Badge>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
-                      </Td>
-                      <Td>
-                        <div className="space-y-1">
-                          <div className="text-[var(--color-fg)]">
-                            <span className="font-medium">{item.botName}</span>
+                        </Td>
+                        <Td>
+                          <div className="space-y-1">
+                            <div className="text-foreground">
+                              <span className="font-medium">{ownerBotName}</span>
+                            </div>
+                            <div className="text-xs text-muted-foreground">Bot ID：{item.botId}</div>
+                            <div className="text-xs text-muted-foreground">模型：{item.model}</div>
                           </div>
-                          <div className="text-xs text-[var(--color-muted)]">Bot ID：{item.botId}</div>
-                          <div className="text-xs text-[var(--color-muted)]">模型：{item.model}</div>
-                        </div>
-                      </Td>
-                      <Td>
-                        <div className="space-y-1 text-xs text-[var(--color-fg)]">
-                          <div>{item.frequency}</div>
-                          <div className="text-xs text-[var(--color-muted)]">{item.timezone ?? '—'}</div>
-                        </div>
-                      </Td>
-                      <Td>
-                        <div className="text-xs text-[var(--color-fg)]">{formatDateTime(item.nextRunAt)}</div>
-                      </Td>
-                      <Td>
-                        <div className="text-xs text-[var(--color-fg)]">{formatDateTime(item.lastRunAt)}</div>
-                      </Td>
-                      <Td>
-                        <div className="flex justify-end gap-2" onClick={(event) => event.stopPropagation()}>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            leftIcon={<Eye className="size-4" />}
-                            onClick={() => onSelectRoutine(item)}
-                          >
-                            查看实例
-                          </Button>
-                          <ConfirmDialog
-                            title={`立即触发「${item.name}」`}
-                            description="当前页面会调用真实 routines 接口触发一次执行。"
-                            confirmText="立即触发"
-                            onConfirm={async () => {
-                              try {
-                                await onRunRoutine(item);
-                                toast.success(`已触发一次 ${item.name}`);
-                              } catch (err) {
-                                const message = err instanceof Error ? err.message : '定时任务触发失败';
-                                toast.error(message);
-                              }
-                            }}
-                          >
-                            <Button variant="primary" size="sm" leftIcon={<Play className="size-4" />}>
-                              立即触发
+                        </Td>
+                        <Td>
+                          <div className="space-y-1 text-xs text-foreground">
+                            <div>{item.frequency}</div>
+                            <div className="text-xs text-muted-foreground">{item.timezone ?? '—'}</div>
+                          </div>
+                        </Td>
+                        <Td>
+                          <div className="text-xs text-foreground">{formatDateTime(item.nextRunAt)}</div>
+                        </Td>
+                        <Td>
+                          <div className="text-xs text-foreground">{formatDateTime(item.lastRunAt)}</div>
+                        </Td>
+                        <Td>
+                          <div className="text-xs text-foreground">
+                            {item.enabled === true ? '是' : item.enabled === false ? '否' : '—'}
+                          </div>
+                        </Td>
+                        <Td>
+                          <div className="flex justify-end gap-2" onClick={(event) => event.stopPropagation()}>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              leftIcon={<Eye className="size-4" />}
+                              onClick={() => onSelectRoutine(item)}
+                            >
+                              查看实例
                             </Button>
-                          </ConfirmDialog>
-                        </div>
-                      </Td>
-                    </tr>
-                  ))
+                            <ConfirmDialog
+                              title={`立即触发「${item.name}」`}
+                              disabled={item.enabled === false}
+                              description="当前页面会调用真实 routines 接口触发一次执行。"
+                              confirmText="立即触发"
+                              onConfirm={async () => {
+                                try {
+                                  await onRunRoutine(item);
+                                  toast.success(`已触发一次 ${item.name}`);
+                                } catch (err) {
+                                  const message = err instanceof Error ? err.message : '定时任务触发失败';
+                                  toast.error(message);
+                                }
+                              }}
+                            >
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                leftIcon={<Play className="size-4" />}
+                                disabled={item.enabled === false}
+                                title={item.enabled === false ? '定时任务未启用，不能立即触发' : undefined}
+                              >
+                                立即触发
+                              </Button>
+                            </ConfirmDialog>
+                          </div>
+                        </Td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
+        </div>
+        <div className="px-4 pb-4">
+          <Pagination
+            current={safePage}
+            pageSize={pageSize}
+            total={visibleTotal}
+            onChange={onPageChange}
+            onPageSizeChange={(nextPageSize) => {
+              onPageSizeChange(nextPageSize);
+              onPageChange(1);
+            }}
+            pageSizeOptions={[10, 20, 50]}
+            className="justify-end pt-4"
+          />
         </div>
       </Card>
     </section>

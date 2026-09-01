@@ -65,10 +65,10 @@ export function GroupParticipantPicker({
   return (
     <div className="min-w-0">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-bold text-[var(--color-fg)]">
-          成员 Bot <span className="text-[var(--color-error)]">*</span>
+        <span className="text-sm font-semibold text-foreground">
+          成员 Bot <span className="text-destructive">*</span>
         </span>
-        <span className="rounded-lg border border-[var(--color-primary)]/20 bg-[var(--color-primary-soft)] px-2 py-0.5 text-xs font-bold text-[var(--color-primary)]">
+        <span className="rounded-lg border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
           已选 {selectedIds.length} 个
         </span>
       </div>
@@ -78,17 +78,17 @@ export function GroupParticipantPicker({
           {selectedBots.map((bot) => (
             <span
               key={bot.id}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-primary)]/20 bg-[var(--color-primary-soft)] py-1 pl-2 pr-1"
+              className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 py-1 pl-2 pr-1"
             >
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-primary)] text-[10px] font-bold text-white">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
                 {avatarText(bot.name)}
               </span>
-              <span className="max-w-30 truncate text-xs font-bold text-[var(--color-primary)]">{bot.name}</span>
+              <span className="max-w-30 truncate text-xs font-semibold text-primary">{bot.name}</span>
               <Button
                 variant="ghost"
                 size="sm"
                 aria-label={`移除${bot.name}`}
-                className="h-5 w-5 rounded-full border-0 p-0 text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]"
+                className="h-5 w-5 rounded-full border-0 p-0 text-primary hover:bg-primary/10"
                 onClick={() => onToggle(bot.id)}
               >
                 <X className="h-3 w-3" aria-hidden />
@@ -103,18 +103,18 @@ export function GroupParticipantPicker({
           value={picker.tab}
           onChange={picker.setTab}
           options={[
-            ...(showMineTab ? [{ value: 'mine' as const, label: '我的 Bot' }] : []),
-            { value: 'friends', label: '我的好友' },
+            ...(showMineTab ? [{ value: 'mine' as const, label: '已管理 Bot' }] : []),
+            { value: 'friends', label: '好友 Bot' },
             { value: 'candidates', label: '可协作 Bot' },
           ]}
-          className="rounded-xl"
+          className="rounded-lg"
         />
       </div>
 
       <div className="relative mb-3">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted)]" />
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          className="h-10 rounded-xl pl-9"
+          className="h-9 rounded-md pl-9"
           value={picker.search}
           onChange={(event) => picker.setSearch(event.target.value)}
           placeholder="搜索 Bot 名称或描述..."
@@ -123,13 +123,13 @@ export function GroupParticipantPicker({
       </div>
 
       {picker.tab === 'candidates' && (
-        <div className="mb-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-primary-soft)] px-4 py-3 text-xs leading-5 text-[var(--color-muted)]">
+        <div className="mb-3 rounded-lg border border-border bg-primary/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
           可协作 Bot 范围：公开 Bot 与已接受好友的集合。
         </div>
       )}
 
       {picker.error ? (
-        <div className="flex items-center justify-between rounded-xl bg-[var(--color-error-soft)] px-3 py-2 text-sm text-[var(--color-error)]">
+        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive">
           <span>{picker.error}</span>
           <Button variant="ghost" size="sm" className="border-0" onClick={picker.retry}>
             重试
@@ -142,11 +142,11 @@ export function GroupParticipantPicker({
           ))}
         </div>
       ) : visibleBots.length === 0 ? (
-        <div className="rounded-2xl border border-[var(--color-border)] bg-white">
+        <div className="rounded-lg border border-border bg-card">
           <Empty
             compact
             title={
-              picker.tab === 'friends' ? '暂无好友 Bot' : picker.tab === 'mine' ? '暂无我的 Bot' : '暂无可协作 Bot'
+              picker.tab === 'friends' ? '暂无好友 Bot' : picker.tab === 'mine' ? '暂无已管理 Bot' : '暂无可协作 Bot'
             }
             description={picker.search ? '试试调整搜索词。' : '可切换到另一个 Tab 查看候选。'}
           />
@@ -154,14 +154,14 @@ export function GroupParticipantPicker({
       ) : (
         <div
           className={cn(
-            'min-w-0 w-full overflow-hidden rounded-2xl border border-[var(--color-border)] bg-white',
+            'min-w-0 w-full overflow-hidden rounded-lg border border-border bg-card',
             cardMode && 'border-0 bg-transparent',
           )}
         >
           <div
             className={cn(
               'app-scrollbar max-h-[320px] overflow-y-auto',
-              cardMode ? 'space-y-1.5' : 'divide-y divide-[var(--color-border)]',
+              cardMode ? 'space-y-1.5' : 'divide-y divide-border',
             )}
             onScroll={(event) => {
               const target = event.currentTarget;
@@ -181,25 +181,25 @@ export function GroupParticipantPicker({
                   disabled={unavailable}
                   aria-pressed={selected}
                   className={cn(
-                    'h-auto min-w-0 w-full justify-start gap-3 rounded-none border-0 px-4 py-3 text-left',
+                    'h-auto min-w-0 w-full justify-start gap-2 rounded-none border-0 px-3 py-2 text-left',
                     cardMode
                       ? selected
-                        ? 'rounded-xl border border-[var(--color-primary)] bg-[var(--color-primary-soft)] hover:bg-[var(--color-primary-soft)]'
-                        : 'rounded-xl border border-[var(--color-border)] bg-white hover:border-[var(--color-primary)]/30 hover:bg-[var(--color-primary-soft)]'
+                        ? 'rounded-lg border border-primary bg-primary/10 hover:bg-primary/10'
+                        : 'rounded-lg border border-border bg-card hover:border-primary/30 hover:bg-primary/10'
                       : selected
-                      ? 'bg-[var(--color-primary-soft)] hover:bg-[var(--color-primary-soft)]'
-                      : 'hover:bg-[var(--color-panel-muted)]',
+                      ? 'bg-primary/10 hover:bg-primary/10'
+                      : 'hover:bg-muted/50',
                   )}
                   onClick={() => onToggle(bot.id)}
                 >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-panel-strong)] text-sm font-bold text-[var(--color-muted)]">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
                     {avatarText(bot.name)}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm font-bold text-[var(--color-fg)]">{bot.name}</span>
+                      <span className="truncate text-sm font-semibold text-foreground">{bot.name}</span>
                       {isOriginator && (
-                        <span className="shrink-0 rounded-full border border-[var(--color-primary)]/20 bg-[var(--color-primary-soft)] px-1.5 py-0.5 text-[10px] text-[var(--color-primary)]">
+                        <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
                           发起方
                         </span>
                       )}
@@ -207,35 +207,28 @@ export function GroupParticipantPicker({
                         className={cn(
                           'flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px]',
                           bot.reachability === 'unreachable' || !bot.online
-                            ? 'bg-[var(--color-panel-strong)] text-[var(--color-muted)]'
-                            : 'bg-[var(--color-primary-soft)] text-[var(--color-primary)]',
+                            ? 'bg-muted text-muted-foreground'
+                            : 'bg-primary/10 text-primary',
                         )}
                       >
-                        <i
-                          className={cn(
-                            'h-1.5 w-1.5 rounded-full',
-                            bot.online ? 'bg-[var(--color-success)]' : 'bg-[var(--color-muted)]',
-                          )}
-                        />
+                        <i className={cn('h-1.5 w-1.5 rounded-full', bot.online ? 'bg-success' : 'bg-muted')} />
                         {bot.online ? '在线' : '隐身'}
                       </span>
                     </span>
                     {bot.summary && (
-                      <span className="mt-1 block truncate text-xs text-[var(--color-muted)]">{bot.summary}</span>
+                      <span className="mt-1 block truncate text-xs text-muted-foreground">{bot.summary}</span>
                     )}
                   </span>
                   <span
                     className={cn(
                       'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border',
-                      selected
-                        ? 'border-[var(--color-primary)] bg-[var(--color-primary)]'
-                        : 'border-[var(--color-primary)]/20 bg-white',
+                      selected ? 'border-primary bg-primary' : 'border-primary/20 bg-card',
                     )}
                   >
                     {selected ? (
-                      <Check className="h-4 w-4 text-white" aria-hidden />
+                      <Check className="h-4 w-4 text-primary-foreground" aria-hidden />
                     ) : (
-                      <Plus className="h-4 w-4 text-[var(--color-primary)]" />
+                      <Plus className="h-4 w-4 text-primary" />
                     )}
                   </span>
                 </Button>

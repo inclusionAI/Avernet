@@ -15,6 +15,8 @@ interface BotWorkshopToolbarProps {
   onDeploymentChange: (value?: BotDeployment) => void;
   onServiceModeChange: (value?: BotServiceMode) => void;
   onCreateCloud: () => void;
+  total?: number;
+  onReset: () => void;
 }
 
 const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
@@ -27,8 +29,10 @@ const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
   onDeploymentChange,
   onServiceModeChange,
   onCreateCloud,
+  total,
+  onReset,
 }) => (
-  <div className="flex min-w-0 flex-wrap items-center gap-3">
+  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-4 px-3">
     <div className="relative w-full sm:w-[200px] sm:shrink-0">
       <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
       <Input
@@ -78,9 +82,21 @@ const BotWorkshopToolbar: React.FC<BotWorkshopToolbarProps> = ({
         <SelectItem value="non-service">非服务化</SelectItem>
       </SelectContent>
     </Select>
-    <Button leftIcon={<Cloud className="size-4" />} onClick={onCreateCloud} className="w-full sm:ml-auto sm:w-auto">
-      创建云端 Bot
-    </Button>
+    <div className="ml-auto flex w-full items-center justify-end gap-4 sm:w-auto">
+      <div className="flex items-center gap-2">
+        {keyword || engine || deployment || serviceMode ? (
+          <Button variant="ghost" size="sm" onClick={onReset}>
+            重置
+          </Button>
+        ) : null}
+        {total !== undefined ? (
+          <span className="text-xs tabular-nums text-muted-foreground">共 {total} 条</span>
+        ) : null}
+      </div>
+      <Button leftIcon={<Cloud className="size-4" />} onClick={onCreateCloud} className="w-full sm:w-auto">
+        创建云端 Bot
+      </Button>
+    </div>
   </div>
 );
 

@@ -9,7 +9,7 @@ export interface UseGroupCreateDialogResult {
 
 interface UseGroupCreateDialogOptions {
   refreshGroups: () => Promise<void>;
-  selectGroup: (groupId: string) => Promise<void>;
+  selectGroup: (groupId: string) => void;
   openSessionForGroup: (groupId: string) => Promise<void>;
 }
 
@@ -26,7 +26,7 @@ export function useGroupCreateDialog({
     async (groupId: string) => {
       setOpen(false);
       await refreshGroups();
-      await selectGroup(groupId);
+      selectGroup(groupId);
       await openSessionForGroup(groupId);
     },
     [openSessionForGroup, refreshGroups, selectGroup],

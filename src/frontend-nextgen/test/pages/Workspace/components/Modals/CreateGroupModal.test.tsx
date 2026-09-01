@@ -202,10 +202,10 @@ it('user identity cannot choose custom collaboration', async () => {
   expect(screen.getByRole('radio', { name: '自定义协作' })).toBeDisabled();
 });
 
-it('user identity shows the 我的 Bot tab', async () => {
+it('user identity shows the 已管理 Bot tab', async () => {
   renderModal();
   await screen.findByRole('button', { name: /Alpha/ });
-  expect(screen.getByRole('button', { name: '我的 Bot' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '已管理 Bot' })).toBeInTheDocument();
 });
 
 it('clears previous form state when reopened', async () => {

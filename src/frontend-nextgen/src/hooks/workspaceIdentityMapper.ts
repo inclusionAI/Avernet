@@ -12,6 +12,8 @@ export function mapIdentityViewToIdentity(view: IdentityView): Identity {
     status: view.online ? 'available' : 'unavailable',
     chatStatus: view.status,
     reachability: view.reachability,
+    engine: view.engine,
+    botType: view.botType,
   };
 }
 

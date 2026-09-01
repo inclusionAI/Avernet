@@ -22,4 +22,16 @@ describe('authApiController', () => {
     await invoke();
     expect(request).toHaveBeenCalledWith(endpoint, { method, credentials: 'include', skipErrorHandler: true });
   });
+
+  it('/auth/user 401 经 skipErrorHandler 原样透传(axios 形错误,不吞错)', async () => {
+    const axiosErr = { response: { status: 401, data: { message: 'unauthorized' } } };
+    (request as jest.Mock).mockRejectedValue(axiosErr);
+    await expect(getCurrentAuthUser()).rejects.toBe(axiosErr);
+  });
+
+  it('/auth/url 正常 provider 体原样返回(不经业务失败标准化)', async () => {
+    const providers = { providers: [{ name: 'alipay', url: 'https://example.test/login' }] };
+    (request as jest.Mock).mockResolvedValue(providers);
+    await expect(getAuthProviders()).resolves.toEqual(providers);
+  });
 });

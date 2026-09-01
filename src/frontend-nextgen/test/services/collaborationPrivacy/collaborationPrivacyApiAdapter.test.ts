@@ -1,4 +1,4 @@
-import type { CollaborationBotDto } from '@/services/backendApi';
+import type { BackendApiEnvelope, BackendApiPage, CollaborationBotDto, OwnedBotDto } from '@/services/backendApi';
 import { createCollaborationPrivacyApiAdapter } from '@/services/collaborationPrivacy/collaborationPrivacyApiAdapter';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
@@ -64,6 +64,107 @@ describe('collaborationPrivacyApiAdapter', () => {
     expect(listMyBots).toHaveBeenCalledWith({ offset: 0, limit: 20 }, signal);
   });
 
+  it('joins the ready /bots engine field onto mine rows, including composite Bot ids', async () => {
+    const listBots = jest.fn(
+      async (
+        ..._args: [Record<string, unknown>?, AbortSignal?]
+      ): Promise<BackendApiEnvelope<BackendApiPage<OwnedBotDto>>> => {
+        void _args;
+        return {
+          code: 200000,
+          data: {
+            total: 2,
+            items: [
+              {
+                bot_id: 'bot-1',
+                bot_name: '测试 Bot',
+                engine: 'openclaw',
+                status: 'ACTIVE',
+              },
+              {
+                bot_id: 'bot-2',
+                bot_name: '未匹配 Bot',
+                engine: 'claude_code',
+                status: 'ACTIVE',
+              },
+            ] satisfies OwnedBotDto[],
+          },
+        };
+      },
+    );
+    const enrichedAdapter = createCollaborationPrivacyApiAdapter({
+      listMyBots,
+      getCollaborationBot,
+      patchCollaborationBot,
+      listBots,
+    });
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      data: {
+        items: [createPhysicalBot({ bot_id: 'bot-1:447147' })],
+        total: 1,
+        offset: 0,
+        limit: 20,
+      },
+    });
+
+    await expect(
+      enrichedAdapter.listManagedBots({ user_id: '447147' }, new AbortController().signal),
+    ).resolves.toMatchObject({
+      items: [expect.objectContaining({ bot_id: 'bot-1:447147', engine: 'openclaw' })],
+    });
+    expect(listBots).toHaveBeenCalledWith({ page: 1, page_size: 100, user_id: '447147' }, expect.any(AbortSignal));
+  });
+
+  it('keeps the managed Bot list usable when the optional /bots engine enrichment fails', async () => {
+    const listBots = jest.fn(
+      async (
+        ..._args: [Record<string, unknown>?, AbortSignal?]
+      ): Promise<BackendApiEnvelope<BackendApiPage<OwnedBotDto>>> => {
+        void _args;
+        return {
+          code: 200000,
+          data: {
+            total: 1,
+            items: [{ bot_id: 'bot-1', engine: 'openclaw', status: 'ACTIVE' } as OwnedBotDto],
+          },
+        };
+      },
+    );
+    const enrichedAdapter = createCollaborationPrivacyApiAdapter({
+      listMyBots,
+      getCollaborationBot,
+      patchCollaborationBot,
+      listBots,
+    });
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      data: { items: [createPhysicalBot()], total: 1, offset: 0, limit: 20 },
+    });
+
+    await expect(enrichedAdapter.listManagedBots({ user_id: '447147' })).resolves.toMatchObject({
+      items: [expect.objectContaining({ bot_id: 'bot-1' })],
+      total: 1,
+      offset: 0,
+      limit: 20,
+    });
+  });
+
+  it('accepts the real dual-audience visibility fields returned by mine', async () => {
+    const bot = createPhysicalBot({ visibility: 'public', user_visibility: 'private', friend_ext: {} });
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      data: { items: [bot], total: 1, offset: 0, limit: 20 },
+    });
+
+    await expect(adapter.listManagedBots()).resolves.toEqual({
+      items: [bot],
+      total: 1,
+      offset: 0,
+      limit: 20,
+    });
+  });
+
   it('loads one managed Bot detail and forwards cancellation', async () => {
     const bot = createPhysicalBot();
     getCollaborationBot.mockResolvedValue({ code: 20000, data: bot });
@@ -97,6 +198,40 @@ describe('collaborationPrivacyApiAdapter', () => {
         descriptor: { summary: 'updated' },
       },
       signal,
+    );
+  });
+
+  it('passes the deployed friend approval PATCH fields through and accepts the confirmed response', async () => {
+    const body = {
+      friend_ext: {
+        public_user_approval: { puid: 'p-user', status: 'AGREE' },
+        no_check_scope_friend_deps: ['A4195'],
+      },
+      friend_check_in_strategy: 'DEPT_FREE' as const,
+    };
+    const patchedBot = createPhysicalBot(body);
+    patchCollaborationBot.mockResolvedValue({ code: 20000, data: patchedBot });
+    const signal = new AbortController().signal;
+
+    await expect(adapter.patchManagedBot('bot-1', body, signal)).resolves.toEqual(patchedBot);
+    expect(patchCollaborationBot).toHaveBeenCalledWith('bot-1', body, signal);
+  });
+
+  it('rejects malformed friend approval fields in Bot responses', async () => {
+    patchCollaborationBot.mockResolvedValueOnce({
+      code: 20000,
+      data: createPhysicalBot({ friend_check_in_strategy: 'UNKNOWN' as 'APPROVAL' }),
+    });
+    await expect(adapter.patchManagedBot('bot-1', { status: 'online' })).rejects.toThrow(
+      'Bot 更新接口返回了无法识别的数据',
+    );
+
+    patchCollaborationBot.mockResolvedValueOnce({
+      code: 20000,
+      data: createPhysicalBot({ friend_ext: [] as unknown as Record<string, unknown> }),
+    });
+    await expect(adapter.patchManagedBot('bot-1', { status: 'online' })).rejects.toThrow(
+      'Bot 更新接口返回了无法识别的数据',
     );
   });
 

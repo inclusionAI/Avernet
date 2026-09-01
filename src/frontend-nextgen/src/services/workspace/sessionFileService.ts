@@ -1,4 +1,5 @@
 import type { ParticipantView } from '@/domain/collaboration';
+import { queryCollaborationBots } from '@/services/backendApi/collaboration/collaborationBotController';
 import type { SessionFileDto, SessionFileStatus } from '@/services/backendApi/collaboration/sessionFileController';
 import {
   buildSessionFileContentUrl,
@@ -115,6 +116,28 @@ export const sessionFileService = {
         return { ok: false, error: toDomainError('SESSION_FILE_FORBIDDEN', '无权访问该会话文件，请刷新后重试。') };
       }
       return { ok: false, error: toDomainError('SESSION_FILE_LIST_FAILED', '加载会话文件失败，请稍后重试。') };
+    }
+  },
+
+  /**
+   * 批量解析 actor（上传者）的展示名。文件接口仅返回 owner.actor_id（如 human_327325 / bot:工号），
+   * 需经 POST /openapi/v1/collaboration/bots/query 用 {bot_ids} 反查 name。返回 {actorId: name} 映射；
+   * 后端返回的 bot 列表与请求 id 列表非一一对应，按 bot_id 匹配，未返回的 id 不出现在映射中。
+   * 失败时返回空映射（调用方回退到 actor_id 兜底展示）。
+   */
+  async resolveActorNames(actorIds: string[]): Promise<Record<string, string>> {
+    const unique = [...new Set(actorIds.filter((id) => id && id.trim()))];
+    if (unique.length === 0) return {};
+    try {
+      const resp = await queryCollaborationBots({ bot_ids: unique });
+      const items = resp.data?.items ?? [];
+      const map: Record<string, string> = {};
+      for (const item of items) {
+        if (item.bot_id && item.name) map[item.bot_id] = item.name;
+      }
+      return map;
+    } catch {
+      return {};
     }
   },
 

@@ -11,16 +11,7 @@ jest.mock('@/shell/SpaceSwitcher', () => ({
 }));
 
 const renderSidebar = (area: NavigationArea) =>
-  render(
-    <AppSidebar
-      area={area}
-      activePath="/workspace"
-      collapsed={false}
-      items={[]}
-      onNavigate={jest.fn()}
-      onExpand={jest.fn()}
-    />,
-  );
+  render(<AppSidebar area={area} activePath="/workspace" collapsed={false} items={[]} onNavigate={jest.fn()} />);
 
 it('工作区域不展示空间切换器', () => {
   renderSidebar('work');

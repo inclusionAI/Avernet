@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/Switch';
 import { Textarea } from '@/components/ui/Textarea';
 import type { BotCreateAuthorization, BotCreateInput, BotCreateScenario, BotCreateSpace } from '@/services/botWorkshop';
 import { Cloud, ExternalLink, Laptop, ShieldCheck, Sparkles } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface CreateBotModalProps {
   scenario?: BotCreateScenario;
@@ -58,14 +58,9 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
     }
   }, [scenario, spaces]);
 
-  const selectedSpace = useMemo(() => spaces.find((space) => space.id === values.spaceId), [spaces, values.spaceId]);
+  const selectedSpace = spaces[0];
   const isLocal = scenario === 'local';
   const serviceDisabled = isLocal || values.engine === 'hermes' || values.engine === 'aicoding';
-
-  const updateSpace = (spaceId: string) => {
-    const space = spaces.find((item) => item.id === spaceId);
-    setValues((current) => ({ ...current, spaceId, ownership: space?.ownership ?? 'personal' }));
-  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -192,23 +187,15 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
 
                 <div className="space-y-1.5 text-xs font-medium text-foreground">
                   <span id="create-bot-space-label">归属空间</span>
-                  <Select value={values.spaceId} onValueChange={updateSpace} disabled={isLocal}>
-                    <SelectTrigger aria-labelledby="create-bot-space-label">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {spaces.map((space) => (
-                        <SelectItem key={space.id} value={space.id}>
-                          {space.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {isLocal && (
-                    <span className="block text-[10px] font-normal text-muted-foreground">
-                      本地 Bot 固定归属个人空间
-                    </span>
-                  )}
+                  <div
+                    aria-labelledby="create-bot-space-label"
+                    className="flex h-9 items-center rounded-md border border-input bg-muted/30 px-3 text-xs font-normal"
+                  >
+                    {selectedSpace?.name ?? '当前空间不可用'}
+                  </div>
+                  <span className="block text-[10px] font-normal text-muted-foreground">
+                    跟随当前工作空间，不支持在创建时切换
+                  </span>
                 </div>
 
                 <label className="space-y-1.5 text-xs font-medium text-foreground sm:col-span-2">

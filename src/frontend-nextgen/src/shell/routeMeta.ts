@@ -1,3 +1,5 @@
+import { getCapabilities } from '@/capabilities';
+
 export type RouteSection = 'work' | 'manage' | 'dev';
 
 export interface RouteMeta {
@@ -8,6 +10,10 @@ export interface RouteMeta {
   openCore: boolean;
 }
 
+// Open Core 基线 route meta。内部专属路由已剥离，
+// 由 internal overlay 经 capability `getInternalRouteMetas` 注入，避免内部业务
+// 入口字面量进 Open Core 产物（open-core-export-plan §5.2 / §5.6
+// 「导航中的内部入口」必须物理分隔）。
 export const routeMetaList: RouteMeta[] = [
   {
     path: '/workspace',
@@ -73,55 +79,6 @@ export const routeMetaList: RouteMeta[] = [
     openCore: true,
   },
   {
-    path: '/capability-workshop',
-    title: '能力工坊',
-    section: 'manage',
-    navKey: 'capability-workshop',
-    openCore: false,
-  },
-  {
-    path: '/capability-workshop/skill',
-    title: 'Skill 工坊',
-    section: 'manage',
-    navKey: 'capability-workshop',
-    openCore: false,
-  },
-  {
-    path: '/capability-workshop/skill/detail',
-    title: 'Skill 详情',
-    section: 'manage',
-    navKey: 'capability-workshop',
-    openCore: false,
-  },
-  {
-    path: '/capability-workshop/card',
-    title: '卡片工坊',
-    section: 'manage',
-    navKey: 'capability-workshop',
-    openCore: false,
-  },
-  {
-    path: '/market',
-    title: '能力市场',
-    section: 'manage',
-    navKey: 'market',
-    openCore: false,
-  },
-  {
-    path: '/market/skill',
-    title: 'Skill 市场',
-    section: 'manage',
-    navKey: 'market',
-    openCore: false,
-  },
-  {
-    path: '/market/mcp',
-    title: 'MCP 市场',
-    section: 'manage',
-    navKey: 'market',
-    openCore: false,
-  },
-  {
     path: '/admin',
     title: '管理后台',
     section: 'manage',
@@ -151,8 +108,20 @@ export const routeMetaList: RouteMeta[] = [
   },
 ];
 
+/**
+ * 合并基线 routeMetaList 与内部 overlay 注入的内部 route meta。
+ * 同步签名：capability 不发请求，直接返回当前形态可用的内部 meta 列表。
+ * Open Core 形态下 capability 返回 `[]`，结果 = Open Core 基线；internal 形态下追加内部 7 条。
+ */
+export function getMergedRouteMetas(): RouteMeta[] {
+  const internal = getCapabilities().getInternalRouteMetas();
+  return internal.status === 'available' && internal.value.length
+    ? [...routeMetaList, ...internal.value]
+    : routeMetaList;
+}
+
 export function getRouteMeta(pathname: string) {
-  return [...routeMetaList]
+  return [...getMergedRouteMetas()]
     .sort((a, b) => b.path.length - a.path.length)
     .find((meta) => pathname === meta.path || pathname.startsWith(`${meta.path}/`));
 }

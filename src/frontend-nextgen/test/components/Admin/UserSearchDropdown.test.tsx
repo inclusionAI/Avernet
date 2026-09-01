@@ -39,6 +39,30 @@ it('支持搜索：输入关键词 → 防抖后展示候选 → 点击选中回
   expect(input.value).toBe('');
 });
 
+it('花名为空时展示真名(工号)：nickName 缺失/为空 → 显示 realName(userId)', async () => {
+  mockSearch.mockResolvedValue([
+    { userId: 'gl520932', displayName: '郭亮', nickName: '', realName: '郭亮', email: 'gl520932@alibaba-inc.com' },
+    {
+      userId: 'liang.guol',
+      displayName: '郭亮',
+      nickName: undefined,
+      realName: '郭亮',
+      email: 'liang.guol@antgroup.com',
+    },
+  ]);
+  extendCapabilities({
+    getUserSearchCapability: () => ({ status: 'available', value: { search: mockSearch } }),
+  });
+  const onSelect = jest.fn();
+  render(<UserSearchDropdown onSelect={onSelect} />);
+  const input = screen.getByLabelText('搜索员工') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: '郭亮' } });
+  // 两条候选均显示真名(userId)
+  await screen.findByRole('button', { name: /郭亮\(gl520932\)/ });
+  fireEvent.click(screen.getByRole('button', { name: /郭亮\(liang\.guol\)/ }));
+  expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ realName: '郭亮' }));
+});
+
 it('已添加成员在候选中显示「已添加」且不可选', async () => {
   mockSearch.mockResolvedValue([
     { userId: '10086', displayName: '寻三', nickName: '寻三' },

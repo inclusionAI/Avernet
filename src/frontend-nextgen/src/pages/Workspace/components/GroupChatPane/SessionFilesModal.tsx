@@ -20,6 +20,7 @@ import { cn } from '@/utils/cn';
 import { Download, FileText, FolderOpen, Share2, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { formatMonthDayTime } from '../SessionCard';
 import { PreviewPane } from './SessionFilesPreviewPane';
 import { UploadFilesModal } from './UploadFilesModal';
 
@@ -82,20 +83,20 @@ export function SessionFilesModal({ sessionId, sessionName, onClose }: SessionFi
         showClose={false}
         closeLabel="关闭会话文件弹窗"
         className={cn(
-          'flex h-[80vh] w-[calc(100vw-2rem)] max-w-[1080px] flex-col gap-0 overflow-hidden rounded-2xl p-0',
-          'border border-[var(--color-border)] bg-[var(--color-card)] text-[var(--color-fg)] shadow-2xl',
+          'flex h-[80vh] w-[calc(100vw-2rem)] max-w-[1080px] flex-col gap-0 overflow-hidden rounded-lg p-0',
+          'border border-border bg-card text-foreground shadow-2xl',
         )}
       >
         <ModalTitle className="sr-only">资源管理 · {sessionName}</ModalTitle>
         <ModalDescription className="sr-only">查看、预览、下载本会话中已上传的文件。</ModalDescription>
 
-        <header className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] px-6 py-5">
+        <header className="flex items-start justify-between gap-3 border-b border-border px-3 py-4 sm:px-6 sm:py-5">
           <div className="min-w-0 flex-1 pr-2">
             <div className="flex items-center gap-2">
-              <FolderOpen className="h-5 w-5 shrink-0 text-[var(--color-primary)]" aria-hidden />
-              <h2 className="m-0 truncate text-base font-semibold text-[var(--color-fg)]">资源管理 · {sessionName}</h2>
+              <FolderOpen className="h-5 w-5 shrink-0 text-primary" aria-hidden />
+              <h2 className="m-0 truncate text-base font-semibold text-foreground">资源管理 · {sessionName}</h2>
             </div>
-            <p className="mt-1.5 text-sm leading-5 text-[var(--color-muted)]">
+            <p className="mt-1.5 text-sm leading-5 text-muted-foreground">
               已添加的资源仅对当前会话生效，协作群内所有成员均可查看与管理。
             </p>
           </div>
@@ -106,23 +107,21 @@ export function SessionFilesModal({ sessionId, sessionName, onClose }: SessionFi
           </ModalClose>
         </header>
 
-        <div className="flex items-center justify-between gap-4 border-b border-[var(--color-border)] px-6 pt-3">
-          <div className="rounded-t-lg bg-[var(--color-primary-soft)] px-4 py-2.5 text-[13px] font-medium text-[var(--color-primary)]">
-            文件
-          </div>
-          <span className="pb-2 text-xs text-[var(--color-muted)]">仅可访问当前协作群会话文件</span>
+        <div className="flex items-center justify-between gap-4 border-b border-border px-3 pt-3 sm:px-6">
+          <div className="rounded-t-lg bg-primary/10 px-4 py-2.5 text-[13px] font-medium text-primary">文件</div>
+          <span className="pb-2 text-xs text-muted-foreground">仅可访问当前协作群会话文件</span>
         </div>
 
         <div className="flex min-h-0 flex-1">
-          <div className="flex w-[320px] shrink-0 flex-col border-r border-[var(--color-border)]">
-            <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-3">
-              <span className="text-xs font-medium text-[var(--color-muted)]">{`会话文件（${filesState.total}）`}</span>
+          <div className="flex w-[min(320px,42%)] shrink-0 flex-col border-r border-border sm:w-[320px]">
+            <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+              <span className="text-xs font-medium text-muted-foreground">{`会话文件（${filesState.total}）`}</span>
               <Button
                 size="sm"
                 variant="ghost"
                 leftIcon={<Upload className="h-3.5 w-3.5" aria-hidden />}
                 onClick={() => setUploadOpen(true)}
-                className="border border-[var(--color-primary-weak)] bg-[var(--color-primary-soft)] px-3 text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)] hover:text-[var(--color-primary)]"
+                className="border border-primary/30 bg-primary/10 px-3 text-primary hover:bg-primary/10 hover:text-primary"
               >
                 添加文件
               </Button>
@@ -150,33 +149,33 @@ export function SessionFilesModal({ sessionId, sessionName, onClose }: SessionFi
                       return (
                         <li
                           key={file.fileId}
-                          className="group flex items-center gap-1 rounded-lg px-1.5 py-1 transition-colors hover:bg-[var(--color-panel-muted)]"
+                          className="group flex items-center gap-1 rounded-lg px-1.5 py-1 transition-colors hover:bg-muted/50"
                         >
                           <Button
                             type="button"
                             variant="ghost"
                             onClick={() => setSelectedId(file.fileId)}
                             className={cn(
-                              'h-9 min-w-0 flex-1 shrink justify-start gap-2 rounded-md px-2 text-left text-[13px] transition-colors',
-                              isActive
-                                ? 'bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
-                                : 'text-[var(--color-fg)] hover:text-[var(--color-primary)]',
+                              'min-w-0 flex-1 shrink justify-start gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
+                              isActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:text-primary',
                             )}
                           >
                             <FileText
-                              className={cn(
-                                'h-4 w-4 shrink-0',
-                                isActive ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted)]',
-                              )}
+                              className={cn('h-4 w-4 shrink-0', isActive ? 'text-primary' : 'text-muted-foreground')}
                               aria-hidden
                             />
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="min-w-0 flex-1 truncate">{file.name}</span>
-                              </TooltipTrigger>
-                              <TooltipContent>{file.name}</TooltipContent>
-                            </Tooltip>
-                            <span className="shrink-0 text-[11px] tabular-nums text-[var(--color-muted)]">
+                            <div className="min-w-0 flex-1">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="block truncate">{file.name}</span>
+                                </TooltipTrigger>
+                                <TooltipContent>{file.name}</TooltipContent>
+                              </Tooltip>
+                              <span className="block truncate text-[11px] text-muted-foreground">
+                                {file.ownerName} · {formatMonthDayTime(file.createdAt * 1000)}
+                              </span>
+                            </div>
+                            <span className="shrink-0 self-center text-[11px] tabular-nums text-muted-foreground">
                               {formatFileSize(file.size)}
                             </span>
                           </Button>

@@ -1,12 +1,15 @@
 // @asset-migrated: teamclaw 自研资产
 /**
- * TaskPanelFetcher —— 任务副屏轮询内核（路 A 自管，对齐 BcsWorkflowPanel）。
+ * TaskPanelFetcher —— 任务副屏轮询内核（路 A 自管）。
  * - 数据流：从 params.{apiBaseUrl, taskId} 取参，组件内 raw fetch，不自读 config / 不依赖 taskService。
  * - apiBaseUrl 为 '' 时走相对路径，由当前环境代理转发 dashboard 到对应网关。
  * - 轮询：图级 status 非终态时 setTimeout 重排（默认 1000ms）；产品态 DONE/FAILED/REVIEWING/CANCELLED 停，兼容旧 HUNG。
  * - 取消：AbortController，切 taskId / 卸载时 abort。
  * - 日志：include_action_log 默认 false（日志抽屉打开时由上层单独请求，P0 常规轮询不携带）。
  */
+import { extractLoginUrl, isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
+import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
+import { isEnvelopeFailure } from '@/services/backendApi/types';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Envelope, TaskDashboardResponse } from './contract';
 import { mapDashboard } from './taskPanelMapper';
@@ -75,7 +78,13 @@ export const TaskPanelFetcher: React.FC<TaskPanelFetcherProps> = ({
           throw new Error(`请求失败（${resp.status}）`);
         }
         const json = (await resp.json()) as Envelope<TaskDashboardResponse>;
-        if (json.code !== 200000) {
+        // 网关级 ACE 登录拦截体:本副屏走 raw fetch 打团队网关,未登录时绕过 httpClient,登记单飞跳转后中断本次加载。
+        if (isAceLoginResponse(json)) {
+          const loginUrl = extractLoginUrl(json);
+          triggerAceLoginRedirect(loginUrl);
+          return;
+        }
+        if (isEnvelopeFailure(json)) {
           throw new Error(json.message || `业务错误码 ${json.code}`);
         }
         if (!json.data) {
@@ -113,7 +122,7 @@ export const TaskPanelFetcher: React.FC<TaskPanelFetcherProps> = ({
     };
   }, [fetchDashboard]);
 
-  // 轮询：setTimeout 重排，终态自然停（对齐 BcsWorkflowPanel）
+  // 轮询：setTimeout 重排，终态自然停
   // 产品态：EXECUTING → 继续轮询；DONE/FAILED/REVIEWING(HUNG) → 停
   useEffect(() => {
     if (!task) {

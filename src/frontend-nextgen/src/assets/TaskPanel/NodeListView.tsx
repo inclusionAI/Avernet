@@ -1,5 +1,6 @@
 // @asset-migrated: teamclaw 自研资产
 /** 节点视图：垂直执行时间线 + 可点击节点卡片 + 子任务下钻入口。 */
+import { getCollaborationBotConversationUrl } from '@/utils/collaborationSquare';
 import React from 'react';
 import { ChevronRight, ExternalLink, Info, NodeStatusIcon } from './icons';
 import { Empty } from './theme';
@@ -18,6 +19,11 @@ const groupBadgeStyle: React.CSSProperties = {
   flexShrink: 0,
 };
 
+const RUN_MODE_LABELS: Record<string, string> = {
+  single_bot: '单Bot',
+  coop_group: '协作群',
+  bbs: 'bbs认领',
+};
 const subTaskBadgeStyle: React.CSSProperties = {
   padding: '2px 5px',
   borderRadius: 4,
@@ -49,13 +55,21 @@ const iconButtonStyle: React.CSSProperties = {
 
 export const NodeListView: React.FC<{
   nodes: TaskView['nodes'];
+  ownerBotId?: string | null;
+  userId?: string;
   onViewNodeDetail: (node: TaskNodeView) => void;
   onOpenSubTask?: (subTaskId: string) => void;
   onOpenGroupSession?: (node: TaskNodeView) => void;
-}> = ({ nodes, onViewNodeDetail, onOpenSubTask, onOpenGroupSession }) => {
+}> = ({ nodes, ownerBotId, userId, onViewNodeDetail, onOpenSubTask, onOpenGroupSession }) => {
   if (!nodes.length) {
     return <Empty description="暂无执行节点" />;
   }
+
+  const getConversationBotId = (node: TaskNodeView): string | null => {
+    const botId = node.assignee?.trim() || ownerBotId?.trim();
+    if (!botId) return null;
+    return botId.includes(':') || !userId ? botId : `${botId}:${userId}`;
+  };
 
   return (
     <div style={{ padding: '14px 12px 24px' }}>
@@ -63,6 +77,7 @@ export const NodeListView: React.FC<{
         const isLast = idx === nodes.length - 1;
         const canOpenSub = Boolean(node.hasSubTask && node.subTaskId && onOpenSubTask);
         const canDrillSession = Boolean(node.sessionId) && Boolean(onOpenGroupSession);
+        const runModeLabel = RUN_MODE_LABELS[node.runMode ?? ''];
         const executorLabel =
           node.runMode === 'coop_group' || node.groupId ? node.groupName ?? 'BCS协作群' : node.executor;
         const actionLabel = canOpenSub ? `打开子任务 ${node.name}` : `查看节点详情 ${node.name}`;
@@ -167,7 +182,7 @@ export const NodeListView: React.FC<{
                         whiteSpace: 'nowrap',
                       }}
                     />
-                    {canDrillSession && <span style={groupBadgeStyle}>{node.groupId ? '协作群' : '会话'}</span>}
+                    {runModeLabel && <span style={groupBadgeStyle}>{runModeLabel}</span>}
                     {canOpenSub && <span style={subTaskBadgeStyle}>子任务</span>}
                   </div>
                   <div
@@ -180,10 +195,23 @@ export const NodeListView: React.FC<{
                       fontSize: 10,
                     }}
                   >
-                    <span>{node.startedAt ?? '尚未开始'}</span>
+                    <span>{node.startedAt ?? (node.status === 'pending' ? '尚未开始' : '—')}</span>
                     {node.timeConsuming && <span>· 耗时 {node.timeConsuming}</span>}
                   </div>
                 </div>
+                {node.sessionId && getConversationBotId(node) && (
+                  <a
+                    href={getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`新开会话 ${node.name}`}
+                    title="新开页面查看会话"
+                    onClick={(event) => event.stopPropagation()}
+                    className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <ExternalLink size={14} />
+                  </a>
+                )}
                 <button
                   type="button"
                   aria-label={`查看 ${node.name} 详情`}

@@ -37,7 +37,11 @@ function notifyError(res: { ok: false; error: { friendlyMessage: string } }): vo
  * 群管理写操作的编排 Hook：更新、成员增删/退出、分享链接、钉钉机器人绑定。
  * 组件只调用此 Hook，不直接依赖 groupService/invitationService/channelBindingService。
  */
-export function useGroupManagement(groupId: string | null, onMutated: () => Promise<void>): UseGroupManagementResult {
+export function useGroupManagement(
+  groupId: string | null,
+  onMutated: () => Promise<void>,
+  enabled: boolean = true,
+): UseGroupManagementResult {
   const [dingTalkBinding, setDingTalkBinding] = useState<DingTalkBindingState>(null);
   const [dingTalkLoading, setDingTalkLoading] = useState(false);
 
@@ -54,8 +58,9 @@ export function useGroupManagement(groupId: string | null, onMutated: () => Prom
   }, [groupId]);
 
   useEffect(() => {
+    if (!enabled) return;
     void reloadDingTalk();
-  }, [reloadDingTalk]);
+  }, [enabled, reloadDingTalk]);
 
   const updateGroup = useCallback(
     async (patch: Parameters<UseGroupManagementResult['updateGroup']>[0]) => {

@@ -1,9 +1,9 @@
-import { Badge, Card, IconButton, Skeleton } from '@/components/ui';
+import { Button, Card, IconButton, Skeleton } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { GroupView, SessionView } from '@/domain/collaboration/types';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { cn } from '@/utils/cn';
-import { MoreHorizontal, Plus, Users } from 'lucide-react';
+import { LoaderCircle, MoreHorizontal, Plus, Users } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../AvatarTile';
 import { formatMonthDayTime } from '../SessionCard';
@@ -31,6 +31,11 @@ interface GroupItemProps {
   onManageGroup: (groupId: string) => void;
   /** 会话管理：打开对应会话的管理面板。 */
   onManageSession: (groupId: string, sessionId: string) => void;
+  /** 后端分页返回的总会话数；未提供时回退到已加载数量。 */
+  totalSessionCount?: number;
+  hasMoreSessions: boolean;
+  isLoadingMoreSessions: boolean;
+  onLoadMoreSessions: () => Promise<void>;
 }
 
 const KIND_LABEL: Record<GroupView['kind'], string> = {
@@ -54,6 +59,10 @@ export const GroupItem = React.memo(function GroupItem({
   onCreateSession,
   onManageGroup,
   onManageSession,
+  totalSessionCount,
+  hasMoreSessions,
+  isLoadingMoreSessions,
+  onLoadMoreSessions,
 }: GroupItemProps) {
   // 点击群卡片：选中该群并切换会话列表的展开/收起，使整个卡片可折叠。
   const handleCardClick = () => {
@@ -72,7 +81,6 @@ export const GroupItem = React.memo(function GroupItem({
   // 每群独立的 全部会话/收藏 过滤：仅过滤本群会话列表。
   const visibleSessions =
     sessionTab === 'favorite' ? safeSessions.filter((s) => favoriteSessionIds.includes(s.sessionId)) : safeSessions;
-  const favoriteCount = safeSessions.filter((s) => favoriteSessionIds.includes(s.sessionId)).length;
   // 群创建时间(MM/dd HH:mm),参照会话卡片 dateText 的展示格式;无法解析时为空串 → 不渲染。
   const createdTime = formatMonthDayTime(group.createdAt);
 
@@ -80,86 +88,91 @@ export const GroupItem = React.memo(function GroupItem({
     <>
       <div className="space-y-2">
         <Card
-          role="button"
-          tabIndex={0}
-          aria-expanded={expanded}
-          onClick={handleCardClick}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              handleCardClick();
-            }
-          }}
           className={cn(
-            'flex cursor-pointer items-center gap-3 px-3 py-3 transition-colors',
-            expanded && 'border-[var(--color-primary)] bg-[var(--color-primary-soft)]',
+            'flex items-center gap-1 rounded-lg p-1 transition-colors',
+            expanded && 'border-primary bg-primary/5',
           )}
         >
-          <AvatarTile label={group.name} />
-          <div className="min-w-0 flex-1">
-            {/* 第一行:群名称(左,可截断) + 新建/管理操作(右),与会话卡片标题行 + trailing 一致。 */}
-            <div className="flex items-center gap-1">
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-fg)]">
-                      {group.name}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>{group.name}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <div className="ml-auto flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                <IconButton
-                  label="新建会话"
-                  size="sm"
-                  icon={<Plus className="h-4 w-4" />}
-                  onClick={handleCreateSession}
-                />
-                <IconButton
-                  label="管理协作群"
-                  size="sm"
-                  icon={<MoreHorizontal className="h-4 w-4" />}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onManageGroup(group.groupId);
-                  }}
-                />
+          <Button
+            variant="ghost"
+            aria-expanded={expanded}
+            onClick={handleCardClick}
+            className="flex h-auto min-w-0 flex-1 items-center justify-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-transparent"
+          >
+            <AvatarTile label={group.name} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1">
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{group.name}</span>
+                    </TooltipTrigger>
+                    <TooltipContent>{group.name}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11px] text-muted-foreground">
+                <span className="shrink-0">{KIND_LABEL[group.kind]}</span>
+                <span aria-hidden="true" className="text-muted-foreground/50">
+                  ·
+                </span>
+                {group.membership === 'session_only' && <span className="shrink-0 text-primary">临时会话成员</span>}
+                {group.membership === 'session_only' && (
+                  <span aria-hidden="true" className="text-muted-foreground/50">
+                    ·
+                  </span>
+                )}
+                <span className="shrink-0">{group.isPublic ? '公开' : '私有'}</span>
+                <span aria-hidden="true" className="text-muted-foreground/50">
+                  ·
+                </span>
+                <span className="inline-flex min-w-0 items-center gap-0.5 truncate">
+                  <Users className="h-3 w-3 shrink-0" />
+                  {group.participantCount} 个成员
+                </span>
+                {createdTime ? (
+                  <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{createdTime}</span>
+                ) : null}
               </div>
             </div>
-            {/* 第二行:类型/可见性/成员数(左侧) + 创建时间(右侧 ml-auto),参照会话卡片副行 subtitle + date 布局。 */}
-            <div className="mt-1 flex items-center gap-1.5">
-              <Badge tone="primary">{KIND_LABEL[group.kind]}</Badge>
-              {group.isPublic ? <Badge tone="success">公开</Badge> : <Badge tone="neutral">私有</Badge>}
-              <span className="inline-flex items-center gap-0.5 text-[11px] text-[var(--color-muted)]">
-                <Users className="h-3 w-3" />
-                {group.participantCount}
-              </span>
-              {createdTime ? (
-                <span className="ml-auto shrink-0 text-[11px] text-[var(--color-muted)]">{createdTime}</span>
-              ) : null}
-            </div>
+          </Button>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <IconButton label="新建会话" size="sm" icon={<Plus className="h-4 w-4" />} onClick={handleCreateSession} />
+            <IconButton
+              label="管理协作群"
+              size="sm"
+              icon={<MoreHorizontal className="h-4 w-4" />}
+              onClick={() => onManageGroup(group.groupId)}
+            />
           </div>
         </Card>
 
         {expanded && (
           <div className="pl-3">
             <SessionTabs
+              className="w-full border-b border-border/70 pb-1"
               value={sessionTab}
-              allCount={safeSessions.length}
-              favoriteCount={favoriteCount}
+              showCount
+              countFormat="suffix"
+              allCount={totalSessionCount ?? safeSessions.length}
+              favoriteCount={safeSessions.filter((s) => favoriteSessionIds.includes(s.sessionId)).length}
               onChange={onSessionTabChange}
             />
-            <div className="mt-1.5 space-y-1.5">
+            <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
               {!loaded ? (
-                <div className="space-y-1.5 p-1">
+                <div>
                   {[1, 2, 3].map((i) => (
-                    <Skeleton.Block key={i} className="h-12 w-full rounded-xl" />
+                    <Skeleton.Block
+                      key={i}
+                      className="h-14 w-full rounded-none border-b border-border last:border-b-0"
+                    />
                   ))}
                 </div>
               ) : visibleSessions.length === 0 ? (
-                <div className="py-1.5">
-                  <span className="text-xs text-[var(--color-muted)]">暂无会话</span>
+                <div className="px-3 py-4">
+                  <span className="text-xs text-muted-foreground">
+                    {sessionTab === 'favorite' ? '暂无已收藏会话' : '暂无协作群会话'}
+                  </span>
                 </div>
               ) : (
                 visibleSessions.map((session) => (
@@ -175,6 +188,23 @@ export const GroupItem = React.memo(function GroupItem({
                 ))
               )}
             </div>
+            {hasMoreSessions && (
+              <div className="mt-2 flex justify-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isLoadingMoreSessions}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void onLoadMoreSessions();
+                  }}
+                  className="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  {isLoadingMoreSessions && <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+                  {isLoadingMoreSessions ? '正在加载…' : '加载更多'}
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>

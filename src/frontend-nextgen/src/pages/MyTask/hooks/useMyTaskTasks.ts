@@ -1,40 +1,77 @@
 import type { TaskListItem } from '@/domain/tasks/models';
-import { listMyTasks } from '@/services/myTask';
-import { TASK_LIST_PAGE_SIZE } from '@/services/tasks/taskConfig';
+import {
+  isEnvelopeFailure,
+  listMyTasks,
+  normalizeMyTaskPage,
+  runtimeStatusesFromProductFilter,
+} from '@/services/myTask';
 import { useCallback, useEffect, useState } from 'react';
+import type { UserTaskStatusFilter } from '../userTaskUtils';
 
-export function useMyTaskTasks(ownerUserId: string) {
+/**
+ * 我的任务列表查询 Hook：服务端分页 + 服务端状态过滤。
+ * statusFilter 是产品态 Tab(all/DRAFTING/DEFINED/EXECUTING/REVIEWING/DONE/FAILED/CANCELLED),
+ * 这里反查为后端运行时态集合(逗号分隔多值,SQL IN 过滤)。空集合(DRAFTING 等运行时不产生的状态)
+ * 直接短路返回空,不查后端。状态/分页变化均触发重新查询。
+ */
+export function useMyTaskTasks(
+  ownerUserId: string,
+  page: number,
+  pageSize: number,
+  statusFilter: UserTaskStatusFilter,
+) {
   const [taskRecords, setTaskRecords] = useState<TaskListItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!ownerUserId) {
       setTaskRecords([]);
+      setTotal(0);
       setError(null);
       setLoading(false);
       return;
     }
+    // 产品态 Tab → 后端运行时态集合:'all' → undefined(不过滤)；空集合(DRAFTING 等)→ 短路空。
+    const runtimeStatuses = runtimeStatusesFromProductFilter(statusFilter);
+    if (runtimeStatuses !== undefined && runtimeStatuses.length === 0) {
+      setTaskRecords([]);
+      setTotal(0);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    const statusParam = runtimeStatuses ? runtimeStatuses.join(',') : undefined;
     setLoading(true);
     setError(null);
     try {
-      const result = await listMyTasks({ owner_user_id: ownerUserId, page: 1, page_size: TASK_LIST_PAGE_SIZE });
-      if (result.code !== 200000 || !Array.isArray(result.data)) {
+      // 服务端分页 + 服务端状态过滤:page/page_size 必传；status 为运行时态逗号串(all 时不传)。
+      const result = await listMyTasks({
+        user_id: ownerUserId,
+        page,
+        page_size: pageSize,
+        status: statusParam,
+      });
+      if (isEnvelopeFailure(result) || !result.data) {
         throw new Error(result.message || '用户任务列表加载失败');
       }
-      setTaskRecords(result.data);
+      const normalized = normalizeMyTaskPage(result.data, page, pageSize);
+      setTaskRecords(normalized.items);
+      setTotal(normalized.total);
     } catch (err) {
       const message = err instanceof Error ? err.message : '用户任务列表加载失败';
       setError(message);
       setTaskRecords([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [ownerUserId]);
+  }, [ownerUserId, page, pageSize, statusFilter]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  return { taskRecords, loading, error, refresh };
+  return { taskRecords, total, loading, error, refresh };
 }

@@ -27,19 +27,18 @@ const asNumber = (value: unknown) => (typeof value === 'number' && Number.isFini
 function runtimeFrom(dto: BackendUnknownRecord, warnings: string[]): BotRuntimeDomain {
   const rawEngine = asString(dto.active_engine) ?? asString(dto.engine_type) ?? asString(dto.engine);
   const templateType = asString(dto.template_type);
-  let engine = rawEngine ?? 'unknown';
-  if (rawEngine === 'aicoding') engine = 'claudeCode';
+  const runtime = resolveBotRuntime({
+    engine: rawEngine,
+    templateType,
+    botType: asString(dto.bot_type),
+    botId: asString(dto.bot_id),
+  });
+  let engine = runtime.engine;
   const known = Boolean(engine && (PUBLIC_ENGINES.has(engine) || INTERNAL_ENGINES.has(engine) || engine === 'moltis'));
   if (!known) {
     if (rawEngine) warnings.push(`未知引擎：${rawEngine}`);
     engine = 'unknown';
   }
-  const runtime = resolveBotRuntime({
-    engine,
-    templateType,
-    botType: asString(dto.bot_type),
-    botId: asString(dto.bot_id),
-  });
   return {
     ...runtime,
     engine,
@@ -79,7 +78,7 @@ function lifecycle(dto: BackendUnknownRecord, warnings: string[]) {
   return 'unknown' as const;
 }
 
-export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string) {
+export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, currentUserId?: string) {
   const warnings: string[] = [];
   // 详情接口的内部运行时 bot_id 可能为 "default"；网关子资源必须继续使用
   // 页面地址中的 canonical Bot ID，避免编辑页后续请求串到 /bots/default/**。
@@ -91,13 +90,19 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string) {
   const botType = asString(dto.bot_type) ?? 'personal';
   const inventoryKind = asString(dto.kind);
   const entityType = asString(dto.entity_type);
-  const spaceKind = asString(space?.kind);
+  const spaceKind = asString(space?.kind)?.toLowerCase();
   const ownership =
     entityType === 'proj' || entityType === 'team' || spaceKind === 'team' ? ('team' as const) : ('personal' as const);
   const runtime = runtimeFrom(dto, warnings);
   const deployment = botType === 'desktop' ? ('local' as const) : ('cloud' as const);
   const serviceMode =
     inventoryKind === 'service' || botType === 'service' ? ('service' as const) : ('non-service' as const);
+  const lockRaw =
+    dto.edit_lock && typeof dto.edit_lock === 'object'
+      ? (dto.edit_lock as BackendUnknownRecord)
+      : dto.lock && typeof dto.lock === 'object'
+      ? (dto.lock as BackendUnknownRecord)
+      : undefined;
   const item: BotDomain = {
     id,
     ownerId,
@@ -105,6 +110,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string) {
     name: asString(dto.bot_name) ?? asString(dto.name) ?? '未命名 Bot',
     description: asString(dto.bot_desc) ?? asString(dto.description),
     spaceId,
+    spaceKind: spaceKind === 'team' ? 'team' : 'personal',
     ownership,
     deployment,
     serviceMode,
@@ -123,14 +129,15 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string) {
     healthyInstances: asNumber(dto.healthy_instances),
     totalInstances: asNumber(dto.total_instances),
     lock:
-      dto.lock && typeof dto.lock === 'object'
+      lockRaw && (lockRaw.locked === true || !('locked' in lockRaw))
         ? {
-            status: asString((dto.lock as BackendUnknownRecord).status) === 'mine' ? 'mine' : 'other',
-            holderUserId: asString((dto.lock as BackendUnknownRecord).holder_user_id),
-            holderName: asString((dto.lock as BackendUnknownRecord).holder_name),
-            lockedAt:
-              asString((dto.lock as BackendUnknownRecord).locked_at) ??
-              asString((dto.lock as BackendUnknownRecord).created_at),
+            status:
+              asString(lockRaw.holder_user_id) === currentUserId || asString(lockRaw.status) === 'mine'
+                ? 'mine'
+                : 'other',
+            holderUserId: asString(lockRaw.holder_user_id),
+            holderName: asString(lockRaw.holder_name),
+            lockedAt: asString(lockRaw.locked_at) ?? asString(lockRaw.created_at),
           }
         : undefined,
     completeness: warnings.length ? 'partial' : 'complete',
@@ -150,8 +157,8 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string) {
   return { item, warnings };
 }
 
-export function mapBotList(page?: BackendApiPage<BackendUnknownRecord>) {
-  const results = (page?.items ?? []).map((dto) => mapBotDto(dto));
+export function mapBotList(page?: BackendApiPage<BackendUnknownRecord>, currentUserId?: string) {
+  const results = (page?.items ?? []).map((dto) => mapBotDto(dto, undefined, currentUserId));
   return {
     items: results.map((result) => result.item),
     total: page?.total,

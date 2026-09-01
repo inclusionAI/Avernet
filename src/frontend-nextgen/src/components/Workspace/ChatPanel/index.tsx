@@ -1,6 +1,7 @@
 import { Headphones, RefreshCw, Sparkles } from 'lucide-react';
 
-import { Badge, Empty, Spin } from '@/components/ui';
+import { Avatar, Badge, Empty, Spin } from '@/components/ui';
+import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationTarget, SupportChatState } from '@/services/workspace/workspaceModel';
 import { formatChatTime } from '@/utils/format';
 import type { ProviderConnectionStatus } from '@tc-chat/adapters';
@@ -15,6 +16,10 @@ import { useEffect, type ReactNode, type RefObject } from 'react';
 
 interface Props {
   target: ConversationTarget | null;
+  /** 当前查看身份，用于在消息区展示真实发送者名称，避免使用有歧义的「你」。 */
+  viewer?: IdentityView | null;
+  /** 顶栏当前登录用户头像；用户消息优先复用此头像，与 Bot 消息保持区分。 */
+  userAvatarUrl?: string;
   messages: ChatMessage[];
   isRequesting: boolean;
   isLoadingMessages: boolean;
@@ -58,8 +63,38 @@ function getMessageBlocks(message: ChatMessage): Block[] {
   return message.content ? ([{ type: 'text', content: message.content }] as TextBlock[]) : [];
 }
 
+function renderUserAvatar(name: string, avatarUrl?: string) {
+  return <Avatar name={name} src={avatarUrl} size={32} />;
+}
+
+function renderAvatar(name: string, avatarUrl?: string, fallbackAvatar?: string) {
+  if (avatarUrl) {
+    return <img src={avatarUrl} alt={name} className="h-8 w-8 shrink-0 rounded-lg object-cover" />;
+  }
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground">
+      {fallbackAvatar || name.charAt(0)}
+    </span>
+  );
+}
+
+export function resolveSingleSender(
+  message: ChatMessage,
+  target: ConversationTarget,
+  viewer?: IdentityView | null,
+  userAvatarUrl?: string,
+): { name: string; avatar: ReactNode } {
+  if (message.role === 'assistant') {
+    return { name: target.name || '未命名 Bot', avatar: renderAvatar(target.name || 'Bot', undefined, target.avatar) };
+  }
+  const name = viewer?.displayName || '未命名成员';
+  return { name, avatar: renderUserAvatar(name, userAvatarUrl ?? viewer?.avatarUrl) };
+}
+
 export function ChatPanel({
   target,
+  viewer,
+  userAvatarUrl,
   messages,
   isRequesting,
   isLoadingMessages,
@@ -92,10 +127,12 @@ export function ChatPanel({
 
   if (!target) {
     return (
-      <section className="flex min-w-0 flex-1 items-center justify-center bg-white">
+      <section className="flex min-w-0 flex-1 items-center justify-center bg-background">
         <Empty
           title="欢迎进入 TeamClaw 对话现场"
-          description="这里承接你与用户、Bot 的即时协作沟通。请选择一个对话，开始当前交流。"
+          description={`${
+            viewer?.displayName || '当前查看身份'
+          }可在这里与用户、Bot进行即时协作沟通。请选择一个对话，开始当前交流。`}
           icon={<Sparkles className="h-5 w-5" />}
         />
       </section>
@@ -127,12 +164,13 @@ export function ChatPanel({
   };
 
   return (
-    <section className="min-w-0 flex-1 bg-white">
-      <ChatLayout className="h-full">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+      <ChatLayout className="min-h-0 flex-1">
         <ChatLayout.Header
+          className="flex h-16 border-b border-border bg-card px-3 sm:px-5"
           slotLeft={
             <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-primary)] text-sm font-semibold text-white">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-semibold text-primary-foreground">
                 {target.avatar}
               </span>
               <div className="min-w-0">
@@ -140,7 +178,7 @@ export function ChatPanel({
                   <h2 className="m-0 truncate text-sm font-semibold">{target.name}</h2>
                   <Badge tone={connectionCopy.tone}>{connectionCopy.label}</Badge>
                 </div>
-                <p className="m-0 mt-0.5 truncate text-xs text-[var(--color-muted)]">{target.summary}</p>
+                <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">{target.summary}</p>
               </div>
             </div>
           }
@@ -152,7 +190,7 @@ export function ChatPanel({
           </div>
         ) : (
           <ChatLayout.List
-            className="px-6 py-4"
+            className="px-3 py-3 sm:px-6 sm:py-4"
             messages={messages}
             computeItemKey={(message) => message.id}
             isStreaming={isRequesting}
@@ -162,20 +200,16 @@ export function ChatPanel({
                 return <SystemNotice>{message.content}</SystemNotice>;
               }
               const isLastMessage = index === messages.length - 1;
+              const sender = resolveSingleSender(message, target, viewer, userAvatarUrl);
               return (
                 <Bubble
-                  className={message.role === 'user' ? 'mb-3 pr-4' : 'mb-3'}
+                  className="mb-3 [--aix-markdown-font-size:12px] [--aix-font-size-base:12px]"
                   sender={{
                     role: message.role,
-                    name: message.role === 'assistant' ? target.name : undefined,
-                    // bot 回复补左侧气泡底色;user 右侧气泡沿用 SDK 默认色。
-                    bubbleColor: message.role === 'assistant' ? 'var(--color-chat-bubble-bot)' : undefined,
-                    avatar:
-                      message.role === 'assistant' ? (
-                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-primary)] text-xs font-semibold text-white">
-                          {target.avatar}
-                        </span>
-                      ) : undefined,
+                    align: 'left',
+                    name: sender.name,
+                    avatar: sender.avatar,
+                    maxWidth: '48rem',
                   }}
                   timestamp={getMessageTime(message)}
                   blocks={getMessageBlocks(message)}
@@ -192,10 +226,10 @@ export function ChatPanel({
         {/* 单聊输入框用原生 <Sender>(forwardRef,暴露 SenderRef)替代 <ChatLayout.Sender>(普通函数组件,非 forwardRef,
             ref 恒 null)。ref={senderRef} 经 useChatBridge.setInputRef 注册到全局桥,使 aixcore 卡片
             bridge.getInputRef().insert(text) 填入主屏输入框(根因 5 修复,对齐 open-claw ChatInputArea)。 */}
-        <div className="shrink-0 p-4">
+        <div className="shrink-0 border-t border-border bg-background px-3 py-3 sm:px-6 sm:py-4">
           <Sender
             ref={senderRef as React.Ref<SenderRef>}
-            className="mx-2"
+            className="w-full"
             value={draft}
             onChange={onDraftChange}
             onSubmit={submit}
@@ -214,7 +248,7 @@ export function ChatPanel({
                     {fileToolbar}
                     {modelSelector}
                     {connectionCopy.detail ? (
-                      <span className="flex items-center gap-1.5 text-xs text-[var(--color-muted)]">
+                      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Headphones className="h-3.5 w-3.5" />
                         {connectionCopy.detail}
                       </span>

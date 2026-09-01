@@ -96,7 +96,7 @@ export const BotSessionItem = React.memo(function BotSessionItem({
       <SessionCard
         title={session.title}
         subtitle={session.messageCount > 0 ? `${session.messageCount} 条消息` : '暂无消息'}
-        dateText={formatMonthDayTime(session.gmtCreate)}
+        dateText={formatMonthDayTime(session.gmtModified || session.gmtCreate)}
         selected={selected}
         onSelect={() => onSelect(session.sessionId)}
         trailing={
@@ -120,9 +120,7 @@ export const BotSessionItem = React.memo(function BotSessionItem({
                   disabled={favoriteToggling}
                   onClick={() => void handleToggleFavorite()}
                 >
-                  <Star
-                    className={cn('h-3.5 w-3.5', favorite && 'fill-[var(--color-warning)] text-[var(--color-warning)]')}
-                  />
+                  <Star className={cn('h-3.5 w-3.5', favorite && 'fill-warning text-warning')} />
                   {favorite ? '取消收藏' : '收藏会话'}
                 </Button>
                 <Button
@@ -135,7 +133,7 @@ export const BotSessionItem = React.memo(function BotSessionItem({
                 </Button>
                 <Button
                   variant="ghost"
-                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs text-[var(--color-error)]"
+                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs text-destructive"
                   onClick={startDelete}
                 >
                   <Trash2 className="h-3.5 w-3.5" />

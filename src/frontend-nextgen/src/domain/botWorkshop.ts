@@ -33,6 +33,8 @@ export interface BotDomain {
   name: string;
   description?: string;
   spaceId?: string;
+  /** 授权能力只跟随接口返回的 Bot 所属空间类型，不从 Bot 类型或部署形态推断。 */
+  spaceKind: BotOwnership;
   ownership: BotOwnership;
   deployment: BotDeployment;
   serviceMode: BotServiceMode;
@@ -52,6 +54,7 @@ export interface BotDomain {
 }
 
 export interface BotListQuery {
+  currentUserId?: string;
   spaceId?: string;
   keyword?: string;
   engine?: string;
@@ -129,6 +132,8 @@ export type BotAction =
   | 'claim-lock'
   | 'authorize'
   | 'health-check';
+
+export type BotInventoryAction = 'view' | 'chat' | 'edit' | 'delete' | 'restart' | 'engine_restart' | 'upgrade';
 
 export interface BotActionAvailability {
   action: BotAction;

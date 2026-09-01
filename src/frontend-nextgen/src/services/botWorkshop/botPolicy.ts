@@ -1,3 +1,4 @@
+import type { BotInventoryAction } from '@/domain/botWorkshop';
 import type { BotAction, BotActionAvailability, BotDomain } from './types';
 
 export interface BotPolicyContext {
@@ -67,4 +68,31 @@ export function getBotActionAvailability(bot: BotDomain, context: BotPolicyConte
     }
     return { action, visible, enabled, disabledReason, dangerous: ['offline', 'restart'].includes(action) };
   });
+}
+
+export function getInventoryActionAvailability(bot: BotDomain, action: BotInventoryAction): BotActionAvailability {
+  const backendReason = bot.disabledActions[action];
+  const declaredEnabled = bot.actions.includes(action);
+  const visible = declaredEnabled || Boolean(backendReason);
+  if (!visible) return { action: action as BotAction, visible: false, enabled: false };
+  if (bot.lock?.status === 'other' && ['edit', 'restart'].includes(action)) {
+    return {
+      action: action as BotAction,
+      visible: true,
+      enabled: false,
+      disabledReason: '该 Bot 正被他人编辑，请先抢锁',
+    };
+  }
+  return {
+    action: action as BotAction,
+    visible: true,
+    enabled: declaredEnabled,
+    disabledReason: declaredEnabled ? undefined : backendReason,
+  };
+}
+
+export function getBotCollaborationMode(bot: BotDomain, isOwner: boolean): 'authorize' | 'request' | undefined {
+  if (bot.spaceKind !== 'team') return undefined;
+  if (isOwner) return 'authorize';
+  return bot.actions.includes('edit') ? undefined : 'request';
 }

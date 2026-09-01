@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { MessageCircle } from 'lucide-react';
 import React from 'react';
@@ -39,9 +40,11 @@ interface SessionCardProps {
   onSelect: () => void;
   /** 右侧操作区(收藏等),由调用方决定可见性。 */
   trailing?: React.ReactNode;
+  /** 调用方可按列表场景补充尺寸；不改变卡片的交互语义。 */
+  className?: string;
 }
 
-/** 会话协作卡片:左侧「会话」角标 + 标题/副行 + 日期;选中态浅蓝底、蓝边与左侧蓝色指示条。 */
+/** 会话列表项:左侧会话图标 + 标题/副行 + 日期;选中态浅蓝底与左侧蓝色指示条。 */
 export const SessionCard = React.memo(function SessionCard({
   title,
   subtitle = '暂无会话预览',
@@ -49,68 +52,47 @@ export const SessionCard = React.memo(function SessionCard({
   selected,
   onSelect,
   trailing,
+  className,
 }: SessionCardProps) {
-  const handleClick = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    onSelect();
-  };
-
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected}
-      onClick={handleClick}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          onSelect();
-        }
-      }}
       className={cn(
-        'group relative flex cursor-pointer items-center gap-2.5 rounded-xl border bg-[var(--color-card)] px-3 py-2.5 text-sm transition-colors',
-        selected
-          ? 'border-transparent bg-[var(--color-primary-soft)]'
-          : 'border-[var(--color-border)] hover:border-[var(--color-primary-weak)]',
+        'group relative flex min-h-12 items-center border-b border-border/70 text-sm transition-colors last:border-b-0',
+        selected ? 'bg-primary/5' : 'bg-card hover:bg-accent/50',
+        className,
       )}
     >
       {selected && (
+        <span aria-hidden="true" className="absolute bottom-2 left-0 top-2 z-10 w-[3px] rounded-r-sm bg-primary" />
+      )}
+      <Button
+        variant="ghost"
+        aria-pressed={selected}
+        onClick={onSelect}
+        className="flex h-auto min-h-12 min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-2.5 py-1.5 text-left hover:bg-transparent focus-visible:z-10"
+      >
         <span
           aria-hidden="true"
-          className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-[var(--color-primary)]"
-        />
-      )}
-      <span
-        aria-hidden="true"
-        className={cn(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
-          selected
-            ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-            : 'bg-[var(--color-panel-strong)] text-[var(--color-muted)]',
-        )}
-      >
-        <MessageCircle className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        {/* 第一行：标题 + 横点操作 */}
-        <div className="flex items-center gap-1">
-          <span
-            className={cn(
-              'truncate text-[13px] font-medium',
-              selected ? 'text-[var(--color-primary)]' : 'text-[var(--color-fg)]',
-            )}
-          >
-            {title}
-          </span>
-          {trailing && <div className="ml-auto flex shrink-0 items-center">{trailing}</div>}
+          className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-md',
+            selected ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
+          )}
+        >
+          <MessageCircle className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1">
+            <span className={cn('truncate text-[13px] font-medium', selected ? 'text-primary' : 'text-foreground')}>
+              {title}
+            </span>
+          </div>
+          <div className="mt-0.5 flex items-center gap-1">
+            {subtitle && <span className="truncate text-xs leading-5 text-muted-foreground">{subtitle}</span>}
+            {dateText && <span className="ml-auto shrink-0 text-xs leading-5 text-muted-foreground">{dateText}</span>}
+          </div>
         </div>
-        {/* 第二行：消息数/成员数 + 时间右对齐 */}
-        <div className="mt-0.5 flex items-center gap-1">
-          {subtitle && <span className="truncate text-xs leading-5 text-[var(--color-muted)]">{subtitle}</span>}
-          {dateText && <span className="ml-auto shrink-0 text-xs leading-5 text-[var(--color-muted)]">{dateText}</span>}
-        </div>
-      </div>
+      </Button>
+      {trailing && <div className="flex shrink-0 items-start pr-2 pt-2">{trailing}</div>}
     </div>
   );
 });

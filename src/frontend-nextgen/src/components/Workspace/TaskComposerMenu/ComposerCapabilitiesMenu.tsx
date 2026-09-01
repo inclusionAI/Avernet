@@ -43,12 +43,12 @@ const MenuRow = React.forwardRef<
     disabled={disabled}
     onMouseEnter={onMouseEnter}
     onMouseLeave={onMouseLeave}
-    leftIcon={<span className="text-[var(--color-primary)]">{icon}</span>}
+    leftIcon={<span className="text-primary">{icon}</span>}
     className="h-auto w-full justify-start px-3 py-2 text-left"
   >
     <span className="flex flex-col">
-      <span className="font-medium text-[var(--color-fg)]">{label}</span>
-      <span className="text-xs text-[var(--color-muted)]">{desc}</span>
+      <span className="font-medium text-foreground">{label}</span>
+      <span className="text-xs text-muted-foreground">{desc}</span>
     </span>
   </Button>
 ));
@@ -71,12 +71,12 @@ function WorkflowListView({
   return (
     <div className="flex flex-col gap-1">
       <div className="relative px-1 pb-1">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-muted)]" />
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索工作流" className="h-7 pl-8 text-xs" />
       </div>
-      {loading && <p className="px-3 py-2 text-xs text-[var(--color-muted)]">加载中…</p>}
+      {loading && <p className="px-3 py-2 text-xs text-muted-foreground">加载中…</p>}
       {!loading && filtered.length === 0 && (
-        <p className="px-3 py-2 text-xs text-[var(--color-muted)]">
+        <p className="px-3 py-2 text-xs text-muted-foreground">
           {keyword ? '无匹配工作流' : '未加载到工作流，请确认 Bot 可用工作流'}
         </p>
       )}
@@ -87,7 +87,7 @@ function WorkflowListView({
           onClick={() => onPick(w)}
           className="h-auto justify-start px-3 py-2 text-left"
         >
-          <span className="font-medium text-[var(--color-fg)] text-xs">{w.title}</span>
+          <span className="font-medium text-foreground text-xs">{w.title}</span>
         </Button>
       ))}
     </div>
@@ -272,9 +272,7 @@ export function ComposerCapabilitiesMenu({
             workflowsLoading={execution.workflowsLoading}
             onWorkflowHover={() => void execution.loadWorkflows()}
           />
-          {disabled && disabledReason && (
-            <p className="mt-1 px-2 text-xs text-[var(--color-error)]">{disabledReason}</p>
-          )}
+          {disabled && disabledReason && <p className="mt-1 px-2 text-xs text-destructive">{disabledReason}</p>}
         </PopoverContent>
       </Popover>
 

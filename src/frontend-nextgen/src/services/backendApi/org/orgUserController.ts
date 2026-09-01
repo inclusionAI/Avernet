@@ -22,11 +22,12 @@ export interface OrgUserDto {
   dept_path: string;
 }
 
-/** 查询当前登录用户的组织信息（协作权限页 currentUser 数据源）。 */
-export function getOrgUser(signal?: AbortSignal) {
+/** 查询指定用户工号的组织信息（协作权限页 currentUser 数据源）。 */
+export function getOrgUser(userId: string, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<OrgUserDto>>(ORG_USER_ENDPOINTS.user, {
     method: 'GET',
-    // 该接口返回当前会话用户，凭 IAM_TOKEN cookie 鉴权，无需 user_id
+    params: { user_id: userId },
+    // user_id 是该接口的显式必填参数，不依赖全局身份注入。
     injectUserId: false,
     signal,
   });

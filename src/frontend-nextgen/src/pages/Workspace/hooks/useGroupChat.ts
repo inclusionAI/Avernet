@@ -1,5 +1,4 @@
 import type { SessionView } from '@/domain/collaboration';
-import { queryAndRegisterManifestLibraryCdn } from '@/services/bcs/libraryCdnInjector';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import { createGroupChatProvider, type GroupChatState } from '@/services/workspace/groupChatProvider';
@@ -15,6 +14,7 @@ import {
   buildGroupChatBridgeRequest,
   buildGroupUserMessageExtra,
 } from './groupChatRequestBuilder';
+import { useManifestHistoryLoader } from './useManifestHistoryLoader';
 
 /**
  * useGroupChat —— 协作群对话 Hook。
@@ -34,6 +34,9 @@ import {
  */
 export function useGroupChat(session: SessionView | null) {
   const identityId = useWorkspaceStore((s) => s.activeIdentityId);
+  const activeIdentity = useWorkspaceStore(
+    (s) => s.identities.find((identity) => identity.id === s.activeIdentityId) ?? null,
+  );
   const historyRefreshNonce = useWorkspaceStore((s) => s.historyRefreshNonce);
   const sessionId = session?.sessionId ?? null;
   const groupId = session?.groupId ?? null;
@@ -81,7 +84,12 @@ export function useGroupChat(session: SessionView | null) {
     chat,
     panelRef,
     inputRef: inputRef as RefObject<BridgeInputRef | null>,
-    buildRequestParams: (content, extra) => buildGroupChatBridgeRequest(sessionId ?? '', content, extra),
+    buildRequestParams: (content, extra) =>
+      buildGroupChatBridgeRequest(sessionId ?? '', content, extra, {
+        senderId: activeIdentity?.id ?? undefined,
+        senderName: activeIdentity?.displayName ?? undefined,
+        senderAvatarUrl: activeIdentity?.avatarUrl,
+      }),
   });
 
   // Provider 生命周期：仅在 sessionId 真正变化时 connect，stop 旧会话 disconnect。
@@ -114,41 +122,14 @@ export function useGroupChat(session: SessionView | null) {
     };
   }, [provider]);
 
-  // 副屏方式②数据桥：进入协作群会话即拉 BCS manifest，写 window.aixLibraryCdnMap，
-  // 供引擎 resolveBusinessEntry 把 <AixUI component="lib.X"> 的 lib 名解析成 CDN URL（对应 ocb GroupChatPage）。
-  // 不阻塞会话主流程（拉取失败引擎侧方式②不可用，不影响消息收发与方式①③）。
-  useEffect(() => {
-    if (!sessionId) return;
-    void queryAndRegisterManifestLibraryCdn();
-  }, [sessionId]);
-
-  // 每次切换会话（sessionId 或 provider 变化）显式拉取历史消息并灌入 SDK chat。
-  // loadHistory 内部调用 GET /openapi/v1/collaboration/sessions/{sid}/messages，
-  // 并在加载期间切换 supportState.phase（loading-history → ready/idle）供 UI 展示骨架。
-  useEffect(() => {
-    if (!provider || !sessionId) return;
-    let cancelled = false;
-    // 切换会话：重置向上翻页状态，避免旧会话的 hasMore / loading 残留到新会话。
-    setHasMoreHistory(false);
-    setIsLoadingMoreHistory(false);
-    provider
-      .loadHistory()
-      .then((history: ChatMessage[]) => {
-        if (cancelled) return;
-        chat.setMessages(history);
-        if (!cancelled) setHasMoreHistory(provider.hasMoreHistory);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        toast.error(error instanceof Error ? error.message : '加载历史消息失败');
-      });
-    return () => {
-      cancelled = true;
-    };
-    // chat.setMessages 来自 useChat，回调引用稳定（useCallback）；不纳入依赖避免重复触发。
-    // historyRefreshNonce：点击会话 tab 时递增，即使是同一会话也强制重新拉取历史。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, sessionId, historyRefreshNonce]);
+  useManifestHistoryLoader({
+    provider,
+    sessionId,
+    historyRefreshNonce,
+    setHasMoreHistory,
+    setIsLoadingMoreHistory,
+    setMessages: chat.setMessages,
+  });
 
   const send = (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => {
     const hasText = text.trim().length > 0;
@@ -165,7 +146,11 @@ export function useGroupChat(session: SessionView | null) {
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
       userMessage: {
         content: trimmed,
-        extra: buildGroupUserMessageExtra(echoAttachments),
+        extra: buildGroupUserMessageExtra(echoAttachments, {
+          senderId: activeIdentity?.id ?? undefined,
+          senderName: activeIdentity?.displayName ?? undefined,
+          senderAvatarUrl: activeIdentity?.avatarUrl,
+        }),
       },
     });
   };
@@ -225,9 +210,21 @@ export function useGroupChat(session: SessionView | null) {
   // 副屏 <AixUI> 直发 chat.onRequest 绕开全局桥 last-wins（修复群 execute 串到单聊 bot），等价桥路径 + isInject 静默。
   const submitPanelMessage = useCallback(
     (content: string) => {
-      if (sessionId) chat.onRequest(buildGroupChatBridgeRequest(sessionId, content, { isInject: true }));
+      if (sessionId)
+        chat.onRequest(
+          buildGroupChatBridgeRequest(
+            sessionId,
+            content,
+            { isInject: true },
+            {
+              senderId: activeIdentity?.id ?? undefined,
+              senderName: activeIdentity?.displayName ?? undefined,
+              senderAvatarUrl: activeIdentity?.avatarUrl,
+            },
+          ),
+        );
     },
-    [chat, sessionId],
+    [activeIdentity, chat, sessionId],
   );
 
   return {

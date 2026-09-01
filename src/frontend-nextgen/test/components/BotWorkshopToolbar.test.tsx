@@ -19,6 +19,7 @@ it('服务类型下拉提供可清除条件的默认项', async () => {
       onDeploymentChange={jest.fn()}
       onServiceModeChange={onServiceModeChange}
       onCreateCloud={jest.fn()}
+      onReset={jest.fn()}
     />,
   );
 

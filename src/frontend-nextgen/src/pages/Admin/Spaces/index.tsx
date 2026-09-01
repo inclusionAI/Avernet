@@ -41,41 +41,47 @@ export function AdminSpacesView() {
 
   return (
     <div className="mx-auto max-w-[1200px]">
-      {/* 顶部工具条：搜索框（图标 + 一键清空）+ 创建空间 右对齐紧挨 */}
-      <div className="mb-6 flex items-center justify-end gap-3">
-        <div className="relative">
-          <Search
-            size={14}
-            aria-hidden
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            className="h-8 w-56 pl-8 pr-7"
-            placeholder="搜索空间名称..."
-            value={keyword}
-            onChange={(e) => onKeywordChange(e.target.value)}
-            aria-label="搜索空间"
-          />
-          {keyword && (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="清空搜索"
-              className="absolute right-0.5 top-1/2 h-6 w-6 -translate-y-1/2 text-muted-foreground"
-              onClick={() => onKeywordChange('')}
-            >
-              <X size={14} />
-            </Button>
-          )}
+      {/* §4.1 精简版 PageHeader：左 h1＋副文案，右操作区（搜索 + 唯一主按钮「创建空间」） */}
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">空间管理</h1>
+          <p className="mt-1 text-xs text-muted-foreground">管理你已加入及可申请的团队空间</p>
         </div>
-        <Button variant="primary" size="sm" leftIcon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>
-          创建空间
-        </Button>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search
+              size={14}
+              aria-hidden
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              className="h-9 w-64 pl-8 pr-7"
+              placeholder="搜索空间名称..."
+              value={keyword}
+              onChange={(e) => onKeywordChange(e.target.value)}
+              aria-label="搜索空间"
+            />
+            {keyword && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="清空搜索"
+                className="absolute right-0.5 top-1/2 h-6 w-6 -translate-y-1/2 text-muted-foreground"
+                onClick={() => onKeywordChange('')}
+              >
+                <X size={14} />
+              </Button>
+            )}
+          </div>
+          <Button variant="primary" leftIcon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>
+            创建空间
+          </Button>
+        </div>
       </div>
 
       {/* 列表 */}
       {loading ? (
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton.Card key={i} />
           ))}
@@ -100,7 +106,7 @@ export function AdminSpacesView() {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {items.map((space) => (
             <SpaceCard
               key={space.spaceId || space.spaceCode}

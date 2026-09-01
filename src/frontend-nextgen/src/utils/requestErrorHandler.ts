@@ -107,3 +107,28 @@ export function normalizeRequestError(
     raw: error,
   };
 }
+
+/** 稳定字符串哈希(djb2),仅用于生成 toastKey,非加密用途。 */
+export function hashString(input: string): string {
+  let hash = 5381;
+  for (let i = 0; i < input.length; i += 1) {
+    hash = ((hash << 5) + hash + input.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(16);
+}
+
+export interface ToastKeyInput {
+  apiPath: string;
+  operation?: string;
+  message?: string;
+}
+
+/**
+ * 构建错误提示去重键(global-error-notify-dedup D3):`req:<apiPath>:<operation | hash(message)>`。
+ * 含 operation 保证「同接口跨不同操作」的独立失败不被误合并;缺省用 message 哈希兜底,兼容未传 operation 的存量调用。
+ * 纯函数、无 React/DOM 依赖,可被 service/协议层(通道 B `backendRequest`、通道 A `requestConfig`)安全引用。
+ */
+export function buildToastKey({ apiPath, operation, message }: ToastKeyInput): string {
+  const tail = operation ?? hashString(message ?? '');
+  return `req:${apiPath}:${tail}`;
+}

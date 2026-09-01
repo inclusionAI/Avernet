@@ -1,6 +1,21 @@
 import { Badge } from '@/components/ui/Badge';
+import type { TaskStatus } from '@/domain/tasks/models';
 import { normalizeTaskStatus } from '@/domain/tasks/status';
 
+export const userTaskStatusOptions = [
+  { label: '全部状态', value: 'all' },
+  { label: '待定义', value: 'DRAFTING' },
+  { label: '已定义', value: 'DEFINED' },
+  { label: '执行中', value: 'EXECUTING' },
+  { label: '待验收', value: 'REVIEWING' },
+  { label: '已完成', value: 'DONE' },
+  { label: '失败', value: 'FAILED' },
+  { label: '已取消', value: 'CANCELLED' },
+] as const satisfies readonly { label: string; value: TaskStatus | 'all' }[];
+
+export type UserTaskStatusFilter = (typeof userTaskStatusOptions)[number]['value'];
+
+// 兼容旧的本地分组筛选工具/测试；用户任务页面筛选下拉使用 userTaskStatusOptions。
 export const userTabOptions = [
   { label: '全部', value: 'all' },
   { label: '进行中', value: 'progress' },
@@ -52,6 +67,16 @@ const sourceTypeLabelMap: Record<string, string> = {
   coop_group: '协作群',
   api: 'API 发起',
 };
+
+export function getBotDisplayName(
+  botNameMap: Record<string, string>,
+  botId?: string | null,
+  fallbackName?: string,
+): string {
+  const normalizedBotId = botId?.trim();
+  if (!normalizedBotId) return fallbackName || '—';
+  return botNameMap[normalizedBotId.toLowerCase()] || fallbackName || normalizedBotId;
+}
 
 export function formatDateTime(value?: string | null): string {
   if (!value) return '—';
@@ -107,6 +132,17 @@ export function getUserTaskTitle(record: any): string {
   return record.task_spec?.metadata?.title || record.task_id;
 }
 
-export function getUserTaskDescription(record: any): string {
-  return record.task_spec?.metadata?.instruction || record.task_spec?.goal?.objective || '—';
+export function getUserTaskGoal(record: any): string {
+  return record.task_spec?.goal?.objective || '—';
+}
+
+export function getUserTaskAcceptanceText(record: any): string {
+  const acceptances = record.task_spec?.goal?.acceptances;
+  if (!Array.isArray(acceptances) || acceptances.length === 0) return '—';
+  return acceptances
+    .map((item: { description?: string; acceptance?: string } | string) =>
+      typeof item === 'string' ? item : item.description || item.acceptance || '',
+    )
+    .filter(Boolean)
+    .join('；');
 }

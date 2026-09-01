@@ -1,9 +1,9 @@
 // 空间卡片（对齐 PRD Teamclaw_PRD_new/src/pages/Admin/index.tsx 空间管理）：
-// - 标题行：图标(team Users 18/team=primary/个人=brand 紫) + 名称 semibold；右侧类型+状态 tag(当前空间时叠加显示)
+// - 标题行：图标(team Users 18/team=primary/个人=muted) + 名称 semibold；右侧类型+状态 tag(当前空间时叠加显示)
 // - 统计块：成员 / 更新时间 / 创建者 三列（直接展示创建者花名，无类型条件），muted 底，分隔线，label 上 / 值 下
 //   （后端 space 列表不再返回 bot_count，故改展示更新时间；创建者为花名字符串，更新时间为相对时间字符串）
 // - 操作：当前/已加入无按钮(整卡可点进详情)；未加入团队=申请加入(primary, block)；申请中=申请中(disabled)
-// - 当前空间高亮：info 边 + soft 外发光；hover 2px lift。
+// - 当前空间高亮：primary 边 + soft 外发光；hover 2px lift。
 import { Button } from '@/components/ui';
 import type { Space } from '@/domain/admin/models';
 import { cn } from '@/utils/cn';
@@ -25,7 +25,7 @@ function Tags({ space, isCurrent }: { space: Space; isCurrent?: boolean }) {
   const isMember = space.currentUserRole === 'ADMIN' || space.currentUserRole === 'MEMBER';
   const membership =
     space.spaceType === 'PERSONAL' ? (
-      <Tag tone="purple">个人</Tag>
+      <Tag>个人</Tag>
     ) : isMember ? (
       <Tag tone="green">已加入</Tag>
     ) : space.joinStatus === 'APPLYING' ? (
@@ -66,16 +66,15 @@ export function SpaceCard({ space, isCurrent, onOpenDetail, onRequestJoin }: Spa
   const [joinOpen, setJoinOpen] = useState(false);
   const cardClickable = isMember || space.spaceType === 'TEAM';
   const Icon = space.spaceType === 'PERSONAL' ? User : Users;
-  const iconColor = space.spaceType === 'PERSONAL' ? 'text-brand' : 'text-[var(--color-primary)]';
+  const iconColor = space.spaceType === 'PERSONAL' ? 'text-muted-foreground' : 'text-primary';
 
   return (
     <>
       <section
         className={cn(
-          'group flex h-full flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-sm transition-all duration-200 ease-out',
-          cardClickable &&
-            'cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:border-[var(--color-primary)]/40',
-          isCurrent && 'border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]/20',
+          'group flex h-full flex-col gap-4 rounded-lg border border-border bg-card p-6 shadow-sm transition-all duration-200 ease-out',
+          cardClickable && 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:border-primary/40',
+          isCurrent && 'border-primary ring-1 ring-primary/20',
         )}
         onClick={cardClickable ? () => onOpenDetail?.(space) : undefined}
         role={cardClickable ? 'button' : undefined}
@@ -93,9 +92,7 @@ export function SpaceCard({ space, isCurrent, onOpenDetail, onRequestJoin }: Spa
             <span
               className={cn(
                 'inline-flex size-9 shrink-0 items-center justify-center rounded-lg transition-colors',
-                space.spaceType === 'PERSONAL'
-                  ? 'bg-brand/10 group-hover:bg-brand/15'
-                  : 'bg-[var(--color-primary)]/10 group-hover:bg-[var(--color-primary)]/15',
+                space.spaceType === 'PERSONAL' ? 'bg-muted' : 'bg-primary/10 group-hover:bg-primary/15',
               )}
               aria-hidden
             >

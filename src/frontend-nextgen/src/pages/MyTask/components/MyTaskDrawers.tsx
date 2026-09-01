@@ -24,12 +24,12 @@ export interface MyTaskDrawersProps {
   historyLoading: boolean;
   historyError: string | null;
   onOpenRoutineFromHistory: (botId: string, routineId: string) => void;
+  botNameMap: Record<string, string>;
 }
 
 export function MyTaskDrawers({
   selectedTaskId,
   onCloseTask,
-  taskRecords,
   ownerUserId,
   selectedRoutine,
   selectedRoutineKey,
@@ -43,20 +43,19 @@ export function MyTaskDrawers({
   historyLoading,
   historyError,
   onOpenRoutineFromHistory,
+  botNameMap,
 }: MyTaskDrawersProps) {
-  const selectedTask = taskRecords.find((item) => item.task_id === selectedTaskId) ?? null;
-
   return (
     <>
       <Drawer open={Boolean(selectedTaskId)} onOpenChange={(open) => !open && onCloseTask()}>
-        <DrawerContent side="right" size="full" className="p-0">
-          <div className="-m-6 h-[calc(100%+3rem)]">
-            {selectedTask ? (
+        <DrawerContent side="right" size="full" className="overflow-hidden bg-background p-0" bodyClassName="p-0">
+          <div className="h-full min-h-0">
+            {selectedTaskId ? (
               <TaskPanel
                 apiBaseUrl={TASK_API_BASE}
                 bcsBaseUrl=""
                 userId={ownerUserId}
-                taskId={selectedTask.task_id}
+                taskId={selectedTaskId}
                 style={{ height: '100%', minHeight: 0 }}
               />
             ) : (
@@ -75,6 +74,7 @@ export function MyTaskDrawers({
         selectedRoutineRuns={selectedRoutineRuns}
         selectedRoutineRunsLoading={selectedRoutineRunsLoading}
         selectedRoutineRunsError={selectedRoutineRunsError}
+        botNameMap={botNameMap}
       />
 
       <MyTaskRoutineHistoryDrawer

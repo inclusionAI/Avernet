@@ -2,6 +2,7 @@ import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
 import { sessionService } from '@/services/workspace/sessionService';
+import type { Identity } from '@/services/workspace/workspaceModel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React, { useState } from 'react';
 import { toast } from 'sonner';
@@ -23,6 +24,12 @@ export function GroupWorkspaceArea({
   view,
   onViewChange,
   availableViews,
+  identities,
+  activeIdentityId,
+  onChangeIdentity,
+  onOpenPermissions,
+  userAvatarUrl,
+  userIdentityId,
   onAddFriend,
   mobileListOpen,
   onCloseMobileList,
@@ -30,21 +37,29 @@ export function GroupWorkspaceArea({
   view: 'chat' | 'group';
   onViewChange: (v: 'chat' | 'group') => void;
   availableViews: WorkspaceView[];
+  identities?: Identity[];
+  activeIdentityId?: string | null;
+  onChangeIdentity?: (id: string) => void;
+  onOpenPermissions?: () => void;
+  userAvatarUrl?: string;
+  userIdentityId?: string | null;
   onAddFriend: () => void;
   /** <lg 二级协作群列表抽屉开关（由 Workspace 持有，聊天/协作群视图共用同一开关）。 */
   mobileListOpen: boolean;
   onCloseMobileList: () => void;
 }) {
   const ws = useGroupWorkspace();
+  const identityItems = identities ?? [];
+  const handleChangeIdentity = onChangeIdentity ?? (() => {});
   const expandedGroupIds = React.useMemo(
     () => ws.groups.filter((g) => ws.expandedGroupIds[g.groupId]).map((g) => g.groupId),
     [ws.groups, ws.expandedGroupIds],
   );
   const sessions = useGroupSessions(ws.selectedGroupId, expandedGroupIds);
   const chat = useGroupChat(sessions.selectedSession);
-  const groupManage = useGroupManagement(ws.selectedGroupId, ws.reloadSelectedGroup);
-  const sessionManage = useSessionManagement(sessions.selectedSession, sessions.applySessionUpdate);
   const [activePanel, setActivePanel] = useState<GroupPanelKind>('none');
+  const groupManage = useGroupManagement(ws.selectedGroupId, ws.reloadSelectedGroup, activePanel === 'manage');
+  const sessionManage = useSessionManagement(sessions.selectedSession, sessions.applySessionUpdate);
   const createGroupDialog = useGroupCreateDialog({
     refreshGroups: ws.refreshGroups,
     selectGroup: (id) => ws.onSelectGroup(id),
@@ -98,10 +113,19 @@ export function GroupWorkspaceArea({
   const handleShareSession = () => sessionManage.createShare();
   const handleCreateSession = (groupId: string) => void sessions.createSessionIn(groupId);
   const handleCreateGroup = () => createGroupDialog.openModal();
-  // 侧栏「…」菜单：群管理（选中该群并打开管理面板）。
+  // 侧栏「…」菜单：群管理（选中该群并打开管理面板，按需拉取群详情）。
   const handleManageGroup = (groupId: string) => {
-    void ws.onSelectGroup(groupId);
+    ws.onSelectGroup(groupId);
     setActivePanel('manage');
+    // 列表项不含 participants/owner/driver，打开管理（查看/编辑）时补齐群详情。
+    void ws.reloadSelectedGroup(groupId);
+  };
+  // 头部齿轮切面板：打开群管理时按需拉取当前选中群详情。
+  const handleTogglePanel = (panel: GroupPanelKind) => {
+    if (panel === 'manage' && activePanel !== 'manage' && ws.selectedGroupId) {
+      void ws.reloadSelectedGroup(ws.selectedGroupId);
+    }
+    setActivePanel(panel);
   };
   const handleManageSession = (groupId: string, sessionId: string) => {
     void ws.onSelectGroup(groupId);
@@ -119,6 +143,11 @@ export function GroupWorkspaceArea({
     view,
     onViewChange,
     availableViews,
+    identities: identityItems,
+    activeIdentityId: activeIdentityId ?? null,
+    onChangeIdentity: handleChangeIdentity,
+    onOpenPermissions,
+    userAvatarUrl,
     groups: ws.groups,
     isLoading: ws.isLoadingGroups,
     onSelectGroup: (id) => void ws.onSelectGroup(id),
@@ -133,6 +162,10 @@ export function GroupWorkspaceArea({
     expandedGroupIds: ws.expandedGroupIds,
     onToggleGroupExpanded: ws.toggleGroupExpanded,
     sessionsByGroupId: sessions.sessionsByGroupId,
+    hasMoreSessionsByGroupId: sessions.hasMoreSessionsByGroupId,
+    totalSessionsByGroupId: sessions.totalSessionsByGroupId,
+    isLoadingMoreSessionsByGroupId: sessions.isLoadingMoreSessionsByGroupId,
+    onLoadMoreSessions: sessions.loadMoreSessions,
     sessionTabsByGroup,
     onSessionTabForGroup: setSessionTabForGroup,
     favoriteSessionIds: sessions.favoriteSessionIds,
@@ -153,7 +186,7 @@ export function GroupWorkspaceArea({
   return (
     <>
       <GroupSidebar {...groupSidebarProps} />
-      {/* <lg 二级协作群列表抽屉：≥lg 内流侧栏可见，<lg 由 IdentityBar 的「打开会话列表」按钮触发。 */}
+      {/* <lg 二级协作群列表抽屉：≥lg 内流侧栏可见，<lg 由移动端顶部的「打开会话列表」按钮触发。 */}
       <Drawer
         open={mobileListOpen}
         onOpenChange={(open) => {
@@ -191,14 +224,16 @@ export function GroupWorkspaceArea({
         onLoadMoreHistory={chat.loadMoreHistory}
         canManageGroup={canManage}
         activePanel={activePanel}
-        onTogglePanel={setActivePanel}
+        onTogglePanel={handleTogglePanel}
         onRequestDissolve={handleDissolve}
         onRequestShareGroup={handleShareGroup}
         onRequestShareSession={handleShareSession}
         inputRef={chat.inputRef}
+        userAvatarUrl={userAvatarUrl}
+        userIdentityId={userIdentityId}
       />
       {activePanel === 'members' && selectedGroup && (
-        <div className="flex w-[320px] shrink-0 border-l border-[var(--color-border)]">
+        <div className="flex w-[min(320px,30vw)] max-w-[30vw] shrink-0 border-l border-border">
           <MembersPanel
             group={selectedGroup}
             session={sessions.selectedSession}

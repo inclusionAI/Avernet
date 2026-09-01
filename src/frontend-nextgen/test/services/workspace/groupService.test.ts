@@ -150,6 +150,76 @@ it('getVisibleGroups kind filter + search + sort', () => {
   ).toEqual(['g2', 'g3', 'g1']);
 });
 
+describe('loadGroupSessions pagination', () => {
+  it('dedupes concurrent session list requests with the same arguments', async () => {
+    sc.listGroupSessions.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { items: [], offset: 0, limit: 10, total: 0 },
+    });
+
+    const [first, second] = await Promise.all([
+      groupService.loadGroupSessionsOrBcs('g1', 'bot-1'),
+      groupService.loadGroupSessionsOrBcs('g1', 'bot-1'),
+    ]);
+
+    expect(sc.listGroupSessions).toHaveBeenCalledTimes(1);
+    expect(first).toEqual(second);
+  });
+
+  it('defaults to the first 10 sessions and preserves page metadata', async () => {
+    sc.listGroupSessions.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [
+          {
+            session_id: 's1',
+            group_id: 'g1',
+            title: '会话一',
+            status: 'running',
+            created_at: 1,
+            updated_at: 2,
+          },
+        ],
+        total: 12,
+        offset: 0,
+        limit: 10,
+      },
+    });
+
+    const res = await groupService.loadGroupSessions('g1', 'bot-1');
+
+    expect(sc.listGroupSessions).toHaveBeenCalledWith('g1', { offset: 0, limit: 10, view_bot_id: 'bot-1' });
+    expect(res).toEqual({
+      ok: true,
+      data: {
+        items: [expect.objectContaining({ sessionId: 's1', groupId: 'g1', title: '会话一' })],
+        offset: 0,
+        limit: 10,
+        total: 12,
+        hasMore: true,
+      },
+    });
+  });
+
+  it('passes an explicit offset and limit for loading the next page', async () => {
+    sc.listGroupSessions.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { items: [], total: 12, offset: 10, limit: 10 },
+    });
+
+    const res = await groupService.loadGroupSessions('g1', undefined, { offset: 10, limit: 10 });
+
+    expect(sc.listGroupSessions).toHaveBeenCalledWith('g1', { offset: 10, limit: 10 });
+    expect(res.ok && res.data).toMatchObject({ offset: 10, limit: 10, total: 12, hasMore: true });
+  });
+});
+
 describe('loadGroupDetail', () => {
   it('passes view_bot_id to listGroupSessions when provided', async () => {
     gc.getGroup.mockResolvedValue({

@@ -2,6 +2,7 @@
  * 任务执行 Loop Mapper（服务层）：构造 execute 请求、解包 Envelope。
  * Core EngineStatus → 产品 TaskStatus 的映射在 src/assets/TaskPanel/taskPanelMapper（副屏消费）。
  */
+import { isEnvelopeFailure } from '@/services/backendApi/types';
 import type { Envelope, ExecuteTaskRequest } from './taskModel';
 
 export interface TaskComposerForm {
@@ -34,14 +35,8 @@ export function buildExecuteRequest(form: TaskComposerForm, ctx: TaskComposerCon
       metadata: { title: form.title.trim(), instruction: form.instruction.trim() },
       context: {
         background: form.background?.trim() ?? '',
-        extend_props: {
-          teamclaw_context: {
-            main_session_id: ctx.mainSessionId,
-            main_session_name: ctx.mainSessionName,
-            source_group_id: ctx.sourceGroupId,
-            parent_task_id: ctx.parentTaskId ?? null,
-          },
-        },
+        // 会话/群/父任务上下文下沉 execution_config(扁平);建群任务此处为空。
+        extend_props: {},
       },
       goal: {
         objective: form.objective.trim(),
@@ -56,12 +51,17 @@ export function buildExecuteRequest(form: TaskComposerForm, ctx: TaskComposerCon
     execution_config: {
       task_type: form.taskType,
       ...(form.taskType === 'workflow' && form.workflowId ? { workflow_id: form.workflowId } : {}),
+      // 会话/群/父任务上下文扁平放入 execution_config(新规范;历史记录读 teamclaw_context 兼容)。
+      main_session_id: ctx.mainSessionId,
+      main_session_name: ctx.mainSessionName,
+      source_group_id: ctx.sourceGroupId,
+      parent_task_id: ctx.parentTaskId ?? null,
     },
   };
 }
 
 export function unwrapEnvelope<T>(env: Envelope<T>): T {
-  if (env.code !== 200000 || !env.data) {
+  if (isEnvelopeFailure(env) || !env.data) {
     throw new Error(env.message || `任务接口错误码 ${env.code}`);
   }
   return env.data;
