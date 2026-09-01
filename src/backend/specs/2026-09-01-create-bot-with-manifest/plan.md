@@ -2,16 +2,13 @@
 
 Spec: `spec.md` in this directory. Work item W13, issue #1696.
 
-> **Revision 3** — reworked after two review rounds on PR #1791. Rev 2 moved the
-> creation onto a task-queue job (`spec.md` D-3/D-4/D-7). Rev 3 answers "do we
-> really need `apply_now`?" and "why a seam inside `create_bot`?" with: we need
-> neither. Phase A runs **before** `create_bot`, and the job's own reschedule
-> idiom waits for it. See K-2 and K-5.
+> **Revision 4.** Applying moves off its daemon thread and onto the task queue,
+> for all three cases; the creation job waits only for phase A; submission never
+> creates inline; the poll is a pure read. Revision history at the end.
 
 ## What already exists, and what that leaves
 
-Two components were built before this item and are meant to be *used*, not
-re-created:
+Two components were built before this item and are meant to be *used*:
 
 **W4's apply engine** —
 
@@ -24,24 +21,19 @@ re-created:
 | `build_materialisers()` | `apply/registry.py` | The live set of constructs something can act on |
 | `declared_entries(parsed, construct)` | `apply/orchestrator.py` | "Did the document declare this category?" |
 | `trigger` column, `String(32)` | `apply_models.py` | Its comment already reserves `create`; no migration |
+| Lock with `lock_token` + stale reaping | `config_manifest_apply` repos | Serialisation that survives a handler moving off-thread |
 
-**The task queue** (`core/task_queue`) — whose README names this exact shape as
-its motivating use case: "polling an external operation until it reaches a
-terminal state: a handler that reschedules itself until done, bounded by a
-wall-clock deadline."
+**The task queue** (`core/task_queue`) — whose README names the pattern this item
+removes: it replaces "the 'spawn a daemon thread and `sleep`' pattern, which loses
+work on restart and double-runs across pods."
 
 | Already there | What it gives W13 |
 | --- | --- |
-| `TaskQueueService.enqueue(type, payload, deadline_seconds, idempotency_key=…)` | Submission's one call |
-| `Reschedule` / `Complete` / `Fail` outcomes | Wait for Passport, wait for the container, finish |
-| `TaskStatus.TIMED_OUT`, enforced DB-side | "The user never clicked", as a status distinct from failure |
-| Claim CAS + lease reclaim | Survives a pod restart; exactly one worker runs it |
-| `wake_on_enqueue` | The job starts at submission instead of waiting out an idle poll |
-
-So the work is **sequencing, a job handler, and a public surface**. Three things do
-not exist: a preflight that also demands a materialiser, the job handler, and the
-endpoint pair. Note what is *not* on that list any more — nothing inside
-`create_bot`, and no new apply entry point (K-2, K-5).
+| `TaskQueueService.enqueue(type, payload, deadline_seconds, idempotency_key=…)` | Both enqueues |
+| `Reschedule` / `Complete` / `Fail` outcomes | The creation job's step machine |
+| `TaskStatus.TIMED_OUT`, enforced DB-side | "The user never clicked", distinct from failure |
+| Claim CAS + lease reclaim | An apply survives the pod that started it |
+| `wake_on_enqueue` + `WorkerWakeup` | No idle-interval latency; its docstring is written around handlers enqueuing follow-up work |
 
 ## Architecture
 
@@ -52,181 +44,206 @@ POST /openapi/v1/bots/with-manifest
   ├─ preflight: quota / name / engine            ← existing
   ├─ preflight: manifest                         ← NEW  validate + materialiser gate
   ├─ persist manifest  key=(entity_id, bot_id)   ← NEW  no schema change
-  ├─ Passport apply → authorization handles      ← existing
-  └─ enqueue job(attributes + tenant, deadline)  ← NEW
+  ├─ Passport apply → authorization handles      ← existing (never creates inline)
+  └─ enqueue creation job(attributes + tenant, deadline)
         └─► 202 {bot_id, AWAITING_AUTHORIZATION, iframe_url, redirect_url}
 
-TaskWorker ──► BotCreateWithManifestHandler       ← NEW   (reschedules itself)
-  │
-  ├─ with avernet_tenant_scope(payload["tenant"]):
-  ├─ 1. Passport not ISSUED?  PENDING → Reschedule ; declined → Fail(+cleanup)
-  ├─ 2. phase A not done?     start_apply(PRE_CONTAINER) → Reschedule until terminal
-  ├─ 3. no bot record?        complete_bot_authorization(...)  ← unmodified
-  │                             └─ create_bot → provisioning   (existing, untouched)
-  ├─ 4. container not up?     Reschedule
-  ├─ 5. phase B not started?  start_apply(ON_CONTAINER, carry_from=<phase A>)
-  ├─ 6. phase B running?      Reschedule
-  └─ 7. terminal              Complete
-        deadline elapses at any point → TIMED_OUT (+cleanup)
+TaskWorker ──► CreationJobHandler                 (reschedules itself)
+  │  with avernet_tenant_scope(payload["tenant"]):
+  ├─ 1. Passport not ISSUED?   PENDING → Reschedule ; declined → discard, Fail
+  ├─ 2. phase A not done?      start_apply(PRE_CONTAINER) → Reschedule until terminal
+  ├─ 3. no bot record?         complete_bot_authorization(...)   ← unmodified
+  ├─ 4. container not up?      Reschedule
+  └─ 5. start_apply(ON_CONTAINER, carry_from=<phase A>) → Complete
+        deadline elapses at any point → TIMED_OUT (+ discard)
+
+TaskWorker ──► ApplyTaskHandler                   ← one type, all three cases
+  │  with avernet_tenant_scope(payload["tenant"]):
+  └─ rebuild context → orchestrator.apply(...) → finish record → release lock
 
 GET /openapi/v1/bots/{bot_id}/with-manifest/status
-  └─ derives the state from: the job record, the bot record, the apply records
+  └─ pure read of: the job record, the bot record, the apply records
 ```
-
-Every state is **read**, never separately stored: authorization from Passport,
-progress from the job row and the apply rows. **No new table, no new column.**
 
 ## Key decisions
 
 ### K-1 The materialiser gate is derived, not listed
 
-`spec.md` requires that W5/W6 widen this endpoint by landing, so the set comes
-from the registry itself. The apply service grows
-
-```python
-def materialised_constructs(self) -> frozenset[ApplyConstruct]:
-    return frozenset(build_materialisers(...).keys())
-```
-
-on its protocol — the same registry `_orchestrator()` builds, so the two cannot
-disagree. The preflight refuses any construct the document **declares** that is
+The set comes from the registry itself — the apply service grows
+`materialised_constructs() -> frozenset[ApplyConstruct]` returning
+`frozenset(build_materialisers(...).keys())`, the same registry `_orchestrator()`
+builds. The preflight refuses any construct the document **declares** that is
 absent from it, where "declares" is `declared_entries(parsed, construct) is not
 None` walked over `APPLY_ORDER` (so a declared-empty category, which *removes*,
 counts as declared).
 
 ### K-2 No seam in `create_bot` — phase A runs before it
 
-The first two revisions put a `pre_provision` callback inside `create_bot`,
-between the row insert and provisioning, because that looked like the only window
-before `BaasService._build_create_bot_payload` composes the start command.
-
-It is not. **Phase A needs nothing from the bot record**, checked rather than
-assumed:
+**Phase A needs nothing from the bot record**, checked rather than assumed:
 
 - `BotStartupScriptService.put` is keyed by `(entity_id, bot_id)` and reads no bot
   record — it validates size and encoding and upserts.
-- Both key parts are known at submission: `bot_id` is allocated by
-  `generate_bot_id`, `entity_id` by the same rule `create_bot` will apply.
-- The placeholder whitelist is exactly four names — `BOT_ENGINE_TYPE`, `BOT_ENV`,
-  `BOT_TENANT`, `BOT_ARCH` — and `placeholders.py` says there is **deliberately no
-  `BOT_ID`**; there is no `BOT_NAME` either. Every one resolves from the creation
-  request, so nothing waits on `_resolve_bot_name`'s defaulting inside
-  `create_bot`.
+- Both key parts are known at submission.
+- The placeholder whitelist is exactly `BOT_ENGINE_TYPE`, `BOT_ENV`,
+  `BOT_TENANT`, `BOT_ARCH`; `placeholders.py` states there is **deliberately no
+  `BOT_ID`**, and there is no `BOT_NAME` either — so nothing waits on
+  `_resolve_bot_name`'s defaulting inside `create_bot`.
 
-So the job runs phase A **before** it calls creation at all. "The row exists
-before the start command is composed" becomes true *by construction* — there is no
-hook that could be placed in the wrong function, and no ordering test that could
-pass today and rot later. `bot_service.py` is untouched by this item.
+So the job runs phase A **before** it calls creation. "The row exists before the
+start command is composed" becomes true *by construction*, with no hook that could
+be placed in the wrong function. `bot_service.py` is untouched by this item.
+
+Phase A needs an `ApplyContext` without a record, which is the
+`(engine_type, bot_type)` capability entry point W1 built for W13.
 
 The one cost: phase A can write a startup-script row for a bot that never gets
-created. That is the same orphan class as the stored manifest and is cleaned on
-the same terminal paths (K-8).
+created — the same orphan class as the stored manifest, cleaned on the same
+terminal paths (K-8).
 
-Phase A needs an `ApplyContext` without a record, which is the `(engine_type,
-bot_type)` capability entry point W1 built for W13 — so the apply service grows a
-way to build a context from the creation attributes instead of a bot dict. That
-is a smaller change than the callback it replaces, and it uses a seam that already
-exists for this caller.
+### K-3 Applying becomes a task — what moves, and what does not
 
-### K-3 The job handler is a state machine over observed facts
+`start_apply`'s body splits at the thread, and **the split is chosen so its public
+contract does not change**:
 
-The handler re-derives where it is on every invocation instead of tracking a
-cursor, because the queue guarantees single-claim but **at-least-once** invocation:
-a crashed worker's task is re-claimed and the handler runs again. Each step's
-question is "is this already done?", answered from durable state — the bot record,
-the device status, the apply records — so a re-run resumes rather than repeats.
+| Stays in `start_apply`, synchronous on the caller's thread | Moves into the task handler |
+| --- | --- |
+| Acquire the lock (so a concurrent apply still raises `ManifestApplyInProgressError`) | Rebuild the context |
+| Re-validate the stored document (so a validation failure still raises to the caller) | Run the orchestrator |
+| Mint `apply_id`, write the `RUNNING` record | Write the terminal record |
+| **Enqueue the task** (was: start the thread) | Release the lock, by token |
+| Return `ApplyAccepted(apply_id, RUNNING)` | |
 
-That is also why creation itself is safe: `create_bot` is already idempotent on a
-supplied `bot_id` (it returns the existing bot), and `start_apply` takes the apply
-lock, so a duplicated invocation cannot double-create or double-apply.
+So `POST …/config-manifest/apply` still answers `202` with an id, still refuses a
+concurrent apply, still surfaces validation synchronously. Only the executor
+changes.
+
+**The lock is held across the handoff**, acquired by the enqueuer and released by
+the handler using the token in the payload. That is what the existing token-based
+release and the stale-lock reaping already support; a task that never runs (worker
+disabled) leaves a lock that the TTL reaps, exactly as a dead thread does today.
+
+**The payload carries identifiers, not state.** Specifically it does **not** carry
+the parsed document: `MAX_DOCUMENT_BYTES` is 64 KB and `ac_task_queue.payload` is
+`Text`, which on MySQL is also 64 KB — a large manifest plus the rest of the
+payload would not fit, and a truncated payload is a silent corruption. The handler
+therefore re-reads and re-validates through `_parsed_or_empty`.
+
+The consequence, stated because it is a real behaviour change: today `parsed` is
+snapshotted before the thread starts, so a `PUT` landing in between is not picked
+up; after this change the handler reads the document as of execution. The window
+is short (`wake_on_enqueue` means milliseconds, not an idle interval), a
+concurrent *apply* is impossible because the lock is held, and re-reading is the
+level-triggered behaviour W4 already chose for its own re-validation. Accepted,
+and noted where the handler reads.
+
+**The context is rebuilt, not serialised.** A bot dict in the payload could be
+stale by the time the task runs, and it is not small. The handler re-reads the bot
+record by `(entity_id, bot_id)`; for phase A there is no record, so `engine_type`
+and `bot_type` come from the payload and capabilities resolve from those.
+
+### K-4 One task type
+
+The three cases — phase A, phase B, an explicit apply on a running bot — differ
+only in `phases`, the `trigger` label, and whether a previous report is carried.
+The orchestrator branches on none of them: `trigger` appears in it exactly twice,
+as a parameter and as a field it copies onto the report, and there is no branch on
+phase names or on first-boot anywhere (W4 pinned that as §2.7). Three task types
+would be three registry keys for one behaviour, and `trigger` already carries the
+distinction for anyone querying the apply table. `wake_on_enqueue` is per-type,
+but all three want immediacy.
+
+### K-5 The creation job waits for phase A only
+
+Phase A has a downstream dependency: creation must not begin until the script row
+exists. Phase B has none — nothing in the platform is blocked on it, which is
+exactly true of an apply against a running bot too. So the job starts phase B and
+finishes; phase B is then observed the way any apply is, by reading its record.
+
+Nothing is lost by not waiting: the poll derives `APPLYING` / `READY` / `FAILED`
+from the apply record and its trigger, not from the job; `carry_from_apply_id` is
+passed when phase B *starts*; the deadline still covers everything that precedes
+phase B; and a phase B whose worker dies is now completed by another worker rather
+than needing a bound at all.
+
+No `apply_now`, and no synchronous variant of anything: the job waits by
+rescheduling until phase A's record is terminal. Rejected alternatives, recorded
+so they are not re-derived — polling the record inside the request (a busy-wait in
+the creation path); a `wait=True` flag on `start_apply` (the return type is what
+differs, so a boolean makes it conditional at every call site); writing the
+startup-script row outside the apply engine (no record, no report, no lock, and
+category knowledge leaks out of the registry).
+
+### K-6 Re-entrancy, and why "no retry" is not the reason
+
+The queue guarantees a single claimer but **at-least-once invocation**: "a crashed
+worker's task is reclaimed after its lease expires", whether or not a handler ever
+returns `Retry`. So both handlers are written to be re-entrant, and safety is
+argued from what they do:
+
+- **The apply task** is safe because apply *converges* — re-applying an unchanged
+  document performs no writes (W4's criterion), and the lock serialises attempts.
+  A partially-written category is re-planned against current state on the re-run.
+- **The creation job** re-derives its step from durable state every invocation
+  rather than tracking a cursor. `create_bot` is already idempotent on a supplied
+  `bot_id` (it returns the existing bot), and `start_apply` takes the lock.
 
 Reschedule delay: 5 s, matching the existing publish poller's cadence.
 
-### K-4 Two applies, two triggers, one carried report
+### K-7 Two applies, two triggers, one carried report
 
 Phase A and phase B are separate `start_apply` calls separated by the whole of
 container provisioning, with distinct triggers that fit the existing `String(32)`
-column:
+column: `create:pre_container` and `create:on_container`.
 
-- `create:pre_container`
-- `create:on_container`
+`start_apply` grows `carry_from_apply_id: str | None`: the named record's
+categories are prepended to the report phase B finishes with and the summary
+re-derived over the union — so a failed phase A plus a clean phase B terminates
+`PARTIAL`, which the poll reports as `FAILED`. Without it the report a caller reads
+at `READY` would name the MCP entries and silently omit `script`.
 
-The triggers are also how the handler and the poll tell "phase A is done" from
-"the whole creation is done".
+The triggers are also how the job and the poll tell "phase A is done" from "the
+whole creation is done", via `last_apply` — so no repository method is added.
 
-To keep the terminal report complete, `start_apply` grows
-`carry_from_apply_id: str | None`: the named record's categories are prepended to
-the report phase B finishes with, and the summary re-derived over the union — so a
-failed phase A plus a clean phase B terminates `PARTIAL`, which the poll reports as
-`FAILED`.
-
-### K-5 No `apply_now` — the job reschedules instead
-
-Rev 2 added a synchronous `apply_now` so phase A could finish before provisioning
-began. With phase A moved ahead of `create_bot` (K-2), the job can simply use the
-queue's own idiom:
-
-```text
-phase A not started?   start_apply(phases={PRE_CONTAINER}) → Reschedule(5s)
-phase A still RUNNING? Reschedule(5s)
-phase A terminal?      → create the bot
-```
-
-`start_apply` already does everything needed; nothing new goes on the service's
-contract. The handler finds phase A's record with `last_apply(entity_id, bot_id)`
-and recognises it by its `create:pre_container` trigger — the same read the poll
-makes, and the same value it later passes as `carry_from_apply_id`, so no
-repository method is added either.
-
-The cost is one reschedule interval (5 s) added to a creation, immediately after a
-step that waited on a **human clicking a link**. It is not measurable against
-that.
-
-Rejected alternatives, recorded because "why not just X" is the obvious question:
-
-- **`start_apply` + poll the record inside the request** — a busy-wait in the
-  creation path.
-- **A `wait=True` flag on `start_apply`** — the return type is what actually
-  differs (`ApplyAccepted` handle vs. a finished `ApplyReport`), so a boolean
-  would make the return type conditional at every call site.
-- **Write the startup-script row directly, skipping the apply engine** — no apply
-  record, no per-entry report, no lock, and category knowledge leaks back out of
-  the registry. W4's design exists to prevent exactly this.
-
-### K-6 The tenant rides in the payload
-
-The queue has no tenant column and no request context at handler time. The payload
-carries the submitting request's tenant and the handler opens
-`avernet_tenant_scope(tenant)` around its whole body.
-
-This gets a test rather than a comment because **the failure is silent**:
-`get_current_avernet_tenant()` is total — outside a request it returns the
-*default* tenant instead of raising — so a handler that forgets the payload value
-substitutes the wrong `${BOT_TENANT}` and reads and writes the manifest tables
-under the wrong tenant, with nothing raised anywhere.
-
-### K-7 State derivation
+### K-8 State derivation — a pure read
 
 | Observed | Reported |
 | --- | --- |
-| Job live, no bot record, Passport `PENDING`/not ready | `AWAITING_AUTHORIZATION` + handles |
-| Job `FAILED` on a declined authorization | `AUTHORIZATION_REJECTED` |
-| Job `TIMED_OUT`, or Passport expired | `AUTHORIZATION_EXPIRED` |
+| Job live, no bot record | `AWAITING_AUTHORIZATION` + handles |
+| Job `FAILED` (declined) | `AUTHORIZATION_REJECTED` |
+| Job `TIMED_OUT` | `AUTHORIZATION_EXPIRED` |
 | Bot record exists; no `create:on_container` apply yet | `CREATING` |
 | `create:on_container` apply `RUNNING` | `APPLYING` |
 | …terminal `SUCCEEDED` | `READY` + report + bot |
 | …terminal `PARTIAL` / `FAILED` | `FAILED` + report + bot |
 
+**No row in that table requires an external call.** The first one in particular is
+read off "the job is live and no bot exists", *not* by querying AgentPass — the
+job is what polls Passport, and duplicating that in the poll would make a read
+path do business work.
+
+The authorization handles come from the job's payload (written at submission),
+read via the task record. If that proves awkward, the alternative is not to return
+them at all — the create response already did — rather than to re-query Passport.
+
 Provisioning that fails outright is the one edge the six states do not name: the
 bot exists but no container will ever come up, so the job hits its deadline and the
 poll reports `FAILED` with a message naming provisioning, not the manifest.
 
-### K-8 Cleanup on a bot-less terminal
+### K-9 Submission never creates the bot inline
 
-When the job ends declined or timed out, it deletes the stored manifest before
-returning `Fail` (the delete is idempotent — W1 made absence success). This is what
-retires the feature switch: the rows this endpoint creates are bounded by their own
-jobs.
+`create_bot_with_authorization` creates the bot inline when Passport returns a
+token immediately. This endpoint always goes through user consent, so W13's
+submission composes the pieces — policy, preflight, persist, the Passport
+application — and stops, rather than calling that function whole. If a token ever
+does come back immediately, the job's first run sees `ISSUED` and proceeds
+normally, so there is no special case and the phase-A-before-creation ordering
+holds on every path.
+
+### K-10 Cleanup on a bot-less terminal
+
+When the job ends declined or timed out, it deletes the stored manifest and any
+startup-script row phase A wrote, before returning. Both deletes are idempotent.
+This is what retires the feature switch.
 
 ## Files
 
@@ -234,55 +251,71 @@ jobs.
 
 | File | What |
 | --- | --- |
-| `core/bot_config_manifest/creation.py` | The creation seam: preflight (validate + materialiser gate), persist, phase A, cleanup. |
-| `core/bot_config_manifest/create_job.py` | `BotCreateWithManifestHandler` — the task-queue handler and its payload shape. |
+| `core/bot_config_manifest/creation.py` | The creation seam: preflight, persist, phase A, discard. |
+| `core/bot_config_manifest/apply/apply_task.py` | The apply task handler and its payload shape. |
+| `core/bot_config_manifest/create_job.py` | The creation job handler. |
 | `adapters/http/openapi_v1/bots/create_with_manifest.py` | The two routes and the state mapping. |
-| `adapters/http/openapi_v1/bots/schemas_create_with_manifest.py` | Request/response models and the `CreationState` enum. |
+| `adapters/http/openapi_v1/bots/schemas_create_with_manifest.py` | Models and the `CreationState` enum. |
 
 ### Changed
 
 | File | Change |
 | --- | --- |
-| `core/bot_management/create_flow.py` | An optional creation-manifest seam, called at preflight and persist. **`bot_service.py` is not touched.** |
-| `core/bot_config_manifest/services/config_manifest_apply_service.py` | `carry_from_apply_id`, `materialised_constructs`, and a record-free apply context. |
-| `core/bot_config_manifest/bot_config_manifest_apply_service_protocol.py` | The two new members. |
-| `di/modules/bot_management_module.py` | Bind the creation service; register the handler in the task-queue registry. |
+| `core/bot_config_manifest/services/config_manifest_apply_service.py` | Enqueue instead of spawning a thread; `carry_from_apply_id`; `materialised_constructs`; a record-free apply context. |
+| `core/bot_config_manifest/bot_config_manifest_apply_service_protocol.py` | The new members. |
+| `core/bot_management/create_flow.py` | An optional creation-manifest seam at submission. **`bot_service.py` and `complete_bot_authorization` are not touched.** |
+| `di/modules/bot_management_module.py` | Bind the creation service; register both handlers in the task-queue registry. |
 | `adapters/http/openapi_v1/__init__.py` | Mount the new router. |
-| `di/config.py` (or the module that owns it) | The configurable creation deadline, default 600 s. |
-| `core/bot_config_manifest/README.md`, `docs/bot-config-manifest/user-manual.zh-CN.md` | The creation flow, the poll states, the `script`-dependency rule. |
+| The config module | The creation deadline, default 600 s. |
+| `core/bot_config_manifest/README.md`, `docs/bot-config-manifest/user-manual.zh-CN.md` | The creation flow, the poll states, the `script` rule, and the worker precondition. |
 
 ## Risks
 
-1. ~~**The seam lands in the wrong place in `create_bot`.**~~ Retired by K-2:
-   phase A precedes creation entirely, so there is no hook to misplace. A test
-   still asserts the ordering, but it is now asserting a property of the sequence
-   rather than guarding a fragile insertion point.
-2. **A re-run of the handler double-creates or double-applies.** Every step is
-   written as "is this already done?" and the two underlying operations are
-   already idempotent (`create_bot` on a supplied id, `start_apply` under its
-   lock). Tested by invoking the handler twice at each step.
-3. **Silent tenant loss on the worker.** K-6; tested, not commented.
-4. **The registry is the first production adopter of the handler registry.** Its
-   docs say the registry is empty until an adopter registers handlers, so the
-   wiring (bootstrap-time registration, `app_name` config) needs checking against a
-   running app, not just unit tests.
-5. **Phase A writes a startup-script row for a bot that may never exist.**
-   Bounded by the same deadline and cleaned on the same terminal paths as the
-   stored manifest (K-8).
+1. **The worker becomes load-bearing.** Applying — and therefore bot creation —
+   only progresses where `task_queue_worker.enabled=true` and `ac_task_queue` is
+   provisioned. Today that flag gates an optimisation; after this it gates the
+   feature. It must be documented as a deployment requirement, and it is the first
+   thing to check when a creation appears stuck.
+2. **First adopter of enqueue idempotency.** The README says the key mechanism is
+   "not yet adopted by any call site" and that adoption must ship in a *strictly
+   later release* than the mechanism. That ordering is satisfied, but it has to be
+   confirmed against the deployed release rather than assumed.
+3. **The lock now spans a process boundary.** Acquired by the enqueuer, released by
+   the handler. A task that never runs holds it until the TTL reaps it — the same
+   outcome as a thread that dies today, but worth a test.
+4. **Re-read instead of snapshot** (K-3) is a small behaviour change on the
+   running-bot path. It is level-triggered by design, but it is the one place where
+   "nothing else moves" is a claim about contracts rather than about internals.
+5. **A re-run of a handler double-acts.** Mitigated by convergence and the lock
+   (K-6), and tested by invoking each handler twice at every step.
 
 ## Testing strategy
 
-- **Unit** — the preflight gate (each construct, and a stub materialiser widening
+- **Unit** — the preflight gate (each construct, plus a stub materialiser widening
   it); the state-derivation table case by case; the report merge.
-- **Handler** — each step's reschedule/complete/fail outcome; a second invocation
-  at every step is a no-op; the deadline path deletes the manifest.
-- **Ordering** — phase A completes before provisioning is entered, on call order.
-- **Tenancy** — the tenant observed inside phase A and inside the handler equals
-  the submitting request's, and a payload missing it is a test failure rather than
-  a silent default.
+- **Apply task** — the three cases run through one handler; the lock is released on
+  every path including a raising orchestrator; a second invocation converges and
+  writes nothing; the existing apply route's `202` + `apply_id` + concurrent-apply
+  refusal are unchanged.
+- **Creation job** — each step's outcome; a second invocation at every step is a
+  no-op; the deadline path deletes both rows.
+- **Ordering** — phase A completes before creation is called, on recorded call
+  order.
+- **Tenancy** — the tenant observed inside each handler equals the submitting
+  request's, written so that dropping the scope *fails* rather than passing by
+  coincidence (the getter returns the default, it does not raise).
 - **Endpoint** — submit → `202` → poll `AWAITING_AUTHORIZATION` → authorize →
-  `CREATING` → `APPLYING` → `READY`; an invalid manifest `422` with Passport never
-  called; an unbacked construct refused at submission; a `PARTIAL` apply reported
-  `FAILED` **with the bot present** in the response.
+  `CREATING` → `APPLYING` → `READY`, the report carrying both phases; an invalid
+  manifest `422` with Passport never called; an unbacked construct refused at
+  submission; a `PARTIAL` apply reported `FAILED` **with the bot present**.
 - **Regression** — every existing create, auth-status, manifest, apply and
   startup-script test passes **unedited**.
+
+## Revision history
+
+| | What changed, and why |
+| --- | --- |
+| **rev 1** | Rode the existing two-leg Passport pipeline; a device-activation listener ran phase B; the poll echoed creation attributes; a default-off switch. |
+| **rev 2** | Onto a task-queue job with a deadline. The listener and its restart guard go; abandonment becomes terminal; the poll takes only a `bot_id`; the switch is replaced by the job cleaning up after itself. |
+| **rev 3** | Phase A moves ahead of bot creation, deleting both the `pre_provision` seam in `create_bot` and the synchronous `apply_now`. |
+| **rev 4** | Applying becomes a task on all three paths (D-9), one task type (D-10); the job stops waiting for phase B (K-5); submission never creates inline (K-9); the poll is a pure read (K-8). |

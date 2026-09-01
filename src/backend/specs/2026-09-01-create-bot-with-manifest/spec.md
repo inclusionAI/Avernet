@@ -17,11 +17,11 @@ what this closes.
 
 Work item **W13** · issue #1696 · `work-items.zh-CN.md` §2.11, §2.12, §5.
 
-> **Revision 2** — reworked after review on PR #1791. The creation is now carried
-> by a **task-queue job with a wall-clock deadline** rather than by the caller's
-> polling and a device-activation listener; the poll takes only a `bot_id`; the
-> feature switch is gone, replaced by the job cleaning up after itself. What
-> changed and why is recorded per decision below.
+> **Revision 4** — after three review rounds on PR #1791. Applying now runs as a
+> **task-queue task on every path**, replacing the daemon thread W4 shipped; the
+> creation job waits only for the pre-container phase; submission never creates a
+> bot inline; and the poll is a pure read. The revision history at the end of
+> `plan.md` records how each of those arrived.
 
 ## Motivation
 
@@ -87,9 +87,44 @@ poll reaches a terminal state that names which entries did not land — and show
 the bot, running, so there is no doubt it was created.
 
 **As an operator**, an abandoned creation leaves no bot, no container, no quota
-consumed, and no stored manifest.
+consumed, and no stored manifest — and a pod restarting mid-creation does not
+strand it.
 
 ## Acceptance Criteria
+
+### Applying is durable work
+
+- [ ] **Applying a manifest runs as a task on the existing task queue, on every
+      path** — the pre-container phase, the post-container phase, and the explicit
+      apply on an already-running bot. The daemon thread W4 spawns is replaced.
+- [ ] **An apply survives the process that started it.** A pod that dies
+      mid-apply does not lose the work: the task's lease expires and another
+      worker finishes it. This is what makes a stored apply status correct without
+      anyone reading it — the apply *completes*, rather than being retroactively
+      reported as failed.
+- [ ] **Re-running an apply is safe, and the reason is convergence, not
+      configuration.** The queue is at-least-once *structurally* — a crashed
+      worker's task is re-claimed whether or not the handler ever asks for a retry
+      — so safety must come from apply itself: re-applying an unchanged document
+      performs no writes (W4's convergence criterion), and the apply lock
+      serialises attempts. Any statement that re-runs are safe "because retry is
+      off" is wrong and must not appear in the code or the docs.
+- [ ] **The public contract of the existing apply route does not change.**
+      `POST …/config-manifest/apply` still answers `202` with an `apply_id`,
+      still refuses a concurrent apply, still surfaces a validation failure
+      synchronously, and its poll route still returns the same report. Only what
+      executes the work changes.
+- [ ] **One task type**, not one per case. The three cases differ only in
+      arguments the engine does not branch on; the apply record's `trigger`
+      column already distinguishes them for anyone querying.
+- [ ] The task is enqueued so the worker picks it up **immediately** rather than
+      waiting out its idle interval.
+- [ ] **Operational preconditions are stated, not assumed.** The worker runs only
+      where it is enabled and its table is provisioned. With applying — and
+      therefore bot creation — riding the queue, a deployment with the worker off
+      does not merely run slower: creations never complete. This is a deployment
+      requirement of the feature, and it is written down where an operator will
+      find it.
 
 ### The create operation
 
@@ -97,8 +132,7 @@ consumed, and no stored manifest.
       creation attributes (engine, cluster, name, description, bot type, space,
       engine properties) and returns immediately with the allocated `bot_id`, the
       authorization handles (`iframe_url` / `redirect_url`), and the state the
-      creation starts in — so a caller knows where it stands without a second
-      call. Everything after that comes from the poll.
+      creation starts in.
 - [ ] The manifest is **validated before Passport is applied for**, in the same
       preflight as quota, name and engine checks. A caller with an invalid
       manifest is never sent to authorize, and no Passport application is spent
@@ -112,8 +146,8 @@ consumed, and no stored manifest.
       refused **here**, at submission. This is stricter than `PUT`, deliberately:
       `PUT` may accept a category that sits inert, but accepting one here means
       taking the user through authorization, creating the bot, and *then* failing
-      the apply — the worst possible moment to discover it, because the bot now
-      exists. The refusal names the construct and says what would apply it.
+      the apply — the worst possible moment to discover it. The refusal names the
+      construct and says what would apply it.
 - [ ] That gate is derived from **what is actually registered**, not from a list
       written by hand. When W5 registers `skills` and `identity`, or W6
       `resources`, this endpoint accepts them with no edit here.
@@ -123,43 +157,56 @@ consumed, and no stored manifest.
       in hand at that point.
 - [ ] The storage key's `entity_id` is resolved by the **same rule** `create_bot`
       will use when it writes the record, so the document stored before the bot
-      exists is found afterwards. A second, drifting derivation of that value is
-      the defect this criterion exists to prevent.
-- [ ] **The creation attributes are materialised at submission**, alongside the
-      manifest, so nothing about the creation has to be supplied again.
+      exists is found afterwards.
+- [ ] **The creation attributes are materialised at submission**, so nothing about
+      the creation has to be supplied again.
+- [ ] **Submission never creates the bot.** This endpoint always goes through
+      user consent, so it applies for the Passport and stops; the job owns
+      creation on every path. If AgentPass ever returns a token immediately, the
+      job's first run simply sees `ISSUED` and proceeds — no special case, and the
+      phase-A-before-creation ordering holds regardless.
 
 ### The job that carries the creation
 
-- [ ] Submission enqueues **one durable job** on the existing task queue, and that
-      job — not the caller's polling — drives the creation to a terminal state:
-      it waits for authorization, runs phase A, creates the bot, waits for the
-      container, runs phase B, and finishes.
+- [ ] Submission enqueues **one durable job**, and that job — not the caller's
+      polling — drives the creation: it waits for authorization, runs phase A,
+      creates the bot, waits for the container, starts phase B, and finishes.
 - [ ] A caller who stops polling still gets a fully configured bot. Polling
       observes; it never drives.
+- [ ] **The job waits for phase A, and does not wait for phase B.** Phase A has a
+      downstream dependency — creation must not begin until the script row exists.
+      Phase B has none: nothing in the platform is blocked on it, exactly as
+      nothing is blocked on an apply against a running bot. The job starts phase B
+      and finishes; phase B is then observed the same way any other apply is.
 - [ ] The job has a **configurable wall-clock deadline**, defaulting to ten
       minutes, measured from submission. Past it the creation is terminal and
-      reported as expired — the bounded answer to "the user never clicked".
-- [ ] The job is **safe to re-run**: the queue guarantees a single claimer but
-      at-least-once invocation across crashes, so every step checks what is
-      already done rather than assuming it is the first attempt. Creating twice,
-      applying twice, or minting a second Passport application is a defect.
+      reported as expired.
+- [ ] The job is **re-entrant**: every step asks "is this already done?" against
+      durable state, because the queue guarantees a single claimer but
+      at-least-once invocation.
 - [ ] The job is enqueued with an idempotency key derived from the bot id, so a
-      resubmission cannot start a second creation for the same bot.
+      resubmission cannot start a second creation for the same bot. This is the
+      **first adoption** of that mechanism, which is permitted only because the
+      mechanism itself landed in an earlier release; that ordering is confirmed
+      before the key is relied on.
 
 ### The poll
 
 - [ ] The poll is addressed by **`bot_id` alone**. `entity_id` is resolved
-      server-side from the authenticated caller, exactly as it is at submission
-      and everywhere else in this group; it is never a request parameter.
+      server-side from the authenticated caller, exactly as it is at submission;
+      it is never a request parameter.
 - [ ] The poll **never accepts the manifest, and never accepts creation
-      attributes.** There is nothing for a caller to re-send, so there is no way
-      for the applied document or the created bot to differ from what was
-      validated and submitted.
+      attributes.** There is nothing for a caller to re-send.
+- [ ] **The poll is a pure read.** It reads durable rows — the job record, the bot
+      record, the apply records — and maps them to a state. It calls no external
+      service (it never queries AgentPass; the job does that), starts no work, and
+      writes nothing. If it needs the authorization handles, they come from
+      durable state or are not returned at all.
 - [ ] It reports:
 
       ```text
       AWAITING_AUTHORIZATION   waiting for the user to open the Passport link
-              │                (the response carries iframe_url / redirect_url)
+              │
               ├──► AUTHORIZATION_REJECTED   terminal — the user declined
               ├──► AUTHORIZATION_EXPIRED    terminal — Passport expired, or the
               │                             job's deadline elapsed unclicked
@@ -167,33 +214,23 @@ consumed, and no stored manifest.
       CREATING                 authorized; the bot record is written, the
               │                container is being provisioned
               ▼
-      APPLYING                 the manifest apply is running
+      APPLYING                 the post-container apply is running
               ├──► READY       terminal — success; carries the apply report
               └──► FAILED      terminal — carries which entries did not land
       ```
 
-- [ ] `AUTHORIZATION_EXPIRED` is **new in this revision** and exists because the
-      deadline does. "Never clicked" and "declined" are different things to a
-      caller deciding whether to retry, and folding an expiry into
-      `AUTHORIZATION_REJECTED` would report a decision the user never made.
 - [ ] An apply result of `PARTIAL` reports **`FAILED`**, per the decision recorded
-      on #1696 and in work-items §5: under §3.2's category overwrite a category is
-      written all-or-nothing, so a declared category that was not written whole is
-      not a success. **The apply record itself still says `PARTIAL`** — the
-      mapping is this poll's summary, not a rewrite of the apply's own status, and
-      the `PUT` + apply path on a running bot is unaffected.
+      on #1696: under §3.2's category overwrite a category is written
+      all-or-nothing, so a declared category that was not written whole is not a
+      success. **The apply record itself still says `PARTIAL`** — the mapping is
+      this poll's summary, not a rewrite of the apply's status, and the `PUT` +
+      apply path on a running bot is unaffected.
 - [ ] Because `FAILED` here must never read as "no bot was created", the terminal
       response **carries the bot** alongside the report. The bot record is not
-      touched by a failing apply (§2.7) — no deletion, no status change, no
-      deactivation — and the response makes that visible rather than leaving the
-      caller to infer it.
+      touched by a failing apply (§2.7).
 - [ ] Both terminal states carry a report complete enough to answer "did my
       manifest take effect?" without a second call — **including the entries from
-      both phases**. A terminal report that names only the post-container
-      categories, silently dropping `script`, does not satisfy this.
-- [ ] `APPLYING` makes D4's interim cost **observable**. Post-boot delivery
-      (§3.4) leaves a window where the bot is ACTIVE but not yet configured; a
-      caller waiting for `READY` never observes it.
+      both phases**.
 - [ ] A creation that never got a bot leaves the poll answering its terminal
       authorization state, not a 404.
 
@@ -205,19 +242,20 @@ consumed, and no stored manifest.
       (`BOT_ENGINE_TYPE`, `BOT_ENV`, `BOT_TENANT`, `BOT_ARCH` — there is
       deliberately no `BOT_ID` or `BOT_NAME`) all resolve from the creation
       request. Ordering it ahead of creation makes "the row exists before the
-      start command is composed" true **by construction** rather than by landing
-      a hook in the right place inside `create_bot`.
-- [ ] **Phase B** runs once the container is up, and the job is what notices.
+      start command is composed" true **by construction**.
+- [ ] **Applying behaves identically in all three cases.** The lock, the
+      re-validation, the record, the orchestrator's walk of `APPLY_ORDER`, the
+      per-entry outcomes and the status derivation are one code path; only the
+      arguments differ, and nothing in the engine branches on them.
 - [ ] A **failing phase A does not fail creation.** The bot is still created and
       provisioned; the failure is recorded and surfaces in the poll's terminal
-      report. §2.7's boundary holds: apply records delivery, and a manifest-layer
-      failure never mutates the bot record.
+      report (§2.7).
 - [ ] A creation that ends without a bot takes the **startup-script row** with it
       as well as the manifest — phase A can write that row before anyone knows the
-      creation will complete, so it is cleaned up on the same terminal paths.
+      creation will complete.
 - [ ] `script`'s materialisation stays exactly what it is today: apply writes the
-      `ac_bot_startup_script` row and stops. **No new execution machinery is
-      built here** — the platform already composes that row into the start command
+      `ac_bot_startup_script` row and stops. **No new execution machinery is built
+      here** — the platform already composes that row into the start command
       (#926's mechanism, which W4's materialiser writes into). W13 only guarantees
       *when* the row is written relative to that composition.
 - [ ] **Iteration 1's rule is stated where a caller will read it:** a manifest's
@@ -227,9 +265,10 @@ consumed, and no stored manifest.
 
 ### Tenancy
 
-- [ ] The tenant reaches the code that actually performs the apply. The job runs
-      on a worker with **no request behind it**, so the tenant is carried in the
-      job's payload and re-established for the duration of the handler.
+- [ ] The tenant reaches the code that actually performs the apply. Both the
+      creation job and the apply task run on a worker with **no request behind
+      them**, so the tenant is carried in each payload and re-established for the
+      duration of each handler.
 - [ ] This is pinned by tests, not by memory, and the failure mode is why:
       `get_current_avernet_tenant()` is a **total function that returns the
       default tenant** outside a request rather than raising. A handler that
@@ -241,12 +280,10 @@ consumed, and no stored manifest.
 ### Cleaning up after itself
 
 - [ ] When a creation ends **without a bot** — declined or expired — the job
-      deletes the manifest it stored at submission. The rows this endpoint can
-      create are bounded by their own jobs: each one has a deadline, and reaching
-      it is what triggers the delete.
+      deletes the manifest and any startup-script row phase A wrote. The rows this
+      endpoint can create are bounded by their own jobs.
 - [ ] No feature switch. The endpoint ships enabled; the unbounded-orphan-rows
-      objection that would have required one is answered by the deadline above
-      rather than deferred to a follow-up.
+      objection that would have required one is answered by the deadline above.
 
 ### Nothing else moves
 
@@ -254,115 +291,118 @@ consumed, and no stored manifest.
       path behave **exactly** as they do today. Their tests pass unedited.
 - [ ] The `PUT` path is unchanged: a bot created by any other means can still be
       given a manifest afterwards, and it still takes effect immediately, with no
-      restart, by the same path as any other existing bot (§2.6).
-- [ ] With no manifest supplied, the new endpoint creates a bot that is
-      byte-for-byte the bot the existing endpoint creates — same preflight, same
-      engine/cluster rules, same space resolution, same Passport flow.
+      restart (§2.6).
+- [ ] Every existing config-manifest, apply and startup-script test passes
+      **unedited**. Moving apply onto the queue changes what executes the work,
+      not what the work does or what any caller sees.
 - [ ] Creation with no manifest, or with a manifest declaring nothing, applies
-      nothing and reports `READY`. An empty declaration is not a failure.
+      nothing and reports `READY`.
 
 ## Decisions
 
 **D-1 — A dedicated endpoint pair, not an extra field on `POST /bots`.**
 Adding an optional manifest to the existing create would change what its existing
 answers *mean*: today a `201` says "created and done", and the auth-status poll's
-`ISSUED` is terminal. With a manifest neither is true. Rather than overload two
-established contracts with a conditional third meaning, the manifest flow gets its
-own pair with its own state machine. It **reuses the implementation** —
-`create_bot_with_authorization` and `complete_bot_authorization` — so the
-preflight, engine/cluster bijection, space resolution and Passport handling are
-the same code, not a copy.
+`ISSUED` is terminal. With a manifest neither is true. The manifest flow gets its
+own pair with its own state machine, reusing the implementation beneath it.
 
 **D-2 — The endpoint accepts a narrower vocabulary than `PUT`, and derives it.**
-`PUT` may accept a category with no materialiser: the document sits inert, the
-capabilities endpoint says so, and nothing has been created. On the creation path
-that same acceptance costs a Passport application, a user's authorization click and
-a live bot before the failure appears. Deriving the gate from the registry rather
-than restating it means W5 and W6 widen this endpoint by landing.
+`PUT` may accept a category with no materialiser: it sits inert, the capabilities
+endpoint says so, and nothing has been created. On the creation path that same
+acceptance costs a Passport application, a user's click and a live bot before the
+failure appears. Deriving the gate from the registry means W5 and W6 widen this
+endpoint by landing.
 
 **D-3 — A durable job carries the creation; the poll only observes.**
-*Revised — this replaces a device-activation listener.* The queue already has the
-exact shape this needs: a handler that reschedules itself until an external status
-goes terminal, bounded by a wall-clock deadline, with `TIMED_OUT` as a status
-distinct from failure. Three things fall out that the listener design had to
-solve separately:
+A poll-driven creation stalls forever if the caller walks away, which is what a
+durable job is for. The queue already has the shape: a handler that reschedules
+itself until an external status goes terminal, bounded by a wall-clock deadline,
+with `TIMED_OUT` distinct from failure.
 
-- **The restart guard disappears.** A listener on device activation fires on every
-  activation — restarts and re-publishes included, which are W8's — so it needed a
-  guard to recognise a creation. A job exists only for a creation, so there is
-  nothing to disambiguate.
-- **Abandonment becomes terminal.** The listener design had no answer for "the
-  user never clicked"; the deadline is one, and it is configurable.
-- **Work survives a restart.** A daemon thread does not; the queue is
-  DB-backed and reclaims a crashed worker's task after its lease expires.
-
-The cost, stated plainly because work-items §5 predicted it: **the task queue
-carries no tenant.** Its model has `env`, `app` and `idempotency_key` and nothing
-tenant-shaped, and no request context exists at handler time to capture. The
-tenant therefore rides in the payload and is re-established with
-`avernet_tenant_scope` in the handler. That is the whole of the cost, and it is
-covered by an acceptance criterion above rather than left to be remembered.
-
-**D-4 — The poll asks for a bot id and nothing else.**
-*Revised.* The earlier draft had the poll echo the creation attributes, the way
-today's auth-status poll does. It does not need to: the attributes are
-materialised into the job at submission, so the server already has them. This also
-retires the entire question of what happens when an echo disagrees with what was
-submitted — there is no echo. (Engine swapping was never permitted in the first
-place; the re-validation the earlier draft added to defend against it is gone with
-it. W4's apply-time re-validation, which predates this item, stays as it is.)
+**D-4 — The poll asks for a bot id and nothing else, and only reads.**
+The creation attributes are materialised into the job at submission, so the server
+already has them. That retires the question of what happens when an echo
+disagrees with what was submitted — there is no echo. The poll also makes no
+external call: the job polls AgentPass, and the poll reads what durable state
+says.
 
 **D-5 — A failed phase A does not abort creation.** Putting a manifest-layer
 failure in charge of the bot record would contradict §2.7 and leave a half-created
-bot to compensate for. The bot is created; the report says the script did not
-land; the caller can fix it with `PUT` + apply.
+bot to compensate for.
 
 **D-6 — `PARTIAL` reports `FAILED`, and the response shows the bot.**
-The mapping is a standing decision (#1696, 2026-08-30, superseding an earlier
-revision that mapped `PARTIAL` to `READY`; it rested on `on_fetch_failure: skip`,
-which §3.2 removed). The objection it invites is real — "failed" can read as "no
-bot was created" — so the terminal response carries the bot itself, and the apply
-record keeps saying `PARTIAL`. Nothing about applying a manifest to an
-already-running bot changes: there, `PARTIAL` is the report's status and the HTTP
-call is a success. Only this poll's one-word summary maps it.
+A standing decision (#1696, 2026-08-30, superseding an earlier revision that
+rested on `on_fetch_failure: skip`, which §3.2 removed). The objection it invites
+is real — "failed" can read as "no bot was created" — so the terminal response
+carries the bot, and the apply record keeps saying `PARTIAL`.
 
-**D-7 — No feature switch.**
-*Revised.* The switch existed for one reason: submission stores a manifest keyed
-by a `bot_id` that may never become a bot, and nothing capped those rows —
-deleting a bot never reaches them, and allocating a `bot_id` consumes no quota. The
-deadline supplies the cap the switch was standing in for, so the job deletes the
-manifest when a creation ends without a bot. #1698's general expiry sweeper is
-still worth having for rows this path cannot account for, but it is no longer this
+**D-7 — No feature switch.** The deadline supplies the cap the switch was
+standing in for, and the job deletes what it wrote when a creation ends without a
+bot. #1698's general sweeper is still worth having but is no longer this
 endpoint's gate.
 
 **D-8 — teclaw is accepted, but "in the first artifact" is not claimed.**
-The job waits for the container on either engine family, so phase B works for
-both. The stronger teclaw guarantee — that the **first** artifact already contains
-the manifest's results — requires reaching into artifact production and is W8's
-criterion, not this item's. On teclaw, `script` is already unsupported by the
-capability resolver, so phase A has nothing to do there.
+The job waits for the container on either engine family. The stronger teclaw
+guarantee — that the **first** artifact already contains the manifest's results —
+requires reaching into artifact production and is W8's criterion. On teclaw,
+`script` is already unsupported, so phase A has nothing to do there.
+
+**D-9 — Applying becomes a task, on every path.**
+`start_apply` runs its work on a daemon thread today. The task queue's own README
+names that as the pattern it exists to replace: it "loses work on restart and
+double-runs across pods". Three things follow, and the third is why this is in
+W13's scope rather than a nice-to-have:
+
+- A pod restart no longer loses an apply.
+- A stranded `RUNNING` record stops being a thing to sweep or reinterpret — the
+  work finishes instead.
+- **Creation depends on an apply completing.** Phase A must land before the bot is
+  created; a thread that dies takes that guarantee with it, and the bot would boot
+  without its script. A durable task is what makes the ordering survive a restart,
+  not just a happy path.
+
+The running-bot path gets the same treatment, because a second execution
+mechanism for the same operation is exactly the divergence W4's single code path
+exists to prevent.
+
+**D-10 — One task type for all three cases.**
+The three differ only in `phases`, the `trigger` label, and whether a previous
+report is carried — none of which the orchestrator branches on. Three task types
+would be three registry keys for one behaviour, and the apply record's `trigger`
+column already carries the distinction for anyone querying. `wake_on_enqueue` is
+per-type, but all three want immediacy, so that does not argue for splitting
+either.
+
+**D-11 — Re-runs are safe by convergence, never by "retry is off".**
+Worth its own decision because the wrong reason is load-bearing: at-least-once is
+structural, so a handler that never asks for a retry is still re-invoked when its
+lease expires. Safety comes from apply's own convergence and its lock. Writing it
+down the other way would mislead whoever adds a materialiser that is not
+convergent.
 
 ## In Scope
 
+- Moving apply execution onto the task queue, for all three cases, with the
+  existing apply API contract unchanged.
 - The create endpoint and the poll endpoint, with the state machine above.
 - The creation job: its handler, its payload (attributes + tenant), its
-  configurable deadline, its idempotency key, and its re-runnability.
-- Persisting the manifest at submission against the allocated `bot_id`, and
-  deleting it when the creation ends without a bot.
+  configurable deadline, its idempotency key, and its re-entrancy.
+- Persisting the manifest at submission, and deleting it — with any phase-A
+  startup-script row — when the creation ends without a bot.
 - The materialiser-backed acceptance gate, derived from the registry.
-- Phase A before the start command is composed; phase B once the container is up;
-  both phases' results in the terminal report.
-- Tenant propagation through the job payload, with tests.
-- Documentation: the creation flow, the poll states, the `script`-dependency rule.
+- Phase A before creation; phase B once the container is up; both phases' results
+  in the terminal report.
+- Tenant propagation through both payloads, with tests.
+- Documentation, including the operational precondition that the worker must be
+  enabled.
 
 ## Out of Scope
 
-- **Creation idempotency at the `bot_id` level (#1697).** A pre-existing gap:
-  `generate_bot_id` mints an id platform-side with no idempotency key, so a
-  retried *submission* makes a second bot. The job's idempotency key prevents a
-  second job for the same bot; it cannot prevent a second bot id being minted.
-- **#1698's general orphan sweeper.** Still worth having; no longer this
-  endpoint's precondition.
+- **Creation idempotency at the `bot_id` level (#1697).** `generate_bot_id` mints
+  an id platform-side with no idempotency key, so a retried *submission* makes a
+  second bot. The job's key prevents a second job for the same bot; it cannot
+  prevent a second id being minted.
+- **#1698's general orphan sweeper.** Still worth having; no longer a gate.
 - **W8's other apply points** — republish, rebuild-restart, `PUT` taking effect
   without a restart, and the legacy `/startup-script` write-through.
 - **The teclaw first-artifact guarantee** (W8), per D-8.
@@ -371,17 +411,14 @@ capability resolver, so phase A has nothing to do there.
 
 ## Open Questions
 
-1. **Does the job drive, or does the poll?** The review said both "add a job with
-   the task queue infra" and "that poll endpoint handles the end to end logic".
-   This spec has the **job** drive and the poll observe, because a poll-driven
-   creation stalls forever if the caller walks away — which is the thing a durable
-   job is for. If the intent was the opposite, the state machine survives; the
-   handler and the poll swap roles.
-2. **`AUTHORIZATION_EXPIRED`** is added by this revision as the honest terminal for
-   a deadline that elapsed. It is a seventh state on a machine #1696 specified with
-   six; say the word and it folds into `AUTHORIZATION_REJECTED`.
-3. **The default deadline** is ten minutes, as proposed, and configurable. It
-   bounds how long a user has to click.
+Two are still the reviewer's to close; neither blocks starting.
+
+1. **`PARTIAL → FAILED`** (D-6). Kept per the standing decision, with the bot
+   carried in the response as the mitigation. The alternative on the table is a
+   distinct `READY_WITH_FAILURES` state rather than folding it back into `READY`.
+2. **`AUTHORIZATION_EXPIRED`** is a seventh state on a machine #1696 specified
+   with six. It exists because the deadline does, and because "never clicked" is
+   not "declined". It can fold into `AUTHORIZATION_REJECTED` if that is preferred.
 
 ## Follow-ups
 
