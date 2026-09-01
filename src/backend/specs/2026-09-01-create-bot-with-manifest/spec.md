@@ -95,32 +95,36 @@ strand it.
 
 ### Applying is durable work
 
-- [ ] **Applying a manifest runs as a task on the existing task queue, on every
+- [x] **Applying a manifest runs as a task on the existing task queue, on every
       path** — the pre-container phase, the post-container phase, and the explicit
       apply on an already-running bot. The daemon thread W4 spawns is replaced.
-- [ ] **An apply survives the process that started it.** A pod that dies
+- [x] **An apply survives the process that started it.** A pod that dies
       mid-apply does not lose the work: the task's lease expires and another
       worker finishes it. This is what makes a stored apply status correct without
       anyone reading it — the apply *completes*, rather than being retroactively
-      reported as failed.
-- [ ] **Re-running an apply is safe, and the reason is convergence, not
+      reported as failed. *Verified indirectly, and deliberately so: lease
+      reclaim is the queue's own property with its own tests, so what this item
+      owns is that re-running the reclaimed task is safe (convergence, asserted
+      on the write count) and that a task not yet claimed still holds its lock.
+      Killing a pod is not reproducible in this suite.*
+- [x] **Re-running an apply is safe, and the reason is convergence, not
       configuration.** The queue is at-least-once *structurally* — a crashed
       worker's task is re-claimed whether or not the handler ever asks for a retry
       — so safety must come from apply itself: re-applying an unchanged document
       performs no writes (W4's convergence criterion), and the apply lock
       serialises attempts. Any statement that re-runs are safe "because retry is
       off" is wrong and must not appear in the code or the docs.
-- [ ] **The public contract of the existing apply route does not change.**
+- [x] **The public contract of the existing apply route does not change.**
       `POST …/config-manifest/apply` still answers `202` with an `apply_id`,
       still refuses a concurrent apply, still surfaces a validation failure
       synchronously, and its poll route still returns the same report. Only what
       executes the work changes.
-- [ ] **One task type**, not one per case. The three cases differ only in
+- [x] **One task type**, not one per case. The three cases differ only in
       arguments the engine does not branch on; the apply record's `trigger`
       column already distinguishes them for anyone querying.
-- [ ] The task is enqueued so the worker picks it up **immediately** rather than
+- [x] The task is enqueued so the worker picks it up **immediately** rather than
       waiting out its idle interval.
-- [ ] **Operational preconditions are stated, not assumed.** The worker runs only
+- [x] **Operational preconditions are stated, not assumed.** The worker runs only
       where it is enabled and its table is provisioned. With applying — and
       therefore bot creation — riding the queue, a deployment with the worker off
       does not merely run slower: creations never complete.
@@ -130,49 +134,49 @@ strand it.
 
 ### The create operation
 
-- [ ] A public endpoint accepts a manifest document **plus** the ordinary
+- [x] A public endpoint accepts a manifest document **plus** the ordinary
       creation attributes (engine, cluster, name, description, bot type, space,
       engine properties) and returns immediately with the allocated `bot_id` and
       the authorization handles (`iframe_url` / `redirect_url`).
-- [ ] **The submit response carries no state.** The state vocabulary belongs to
+- [x] **The submit response carries no state.** The state vocabulary belongs to
       the poll and appears nowhere else, so no terminal value can ever be returned
       by submission. A caller that has just submitted is, by construction,
       awaiting authorization.
-- [ ] **Only ARCA-family engines are accepted.** A teclaw creation is refused, by
+- [x] **Only ARCA-family engines are accepted.** A teclaw creation is refused, by
       the same rule as an unbacked construct — never accept what this path cannot
       deliver. teclaw configures a bot by composing its artifact at provision
       time, which is a different mechanism from the pre/post-container split here
       and belongs to W8, whose scope names it ("teclaw 在第一份 artifact 组装之前")
       and whose first acceptance criterion is the first-artifact guarantee. The
       refusal says so and names W8.
-- [ ] The manifest is **validated before Passport is applied for**, in the same
+- [x] The manifest is **validated before Passport is applied for**, in the same
       preflight as quota, name and engine checks. A caller with an invalid
       manifest is never sent to authorize, and no Passport application is spent
       on a request that cannot succeed.
-- [ ] Validation answers from the **request's** engine type and bot type, not
+- [x] Validation answers from the **request's** engine type and bot type, not
       from a bot record — there is no record yet. It uses the resolver W1 already
       exposes for exactly this (`resolve_capabilities`), so this path and
       `PUT`/`GET …/capabilities` cannot disagree about what a document may
       contain.
-- [ ] A manifest declaring a construct with **no materialiser in this build** is
+- [x] A manifest declaring a construct with **no materialiser in this build** is
       refused **here**, at submission. This is stricter than `PUT`, deliberately:
       `PUT` may accept a category that sits inert, but accepting one here means
       taking the user through authorization, creating the bot, and *then* failing
       the apply — the worst possible moment to discover it. The refusal names the
       construct and says what would apply it.
-- [ ] That gate is derived from **what is actually registered**, not from a list
+- [x] That gate is derived from **what is actually registered**, not from a list
       written by hand. When W5 registers `skills` and `identity`, or W6
       `resources`, this endpoint accepts them with no edit here.
-- [ ] The manifest is persisted **before Passport**, keyed by the allocated
+- [x] The manifest is persisted **before Passport**, keyed by the allocated
       `bot_id`. No schema change: the existing
       `(avernet_tenant, sha256(env, entity_id, bot_id))` key has all three parts
       in hand at that point.
-- [ ] The storage key's `entity_id` is resolved by the **same rule** `create_bot`
+- [x] The storage key's `entity_id` is resolved by the **same rule** `create_bot`
       will use when it writes the record, so the document stored before the bot
       exists is found afterwards.
-- [ ] **The creation attributes are materialised at submission**, so nothing about
+- [x] **The creation attributes are materialised at submission**, so nothing about
       the creation has to be supplied again.
-- [ ] **Submission never creates the bot.** This endpoint always goes through
+- [x] **Submission never creates the bot.** This endpoint always goes through
       user consent, so it applies for the Passport and stops; the job owns
       creation on every path. If AgentPass ever returns a token immediately, the
       job's first run simply sees `ISSUED` and proceeds — no special case, and the
@@ -180,23 +184,23 @@ strand it.
 
 ### The job that carries the creation
 
-- [ ] Submission enqueues **one durable job**, and that job — not the caller's
+- [x] Submission enqueues **one durable job**, and that job — not the caller's
       polling — drives the creation: it waits for authorization, runs phase A,
       creates the bot, waits for the container, starts phase B, and finishes.
-- [ ] A caller who stops polling still gets a fully configured bot. Polling
+- [x] A caller who stops polling still gets a fully configured bot. Polling
       observes; it never drives.
-- [ ] **The job waits for phase A, and does not wait for phase B.** Phase A has a
+- [x] **The job waits for phase A, and does not wait for phase B.** Phase A has a
       downstream dependency — creation must not begin until the script row exists.
       Phase B has none: nothing in the platform is blocked on it, exactly as
       nothing is blocked on an apply against a running bot. The job starts phase B
       and finishes; phase B is then observed the same way any other apply is.
-- [ ] The job has a **configurable wall-clock deadline**, defaulting to ten
+- [x] The job has a **configurable wall-clock deadline**, defaulting to ten
       minutes, measured from submission. Past it the creation is terminal and
       reported as expired.
-- [ ] The job is **re-entrant**: every step asks "is this already done?" against
+- [x] The job is **re-entrant**: every step asks "is this already done?" against
       durable state, because the queue guarantees a single claimer but
       at-least-once invocation.
-- [ ] The job is enqueued with an idempotency key derived from the bot id, so a
+- [x] The job is enqueued with an idempotency key derived from the bot id, so a
       resubmission cannot start a second creation for the same bot. This is the
       **first adoption** of that mechanism. The queue requires adoption to ship
       strictly later than the mechanism itself, which is satisfied: it is
@@ -204,17 +208,17 @@ strand it.
 
 ### The poll
 
-- [ ] The poll is addressed by **`bot_id` alone**. `entity_id` is resolved
+- [x] The poll is addressed by **`bot_id` alone**. `entity_id` is resolved
       server-side from the authenticated caller, exactly as it is at submission;
       it is never a request parameter.
-- [ ] The poll **never accepts the manifest, and never accepts creation
+- [x] The poll **never accepts the manifest, and never accepts creation
       attributes.** There is nothing for a caller to re-send.
-- [ ] **The poll is a pure read.** It reads durable rows — the job record, the bot
+- [x] **The poll is a pure read.** It reads durable rows — the job record, the bot
       record, the apply records — and maps them to a state. It calls no external
       service (it never queries AgentPass; the job does that), starts no work, and
       writes nothing. If it needs the authorization handles, they come from
       durable state or are not returned at all.
-- [ ] It reports:
+- [x] It reports:
 
       ```text
       AWAITING_AUTHORIZATION   waiting for the user to open the Passport link
@@ -234,66 +238,66 @@ strand it.
                                  did not land, and the report says which
       ```
 
-- [ ] **The three failure modes are distinguishable without reading prose.** An
+- [x] **The three failure modes are distinguishable without reading prose.** An
       invalid manifest is a `422` at submission with no bot and no state at all; a
       bot that could not be created or never came up is `CREATE_FAILED`; a bot
       that is running with an incomplete manifest is `APPLY_FAILED`. A caller
       never has to parse a message to tell "you have no bot" from "you have a bot
       that is missing some configuration".
 
-- [ ] An apply result of `PARTIAL` reports **`APPLY_FAILED`**, not `READY`, per
+- [x] An apply result of `PARTIAL` reports **`APPLY_FAILED`**, not `READY`, per
       the decision recorded on #1696: under §3.2's category overwrite a category is
       written all-or-nothing, so a declared category that was not written whole is
       not a success. **The apply record itself still says `PARTIAL`** — the mapping
       is this poll's summary, not a rewrite of the apply's status, and the `PUT` +
       apply path on a running bot is unaffected.
-- [ ] `APPLY_FAILED` states in its own name that the bot exists — that is what the
+- [x] `APPLY_FAILED` states in its own name that the bot exists — that is what the
       earlier `FAILED` spelling could not do, and the objection it invited ("people
       will think the bot was never created") is answered by the vocabulary rather
       than by a note in the payload. The response **also carries the bot**, and the
       bot record is not touched by a failing apply (§2.7).
-- [ ] Both terminal states carry a report complete enough to answer "did my
+- [x] Both terminal states carry a report complete enough to answer "did my
       manifest take effect?" without a second call — **including the entries from
       both phases**.
-- [ ] A creation that never got a bot leaves the poll answering its terminal
+- [x] A creation that never got a bot leaves the poll answering its terminal
       authorization state, not a 404.
 
 ### The two phases, in the creation sequence
 
-- [ ] **Phase A runs before the bot record is created at all.** It needs nothing
+- [x] **Phase A runs before the bot record is created at all.** It needs nothing
       from the bot: the startup-script row is keyed by `(entity_id, bot_id)`,
       both known at submission, and the only placeholders the schema admits
       (`BOT_ENGINE_TYPE`, `BOT_ENV`, `BOT_TENANT`, `BOT_ARCH` — there is
       deliberately no `BOT_ID` or `BOT_NAME`) all resolve from the creation
       request. Ordering it ahead of creation makes "the row exists before the
       start command is composed" true **by construction**.
-- [ ] **Applying behaves identically in all three cases.** The lock, the
+- [x] **Applying behaves identically in all three cases.** The lock, the
       re-validation, the record, the orchestrator's walk of `APPLY_ORDER`, the
       per-entry outcomes and the status derivation are one code path; only the
       arguments differ, and nothing in the engine branches on them.
-- [ ] A **failing phase A does not fail creation.** The bot is still created and
+- [x] A **failing phase A does not fail creation.** The bot is still created and
       provisioned; the failure is recorded and surfaces in the poll's terminal
       report (§2.7).
-- [ ] A creation that ends without a bot takes the **startup-script row** with it
+- [x] A creation that ends without a bot takes the **startup-script row** with it
       as well as the manifest — phase A can write that row before anyone knows the
       creation will complete.
-- [ ] `script`'s materialisation stays exactly what it is today: apply writes the
+- [x] `script`'s materialisation stays exactly what it is today: apply writes the
       `ac_bot_startup_script` row and stops. **No new execution machinery is built
       here** — the platform already composes that row into the start command
       (#926's mechanism, which W4's materialiser writes into). W13 only guarantees
       *when* the row is written relative to that composition.
-- [ ] **Iteration 1's rule is stated where a caller will read it:** a manifest's
+- [x] **Iteration 1's rule is stated where a caller will read it:** a manifest's
       `script` must not depend on anything else the same manifest declares,
       because on a first boot the script runs before any other category has been
       delivered (§2.12). #1508 removes the restriction in iteration 2.
 
 ### Tenancy
 
-- [ ] The tenant reaches the code that actually performs the apply. Both the
+- [x] The tenant reaches the code that actually performs the apply. Both the
       creation job and the apply task run on a worker with **no request behind
       them**, so the tenant is carried in each payload and re-established for the
       duration of each handler.
-- [ ] This is pinned by tests, not by memory, and the failure mode is why:
+- [x] This is pinned by tests, not by memory, and the failure mode is why:
       `get_current_avernet_tenant()` is a **total function that returns the
       default tenant** outside a request rather than raising. A handler that
       forgets the payload's tenant therefore does not crash — it quietly
@@ -303,20 +307,20 @@ strand it.
 
 ### Cleaning up after itself
 
-- [ ] When a creation ends **without a bot** — declined or expired — the job
+- [x] When a creation ends **without a bot** — declined or expired — the job
       deletes the manifest and any startup-script row phase A wrote. The rows this
       endpoint can create are bounded by their own jobs.
-- [ ] No feature switch. The endpoint ships enabled; the unbounded-orphan-rows
+- [x] No feature switch. The endpoint ships enabled; the unbounded-orphan-rows
       objection that would have required one is answered by the deadline above.
 
 ### Nothing else moves
 
-- [ ] `POST /openapi/v1/bots`, the auth-status poll and every existing creation
+- [x] `POST /openapi/v1/bots`, the auth-status poll and every existing creation
       path behave **exactly** as they do today. Their tests pass unedited.
-- [ ] The `PUT` path is unchanged: a bot created by any other means can still be
+- [x] The `PUT` path is unchanged: a bot created by any other means can still be
       given a manifest afterwards, and it still takes effect immediately, with no
       restart (§2.6).
-- [ ] Every existing config-manifest, apply and startup-script test passes with
+- [x] Every existing config-manifest, apply and startup-script test passes with
       **no change to what it asserts**. Moving apply onto the queue changes what
       executes the work, not what the work does or what any caller sees.
       **Corrected during implementation:** an earlier wording said "unedited",
@@ -327,7 +331,7 @@ strand it.
       test that reaches for the mechanism has to follow the mechanism, and
       pretending otherwise would have meant either keeping the thread or leaving
       those tests asserting nothing.
-- [ ] Creation with no manifest, or with a manifest declaring nothing, applies
+- [x] Creation with no manifest, or with a manifest declaring nothing, applies
       nothing and reports `READY`.
 
 ## Decisions
