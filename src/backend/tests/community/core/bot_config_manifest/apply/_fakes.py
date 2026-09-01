@@ -251,6 +251,200 @@ SOUL_URL = "https://content.example/identity/soul.md"
 SOUL_BODY = b"# team charter\nServe the customer honestly.\n"
 
 
+class FakeSkillUploadService:
+    """Stands in for ``LocalSkillUploadService``: same-name create-or-replace.
+
+    The name is parsed from the uploaded package's own SKILL.md (by the real
+    parser) — never taken from the caller — so the fake refuses what the real
+    service refuses: an unparseable package, right here, in the materialiser's
+    tests.
+    """
+
+    def __init__(self) -> None:
+        self.uploads: list[dict[str, Any]] = []
+        self.rows: dict[str, dict[str, Any]] = {}
+        self._next_id = 100
+
+    async def upload_local_skill(
+        self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
+    ) -> dict[str, Any]:
+        from agentclaw.community.core.skill_center.services.skill_parser import (
+            SkillParser,
+        )
+
+        name = _skill_name_of(package, SkillParser())
+        if name is None:
+            raise _LocalSkillInvalidPackage()
+        record = self.rows.get(name)
+        operation = "created" if record is None else "replaced"
+        if record is None:
+            self._next_id += 1
+            record = {"id": self._next_id, "name": name}
+            self.rows[name] = record
+        self.uploads.append(
+            {
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "actor_id": actor_id,
+                "name": name,
+                "package": package,
+                "operation": operation,
+            }
+        )
+        return {
+            "operation": operation,
+            "skill": {**record, "active": False},
+            "actor_id": actor_id,
+        }
+
+    def uploaded_packages(self, *, name: str) -> list[bytes]:
+        return [
+            call["package"] for call in self.uploads if call["name"] == name
+        ]
+
+
+def _skill_name_of(package: bytes, parser: Any) -> str | None:
+    """The package's own declared name, via its SKILL.md front matter."""
+    import io
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(package)) as archive:
+            members = [
+                info
+                for info in archive.infolist()
+                if not info.is_dir() and info.filename.split("/")[-1] == "SKILL.md"
+            ]
+            if len(members) != 1:
+                return None
+            body = archive.read(members[0])
+    except zipfile.BadZipFile:
+        return None
+    metadata = parser.parse_skill_markdown(body)
+    return str(metadata.to_dict().get("name") or "")
+
+
+class _LocalSkillInvalidPackage(Exception):
+    """The shape LocalSkillInvalidPackageError takes in these tests."""
+
+
+class FakeSkillActivation:
+    """Stands in for ``DirectActivationService``'s skill pair.
+
+    ``governed`` are the skill ids a SkillSet or the default set supplies —
+    the R1 refusal: activate/deactivate raise, exactly where the real
+    commands do, so a materialiser that forgot to pre-narrow the removals
+    would half-write a category here before failing in production.
+    """
+
+    def __init__(self, governed: set[int] | None = None) -> None:
+        self.governed = set(governed or ())
+        self.installed: set[int] = set()
+        self.activations: list[dict[str, Any]] = []
+        self.deactivations: list[dict[str, Any]] = []
+
+    async def activate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        if int(skill_id) in self.governed:
+            raise _PlatformSkillConflict("RESOURCE_MANAGED_BY_SKILL_SET")
+        self.installed.add(int(skill_id))
+        self.activations.append({"skill_id": int(skill_id), "bot_id": bot_id})
+        return {"id": skill_id, "changed": True}
+
+    async def deactivate_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        if int(skill_id) in self.governed:
+            raise _PlatformSkillConflict("RESOURCE_MANAGED_BY_SKILL_SET")
+        self.installed.discard(int(skill_id))
+        self.deactivations.append({"skill_id": int(skill_id), "bot_id": bot_id})
+        return {"id": skill_id, "changed": True}
+
+    @property
+    def writes(self) -> int:
+        return len(self.activations) + len(self.deactivations)
+
+
+class _PlatformSkillConflict(Exception):
+    """The shape SkillSetControlPlaneConflictError takes in these tests."""
+
+
+class FakeCapabilityReader:
+    """Stands in for ``BotCapabilityStateReader``: the active set + governance.
+
+    ``reader.member_skill_ids`` is what the flush says the Bot's Sets supply;
+    narrowing removals by it mirrors the ``mcp`` materialiser's
+    platform-default narrowing — same refusal, same source of truth.
+    """
+
+    def __init__(
+        self,
+        assets: list[Any] | None = None,
+        member_ids: set[int] | None = None,
+    ) -> None:
+        self.assets = tuple(assets or ())
+        self.member_ids = frozenset(member_ids or ())
+        self.asset_reads: list[dict[str, Any]] = []
+
+    def active_skill_assets(self, *, bot_id: str, owner_id: str, bot=None):
+        self.asset_reads.append({"bot_id": bot_id, "owner_id": owner_id})
+        return self.assets
+
+    def member_skill_ids(self, *, bot):
+        return self.member_ids
+
+
+def skill_asset(skill_id: int, name: str, git_path: str = "local://x"):
+    """One active-skill asset, the RegisteredSkillAsset shape."""
+    return SimpleNamespace(skill_id=skill_id, name=name, git_path=git_path)
+
+
+def build_skill_zip(name: str, *, extra: list[tuple[str, bytes]] | None = None) -> bytes:
+    """A real, valid skill package zip: SKILL.md with front matter, plus any
+    extra members — the discipline of driving fakes with true bytes."""
+    import io
+    import zipfile
+
+    manifest = (
+        f"---\nname: {name}\ndescription: {name} test skill.\n---\n# {name}\n"
+    ).encode()
+    entries: list[tuple[str, bytes]] = [("SKILL.md", manifest)]
+    entries.extend(extra or [])
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        for path, content in entries:
+            archive.writestr(zipfile.ZipInfo(path), content)
+    return stream.getvalue()
+
+
+def build_skill_tgz(rows: list[tuple[str, bytes]]) -> bytes:
+    """A real tar.gz carrying ``rows`` (path without leading ./, bytes)."""
+    import io
+    import tarfile
+
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+        for path, content in rows:
+            info = tarfile.TarInfo(path)
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+    return stream.getvalue()
+
+
+def real_validator() -> Any:
+    """The production validator, over the production parser — no fake."""
+    from agentclaw.community.core.skill_center.services.skill_parser import (
+        SkillParser,
+    )
+    from agentclaw.community.core.skill_center.skill_package import (
+        SkillPackageValidator,
+    )
+
+    return SkillPackageValidator(SkillParser())
+
+
+
 
 class FakeStartupScriptService:
     """Stands in for ``BotStartupScriptService``, recording every call."""

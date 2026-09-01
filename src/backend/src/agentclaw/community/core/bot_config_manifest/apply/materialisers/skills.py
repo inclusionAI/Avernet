@@ -1,0 +1,486 @@
+"""``skills`` → local upload + direct activation — the active skill set.
+
+The area is the one work-items §3.2 names: the bot's **active** skill set —
+``BotCapabilityStateReader.active_skill_assets`` after its flush, the same
+read the public listing answers from. Declared and not active ⇒ uploaded and
+activated. Active and no longer declared ⇒ deactivated. Active and unchanged
+⇒ no call at all (convergence). A skill one of the bot's SkillSets supplies
+is neither: the write refuses it — the same narrowing the ``mcp``
+materialiser applies to platform-default codes, asked up front so a governed
+skill never becomes a mid-category abort, and never a removal.
+
+**Packages travel the manual-upload road.** A no-subpath zip entry's fetched
+bytes are validated by the same ``SkillPackageValidator`` the router path
+uses, then handed to ``upload_local_skill`` as the canonical zip: an
+installed skill is indistinguishable from an uploaded one because it *is* an
+uploaded one (§3.3). A tar.gz or subpath entry is unpacked by the guarded
+unpacker, its selected subtree re-packed canonically by the same validator.
+The package's own SKILL.md front matter names the skill; a declaration whose
+``name`` disagrees is refused — report identities would otherwise lie about
+what got installed, and the runtime name is unique per bot either way.
+
+Convergence reads §2.8's receipts: when an entry's bytes were served from
+the platform's own copy (a receipt matching the declaration) and its name is
+active, re-applying writes nothing. A pinned fetch only ever returns the
+pinned bytes, so the receipt's agreement is the statement "what is installed
+is what is declared".
+
+Known corner, recorded rather than hidden: a skill a Set *references* but
+whose skill id the flush's ``member_skill_ids`` excludes (an excluded
+default-set member — the R1 refusal still applies to it) can abort a write
+mid-category. The same class exists for user Sets in the ``mcp`` wave; both
+report honestly as ``partially_written``.
+"""
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Sequence
+
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    EntryFetchError,
+    EntryFetcher,
+    FetchedEntry,
+)
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+    EntryOutcome,
+    EntryResult,
+)
+from agentclaw.community.core.bot_config_manifest.apply.registry import (
+    CategoryPlan,
+    Intent,
+    Materialiser,
+    PlannedEntry,
+    ResolveFailure,
+    ResolveResult,
+)
+from agentclaw.community.core.bot_config_manifest.capabilities import (
+    ManifestCategory,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+    ARCHIVE_MEMBER_LIMIT,
+    FETCH_ENTRY_LIMITS,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
+    UnpackError,
+    unpack_archive,
+)
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageInvalidError,
+    SkillPackageTooLargeError,
+    SkillPackageValidator,
+)
+from agentclaw.community.log import get_logger
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.bot_config_manifest.apply.context import (
+        ApplyContext,
+    )
+
+logger = get_logger()
+
+_FETCH_CATEGORY = "skills"
+
+#: URL path suffix → archive kind. Ordered so the longer tar suffix is tried
+#: before a hypothetical shorter one; ``.tgz`` is the autoroute of the same
+#: kind.
+_KIND_BY_SUFFIX: tuple[tuple[str, str], ...] = (
+    (".zip", "zip"),
+    (".tar.gz", "tar.gz"),
+    (".tgz", "tar.gz"),
+)
+
+#: Fallback when the URL does not say: the media type the source served.
+_KIND_BY_CONTENT_TYPE: tuple[tuple[str, str], ...] = (
+    ("application/zip", "zip"),
+    ("application/x-zip-compressed", "zip"),
+    ("application/gzip", "tar.gz"),
+    ("application/x-gzip", "tar.gz"),
+    ("application/x-tar", "tar.gz"),
+)
+
+
+class _PackageRefusal(Exception):
+    """The fetched bytes can never become a skill package — refuse the entry."""
+
+
+class _SkillPackage:
+    """One entry's validated, upload-ready package — the intent's value."""
+
+    __slots__ = ("name", "canonical_zip", "from_store")
+
+    def __init__(self, name: str, canonical_zip: bytes, *, from_store: bool) -> None:
+        self.name = name
+        self.canonical_zip = canonical_zip
+        # Whether the platform's own copy (W11) answered for these bytes.
+        # ``plan`` reads it: an active name plus a from-store copy is the
+        # unchanged state, because the receipt is keyed to this very source
+        # and agrees with the declaration.
+        self.from_store = from_store
+
+
+class SkillsMaterialiser(Materialiser):
+    """Converges the bot's active skills toward the declared package set."""
+
+    construct = ManifestCategory.SKILLS
+
+    def __init__(
+        self,
+        upload_service: Any,
+        activation_service: Any,
+        capability_reader: Any,
+        validator: SkillPackageValidator,
+        fetcher: EntryFetcher,
+    ) -> None:
+        self._uploads = upload_service
+        self._activation = activation_service
+        self._reader = capability_reader
+        self._validator = validator
+        self._fetcher = fetcher
+
+    async def resolve(
+        self, ctx: "ApplyContext", entries: Sequence[dict[str, Any]]
+    ) -> ResolveResult:
+        """Declared entries → validated packages, every refusal up front.
+
+        The order is deliberate: the name-level conflicts a declaration can
+        already have with the area are asked **before** any bytes are spent,
+        because the fetch is the expensive failure; then the fetch/pin; then
+        the package's own shape and name.
+        """
+        intents: list[Intent] = []
+        failures: list[ResolveFailure] = []
+        seen: set[str] = set()
+
+        area = {
+            asset.name: asset
+            for asset in self._reader.active_skill_assets(
+                bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
+            )
+        }
+        governed = self._reader.member_skill_ids(bot=ctx.bot)
+
+        for index, entry in enumerate(entries):
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if not isinstance(name, str) or not name:
+                failures.append(
+                    ResolveFailure(f"[{index}]", "a skills entry must name a 'name'")
+                )
+                continue
+            if name in seen:
+                # The active set is keyed by name — a duplicate declaration
+                # states something untrue of any result.
+                failures.append(
+                    ResolveFailure(name, "declared more than once in this category")
+                )
+                continue
+            seen.add(name)
+
+            existing = area.get(name)
+            if existing is not None:
+                if existing.skill_id in governed:
+                    failures.append(
+                        ResolveFailure(
+                            name,
+                            f"skill {name!r} is supplied to this bot by a skill set "
+                            "or the default set: it is managed there, not by a "
+                            "manifest, and a manifest can neither declare it nor "
+                            "remove it",
+                        )
+                    )
+                    continue
+                if not str(existing.git_path or "").startswith("local://"):
+                    failures.append(
+                        ResolveFailure(
+                            name,
+                            f"an active non-local skill is already called {name!r}: "
+                            "runtime skill names are unique per bot, so a local "
+                            "package cannot be installed under its name",
+                        )
+                    )
+                    continue
+
+            inline = entry.get("content")
+            if isinstance(inline, str):
+                # The belt behind the validator's PUT-time rule: a skill is a
+                # package, and no materialiser exists for inline text.
+                failures.append(
+                    ResolveFailure(
+                        name,
+                        "a skills entry is a package (SKILL.md + the files it "
+                        "names) — inline 'content' cannot be one; declare 'source'",
+                    )
+                )
+                continue
+
+            source_url = entry.get("source")
+            if not isinstance(source_url, str) or not source_url:
+                failures.append(
+                    ResolveFailure(name, "a skills entry must declare 'source'")
+                )
+                continue
+
+            try:
+                fetched = self._fetcher.fetch(
+                    ctx,
+                    source_url=source_url,
+                    digest=entry.get("digest"),
+                    auth=entry.get("auth"),
+                    category=_FETCH_CATEGORY,
+                    keep_last=entry.get("on_fetch_failure") == "keep_last",
+                )
+            except EntryFetchError as exc:
+                failures.append(ResolveFailure(name, exc.reason))
+                continue
+
+            try:
+                package = self._build_package(
+                    entry=entry,
+                    fetched=fetched,
+                    source_url=source_url,
+                )
+            except _PackageRefusal as exc:
+                failures.append(ResolveFailure(name, str(exc)))
+                continue
+
+            if package.name != name:
+                failures.append(
+                    ResolveFailure(
+                        name,
+                        f"the package names its skill {package.name!r}, but the "
+                        f"entry declares {name!r}: the report names entries as "
+                        "declared, and the report and the runtime name must agree",
+                    )
+                )
+                continue
+
+            intents.append(Intent(name, package))
+
+        return ResolveResult(intents=tuple(intents), failures=tuple(failures))
+
+    async def plan(
+        self, ctx: "ApplyContext", intents: Sequence[Intent]
+    ) -> CategoryPlan:
+        """Classify each intent against the active set; compute removals."""
+        area = self._area(ctx)
+        governed = self._reader.member_skill_ids(bot=ctx.bot)
+        declared = {intent.identity for intent in intents}
+
+        planned = []
+        for intent in intents:
+            package = intent.value
+            if intent.identity in area and package.from_store:
+                # Active, and the platform's own copy (a receipt that matches
+                # the declaration) is what would be installed: unchanged.
+                outcome = EntryOutcome.UNCHANGED.value
+            elif intent.identity in area:
+                # Active with new bytes (the pin moved on): the package is
+                # replaced in place; the installation itself stays.
+                outcome = EntryOutcome.UPDATED.value
+            else:
+                outcome = EntryOutcome.CREATED.value
+            planned.append(PlannedEntry(intent, outcome))
+
+        # The removal side of the area: what the write would refuse is not
+        # planned for removal — a Set-supplied skill is not the manifest's.
+        removable = {
+            name
+            for name, asset in area.items()
+            if asset.skill_id not in governed
+        }
+        removals = tuple(sorted(removable - declared))
+        return CategoryPlan(entries=tuple(planned), removals=removals)
+
+    async def write(
+        self, ctx: "ApplyContext", plan: CategoryPlan
+    ) -> Sequence[EntryResult]:
+        """Upload what is not unchanged, activate what is not active yet.
+
+        An ``unchanged`` entry calls nothing at all — convergence observed as
+        the absence of writes, not equal-looking output. ``created`` activates
+        the id the upload just wrote; ``updated`` does not re-activate (the
+        skill is already in the active set — that is what ``updated`` meant).
+        """
+        results: list[EntryResult] = []
+        for planned in plan.entries:
+            if planned.outcome == EntryOutcome.UNCHANGED.value:
+                results.append(
+                    EntryResult(
+                        self.construct,
+                        planned.intent.identity,
+                        EntryOutcome.UNCHANGED,
+                    )
+                )
+                continue
+            package = planned.intent.value
+            uploaded = await self._uploads.upload_local_skill(
+                bot_id=ctx.bot_id,
+                owner_id=ctx.owner_id,
+                actor_id=ctx.actor_id,
+                package=package.canonical_zip,
+            )
+            if planned.outcome == EntryOutcome.CREATED.value:
+                # The authoritative id: the row this very upload just wrote.
+                skill_id = str(uploaded["skill"]["id"])
+                await self._activation.activate_skill(
+                    skill_id=skill_id,
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    actor_id=ctx.actor_id,
+                )
+            results.append(
+                EntryResult(
+                    self.construct,
+                    planned.intent.identity,
+                    EntryOutcome(planned.outcome),
+                )
+            )
+
+        # Removals re-ask the area rather than carrying ids through the plan:
+        # the engine's plan carries identities, materialisers are stateless
+        # across stages by design, and one extra read cannot disagree with
+        # itself the way a cached id can.
+        area = self._area(ctx)
+        for name in plan.removals:
+            asset = area.get(name)
+            if asset is None:
+                # Gone between plan and write — already converged for this
+                # name; there is nothing to deactivate and no error to report.
+                continue
+            await self._activation.deactivate_skill(
+                skill_id=str(asset.skill_id),
+                bot_id=ctx.bot_id,
+                owner_id=ctx.owner_id,
+                actor_id=ctx.actor_id,
+            )
+        return tuple(results)
+
+    # ── the package road ────────────────────────────────────────────────────
+
+    def _build_package(
+        self, *, entry: dict[str, Any], fetched: FetchedEntry, source_url: str
+    ) -> _SkillPackage:
+        """Fetched bytes → a validated package, the manual-upload shape."""
+        kind = self._archive_kind(entry, source_url, fetched.content_type)
+        subpath = entry.get("subpath")
+
+        if kind == "zip" and not subpath:
+            # The byte-for-byte manual road: the fetched zip is validated and
+            # its canonical form handed on — the same ``validate_zip`` the
+            # upload service itself runs, so limits and layout are one rule.
+            validated = self._validate(self._validator.validate_zip, fetched.content)
+            return _SkillPackage(
+                validated.name, validated.canonical_zip, from_store=fetched.from_store
+            )
+
+        files = self._extract_subtree(
+            fetched.content, kind, subpath if isinstance(subpath, str) else None
+        )
+        validated = self._validate(self._validator.validate_directory, files)
+        return _SkillPackage(
+            validated.name, validated.canonical_zip, from_store=fetched.from_store
+        )
+
+    def _extract_subtree(
+        self, archive: bytes, kind: str, subpath: str | None
+    ) -> list[tuple[str, bytes]]:
+        """The guarded unpack, then the subpath's files as (relpath, bytes)."""
+        with tempfile.TemporaryDirectory(prefix="manifest-skill-") as tmp:
+            root = Path(tmp) / "pkg"
+            try:
+                tree = unpack_archive(
+                    archive,
+                    kind,
+                    root,
+                    member_limit=ARCHIVE_MEMBER_LIMIT,
+                    unpacked_size_limit=FETCH_ENTRY_LIMITS["resources_unpacked"],
+                )
+            except UnpackError as exc:
+                raise _PackageRefusal(
+                    f"the fetched skill archive could not be unpacked: {exc}"
+                ) from exc
+
+            selected: list[tuple[str, bytes]] = []
+            for member in tree.members:
+                relative = _under_subpath(member, subpath)
+                if relative is None:
+                    continue
+                # Read back from disk: the tree on disk is what the unpack
+                # guard verified, permissions flattened, traversal refused.
+                selected.append((relative, (root / member).read_bytes()))
+            if not selected:
+                raise _PackageRefusal(
+                    f"the archive contains nothing under subpath {subpath!r}"
+                    if subpath
+                    else "the archive contains no files"
+                )
+            return selected
+
+    def _archive_kind(self, entry: dict[str, Any], source_url: str, content_type: str | None) -> str:
+        """Declared ``unpack`` wins; else the URL's suffix; else the served
+        media type; else the entry is refused — fetching a skill whose
+        delivery shape nobody can name would fail inside the write."""
+        declared = entry.get("unpack")
+        if declared in ("zip", "tar.gz"):
+            return declared
+        path = source_url.split("?", 1)[0].lower()
+        for suffix, kind in _KIND_BY_SUFFIX:
+            if path.endswith(suffix):
+                return kind
+        if isinstance(content_type, str):
+            media = content_type.split(";", 1)[0].strip().lower()
+            for ctype, kind in _KIND_BY_CONTENT_TYPE:
+                if media == ctype:
+                    return kind
+        raise _PackageRefusal(
+            "cannot tell how to unpack this skill source: neither its URL "
+            "suffix nor its content type says 'zip' or 'tar.gz', and 'unpack' "
+            "is not declared"
+        )
+
+    def _validate(self, call, payload):
+        """One validator call, refused as an entry failure — at resolve time,
+        in the all-or-nothing envelope, never as a mid-write surprise."""
+        try:
+            return call(payload)
+        except SkillPackageInvalidError as exc:
+            raise _PackageRefusal(
+                f"the fetched skill is not a valid package ({exc.reason})"
+            ) from exc
+        except SkillPackageTooLargeError:
+            raise _PackageRefusal(
+                "the fetched skill package is over the upload package limits"
+            ) from None
+
+    def _area(self, ctx: "ApplyContext") -> dict[str, Any]:
+        """The active set by name — the reader's flush-then-read for this bot."""
+        return {
+            asset.name: asset
+            for asset in self._reader.active_skill_assets(
+                bot_id=ctx.bot_id, owner_id=ctx.owner_id, bot=ctx.bot
+            )
+        }
+
+
+def _under_subpath(member: str, subpath: str | None) -> str | None:
+    """The member's path relative to ``subpath``, or ``None`` if outside it.
+
+    Boundary-matched on segments: ``pkg/skill-a`` is not under
+    ``pkg/skill``. Both are already workspace-relative with no ``..``
+    segments — the entry's ``subpath`` by the validator, the member's name by
+    the unpack guard — so the comparison is pure prefix arithmetic.
+    """
+    if subpath is None:
+        return member
+    prefix = subpath.rstrip("/")
+    if not prefix:
+        return member
+    if member == prefix:
+        # The subpath itself: a directory member, never a file.
+        return None
+    if member.startswith(prefix + "/"):
+        return member[len(prefix) + 1 :]
+    return None
+
+
+__all__ = ["SkillsMaterialiser"]
