@@ -80,11 +80,15 @@ class ManifestContentServiceProtocol(Protocol):
     @abstractmethod
     def records(
         self,
+        scope: ContentScope,
         *,
-        env: str,
-        entity_id: str,
-        bot_id: str,
-        limit: int = 50,  # == repository protocol's DEFAULT_RECORD_LIMIT; a literal keeps this protocol file domain-import-free at runtime
+        limit: Optional[int] = None,
     ) -> list[StoredContentRecord]:
-        """The audit read: one bot's receipts, newest first."""
+        """The audit read: one bot's receipts, newest first.
+
+        Same scope shape as ``store`` — the bot a store event was on behalf
+        of. ``limit=None`` means the repository protocol's
+        ``DEFAULT_RECORD_LIMIT``; that constant stays the one definition, so
+        this file carries no drifting copy of its value.
+        """
         ...

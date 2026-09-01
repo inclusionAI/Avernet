@@ -195,7 +195,9 @@ store behind all three consumers of the requirement (audit, delivery,
   twice is two audit events, not one row to overwrite. Dedup lives in the
   blob layer by content address; repetition in the log is the fact.
 - **`read(digest)` is the one read path**, shared by delivery and audit:
-  streaming with the hash computed on the same pass, so the store returns
+  read in chunks with the hash computed on the same pass, returned whole
+  (peak ≈ 2× the blob at the §5 cap — a stated v1 trade; the consumer
+  materialises the full payload anyway), so the store returns
   bytes it can prove or fails — a re-delivery that "mostly" matches its
   address would defeat the receipt contract exactly where it matters. A
   missing address is terminal; this layer **never re-fetches** (§2.8's

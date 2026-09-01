@@ -106,9 +106,20 @@ def test_store_then_read_roundtrips_the_platform_copy(tmp_path):
     )
     assert stored.digest == BODY_SHA
     assert service.read(BODY_SHA) == BODY
-    # The audit read surfaces the same receipt.
-    assert [r.digest for r in service.records(
-        env=SCOPE.env, entity_id=SCOPE.entity_id, bot_id=SCOPE.bot_id)] == [BODY_SHA]
+    # The audit read surfaces the same receipt — scope-shaped, like store().
+    assert [r.digest for r in service.records(scope=SCOPE)] == [BODY_SHA]
+
+
+def test_records_limit_none_defaults_and_an_explicit_value_bounds(tmp_path):
+    # None means the repository protocol's DEFAULT_RECORD_LIMIT (the one
+    # definition of the bound — no drifting literal here); an explicit
+    # value bounds the audit read itself.
+    service, _ = _service(tmp_path)
+    service.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
+    service.store(_fetched(url="https://mirror.example/a.bin"), scope=SCOPE,
+                  source_url="https://mirror.example/a.bin")
+    assert len(service.records(scope=SCOPE)) == 2
+    assert len(service.records(scope=SCOPE, limit=1)) == 1
 
 
 def test_a_receipt_that_disagrees_with_its_bytes_is_refused(tmp_path):

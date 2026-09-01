@@ -234,11 +234,19 @@ class ManifestContentService:
     def read(self, digest: str) -> bytes:
         """The one read path, shared by delivery and audit (§2.8).
 
-        Streaming with the hash on the same pass: the store returns bytes it
-        can prove, or it raises — a re-delivery that "mostly" matches its
-        address would defeat the receipt contract exactly where it matters.
-        A missing address is terminal (``ContentMissingError``); this layer
-        never re-fetches.
+        The blob is read in chunks with the hash computed on the same pass,
+        and returned whole: the store hands back bytes it can prove, or it
+        raises — a re-delivery that "mostly" matches its address would
+        defeat the receipt contract exactly where it matters. A missing
+        address is terminal (``ContentMissingError``); this layer never
+        re-fetches.
+
+        Whole-bytes on purpose, at a stated cost: at the schema §5 cap
+        (100–200 MiB an entry) the peak is ~2× the blob (the chunk list and
+        the joined return). Apply is rare, and the read's consumer — W4's
+        delivery — materialises the full payload into the artifact anyway;
+        a chunk-wise contract is a decision for when a consumer exists that
+        wants one, not a default to speculate at now.
         """
         digest = _require_valid_digest(digest)
         blob = self._blob_path(digest)
@@ -259,15 +267,16 @@ class ManifestContentService:
 
     def records(
         self,
+        scope: ContentScope,
         *,
-        env: str,
-        entity_id: str,
-        bot_id: str,
-        limit: int = DEFAULT_RECORD_LIMIT,
+        limit: Optional[int] = None,
     ) -> list[StoredContentRecord]:
         """The audit read: one bot's receipts, newest first."""
         return self._repository.records_for(
-            env=env, entity_id=entity_id, bot_id=bot_id, limit=limit
+            env=scope.env,
+            entity_id=scope.entity_id,
+            bot_id=scope.bot_id,
+            limit=DEFAULT_RECORD_LIMIT if limit is None else limit,
         )
 
     # --- the blob tree ----------------------------------------------------

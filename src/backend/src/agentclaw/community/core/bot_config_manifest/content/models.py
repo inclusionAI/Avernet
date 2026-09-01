@@ -61,7 +61,7 @@ class StoredContentRecord(BaseModel):
     """溯源行业务模型（对应 ac_manifest_content 表）。"""
 
     id: Optional[int] = Field(default=None, description="主键ID")
-    env: str = Field(default="dev", description="环境标识")
+    env: str = Field(..., description="环境标识（必填，无默认——scope 之外不存在「默认环境」）")
     entity_id: str = Field(..., description="实体ID（存储键，非公开字段）")
     bot_id: str = Field(..., description="Bot ID")
     digest: str = Field(..., description="内容地址 sha256:<hex64>")
