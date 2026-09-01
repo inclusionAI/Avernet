@@ -114,6 +114,7 @@ from agentclaw.community.adapters.http.skills_pool import router as skills_pool_
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
+from agentclaw.community.adapters.http.bot_message_feedback.router import router as bot_message_feedback_router  # noqa: E402
 # The task surface is internal: execute/dashboard/list, the report and bbs
 # operations, the discovery phase and the engine's push callbacks all answer
 # under ``/api/v1/collaboration/tasks`` in ``adapters/http/task``. The
@@ -380,13 +381,12 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     McpEndpointUnavailableError: 422,
     McpPermissionDeniedError: 403,
     # 400, not 409: the published wire echoes the reason code as a rejected
-    # request and clients already parse it that way. Kept as-is deliberately.
+    # request and clients already parse it that way. Kept-as-is deliberately.
     SkillSetControlPlaneConflictError: 400,
     # 409, not 503. The mutation fence could not be taken, so the command never
-    # ran and the caller may retry — but the service itself is up and serving,
-    # which is the only thing a 503 is allowed to mean. Answering 503 also tells
-    # proxies and clients to back off the whole endpoint over what is a
-    # per-Bot lock conflict.
+    # ran and the service itself is up and serving, which is the only thing a
+    # 503 is allowed to mean. Answering 503 also tells proxies and clients to
+    # back off the whole endpoint over what is a per-Bot lock conflict.
     SkillSetControlPlaneLockUnavailableError: 409,
     SkillSetRuntimeReconcileError: 500,
 }
@@ -540,11 +540,11 @@ async def _http_exception_handler(
         # The public response is the bare reason phrase — ``exc.detail`` is
         # replaced, not returned — so this line is the only place the raised
         # detail survives. It also covers an ``HTTPException`` raised *inside* a
-        # public handler: ``@envelope_errors`` does not map that type, so it
+        # public handler: ``@envelope_errors`` does not wrap that type, so it
         # arrives here with the handler's arguments already stashed.
         #
         # Every status carries the traceback. For a handler-raised one ("Upload
-        # storage failed", "cron service returned no data") the raise site is
+        # storage failed", "Upload no data returned") the raise site is
         # the diagnosis. For Starlette's own routing 404/405, raised before any
         # handler, the stack is framework internals and adds little — but the
         # two are indistinguishable from here, and a handler-raised 4xx is the
@@ -558,7 +558,7 @@ async def _http_exception_handler(
             exc_info=exc,
         )
         return _public_error_envelope(exc.status_code, request, exc.headers)
-    # Internal ``/api`` routes keep FastAPI's response shape, but its default
+    # Internal ``/api`` routes keep FastAPI's ``{"detail": [...]}`` body, but its default
     # handler logs nothing at all — an ``HTTPException`` raised inside a route
     # left no record whatsoever. Log it here before delegating, so the response
     # is unchanged and the raise site is still recoverable.
@@ -688,7 +688,7 @@ async def _principal_error_handler(request: Request, exc: Exception) -> JSONResp
     re-raise dumped the whole ASGI stack twice per request, while this is one
     formatted chain for the exception itself. If the volume ever does bite, the
     fix is to drop ``exc_info`` here specifically rather than to unregister
-    these types, which would bring the re-raise back.
+    these types.
     """
     # ``exc`` carries the operator-facing diagnosis on the verification path —
     # the token's ``alg``/``kid`` and the fingerprint of the key we judged it
@@ -698,8 +698,7 @@ async def _principal_error_handler(request: Request, exc: Exception) -> JSONResp
     logger.warning(
         "[Public 401] %s on %s %s: %s%s",
         type(exc).__name__, request.method, request.url.path, exc,
-        params_suffix(request),
-        exc_info=exc,
+        params_suffix(request), exc_info=exc,
     )
     mapped = _public_mapped_error(request, exc)
     if mapped is not None:
@@ -902,6 +901,7 @@ app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
 app.include_router(channel_router)
 app.include_router(quality_router)
+app.include_router(bot_message_feedback_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
@@ -915,7 +915,7 @@ app.include_router(antprocess_router)
 app.include_router(antcode_router)  # AntCode 集成
 app.include_router(bot_public_auth_router)
 app.include_router(bot_public_router)
-app.include_router(bot_public_noauth_router)  
+app.include_router(bot_public_noauth_router)
 app.include_router(workitem_noauth_router)  # 工作项接口 (route URL still /api/public/dima)
 app.include_router(oss_to_nas_router)
 app.include_router(system_health_router)
