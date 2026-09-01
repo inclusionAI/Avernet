@@ -389,12 +389,24 @@ class DeadlineRenewalScheduler:
                     next_renew = naive_cst_now() + timedelta(
                         minutes=self._config.retry_delay_minutes
                     )
-                    self._schedule_repo.postpone_renewal(
-                        self._config.env,
-                        row["source_table"],
-                        row["source_id"],
-                        next_renew,
-                    )
+                    # WR-01 (86-REVIEW): the postpone write is a per-row
+                    # low-risk op — a single poison-row failure must not
+                    # abort the remaining orphan checks and this round's
+                    # metrics (CR-GAP-01 discipline).
+                    try:
+                        self._schedule_repo.postpone_renewal(
+                            self._config.env,
+                            row["source_table"],
+                            row["source_id"],
+                            next_renew,
+                        )
+                    except Exception:
+                        log.exception(
+                            "[DeadlineRenewalScheduler] Failed to postpone "
+                            "orphan source=%s:%s after recheck",
+                            row["source_table"],
+                            row["source_id"],
+                        )
                     if alive is True:
                         log.info(
                             "[DeadlineRenewalScheduler] orphan source=%s:%s "
