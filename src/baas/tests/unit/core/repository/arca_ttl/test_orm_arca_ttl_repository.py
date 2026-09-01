@@ -890,3 +890,173 @@ class TestCountHotArcaBindings:
         params = compiled.params
         assert params["env_1"] == "test"
         assert params["device_provider_1"] == ["arca", "ARCA"]
+
+
+class TestCountHotCovered:
+    """86-02 (WR-01): the covered count INNER JOINs the cold table — ANY
+    cold status — over the established hot-side ACTIVE ARCA filters."""
+
+    def test_count_hot_covered_device_side_inner_join(self):
+        """Device side: cold ON (source_table, source_id, env, sandbox_id),
+        no cold-status predicate (any status covers), hot filters replicated."""
+        repo, mock_session = _make_repo()
+        mock_session.execute.return_value.scalar.return_value = 42
+
+        result = repo.count_hot_covered("test")
+
+        assert result == 84  # device + binding side, 42 each
+        assert mock_session.execute.call_count == 2
+        compiled = mock_session.execute.call_args_list[0][0][0].compile(
+            dialect=mysql.dialect()
+        )
+        sql_text = str(compiled)
+
+        assert "count(*)" in sql_text
+        assert "INNER JOIN baas_bot_ttl_renewal_schedule ON" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.source_table = %s" in sql_text
+        assert "baas_bot_ttl_renewal_schedule.source_id = baas_device.id" in sql_text
+        assert (
+            "baas_bot_ttl_renewal_schedule.sandbox_id = "
+            "baas_device.provider_device_id" in sql_text
+        )
+        assert "baas_device.provider_type = %s" in sql_text
+        assert "baas_device.status = %s" in sql_text
+        assert "baas_device.is_deleted = %s" in sql_text
+        assert "baas_device.provider_device_id IS NOT NULL" in sql_text
+        # Any-status coverage: NO cold-table status predicate in the join.
+        assert "baas_bot_ttl_renewal_schedule.status" not in sql_text
+        assert "test" in compiled.params.values()
+
+    def test_count_hot_covered_binding_side_json_equality(self):
+        """Binding side: JSON sandbox equality in the ON, no is_deleted
+        anywhere (D-16'); the sqlite dialect skips the unquote wrapper."""
+        repo, mock_session = _make_repo()
+        mock_session.execute.return_value.scalar.return_value = 7
+
+        repo.count_hot_covered("test")
+
+        mysql_compiled = mock_session.execute.call_args_list[1][0][0].compile(
+            dialect=mysql.dialect()
+        )
+        mysql_sql = str(mysql_compiled)
+        assert (
+            "baas_bot_ttl_renewal_schedule.sandbox_id = "
+            "json_unquote(json_extract(ac_entity_device_binding.device_props, "
+            "'$.sandbox_id'))" in mysql_sql
+        )
+        assert "ac_entity_device_binding.status = %s" in mysql_sql
+        assert "is_deleted" not in mysql_sql
+
+        # D-05' flip: rebuild under the sqlite dialect before compiling.
+        mock_session.bind.dialect.name = _SQLITE
+        repo.count_hot_covered("test")
+
+        sqlite_compiled = mock_session.execute.call_args_list[3][0][0].compile(
+            dialect=sqlite.dialect()
+        )
+        sqlite_sql = str(sqlite_compiled)
+        assert "json_unquote" not in sqlite_sql
+        assert (
+            "baas_bot_ttl_renewal_schedule.sandbox_id = "
+            "json_extract(ac_entity_device_binding.device_props, '$.sandbox_id')"
+            in sqlite_sql
+        )
+
+
+class TestCountSuppressedTerminal:
+    """86-02 (R3): the suppressed variant adds a cold-table status bind
+    ("STOPPED") to the covered count — hot-ACTIVE x cold-STOPPED only."""
+
+    def test_count_suppressed_terminal_device_side_stopped_status_bind(self):
+        repo, mock_session = _make_repo()
+        mock_session.execute.return_value.scalar.return_value = 5
+
+        result = repo.count_suppressed_terminal("test")
+
+        assert result == 10  # device + binding side, 5 each
+        assert mock_session.execute.call_count == 2
+        compiled = mock_session.execute.call_args_list[0][0][0].compile(
+            dialect=mysql.dialect()
+        )
+        sql_text = str(compiled)
+        assert "baas_bot_ttl_renewal_schedule.status = %s" in sql_text
+        status_binds = [
+            v for k, v in compiled.params.items() if k.startswith("status")
+        ]
+        assert sorted(status_binds) == ["ACTIVE", "STOPPED"]
+
+    def test_count_suppressed_terminal_binding_side_both_dialects(self):
+        repo, mock_session = _make_repo()
+        mock_session.execute.return_value.scalar.return_value = 0
+
+        repo.count_suppressed_terminal("test")
+
+        mysql_compiled = mock_session.execute.call_args_list[1][0][0].compile(
+            dialect=mysql.dialect()
+        )
+        mysql_sql = str(mysql_compiled)
+        assert (
+            "baas_bot_ttl_renewal_schedule.sandbox_id = "
+            "json_unquote(json_extract(ac_entity_device_binding.device_props, "
+            "'$.sandbox_id'))" in mysql_sql
+        )
+        assert "baas_bot_ttl_renewal_schedule.status = %s" in mysql_sql
+        status_binds = [
+            v for k, v in mysql_compiled.params.items() if k.startswith("status")
+        ]
+        assert sorted(status_binds) == ["ACTIVE", "STOPPED"]
+
+        mock_session.bind.dialect.name = _SQLITE
+        repo.count_suppressed_terminal("test")
+        sqlite_compiled = mock_session.execute.call_args_list[3][0][0].compile(
+            dialect=sqlite.dialect()
+        )
+        sqlite_sql = str(sqlite_compiled)
+        assert "json_unquote" not in sqlite_sql
+        status_binds_sqlite = [
+            v for k, v in sqlite_compiled.params.items() if k.startswith("status")
+        ]
+        assert sorted(status_binds_sqlite) == ["ACTIVE", "STOPPED"]
+
+
+class TestHotRowExists:
+    """86-02 (WR-02): the orphan-recheck existence probe mirrors
+    list_due_for_renewal's JOIN conditions per side (D-16' decree)."""
+
+    def test_hot_row_exists_device_side_compiles_id_env_is_deleted(self):
+        repo, mock_session = _make_repo()
+        mock_session.execute.return_value.scalar.return_value = 42
+
+        assert repo.hot_row_exists("test", "baas_device", 42) is True
+
+        mock_session.execute.assert_called_once()
+        compiled = mock_session.execute.call_args[0][0].compile(
+            dialect=mysql.dialect()
+        )
+        sql_text = str(compiled)
+        assert "baas_device.id = %s" in sql_text
+        assert "baas_device.env = %s" in sql_text
+        assert "baas_device.is_deleted = %s" in sql_text
+        assert "test" in compiled.params.values()
+        assert 42 in compiled.params.values()
+        assert 0 in compiled.params.values()  # is_deleted bound value
+
+    def test_hot_row_exists_binding_side_without_is_deleted(self):
+        repo, mock_session = _make_repo()
+        mock_session.execute.return_value.scalar.return_value = None
+
+        assert repo.hot_row_exists("test", "ac_entity_device_binding", 7) is False
+
+        compiled = mock_session.execute.call_args[0][0].compile(
+            dialect=mysql.dialect()
+        )
+        sql_text = str(compiled)
+        assert "ac_entity_device_binding.id = %s" in sql_text
+        assert "ac_entity_device_binding.env = %s" in sql_text
+        assert "is_deleted" not in sql_text
+
+    def test_hot_row_exists_unsupported_source_table_raises(self):
+        repo, mock_session = _make_repo()
+
+        with pytest.raises(ValueError, match="Unsupported source_table"):
+            repo.hot_row_exists("test", "bogus", 1)
