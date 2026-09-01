@@ -9,6 +9,7 @@ import json
 import logging
 from pathlib import Path
 import tempfile
+import time
 from typing import Callable
 from urllib.parse import urlsplit
 
@@ -67,6 +68,10 @@ def _response_metadata(response: object) -> tuple[int | None, str | None]:
     headers = getattr(response, "headers", None)
     content_type = headers.get("content-type") if hasattr(headers, "get") else None
     return status_code, content_type if isinstance(content_type, str) else None
+
+
+def _duration_ms(started_at: float) -> int:
+    return round((time.perf_counter() - started_at) * 1000)
 
 
 def _json_value(value: object) -> object:
@@ -202,10 +207,25 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         self, request: SkillVersionMaterializationRequest
     ) -> PublishedMaterializedSkillVersion:
         stage = "target_read"
+        started_at = time.perf_counter()
+        stage_started_at = started_at
+        stage_durations_ms: dict[str, int] = {}
+
+        def advance_stage(next_stage: str) -> None:
+            nonlocal stage, stage_started_at
+            stage_durations_ms[stage] = _duration_ms(stage_started_at)
+            stage = next_stage
+            stage_started_at = time.perf_counter()
+
+        def finish_stage() -> None:
+            stage_durations_ms[stage] = _duration_ms(stage_started_at)
+
         target: MaterializingSkillVersion | None = None
         download_host: str | None = None
         download_path: str | None = None
         response: object | None = None
+        package_bytes: bytes | None = None
+        package: ValidatedSkillPackage | None = None
         try:
             target = self._versions.get_materialization_target(
                 env=request.env,
@@ -222,14 +242,25 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
             if target.sc_skill_id < 1 or target.sc_version_id < 1:
                 raise ValueError("exact SC identity is incomplete")
             if target.status == "PUBLISHED":
-                stage = "canonical_verify"
+                advance_stage("canonical_verify")
                 if not self._store.verify_version(ref):
                     raise ValueError(
                         "PUBLISHED Version has no verified canonical content"
                     )
-                return self._published_target(target)
+                published = self._published_target(target)
+                finish_stage()
+                self._log_success(
+                    request=request,
+                    target=target,
+                    duration_ms=_duration_ms(started_at),
+                    stage_durations_ms=stage_durations_ms,
+                    package_bytes=None,
+                    package_file_count=None,
+                    already_published=True,
+                )
+                return published
 
-            stage = "exact_download"
+            advance_stage("exact_download")
             exact = self._gateway.get_exact_download(
                 SkillCenterExactDownloadRequest(
                     skill_code=target.skill_code,
@@ -246,29 +277,29 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 raise ValueError("Skill Center returned a different exact Version")
             download_host, download_path = _safe_url_parts(exact.download_url)
             expected_digest = exact.sha256.lower()
-            stage = "package_download"
+            advance_stage("package_download")
             response = self._http.get(exact.download_url, timeout=30.0)
             response.raise_for_status()
             package_bytes = bytes(response.content)
-            stage = "digest_verify"
+            advance_stage("digest_verify")
             if hashlib.sha256(package_bytes).hexdigest() != expected_digest:
                 raise ValueError("downloaded package digest does not match SC")
 
-            stage = "package_validate"
+            advance_stage("package_validate")
             package = (
                 self._validator.validate_public_center_zip(package_bytes)
                 if request.scope is SkillCenterReadScope.PUBLIC
                 else self._validator.validate_zip(package_bytes)
             )
-            stage = "name_match"
+            advance_stage("name_match")
             if (
                 request.scope is not SkillCenterReadScope.PUBLIC
                 and package.name != target.name
             ):
                 raise ValueError("materialized SKILL.md name changed")
-            stage = "scanner"
+            advance_stage("scanner")
             scan = self._scanner.scan(package)
-            stage = "metadata_build"
+            advance_stage("metadata_build")
             dependencies = _dependencies(
                 tuple(scan.mcp_dependencies),
                 tuple(
@@ -298,13 +329,13 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 sort_keys=True,
             )
             version = CanonicalCenterVersion.from_files(identity, dict(package.files))
-            stage = "canonical_write"
+            advance_stage("canonical_write")
             written = self._store.write_version(version)
-            stage = "canonical_verify"
+            advance_stage("canonical_verify")
             if written != ref or not self._store.verify_version(ref):
                 raise ValueError("canonical exact Version did not verify")
-            stage = "publish"
-            return self._versions.publish_materialized(
+            advance_stage("publish")
+            published = self._versions.publish_materialized(
                 env=request.env,
                 skill_id=request.skill_id,
                 skill_version_id=request.skill_version_id,
@@ -313,7 +344,19 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 description=package.description,
                 published_at=self._clock(),
             )
+            finish_stage()
+            self._log_success(
+                request=request,
+                target=target,
+                duration_ms=_duration_ms(started_at),
+                stage_durations_ms=stage_durations_ms,
+                package_bytes=len(package_bytes),
+                package_file_count=len(package.files),
+                already_published=False,
+            )
+            return published
         except SkillVersionMaterializationError as exc:
+            finish_stage()
             self._log_failure(
                 request=request,
                 target=target,
@@ -322,11 +365,14 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 download_host=download_host,
                 download_path=download_path,
                 response=response,
+                duration_ms=_duration_ms(started_at),
+                stage_durations_ms=stage_durations_ms,
             )
             if exc.stage is not None:
                 raise
             raise SkillVersionMaterializationError(str(exc), stage=stage) from exc
         except Exception as exc:
+            finish_stage()
             self._log_failure(
                 request=request,
                 target=target,
@@ -335,6 +381,8 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 download_host=download_host,
                 download_path=download_path,
                 response=response,
+                duration_ms=_duration_ms(started_at),
+                stage_durations_ms=stage_durations_ms,
             )
             raise SkillVersionMaterializationError(str(exc), stage=stage) from exc
 
@@ -348,6 +396,8 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         download_host: str | None,
         download_path: str | None,
         response: object | None,
+        duration_ms: int,
+        stage_durations_ms: Mapping[str, int],
     ) -> None:
         """Emit correlation facts without serializing exception text or download URLs."""
         http_status, http_content_type = _response_metadata(response)
@@ -371,6 +421,8 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
             "http_status": http_status,
             "http_content_type": http_content_type,
             "failure_type": failure_type,
+            "duration_ms": duration_ms,
+            "stage_durations_ms": json.dumps(stage_durations_ms, sort_keys=True),
         }
         logger.warning(
             "skill_center_materialization_failed "
@@ -381,7 +433,47 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
             "sc_skill_id=%(sc_skill_id)s sc_version_id=%(sc_version_id)s "
             "download_host=%(download_host)s download_path=%(download_path)s "
             "http_status=%(http_status)s http_content_type=%(http_content_type)s "
-            "failure_type=%(failure_type)s",
+            "failure_type=%(failure_type)s duration_ms=%(duration_ms)s "
+            "stage_durations_ms=%(stage_durations_ms)s",
+            diagnostics,
+            extra=diagnostics,
+        )
+
+    @staticmethod
+    def _log_success(
+        *,
+        request: SkillVersionMaterializationRequest,
+        target: MaterializingSkillVersion,
+        duration_ms: int,
+        stage_durations_ms: Mapping[str, int],
+        package_bytes: int | None,
+        package_file_count: int | None,
+        already_published: bool,
+    ) -> None:
+        diagnostics = {
+            "operation": "skill_version_materialization",
+            "env": request.env,
+            "scope": request.scope.value,
+            "team_id": request.team_id,
+            "skill_id": request.skill_id,
+            "skill_version_id": request.skill_version_id,
+            "skill_uuid": target.skill_uuid,
+            "skill_code": target.skill_code,
+            "sc_version_number": target.sc_version_number,
+            "duration_ms": duration_ms,
+            "stage_durations_ms": json.dumps(stage_durations_ms, sort_keys=True),
+            "package_bytes": package_bytes,
+            "package_file_count": package_file_count,
+            "already_published": already_published,
+        }
+        logger.info(
+            "skill_center_materialization_succeeded "
+            "operation=%(operation)s env=%(env)s scope=%(scope)s team_id=%(team_id)s "
+            "skill_id=%(skill_id)s skill_version_id=%(skill_version_id)s "
+            "skill_uuid=%(skill_uuid)s skill_code=%(skill_code)s "
+            "sc_version_number=%(sc_version_number)s duration_ms=%(duration_ms)s "
+            "stage_durations_ms=%(stage_durations_ms)s package_bytes=%(package_bytes)s "
+            "package_file_count=%(package_file_count)s already_published=%(already_published)s",
             diagnostics,
             extra=diagnostics,
         )
