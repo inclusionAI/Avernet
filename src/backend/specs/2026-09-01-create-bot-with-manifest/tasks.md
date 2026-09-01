@@ -199,20 +199,20 @@ Conventions from `plan.md` that every task assumes:
 
 ## Group D — The public surface
 
-## [ ] Task 11: Request and response models
+## [x] Task 11: Request and response models
 - **Files:** `adapters/http/openapi_v1/bots/schemas_create_with_manifest.py` (new)
 - **Done when:**
-  - [ ] The create body carries the manifest plus the same creation attributes the
+  - [x] The create body carries the manifest plus the same creation attributes the
         existing create body accepts.
-  - [ ] The **poll has no body and no query parameters** — `bot_id` in the path is
+  - [x] The **poll has no body and no query parameters** — `bot_id` in the path is
         its whole input.
-  - [ ] A `CreationState` enum with these eight states — `AWAITING_AUTHORIZATION`,
+  - [x] A `CreationState` enum with these eight states — `AWAITING_AUTHORIZATION`,
         `AUTHORIZATION_REJECTED`, `AUTHORIZATION_EXPIRED`, `CREATING`,
         `CREATE_FAILED`, `APPLYING`, `READY`, `APPLY_FAILED`.
-  - [ ] The poll response carries the state, the authorization handles while
+  - [x] The poll response carries the state, the authorization handles while
         awaiting, and — at `READY` and `APPLY_FAILED` — the apply report **and the
         bot**.
-  - [ ] **The submit response has no state field at all.** The enum appears only
+  - [x] **The submit response has no state field at all.** The enum appears only
         on the poll, so no terminal value can be returned by submission. A test
         pins that the submit model has no such field.
 - **Depends on:** —
