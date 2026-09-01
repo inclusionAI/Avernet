@@ -64,6 +64,7 @@ SPACE_SKILL_PUBLICATION_TASK = "skill_center.publication"
 SPACE_SKILL_PUBLICATION_DEADLINE_SECONDS = 30 * 60
 SPACE_SKILL_PUBLICATION_AUTO_RETRY_SECONDS = 15 * 60
 SPACE_SKILL_PUBLICATION_POLL_SECONDS = 2
+SPACE_SKILL_MATERIALIZATION_MAX_AUTO_RETRIES = 3
 _PACKAGE_URL_EXPIRES_SECONDS = 60 * 60
 _SAFE_STORAGE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 logger = logging.getLogger(__name__)
@@ -464,13 +465,16 @@ class SpaceSkillPublicationTaskHandler:
                 env=env,
                 failure_type=type(exc.__cause__ or exc).__name__,
             )
-            return self._retry_or_available(
-                work,
-                kind=PublicationRecoveryKind.MATERIALIZATION,
+            attempt = self._repository.record_materialization_failure(
+                attempt_id=work.attempt.attempt_id,
                 error_code="MATERIALIZATION_FAILED",
                 error_message="Exact Version materialization failed",
+                max_auto_retries=SPACE_SKILL_MATERIALIZATION_MAX_AUTO_RETRIES,
                 env=env,
             )
+            if attempt.status is PublicationAttemptStatus.MATERIALIZATION_FAILED:
+                return Complete()
+            return Retry("Exact Version materialization failed")
 
     def _delete_frozen_draft_best_effort(
         self, work: PublicationWork, *, env: str

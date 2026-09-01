@@ -883,6 +883,7 @@ class PublicationAttemptState(_DocumentedEnum):
     SC_SUBMITTING = "SC_SUBMITTING"
     WAITING_SC = "WAITING_SC"
     MATERIALIZING = "MATERIALIZING"
+    MATERIALIZATION_FAILED = "MATERIALIZATION_FAILED"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     RESULT_UNKNOWN = "RESULT_UNKNOWN"
@@ -892,6 +893,7 @@ class PublicationAttemptState(_DocumentedEnum):
         "SC_SUBMITTING": "The one-shot Skill Center request has started.",
         "WAITING_SC": "Skill Center processing or exact metadata discovery is pending.",
         "MATERIALIZING": "The exact published Version is passing the Ready Gate.",
+        "MATERIALIZATION_FAILED": "Skill Center published the Version, but its local Ready Gate failed; retry is available.",
         "SUCCEEDED": "The exact Version is Published and ready for consumption.",
         "FAILED": "Publication was explicitly rejected and the Draft is editable.",
         "RESULT_UNKNOWN": "The external publication outcome is not yet confirmed.",

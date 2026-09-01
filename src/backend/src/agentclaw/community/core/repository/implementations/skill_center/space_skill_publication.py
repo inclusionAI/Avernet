@@ -598,6 +598,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             attempt.status = "MATERIALIZING"
             attempt.recovery_state = "AUTO_RETRYING"
             attempt.recovery_kind = "MATERIALIZATION"
+            attempt.materialization_retry_count = 0
             attempt.error_code = None
             attempt.error_message = None
             session.flush()
@@ -685,6 +686,37 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
                 session.flush()
             return self._record(attempt)
 
+    def record_materialization_failure(
+        self,
+        *,
+        attempt_id: int,
+        error_code: str,
+        error_message: str,
+        max_auto_retries: int,
+        env: str,
+    ) -> PublicationAttemptRecord:
+        if max_auto_retries < 0:
+            raise ValueError("max_auto_retries must not be negative")
+        with self._db.transactional_orm_session() as session:
+            attempt, _skill, version = self._lock_attempt_aggregate(
+                session, attempt_id=attempt_id, env=env
+            )
+            if version is None or attempt.skill_version_id is None:
+                raise RuntimeError("materialization failure has no exact Version")
+            if attempt.status != "MATERIALIZING":
+                return self._record(attempt)
+            attempt.error_code = error_code
+            attempt.error_message = error_message
+            attempt.recovery_kind = "MATERIALIZATION"
+            if attempt.materialization_retry_count >= max_auto_retries:
+                attempt.status = "MATERIALIZATION_FAILED"
+                attempt.recovery_state = "AVAILABLE"
+            else:
+                attempt.materialization_retry_count += 1
+                attempt.recovery_state = "AUTO_RETRYING"
+            session.flush()
+            return self._record(attempt)
+
     def restart_recovery(
         self,
         *,
@@ -723,6 +755,11 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             if attempt.recovery_kind is None:
                 raise RuntimeError("AVAILABLE recovery has no kind")
             attempt.recovery_state = "AUTO_RETRYING"
+            if attempt.recovery_kind == "MATERIALIZATION":
+                if attempt.status not in ("MATERIALIZING", "MATERIALIZATION_FAILED"):
+                    raise RuntimeError("materialization recovery has invalid Attempt status")
+                attempt.status = "MATERIALIZING"
+                attempt.materialization_retry_count = 0
             attempt.error_code = None
             attempt.error_message = None
             session.flush()
@@ -977,6 +1014,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             sc_post_started_at=attempt.sc_post_started_at,
             sc_accepted_at=attempt.sc_accepted_at,
             completed_at=attempt.completed_at,
+            materialization_retry_count=int(attempt.materialization_retry_count or 0),
         )
 
 

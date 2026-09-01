@@ -95,8 +95,8 @@ class SkillPackageValidator:
             require_wrapper_name_match=True,
         )
 
-    def validate_public_center_zip(self, package: bytes) -> ValidatedSkillPackage:
-        """Validate one SC Public package with an opaque transport wrapper.
+    def validate_skill_center_exact_zip(self, package: bytes) -> ValidatedSkillPackage:
+        """Validate one exact SC package with an opaque transport wrapper.
 
         Skill Center's exact download may wrap a valid Skill in its external
         ``skillCode`` directory.  That transport name is not the manifest or
@@ -109,6 +109,10 @@ class SkillPackageValidator:
             allow_legacy_local_manifest=False,
             require_wrapper_name_match=False,
         )
+
+    def validate_public_center_zip(self, package: bytes) -> ValidatedSkillPackage:
+        """Compatibility alias for Public callers of the exact SC package rule."""
+        return self.validate_skill_center_exact_zip(package)
 
     def validate_legacy_local_zip(self, package: bytes) -> ValidatedSkillPackage:
         """Validate the historical Local upload wire with explicit fallback."""

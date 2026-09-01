@@ -15,6 +15,7 @@ class PublicationAttemptStatus(StrEnum):
     SC_SUBMITTING = "SC_SUBMITTING"
     WAITING_SC = "WAITING_SC"
     MATERIALIZING = "MATERIALIZING"
+    MATERIALIZATION_FAILED = "MATERIALIZATION_FAILED"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     RESULT_UNKNOWN = "RESULT_UNKNOWN"
@@ -27,6 +28,7 @@ ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES = tuple(
         PublicationAttemptStatus.SC_SUBMITTING,
         PublicationAttemptStatus.WAITING_SC,
         PublicationAttemptStatus.MATERIALIZING,
+        PublicationAttemptStatus.MATERIALIZATION_FAILED,
         PublicationAttemptStatus.RESULT_UNKNOWN,
     )
 )
@@ -68,6 +70,7 @@ class PublicationAttemptRecord:
     sc_post_started_at: datetime | None = None
     sc_accepted_at: datetime | None = None
     completed_at: datetime | None = None
+    materialization_retry_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
