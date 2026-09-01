@@ -2077,6 +2077,44 @@ async def test_download_dir_404_when_the_directory_is_absent():
 
 
 @pytest.mark.asyncio
+async def test_download_dir_404s_when_the_provider_raises_the_upstream_404():
+    """The baas shape of "directory absent" — an upstream 404, not a ``None``.
+
+    ``baas_device_filesystem.list_dir`` re-raises the upstream status rather
+    than answering ``None``, so on the live baas stack the walk surfaces the
+    missing directory as an ``httpx.HTTPStatusError``. A missing directory is
+    this route's documented 404, same as the ``None``-provider shape the test
+    above covers — not a 500.
+    """
+    with pytest.raises(HTTPException) as exc:
+        await download_directory(
+            path="nope",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubTreeFileService({}, tree_raises=_http_status(404)),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_dir_surfaces_an_upstream_fault():
+    """Only 404 is an ordinary answer; an upstream fault must still surface."""
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await download_directory(
+            path="docs",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubTreeFileService({}, tree_raises=_http_status(503)),
+            request=_request_without_trace(),
+        )
+
+
+@pytest.mark.asyncio
 async def test_download_dir_empty_directory_is_a_valid_root_only_archive():
     """Empty is not missing: an existing empty directory downloads as an
     archive holding just its root entry — the walk can tell the two apart."""

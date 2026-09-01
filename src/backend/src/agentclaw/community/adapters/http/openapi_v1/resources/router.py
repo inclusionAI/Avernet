@@ -691,16 +691,29 @@ async def download_directory(
     safe = _safe_path(path)
     entity_type, entity_id, engine_type = _file_coords(bot_id, owner_id, bot_repo)
     root_name = safe.rsplit("/", 1)[-1] if safe else "workspace"
-    zip_path = await build_directory_zip(
-        file_svc.iter_directory_files(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            bot_id=bot_id,
-            engine_type=engine_type,
-            path=safe,
-        ),
-        root_name,
-    )
+    try:
+        zip_path = await build_directory_zip(
+            file_svc.iter_directory_files(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                engine_type=engine_type,
+                path=safe,
+            ),
+            root_name,
+        )
+    except httpx.HTTPStatusError as exc:
+        # The generator walks lazily inside the build, so the provider's verdict
+        # on a missing directory surfaces here, not at the call site above. The
+        # baas providers re-raise the upstream 404 for it rather than answering
+        # ``None`` (same loudness ``_read_file_or_404`` relies on), and — same
+        # rule as there — only *here* does that 404 stop being an upstream fault
+        # and become this route's documented "not found"; a missing directory is
+        # an ordinary answer, an empty walk is not. Every other status still
+        # surfaces as a 500, which is what an upstream fault is.
+        if exc.response.status_code != 404:
+            raise
+        raise HTTPException(status_code=404, detail="Resource not found") from exc
     filename = quote(f"{root_name}.zip")
     return FileResponse(
         zip_path,
