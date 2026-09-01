@@ -21,6 +21,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
+from secbaas.community.core.service.paas import (
+    DeviceFacadeException,
+    ErrorCode,
+    PaasError,
+)
 from secbaas.community.core.service.scheduler import (
     DeadlineRenewalScheduler,
     DeadlineRenewalSchedulerConfig,
@@ -1119,7 +1124,15 @@ class TestTtlWindowDerivation:
 
 
 class TestStep4FailureHandling:
-    """Tests for Step 4 — failure handling (retry + STOPPED threshold)."""
+    """Tests for Step 4 — liveness-gated failure handling.
+
+    Two-verdict model at the max_fail_count threshold: a platform-confirmed
+    verdict (dead-sandbox DEVICE_NOT_FOUND error class, or an expired TTL)
+    writes terminal STOPPED with the verdict as stop_reason; every
+    non-confirming failure (outage/unavailable class, empty TTL, generic
+    exception, rejected extension on a live container) holds the count at
+    max_fail_count - 1 (cap-and-hold) and keeps retrying.
+    """
 
     @pytest.mark.asyncio
     async def test_failure_retry_below_max_fail_count(self):
@@ -1145,9 +1158,115 @@ class TestStep4FailureHandling:
         mock_repo.set_status.assert_not_called()
         assert result == "failed"
 
+    @staticmethod
+    def _assert_cap_and_hold(mock_repo):
+        """Assert the cap-and-hold shape: count pinned at max_fail_count-1."""
+        call_args = mock_repo.update_after_failure.call_args
+        assert call_args is not None
+        assert call_args.kwargs.get("new_fail_count") == 9
+        return call_args.kwargs.get("next_renew_at")
+
+    @staticmethod
+    def _gone_exception(operation="get_device_info"):
+        """Dead-sandbox error class the platform emits for a recycled sandbox."""
+        return DeviceFacadeException(
+            operation,
+            "ARCA",
+            0,
+            None,
+            PaasError(ErrorCode.DEVICE_NOT_FOUND, "Device not found"),
+        )
+
     @pytest.mark.asyncio
-    async def test_failure_stopped_at_max_fail_count(self):
-        """Test 24: fail_count=10 → STOPPED, no retry."""
+    async def test_failure_threshold_confirmed_gone_stops_with_reason(self):
+        """fail_count=9 + DEVICE_NOT_FOUND → STOPPED with stop_reason=threshold_gone."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(side_effect=self._gone_exception())
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_gone"
+        )
+        mock_repo.update_after_failure.assert_not_called()
+        assert result == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_failure_threshold_expired_ttl_stops_with_reason(self):
+        """fail_count=9 + platform-reported expired TTL → STOPPED, threshold_expired."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1))
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_expired"
+        )
+        mock_repo.update_after_failure.assert_not_called()
+        assert result == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_failure_threshold_outage_error_class_holds_cap_and_retries(self):
+        """fail_count=9 + DEVICE_UNAVAILABLE (outage) → NO stop, cap-and-hold at 9."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(
+            side_effect=DeviceFacadeException(
+                "get_device_info",
+                "ARCA",
+                0,
+                None,
+                PaasError(ErrorCode.DEVICE_UNAVAILABLE, "platform down"),
+            )
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        next_retry = self._assert_cap_and_hold(mock_repo)
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now_cst = datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
+        expected_min = now_cst + timedelta(minutes=2) - timedelta(seconds=5)
+        expected_max = now_cst + timedelta(minutes=2) + timedelta(seconds=5)
+        assert expected_min <= next_retry <= expected_max
+
+    @pytest.mark.asyncio
+    async def test_failure_threshold_generic_exception_holds_cap_and_retries(self):
+        """fail_count=9 + plain Exception (fail-safe default) → cap-and-hold."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(side_effect=Exception("timeout"))
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        self._assert_cap_and_hold(mock_repo)
+
+    @pytest.mark.asyncio
+    async def test_failure_non_confirming_at_max_fail_count_holds_cap_and_retries(
+        self,
+    ):
+        """fail_count=10 + empty TTL (non-confirming) → cap-and-hold, never STOPPED."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
         mock_facade.get_device_info = AsyncMock(
@@ -1159,15 +1278,13 @@ class TestStep4FailureHandling:
         record = _renewal_record(renew_fail_count=10)
         result = await scheduler._renew_one(record)
 
-        mock_repo.set_status.assert_called_once_with(
-            "test", "baas_device", 1, "STOPPED"
-        )
-        mock_repo.update_after_failure.assert_not_called()
-        assert result == "stopped"
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        self._assert_cap_and_hold(mock_repo)
 
     @pytest.mark.asyncio
-    async def test_failure_threshold_exact_nine_to_ten_triggers_stopped(self):
-        """Test 25: fail_count=9 → incremented to 10 → STOPPED."""
+    async def test_failure_nine_to_ten_non_confirming_holds_cap_and_retries(self):
+        """fail_count=9 + empty TTL → count reaches 10 but holds at 9, retries."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
         mock_facade.get_device_info = AsyncMock(
@@ -1179,8 +1296,34 @@ class TestStep4FailureHandling:
         record = _renewal_record(renew_fail_count=9)
         result = await scheduler._renew_one(record)
 
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        self._assert_cap_and_hold(mock_repo)
+
+    @pytest.mark.asyncio
+    async def test_extend_ttl_not_found_at_threshold_stops(self):
+        """fail_count=9 + extend_ttl raises DEVICE_NOT_FOUND → STOPPED, threshold_gone.
+
+        The sandbox was provably alive seconds earlier (TTL read succeeded),
+        but the extension reply reports the dead-sandbox error class — the
+        single confirming error shape must still terminate at the cap.
+        """
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(10))
+        )
+        mock_facade.extend_ttl = AsyncMock(
+            side_effect=self._gone_exception(operation="extend_ttl")
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
         mock_repo.set_status.assert_called_once_with(
-            "test", "baas_device", 1, "STOPPED"
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_gone"
         )
         mock_repo.update_after_failure.assert_not_called()
         assert result == "stopped"
@@ -1969,21 +2112,23 @@ class TestProcessOneIsolation:
 
 
 class TestStoppedTransitionMetric:
-    """WR-GAP-03: threshold crossing emits a scrapeable metrics line — after
-    phase 85's any-status anti-join, threshold-STOPPED is terminal (revival
-    only via the device-lifecycle register() upsert); the metrics line is the
-    durable alarm."""
+    """WR-GAP-03: a threshold-STOPPED write emits a scrapeable metrics line.
+    R7 retarget: under the liveness gate the line fires only when the STOPPED
+    write carries a platform-confirmed verdict — the line now also carries
+    the stop_reason dimension and is the durable alarm (the persistence side
+    is the any-status anti-join keeping confirmed STOPPED rows terminal)."""
 
     @pytest.mark.asyncio
     async def test_stopped_transition_emits_metrics_line(self, caplog):
-        """WR-GAP-03: fail_count crossing the threshold emits
-        [arca_ttl_metrics] stopped_transition=1 with fail_count."""
+        """WR-GAP-03: a platform-confirmed expired TTL crossing the threshold
+        emits [arca_ttl_metrics] stopped_transition=1 with fail_count and
+        the stop_reason=threshold_expired dimension."""
         import logging
 
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
         mock_facade.get_device_info = AsyncMock(
-            return_value=MagicMock(ttl_timestamp=None)
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1))
         )
         mock_repo.set_status = MagicMock()
         mock_repo.update_after_failure = MagicMock()
@@ -1993,7 +2138,7 @@ class TestStoppedTransitionMetric:
             result = await scheduler._renew_one(record)
 
         mock_repo.set_status.assert_called_once_with(
-            "test", "baas_device", 1, "STOPPED"
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_expired"
         )
         mock_repo.update_after_failure.assert_not_called()
         assert result == "stopped"
@@ -2003,10 +2148,11 @@ class TestStoppedTransitionMetric:
         ]
         assert len(transition_lines) == 1
         msg = transition_lines[0]
-        assert "[arca_ttl_metrics]" in msg
-        assert "stopped_transition=1" in msg
-        assert "sandbox_id=sb-1" in msg
-        assert "fail_count=10" in msg
+        assert msg == (
+            "[arca_ttl_metrics] stopped_transition=1 sandbox_id=sb-1 "
+            "source_table=baas_device source_id=1 fail_count=10 "
+            "stop_reason=threshold_expired"
+        )
 
         transition_records = [
             r for r in caplog.records if "stopped_transition" in r.message
@@ -2017,6 +2163,7 @@ class TestStoppedTransitionMetric:
         stopped_lines = [r for r in caplog.records if "marked STOPPED" in r.message]
         assert len(stopped_lines) == 1
         assert stopped_lines[0].levelno == logging.WARNING
+        assert "threshold_expired" in stopped_lines[0].message
 
 
 class TestRenewalDigestLogging:
@@ -2163,13 +2310,14 @@ class TestRenewalDigestLogging:
 
     @pytest.mark.asyncio
     async def test_stopped_outcome_maps_to_failure_digest_result(self, caplog):
-        """Threshold STOPPED maps the digest result to "failure" (not
-        "stopped") — monitor vocabulary stays two-valued success/failure."""
+        """Threshold STOPPED on a platform-confirmed expired verdict maps the
+        digest result to "failure" (not "stopped") — monitor vocabulary
+        stays two-valued success/failure."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(
             enabled=True, config_overrides={"max_fail_count": 1}
         )
         mock_facade.get_device_info = AsyncMock(
-            return_value=MagicMock(ttl_timestamp=None)
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1))
         )
         mock_repo.set_status = MagicMock()
 
