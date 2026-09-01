@@ -439,7 +439,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: for polling, never what authorizes the read — the bot is still addressed in
 #: the path and still resolved as the named user's, which is what makes an id
 #: from another bot resolve to nothing.
-_BOT_ID_PLACEMENT = {"path": 153, "query": 1, "none": 101}
+_BOT_ID_PLACEMENT = {"path": 154, "query": 1, "none": 101}
 
 
 def _schema() -> dict:
@@ -530,8 +530,8 @@ def test_the_pinned_number_of_operations_take_it():
     version reads/actions and edit-lock operations all act for an explicit user.
     The five bot-first Editors operations bring the total to 119, and the four
     render-screen operations bring the total to 123, and the read-only Node
-    inventory brings the current total to 124. Caller identity context and MCP
-    call-type configuration add two more Bot-addressed, user-scoped operations.
+    inventory brings the current total to 124. Caller identity context plus MCP
+    and CLI call-type configuration add three Bot-addressed, user-scoped operations.
     """
     taking = [
         1
@@ -561,7 +561,7 @@ def test_the_pinned_number_of_operations_take_it():
     # moved to _USER_ID_FILTER_ONLY (asserted by its own test) and left this
     # count: 182 → 181. execute/dashboard take no user_id at all — see
     # _NO_USER_DIMENSION.
-    # Caller identity context and call-type update add two operations.
+    # Caller identity context plus MCP/CLI call-type updates add three operations.
     # Space Skill Grant management adds four Space-addressed operations,
     # editor-request command adds one, and permanent Draft Edit Lease adds four.
     # The owner-level routines aggregate (GET /bots/routines/all) adds one
@@ -581,8 +581,9 @@ def test_the_pinned_number_of_operations_take_it():
     # the user parameter — the surface is application-operated, the audit
     # actor composes off the principal alone — landing on 222 again.
     # Applying the manifest (W4, #1472) adds three more — apply, the
-    # last-apply read, and the poll by ``apply_id``: 222 → 225.
-    assert len(taking) == 225
+    # last-apply read, and the poll by ``apply_id``: 222 → 225. CLI caller
+    # configuration adds the final owner-addressed user-scoped operation.
+    assert len(taking) == 226
 
 
 def test_the_exempt_operations_take_none():

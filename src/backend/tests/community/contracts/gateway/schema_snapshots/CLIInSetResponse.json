@@ -27,6 +27,22 @@
       ],
       "default": null,
       "title": "Cli Desc"
+    },
+    "identity_mode": {
+      "anyOf": [
+        {
+          "enum": [
+            "owner",
+            "caller"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Identity Mode"
     }
   },
   "required": [

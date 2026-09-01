@@ -1,4 +1,4 @@
-"""Bootstrap-time convergence of the overwrite-style AgentPass resource scope."""
+"""Bootstrap-time convergence of the overwrite-style Passport resource scope."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ class CliScopeReconcileResult:
 
 @dataclass(frozen=True, slots=True)
 class _CliScopeSnapshot:
-    """One complete AgentPass snapshot normalized for an overwrite writer."""
+    """One complete Passport snapshot normalized for an overwrite writer."""
 
     historical_cli_items: list[dict[str, Any]]
     historical_mcp_items: list[McpScopeItem]
@@ -68,7 +68,7 @@ class CliPassportScopeReconciler:
         self._manifest_resolver = manifest_resolver or CliCapabilityManifestResolver()
 
     def current_passport_cli_items(self, *, bot: Mapping[str, Any]) -> list[dict[str, Any]]:
-        """Read the validated current CLI scope without mutating AgentPass."""
+        """Read the validated current CLI scope without mutating Passport."""
         return list(self._build_snapshot(bot).historical_cli_items)
 
     def supports_profile(self, *, bot: Mapping[str, Any]) -> bool:
@@ -194,18 +194,18 @@ class CliPassportScopeReconciler:
 
 def _extract_mcp_items(passport: Mapping[str, Any] | None) -> list[McpScopeItem]:
     if not isinstance(passport, Mapping):
-        raise ValueError("AgentPass scope is unavailable")
+        raise ValueError("Passport scope is unavailable")
     result: list[McpScopeItem] = []
     seen: set[str] = set()
     for raw in passport.get("mcps") or []:
         if not isinstance(raw, Mapping):
-            raise ValueError("AgentPass MCP scope is invalid")
+            raise ValueError("Passport MCP scope is invalid")
         code = raw.get("mcp_code") or raw.get("server_code")
         if not isinstance(code, str) or not code or code in seen:
-            raise ValueError("AgentPass MCP code is invalid")
+            raise ValueError("Passport MCP code is invalid")
         identity = str(getattr(raw.get("identity_mode", "owner"), "value", raw.get("identity_mode", "owner"))).strip().lower()
         if identity not in {"owner", "caller"}:
-            raise ValueError("AgentPass MCP identity mode is invalid")
+            raise ValueError("Passport MCP identity mode is invalid")
         seen.add(code)
         item: McpScopeItem = {"mcp_code": code, "identity_mode": identity}
         mcp_name = _optional_text(raw.get("mcp_name") or raw.get("server_name"))
@@ -227,10 +227,10 @@ def build_passport_resource_scope(
     cli_identity_modes: Mapping[str, object] | None = None,
     removed_cli_codes: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Build an overwrite-safe scope from AgentPass history and local sparse rows.
+    """Build an overwrite-safe scope from Passport history and local sparse rows.
 
     The caller owns desired MCP membership; this pure helper only restores the
-    identity for those codes from the complete AgentPass snapshot, then lets a
+    identity for those codes from the complete Passport snapshot, then lets a
     local sparse row take precedence. CLI history is retained and merged with
     caller-provided defaults or desired additions in the same snapshot.
     """

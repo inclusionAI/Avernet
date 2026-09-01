@@ -348,6 +348,8 @@ from agentclaw.community.core.gateway_principal import (  # noqa: E402
 )
 from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerCallTypeInvalidError,
+    CallerCliNotFoundError,
+    CallerCliSyncError,
     CallerIdentityAmbiguousError,
     CallerIdentityIrreversibleError,
     CallerIdentityNotFoundError,
@@ -387,6 +389,8 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     CallerLockEpochError: 409,
     CallerMcpNotFoundError: 404,
     CallerMcpSyncError: 500,
+    CallerCliNotFoundError: 404,
+    CallerCliSyncError: 500,
     CallerCallTypeInvalidError: 500,
     # ── SkillSet control plane ────────────────────────────────────────────
     # The legacy /api/skillsets routes used to translate these themselves, in a

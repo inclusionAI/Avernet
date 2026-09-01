@@ -264,6 +264,8 @@ class TestDeclareMcpScopeUsesResolver:
             mcp_provider=_make_mcp_provider(mcps=[{"server_code": "mcp.t.1"}]),
             passport_update=passport_update,
         )
+        service.bot_repository.get_by_id_and_owner.return_value = None
+        passport_update.query_agent_passport.return_value = {"mcps": [], "clis": []}
 
         result = await service.refresh_mcp_scope(
             user_id="u1",

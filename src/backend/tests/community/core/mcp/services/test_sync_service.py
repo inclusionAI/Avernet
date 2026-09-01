@@ -647,7 +647,7 @@ class TestRefreshMcpScope:
                 engine_type="openclaw",
             )
 
-        assert result == {"success": False, "error": "构建 AgentPass 完整范围失败"}
+        assert result == {"success": False, "error": "构建 Passport 完整范围失败"}
         passport_update.update_passport.assert_not_called()
         assert "agentpass_mcp_scope_snapshot_failed" in caplog.text
         assert "stage=build" in caplog.text

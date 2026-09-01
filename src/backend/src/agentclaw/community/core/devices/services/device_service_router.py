@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Any, override
 
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.mcp.services.cli_passport_scope import CliPassportScopeReconciler
     from agentclaw.community.plugin_api.passport import PassportPlugin
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.devices.services.cli_bootstrap import CliScopeReconcilerProtocol, reconcile_cli_bootstrap_scope
 from agentclaw.community.core.devices.errors import (
     DeviceNotFoundError,
     DeviceServiceError,
@@ -49,7 +49,6 @@ from agentclaw.community.log import get_logger
 
 
 logger = get_logger()
-
 # Provider 类型别名
 DeviceProvider = DeviceService
 
@@ -127,7 +126,7 @@ class DeviceServiceRouter(DeviceService):
         sandbox_client: "SandboxRuntimeClient | None" = None,
         publish_repo: BotPublishRepositoryProtocol | None = None,
         bot_repo: BotRepository | None = None,
-        cli_scope_reconciler: "CliPassportScopeReconciler | None" = None,
+        cli_scope_reconciler: CliScopeReconcilerProtocol | None = None,
     ) -> None:
         """初始化设备服务路由器.
 
@@ -784,22 +783,10 @@ class DeviceServiceRouter(DeviceService):
             )
             raise DeviceNotFoundError(f"device {device_id} not found")
 
-        # ========== 步骤 2: 收敛 AgentPass CLI scope ==========
-        cli_bootstrap: dict[str, object] = {}
-        if self._cli_scope_reconciler is not None:
-            try:
-                reconciled_scope = self._cli_scope_reconciler.reconcile(bot=bot)
-                cli_bootstrap = {
-                    "cli_manifest_version": reconciled_scope.manifest_version,
-                    "cli_manifest_digest": reconciled_scope.manifest_digest,
-                    "cli_codes": list(reconciled_scope.cli_codes),
-                }
-            except Exception as exc:
-                logger.error(
-                    "cli_passport_reconcile_failed device_id=%s bot_id=%s error_type=%s",
-                    device_id, bot_id, type(exc).__name__,
-                )
-                raise DeviceServiceError("CLI passport scope reconciliation failed") from exc
+        # ========== 步骤 2: 收敛 Passport CLI scope ==========
+        cli_bootstrap = reconcile_cli_bootstrap_scope(
+            self._cli_scope_reconciler, bot=bot, device_id=device_id, bot_id=bot_id, logger=logger
+        )
 
         # ========== 步骤 3: 取 agent_code ==========
         from agentclaw.community.core.bot_management.utils import resolve_agent_code
