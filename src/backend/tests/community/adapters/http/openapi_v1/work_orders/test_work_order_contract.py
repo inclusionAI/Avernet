@@ -138,7 +138,7 @@ def test_process_approval_forwards_only_callback_identity_headers(
             "Cookie": "backend_session=must-not-forward",
             "X-Request-Id": "request-1",
             "X-Trace-Id": "trace-1",
-            "X-Avernet-Principal": "must-not-forward",
+            "X-Avernet-Principal": "principal-token",
         },
     )
 
@@ -153,6 +153,7 @@ def test_process_approval_forwards_only_callback_identity_headers(
     lowered = {key.lower(): value for key, value in credential.headers.items()}
     assert lowered == {
         "authorization": "Bearer token",
+        "x-avernet-principal": "principal-token",
         "x-request-id": "request-1",
         "x-trace-id": "trace-1",
     }
@@ -270,7 +271,10 @@ def test_create_bot_editor_request_uses_principal_and_named_owner(
     )
 
 
-def test_create_work_order_event_accepts_json_objects(client, work_order_service):
+def test_create_work_order_event_accepts_json_objects(
+    client, work_order_service, caplog
+):
+    caplog.set_level("INFO", logger="start")
     work_order_service.create_work_order_event.return_value = (
         WorkOrderEventCreatedResult(
             event_category=NotificationCategory.APPROVAL,
@@ -296,6 +300,12 @@ def test_create_work_order_event_accepts_json_objects(client, work_order_service
     response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
 
     assert response.status_code == 201
+    event_log = next(
+        record
+        for record in caplog.records
+        if record.message == "work-order event received"
+    )
+    assert event_log.work_order_event == {**payload, "apply_reason": None}
     work_order_service.create_work_order_event.assert_called_once_with(
         event_category=NotificationCategory.APPROVAL,
         biz_type="SPACE_JOIN",

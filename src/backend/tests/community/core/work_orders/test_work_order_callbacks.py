@@ -104,6 +104,86 @@ def test_friend_handler_accepts_and_forwards_only_supplied_credential() -> None:
     )
 
 
+def test_friend_handler_logs_bcn_response_details_without_credentials(caplog) -> None:
+    caplog.set_level("INFO", logger="start")
+    http = MagicMock(spec=HttpClient)
+    http.post.return_value = _response(
+        {
+            "code": 403201,
+            "message": "Forbidden",
+            "data": None,
+            "request_id": "bcn-request-1",
+        },
+        status_code=403,
+    )
+    handler = FriendDecisionCallbackHandler(http)
+
+    with pytest.raises(WorkOrderCallbackError):
+        handler.handle(
+            context=_context(),
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            credential=WorkOrderCallbackCredential(
+                headers={
+                    "Authorization": "Bearer secret-auth",
+                    "X-Avernet-Principal": "secret-principal",
+                }
+            ),
+        )
+
+    request_log = next(
+        record
+        for record in caplog.records
+        if record.message == "friend work-order BCN callback request"
+    )
+    response_log = next(
+        record
+        for record in caplog.records
+        if record.message == "friend work-order BCN callback response"
+    )
+    assert request_log.request_body is None
+    assert request_log.has_authorization is True
+    assert request_log.has_x_avernet_principal is True
+    assert response_log.http_status == 403
+    assert response_log.response_code == 403201
+    assert response_log.response_message == "Forbidden"
+    assert response_log.response_request_id == "bcn-request-1"
+    assert response_log.response_body_raw == (
+        '{"code":403201,"message":"Forbidden","data":null,'
+        '"request_id":"bcn-request-1"}'
+    )
+    assert "secret-auth" not in caplog.text
+    assert "secret-principal" not in caplog.text
+
+
+def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
+    caplog.set_level("INFO", logger="start")
+    http = MagicMock(spec=HttpClient)
+    http.post.return_value = httpx.Response(
+        502,
+        text="Bad Gateway",
+        request=httpx.Request("POST", "https://bcn.test/callback"),
+    )
+    handler = FriendDecisionCallbackHandler(http)
+
+    with pytest.raises(WorkOrderCallbackError):
+        handler.handle(
+            context=_context(),
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            credential=WorkOrderCallbackCredential(headers={}),
+        )
+
+    response_log = next(
+        record
+        for record in caplog.records
+        if record.message == "friend work-order BCN callback response"
+    )
+    assert response_log.http_status == 502
+    assert response_log.response_code is None
+    assert response_log.response_body_raw == "Bad Gateway"
+
+
 def test_friend_handler_rejects_with_review_reason() -> None:
     http = MagicMock(spec=HttpClient)
     http.post.return_value = _response({"success": True})

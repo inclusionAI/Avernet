@@ -67,7 +67,10 @@ from agentclaw.community.core.work_orders.models import (
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.log import get_logger
 
+
+logger = get_logger()
 
 router = APIRouter(tags=["work-orders"], route_class=PublicAPIRoute)
 PositiveIdPath = Annotated[int, Path(ge=1, description="Positive numeric identifier.")]
@@ -83,6 +86,7 @@ _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 _CALLBACK_HEADER_NAMES = {
     "authorization",
+    "x-avernet-principal",
     "x-request-id",
     "x-trace-id",
 }
@@ -274,6 +278,10 @@ async def create_work_order_event(
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderEventCreated]:
     actor_id = _require_user_delegation(caller)
+    logger.info(
+        "work-order event received",
+        extra={"work_order_event": body.model_dump(mode="json")},
+    )
     data = create_work_order_event_data(
         body=body,
         actor_id=actor_id,

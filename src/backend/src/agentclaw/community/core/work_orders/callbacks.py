@@ -29,6 +29,7 @@ from agentclaw.community.plugin_api.http_client import (
 
 
 logger = get_logger()
+_RESPONSE_BODY_LOG_LIMIT = 16 * 1024
 
 
 @dataclass(frozen=True)
@@ -117,16 +118,67 @@ class FriendDecisionCallbackHandler:
             if decision is WorkOrderDecision.APPROVED
             else {"reason": review_remark}
         )
+        callback_headers = dict(credential.headers)
+        lowered_headers = {key.lower(): value for key, value in callback_headers.items()}
+        logger.info(
+            "friend work-order BCN callback request",
+            extra={
+                "work_order_id": context.work_order.id,
+                "event_type": context.source_event_type,
+                "request_id": request_id,
+                "action": action,
+                "callback_path": path,
+                "request_body": body,
+                "has_authorization": "authorization" in lowered_headers,
+                "has_x_avernet_principal": "x-avernet-principal" in lowered_headers,
+                "x_request_id": lowered_headers.get("x-request-id"),
+                "x_trace_id": lowered_headers.get("x-trace-id"),
+            },
+        )
+        response = None
+        response_body_raw = ""
+        response_payload: dict[str, object] | None = None
         try:
             response = self._http.post(
                 path,
                 json=body,
-                headers=dict(credential.headers),
+                headers=callback_headers,
                 timeout=self._timeout,
             )
+            response_body_raw = response.text
+            logged_response_body = response_body_raw
+            if len(logged_response_body) > _RESPONSE_BODY_LOG_LIMIT:
+                logged_response_body = (
+                    logged_response_body[:_RESPONSE_BODY_LOG_LIMIT] + "...<truncated>"
+                )
+            try:
+                parsed = json.loads(response_body_raw)
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            if isinstance(parsed, dict):
+                response_payload = parsed
+            logger.info(
+                "friend work-order BCN callback response",
+                extra={
+                    "work_order_id": context.work_order.id,
+                    "event_type": context.source_event_type,
+                    "request_id": request_id,
+                    "action": action,
+                    "http_status": response.status_code,
+                    "response_code": response_payload.get("code")
+                    if response_payload
+                    else None,
+                    "response_message": response_payload.get("message")
+                    if response_payload
+                    else None,
+                    "response_request_id": response_payload.get("request_id")
+                    if response_payload
+                    else None,
+                    "response_body_raw": logged_response_body,
+                },
+            )
             response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, dict) or payload.get("success") is not True:
+            if response_payload is None or response_payload.get("success") is not True:
                 raise ValueError("BCN callback did not report success")
         except Exception as exc:
             logger.warning(
@@ -134,6 +186,23 @@ class FriendDecisionCallbackHandler:
                 extra={
                     "work_order_id": context.work_order.id,
                     "event_type": context.source_event_type,
+                    "request_id": request_id,
+                    "action": action,
+                    "http_status": response.status_code if response is not None else None,
+                    "response_code": response_payload.get("code")
+                    if response_payload
+                    else None,
+                    "response_message": response_payload.get("message")
+                    if response_payload
+                    else None,
+                    "response_request_id": response_payload.get("request_id")
+                    if response_payload
+                    else None,
+                    "response_body_raw": (
+                        response_body_raw[:_RESPONSE_BODY_LOG_LIMIT] + "...<truncated>"
+                        if len(response_body_raw) > _RESPONSE_BODY_LOG_LIMIT
+                        else response_body_raw
+                    ),
                 },
                 exc_info=True,
             )
