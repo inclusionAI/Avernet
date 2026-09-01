@@ -609,6 +609,39 @@ class TestStep1ColdTableQuery:
         assert report.orphan_count == 0
 
     @pytest.mark.asyncio
+    async def test_orphan_postpone_write_failure_does_not_abort_round(self):
+        """86-REVIEW WR-01: a failing postpone write on one poison row must
+        not abort the remaining orphan checks or the round — the next
+        proven-absent orphan is still STOPPED this round."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 2
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.find_unregistered.return_value = []
+        # Row 1: recheck alive → postpone raises; row 2: recheck absent.
+        mock_repo.hot_row_exists.side_effect = [True, False]
+        mock_repo.postpone_renewal.side_effect = Exception("DB down")
+        mock_repo.list_due_for_renewal.side_effect = [
+            [
+                self._due_row("baas_device", 2, "sb-2", hot_id=None),
+                self._due_row("baas_device", 3, "sb-3", hot_id=None),
+            ],
+            [],
+        ]
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        # Round survives: the second orphan is still terminally STOPPED.
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 3, "STOPPED", stop_reason="orphan"
+        )
+        mock_repo.postpone_renewal.assert_called_once()
+        assert report.orphan_count == 1
+
+    @pytest.mark.asyncio
     async def test_one_side_query_failure_keeps_healthy_side_rows(self):
         """WR-05: when one due query raises, the healthy side's batch is
         still processed this round — only the failed side is emptied."""
