@@ -54,6 +54,7 @@ from engine.community.core.skills.models import (
     CenterEnsureRequest,
     CleanSymlinksRequest,
     PoolMappingSourceLayout,
+    PoolMappingApplyMode,
     PoolSkillMappingIntent,
     SymlinkItem,
     SyncBindPathsRequest,
@@ -270,7 +271,7 @@ async def verify_runtime_skill_mappings(
     if body.mapping_contract_version is not None:
         layout_kwargs["mapping_contract_version"] = body.mapping_contract_version
     if body.apply_mode != "STRICT":
-        layout_kwargs["apply_mode"] = body.apply_mode
+        layout_kwargs["apply_mode"] = PoolMappingApplyMode(body.apply_mode)
     if body.retired_mappings:
         layout_kwargs["retired_mappings"] = [
             _mapping_command(item) for item in body.retired_mappings
@@ -306,7 +307,7 @@ async def publish_runtime_skill_mappings(
     if body.mapping_contract_version is not None:
         layout_kwargs["mapping_contract_version"] = body.mapping_contract_version
     if body.apply_mode != "STRICT":
-        layout_kwargs["apply_mode"] = body.apply_mode
+        layout_kwargs["apply_mode"] = PoolMappingApplyMode(body.apply_mode)
     if body.retired_mappings:
         layout_kwargs["retired_mappings"] = [
             _mapping_command(item) for item in body.retired_mappings
