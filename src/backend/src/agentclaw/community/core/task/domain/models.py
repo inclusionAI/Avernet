@@ -185,7 +185,7 @@ class RuntimeInfo:
 
     run_mode: str | None = None              # "single_bot"/"coop_group"/"bbs";无 collab_mode
     assignee: str | None = None              # 执行者(bot_id / group_id)
-    start_time: int | None = None         # 进 RUNNING 时写(毫秒,int(time.time()*1000))
+    start_time: int | None = None         # 任务/节点开始时间(根在 init_graph 时写;叶子首次 RUNNING 时写)
     end_time: int | None = None           # 进终态时写(毫秒,int(time.time()*1000))
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None

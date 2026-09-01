@@ -87,6 +87,7 @@ class TestInitializeGraph:
         root = g.tasks[0]
         assert root.node_id == "tA"
         assert root.status == Status.PENDING
+        assert root.run_info.start_time is not None
         assert root.node_run_graph is g
 
     def test_run_id_monotonic(self, svc: TaskGraphService):
@@ -340,14 +341,14 @@ class TestUpdateTaskNodeInfo:
         assert node.run_info.end_time is None
 
     def test_planning_to_hung_writes_end_time_only(self, svc, graph):
-        # 纯规划节点从未执行(无 start)->直 HUNG:写 end_time,start 保持 None
+        # 根在 init_graph 时已开始计时,即使纯规划节点未进入 RUNNING。
         svc.update_task_node_info(_patch("t1", "t1", status=Status.PLANNING))
-        assert svc._get_node(graph, "t1").run_info.start_time is None
+        assert svc._get_node(graph, "t1").run_info.start_time is not None
         svc.update_task_node_info(_patch("t1", "t1", status=Status.HUNG))
         node = svc._get_node(graph, "t1")
         assert node.status == Status.HUNG
         assert node.run_info.end_time is not None
-        assert node.run_info.start_time is None
+        assert node.run_info.start_time is not None
 
 
 # ===== relations 派生查询 =====

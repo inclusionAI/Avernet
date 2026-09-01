@@ -678,6 +678,63 @@ class TaskService:
             return
         await asyncio.gather(*self._bg_tasks, return_exceptions=True)
 
+    @staticmethod
+    def _hydrate_root_dashboard_runtime(graph: TaskExecutionGraph, task_id: str) -> None:
+        """Fill missing root runtime identity for dashboard compatibility.
+
+        ``initialize_graph`` creates a planning root before the concrete executor
+        exists, so its run mode/assignee/session can legitimately be empty. The
+        dashboard still needs a stable root context, so fill only missing fields
+        from graph metadata. This is a read-side projection and must not overwrite
+        real execution values written later by workflow/BCS/BBS dispatch.
+        """
+        root = next((node for node in graph.tasks if node.node_id == task_id), None)
+        if root is None:
+            return
+
+        graph_props = graph.extend_props or {}
+        config = graph_props.get("execution_config") or {}
+        if not isinstance(config, dict):
+            config = {}
+
+        source_type = graph_props.get("source_type")
+        source_type = getattr(source_type, "value", source_type)
+        source_type = str(source_type or "").strip().lower()
+        task_type = config.get("task_type")
+        task_type = getattr(task_type, "value", task_type)
+        task_type = str(task_type or "").strip().lower()
+
+        # ``api`` is a trigger channel rather than an execution mode. Resolve its
+        # concrete mode from task_type when available, otherwise retain the
+        # historical single-bot default.
+        run_mode_by_source = {
+            "bot": "single_bot",
+            "coop_group": "coop_group",
+        }
+        run_mode = run_mode_by_source.get(source_type)
+        if source_type == "api":
+            run_mode = {
+                "workflow": "single_bot",
+                "yaml": "coop_group",
+                "bbs": "bbs",
+            }.get(task_type, "single_bot")
+
+        if not root.run_info.run_mode and run_mode:
+            root.run_info.run_mode = run_mode
+        if not root.run_info.assignee:
+            owner_bot_id = graph_props.get("owner_bot_id")
+            if owner_bot_id:
+                root.run_info.assignee = str(owner_bot_id)
+
+        if not root.run_info.extend_props.get("session_id"):
+            main_session_id = config.get("main_session_id")
+            if main_session_id:
+                root.run_info.extend_props["session_id"] = main_session_id
+        if not root.run_info.extend_props.get("assignee_owner_id"):
+            owner_user_id = graph_props.get("owner_user_id")
+            if owner_user_id:
+                root.run_info.extend_props["assignee_owner_id"] = str(owner_user_id)
+
     def get_task_dashboard(
         self,
         task_id: str,
@@ -691,6 +748,8 @@ class TaskService:
         把回调审计的 ``execution_graph``(BCN/ClawMind DAG 快照)挂在图级,便于 dashboard 可见;无 session_id /
         无 callback / 未配 ``callback_repo`` → 留 ``None``。子树投影(node_id 入参)不挂(root 不在投影内)。"""
         graph = self._graph.query_task_dashboard(task_id, node_id)
+        if node_id is None:
+            self._hydrate_root_dashboard_runtime(graph, task_id)
         if include_action_log:
             self._graph.load_action_logs(graph)
         root = next((n for n in graph.tasks if n.node_id == task_id), None)

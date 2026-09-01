@@ -279,12 +279,15 @@ class TaskGraphService:
             if task_id in self._graphs:
                 raise GraphAlreadyInitializedError(f"task_id={task_id} 图已存在")
             run_id = self._next_run_id()
+            # 任务从建图开始计时。根节点仍保持 PENDING,但其 start_time 代表
+            # 任务创建/执行图初始化时间,不能等到后续进入 RUNNING 才补写。
+            started_at = int(time.time() * 1000)
             root = TaskNode(
                 node_id=task_id,
                 task_id=task_id,
                 status=Status.PENDING,
                 task_spec=task_info.task_spec,
-                run_info=RuntimeInfo(),
+                run_info=RuntimeInfo(start_time=started_at),
                 node_run_graph=None,  # type: ignore[arg-type]  回填见下
             )
             graph = TaskExecutionGraph(
@@ -471,7 +474,11 @@ class TaskGraphService:
                 node.run_info.assignee = patch.assignee or None
             if patch.extend_props_patch is not None:
                 node.run_info.extend_props.update(patch.extend_props_patch)
-            if new_status == Status.RUNNING and prev_status != Status.RUNNING:
+            if (
+                new_status == Status.RUNNING
+                and prev_status != Status.RUNNING
+                and node.run_info.start_time is None
+            ):
                 node.run_info.start_time = int(time.time() * 1000)
                 node.run_info.end_time = None
             elif new_status in {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG}:

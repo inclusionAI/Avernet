@@ -187,7 +187,11 @@ def test_execute_yaml_persists_session_id_with_state_machine():
     # group_id + session_id surface in run_info extend_props (DB + dashboard root node).
     assert run.extend_props == {"group_id": "grp-1", "session_id": "yaml-session-1"}
     dash = svc.get_task_dashboard("t1")
-    assert dash.tasks[0].run_info.extend_props == {"group_id": "grp-1", "session_id": "yaml-session-1"}
+    assert dash.tasks[0].run_info.extend_props == {
+        "group_id": "grp-1",
+        "session_id": "yaml-session-1",
+        "assignee_owner_id": "u1",
+    }
 
 
 def test_execute_yaml_without_yaml_uses_manager_worker():
