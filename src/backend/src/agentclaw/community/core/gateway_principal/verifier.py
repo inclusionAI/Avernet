@@ -29,7 +29,9 @@ resolves the signing key through ``SecretResolver``.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 import jwt
 from pydantic import TypeAdapter, ValidationError
@@ -264,6 +266,37 @@ def verify_principal_token(
     expired, unparseable payload, contradictory tenants, an
     identity set naming neither an end user nor an application, or no signing
     key configured at all.
+
+    The two halves are also callable on their own — see
+    :func:`decode_principal_token` and :func:`caller_from_claims`. This is the
+    composition of them, and the only form any HTTP seam should reach for: a
+    caller that decodes without admitting has verified a signature and nothing
+    else.
+    """
+    return caller_from_claims(decode_principal_token(token, config))
+
+
+def decode_principal_token(
+    token: str, config: PrincipalVerifierConfig
+) -> dict[str, Any]:
+    """Return ``token``'s claims once its signature and time window check out.
+
+    The cryptographic half of :func:`verify_principal_token`: signature against
+    the shared key, ``alg`` pinned to :data:`_ALGORITHMS`, ``iss`` and (when
+    configured) ``aud`` value-checked, ``exp``/``iat``/``iss`` required to be
+    present, ``exp`` judged with :data:`_LEEWAY_SECONDS` of skew.
+
+    What comes back is **authenticated but not yet admitted**: the gateway
+    signed these claims, so they are not a caller's assertion — but nothing here
+    has looked at *who* they name, whether the identity set parses, or whether
+    the tenants agree. :func:`caller_from_claims` is that half, and any decision
+    about the caller belongs to it.
+
+    Separate from it because one consumer needs the claims themselves rather
+    than the caller they project onto: :mod:`.signer` re-addresses a verified
+    token to a second upstream, and re-addressing means preserving every claim
+    the gateway wrote (see that module). Every other consumer wants
+    :func:`verify_principal_token`.
     """
     if not config.signing_key:
         # No key means we cannot tell a gateway token from a forged one. The
@@ -312,6 +345,22 @@ def verify_principal_token(
             f"{_unverified_token_header(token)}]"
         ) from exc
 
+    return claims
+
+
+def caller_from_claims(claims: Mapping[str, Any]) -> VerifiedCaller:
+    """Project already-authenticated ``claims`` onto the caller they name.
+
+    The identity half of :func:`verify_principal_token`: the ``principals``
+    payload must parse onto :mod:`.models`, every principal that asserts a
+    tenant must agree on one, and the set must name an end user or an
+    application.
+
+    **Takes claims a signature has already vouched for**, which is the whole of
+    its precondition — it has no way to check that itself, so its only callers
+    are :func:`verify_principal_token` and :mod:`.signer`, each of which decodes
+    through :func:`decode_principal_token` first.
+    """
     principals = _parse_principals(claims.get("principals"))
     _reject_contradictory_tenant(principals)
     _require_admissible_principal(principals)
