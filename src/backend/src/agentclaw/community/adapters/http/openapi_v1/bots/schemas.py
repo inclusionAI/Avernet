@@ -179,11 +179,22 @@ class BotCreateEngineProperties(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    template: dict[str, Any] = Field(
+    template_type: str | None = Field(
         description=(
-            "Application-coding template properties. Passed through unchanged to "
-            "the template validator; platform-managed identity and lifecycle "
-            "fields are not accepted."
+            "Template type declared with the config. Required for template-"
+            "factory snapshots (any value, echoed from available-t-templates); "
+            "for hand-written application-coding configs omit it or pass "
+            "'applicationCoding'."
+        ),
+        default=None,
+    )
+    template_config: dict[str, Any] = Field(
+        description=(
+            "Template configuration. Either hand-written application-coding "
+            "properties, or a template-factory snapshot (identified by "
+            "template_key + template_uid) echoed verbatim from "
+            "bot-templates/available-tc-list; platform-managed identity and "
+            "lifecycle fields are not accepted."
         ),
     )
 
