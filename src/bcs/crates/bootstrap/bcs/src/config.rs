@@ -427,8 +427,11 @@ fn default_collaboration_templates_default_language() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GatewayPrincipalConfig {
-    #[serde(default = "default_gateway_principal_issuer")]
-    pub issuer: String,
+    /// Accepted JWT issuers. A token whose `iss` claim matches any entry is
+    /// accepted. Defaults to both `gateway` and `backend` so tokens minted by
+    /// either issuer are trusted out of the box.
+    #[serde(default = "default_gateway_principal_issuers")]
+    pub issuers: Vec<String>,
 
     #[serde(default = "default_gateway_principal_audience")]
     pub audience: String,
@@ -446,7 +449,7 @@ pub struct GatewayPrincipalConfig {
 impl Default for GatewayPrincipalConfig {
     fn default() -> Self {
         Self {
-            issuer: default_gateway_principal_issuer(),
+            issuers: default_gateway_principal_issuers(),
             audience: default_gateway_principal_audience(),
             key_id: default_gateway_principal_key_id(),
             signing_key_env: default_gateway_principal_signing_key_env(),
@@ -457,8 +460,20 @@ impl Default for GatewayPrincipalConfig {
 
 impl GatewayPrincipalConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if self.issuers.is_empty() {
+            return Err("gateway_principal.issuers must not be empty".to_string());
+        }
+        let mut seen: Vec<&str> = Vec::with_capacity(self.issuers.len());
+        for issuer in &self.issuers {
+            if issuer.trim().is_empty() {
+                return Err("gateway_principal.issuers must not contain blank entries".to_string());
+            }
+            if seen.iter().any(|prior| *prior == issuer) {
+                return Err("gateway_principal.issuers must not contain duplicates".to_string());
+            }
+            seen.push(issuer);
+        }
         for (field, value) in [
-            ("issuer", &self.issuer),
             ("audience", &self.audience),
             ("key_id", &self.key_id),
             ("signing_key_env", &self.signing_key_env),
@@ -478,8 +493,8 @@ impl GatewayPrincipalConfig {
     }
 }
 
-fn default_gateway_principal_issuer() -> String {
-    "gateway".to_string()
+fn default_gateway_principal_issuers() -> Vec<String> {
+    vec!["gateway".to_string(), "backend".to_string()]
 }
 
 fn default_gateway_principal_audience() -> String {

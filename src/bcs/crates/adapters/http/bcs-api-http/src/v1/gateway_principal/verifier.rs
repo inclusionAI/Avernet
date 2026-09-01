@@ -21,25 +21,38 @@ const CLOCK_SKEW_SECONDS: u64 = 5;
 const GATEWAY_PRINCIPAL_HEADER: &str = "x-avernet-principal";
 
 pub struct GatewayPrincipalTrust {
-    issuer: String,
+    issuers: Vec<String>,
     audience: String,
     key_id: String,
 }
 
 impl GatewayPrincipalTrust {
     pub fn new(
-        issuer: impl Into<String>,
+        issuers: Vec<String>,
         audience: impl Into<String>,
         key_id: impl Into<String>,
     ) -> Result<Self, GatewayPrincipalVerifierBuildError> {
-        let issuer = issuer.into();
         let audience = audience.into();
         let key_id = key_id.into();
-        if !is_non_blank(&issuer) || !is_non_blank(&audience) || !is_non_blank(&key_id) {
+        if !is_non_blank(&audience) || !is_non_blank(&key_id) {
             return Err(GatewayPrincipalVerifierBuildError::InvalidTrustConfiguration);
         }
+        // At least one issuer, each non-blank, no duplicates (order-preserving).
+        if issuers.is_empty() {
+            return Err(GatewayPrincipalVerifierBuildError::InvalidTrustConfiguration);
+        }
+        let mut normalized: Vec<String> = Vec::with_capacity(issuers.len());
+        for issuer in issuers {
+            if !is_non_blank(&issuer) {
+                return Err(GatewayPrincipalVerifierBuildError::InvalidTrustConfiguration);
+            }
+            if normalized.iter().any(|prior| prior == &issuer) {
+                return Err(GatewayPrincipalVerifierBuildError::InvalidTrustConfiguration);
+            }
+            normalized.push(issuer);
+        }
         Ok(Self {
-            issuer,
+            issuers: normalized,
             audience,
             key_id,
         })
@@ -123,7 +136,7 @@ impl GatewayPrincipalTokenVerifier {
 
         let mut validation = Validation::new(Algorithm::HS256);
         validation.set_audience(&[&self.trust.audience]);
-        validation.set_issuer(&[&self.trust.issuer]);
+        validation.set_issuer(&self.trust.issuers);
         validation.set_required_spec_claims(&["exp", "iss", "aud"]);
         validation.leeway = 0;
         validation.validate_exp = false;
@@ -139,8 +152,9 @@ impl GatewayPrincipalTokenVerifier {
                     GatewayPrincipalVerificationError::InvalidSignature
                 }
                 jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
+                    let expected_iss = self.trust.issuers.join(", ");
                     warn!(
-                        expected_iss = %self.trust.issuer,
+                        expected_iss = %expected_iss,
                         kid = ?header.kid,
                         token_fingerprint = %token_fingerprint,
                         "Gateway Principal token issuer mismatch"

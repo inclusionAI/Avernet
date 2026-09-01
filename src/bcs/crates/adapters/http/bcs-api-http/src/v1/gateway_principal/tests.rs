@@ -124,7 +124,7 @@ fn mint_with(header: Header, claims: &Value, signing_key: &[u8]) -> String {
 fn verifier_from(fixture: &ContractFixture) -> GatewayPrincipalTokenVerifier {
     let trust = must_ok(
         GatewayPrincipalTrust::new(
-            fixture.issuer.clone(),
+            vec![fixture.issuer.clone()],
             fixture.audience.clone(),
             fixture.key_id.clone(),
         ),
@@ -229,6 +229,43 @@ fn verifies_the_shared_all_identity_fixture_without_projecting_secrets() {
     let debug = format!("{caller:?}");
     assert!(!debug.contains("TEST_ONLY_BOT_TOKEN_MARKER"));
     assert!(!debug.contains("TEST_ONLY_ACCESS_KEY_TOKEN_MARKER"));
+}
+
+#[test]
+fn trusts_multiple_configured_issuers() {
+    // Two trust entries share one signing key and audience; a token minted by
+    // either issuer must verify, and an unconfigured issuer must be rejected.
+    let fixture = fixture();
+    let trust = must_ok(
+        GatewayPrincipalTrust::new(
+            vec!["gateway".to_string(), "backend".to_string()],
+            fixture.audience.clone(),
+            fixture.key_id.clone(),
+        ),
+        "valid multi-issuer trust",
+    );
+    let verifier = must_ok(
+        GatewayPrincipalTokenVerifier::new(TEST_KEY, trust),
+        "valid verifier",
+    );
+    for accepted_iss in ["gateway", "backend"] {
+        let mut claims = valid_claims();
+        claims["iss"] = json!(accepted_iss);
+        let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+        let caller = must_ok(
+            verifier.verify_at(&token, NOW),
+            "accepted configured issuer",
+        );
+        assert_eq!(caller.tenant.as_deref(), Some("tenant-a"));
+    }
+
+    let mut claims = valid_claims();
+    claims["iss"] = json!("other-gateway");
+    let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+    assert_eq!(
+        verifier.verify_at(&token, NOW),
+        Err(GatewayPrincipalVerificationError::InvalidClaims),
+    );
 }
 
 #[tokio::test]
@@ -399,24 +436,38 @@ fn rejects_untrusted_algorithm_token_type_and_key_id() {
 #[test]
 fn rejects_empty_trust_material() {
     let valid = must_ok(
-        GatewayPrincipalTrust::new("gateway", "bcs", "bare"),
+        GatewayPrincipalTrust::new(vec!["gateway".to_string()], "bcs", "bare"),
         "valid trust",
     );
     assert_eq!(
         GatewayPrincipalTokenVerifier::new(b"", valid).err(),
         Some(GatewayPrincipalVerifierBuildError::EmptySigningKey),
     );
+    // Blank issuer, blank audience, blank key id.
     for values in [
-        ("", "bcs", "bare"),
-        ("gateway", "", "bare"),
-        ("gateway", "bcs", ""),
-        ("   ", "bcs", "bare"),
+        (vec!["".to_string()], "bcs", "bare"),
+        (vec!["gateway".to_string()], "", "bare"),
+        (vec!["gateway".to_string()], "bcs", ""),
+        (vec!["   ".to_string()], "bcs", "bare"),
     ] {
         assert!(matches!(
             GatewayPrincipalTrust::new(values.0, values.1, values.2),
             Err(GatewayPrincipalVerifierBuildError::InvalidTrustConfiguration),
         ));
     }
+    // Empty issuer list and duplicate issuers are rejected.
+    assert!(matches!(
+        GatewayPrincipalTrust::new(Vec::<String>::new(), "bcs", "bare"),
+        Err(GatewayPrincipalVerifierBuildError::InvalidTrustConfiguration),
+    ));
+    assert!(matches!(
+        GatewayPrincipalTrust::new(
+            vec!["gateway".to_string(), "gateway".to_string()],
+            "bcs",
+            "bare",
+        ),
+        Err(GatewayPrincipalVerifierBuildError::InvalidTrustConfiguration),
+    ));
 }
 
 #[test]
