@@ -271,6 +271,18 @@ user_config:
       user: required
       app: required
 
+    # Source credentials (W3 #1471): tenant-level secret management — an
+    # application surface. The app identity is what the operations are
+    # scoped by: registering a free name makes the calling application its
+    # owner, rotation and delete are the owner's alone (checked at the
+    # backend, against the row), and any app of the tenant may read the
+    # masked inventory — the name is the shared reference namespace
+    # manifests cite. A user may ride along for audit attribution but
+    # cannot act alone. The same shape as /openapi/v1/bots/authorized.
+    "/openapi/v1/bots/source-credentials/**":
+      user: optional
+      app: required
+
     "/openapi/v1/collaboration/**":
       user: optional
       app: optional

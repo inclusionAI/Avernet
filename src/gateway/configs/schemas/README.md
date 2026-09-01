@@ -19,7 +19,9 @@ of a surface the upstream does not serve, and nothing downstream would catch it.
 - `bots.openapi.json` — Backend public OpenAPI spec (currently the
   `/openapi/v1/bots`, `/openapi/v1/org/user`, `/openapi/v1/org/dept`,`/openapi/v1/org`, `/openapi/v1/bots/spaces`,
   `/openapi/v1/bots/work-orders`, and `/openapi/v1/bots/work-order-notifications`
-  surfaces, narrowed to public paths and the components they reference)
+  surfaces, plus `/openapi/v1/bots/source-credentials/**` (W3, #1471:
+  tenant source credentials — app-operated, owner-app guarded), narrowed
+  to public paths and the components they reference)
 
 ## Future: build-time generation
 

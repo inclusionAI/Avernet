@@ -270,6 +270,14 @@ def _without_request_id(response) -> dict:
 _NO_USER_DIMENSION = {
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
+    # Source credentials (W3, #1471): tenant-level named objects on an
+    # application-operated surface — no user axis at all. The caller is
+    # the tenant's application (the edge requires an app credential);
+    # a riding user is audit attribution in ``modifier``, never a scope.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/source-credentials"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/source-credentials/{{name}}"),
+    ("put", f"{PUBLIC_API_PREFIX}/bots/source-credentials/{{name}}"),
+    ("delete", f"{PUBLIC_API_PREFIX}/bots/source-credentials/{{name}}"),
     # The marketplace catalogue is identical for every caller in the tenant.
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
@@ -419,8 +427,12 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``GET …/config-manifest/capabilities``). Each addresses one bot and
 #: resolves it as the named user's, so all four are bot-path-addressed like
 #: the rest of the surface. ``none`` is 97 because task template execution
-#: is internal to ``execute`` and has no separate route.
-_BOT_ID_PLACEMENT = {"path": 150, "query": 1, "none": 97}
+#: is internal to ``execute`` and has no separate route; it then moved
+#: 97 → 101 with the four source-credentials operations (W3, #1471) —
+#: tenant-level rows, no bot dimension at all. The W3 rework moved the
+#: group under ``/bots/source-credentials`` and made all four operations
+#: user-parameter-free (application-operated), which changes no count here.
+_BOT_ID_PLACEMENT = {"path": 150, "query": 1, "none": 101}
 
 
 def _schema() -> dict:
@@ -556,7 +568,11 @@ def test_the_pinned_number_of_operations_take_it():
     # bringing the combined surface to 218. The public task execute operation is the single task submission surface;
     # static-template execution is selected inside execute rather than exposed as a route. The config
     # manifest adds four Bot-addressed operations — read, replace, clear, and
-    # the capability read — all user-scoped, bringing it to 222 after removing the obsolete run-template route.
+    # the capability read — all user-scoped, 223 after the obsolete
+    # run-template route was removed. W3 (#1471) added a user-taking
+    # PUT /source-credentials/{name} (223), and its rework took it back off
+    # the user parameter — the surface is application-operated, the audit
+    # actor composes off the principal alone — landing on 222 again.
     assert len(taking) == 222
 
 

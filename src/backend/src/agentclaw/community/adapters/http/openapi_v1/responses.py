@@ -69,6 +69,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UserIdMismatchError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
+    SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_work_order import WorkOrderErrorCode, WorkOrderPublicErrorMessage
@@ -619,6 +622,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
+    **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # Startup script (issue #926): the body is refused at write time so a
     # caller learns the limit instead of hitting it inside a container. The

@@ -145,7 +145,7 @@ report；一个类别的失败**不牵连**别的类别。在覆盖语义下，�
 git 源调托管服务 HTTP API、URL 源发普通 GET，注入动作相同。
 
 ```text
-PUT /openapi/v1/source-credentials/{name}
+PUT /openapi/v1/bots/source-credentials/{name}
 {
   "type": "header",                     # 判别键；v1 唯一实现，缺省即 header
   "allowed_prefixes": ["…"],            # 所有 type 共有（见下）
@@ -157,7 +157,7 @@ PUT /openapi/v1/source-credentials/{name}
 两个实际调用（同一端点、同一 schema，只是 `{name}` 与取值不同）：
 
 ```text
-PUT /openapi/v1/source-credentials/corp-git-content
+PUT /openapi/v1/bots/source-credentials/corp-git-content
 {
   "type": "header",
   "header_name": "Authorization",                                  # 按托管服务定（下方「token 选型」）
@@ -165,7 +165,7 @@ PUT /openapi/v1/source-credentials/corp-git-content
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
 }
 
-PUT /openapi/v1/source-credentials/oss-artifacts
+PUT /openapi/v1/bots/source-credentials/oss-artifacts
 {
   "type": "header",
   "header_name": "Authorization",

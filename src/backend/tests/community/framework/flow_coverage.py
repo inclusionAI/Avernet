@@ -177,7 +177,19 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "bot_app_grant": _BOT_APP_GRANT_EXEMPT_REASON,
     "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
-    "bot_dormant": _EXEMPT_REASON,
+        "bot_config_manifest": (
+        "W3 (#1471) is credential storage: CRUD + prefix policy, no "
+        "singlebox-observable fetch flow yet (the guarded fetcher lands in "
+        "W2's own PR). Covered by "
+        "tests/community/core/bot_config_manifest/credentials/ (policy "
+        "matrix, service all-or-nothing + fail-closed, repository over a "
+        "real database), the adapter suite in "
+        "tests/community/adapters/http/openapi_v1/test_source_credentials_endpoints.py, "
+        "and the assembled-app endpoint cases in "
+        "tests/community/endpoints/test_openapi_source_credentials.py. "
+        "Drain this when W4's apply gives singlebox an observable flow."
+    ),
+"bot_dormant": _EXEMPT_REASON,
     "bot_inventory": (
         "New public inventory/local Bot aggregation module. Covered by HTTP endpoint, "
         "service conformance, and architecture tests in this change; drain when "

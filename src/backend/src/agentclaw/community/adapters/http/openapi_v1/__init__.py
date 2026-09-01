@@ -236,6 +236,7 @@ from .spaces import router as spaces_router
 from .spaces.skill_routes import router as space_skill_router
 from .spaces.publication_routes import router as space_skill_publication_router
 from .work_orders import router as work_orders_router
+from .source_credentials import router as source_credentials_router
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     PublicAPIRoute,
     assert_every_route_authorized,
@@ -456,6 +457,19 @@ def build_public_router() -> APIRouter:
     # backed by the same StaffDeptPlugin as the whoami's dept fields.
     public.include_router(
         org_dept_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Source credentials (W3, #1471): tenant-level named credentials
+    # referenced from manifests by name. A literal group under the bots
+    # namespace, mounted before the ``{bot_id}`` wildcard router like
+    # market/catalog — its path must not be captured as a bot id. No
+    # bot_id and no user_id: callers arrive as applications of the tenant
+    # (the edge requires an app credential), the tenant guard scopes
+    # every row, and the service enforces the owner-app boundary for
+    # rotation and delete.
+    public.include_router(
+        source_credentials_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
