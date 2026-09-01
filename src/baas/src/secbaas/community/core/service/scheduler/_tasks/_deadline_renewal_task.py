@@ -577,11 +577,12 @@ class DeadlineRenewalScheduler:
                                     "[DeadlineRenewalScheduler] discovery scan: "
                                     "unparseable ttl=%s for sandbox_id=%s "
                                     "source_table=%s source_id=%s — "
-                                    "falling back to now+12h",
+                                    "falling back to now+%.0fh",
                                     ttl_ms_str,
                                     row["sandbox_id"],
                                     row["source_table"],
                                     row["id"],
+                                    self._renewal_window.total_seconds() / 3600,
                                 )
                                 next_renew_at = naive_cst_now() + self._renewal_window
                         else:
@@ -589,10 +590,11 @@ class DeadlineRenewalScheduler:
                                 "[DeadlineRenewalScheduler] discovery scan: "
                                 "missing ttl for sandbox_id=%s "
                                 "source_table=%s source_id=%s — "
-                                "falling back to now+12h",
+                                "falling back to now+%.0fh",
                                 row["sandbox_id"],
                                 row["source_table"],
                                 row["id"],
+                                self._renewal_window.total_seconds() / 3600,
                             )
                             next_renew_at = naive_cst_now() + self._renewal_window
 
