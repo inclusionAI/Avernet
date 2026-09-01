@@ -232,7 +232,8 @@ class BotCreate(BaseModel):
         default=None,
         description=(
             "Optional engine-specific properties. Omit for a plain bot; provide "
-            "template for an application-coding bot."
+            "template_config (hand-written application-coding or a "
+            "template-factory snapshot) for a template-backed bot."
         ),
     )
     # ``engine_options`` is deliberately absent. The engine-owned bag the

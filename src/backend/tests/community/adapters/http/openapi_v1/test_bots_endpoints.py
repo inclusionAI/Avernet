@@ -1541,7 +1541,7 @@ def test_create_schema_nests_template_config_under_engine_properties(client):
     assert "template_type" not in poll_properties
     assert "template_config" not in poll_properties
     assert set(engine_properties) == {"template_type", "template_config"}
-    assert engine_properties["template_config"]["required"] == ["template_config"]
+    assert schemas["BotCreateEngineProperties"]["required"] == ["template_config"]
 
 
 def test_auth_status_validates_cluster_against_default_engine(client, svc, passport):
