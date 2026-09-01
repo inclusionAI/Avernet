@@ -840,6 +840,16 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # No bot exists yet for a grant to cover, and creation spends the user's
     # quota. Auto-granting the new bot would invent consent nobody gave.
     ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,
+    # Creating a bot with its manifest is the same creation, so it carries the
+    # same refusal. Its status poll goes with it rather than joining the
+    # grant-checked auth-status rows above: it is part of the same creation
+    # transaction, and until the bot exists there is no grant that could cover
+    # it.
+    ("POST", "/openapi/v1/bots/with-manifest"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/with-manifest/status",
+    ): AdmissionMode.REFUSED,
     # Delegation is a human act. An application must not be able to widen its
     # own access, withdraw a competitor's, or enumerate what else reaches a bot.
     ("POST", "/openapi/v1/bots/{bot_id}/authorized-apps"): AdmissionMode.REFUSED,

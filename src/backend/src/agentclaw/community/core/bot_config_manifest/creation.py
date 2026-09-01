@@ -39,6 +39,8 @@ from agentclaw.community.core.bot_config_manifest.schema import (
     Violation,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -173,13 +175,23 @@ def _location_for(construct: ApplyConstruct) -> str:
 
 
 class BotCreationManifestSeam:
-    """The four things bot creation asks of the manifest layer.
+    """Everything bot creation asks of the manifest layer, in one place.
 
     Deliberately small and free of creation policy: creation decides *when* to
     call these, this decides what each one means. Everything underneath is W1's
     and W4's — the same validator, the same storage, the same apply engine — so
     a manifest submitted through creation cannot end up held to different rules
     than one submitted through ``PUT``.
+
+    The last two — starting the durable job and reading it back — are here so
+    the HTTP layer never touches the task queue. A router that enqueued work
+    would be doing business, and a router that knew the job's idempotency key
+    would be a second place for it to be spelled.
+
+    Both are passed in rather than imported, because ``create_job`` imports this
+    module for the triggers below: wiring them at construction is how the DI
+    module already resolves the same shape for ``is_teclaw`` and the job's own
+    collaborators, and it keeps the two modules' dependency in one direction.
     """
 
     def __init__(
@@ -189,11 +201,15 @@ class BotCreationManifestSeam:
         apply_service: Any,
         script_service_provider: Callable[[], Any],
         is_teclaw: Callable[[Optional[str]], bool],
+        start_job: Callable[..., None],
+        find_job: Callable[..., Any],
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_service
         self._script_service_provider = script_service_provider
         self._is_teclaw = is_teclaw
+        self._start_job = start_job
+        self._find_job = find_job
 
     def preflight(
         self, *, document: str, engine_type: Optional[str], bot_type: Optional[str]
@@ -300,6 +316,51 @@ class BotCreationManifestSeam:
                 bot_id,
             )
             return None
+
+    def start_job(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str,
+        user_id: str,
+        document_owner: str,
+        spec: dict[str, Any],
+        iframe_url: Optional[str],
+        redirect_url: Optional[str],
+    ) -> None:
+        """Hand the creation to the durable job.
+
+        Called **after** the Passport application, because the job's first step
+        is reading its status: enqueueing earlier would only mean a first run
+        that finds nothing and reschedules.
+        """
+        self._start_job(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            user_id=user_id,
+            tenant=get_current_avernet_tenant(),
+            env=get_current_env(),
+            document_owner=document_owner,
+            spec=spec,
+            iframe_url=iframe_url,
+            redirect_url=redirect_url,
+        )
+
+    def find_job(self, *, entity_id: str, bot_id: str) -> Optional[Any]:
+        """This creation's task row, or ``None`` if no creation was submitted.
+
+        The tenant is resolved here, from the request, rather than taken as an
+        argument — the same rule the storage key follows, and for the same
+        reason: a caller who could supply it could read another tenant's row.
+        ``entity_id`` is the caller's own, resolved by the caller exactly as it
+        is at submission, and it is what keeps one owner's ``bot_id`` from
+        finding another's creation.
+        """
+        return self._find_job(
+            tenant=get_current_avernet_tenant(),
+            entity_id=entity_id,
+            bot_id=bot_id,
+        )
 
     def discard(self, *, entity_id: str, bot_id: str) -> None:
         """Remove what submission and the pre-container phase wrote.

@@ -217,24 +217,26 @@ Conventions from `plan.md` that every task assumes:
         pins that the submit model has no such field.
 - **Depends on:** —
 
-## [ ] Task 12: The two routes
+## [x] Task 12: The two routes
 - **Files:** `adapters/http/openapi_v1/bots/create_with_manifest.py` (new),
   `adapters/http/openapi_v1/__init__.py`
 - **Done when:**
-  - [ ] `POST /openapi/v1/bots/with-manifest` returns `202` with `bot_id`,
-        `AWAITING_AUTHORIZATION` and both handles, carrying the same bars as the
-        existing create (refused to an application caller).
-  - [ ] `GET /openapi/v1/bots/{bot_id}/with-manifest/status` answers `plan.md`
+  - [x] `POST /openapi/v1/bots/with-manifest` returns `202` with `bot_id` and
+        both handles, carrying the same bars as the existing create (refused to
+        an application caller). **No state** — that line said
+        `AWAITING_AUTHORIZATION` until rev 5 confined the vocabulary to the poll,
+        and this was the one place the reconciliation missed.
+  - [x] `GET /openapi/v1/bots/{bot_id}/with-manifest/status` answers `plan.md`
         §K-8 and **makes no external call** — no AgentPass query, no work started,
         nothing written. A test asserts the Passport plugin is never touched.
-  - [ ] The three failure modes answer differently and without prose: an invalid
+  - [x] The three failure modes answer differently and without prose: an invalid
         manifest is a `422` at submission; a bot that could not be created or never
         came up is `CREATE_FAILED`; a running bot with an incomplete manifest is
         `APPLY_FAILED`. A test asserts all three.
-  - [ ] A teclaw creation is refused at submission, naming W8.
-  - [ ] The router is mounted where its `{bot_id}` literal cannot be captured by a
+  - [x] A teclaw creation is refused at submission, naming W8.
+  - [x] The router is mounted where its `{bot_id}` literal cannot be captured by a
         wildcard group. **No feature switch.**
-  - [ ] Route docstrings state: the manifest is submitted once and never
+  - [x] Route docstrings state: the manifest is submitted once and never
         re-submitted; iteration 1's rule that a `script` must not depend on
         anything else the same manifest declares; and that `FAILED` leaves a
         running bot.

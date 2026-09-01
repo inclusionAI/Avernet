@@ -56,12 +56,31 @@ class _Scripts:
         return True
 
 
-def _seam(applies=None, manifests=None, scripts=None):
+class _Jobs:
+    """Records what the seam asks of the queue, without a queue."""
+
+    def __init__(self, found=None) -> None:
+        self.started: list[dict] = []
+        self.looked_up: list[dict] = []
+        self._found = found
+
+    def start(self, **fields):
+        self.started.append(fields)
+
+    def find(self, **fields):
+        self.looked_up.append(fields)
+        return self._found
+
+
+def _seam(applies=None, manifests=None, scripts=None, jobs=None):
+    jobs = jobs or _Jobs()
     return BotCreationManifestSeam(
         manifest_service=manifests or _Manifests(),
         apply_service=applies or _Applies(),
         script_service_provider=lambda: scripts or _Scripts(),
         is_teclaw=lambda engine: engine == "teclaw",
+        start_job=jobs.start,
+        find_job=jobs.find,
     )
 
 

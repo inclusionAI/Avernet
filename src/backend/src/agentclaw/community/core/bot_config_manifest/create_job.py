@@ -90,6 +90,43 @@ def create_deadline_seconds() -> int:
         return DEFAULT_CREATE_DEADLINE_SECONDS
     return parsed
 
+#: The ``Fail`` reason a creation carries when its authorization window elapsed
+#: rather than being declined.
+#:
+#: A shared constant, not a message, because the poll matches on it: expiry
+#: normally reaches the handler first (``_expired``), which fails the task rather
+#: than letting the queue retire it ``TIMED_OUT``, so the queue status alone
+#: cannot tell "the user said no" from "the user never came back". Reporting the
+#: first when the second happened would attribute to a user a decision they never
+#: made. The queue's own ``TIMED_OUT`` is the other half of the same answer.
+AUTHORIZATION_WINDOW_ELAPSED = "the authorization window elapsed"
+
+
+def create_job_idempotency_key(
+    *, tenant: str, entity_id: str, bot_id: str
+) -> str:
+    """The enqueue key for one creation. Derived, never stored.
+
+    Both the submission (which enqueues) and the poll (which looks the job up)
+    compute it from values they already hold, so there is nothing to keep in
+    step and no column to add.
+
+    It carries the same three parts as the manifest's own storage key, and for
+    the same reason rather than for symmetry. The queue's dedup scope is
+    ``(env, app, task_type)`` and knows nothing about tenants or owners, so
+    anything left out of the key is something the lookup does not scope by —
+    and the poll's whole authorization argument is that a caller can only reach
+    rows keyed by the ``entity_id`` resolved from their own principal. Without
+    ``entity_id`` in here, another user's ``bot_id`` would find their pending
+    creation and hand back their authorization URL.
+
+    ``bot_id`` alone is documented as globally unique, so the other two parts
+    never change *which* row is found for a legitimate caller; they decide which
+    rows are reachable at all.
+    """
+    return f"create_with_manifest:{tenant}:{entity_id}:{bot_id}"
+
+
 #: How often the job looks again. Matches the existing publish poller's cadence.
 POLL_DELAY_SECONDS = 5.0
 
@@ -144,6 +181,71 @@ def build_create_job_payload(
         # The queue's deadline stays as the outer backstop.
         "submitted_at": submitted_at or datetime.now().isoformat(),
     }
+
+
+def enqueue_create_job(
+    task_queue: Any,
+    *,
+    bot_id: str,
+    entity_id: str,
+    user_id: str,
+    tenant: str,
+    env: str,
+    document_owner: str,
+    spec: dict[str, Any],
+    iframe_url: Optional[str],
+    redirect_url: Optional[str],
+) -> None:
+    """Hand a submitted creation to the queue. Everything after this is the job's.
+
+    Keyed, and this is the queue's **first** keyed call site — the mechanism
+    shipped ahead of any adopter precisely so this could be reviewed on its own.
+    The key buys one property: a submission retried by a caller who never saw the
+    ``202`` cannot start a second job for the same bot. It does not make
+    *submission* idempotent — a retry mints a fresh ``bot_id`` and so a fresh
+    key, which is #1697's problem, not this one's.
+
+    The deadline is the queue's, enforced DB-side, and is the outer backstop
+    rather than the mechanism: the handler checks ``submitted_at`` itself,
+    because a task retired in the claim scan never runs again and so would never
+    delete the rows submission wrote.
+    """
+    task_queue.enqueue(
+        CREATE_JOB_TASK_TYPE,
+        build_create_job_payload(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            user_id=user_id,
+            tenant=tenant,
+            env=env,
+            document_owner=document_owner,
+            spec=spec,
+            iframe_url=iframe_url,
+            redirect_url=redirect_url,
+        ),
+        create_deadline_seconds(),
+        idempotency_key=create_job_idempotency_key(
+            tenant=tenant, entity_id=entity_id, bot_id=bot_id
+        ),
+    )
+
+
+def find_create_job(
+    task_queue: Any, *, tenant: str, entity_id: str, bot_id: str
+) -> Optional[Any]:
+    """This creation's task row, live or terminal, or ``None`` if there is none.
+
+    ``None`` is a real answer and the poll depends on it twice over: no creation
+    was ever submitted under this key — which is how a bot made by the ordinary
+    endpoint is told apart from one whose creation failed, and equally how
+    another owner's ``bot_id`` finds nothing rather than their pending creation.
+    """
+    return task_queue.find_by_idempotency_key(
+        CREATE_JOB_TASK_TYPE,
+        create_job_idempotency_key(
+            tenant=tenant, entity_id=entity_id, bot_id=bot_id
+        ),
+    )
 
 
 class BotCreateWithManifestHandler:
@@ -206,7 +308,7 @@ class BotCreateWithManifestHandler:
                 bot_id,
             )
             self._seam_provider().discard(entity_id=entity_id, bot_id=bot_id)
-            return Fail("the authorization window elapsed")
+            return Fail(AUTHORIZATION_WINDOW_ELAPSED)
 
         status = self._authorization_status(bot_id=bot_id, user_id=user_id)
         if status is None:
@@ -387,6 +489,7 @@ class CreateJobLifecycle(LifecycleBase):
 
 
 __all__ = [
+    "AUTHORIZATION_WINDOW_ELAPSED",
     "CREATE_DEADLINE_ENV",
     "CREATE_JOB_TASK_TYPE",
     "DEFAULT_CREATE_DEADLINE_SECONDS",
@@ -395,4 +498,7 @@ __all__ = [
     "CreateJobLifecycle",
     "build_create_job_payload",
     "create_deadline_seconds",
+    "create_job_idempotency_key",
+    "enqueue_create_job",
+    "find_create_job",
 ]

@@ -93,6 +93,8 @@ from agentclaw.community.core.bot_management.create_flow import (
 from agentclaw.community.core.bot_config_manifest.create_job import (
     BotCreateWithManifestHandler,
     CreateJobLifecycle,
+    enqueue_create_job,
+    find_create_job,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     BotCreationManifestSeam,
@@ -730,18 +732,30 @@ class BotManagementModule(Module):
         apply_service: BotConfigManifestApplyService,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
+        task_queue_provider: Callable[[], TaskQueueService],
     ) -> BotCreationManifestSeam:
-        """The four operations bot creation asks of the manifest layer.
+        """The operations bot creation asks of the manifest layer.
 
         ``is_teclaw`` comes from the same factory the capability resolver takes,
         so "runs in a teclaw container" has one definition rather than a
         hand-rolled comparison here.
+
+        The job's two operations are bound here rather than imported by the
+        seam: ``create_job`` imports ``creation`` for the phase triggers, so the
+        dependency has to run one way. The queue itself stays behind the same
+        lazy provider the apply service uses.
         """
         return BotCreationManifestSeam(
             manifest_service=manifest_service,
             apply_service=apply_service,
             script_service_provider=script_service_provider,
             is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
+            start_job=lambda **fields: enqueue_create_job(
+                task_queue_provider(), **fields
+            ),
+            find_job=lambda **fields: find_create_job(
+                task_queue_provider(), **fields
+            ),
         )
 
     @singleton

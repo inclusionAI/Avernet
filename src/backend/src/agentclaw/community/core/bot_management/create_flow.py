@@ -649,6 +649,13 @@ class ManifestCreationSubmitted:
     bot_id: str
     iframe_url: str | None
     redirect_url: str | None
+    #: The **prepared** spec and context, as the creation will actually be
+    #: completed. Returned rather than left for the caller to rebuild, because
+    #: ``_prepare_create`` can rewrite the engine and what the job freezes must
+    #: be the engine the manifest was validated against — not the one the
+    #: request happened to name. See :func:`creation_spec_to_payload`.
+    spec: BotCreateSpec
+    context: BotCreateContext
 
 
 def submit_bot_creation_with_manifest(
@@ -759,6 +766,8 @@ def submit_bot_creation_with_manifest(
         bot_id=bot_id,
         iframe_url=iframe_url,
         redirect_url=redirect_url,
+        spec=spec,
+        context=context,
     )
 
 
