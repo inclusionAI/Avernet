@@ -4,6 +4,8 @@ info:
   version: 1.0.0
   description: Versioned public contract for Bot Collaboration Network resources.
 tags:
+  - name: Authentication
+    description: OAuth login and session lifecycle operations for the public OpenAPI auth facade.
   - name: Collaboration / Bots
     description: Bot discovery, lookup, and management within BCN.
   - name: Collaboration / Friendships
@@ -21,6 +23,16 @@ tags:
   - name: Collaboration / Event Subscriptions
     description: Durable Event Subscription and Webhook delivery management.
 paths:
+  /openapi/v1/auth/url:
+    $ref: ./openapi/auth.yaml#/AuthUrlPath
+  /openapi/v1/auth/callback/{provider}:
+    $ref: ./openapi/auth.yaml#/AuthCallbackPath
+  /openapi/v1/auth/user:
+    $ref: ./openapi/auth.yaml#/AuthUserPath
+  /openapi/v1/auth/refresh:
+    $ref: ./openapi/auth.yaml#/AuthRefreshPath
+  /openapi/v1/auth/logout:
+    $ref: ./openapi/auth.yaml#/AuthLogoutPath
   /openapi/v1/collaboration/bots/mine:
     $ref: ./openapi/bots.yaml#/MyBotsPath
   /openapi/v1/collaboration/bots/query:
@@ -155,6 +167,20 @@ components:
       $ref: ./domain-models.yaml#/FriendConnection
     ErrorEnvelope:
       $ref: ./shared.yaml#/ErrorEnvelope
+    AuthProviderUrl:
+      $ref: ./openapi/auth.yaml#/AuthProviderUrl
+    AuthProviderUrlList:
+      $ref: ./openapi/auth.yaml#/AuthProviderUrlList
+    AuthProviderUrlListEnvelope:
+      $ref: ./openapi/auth.yaml#/AuthProviderUrlListEnvelope
+    AuthUserInfo:
+      $ref: ./openapi/auth.yaml#/AuthUserInfo
+    AuthUserInfoEnvelope:
+      $ref: ./openapi/auth.yaml#/AuthUserInfoEnvelope
+    AuthSessionMutationData:
+      $ref: ./openapi/auth.yaml#/AuthSessionMutationData
+    AuthSessionMutationEnvelope:
+      $ref: ./openapi/auth.yaml#/AuthSessionMutationEnvelope
     EventSubscription:
       $ref: ./openapi/event-subscriptions.yaml#/EventSubscription
     EventDeliverySummary:

@@ -1,9 +1,9 @@
 """Approved BCN public OpenAPI V1 contract inventory.
 
-The public contract must expose exactly the approved operations across Bot,
-Group, GroupParticipant, Session, SessionParticipant, Invitation, and
-Friendship / FriendRequest, Channel Binding, and must not expose session-file,
-bot candidate search, message-send, Internal API, or routing-only path aliases.
+The public contract must expose exactly the approved operations across Authentication, Bot,
+Group, GroupParticipant, Session, SessionParticipant, Invitation, Friendship / FriendRequest,
+Channel Binding, and Register, and must not expose session-file, bot candidate
+search, message-send, Internal API, or routing-only path aliases.
 """
 
 import sys
@@ -18,6 +18,14 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 
 EXPECTED_OPERATIONS = {
+    ("get", "/openapi/v1/auth/url"),
+    ("get", "/openapi/v1/auth/callback/{provider}"),
+    ("get", "/openapi/v1/auth/user"),
+    ("post", "/openapi/v1/auth/refresh"),
+    ("post", "/openapi/v1/auth/logout"),
+    ("get", "/openapi/v1/collaboration/public-groups"),
+    ("get", "/openapi/v1/collaboration/register/token"),
+    ("post", "/openapi/v1/collaboration/register"),
     ("post", "/openapi/v1/collaboration/bots/query"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
@@ -87,13 +95,14 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_56_approved_operations() -> None:
+def test_contract_contains_exactly_the_64_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
 def test_all_operations_share_the_collaboration_ownership_prefix() -> None:
     assert all(
         path.startswith("/openapi/v1/collaboration/")
+        or path.startswith("/openapi/v1/auth/")
         for _, path in _actual_operations()
     )
 
@@ -117,6 +126,12 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
                 continue
             if path == "/openapi/v1/collaboration/messages/ws":
                 expected = {}
+            elif path.startswith("/openapi/v1/auth/") or path == "/openapi/v1/collaboration/register":
+                expected = {}
+            elif path == "/openapi/v1/collaboration/public-groups":
+                expected = {"user": "required"}
+            elif path == "/openapi/v1/collaboration/register/token":
+                expected = {"user": "required"}
             elif (method, path) in human_or_owned_bot:
                 expected = {"user": "optional", "app": "required", "bot": "optional"}
             else:
