@@ -32,7 +32,7 @@ use bcs_service_api::{
     },
     message_log_json,
     port::repo::{AppendMessageWithEvent, MessageRepoPort},
-    port::{EventRecordFactoryPort, EventRecorderPort, NewEvent},
+    port::{EventRecordFactoryPort, EventRecorderPort, HumanMentionNotifyPort, NewEvent},
     types::{EVENT_SCHEMA_VERSION_V1, EventActor, EventActorType, EventScope, EventSubject},
 };
 use chrono::{SecondsFormat, TimeZone, Utc};
@@ -66,6 +66,7 @@ pub struct BcsMessageFlow {
     pub provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
     pub channel: Arc<OnceLock<Arc<dyn ChannelService>>>,
     pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
+    pub human_mention_notify: Option<Arc<dyn HumanMentionNotifyPort>>,
 }
 
 impl BcsMessageFlow {
@@ -96,6 +97,7 @@ impl BcsMessageFlow {
             provider_stream_gray_list: None,
             channel: Arc::new(OnceLock::new()),
             bot_terminal_observer: Arc::new(NoopBotTerminalObserver),
+            human_mention_notify: None,
         }
     }
 
@@ -127,6 +129,14 @@ impl BcsMessageFlow {
 
     pub fn with_system_message(mut self, system_message: Arc<dyn SystemMessageService>) -> Self {
         self.system_message = Some(system_message);
+        self
+    }
+
+    pub fn with_human_mention_notify(
+        mut self,
+        human_mention_notify: Arc<dyn HumanMentionNotifyPort>,
+    ) -> Self {
+        self.human_mention_notify = Some(human_mention_notify);
         self
     }
 
@@ -738,6 +748,28 @@ pub async fn handle_web_send(
 
     let sender_display_name = preferred_sender_display_name(flow, &cmd).await;
     let from_bot_owner = from_bot_owner(flow, &cmd.from_actor_id).await;
+    let (mention_source, mention_message_text): (Option<&[String]>, String) =
+        if group.group_kind == GroupKind::Dm {
+            (None, String::new())
+        } else if !cmd.mentions.is_empty() {
+            // 显式 mention 路径：使用原始消息文本（契约 6.1）。
+            (Some(cmd.mentions.as_slice()), cmd.message.clone())
+        } else {
+            (Some(decision.mentions.as_slice()), decision.cleaned_message.clone())
+        };
+    crate::human_notify_hook::spawn_human_mention_notify(
+        &flow.human_mention_notify,
+        mention_source,
+        &overlay,
+        crate::human_notify_hook::MentionNotifyContext {
+            session_id: cmd.session_id.clone().unwrap_or_default(),
+            group_id: cmd.group_id.clone(),
+            sender_actor_id: cmd.from_actor_id.clone(),
+            sender_label: sender_display_name.clone(),
+            message_text: mention_message_text,
+            timestamp_ms: now_ms(),
+        },
+    );
     let sender_type = if cmd.from_actor_id.starts_with("human_") {
         SenderType::Human
     } else {
@@ -1602,6 +1634,27 @@ pub async fn handle_group_callback(
     } else {
         build_explicit_mention_decision(&group, &cmd.mentions, &routable_message, &overlay)
     };
+
+    let (mention_source, mention_message_text): (Option<&[String]>, String) =
+        if cmd.mentions.is_empty() || mentions_all(&cmd.mentions) {
+            (Some(decision.mentions.as_slice()), decision.cleaned_message.clone())
+        } else {
+            // 显式 mention 路径：使用进入路由的原始文本（契约 6.1）。
+            (Some(cmd.mentions.as_slice()), routable_message.clone())
+        };
+    crate::human_notify_hook::spawn_human_mention_notify(
+        &flow.human_mention_notify,
+        mention_source,
+        &overlay,
+        crate::human_notify_hook::MentionNotifyContext {
+            session_id: String::new(),
+            group_id: cmd.group_id.clone(),
+            sender_actor_id: "system".to_string(),
+            sender_label: "system".to_string(),
+            message_text: mention_message_text,
+            timestamp_ms: now_ms(),
+        },
+    );
 
     if cmd.store_message {
         let group_message = GroupMessage {

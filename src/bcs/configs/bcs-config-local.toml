@@ -182,6 +182,14 @@ use_remote_login_check = false
 # [user_directory.providers.<provider>].
 enabled = false
 
+# Human mention notification: notify human participants when a message
+# @-mentions them. Select a linked backend; omit `provider` to disable.
+[human_notify]
+provider = "dummy"
+
+[human_notify.providers.dummy]
+enabled = true
+
 [auth]
 chain = ["local", "session"]
 require_authentication = false

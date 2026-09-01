@@ -18,9 +18,9 @@ pub use bcs_config_api::{
 pub use bcs_config_api::{
     AuthChainConfig, AuthSdkConfig,
     ChannelConfigSection, DingTalkAccountConfig, EventingConfig, FusionProviderConfig,
-    LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
-    LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig, StructuredOutputMode,
-    UserDirectoryConfig, UserDirectoryProviderConfig,
+    HumanNotifyConfig, LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig,
+    LogOutputFormat, LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig,
+    StructuredOutputMode, UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 #[allow(unused_imports)]
@@ -621,6 +621,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub channels: ChannelConfigSection,
 
+    /// Human mention notification configuration.
+    #[serde(default)]
+    pub human_notify: HumanNotifyConfig,
+
     /// HTTP provider webhook adapter configuration.
     #[serde(default)]
     pub provider_http: ProviderHttpConfig,
@@ -1115,6 +1119,7 @@ impl Default for BcsConfig {
             database: DatabaseConfig::default(),
             secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
+            human_notify: HumanNotifyConfig::default(),
             provider_http: ProviderHttpConfig::default(),
             collaboration: CollaborationConfig::default(),
             openapi_v1: OpenApiV1Config::default(),
@@ -3140,5 +3145,23 @@ base_url = "https://directory.example.com"
                 "{label} config {path} still carries the legacy scalar `issuer` key",
             );
         }
+    }
+
+    #[test]
+    fn human_notify_section_parses() {
+        let config: BcsConfig = toml::from_str(
+            r#"
+bots_base_dir = "/tmp/bots"
+
+[human_notify]
+provider = "dummy"
+
+[human_notify.providers.dummy]
+enabled = true
+"#,
+        )
+        .expect("config parses");
+        assert_eq!(config.human_notify.provider.as_deref(), Some("dummy"));
+        assert!(config.human_notify.enabled_provider("dummy"));
     }
 }

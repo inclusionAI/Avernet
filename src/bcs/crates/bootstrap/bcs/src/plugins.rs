@@ -21,6 +21,12 @@ use bcs_service_api::port::repo::ChannelBindingRepoPort;
 use bcs_user_directory_api::UserDirectoryPlugin;
 use futures::future::BoxFuture;
 
+// Force-link the built-in dummy notifier so its inventory registration is
+// retained in the final binary: this constant references the dummy build
+// function directly instead of relying on an elided unused import.
+const _: bcs_human_notify_api::HumanMentionNotifierBuild =
+    bcs_human_notify_dummy::build_dummy_notifier;
+
 use crate::config::{
     BcsConfig, DatabaseType, SecurityGatewayProviderConfig, UserDirectoryProviderConfig,
 };
@@ -282,6 +288,100 @@ pub fn build_registered_channel_provider(
         }
     }
     Ok(None)
+}
+
+/// Build the selected human mention notification port.
+///
+/// Returns a no-op port when the feature is not configured or the selected
+/// provider entry is disabled. Returns a startup error when the selected
+/// provider is not linked into this binary or its config is invalid.
+pub async fn build_human_mention_notify_port(
+    config: &BcsConfig,
+) -> crate::Result<Arc<dyn bcs_service_api::port::HumanMentionNotifyPort>> {
+    let Some(provider) = config.human_notify.provider.as_deref() else {
+        tracing::info!("human_notify disabled: no provider configured");
+        return Ok(Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort));
+    };
+    let Some(provider_config) = config.human_notify.providers.get(provider) else {
+        return Err(crate::BcsError::InvalidConfig(format!(
+            "human_notify.provider '{provider}' has no [human_notify.providers.{provider}] entry"
+        )));
+    };
+    if !provider_config.enabled {
+        tracing::info!(provider, "human_notify disabled: provider entry not enabled");
+        return Ok(Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort));
+    }
+    for factory in inventory::iter::<bcs_human_notify_api::HumanMentionNotifierFactory> {
+        if factory.name == provider {
+            let notifier = (factory.build)(provider_config.clone())
+                .await
+                .map_err(human_notify_build_error)?;
+            tracing::info!(provider, "human_notify backend selected");
+            return Ok(Arc::new(HumanMentionNotifyAdapter { notifier }));
+        }
+    }
+    Err(crate::BcsError::InvalidConfig(format!(
+        "human_notify.provider '{provider}' is not available in this binary"
+    )))
+}
+
+fn human_notify_build_error(error: bcs_human_notify_api::HumanNotifyError) -> crate::BcsError {
+    match error {
+        bcs_human_notify_api::HumanNotifyError::Config(message) => {
+            crate::BcsError::InvalidConfig(message)
+        }
+        bcs_human_notify_api::HumanNotifyError::Delivery(message) => {
+            crate::BcsError::StorageInitError(message)
+        }
+    }
+}
+
+const HUMAN_NOTIFY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Adapts a selected [`bcs_human_notify_api::HumanMentionNotifier`] to the
+/// service port. Swallows errors into logs and bounds runtime with a timeout.
+pub struct HumanMentionNotifyAdapter {
+    pub notifier: Arc<dyn bcs_human_notify_api::HumanMentionNotifier>,
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::port::HumanMentionNotifyPort for HumanMentionNotifyAdapter {
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    async fn notify_mentioned_humans(
+        &self,
+        notification: bcs_service_api::port::human_notify::MentionNotification,
+    ) -> bcs_service_api::ServiceResult<()> {
+        let backend = self.notifier.backend_name();
+        let group_id = notification.group_id.clone();
+        let session_id = notification.session_id.clone();
+        match tokio::time::timeout(HUMAN_NOTIFY_TIMEOUT, self.notifier.notify(&notification)).await
+        {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                tracing::error!(
+                    backend,
+                    group_id = %group_id,
+                    session_id = %session_id,
+                    "human mention notification failed: {error}"
+                );
+                Err(bcs_service_api::ServiceError::InternalError(error.to_string()))
+            }
+            Err(_elapsed) => {
+                tracing::error!(
+                    backend,
+                    group_id = %group_id,
+                    session_id = %session_id,
+                    "human mention notification timed out"
+                );
+                Err(bcs_service_api::ServiceError::InternalError(
+                    "human mention notification timed out".to_string(),
+                ))
+            }
+        }
+    }
 }
 
 fn resolve_sqlite_path(config: &BcsConfig) -> String {
@@ -913,4 +1013,104 @@ mod tests {
         assert!(Arc::ptr_eq(&plugins.db().expect("db handle"), &db));
     }
 
+}
+
+#[cfg(test)]
+mod human_notify_selection_tests {
+    use super::*;
+
+    fn failing_notifier_factory(
+        _config: bcs_config_api::HumanNotifyProviderConfig,
+    ) -> futures::future::BoxFuture<
+        'static,
+        bcs_human_notify_api::HumanNotifyResult<Arc<dyn bcs_human_notify_api::HumanMentionNotifier>>,
+    > {
+        Box::pin(async move {
+            Err(bcs_human_notify_api::HumanNotifyError::Config(
+                "boom".to_string(),
+            ))
+        })
+    }
+
+    inventory::submit! {
+        bcs_human_notify_api::HumanMentionNotifierFactory {
+            name: "test-failing-notifier",
+            build: failing_notifier_factory,
+        }
+    }
+
+    fn config_with(provider: Option<&str>, entry: Option<(bool, &str)>) -> BcsConfig {
+        let mut config = BcsConfig::default();
+        config.human_notify.provider = provider.map(str::to_string);
+        if let Some((enabled, name)) = entry {
+            let mut provider_config = bcs_config_api::HumanNotifyProviderConfig::default();
+            provider_config.enabled = enabled;
+            config.human_notify.providers.insert(name.to_string(), provider_config);
+        }
+        config
+    }
+
+    #[tokio::test]
+    async fn unset_provider_selects_noop() {
+        let port = build_human_mention_notify_port(&config_with(None, None)).await.unwrap();
+        assert!(!port.is_available());
+    }
+
+    #[tokio::test]
+    async fn disabled_entry_selects_noop() {
+        let port = build_human_mention_notify_port(&config_with(Some("dummy"), Some((false, "dummy"))))
+            .await
+            .unwrap();
+        assert!(!port.is_available());
+    }
+
+    #[tokio::test]
+    async fn missing_provider_entry_is_startup_error() {
+        let error = match build_human_mention_notify_port(&config_with(Some("dummy"), None)).await
+        {
+            Ok(_) => panic!("missing entry must fail startup"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("human_notify.providers.dummy"));
+    }
+
+    #[tokio::test]
+    async fn unregistered_provider_is_startup_error() {
+        let error = match build_human_mention_notify_port(&config_with(
+            Some("missing-backend"),
+            Some((true, "missing-backend")),
+        ))
+        .await
+        {
+            Ok(_) => panic!("unregistered backend must fail startup"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("not available in this binary"));
+    }
+
+    #[tokio::test]
+    async fn failing_factory_is_startup_error() {
+        let error = match build_human_mention_notify_port(&config_with(
+            Some("test-failing-notifier"),
+            Some((true, "test-failing-notifier")),
+        ))
+        .await
+        {
+            Ok(_) => panic!("factory config error must fail startup"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, crate::BcsError::InvalidConfig(_)));
+        assert!(
+            error.to_string().contains("boom"),
+            "error must come from the registered failing factory: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn dummy_backend_builds_available_port() {
+        let port = build_human_mention_notify_port(&config_with(Some("dummy"), Some((true, "dummy"))))
+            .await
+            .unwrap();
+        assert!(port.is_available());
+    }
 }

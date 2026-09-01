@@ -372,6 +372,151 @@ impl RoutingCoreService for FakeRoutingCoreService {
         }
     }
 
+    /// Mirrors the production router contract for text @-mentions so message
+    /// flow contract tests can exercise the human mention notify hook:
+    /// display-name/uuid resolution, Absent-Human drop (Human default mode is
+    /// Absent), Hidden drop, `@all`/`@所有人` all-Bot Send, and mention
+    /// stripping. Actor kind/mode/status are read from the overlay first
+    /// (authoritative, like production `route_with_overlay`), falling back to
+    /// the participant row when the overlay has no entry. Simplifications vs
+    /// the production router: no display-name mention boundary check, no
+    /// ManagerWorker worker exclusion, and no muted/hidden forced-Inject
+    /// downgrade (Hidden actors are dropped from mentions entirely instead of
+    /// being carried as hidden mentions).
+    async fn route_with_overlay(
+        &self,
+        group: &Group,
+        message: &str,
+        sender_bot_id: Option<&str>,
+        overlay: &[bcs_service_api::RouteParticipantOverlay],
+    ) -> RoutingDecision {
+        self.route_calls.write().await.push((
+            group.id.clone(),
+            message.to_string(),
+            sender_bot_id.map(str::to_string),
+        ));
+        let lower = message.to_lowercase();
+        let has_all = lower.contains("@all") || message.contains("@所有人");
+
+        let mut resolved: Vec<String> = Vec::new();
+        let mut strip_at: Vec<usize> = Vec::new();
+        for (at_index, _) in message.match_indices('@') {
+            let after_at = &message[at_index + '@'.len_utf8()..];
+            let by_name = group
+                .participants
+                .iter()
+                .filter(|participant| {
+                    participant
+                        .bot_name
+                        .as_deref()
+                        .map_or(false, |name| !name.is_empty() && after_at.starts_with(name))
+                })
+                .max_by_key(|participant| participant.bot_name.as_deref().map(str::len));
+            let uuid = if let Some(participant) = by_name {
+                Some(participant.bot_uuid.clone())
+            } else {
+                let token: String = after_at
+                    .chars()
+                    .take_while(|ch| ch.is_alphanumeric() || *ch == '-' || *ch == '_' || *ch == ':')
+                    .collect();
+                if token.is_empty() {
+                    None
+                } else {
+                    group
+                        .participants
+                        .iter()
+                        .find(|participant| participant.bot_uuid == token)
+                        .map(|participant| participant.bot_uuid.clone())
+                }
+            };
+            if let Some(uuid) = uuid {
+                strip_at.push(at_index);
+                if !resolved.contains(&uuid) {
+                    resolved.push(uuid);
+                }
+            }
+        }
+
+        let mut mentions: Vec<String> = Vec::new();
+        let mut bot_mentions: Vec<String> = Vec::new();
+        for uuid in &resolved {
+            let Some(participant) = group.get_participant(uuid) else {
+                continue;
+            };
+            let (actor_kind, mode, status) = match overlay
+                .iter()
+                .find(|entry| entry.bot_uuid == *uuid)
+            {
+                Some(entry) => (
+                    entry.actor_kind,
+                    entry
+                        .mode
+                        .unwrap_or_else(|| ParticipantMode::default_for(entry.actor_kind)),
+                    entry.status,
+                ),
+                None => (
+                    participant.actor_kind,
+                    participant
+                        .mode
+                        .unwrap_or_else(|| ParticipantMode::default_for(participant.actor_kind)),
+                    ActorStatus::Online,
+                ),
+            };
+            if status == ActorStatus::Hidden {
+                continue;
+            }
+            if actor_kind == ActorKind::Human && mode == ParticipantMode::Absent {
+                continue;
+            }
+            if actor_kind == ActorKind::Bot {
+                bot_mentions.push(uuid.clone());
+            }
+            if !mentions.contains(uuid) {
+                mentions.push(uuid.clone());
+            }
+        }
+
+        let targets = group
+            .participants
+            .iter()
+            .filter(|participant| participant.is_bot())
+            .map(|participant| {
+                let delivery_type = if has_all {
+                    bcs_service_api::DeliveryType::Send
+                } else if !bot_mentions.is_empty() {
+                    if bot_mentions.contains(&participant.bot_uuid) {
+                        bcs_service_api::DeliveryType::Send
+                    } else {
+                        bcs_service_api::DeliveryType::Inject
+                    }
+                } else if participant.bot_uuid == group.driver_bot {
+                    bcs_service_api::DeliveryType::Send
+                } else {
+                    bcs_service_api::DeliveryType::Inject
+                };
+                RoutingTarget {
+                    bot_uuid: participant.bot_uuid.clone(),
+                    url: String::new(),
+                    is_driver: participant.bot_uuid == group.driver_bot,
+                    delivery_type,
+                }
+            })
+            .collect();
+
+        let cleaned_message = message
+            .char_indices()
+            .filter(|(index, _)| !strip_at.contains(index))
+            .map(|(_, ch)| ch)
+            .collect();
+
+        RoutingDecision {
+            targets,
+            mentions,
+            cleaned_message,
+            hidden_mentions: vec![],
+        }
+    }
+
     async fn route_dm_with_overlay(
         &self,
         group: &Group,
@@ -833,6 +978,69 @@ impl FrontendDeliveryPort for RecordingFrontendDelivery {
     }
 
     async fn unregister_run(&self, _run_id: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+}
+
+/// Recording fake for the human mention notify port (contract tests).
+#[derive(Default)]
+pub struct RecordingHumanMentionNotify {
+    available: std::sync::atomic::AtomicBool,
+    notifications: tokio::sync::Mutex<Vec<bcs_service_api::port::human_notify::MentionNotification>>,
+}
+
+impl RecordingHumanMentionNotify {
+    pub fn available(available: bool) -> Self {
+        Self {
+            available: std::sync::atomic::AtomicBool::new(available),
+            notifications: tokio::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    pub async fn notifications(
+        &self,
+    ) -> Vec<bcs_service_api::port::human_notify::MentionNotification> {
+        self.notifications.lock().await.clone()
+    }
+
+    /// Poll until `expected` notifications arrive or a 2s deadline passes.
+    pub async fn wait_for(
+        &self,
+        expected: usize,
+    ) -> Vec<bcs_service_api::port::human_notify::MentionNotification> {
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(2);
+        loop {
+            let count = self.notifications.lock().await.len();
+            if count >= expected || tokio::time::Instant::now() >= deadline {
+                return self.notifications.lock().await.clone();
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Negative assertion helper: waits a fixed window during which a spawned
+    /// notification would have arrived, then returns what was recorded
+    /// (callers assert emptiness). `wait_for(0)` must NOT be used for
+    /// negative assertions — it returns immediately.
+    pub async fn wait_for_none(
+        &self,
+    ) -> Vec<bcs_service_api::port::human_notify::MentionNotification> {
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        self.notifications.lock().await.clone()
+    }
+}
+
+#[async_trait]
+impl bcs_service_api::port::human_notify::HumanMentionNotifyPort for RecordingHumanMentionNotify {
+    fn is_available(&self) -> bool {
+        self.available.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    async fn notify_mentioned_humans(
+        &self,
+        notification: bcs_service_api::port::human_notify::MentionNotification,
+    ) -> ServiceResult<()> {
+        self.notifications.lock().await.push(notification);
         Ok(())
     }
 }
