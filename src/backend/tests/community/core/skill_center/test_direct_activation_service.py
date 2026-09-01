@@ -168,6 +168,11 @@ class _FailingRuntime(_SuccessfulRuntime):
             raise RuntimeError("engine write failed")
 
 
+class _SnapshotFailingRuntime(_SuccessfulRuntime):
+    async def snapshot_skill_mappings(self, **_kwargs):
+        raise RuntimeError("invalid desired-state plan")
+
+
 class _McpCenter:
     def __init__(self, allowed: bool) -> None:
         self.allowed = allowed
@@ -415,6 +420,20 @@ async def test_skill_wire_keeps_committed_desired_state_when_projection_fails():
     assert result["runtime_projection"]["issues"][0]["code"] == (
         "RUNTIME_PROJECTION_UNAVAILABLE"
     )
+
+
+@pytest.mark.asyncio
+async def test_plan_validation_failure_refuses_before_desired_state_write():
+    repository = _Repository()
+    service = _service(repository=repository, runtime=_SnapshotFailingRuntime())
+
+    with pytest.raises(RuntimeError, match="invalid desired-state plan"):
+        await service.activate_skill(
+            skill_id="7", bot_id="bot-1", owner_id="true-owner",
+            actor_id="true-owner",
+        )
+
+    assert repository.install_skill_calls == []
 
 
 @pytest.mark.asyncio

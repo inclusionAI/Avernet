@@ -142,18 +142,14 @@ class MutationProjectionFlow:
                 "runtime_projection": {"status": "SKIPPED", "issues": []},
             }
         owner_id = str(bot["owner_id"])
-        previous_mappings: Sequence[PoolSkillMapping] = ()
-        snapshot_failed = False
-        try:
-            # Retirement is a diff between the committed pre- and post-mutation
-            # snapshots.  A failed runtime read is itself a projection issue,
-            # never a reason to reject the following desired-state write.
-            previous_mappings = await self._runtime.snapshot_skill_mappings(
-                bot_id=bot_id,
-                owner_id=owner_id,
-            )
-        except Exception:
-            snapshot_failed = True
+        # This is a desired-state plan validation, not a device write.  In
+        # particular, engine contract refusals must still stop the mutation
+        # before Installation changes; only a failure *after* ``mutation``
+        # commits is a best-effort runtime result.
+        previous_mappings = await self._runtime.snapshot_skill_mappings(
+            bot_id=bot_id,
+            owner_id=owner_id,
+        )
         result = mutation()
         if skip_projection_when_unchanged and not result.changed:
             return {
@@ -177,14 +173,6 @@ class MutationProjectionFlow:
                         "suggested_action": "Wait for the Bot to become ready.",
                     }],
                 },
-            }
-        if snapshot_failed:
-            return {
-                **result.item,
-                "changed": result.changed,
-                **result.details,
-                "desired_state": self._desired_state(result.changed),
-                "runtime_projection": self._pending_projection(),
             }
         effective_scope = (
             scope_from_result(result) if scope_from_result is not None else scope
