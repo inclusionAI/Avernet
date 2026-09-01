@@ -55,6 +55,7 @@ async fn session_state_machine_contract_defaults_to_fail_closed() {
             caller_bot_id: "bot-owner".to_string(),
             definition_yaml: "name: one-shot".to_string(),
             participant_bindings: BTreeMap::new(),
+            opening_message: None,
             input: Value::Null,
             judge_available: false,
         })

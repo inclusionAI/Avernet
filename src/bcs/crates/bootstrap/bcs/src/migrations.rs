@@ -537,6 +537,7 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         created_by TEXT DEFAULT NULL,
         status TEXT NOT NULL,
         input_json TEXT DEFAULT NULL,
+        opening_message_override_json TEXT DEFAULT NULL,
         output_text TEXT DEFAULT NULL,
         error_message TEXT DEFAULT NULL,
         created_at_ms INTEGER NOT NULL,
@@ -995,6 +996,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 18,
         name: "state_machine_rerun_lineage",
     },
+    SqliteMigration {
+        version: 19,
+        name: "one_shot_opening_message_override",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1368,8 +1373,29 @@ async fn apply_sqlite_migration_body(
         16 => Ok(()),
         17 => add_sqlite_session_callback_lease_schema(db).await,
         18 => add_sqlite_state_machine_rerun_lineage_schema(db).await,
+        19 => add_sqlite_one_shot_opening_message_override_schema(db).await,
         _ => Ok(()),
     }
+}
+
+async fn add_sqlite_one_shot_opening_message_override_schema(
+    db: &dyn DbPlugin,
+) -> DbResult<()> {
+    if !table_exists(db, "bcs_state_machine_runs").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_state_machine_runs").await?;
+    if !columns
+        .iter()
+        .any(|column| column == "opening_message_override_json")
+    {
+        db.execute(DbStatement::new(
+            "ALTER TABLE bcs_state_machine_runs \
+             ADD COLUMN opening_message_override_json TEXT DEFAULT NULL",
+        ))
+        .await?;
+    }
+    Ok(())
 }
 
 async fn add_sqlite_state_machine_rerun_lineage_schema(db: &dyn DbPlugin) -> DbResult<()> {
@@ -1894,6 +1920,11 @@ mod tests {
                     18,
                     "state_machine_rerun_lineage".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    19,
+                    "one_shot_opening_message_override".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1906,7 +1937,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 18);
+        assert_eq!(report.pending_versions.len(), 19);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1965,6 +1996,11 @@ assert_eq!(report.pending_versions[10].version, 11);
         assert_eq!(
             report.pending_versions[17].name,
             "state_machine_rerun_lineage"
+        );
+        assert_eq!(report.pending_versions[18].version, 19);
+        assert_eq!(
+            report.pending_versions[18].name,
+            "one_shot_opening_message_override"
         );
         Ok(())
     }
@@ -2069,6 +2105,40 @@ assert_eq!(report.pending_versions[10].version, 11);
     }
 
     #[tokio::test]
+    async fn sqlite_one_shot_opening_message_override_migration_repairs_legacy_run_table()
+    -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_state_machine_runs (
+                env TEXT NOT NULL,
+                run_id TEXT NOT NULL
+            )",
+        ))
+        .await?;
+
+        add_sqlite_one_shot_opening_message_override_schema(&db).await?;
+        add_sqlite_one_shot_opening_message_override_schema(&db).await?;
+
+        let columns = column_names(&db, "bcs_state_machine_runs").await?;
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == "opening_message_override_json")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mysql_one_shot_opening_message_override_migration_adds_nullable_column() {
+        let migration = include_str!(
+            "../../../../migrations/mysql/018_one_shot_opening_message_override.sql"
+        );
+        assert!(migration.contains(
+            "ADD COLUMN IF NOT EXISTS `opening_message_override_json` text DEFAULT NULL"
+        ));
+    }
+
+    #[tokio::test]
     async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
         let db = LocalSqliteDbPlugin::new()?;
 
@@ -2150,6 +2220,11 @@ assert_eq!(report.pending_versions[10].version, 11);
                 (
                     18,
                     "state_machine_rerun_lineage".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    19,
+                    "one_shot_opening_message_override".to_string(),
                     "sqlite".to_string()
                 )
             ]

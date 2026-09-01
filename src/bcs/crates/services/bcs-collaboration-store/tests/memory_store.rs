@@ -1,6 +1,6 @@
 use bcs_collaboration_store::MemoryCollaborationStore;
 use bcs_domain::{
-    CollaborationDefinition, StateMachineDeliveryCorrelation, StateMachineNodeRun,
+    CollaborationDefinition, OpeningMessage, StateMachineDeliveryCorrelation, StateMachineNodeRun,
     StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
 use bcs_event_store::MemoryEventStore;
@@ -171,6 +171,9 @@ async fn rerun_create_is_source_idempotent_and_rejects_another_active_session_ru
     let definition = test_definition("Say hello.");
     let mut source = test_run("sm-run-source", "group-1:abcdef12", 1);
     source.status = StateMachineRunStatus::Failed;
+    source.opening_message_override = Some(OpeningMessage::Text(
+        "Retry {{bcs.run_id}}".to_string(),
+    ));
     source.error = Some("source failed".to_string());
     source.completed_at = Some(2);
     store
@@ -208,6 +211,10 @@ async fn rerun_create_is_source_idempotent_and_rejects_another_active_session_ru
         CreateStateMachineRerunOutcome::Existing(existing) => {
             assert_eq!(existing.run_id, child.run_id);
             assert_eq!(existing.rerun_of.as_deref(), Some(source.run_id.as_str()));
+            assert_eq!(
+                existing.opening_message_override,
+                source.opening_message_override
+            );
         }
         other => panic!("expected existing direct child, got {other:?}"),
     }
@@ -572,6 +579,7 @@ fn test_run(run_id: &str, session_id: &str, created_at: u64) -> StateMachineRun 
         created_by: Some("tester".to_string()),
         status: StateMachineRunStatus::Running,
         input: json!({"question": "hello"}),
+        opening_message_override: None,
         output: None,
         error: None,
         created_at,

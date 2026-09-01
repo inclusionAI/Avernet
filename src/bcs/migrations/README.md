@@ -23,6 +23,7 @@ The open-source v1 baseline starts from a single MySQL/OceanBase init schema:
 | 015 | `mysql/015_add_bot_internal_attributes.sql` | Add persistent Provider Bot attributes (visibility, friend extension, check-in strategy) |
 | 016 | `mysql/016_session_callback_lease.sql` | Add activation-aware callback delivery lease columns and recovery index |
 | 017 | `mysql/017_state_machine_rerun_lineage.sql` | Add State Machine Run lineage, activation identity, and natural rerun idempotency |
+| 018 | `mysql/018_one_shot_opening_message_override.sql` | Persist request-level opening-message overrides for one-shot State Machine Runs |
 
 The previous internal incremental SQL files were removed from the public
 migration path and replaced by the v1 baseline. New public migrations should be
@@ -90,7 +91,7 @@ The startup runner executes SQLite schema work in this order:
 Each migration is recorded only after all of its steps succeed. Re-running
 startup must be idempotent, and checksum mismatches fail startup.
 
-The current SQLite migration chain records versions `001` through `018`.
+The current SQLite migration chain records versions `001` through `019`.
 Versions whose schema is already created by the startup bootstrap record
 progress as no-ops; version `007` repairs the HumanInput output metadata on
 existing databases, versions `008` and `009` add their tables through the
@@ -100,9 +101,10 @@ plaintext, version `011` adds Group opening-message configuration, versions
 columns added through the additive bootstrap DDL, version `013` adds the
 edge-permission tables, version `015` adds per-participant provider routing
 tags, version `016` records parity for SQLite's already unbounded `TEXT`
-session identifiers, and version `017` adds activation-aware callback lease columns plus the
-periodic recovery index, and version `018` adds State Machine Run lineage,
-activation identity, and the unique direct-rerun constraint.
+session identifiers, version `017` adds activation-aware callback lease columns
+plus the periodic recovery index, version `018` adds State Machine Run lineage,
+activation identity, and the unique direct-rerun constraint, and version `019`
+adds the request-level one-shot opening-message override column.
 Future schema changes should use later numeric versions.
 Do not add pre-open-source local schema repairs to the baseline migration.
 Pre-baseline local SQLite files are not a compatibility target; recreate them

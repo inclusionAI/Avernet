@@ -9,12 +9,12 @@ use bcs_domain::{
     BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
     CollaborationDefinition, CollaborationDefinitionRef, CollaborationRuntimeDefinition, Group,
     GroupKind, GroupMessage, GroupMessageType, GroupRuntimeBinding, GroupStatus, GroupStrategy,
-    MessageOwnerFilter, MessageQuery, MessageRole, NewMessage, OpeningMessageRenderContext,
-    Participant, ParticipantMode, ParticipantRole, RenderedOpeningMessage, ResolvedParticipant,
-    ResolvedParticipantBinding, RuntimeParticipantBinding, STATE_MACHINE_PANEL_MESSAGE_TYPE,
-    SenderType, Session, StateMachineAssignee, StateMachineDeliveryCorrelation,
-    StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
-    StateMachineRunStatus,
+    MessageOwnerFilter, MessageQuery, MessageRole, NewMessage, OpeningMessage,
+    OpeningMessageRenderContext, OpeningMessageScope, Participant, ParticipantMode,
+    ParticipantRole, RenderedOpeningMessage, ResolvedParticipant, ResolvedParticipantBinding,
+    RuntimeParticipantBinding, STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType, Session,
+    StateMachineAssignee, StateMachineDeliveryCorrelation, StateMachineNodeKind,
+    StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
 use bcs_protocol::{
     BCS_PROTOCOL_VERSION, BcsFrame, EventFrame, GroupContextInput, GroupContextParticipant,
@@ -1179,10 +1179,10 @@ impl CollaborationRuntime {
             return Ok(message);
         }
         let session_title = self.session_title(&run.session_id).await;
-        Ok(default_state_machine_opening_message(
-            &run.run_id,
-            session_title.as_deref(),
-        ))
+        let group = self.groups.get(&run.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", run.group_id))
+        })?;
+        render_state_machine_opening_message(&group, run, session_title.as_deref())
     }
 
     async fn resume_materialized_rerun(
@@ -2680,6 +2680,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             definition: None,
             definition_ref: None,
             participant_bindings: Some(cmd.participant_bindings),
+            opening_message_override: cmd.opening_message,
             input: cmd.input,
             caller_id: Some(cmd.caller_bot_id),
             authenticated_human: None,
@@ -2699,6 +2700,26 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let mut group = self.groups.get(&cmd.group_id).await.ok_or_else(|| {
             CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", cmd.group_id))
         })?;
+        if cmd.opening_message_override.is_some()
+            && (!is_one_shot_session_run
+                || !matches!(
+                    group.group_strategy,
+                    GroupStrategy::Chat | GroupStrategy::ManagerWorker
+                ))
+        {
+            return Err(CollaborationRuntimeError::InvalidRequest(
+                "opening_message override is supported only for one-shot session Runs".to_string(),
+            ));
+        }
+        if let Some(opening_message) = cmd.opening_message_override.as_ref() {
+            opening_message
+                .validate_for(OpeningMessageScope::StateMachineRun)
+                .map_err(|error| {
+                    CollaborationRuntimeError::InvalidRequest(format!(
+                        "invalid_opening_message: {error}"
+                    ))
+                })?;
+        }
         if cmd.participant_bindings.is_some() {
             if let Some(session_id) = cmd.session_id.as_deref() {
                 let participant_scope = self
@@ -2892,6 +2913,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             created_by: cmd.caller_id.clone(),
             status: StateMachineRunStatus::Pending,
             input: cmd.input,
+            opening_message_override: cmd.opening_message_override,
             output: None,
             error: None,
             created_at: now,
@@ -3131,11 +3153,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             })?;
         let compiled = validate_definition(definition)?;
         if let Some(existing) = self.runs.get_direct_rerun(&source.run_id).await? {
-            let opening_message = render_state_machine_opening_message(
-                &group,
-                &existing,
-                session.session_title.as_deref(),
-            )?;
+            let opening_message = self.opening_message_for_existing_run(&existing).await?;
             return self
                 .resume_materialized_rerun(
                     &compiled,
@@ -3173,6 +3191,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 .or_else(|| source.created_by.clone()),
             status: StateMachineRunStatus::Pending,
             input: source.input.clone(),
+            opening_message_override: source.opening_message_override.clone(),
             output: None,
             error: None,
             created_at: now,
@@ -3196,11 +3215,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             .await?
         {
             CreateStateMachineRerunOutcome::Existing(existing) => {
-                let opening_message = render_state_machine_opening_message(
-                    &group,
-                    &existing,
-                    session.session_title.as_deref(),
-                )?;
+                let opening_message = self.opening_message_for_existing_run(&existing).await?;
                 (existing, opening_message, false)
             }
             CreateStateMachineRerunOutcome::Conflict => {
@@ -5922,6 +5937,9 @@ fn render_state_machine_opening_message(
     // default panel instead of interpreting that Session template as a Run
     // opening message.
     if group.group_strategy != GroupStrategy::StateMachine {
+        if let Some(opening_message) = run.opening_message_override.as_ref() {
+            return render_run_opening_message(opening_message, group, run, session_title);
+        }
         return Ok(default_state_machine_opening_message(
             &run.run_id,
             session_title,
@@ -5933,6 +5951,15 @@ fn render_state_machine_opening_message(
             session_title,
         ));
     };
+    render_run_opening_message(opening_message, group, run, session_title)
+}
+
+fn render_run_opening_message(
+    opening_message: &OpeningMessage,
+    group: &Group,
+    run: &StateMachineRun,
+    session_title: Option<&str>,
+) -> Result<RenderedOpeningMessage, CollaborationRuntimeError> {
     opening_message
         .render(OpeningMessageRenderContext::StateMachineRun {
             group_id: &group.id,
@@ -6049,7 +6076,7 @@ mod tests {
     }
 
     #[test]
-    fn session_opening_message_does_not_override_one_shot_state_machine_panel() {
+    fn one_shot_opening_message_is_run_scoped_for_chat_and_manager_worker_groups() {
         let run = StateMachineRun {
             run_id: "run-1".to_string(),
             root_run_id: Some("run-1".to_string()),
@@ -6063,6 +6090,7 @@ mod tests {
             created_by: None,
             status: StateMachineRunStatus::Running,
             input: Value::Null,
+            opening_message_override: None,
             output: None,
             error: None,
             created_at: 1,
@@ -6072,7 +6100,7 @@ mod tests {
         for strategy in [GroupStrategy::Chat, GroupStrategy::ManagerWorker] {
             let mut group = Group::new("group-1", "driver", Vec::new());
             group.group_strategy = strategy;
-            group.opening_message = Some(bcs_domain::OpeningMessage::Text(
+            group.opening_message = Some(OpeningMessage::Text(
                 "Session opening {{bcs.session_id}}".to_string(),
             ));
 
@@ -6081,6 +6109,26 @@ mod tests {
                     .expect("render one-shot panel"),
                 default_state_machine_opening_message("run-1", Some("一次性任务"))
             );
+
+            let mut overridden_run = run.clone();
+            overridden_run.opening_message_override = Some(
+                serde_json::from_value(serde_json::json!({
+                    "type": "panel",
+                    "component": "custom.OneShotRunView",
+                    "params": {
+                        "groupId": "{{bcs.group_id}}",
+                        "runId": "{{bcs.run_id}}"
+                    }
+                }))
+                .expect("valid one-shot panel"),
+            );
+            let rendered =
+                render_state_machine_opening_message(&group, &overridden_run, Some("一次性任务"))
+                    .expect("render explicit one-shot panel");
+            assert_eq!(rendered.component.as_deref(), Some("custom.OneShotRunView"));
+            assert!(rendered.content.contains("\"groupId\":\"group-1\""));
+            assert!(rendered.content.contains("\"runId\":\"run-1\""));
+            assert!(!rendered.content.contains("Session opening"));
         }
     }
 
@@ -6141,6 +6189,7 @@ runtime:
             created_by: None,
             status: StateMachineRunStatus::Running,
             input: Value::Null,
+            opening_message_override: None,
             output: None,
             error: None,
             created_at: 1,
@@ -6228,6 +6277,7 @@ runtime:
             created_by: None,
             status: StateMachineRunStatus::Running,
             input: Value::Null,
+            opening_message_override: None,
             output: None,
             error: None,
             created_at: 1,

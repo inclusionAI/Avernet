@@ -50,6 +50,7 @@ impl CollaborationRuntimeService for RecordingRuntime {
                     created_by: command.caller_id,
                     status: StateMachineRunStatus::Running,
                     input: command.input,
+                    opening_message_override: None,
                     output: None,
                     error: None,
                     created_at: 1,

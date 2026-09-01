@@ -740,6 +740,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                     created_by: cmd.caller_id.clone(),
                     status: StateMachineRunStatus::Running,
                     input: cmd.input,
+                    opening_message_override: None,
                     output: None,
                     error: None,
                     created_at: 1,

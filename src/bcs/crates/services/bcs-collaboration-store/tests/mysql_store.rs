@@ -11,7 +11,7 @@ use bcs_db_api::{
 };
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_domain::{
-    CollaborationDefinition, CollaborationDefinitionRef, ParticipantRole, ResolvedParticipant,
+    CollaborationDefinition, CollaborationDefinitionRef, OpeningMessage, ParticipantRole, ResolvedParticipant,
     ResolvedParticipantBinding, RuntimeParticipantBinding, StateMachineDeliveryCorrelation,
     StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
@@ -302,6 +302,7 @@ async fn mysql_definition_snapshot_writes_run_definition_snapshot_table() {
         created_by: Some("tester".to_string()),
         status: StateMachineRunStatus::Running,
         input: json!({"question": "hello"}),
+        opening_message_override: None,
         output: None,
         error: None,
         created_at: 1,
@@ -376,7 +377,10 @@ async fn mysql_definition_snapshot_reads_run_definition_snapshot_table() {
 async fn mysql_runtime_create_run_writes_run_and_node_rows() {
     let db = Arc::new(RecordingDb::default());
     let store = MySqlCollaborationStore::new(db.clone(), "dev".to_string());
-    let run = test_run();
+    let mut run = test_run();
+    run.opening_message_override = Some(OpeningMessage::Text(
+        "Run {{bcs.run_id}}".to_string(),
+    ));
     let node = test_node();
 
     store
@@ -397,6 +401,15 @@ async fn mysql_runtime_create_run_writes_run_and_node_rows() {
             assert_eq!(stmt.params()[7], DbValue::from(7));
             assert_eq!(stmt.params()[10], DbValue::from("tester"));
             assert_eq!(stmt.params()[11], DbValue::from("running"));
+            assert!(stmt.sql().contains("opening_message_override_json"));
+            assert_eq!(
+                stmt.params()[13],
+                DbValue::from(
+                    serde_json::to_string(run.opening_message_override.as_ref().unwrap())
+                        .unwrap()
+                        .as_str()
+                )
+            );
         }
         _ => panic!("expected run execute step"),
     }
@@ -447,7 +460,15 @@ async fn mysql_session_idle_create_locks_session_and_guards_run_and_nodes() {
 
 #[tokio::test]
 async fn mysql_runtime_reads_run_and_node_rows() {
-    let run = test_run();
+    let mut run = test_run();
+    run.opening_message_override = Some(
+        serde_json::from_value(json!({
+            "type": "panel",
+            "component": "partnerPanel.OneShotRunView",
+            "params": {"runId": "{{bcs.run_id}}"}
+        }))
+        .expect("valid opening panel"),
+    );
     let node = test_node();
     let db = Arc::new(RecordingDb {
         runtime_run_row: Mutex::new(Some(run_row(&run))),
@@ -464,6 +485,10 @@ async fn mysql_runtime_reads_run_and_node_rows() {
     assert_eq!(loaded_run.group_version, 7);
     assert_eq!(loaded_run.created_by.as_deref(), Some("tester"));
     assert_eq!(loaded_run.input["question"], "hello");
+    assert_eq!(
+        loaded_run.opening_message_override,
+        run.opening_message_override
+    );
 
     let loaded_by_session = store
         .get_run_by_session_id("group-1:abcdef12")
@@ -488,6 +513,25 @@ async fn mysql_runtime_reads_run_and_node_rows() {
     assert_eq!(queries[1].params()[1], DbValue::from("group-1:abcdef12"));
     assert!(queries[2].sql().contains("session_id = ?"));
     assert!(!queries[2].sql().contains("LIMIT 1"));
+}
+
+#[tokio::test]
+async fn mysql_runtime_rejects_invalid_persisted_opening_message_override_json() {
+    let run = test_run();
+    let db = Arc::new(RecordingDb {
+        runtime_run_row: Mutex::new(Some(run_row_with_opening_json(
+            &run,
+            DbValue::from("{invalid"),
+        ))),
+        ..RecordingDb::default()
+    });
+    let store = MySqlCollaborationStore::new(db, "dev".to_string());
+
+    let error = store
+        .get_run(&run.run_id)
+        .await
+        .expect_err("invalid persisted override must fail the read");
+    assert!(error.to_string().contains("opening_message_override_json"));
 }
 
 #[tokio::test]
@@ -1292,6 +1336,7 @@ fn test_run() -> StateMachineRun {
         created_by: Some("tester".to_string()),
         status: StateMachineRunStatus::Running,
         input: json!({"question": "hello"}),
+        opening_message_override: None,
         output: None,
         error: None,
         created_at: 1,
@@ -1369,6 +1414,18 @@ fn test_correlation() -> StateMachineDeliveryCorrelation {
 }
 
 fn run_row(run: &StateMachineRun) -> DbRow {
+    let opening_message_override_json = run
+        .opening_message_override
+        .as_ref()
+        .map(|opening_message| DbValue::from(serde_json::to_string(opening_message).unwrap()))
+        .unwrap_or(DbValue::Null);
+    run_row_with_opening_json(run, opening_message_override_json)
+}
+
+fn run_row_with_opening_json(
+    run: &StateMachineRun,
+    opening_message_override_json: DbValue,
+) -> DbRow {
     DbRow::new(BTreeMap::from([
         ("run_id".to_string(), DbValue::from(run.run_id.as_str())),
         (
@@ -1396,6 +1453,10 @@ fn run_row(run: &StateMachineRun) -> DbRow {
         (
             "input_json".to_string(),
             DbValue::from(run.input.to_string()),
+        ),
+        (
+            "opening_message_override_json".to_string(),
+            opening_message_override_json,
         ),
         ("output_text".to_string(), DbValue::Null),
         ("error_message".to_string(), DbValue::Null),
