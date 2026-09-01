@@ -258,15 +258,17 @@ Conventions from `plan.md` that every task assumes:
         appears only in the report.
 - **Depends on:** Task 9
 
-## [ ] Task 14: Durability and re-entrancy
-- **Files:** `tests/community/bot_config_manifest/test_apply_task.py` (new)
+## [x] Task 14: Durability and re-entrancy
+- **Files:** `tests/community/core/bot_config_manifest/apply/test_apply_task.py` (new);
+  the job's own double-drive stayed in `creation/test_create_job.py`, beside the
+  step machine it is about
 - **Done when:**
-  - [ ] An apply whose handler is invoked twice converges: the second run writes
+  - [x] An apply whose handler is invoked twice converges: the second run writes
         nothing.
-  - [ ] The lock is released on every path, including a raising orchestrator, and
+  - [x] The lock is released on every path, including a raising orchestrator, and
         a task that never runs leaves a lock the TTL reaps.
-  - [ ] The creation job invoked twice at each step does not double-act.
-  - [ ] A comment or docstring near the re-entrancy tests states the reason —
+  - [x] The creation job invoked twice at each step does not double-act.
+  - [x] A comment or docstring near the re-entrancy tests states the reason —
         convergence and the lock, **not** an absence of retry.
 - **Depends on:** Tasks 1, 9
 
