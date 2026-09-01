@@ -41,6 +41,7 @@ from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.domain.errors import TaskStateError
 
 from agentclaw.community.core.task.repository.types import (
+    BbsTaskOverviewRecord,
     TaskInfoRecord,
     TaskNodeRecord,
     TaskNodeRunInfoRecord,
@@ -881,6 +882,15 @@ class TaskService:
             statuses, owner_user_id=owner_user_id, page=page, page_size=page_size
         )
         return self._enrich_task_owner_display(records), total
+
+    def list_bbs_tasks(self) -> list[BbsTaskOverviewRecord]:
+        """列所有 BBS 接力任务(run_mode='bbs'):run_info ⋈ node 联合,按 task_id 补 publisher(owner_bot_id)。
+
+        供 bbs/list 路由调用,委托 ``TaskGraphService.list_bbs_tasks_overview``。返回
+        ``BbsTaskOverviewRecord``(含 task_spec/extend_props 原始 dict);title/goal/acceptances/
+        assignee_name 由 adapter translator 二次解析。
+        """
+        return self._graph.list_bbs_tasks_overview()
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(委托 TaskGraphService.claim_bbs_owner)。

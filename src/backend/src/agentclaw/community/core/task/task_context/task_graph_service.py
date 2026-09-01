@@ -41,6 +41,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
     TaskSummary,
 )
+from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 
 _LOG = logging.getLogger(__name__)
 
@@ -837,6 +838,14 @@ class TaskGraphService:
                     bbs_mode=bool(graph.extend_props.get("bbs_mode", False))))
             summaries.sort(key=lambda s: s.run_id, reverse=True)
             return summaries
+
+    def list_bbs_tasks_overview(self) -> list[BbsTaskOverviewRecord]:
+        """列所有 BBS 接力任务概览(run_mode='bbs' 的 run_info ⋈ node,补 publisher);只读。
+
+        委托 ``graph_repo.list_bbs_tasks_overview``;无 repo 绑定(纯内核/测试)→ 空列表,不阻断。"""
+        if self._graph_repo is None:
+            return []
+        return self._graph_repo.list_bbs_tasks_overview()
 
     def _node_depth(self, task_id: str, node_id: str) -> int:
         """从 relations 分解树递归自算深度(派生不持久)。根=0。"""

@@ -303,6 +303,33 @@ class TaskInfoRecordDTO(BaseModel):
     gmt_modified: datetime | None = Field(None, description="记录最后修改时间")
 
 
+class BbsTaskItemDTO(BaseModel):
+    """GET /api/v1/collaboration/tasks/bbs/list 返回的单条 BBS 接力任务概览。
+
+    忠实映射给定 SQL 的列别名(task_node_run_info r ⋈ task_node n,再补 task_info.owner_bot_id)。
+    title/goal/acceptances 由 adapter 二次解析自 task_spec;assignee_name 解析自 extend_props;
+    publisher=task_info.owner_bot_id(按 task_id 补,缺失 → None)。status 取 task_node 原始运行态。
+    """
+
+    task_id: str = Field(..., description="任务ID(r.task_id)")
+    node_id: str = Field(..., description="节点ID(r.node_id)")
+    run_mode: str | None = Field(None, description="执行模态(r.run_mode;bbs)")
+    retry: int = Field(0, description="重试序号(r.retry;当前恒 0)")
+    assignee_id: str | None = Field(None, description="承接者ID(r.assignee → assignee_id)")
+    status: str | None = Field(None, description="节点运行态(n.status 原值,如 RUNNING/DONE/…)")
+    acceptance_result: dict[str, Any] | None = Field(None, description="验收结论(r.acceptance_result)")
+    extend_props: dict[str, Any] | None = Field(None, description="运行扩展属性(r.extend_props)")
+    relay_create_time: datetime | None = Field(None, description="节点建表时间(n.gmt_create)")
+    relay_begin_time: datetime | None = Field(None, description="run 建表时间(r.gmt_create)")
+    relay_end_time: datetime | None = Field(None, description="run 改表时间(r.gmt_modified)")
+    task_spec: dict[str, Any] = Field(..., description="节点任务规格(n.task_spec 原始 dict)")
+    title: str | None = Field(None, description="解析自 task_spec.metadata.title")
+    goal: str | None = Field(None, description="解析自 task_spec.goal.objective")
+    acceptances: list[Any] | None = Field(None, description="解析自 task_spec.goal.acceptances")
+    assignee_name: str | None = Field(None, description="解析自 extend_props.assignee_name")
+    publisher: str | None = Field(None, description="发布方 botId(task_info.owner_bot_id)")
+
+
 class TaskRelationDTO(BaseModel):
     """分解树边(一等公民);承载结构归属,单入(每非根节点恰好 1 入边=结构父)。"""
 
@@ -653,6 +680,33 @@ def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
         status=runtime_status_to_product_status(record.status),
         gmt_create=record.gmt_create,
         gmt_modified=record.gmt_modified,
+    )
+
+
+def bbs_task_overview_to_dto(record) -> BbsTaskItemDTO:
+    """BbsTaskOverviewRecord -> BbsTaskItemDTO(Rule 22):二次解析 task_spec/extend_props。"""
+    task_spec = record.task_spec or {}
+    metadata = task_spec.get("metadata") or {}
+    goal = task_spec.get("goal") or {}
+    extend_props = record.extend_props or {}
+    return BbsTaskItemDTO(
+        task_id=record.task_id,
+        node_id=record.node_id,
+        run_mode=record.run_mode,
+        retry=record.retry,
+        assignee_id=record.assignee_id,
+        status=record.status.value if record.status is not None else None,
+        acceptance_result=record.acceptance_result,
+        extend_props=record.extend_props,
+        relay_create_time=record.relay_create_time,
+        relay_begin_time=record.relay_begin_time,
+        relay_end_time=record.relay_end_time,
+        task_spec=dict(task_spec),
+        title=metadata.get("title"),
+        goal=goal.get("objective"),
+        acceptances=goal.get("acceptances"),
+        assignee_name=extend_props.get("assignee_name"),
+        publisher=record.publisher,
     )
 
 

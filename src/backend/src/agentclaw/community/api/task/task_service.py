@@ -12,7 +12,10 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
-from agentclaw.community.core.task.repository.types import TaskInfoRecord
+from agentclaw.community.core.task.repository.types import (
+    BbsTaskOverviewRecord,
+    TaskInfoRecord,
+)
 
 
 @runtime_checkable
@@ -51,6 +54,13 @@ class TaskServiceProtocol(Protocol):
         page_size: int = 20,
     ) -> tuple[list[TaskInfoRecord], int]:
         """列持久化任务记录的一页(1-based),可选按状态和 owner 过滤,返回 (items, total)。"""
+        ...
+
+    def list_bbs_tasks(self) -> list[BbsTaskOverviewRecord]:
+        """列所有 BBS 接力任务(run_mode='bbs'):``task_node_run_info`` ⋈ ``task_node`` 联合,
+        再按 task_id 补 ``task_info.owner_bot_id``(publisher)。返回 ``BbsTaskOverviewRecord``
+        (含 task_spec/extend_props 原始 dict);title/goal/acceptances/assignee_name 由 adapter
+        translator 二次解析。供 bbs/list 路由调用,委托 TaskGraphService.list_bbs_tasks_overview。"""
         ...
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:

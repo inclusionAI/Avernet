@@ -14,6 +14,7 @@
   POST /api/v1/collaboration/tasks/bbs/claim        — BBS 接力步②:CAS 占根(恰一赢,输者 409)
   POST /api/v1/collaboration/tasks/bbs/attach        — BBS 接力步④:挂 run_mode=bbs scoped 子节点 + start
   POST /api/v1/collaboration/tasks/bbs/result        — BBS 接力步⑤:回投终态 + 释放 claim
+  GET  /api/v1/collaboration/tasks/bbs/list          — 列所有 BBS 接力任务(run_info⋈node + publisher)
   POST /api/v1/collaboration/tasks/discovery/discover — 任务发现阶段:读取任务 → per-bot engine 建 session → 投递通知
   GET  /api/v1/collaboration/tasks/discovery/status   — 任务发现状态(读 SQLite db)
 
@@ -46,6 +47,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     BbsAttachDTO,
     BbsClaimDTO,
     BbsResultDTO,
+    BbsTaskItemDTO,
     TaskCallbackDataDTO,
     TaskCallbackRequest,
     TaskExecutionGraphDTO,
@@ -55,6 +57,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
     acceptance_result_from_dto,
+    bbs_task_overview_to_dto,
     callback_from_dto,
     graph_to_dto,
     op_result_to_dto,
@@ -480,6 +483,25 @@ async def bbs_result(
         exec_error=body.exec_error,
     )
     return envelope({"ok": True}, request)
+
+
+@router.get("/bbs/list", response_model=Envelope[list[BbsTaskItemDTO]])
+@envelope_errors
+async def list_bbs_tasks(
+    request: Request,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[list[BbsTaskItemDTO]]:
+    """列所有 BBS 接力任务(run_mode='bbs'):`task_node_run_info` r ⋈ `task_node` n (task_id+node_id),
+    再按 task_id 补 `task_info.owner_bot_id`(publisher)。无 retry 过滤、无分页(当前 retry 恒 0)。
+
+    返回 ``BbsTaskItemDTO``:SQL 直投字段(task_id/node_id/run_mode/retry/assignee_id/status/
+    acceptance_result/extend_props/relay_* time/task_spec)+ adapter 二次解析字段
+    (title=task_spec.metadata.title / goal=task_spec.goal.objective /
+    acceptances=task_spec.goal.acceptances / assignee_name=extend_props.assignee_name / publisher)。
+    translator 投影遵循 Rule 22(adapter 只转协议);领域查询委托 TaskServiceProtocol.list_bbs_tasks。
+    """
+    records = service.list_bbs_tasks()
+    return envelope([bbs_task_overview_to_dto(r) for r in records], request)
 
 
 @router.post("/nodes/update", response_model=Envelope[dict[str, Any]])

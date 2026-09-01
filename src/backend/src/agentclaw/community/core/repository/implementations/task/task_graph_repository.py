@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from injector import inject
+from sqlalchemy import and_
 
 from agentclaw.community.core.repository.protocols.task import TaskGraphRepositoryProtocol
 from agentclaw.community.core.task.domain.errors import GraphVersionConflictError
@@ -27,6 +28,7 @@ from agentclaw.community.core.task.repository.serializers import (
     runtime_from_dict,
     task_spec_to_dict,
 )
+from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -551,3 +553,61 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             run_row.extend_props = self._json(props)
             db.flush()
             return True
+
+    def list_bbs_tasks_overview(self) -> list[BbsTaskOverviewRecord]:
+        """列所有 BBS 接力任务(run_mode='bbs'):``task_node_run_info`` ⋈ ``task_node``
+        (task_id+node_id),再按 distinct task_id 批量补 ``task_info.owner_bot_id``→publisher
+        (缺失→None)。只读投影,忠实映射给定 SQL(无 retry 过滤、无分页;当前 retry 恒 0)。
+
+        ``task_spec``/``extend_props``/``acceptance_result`` 复用模型 ``to_record()`` 的 JSON 解析;
+        title/goal/acceptances/assignee_name 由 adapter translator 二次解析(不在此 record 内)。
+        """
+        with self._db.orm_session() as db:
+            joined = (
+                db.query(TaskNodeRunInfoModel, TaskNodeModel)
+                .join(
+                    TaskNodeModel,
+                    and_(
+                        TaskNodeRunInfoModel.task_id == TaskNodeModel.task_id,
+                        TaskNodeRunInfoModel.node_id == TaskNodeModel.node_id,
+                    ),
+                )
+                .filter(TaskNodeRunInfoModel.run_mode == "bbs")
+                .all()
+            )
+            if not joined:
+                return []
+
+            # publisher:按 distinct task_id 一次 in_() 批查 task_info.owner_bot_id,避免 N+1。
+            task_ids = {run.task_id for run, _ in joined}
+            publishers: dict[str, str] = {}
+            if task_ids:
+                publisher_rows = (
+                    db.query(TaskInfoModel.task_id, TaskInfoModel.owner_bot_id)
+                    .filter(TaskInfoModel.task_id.in_(task_ids))
+                    .all()
+                )
+                publishers = {tid: oid for tid, oid in publisher_rows if oid}
+
+            records: list[BbsTaskOverviewRecord] = []
+            for run, node in joined:
+                run_rec = run.to_record()  # 已 JSON 解析 extend_props/acceptance_result
+                node_rec = node.to_record()  # 已 JSON 解析 task_spec;status → Status
+                records.append(
+                    BbsTaskOverviewRecord(
+                        task_id=run_rec.task_id,
+                        node_id=run_rec.node_id,
+                        run_mode=run_rec.run_mode,
+                        retry=run_rec.retry,
+                        assignee_id=run_rec.assignee,
+                        status=node_rec.status,
+                        acceptance_result=run_rec.acceptance_result,
+                        extend_props=run_rec.extend_props,
+                        relay_create_time=node_rec.gmt_create,
+                        relay_begin_time=run_rec.gmt_create,
+                        relay_end_time=run_rec.gmt_modified,
+                        task_spec=node_rec.task_spec or {},
+                        publisher=publishers.get(run_rec.task_id),
+                    )
+                )
+            return records

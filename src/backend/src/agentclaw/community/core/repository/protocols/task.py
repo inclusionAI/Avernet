@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, Sequence, runtime_checkabl
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
     from agentclaw.community.core.task.repository.types import (
+        BbsTaskOverviewRecord,
         TaskActionLogRecord,
         TaskCallbackRecord,
         TaskInfoRecord,
@@ -373,6 +374,14 @@ class TaskGraphRepositoryProtocol(Protocol):
     @abstractmethod
     def release_bbs_owner(self, task_id: str, bot_id: str) -> bool:
         """Release a BBS relay claim held by ``bot_id``."""
+        ...
+
+    @abstractmethod
+    def list_bbs_tasks_overview(self) -> "list[BbsTaskOverviewRecord]":
+        """List every BBS relay run: ``task_node_run_info`` (run_mode='bbs') ⋈ ``task_node``
+        on (task_id, node_id), with ``task_info.owner_bot_id`` attached as ``publisher``
+        (batch-looked-up by task_id; missing task_info → ``None``). Read-only overview
+        projection feeding ``GET /api/v1/collaboration/tasks/bbs/list``."""
         ...
 
 
