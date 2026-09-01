@@ -45,14 +45,14 @@ CLOUD = {
 
 
 class _TemplatePortStub:
-    """Hands one stored snapshot back — including the secrets that must not
-    survive the wire — so the handler test pins the projection end to end."""
+    """Hands one stored snapshot back — secrets included — so the handler test
+    pins the verbatim passthrough end to end."""
 
     def list_template_configs_by_bot_ids(self, bot_ids):
         return {
             "c1": {
                 "devflow_workflow": "release-notes",
-                "token": "must-not-leak",
+                "token": "echoed-to-owner",
                 "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
                 "runtime": "codefuse",
             }
@@ -131,16 +131,21 @@ def test_list_inventory_combines_personal_cloud_and_local(client):
     assert ids == {"c1", "l1"}
 
 
-def test_list_inventory_carries_projected_template_fields(client):
+def test_list_inventory_carries_template_snapshot_verbatim(client):
     data = _ok(client.get("/openapi/v1/bots/all"))
 
     by_id = {item["bot_id"]: item for item in data["items"]}
     cloud = by_id["c1"]
+    # The stored snapshot reaches the wire verbatim — the passthrough decision
+    # (2026-09-01): an owner-scoped face echoes the caller's own creation
+    # input, secrets included, with no allowlist filtering.
     assert cloud["template_type"] == "applicationCoding"
-    assert cloud["template_config"] == {"devflow_workflow": "release-notes"}
-    assert "token" not in cloud["template_config"]
-    assert "bot_template_config" not in cloud["template_config"]
-    assert "runtime" not in cloud["template_config"]
+    assert cloud["template_config"] == {
+        "devflow_workflow": "release-notes",
+        "token": "echoed-to-owner",
+        "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
+        "runtime": "codefuse",
+    }
     # Desktop rows carry no template identity.
     assert by_id["l1"]["template_type"] is None
     assert by_id["l1"]["template_config"] is None

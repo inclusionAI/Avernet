@@ -113,7 +113,7 @@ from agentclaw.community.core.bot_inventory.policies.combo_policy import (
     assert_service_upgrade,
 )
 from agentclaw.community.core.bot_management.template_public_view import (
-    project_template_config_for_public,
+    template_config_for_public,
 )
 from agentclaw.community.core.bot_inventory.types import (
     BotInventoryItem as CoreItem,
@@ -191,12 +191,14 @@ def _require_service_capable_engine(bot_type: str, engine: str) -> None:
 def _to_bot(d: dict[str, Any], *, space: dict[str, Any] | None = None) -> Bot:
     """Adapt an internal bot ``to_dict()`` record to the public ``Bot`` schema.
 
-    ``template_config`` on the row is the stored engine snapshot (it may carry
-    secrets), so it passes through the core allowlist projection here — gated
-    on a truthy ``template_type`` so the detail path (whose attach is not
-    template-gated) honors the same "null without a template" contract the
-    listings publish. ``space`` is the owner-view summary the listing
-    endpoints resolve and pass in; other callers leave it null.
+    ``template_config`` on the row is the stored engine snapshot, returned
+    verbatim (2026-09-01 passthrough decision — an owner-scoped face echoes
+    the caller's own creation input, secrets included), detached via the core
+    deep-copy helper — gated on a truthy ``template_type`` so the detail path
+    (whose attach is not template-gated) honors the same "null without a
+    template" contract the listings publish. ``space`` is the owner-view
+    summary the listing endpoints resolve and pass in; other callers leave it
+    null.
     """
     engine = d.get("active_engine") or ""
     has_template = d.get("template_type") not in (None, "")
@@ -211,7 +213,7 @@ def _to_bot(d: dict[str, Any], *, space: dict[str, Any] | None = None) -> Bot:
         owner_entity_id=d.get("owner_id") or "",
         template_type=str(d["template_type"]) if has_template else None,
         template_config=(
-            project_template_config_for_public(d.get("template_config"))
+            template_config_for_public(d.get("template_config"))
             if has_template
             else None
         ),

@@ -19,7 +19,7 @@ from agentclaw.community.core.bot_inventory.protocols import (
     ServiceEditLockPort,
 )
 from agentclaw.community.core.bot_management.template_public_view import (
-    project_template_config_for_public,
+    template_config_for_public,
 )
 from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
     BotLifecycleView,
@@ -167,13 +167,17 @@ class BotInventoryService(BotInventoryServiceProtocol):
     def _attach_page_templates(
         self, items: list[BotInventoryItem]
     ) -> list[BotInventoryItem]:
-        """Project template_config onto the returned page slice only.
+        """Attach template_config onto the returned page slice only.
 
         The fan-out intentionally pulls rows with ``attach_templates=False``
         (one batched template read per 200-row page would tax every listing);
         this is the single place template snapshots enter the read model, and
         it sees only the page the caller will actually see — so the per-request
         template cost is one bounded read over ≤page_size ids.
+
+        Attach is verbatim (2026-09-01 passthrough decision): the stored
+        snapshot is deep-copied onto the read model, secrets included — the
+        listing is owner-scoped, so that echoes the caller's own input.
         """
         bot_ids = [item.bot_id for item in items if item.template_type]
         if not bot_ids:
@@ -186,13 +190,11 @@ class BotInventoryService(BotInventoryServiceProtocol):
             if not item.template_type:
                 enriched.append(item)
                 continue
-            projected = project_template_config_for_public(
-                ext_by_bot_id.get(item.bot_id)
-            )
-            if projected is None:
+            attached = template_config_for_public(ext_by_bot_id.get(item.bot_id))
+            if attached is None:
                 enriched.append(item)
                 continue
-            enriched.append(replace(item, template_config=projected))
+            enriched.append(replace(item, template_config=attached))
         return enriched
 
     def _attach_edit_locks(
