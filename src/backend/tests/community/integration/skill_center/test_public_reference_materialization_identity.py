@@ -27,7 +27,6 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     SkillVersionMaterializationRequest,
-    SkillVersionScanResult,
 )
 from agentclaw.community.core.skill_center.public_center_identity import (
     PublicCenterSkillIdentity,
@@ -116,11 +115,6 @@ class _Gateway:
         )
 
 
-class _Scanner:
-    def scan(self, _package) -> SkillVersionScanResult:
-        return SkillVersionScanResult(risk_tags=(), mcp_dependencies=())
-
-
 def test_deterministic_public_identity_passes_real_canonical_ready_gate() -> None:
     db = _Database()
     references = SkillCenterReferenceRepository(db)
@@ -148,7 +142,6 @@ def test_deterministic_public_identity_passes_real_canonical_ready_gate() -> Non
             gateway=_Gateway(package),
             http=_Http(package),
             validator=SkillPackageValidator(SkillParser()),
-            scanner=_Scanner(),
             store=store,
             clock=lambda: datetime(2026, 8, 30, tzinfo=UTC),
         ).materialize(
@@ -224,7 +217,6 @@ def test_public_wrapper_and_market_display_name_converge_to_manifest_name() -> N
             gateway=_Gateway(package),
             http=_Http(package),
             validator=SkillPackageValidator(SkillParser()),
-            scanner=_Scanner(),
             store=store,
             clock=lambda: datetime(2026, 8, 30, tzinfo=UTC),
         ).materialize(
@@ -251,7 +243,6 @@ def test_public_wrapper_and_market_display_name_converge_to_manifest_name() -> N
             gateway=_Gateway(package),
             http=_Http(package),
             validator=SkillPackageValidator(SkillParser()),
-            scanner=_Scanner(),
             store=store,
             clock=lambda: datetime(2026, 8, 31, tzinfo=UTC),
         ).materialize(

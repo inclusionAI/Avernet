@@ -22,6 +22,7 @@ from agentclaw.community.core.models.mcp import (
     BotMCPInstallation,
     SkillSetMCPServer,
 )
+from agentclaw.community.core.models.space_skill import SkillVersion
 from agentclaw.community.core.skill_center.orm import (
     DefaultSkillsetMcpExclusion,
     DefaultSkillsetSkillExclusion,
@@ -1830,6 +1831,7 @@ def _offlined_center_member(db) -> None:
                     name="center-a",
                     git_path="center://uuid-a",
                     skill_uuid="uuid-a",
+                    mcp_dependencies="{malformed",
                     version=1,
                     status="PUBLISHED",
                     env="dev",
@@ -2578,6 +2580,7 @@ def test_excluding_an_unresolvable_member_still_retires_its_installation():
         offline = Skill(
             name="offline", git_path="center://offline-uuid",
             skill_uuid="offline-uuid", status="OFFLINE", env="dev",
+            mcp_dependencies="{malformed",
         )
         session.add_all([default, offline])
         session.flush()
@@ -2850,6 +2853,42 @@ def _seed_skill_with_dependencies(db, dependencies: str | None):
     return skill, skill_set
 
 
+def _seed_center_skill_with_dependencies(db, dependencies: str):
+    with db.transactional_orm_session() as session:
+        skill = Skill(
+            name="center-dependent",
+            git_path="center://center-dependent",
+            env="dev",
+            status="PUBLISHED",
+            skill_uuid="00000000-0000-4000-8000-000000000123",
+            mcp_dependencies=None,
+        )
+        skill_set = SkillSet(
+            name="set", user_id="owner", bolt_id="bot", is_active=True, env="dev"
+        )
+        session.add_all([skill, skill_set])
+        session.flush()
+        session.add(
+            SkillVersion(
+                skill_id=skill.id,
+                publication_attempt_id=None,
+                version_ordinal=1,
+                status="PUBLISHED",
+                sc_version_number="v1.0",
+                sc_skill_id=1001,
+                sc_version_id=2001,
+                name=skill.name,
+                description="Center dependency fixture",
+                metadata_json=dependencies,
+                published_at=datetime(2026, 9, 1),
+                created_by="owner",
+                env="dev",
+            )
+        )
+        session.flush()
+    return skill, skill_set
+
+
 def test_add_skill_reports_the_skill_s_mcp_dependencies():
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)
@@ -2930,6 +2969,66 @@ def test_add_skill_reports_no_dependencies_when_the_skill_declares_none():
     )
 
     assert result.mcp_codes == frozenset()
+
+
+def test_center_skill_add_and_remove_use_latest_published_version_dependencies():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    skill, skill_set = _seed_center_skill_with_dependencies(
+        db,
+        '{"mcp_dependencies":[{"code":"mcp.old"}]}',
+    )
+    with db.transactional_orm_session() as session:
+        session.add(
+            SkillVersion(
+                skill_id=skill.id,
+                publication_attempt_id=None,
+                version_ordinal=2,
+                status="PUBLISHED",
+                sc_version_number="v2.0",
+                sc_skill_id=1001,
+                sc_version_id=2002,
+                name=skill.name,
+                description="Latest Center dependency fixture",
+                metadata_json=(
+                    '{"mcp_dependencies":[{"code":"mcp.center"}]}'
+                ),
+                published_at=datetime(2026, 9, 2),
+                created_by="owner",
+                env="dev",
+            )
+        )
+
+    added = repository.add_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    )
+    removed = repository.remove_skill(
+        bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
+        skill_id=str(skill.id),
+    )
+
+    assert added.mcp_codes == frozenset({"mcp.center"})
+    assert removed.mcp_codes == frozenset({"mcp.center"})
+
+
+def test_center_direct_install_and_uninstall_use_version_dependencies():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    skill, _skill_set = _seed_center_skill_with_dependencies(
+        db,
+        '{"mcp_dependencies":[{"code":"mcp.center"}]}',
+    )
+
+    installed = repository.install_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(skill.id)
+    )
+    uninstalled = repository.uninstall_skill(
+        bot_id="bot", owner_id="owner", skill_id=str(skill.id)
+    )
+
+    assert installed.mcp_codes == frozenset({"mcp.center"})
+    assert uninstalled.mcp_codes == frozenset({"mcp.center"})
 
 
 def test_a_no_op_add_skill_claims_nothing():
@@ -3015,3 +3114,60 @@ def test_excluding_a_default_member_releases_its_dependencies():
         set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
     )
     assert restored.mcp_codes == frozenset({"mcp.weather"})
+
+
+def test_center_default_exclusion_uses_published_version_dependencies():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="default", user_id="", bolt_id="", engine_type="openclaw",
+            is_default=True, env="dev",
+        )
+        skill = Skill(
+            name="center-default",
+            git_path="center://center-default",
+            env="dev",
+            status="PUBLISHED",
+            skill_uuid="00000000-0000-4000-8000-000000000124",
+        )
+        session.add_all([default, skill])
+        session.flush()
+        session.add_all([
+            SkillVersion(
+                skill_id=skill.id,
+                publication_attempt_id=None,
+                version_ordinal=1,
+                status="PUBLISHED",
+                sc_version_number="v1.0",
+                sc_skill_id=1002,
+                sc_version_id=2002,
+                name=skill.name,
+                description="Center default fixture",
+                metadata_json=(
+                    '{"mcp_dependencies":[{"code":"mcp.center-default"}]}'
+                ),
+                published_at=datetime(2026, 9, 1),
+                created_by="owner",
+                env="dev",
+            ),
+            SkillSetSkill(
+                skill_set_id=default.id,
+                skill_id=skill.id,
+                skill_uuid=skill.skill_uuid,
+                env="dev",
+            ),
+            BotSkillInstallation(
+                bot_id="bot", owner_id="owner", skill_id=skill.id, env="dev"
+            ),
+        ])
+
+    excluded = repository.exclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+    restored = repository.unexclude_default_skill(
+        set_id=str(default.id), skill_id=str(skill.id), **_DEFAULT_SCOPE
+    )
+
+    assert excluded.mcp_codes == frozenset({"mcp.center-default"})
+    assert restored.mcp_codes == frozenset({"mcp.center-default"})

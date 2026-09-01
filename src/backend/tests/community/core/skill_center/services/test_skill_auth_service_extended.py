@@ -15,10 +15,19 @@ from agentclaw.community.core.skill_center.services.skill_auth_service import Sk
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_svc(skill_set_repo=None, mcp_auth_service=None, mcp_center=None, skill_repo=None):
+def _make_svc(
+    skill_set_repo=None,
+    mcp_auth_service=None,
+    mcp_center=None,
+    skill_repo=None,
+    skill_version_repo=None,
+):
     return SkillAuthService(
         skill_repo=skill_repo if skill_repo is not None else MagicMock(),
         skill_set_repo=skill_set_repo if skill_set_repo is not None else MagicMock(),
+        skill_version_repo=(
+            skill_version_repo if skill_version_repo is not None else MagicMock()
+        ),
         mcp_center=mcp_center if mcp_center is not None else MagicMock(),
         mcp_auth_service=mcp_auth_service if mcp_auth_service is not None else MagicMock(),
     )
@@ -351,6 +360,32 @@ class TestCollectSkillSetMcpCodes:
         assert set(codes) == {"a", "b", "c"}
         assert skill_to_codes["sk1"] == ["a", "b"]
         assert skill_to_codes["sk2"] == ["b", "c"]
+
+    def test_center_skill_uses_latest_published_version_dependencies(self):
+        repo = MagicMock()
+        repo.get_skills_in_set.return_value = [
+            {
+                "id": "7",
+                "name": "center-skill",
+                "git_path": "center://center-skill",
+                "mcp_dependencies": [],
+            }
+        ]
+        versions = MagicMock()
+        versions.list_latest_published.return_value = (
+            {
+                "metadata_json": (
+                    '{"mcp_dependencies":[{"code":"mcp.center"}]}'
+                )
+            },
+        )
+
+        _skills, codes, skill_to_codes = _make_svc(
+            skill_set_repo=repo, skill_version_repo=versions
+        )._collect_skill_set_mcp_codes("set1")
+
+        assert codes == ["mcp.center"]
+        assert skill_to_codes == {"7": ["mcp.center"]}
 
 
 # ---------------------------------------------------------------------------
