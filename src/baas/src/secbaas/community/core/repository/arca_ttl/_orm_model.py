@@ -35,6 +35,8 @@ class TtlRenewalScheduleModel(Base):
     next_renew_at = Column(DateTime, nullable=False)
     renew_fail_count = Column(Integer, nullable=False, default=0)
     status = Column(String(32), nullable=False, default="ACTIVE")
+    # Terminal-STOPPED provenance (table DDL is hand-managed out-of-repo):
+    # lifecycle / orphan / threshold_gone / threshold_expired.
     stop_reason = Column(String(64), nullable=True)
     last_renewed_at = Column(DateTime, nullable=True)
     # env last, mirroring the physical DDL column order (design doc §7.2).
