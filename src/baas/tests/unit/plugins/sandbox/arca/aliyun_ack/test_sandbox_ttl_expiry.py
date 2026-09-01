@@ -324,13 +324,12 @@ class TestDestroy:
                 resource_names={
                     "Deployment": "avernet-agent-uid",
                     "ConfigMap": "envoy-header-rules-uid",
-                    "NetworkPolicy": "avernet-agent-netpol-uid",
                 },
             )
             assert sb.destroy() is True
         h.apps.delete_namespaced_deployment.assert_called_once()
         h.core.delete_namespaced_config_map.assert_called_once()
-        h.core.delete_namespaced_network_policy.assert_called_once()
+        h.core.delete_namespaced_network_policy.assert_not_called()
 
     def test_destroy_raises_on_500(self) -> None:
         from kubernetes.client.exceptions import ApiException
