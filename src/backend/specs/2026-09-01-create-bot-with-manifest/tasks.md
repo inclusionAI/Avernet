@@ -2,14 +2,19 @@
 
 Spec: `spec.md` · Plan: `plan.md` · Issue #1696.
 
-Five groups. A→B→C are a chain (each needs the one before); D needs C; E proves
-the lot. Nothing here adds a table or a column.
+> **Revision 2** — reworked after review on PR #1791. The device-activation
+> listener is gone; a task-queue job carries the creation. Task 9 changed
+> completely, Tasks 11 and 13 changed, and Task 17 (cleanup) is new.
+
+Five groups. A→B→C are a chain; D needs C; E proves the lot. Nothing here adds a
+table or a column.
 
 Conventions from `plan.md` that every task assumes:
 
 - Phase A trigger is `create:pre_container`, phase B's is `create:on_container`.
 - The materialiser gate is **derived from the registry**, never a written list.
 - Nothing in a manifest may abort creation or touch the bot record.
+- The handler is re-entrant: every step asks "is this already done?".
 
 ---
 
@@ -51,11 +56,11 @@ Conventions from `plan.md` that every task assumes:
 - **Done when:**
   - [ ] `start_apply` and `apply_now` accept `carry_from_apply_id: str | None`.
   - [ ] When set, the named record's categories are prepended to the finished
-        report and the summary is re-derived over the union, so `APPLY_ORDER`'s
+        report and the summary re-derived over the union, so `APPLY_ORDER`'s
         order survives (`script` is position 0).
   - [ ] A failed phase A carried into a clean phase B terminates `PARTIAL`.
-  - [ ] A missing or foreign `carry_from_apply_id` is ignored, not fatal: it is a
-        reporting nicety, and losing it must never fail an apply that worked.
+  - [ ] A missing or foreign id is ignored, not fatal: losing a reporting nicety
+        must never fail an apply that worked.
   - [ ] Phase A's own record is untouched by the carry.
 - **Depends on:** Task 2
 
@@ -67,49 +72,51 @@ Conventions from `plan.md` that every task assumes:
 - **Files:** `core/bot_config_manifest/creation.py` (new)
 - **Done when:**
   - [ ] One function validates a document against an **engine type and bot type**
-        (never a record) via the manifest service's `validate`, and then refuses
-        any **declared** construct absent from `materialised_constructs()`.
+        (never a record) via the manifest service's `validate`, then refuses any
+        **declared** construct absent from `materialised_constructs()`.
   - [ ] "Declared" is `declared_entries(parsed, construct) is not None` walked
-        over `APPLY_ORDER`, so a declared-empty category counts as declared —
-        it removes, which is a write.
+        over `APPLY_ORDER`, so a declared-empty category counts as declared — it
+        removes, which is a write.
   - [ ] The refusal names the construct and what would apply it; every violation
         is reported in one pass, matching `PUT`'s all-or-nothing shape.
-  - [ ] The module docstring states plainly why this is stricter than `PUT`:
-        accepting here costs a Passport application, a user's click and a live
-        bot before the failure appears.
+  - [ ] The module docstring states why this is stricter than `PUT`: accepting
+        here costs a Passport application, a user's click and a live bot before
+        the failure appears.
 - **Depends on:** Task 1
 
 ## [ ] Task 5: The creation seam object
 - **Files:** `core/bot_config_manifest/creation.py`
 - **Done when:**
-  - [ ] A small service exposes exactly four operations: `preflight(engine, bot_type)`,
-        `persist(entity_id, bot_id)`, `revalidate(entity_id, bot_id, engine, bot_type)`
-        and `phase_a(bot)`.
+  - [ ] A small service exposes four operations: `preflight(engine, bot_type)`,
+        `persist(entity_id, bot_id)`, `phase_a(bot)` and `discard(entity_id, bot_id)`.
   - [ ] `persist` writes through the existing manifest service — same validation,
         same all-or-nothing, same storage key. No new repository call.
   - [ ] `phase_a` calls `apply_now(phases={PRE_CONTAINER}, trigger="create:pre_container")`
         and **never raises**: it returns the report, and a failure is a report,
         not an exception.
-  - [ ] `phase_a` runs even when the document declares no `script` — the empty
-        record is the marker Task 9's listener keys on. A test pins this; it looks
-        like a no-op worth optimising away, and removing it silently breaks
-        phase B.
+  - [ ] `phase_a` runs even when the document declares no `script` — the record is
+        what tells the poll and the handler that phase A is done. A test pins
+        this; it looks like a no-op worth optimising away.
+  - [ ] `discard` deletes the stored manifest, idempotently.
 - **Depends on:** Tasks 2, 4
 
 ## [ ] Task 6: `entity_id` is resolved once
 - **Files:** `core/bot_config_manifest/creation.py`, `core/bot_management/create_flow.py`
 - **Done when:**
-  - [ ] The `entity_id` the manifest is stored under in leg 1 is the value
+  - [ ] The `entity_id` the manifest is stored under at submission is the value
         `create_bot` will resolve for the record — taken from the **prepared**
         spec, after `_prepare_create`, not from the raw request.
-  - [ ] A test creates through the public surface and asserts the leg-1 row is
-        found by the leg-2 read. A drifting second derivation stores a document
-        nothing ever reads, and the apply reports success having applied nothing.
+  - [ ] The poll resolves the same value the same way, from the authenticated
+        caller, never from a request parameter.
+  - [ ] A test creates through the public surface and asserts the submitted row is
+        found by the job's later read. A drifting second derivation stores a
+        document nothing ever reads, and the apply then reports success having
+        applied nothing.
 - **Depends on:** Task 5
 
 ---
 
-## Group C — Wiring it into creation
+## Group C — Creation, and the job that carries it
 
 ## [ ] Task 7: The `pre_provision` seam in `create_bot`
 - **Files:** `core/bot_management/services/bot_service.py`
@@ -125,57 +132,73 @@ Conventions from `plan.md` that every task assumes:
         before the start command is composed.
 - **Depends on:** —
 
-## [ ] Task 8: `create_flow` calls the seam at its three points
+## [ ] Task 8: `create_flow` calls the seam at submission
 - **Files:** `core/bot_management/create_flow.py`
 - **Done when:**
-  - [ ] Both `create_bot_with_authorization` and `complete_bot_authorization`
-        take an optional creation-manifest seam.
-  - [ ] Leg 1: preflight runs **beside quota/name/engine, before Passport is
-        applied for**, and persist runs after preflight passes.
-  - [ ] Leg 2: `revalidate` runs before `create_bot`, against the engine
-        completion will actually use, and its failure creates nothing.
-  - [ ] Both legs pass `pre_provision=seam.phase_a` into `create_bot`, so a
-        creation completed inline (a Passport token returned immediately) gets
-        phase A too — not only the polled path.
+  - [ ] `create_bot_with_authorization` takes an optional creation-manifest seam:
+        preflight runs **beside quota/name/engine, before Passport is applied
+        for**, and persist runs after preflight passes.
+  - [ ] `complete_bot_authorization` takes the seam too and passes
+        `pre_provision=seam.phase_a` into `create_bot`, so a creation completed
+        inline (a Passport token returned immediately) gets phase A as well.
   - [ ] With no seam supplied, both functions behave exactly as today.
 - **Depends on:** Tasks 5, 7
 
-## [ ] Task 9: The phase-B listener
-- **Files:** `core/bot_config_manifest/apply/create_listener.py` (new),
+## [ ] Task 9: The creation job handler
+- **Files:** `core/bot_config_manifest/create_job.py` (new),
   `di/modules/bot_management_module.py`
 - **Done when:**
-  - [ ] A `LifecycleBase` participant subscribes to `DeviceActivatedEvent` in
-        `startup()`, following `SkillSymlinkListener`'s shape (idempotent
-        subscribe, bot resolved from the binding).
-  - [ ] It acts only when the bot has a manifest **and** the latest apply record's
-        trigger is `create:pre_container`.
-  - [ ] It then calls `start_apply(phases={ON_CONTAINER}, trigger="create:on_container",
-        carry_from_apply_id=<phase A's id>)`.
-  - [ ] The tenant is bound at the `Thread(...)` construction site, inline, never
-        as a decorator — the import-time capture trap is named in a comment.
-  - [ ] It does nothing on: a restart activation, a bot with no manifest, a second
-        activation after phase B has run, and a bot whose latest apply is explicit.
-        Each is a test.
-- **Depends on:** Tasks 3, 5
+  - [ ] A `TaskHandler` (a `task_type` plus `handle(payload) -> TaskOutcome`)
+        registered into the `HandlerRegistry` at bootstrap, with
+        `wake_on_enqueue` so a submission starts it immediately.
+  - [ ] Its whole body runs inside `avernet_tenant_scope(payload["tenant"])`.
+  - [ ] The step machine of `plan.md` §K-3: Passport pending → `Reschedule(5s)`;
+        declined → `discard` then `Fail`; issued and no bot → create with
+        `pre_provision=phase_a`; container not up → `Reschedule`; phase B not
+        started → `start_apply(ON_CONTAINER, carry_from=<phase A id>)`; running →
+        `Reschedule`; terminal → `Complete`.
+  - [ ] **Every step is re-entrant.** Invoking the handler twice at any step does
+        not create a second bot, start a second apply, or mint a second Passport
+        application. A test drives each step twice.
+  - [ ] The payload carries the creation attributes, the ids, and the tenant —
+        everything the handler needs, since no request context exists at handler
+        time.
+- **Depends on:** Tasks 3, 5, 8
+
+## [ ] Task 10: The deadline, and what happens at it
+- **Files:** `core/bot_config_manifest/create_job.py`, the config module
+- **Done when:**
+  - [ ] The deadline is configurable with a default of 600 s, passed as
+        `deadline_seconds` at enqueue, so the queue enforces it DB-side.
+  - [ ] A creation that reaches it is `TIMED_OUT`, and the poll reports
+        `AUTHORIZATION_EXPIRED` — never `AUTHORIZATION_REJECTED`, which would
+        report a decision the user never made.
+  - [ ] The stored manifest is deleted on every bot-less terminal — declined and
+        timed out alike — and the delete is idempotent.
+  - [ ] A test asserts no manifest row survives an abandoned creation. This is
+        what replaces the feature switch.
+- **Depends on:** Task 9
 
 ---
 
 ## Group D — The public surface
 
-## [ ] Task 10: Request and response models
+## [ ] Task 11: Request and response models
 - **Files:** `adapters/http/openapi_v1/bots/schemas_create_with_manifest.py` (new)
 - **Done when:**
   - [ ] The create body carries the manifest document plus the same creation
         attributes the existing create body accepts.
-  - [ ] The poll body echoes the creation attributes — and **never** a manifest.
-        A field for one would let a caller validate one document and apply
-        another; the model is where that is made impossible.
-  - [ ] A `CreationState` enum with exactly the six states, and a response
-        carrying the state, the bot (once it exists), the authorization handles
-        (while awaiting) and the apply report (at both terminal states).
+  - [ ] The **poll has no body and no query parameters** — `bot_id` in the path is
+        the whole of its input. There is nothing for a caller to re-send, which is
+        the property that makes "the validated manifest is the applied manifest"
+        structural rather than promised.
+  - [ ] A `CreationState` enum with the seven states, and a response carrying the
+        state, the authorization handles (while awaiting), and — at both terminal
+        states — the apply report **and the bot**, so `FAILED` can never read as
+        "no bot was created".
 - **Depends on:** —
 
-## [ ] Task 11: The two routes and the switch
+## [ ] Task 12: The two routes
 - **Files:** `adapters/http/openapi_v1/bots/create_with_manifest.py` (new),
   `adapters/http/openapi_v1/__init__.py`
 - **Done when:**
@@ -183,25 +206,23 @@ Conventions from `plan.md` that every task assumes:
         `AWAITING_AUTHORIZATION` and both handles; it carries the same bars as the
         existing create (refused to an application caller — creation spends the
         user's quota and no bot exists for a grant to cover).
-  - [ ] `POST /openapi/v1/bots/{bot_id}/with-manifest/status` drives completion and
-        answers the state table in `plan.md` §K-7, including the provisioning-failure
-        edge reported as `FAILED` with a message naming provisioning.
-  - [ ] Both are gated by `BOT_CONFIG_MANIFEST_CREATE_ENABLED`, read per request,
-        default off, answering `404` when off. The comment carries §2.11's reason
-        and names #1698 as the precondition for turning it on.
+  - [ ] `GET /openapi/v1/bots/{bot_id}/with-manifest/status` answers the state
+        table in `plan.md` §K-7, including the provisioning-failure edge reported
+        as `FAILED` with a message naming provisioning. A `GET`, because it
+        observes — the job drives.
   - [ ] The router is mounted where its `{bot_id}` literal cannot be captured by a
-        wildcard group.
+        wildcard group. **No feature switch** (spec D-7).
   - [ ] Route docstrings state: the manifest is submitted once and never
         re-submitted; iteration 1's rule that a `script` must not depend on
         anything else the same manifest declares; and that `FAILED` leaves a
         running bot.
-- **Depends on:** Tasks 8, 10
+- **Depends on:** Tasks 9, 11
 
 ---
 
 ## Group E — Proof
 
-## [ ] Task 12: The ordering proof
+## [ ] Task 13: The ordering proof
 - **Files:** `tests/community/bot_config_manifest/test_creation_ordering.py` (new)
 - **Done when:**
   - [ ] Phase A completes **before** provisioning is entered — asserted on
@@ -212,18 +233,19 @@ Conventions from `plan.md` that every task assumes:
         appears only in the report.
 - **Depends on:** Task 8
 
-## [ ] Task 13: Tenancy
+## [ ] Task 14: Tenancy
 - **Files:** `tests/community/bot_config_manifest/test_creation_tenancy.py` (new)
 - **Done when:**
-  - [ ] The tenant observed inside phase A equals the request's tenant.
-  - [ ] The tenant observed inside phase B — on the listener's thread, with no
-        request behind it — equals the tenant the bot was created under.
-  - [ ] A test asserts the wrap happens at the construction site (a
-        module-level decorator would capture at import); the comment in the code
-        points at this test.
+  - [ ] The tenant observed inside phase A and inside the handler equals the
+        tenant of the submitting request.
+  - [ ] A handler invoked with a payload whose tenant differs from the process
+        default reads and writes under the payload's tenant — the test that would
+        pass by accident if the scope were dropped is written so it *fails*
+        instead, since `get_current_avernet_tenant()` returns the default rather
+        than raising.
 - **Depends on:** Task 9
 
-## [ ] Task 14: Endpoint tests
+## [ ] Task 15: Endpoint tests
 - **Files:** `tests/community/endpoints/test_openapi_create_with_manifest.py` (new)
 - **Done when:**
   - [ ] Full flow through the app: submit → `202` → poll `AWAITING_AUTHORIZATION`
@@ -233,34 +255,33 @@ Conventions from `plan.md` that every task assumes:
         **Passport is never called** — asserted on the plugin, not inferred.
   - [ ] A manifest declaring a construct with no materialiser is refused at
         submission, naming it.
-  - [ ] A `PARTIAL` apply reports `FAILED`, the bot is running, and the bot record
-        is untouched.
-  - [ ] `AUTHORIZATION_REJECTED` is terminal and creates nothing.
+  - [ ] A `PARTIAL` apply reports `FAILED`, the response **carries the bot**, and
+        the bot record is untouched.
+  - [ ] `AUTHORIZATION_REJECTED` and `AUTHORIZATION_EXPIRED` are terminal, create
+        nothing, and leave no manifest row.
   - [ ] Creation with no manifest through this endpoint reports `READY`.
-  - [ ] The switch off answers `404` on both routes.
-- **Depends on:** Task 11
+- **Depends on:** Task 12
 
-## [ ] Task 15: Nothing else moved
+## [ ] Task 16: Nothing else moved
 - **Files:** existing suites
 - **Done when:**
   - [ ] Every existing create, auth-status, config-manifest, apply and
         startup-script test passes **unedited**.
-  - [ ] A bot created by the existing endpoint and given a manifest by `PUT`
-        still applies with no restart, by the same path as before.
-- **Depends on:** Tasks 11, 9
+  - [ ] A bot created by the existing endpoint and given a manifest by `PUT` still
+        applies with no restart, by the same path as before.
+- **Depends on:** Tasks 9, 12
 
-## [ ] Task 16: Documentation
+## [ ] Task 17: Documentation
 - **Files:** `core/bot_config_manifest/README.md`,
   `docs/bot-config-manifest/user-manual.zh-CN.md`,
   `docs/bot-config-manifest/work-items.zh-CN.md` (+ the English `work-items.md`)
 - **Done when:**
-  - [ ] The user manual documents the create-with-manifest flow, the six poll
-        states, `PARTIAL → FAILED`, and that `FAILED` leaves a running bot.
+  - [ ] The user manual documents the create-with-manifest flow, the poll states,
+        the deadline, `PARTIAL → FAILED`, and that `FAILED` leaves a running bot.
   - [ ] The `script`-dependency rule is written where a manifest author will read
         it, marked as iteration 1 only and pointing at #1508.
-  - [ ] The README's Context Boundary block lists the creation seam and the
-        listener.
-  - [ ] W13's row in both work-items documents records what shipped and what did
-        not — the teclaw first-artifact guarantee stays W8's, and the endpoint is
-        off until #1698.
-- **Depends on:** Task 14
+  - [ ] The README's Context Boundary block lists the creation seam and the job.
+  - [ ] W13's row in both work-items documents records what shipped: the job and
+        its deadline, the retirement of the feature switch (with #1698 no longer
+        its gate), and that the teclaw first-artifact guarantee stays W8's.
+- **Depends on:** Task 15
