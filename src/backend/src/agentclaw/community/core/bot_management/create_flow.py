@@ -762,6 +762,93 @@ def submit_bot_creation_with_manifest(
     )
 
 
+def creation_spec_to_payload(
+    spec: BotCreateSpec, context: BotCreateContext
+) -> dict[str, Any]:
+    """Freeze a creation's attributes so nothing has to be supplied again.
+
+    This is what lets the poll take a ``bot_id`` and nothing else: the server
+    already holds what the creation was for. Enums are stored by value because
+    the payload is JSON in a database column, and the *prepared* spec is what
+    callers should freeze — ``_prepare_create`` can rewrite the engine, and the
+    completion must use the engine the manifest was validated against.
+    """
+    return {
+        "entity_id": spec.entity_id,
+        "entity_type": spec.entity_type,
+        "engine_type": spec.engine_type,
+        "bot_type": spec.bot_type,
+        "bot_name": spec.bot_name,
+        "bot_desc": spec.bot_desc,
+        "avatar_url": spec.avatar_url,
+        "share_policy": spec.share_policy,
+        "template_type": spec.template_type,
+        "template_config": spec.template_config,
+        "template_validation_mode": spec.template_validation_mode.value,
+        "space_id": spec.space_id,
+        "engine_properties": spec.engine_properties,
+        "deployment_mode": context.deployment_mode.value,
+        "space_kind": context.space_kind,
+    }
+
+
+def creation_spec_from_payload(
+    payload: dict[str, Any],
+) -> tuple[BotCreateSpec, BotCreateContext]:
+    """The inverse. Raises ``KeyError``/``ValueError`` on a payload it cannot read."""
+    return (
+        BotCreateSpec(
+            entity_id=payload["entity_id"],
+            entity_type=payload.get("entity_type", "staff"),
+            engine_type=payload["engine_type"],
+            bot_type=payload["bot_type"],
+            bot_name=payload.get("bot_name"),
+            bot_desc=payload.get("bot_desc"),
+            avatar_url=payload.get("avatar_url"),
+            share_policy=payload.get("share_policy"),
+            template_type=payload.get("template_type"),
+            template_config=payload.get("template_config"),
+            template_validation_mode=BotCreateTemplateValidationMode(
+                payload["template_validation_mode"]
+            ),
+            space_id=payload.get("space_id"),
+            engine_properties=payload.get("engine_properties") or {},
+        ),
+        BotCreateContext(
+            deployment_mode=BotCreateDeploymentMode(payload["deployment_mode"]),
+            space_kind=payload["space_kind"],
+        ),
+    )
+
+
+def complete_manifest_creation(
+    job_payload: dict[str, Any],
+    *,
+    bot_service: BotService,
+    passport_plugin: PassportPlugin,
+    auth_rel_plugin: AuthRelationshipPlugin,
+) -> AuthStatusResult:
+    """Finish a create-from-manifest by the ordinary completion path.
+
+    Reuses :func:`complete_bot_authorization` **unmodified**, which is what keeps
+    creation itself a single implementation. It is idempotent on a supplied
+    ``bot_id`` — ``create_bot`` returns the existing bot — so a re-claimed task
+    cannot produce a second one.
+    """
+    spec, context = creation_spec_from_payload(job_payload["spec"])
+    user_id = str(job_payload["user_id"])
+    return complete_bot_authorization(
+        user_id=user_id,
+        nick_name=user_id,
+        bot_id=str(job_payload["bot_id"]),
+        spec=spec,
+        context=context,
+        bot_service=bot_service,
+        passport_plugin=passport_plugin,
+        auth_rel_plugin=auth_rel_plugin,
+    )
+
+
 def complete_bot_authorization(
     *,
     user_id: str,

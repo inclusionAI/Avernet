@@ -1,0 +1,215 @@
+"""The creation job's step machine, and its re-entrancy.
+
+Every step asks a question about durable state rather than tracking a cursor,
+because the queue guarantees a single claimer but **at-least-once invocation**: a
+crashed worker's task is re-claimed once its lease expires, whether or not a
+handler ever asks for a retry. Each step is therefore driven twice here.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.bot_config_manifest.create_job import (
+    BotCreateWithManifestHandler,
+)
+from agentclaw.community.core.bot_config_manifest.creation import (
+    CREATE_ON_CONTAINER_TRIGGER,
+    CREATE_PRE_CONTAINER_TRIGGER,
+)
+from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
+
+_PAYLOAD = {
+    "bot_id": "b_1",
+    "entity_id": "u_owner",
+    "user_id": "u_owner",
+    "tenant": "",
+    "env": "dev",
+    "document_owner": "u_owner",
+    "spec": {"engine_type": "claude_code", "bot_type": "personal"},
+    "iframe_url": "https://auth.example/consent",
+    "redirect_url": None,
+}
+
+
+@dataclass
+class _Report:
+    trigger: str
+    status: ApplyStatus
+    apply_id: str = "apply-a"
+
+
+class _Applies:
+    def __init__(self, latest: Optional[_Report] = None) -> None:
+        self.latest = latest
+        self.started: list[dict] = []
+
+    def last_apply(self, *, entity_id, bot_id):
+        return self.latest
+
+    def start_apply(self, **kwargs):
+        self.started.append(kwargs)
+        self.latest = _Report(kwargs["trigger"], ApplyStatus.RUNNING, "apply-b")
+
+        class _A:
+            apply_id = "apply-b"
+
+        return _A()
+
+
+class _Seam:
+    def __init__(self, applies: _Applies) -> None:
+        self._applies = applies
+        self.phase_a_calls = 0
+        self.discards = 0
+
+    def phase_a(self, **_kwargs):
+        self.phase_a_calls += 1
+        self._applies.latest = _Report(
+            CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.RUNNING
+        )
+        return "apply-a"
+
+    def discard(self, **_kwargs):
+        self.discards += 1
+
+
+class _Bots:
+    def __init__(self, record=None) -> None:
+        self.record = record
+
+    def get_by_id_and_entity(self, bot_id, entity_id):
+        return self.record
+
+
+class _Passport:
+    def __init__(self, status) -> None:
+        self.status = status
+
+    def query_auth_status(self, *, bot_id, owner_workno):
+        return {"status": self.status} if self.status else None
+
+
+def _handler(*, passport_status="PENDING", applies=None, bots=None, seam=None):
+    applies = applies or _Applies()
+    seam = seam or _Seam(applies)
+    created: list[dict] = []
+    handler = BotCreateWithManifestHandler(
+        manifest_seam_provider=lambda: seam,
+        apply_service_provider=lambda: applies,
+        bot_repository_provider=lambda: bots or _Bots(),
+        complete_authorization=created.append,
+        passport_plugin_provider=lambda: _Passport(passport_status),
+        bot_service_provider=lambda: None,
+    )
+    return handler, applies, seam, created
+
+
+def test_it_waits_while_authorization_is_pending():
+    handler, _applies, seam, created = _handler(passport_status="PENDING")
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Reschedule)
+    assert seam.phase_a_calls == 0 and not created
+
+
+def test_a_passport_outage_is_a_wait_not_a_verdict():
+    """No answer at all means keep asking; it must not look like a rejection."""
+    handler, _applies, seam, _created = _handler(passport_status=None)
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Reschedule)
+    assert seam.discards == 0, "an outage must not delete the caller's manifest"
+
+
+def test_a_declined_authorization_is_terminal_and_cleans_up():
+    handler, _applies, seam, created = _handler(passport_status="REJECTED")
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Fail)
+    assert seam.discards == 1, (
+        "nothing else can reach the rows submission wrote: no bot record was "
+        "written, so ordinary deletion never gets to them"
+    )
+    assert not created
+
+
+def test_the_pre_container_phase_runs_before_the_bot_is_created():
+    handler, _applies, seam, created = _handler(passport_status="ISSUED")
+    handler.handle(dict(_PAYLOAD))
+    assert seam.phase_a_calls == 1
+    assert not created, (
+        "creation must not start until the startup-script row exists, or the "
+        "first boot cannot carry the script"
+    )
+
+
+def test_it_creates_only_once_the_pre_container_phase_is_terminal():
+    applies = _Applies(_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.RUNNING))
+    handler, _applies, _seam, created = _handler(
+        passport_status="ISSUED", applies=applies
+    )
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Reschedule)
+    assert not created
+
+    applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    handler.handle(dict(_PAYLOAD))
+    assert len(created) == 1
+
+
+def test_a_failed_pre_container_phase_still_creates_the_bot():
+    """§2.7: a manifest-layer failure never prevents the bot."""
+    applies = _Applies(_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.FAILED))
+    handler, _applies, _seam, created = _handler(
+        passport_status="ISSUED", applies=applies
+    )
+    handler.handle(dict(_PAYLOAD))
+    assert len(created) == 1
+
+
+def test_it_waits_for_the_container_then_starts_the_post_container_phase():
+    applies = _Applies(_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED))
+    bots = _Bots({"bot_id": "b_1", "status": "PENDING"})
+    handler, _applies, _seam, _created = _handler(applies=applies, bots=bots)
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Reschedule)
+    assert not applies.started
+
+    bots.record = {"bot_id": "b_1", "status": "ACTIVE"}
+    outcome = handler.handle(dict(_PAYLOAD))
+    assert isinstance(outcome, Complete), (
+        "the job does not wait for the post-container phase: nothing in the "
+        "platform is blocked on it"
+    )
+    (started,) = applies.started
+    assert started["trigger"] == CREATE_ON_CONTAINER_TRIGGER
+    assert started["carry_from_apply_id"] == "apply-a", (
+        "without the carry, the terminal report names the post-container "
+        "categories and silently omits script"
+    )
+
+
+def test_a_bot_that_can_never_be_provisioned_is_terminal():
+    applies = _Applies(_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED))
+    bots = _Bots({"bot_id": "b_1", "status": "FAILED"})
+    handler, *_ = _handler(applies=applies, bots=bots)
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Fail)
+
+
+# ── re-entrancy: the queue is at-least-once, structurally ──────────────────
+
+
+def test_every_step_is_safe_to_run_twice():
+    # Pending: two invocations, still nothing done.
+    handler, _applies, seam, created = _handler(passport_status="PENDING")
+    handler.handle(dict(_PAYLOAD))
+    handler.handle(dict(_PAYLOAD))
+    assert seam.phase_a_calls == 0 and not created
+
+    # Issued, no phase A yet: the second invocation must not start a second one.
+    handler, applies, seam, created = _handler(passport_status="ISSUED")
+    handler.handle(dict(_PAYLOAD))
+    handler.handle(dict(_PAYLOAD))
+    assert seam.phase_a_calls == 1, "a re-claimed task started a second apply"
+
+    # Container up: the second invocation must not start a second phase B.
+    applies = _Applies(_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED))
+    bots = _Bots({"bot_id": "b_1", "status": "ACTIVE"})
+    handler, applies, _seam, _created = _handler(applies=applies, bots=bots)
+    handler.handle(dict(_PAYLOAD))
+    handler.handle(dict(_PAYLOAD))
+    assert len(applies.started) == 1, "a re-claimed task started a second apply"

@@ -87,6 +87,16 @@ from agentclaw.community.core.skill_center.direct_activation_service_protocol im
 from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     ApplyTaskLifecycle,
 )
+from agentclaw.community.core.bot_management.create_flow import (
+    complete_manifest_creation,
+)
+from agentclaw.community.core.bot_config_manifest.create_job import (
+    BotCreateWithManifestHandler,
+    CreateJobLifecycle,
+)
+from agentclaw.community.core.bot_config_manifest.creation import (
+    BotCreationManifestSeam,
+)
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
     BotConfigManifestApplyService,
 )
@@ -710,6 +720,76 @@ class BotManagementModule(Module):
     ) -> BotConfigManifestApplyServiceProtocol:
         """The Protocol every adapter injects, delegated to the one instance."""
         return service
+
+    @singleton
+    @provider
+    @inject
+    def bot_creation_manifest_seam(
+        self,
+        manifest_service: BotConfigManifestServiceProtocol,
+        apply_service: BotConfigManifestApplyService,
+        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
+        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
+    ) -> BotCreationManifestSeam:
+        """The four operations bot creation asks of the manifest layer.
+
+        ``is_teclaw`` comes from the same factory the capability resolver takes,
+        so "runs in a teclaw container" has one definition rather than a
+        hand-rolled comparison here.
+        """
+        return BotCreationManifestSeam(
+            manifest_service=manifest_service,
+            apply_service=apply_service,
+            script_service_provider=script_service_provider,
+            is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bot_create_with_manifest_handler(
+        self,
+        injector: Injector,
+        passport_plugin: PassportPlugin,
+        auth_rel_plugin: AuthRelationshipPlugin,
+        bot_repository: BotRepository,
+    ) -> BotCreateWithManifestHandler:
+        """The creation job's step machine.
+
+        Its collaborators are resolved lazily: the handler is built while the
+        injector is still walking bindings to discover lifecycles, and the
+        creation graph it reaches into is large.
+        """
+
+        def _complete(job_payload: dict) -> None:
+            complete_manifest_creation(
+                job_payload,
+                bot_service=injector.get(BotService),
+                passport_plugin=passport_plugin,
+                auth_rel_plugin=auth_rel_plugin,
+            )
+
+        return BotCreateWithManifestHandler(
+            manifest_seam_provider=lambda: injector.get(BotCreationManifestSeam),
+            apply_service_provider=lambda: injector.get(
+                BotConfigManifestApplyService
+            ),
+            bot_repository_provider=lambda: bot_repository,
+            complete_authorization=_complete,
+            passport_plugin_provider=lambda: passport_plugin,
+            bot_service_provider=lambda: injector.get(BotService),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def manifest_create_job_lifecycle(
+        self, registry: HandlerRegistry, injector: Injector
+    ) -> CreateJobLifecycle:
+        return CreateJobLifecycle(
+            registry=registry,
+            handler_provider=lambda: injector.get(BotCreateWithManifestHandler),
+        )
 
     @singleton
     @provider

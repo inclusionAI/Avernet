@@ -158,25 +158,25 @@ Conventions from `plan.md` that every task assumes:
         today.
 - **Depends on:** Task 6
 
-## [ ] Task 9: The creation job handler
+## [x] Task 9: The creation job handler
 - **Files:** `core/bot_config_manifest/create_job.py` (new),
   `di/modules/bot_management_module.py`
 - **Done when:**
-  - [ ] A `TaskHandler` registered at bootstrap with `wake_on_enqueue`, its whole
+  - [x] A `TaskHandler` registered at bootstrap with `wake_on_enqueue`, its whole
         body inside `avernet_tenant_scope(payload["tenant"])`.
-  - [ ] The step machine of `plan.md` §K-5: Passport pending → `Reschedule(5s)`;
+  - [x] The step machine of `plan.md` §K-5: Passport pending → `Reschedule(5s)`;
         declined → `discard` then `Fail`; issued and phase A not done → start
         phase A and `Reschedule` until its record is terminal; phase A done and no
         bot → `complete_bot_authorization(...)`; container not up → `Reschedule`;
         then start phase B with `carry_from` and **`Complete` without waiting for
         it**.
-  - [ ] Phase A's record is found with `last_apply(entity_id, bot_id)` and
+  - [x] Phase A's record is found with `last_apply(entity_id, bot_id)` and
         recognised by its `create:pre_container` trigger — the same read the poll
         makes, so no repository method is added.
-  - [ ] **Every step is re-entrant.** Invoking the handler twice at any step does
+  - [x] **Every step is re-entrant.** Invoking the handler twice at any step does
         not create a second bot, start a second apply, or mint a second Passport
         application. A test drives each step twice.
-  - [ ] The payload carries the creation attributes, the ids, the authorization
+  - [x] The payload carries the creation attributes, the ids, the authorization
         handles and the tenant — everything the job and the poll need, since no
         request context exists at handler time.
 - **Depends on:** Tasks 3, 6, 8
