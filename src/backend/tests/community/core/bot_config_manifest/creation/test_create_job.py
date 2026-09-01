@@ -213,3 +213,73 @@ def test_every_step_is_safe_to_run_twice():
     handler.handle(dict(_PAYLOAD))
     handler.handle(dict(_PAYLOAD))
     assert len(applies.started) == 1, "a re-claimed task started a second apply"
+
+
+# ── the deadline, and what happens at it ───────────────────────────────────
+
+
+def test_an_unauthorized_creation_expires_and_takes_its_rows_with_it(monkeypatch):
+    """The handler owns expiry, not the queue.
+
+    The queue retires a task **DB-side in its claim scan**, so the handler never
+    runs again — nothing would delete the manifest and startup-script rows
+    submission wrote, and nothing else can reach them: no bot record exists, so
+    ordinary deletion never gets to them, and allocating a bot_id consumes no
+    quota, so the tenant ceiling does not bound them either.
+    """
+    from datetime import datetime, timedelta
+
+    handler, _applies, seam, created = _handler(passport_status="PENDING")
+    payload = dict(_PAYLOAD)
+    payload["submitted_at"] = (
+        datetime.now() - timedelta(seconds=601)
+    ).isoformat()
+
+    outcome = handler.handle(payload)
+
+    assert isinstance(outcome, Fail)
+    assert seam.discards == 1, "an abandoned creation must leave no rows behind"
+    assert not created
+
+
+def test_a_creation_inside_the_window_keeps_waiting():
+    from datetime import datetime, timedelta
+
+    handler, _applies, seam, _created = _handler(passport_status="PENDING")
+    payload = dict(_PAYLOAD)
+    payload["submitted_at"] = (datetime.now() - timedelta(seconds=60)).isoformat()
+
+    assert isinstance(handler.handle(payload), Reschedule)
+    assert seam.discards == 0
+
+
+def test_expiry_is_not_checked_once_the_bot_exists():
+    """Expiring then would delete the manifest of a bot that is running."""
+    from datetime import datetime, timedelta
+
+    applies = _Applies(_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED))
+    bots = _Bots({"bot_id": "b_1", "status": "ACTIVE"})
+    handler, applies, seam, _created = _handler(applies=applies, bots=bots)
+    payload = dict(_PAYLOAD)
+    payload["submitted_at"] = (
+        datetime.now() - timedelta(seconds=99999)
+    ).isoformat()
+
+    assert isinstance(handler.handle(payload), Complete)
+    assert seam.discards == 0
+    assert applies.started, "the post-container phase must still start"
+
+
+def test_the_deadline_is_configurable(monkeypatch):
+    from agentclaw.community.core.bot_config_manifest.create_job import (
+        CREATE_DEADLINE_ENV,
+        create_deadline_seconds,
+    )
+
+    monkeypatch.setenv(CREATE_DEADLINE_ENV, "42")
+    assert create_deadline_seconds() == 42
+    # A value that would expire everything immediately is refused, not obeyed.
+    monkeypatch.setenv(CREATE_DEADLINE_ENV, "0")
+    assert create_deadline_seconds() == 600
+    monkeypatch.setenv(CREATE_DEADLINE_ENV, "not-a-number")
+    assert create_deadline_seconds() == 600

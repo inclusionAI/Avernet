@@ -181,17 +181,17 @@ Conventions from `plan.md` that every task assumes:
         request context exists at handler time.
 - **Depends on:** Tasks 3, 6, 8
 
-## [ ] Task 10: The deadline, and what happens at it
+## [x] Task 10: The deadline, and what happens at it
 - **Files:** `create_job.py`, the config module
 - **Done when:**
-  - [ ] The deadline is configurable, default 600 s, passed as `deadline_seconds`
+  - [x] The deadline is configurable, default 600 s, passed as `deadline_seconds`
         so the queue enforces it DB-side.
-  - [ ] A creation that reaches it is `TIMED_OUT`, and the poll reports
+  - [x] A creation that reaches it is `TIMED_OUT`, and the poll reports
         `AUTHORIZATION_EXPIRED` — never `AUTHORIZATION_REJECTED`, which would
         report a decision the user never made.
-  - [ ] The manifest **and any phase-A startup-script row** are deleted on every
+  - [x] The manifest **and any phase-A startup-script row** are deleted on every
         bot-less terminal, idempotently.
-  - [ ] A test asserts neither row survives an abandoned creation. This is what
+  - [x] A test asserts neither row survives an abandoned creation. This is what
         replaces the feature switch.
 - **Depends on:** Task 9
 

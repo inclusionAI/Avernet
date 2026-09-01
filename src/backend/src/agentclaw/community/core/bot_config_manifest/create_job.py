@@ -25,6 +25,8 @@ it and finishes, and the poll observes it the way it observes any apply.
 """
 from __future__ import annotations
 
+import os
+from datetime import datetime, timedelta
 from typing import Any, Callable, Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
@@ -53,6 +55,41 @@ CREATE_JOB_TASK_TYPE = "config_manifest.create_bot"
 #: retired. Configurable; this is the default the design settled on.
 DEFAULT_CREATE_DEADLINE_SECONDS = 10 * 60
 
+#: Environment override for the above.
+CREATE_DEADLINE_ENV = "BOT_CREATE_WITH_MANIFEST_DEADLINE_SECONDS"
+
+
+def create_deadline_seconds() -> int:
+    """The window a user has to authorize, in seconds.
+
+    Read per call rather than at import so a deployment can change it without a
+    rebuild, and clamped to something positive: a zero or negative deadline would
+    expire every creation the instant it was submitted.
+    """
+    raw = os.environ.get(CREATE_DEADLINE_ENV)
+    if not raw:
+        return DEFAULT_CREATE_DEADLINE_SECONDS
+    try:
+        parsed = int(raw)
+    except ValueError:
+        logger.warning(
+            "[manifest_create] %s=%r is not an integer; using %ss",
+            CREATE_DEADLINE_ENV,
+            raw,
+            DEFAULT_CREATE_DEADLINE_SECONDS,
+        )
+        return DEFAULT_CREATE_DEADLINE_SECONDS
+    if parsed <= 0:
+        logger.warning(
+            "[manifest_create] %s=%s would expire every creation immediately; "
+            "using %ss",
+            CREATE_DEADLINE_ENV,
+            parsed,
+            DEFAULT_CREATE_DEADLINE_SECONDS,
+        )
+        return DEFAULT_CREATE_DEADLINE_SECONDS
+    return parsed
+
 #: How often the job looks again. Matches the existing publish poller's cadence.
 POLL_DELAY_SECONDS = 5.0
 
@@ -74,6 +111,7 @@ def build_create_job_payload(
     spec: dict[str, Any],
     iframe_url: Optional[str],
     redirect_url: Optional[str],
+    submitted_at: Optional[str] = None,
 ) -> dict[str, Any]:
     """Everything the job needs, because nothing else will be available.
 
@@ -99,6 +137,12 @@ def build_create_job_payload(
         "spec": spec,
         "iframe_url": iframe_url,
         "redirect_url": redirect_url,
+        # When the window started. The handler owns expiry rather than leaving
+        # it to the queue's deadline, and the difference is load-bearing: the
+        # queue retires a task **DB-side, in its claim scan**, so the handler
+        # never runs again and nothing would delete the rows submission wrote.
+        # The queue's deadline stays as the outer backstop.
+        "submitted_at": submitted_at or datetime.now().isoformat(),
     }
 
 
@@ -154,6 +198,15 @@ class BotCreateWithManifestHandler:
         bot_id = str(payload["bot_id"])
         entity_id = str(payload["entity_id"])
         user_id = str(payload["user_id"])
+
+        if self._expired(payload):
+            logger.info(
+                "[manifest_create] bot_id=%s was never authorized within the "
+                "window; discarding what submission wrote",
+                bot_id,
+            )
+            self._seam_provider().discard(entity_id=entity_id, bot_id=bot_id)
+            return Fail("the authorization window elapsed")
 
         status = self._authorization_status(bot_id=bot_id, user_id=user_id)
         if status is None:
@@ -234,6 +287,29 @@ class BotCreateWithManifestHandler:
 
     # ── the questions each step asks ────────────────────────────────────────
 
+    def _expired(self, payload: dict) -> bool:
+        """Whether the authorization window has elapsed.
+
+        Only asked **before the bot exists**: once creation has happened the
+        window is irrelevant, and expiring then would delete the manifest of a
+        bot that is running.
+        """
+        submitted = payload.get("submitted_at")
+        if not submitted:
+            # A payload from before this field existed. Treat it as fresh rather
+            # than instantly expired — the queue's own deadline still bounds it.
+            return False
+        try:
+            started = datetime.fromisoformat(str(submitted))
+        except ValueError:
+            logger.warning(
+                "[manifest_create] unreadable submitted_at=%r; leaving expiry "
+                "to the queue's deadline",
+                submitted,
+            )
+            return False
+        return datetime.now() - started > timedelta(seconds=create_deadline_seconds())
+
     def _authorization_status(self, *, bot_id: str, user_id: str) -> Optional[str]:
         try:
             answer = self._passport_provider().query_auth_status(
@@ -311,10 +387,12 @@ class CreateJobLifecycle(LifecycleBase):
 
 
 __all__ = [
+    "CREATE_DEADLINE_ENV",
     "CREATE_JOB_TASK_TYPE",
     "DEFAULT_CREATE_DEADLINE_SECONDS",
     "POLL_DELAY_SECONDS",
     "BotCreateWithManifestHandler",
     "CreateJobLifecycle",
     "build_create_job_payload",
+    "create_deadline_seconds",
 ]
