@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from enum import StrEnum
 from typing import Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.runtime_resolver import (
@@ -13,6 +14,136 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeSkillProjection,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+
+
+class RuntimeProjectionStatus(StrEnum):
+    """User-visible outcome of applying a committed Desired State."""
+
+    CONVERGED = "CONVERGED"
+    PENDING = "PENDING"
+    DEGRADED = "DEGRADED"
+    SKIPPED = "SKIPPED"
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeProjectionIssue:
+    """Sanitized, actionable evidence for one runtime resource or domain."""
+
+    resource_type: str
+    code: str
+    reason: str
+    status: RuntimeProjectionStatus
+    retryable: bool
+    resource_id: str | None = None
+    name: str | None = None
+    corpus: str | None = None
+    requested_action: str | None = None
+    observed_entry_type: str | None = None
+    expected_entry_type: str | None = None
+    logical_location: str | None = None
+    suggested_action: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        values: dict[str, object] = {
+            "resource_type": self.resource_type,
+            "code": self.code,
+            "reason": self.reason,
+            "status": self.status.value,
+            "retryable": self.retryable,
+        }
+        for key in (
+            "resource_id",
+            "name",
+            "corpus",
+            "requested_action",
+            "observed_entry_type",
+            "expected_entry_type",
+            "logical_location",
+            "suggested_action",
+        ):
+            value = getattr(self, key)
+            if value is not None:
+                values[key] = value
+        return values
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeProjectionResult:
+    """A projection outcome separate from Installation Desired State."""
+
+    status: RuntimeProjectionStatus
+    components: dict[str, RuntimeProjectionStatus] = field(default_factory=dict)
+    issues: tuple[RuntimeProjectionIssue, ...] = ()
+    reason: str | None = None
+
+    @classmethod
+    def converged(cls, *, components: dict[str, RuntimeProjectionStatus] | None = None) -> "RuntimeProjectionResult":
+        return cls(
+            status=RuntimeProjectionStatus.CONVERGED,
+            components=components or {},
+        )
+
+    @classmethod
+    def skipped(cls, *, reason: str) -> "RuntimeProjectionResult":
+        return cls(status=RuntimeProjectionStatus.SKIPPED, reason=reason)
+
+    @classmethod
+    def pending(cls, *, code: str, reason: str) -> "RuntimeProjectionResult":
+        return cls(
+            status=RuntimeProjectionStatus.PENDING,
+            issues=(
+                RuntimeProjectionIssue(
+                    resource_type="RUNTIME",
+                    code=code,
+                    reason=reason,
+                    status=RuntimeProjectionStatus.PENDING,
+                    retryable=True,
+                ),
+            ),
+        )
+
+    @classmethod
+    def combine(cls, *results: "RuntimeProjectionResult") -> "RuntimeProjectionResult":
+        if not results:
+            return cls.skipped(reason="NO_RUNTIME_COMPONENT")
+        components: dict[str, RuntimeProjectionStatus] = {}
+        issues: list[RuntimeProjectionIssue] = []
+        statuses: list[RuntimeProjectionStatus] = []
+        for result in results:
+            components.update(result.components)
+            issues.extend(result.issues)
+            statuses.append(result.status)
+        if RuntimeProjectionStatus.DEGRADED in statuses:
+            status = RuntimeProjectionStatus.DEGRADED
+        elif RuntimeProjectionStatus.PENDING in statuses:
+            status = RuntimeProjectionStatus.PENDING
+        elif RuntimeProjectionStatus.CONVERGED in statuses:
+            status = RuntimeProjectionStatus.CONVERGED
+        else:
+            status = RuntimeProjectionStatus.SKIPPED
+        return cls(status=status, components=components, issues=tuple(issues))
+
+    def to_dict(self) -> dict[str, object]:
+        pending_count = sum(
+            issue.status is RuntimeProjectionStatus.PENDING
+            for issue in self.issues
+        )
+        degraded_count = sum(
+            issue.status is RuntimeProjectionStatus.DEGRADED
+            for issue in self.issues
+        )
+        data: dict[str, object] = {
+            "status": self.status.value,
+            "components": {
+                name: status.value for name, status in self.components.items()
+            },
+            "pending_count": pending_count,
+            "degraded_count": degraded_count,
+            "issues": [issue.to_dict() for issue in self.issues],
+        }
+        if self.reason is not None:
+            data["reason"] = self.reason
+        return data
 
 
 @runtime_checkable
@@ -177,14 +308,15 @@ class EngineRuntimeProjection(Protocol):
         plan: ResolvedSkillPlan,
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         """Converge this Bot's runtime on ``plan``.
 
-        Raises ``SkillSetRuntimeReconcileError`` if it did not converge, so
-        the caller can compensate. How many runtime calls that took, and in
-        what order, is decided here and is not observable to the caller. MCP
-        writers require ``ResolvedCapabilityPlan``; Skill-only writers accept
-        the narrower ``ResolvedSkillPlan``.
+        Returns an explicit observed Runtime outcome.  Desired State is
+        already committed by the caller, so transport/filesystem drift is not
+        represented by a control-plane exception. How many runtime calls that
+        took, and in what order, is decided here and is not observable to the
+        caller. MCP writers require ``ResolvedCapabilityPlan``; Skill-only
+        writers accept the narrower ``ResolvedSkillPlan``.
         """
         ...
 
@@ -300,7 +432,7 @@ class BotRuntimeProjectorProtocol(Protocol):
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
         scope: ProjectionScope,
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         """Apply the projection, limited to what ``scope`` says changed.
 
         ``scope`` is required rather than defaulted: a caller that forgot it
@@ -316,7 +448,7 @@ class BotRuntimeProjectorProtocol(Protocol):
         bot_id: str,
         owner_id: str,
         scope: ProjectionScope,
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         """Project MCP/CLI while an external authority owns Skill mappings.
 
         ``scope.mcp`` must be true; callers cannot use this entry point to
@@ -330,6 +462,9 @@ __all__ = [
     "CapabilityRuntimeBoundary",
     "EngineRuntimeProjection",
     "ProjectionScope",
+    "RuntimeProjectionIssue",
+    "RuntimeProjectionResult",
+    "RuntimeProjectionStatus",
     "ResolvedCapabilityPlan",
     "ResolvedSkillPlan",
 ]

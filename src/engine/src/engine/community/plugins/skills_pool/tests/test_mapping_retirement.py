@@ -8,12 +8,72 @@ from engine.community.plugins.claude_code.layout_pool import (
     claude_code_retirement_active_roots,
 )
 from engine.community.plugins.skills_pool.layout_activation import (
+    MappingApplyMode,
     MappingSourceLayout,
     SkillMapping,
     _Layout,
     publish_pool_mappings,
     verify_skill_mappings,
 )
+
+
+def test_best_effort_mapping_keeps_unmanaged_entry_and_publishes_safe_entries(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    layout = _Layout.for_engine("aicoding", home)
+    layout.active_root.mkdir(parents=True)
+
+    ready_source = layout.pool_local / "ready"
+    missing_source = layout.pool_local / "missing"
+    ready_source.mkdir(parents=True)
+    (ready_source / "SKILL.md").write_text("ready")
+
+    ready_target = layout.active_root / "ready"
+    missing_target = layout.active_root / "missing"
+    occupied_target = layout.active_root / "occupied"
+    occupied_target.mkdir()
+    (occupied_target / "SKILL.md").write_text("image-owned")
+
+    result = publish_pool_mappings(
+        mappings=[
+            SkillMapping(str(ready_source), str(ready_target)),
+            SkillMapping(str(missing_source), str(missing_target)),
+            SkillMapping(str(layout.pool_local / "occupied"), str(occupied_target)),
+        ],
+        home=home,
+        engine="aicoding",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert not result.published
+    assert result.status == "DEGRADED"
+    assert ready_target.readlink() == ready_source
+    assert missing_target.is_symlink()
+    assert missing_target.readlink() == missing_source
+    assert occupied_target.is_dir()
+    assert (occupied_target / "SKILL.md").read_text() == "image-owned"
+    assert result.item_for(target=missing_target).status == "PENDING"
+    assert result.item_for(target=missing_target).code == "MANAGED_SOURCE_MISSING"
+    assert result.item_for(target=occupied_target).status == "DEGRADED"
+    assert result.item_for(target=occupied_target).code == "UNMANAGED_ACTIVE_ENTRY_RETAINED"
+
+    verified = verify_skill_mappings(
+        mappings=[
+            SkillMapping(str(ready_source), str(ready_target)),
+            SkillMapping(str(missing_source), str(missing_target)),
+            SkillMapping(str(layout.pool_local / "occupied"), str(occupied_target)),
+        ],
+        home=home,
+        engine="aicoding",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert not verified.valid
+    assert verified.status == "DEGRADED"
+    by_target = {item.target: item for item in verified.items}
+    assert by_target[str(occupied_target)].status == "DEGRADED"
+    assert by_target[str(missing_target)].status == "PENDING"
 
 
 @pytest.mark.parametrize("engine", ["openclaw", "claude_code", "aicoding", "hermes"])

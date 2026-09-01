@@ -23,6 +23,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
+from agentclaw.community.adapters.http.openapi_v1.runtime_projection import (
+    desired_state_from,
+    runtime_projection_from,
+)
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
@@ -65,6 +69,12 @@ def _set(item: dict[str, Any]) -> SkillSetItem:
         description=item.get("description"),
         is_default=bool(item.get("is_default")),
         is_active=bool(item.get("is_active")),
+        desired_state=(
+            desired_state_from(item) if "runtime_projection" in item else None
+        ),
+        runtime_projection=(
+            runtime_projection_from(item) if "runtime_projection" in item else None
+        ),
     )
 
 
@@ -262,7 +272,18 @@ async def add_skill(
     )
     if result.error is not None:
         raise result.error
-    return envelope(SkillSetMembershipResult(changed=result.changed), request)
+    mutation = {
+        "changed": result.changed,
+        "runtime_projection": result.runtime_projection,
+    }
+    return envelope(
+        SkillSetMembershipResult(
+            changed=result.changed,
+            desired_state=desired_state_from(mutation),
+            runtime_projection=runtime_projection_from(mutation),
+        ),
+        request,
+    )
 
 
 @router.delete(
@@ -290,7 +311,18 @@ async def remove_skill(
     )
     if result.error is not None:
         raise result.error
-    return envelope(SkillSetMembershipResult(changed=result.changed), request)
+    mutation = {
+        "changed": result.changed,
+        "runtime_projection": result.runtime_projection,
+    }
+    return envelope(
+        SkillSetMembershipResult(
+            changed=result.changed,
+            desired_state=desired_state_from(mutation),
+            runtime_projection=runtime_projection_from(mutation),
+        ),
+        request,
+    )
 
 
 @router.get("/{set_id}/mcps", response_model=Envelope[list[SkillSetMcpItem]])
@@ -390,7 +422,14 @@ async def add_mcp(
         set_id=set_id,
         server_code=server_code,
     )
-    return envelope(SkillSetMembershipResult(**result), request)
+    return envelope(
+        SkillSetMembershipResult(
+            changed=bool(result["changed"]),
+            desired_state=desired_state_from(result),
+            runtime_projection=runtime_projection_from(result),
+        ),
+        request,
+    )
 
 
 @router.delete(
@@ -416,7 +455,14 @@ async def remove_mcp(
         set_id=set_id,
         server_code=server_code,
     )
-    return envelope(SkillSetMembershipResult(**result), request)
+    return envelope(
+        SkillSetMembershipResult(
+            changed=bool(result["changed"]),
+            desired_state=desired_state_from(result),
+            runtime_projection=runtime_projection_from(result),
+        ),
+        request,
+    )
 
 
 @router.post("/{set_id}/activate", response_model=Envelope[SkillSetItem])

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from agentclaw.community.adapters.http.openapi_v1.runtime_projection import (
+    DesiredStateResult,
+    RuntimeProjectionResult,
+)
+
 
 class SkillSetItem(BaseModel):
     """One Bot-scoped SkillSet and its whole-set desired state."""
@@ -13,6 +18,8 @@ class SkillSetItem(BaseModel):
     description: str | None = Field(default=None, description="Optional SkillSet description.")
     is_default: bool = Field(description="Whether this is the immutable System Default set.")
     is_active: bool = Field(description="Whole-set desired state; ordinary sets never expose partial activation.")
+    desired_state: DesiredStateResult | None = None
+    runtime_projection: RuntimeProjectionResult | None = None
 
 
 class CreateSkillSetRequest(BaseModel):
@@ -33,6 +40,10 @@ class SkillSetMembershipResult(BaseModel):
     """Result of an idempotent SkillSet membership command."""
 
     changed: bool = Field(description="False when the requested membership state already existed.")
+    # Canonical handlers populate both. They stay optional at the schema
+    # boundary so this additive diagnostic does not break older clients.
+    desired_state: DesiredStateResult | None = None
+    runtime_projection: RuntimeProjectionResult | None = None
 
 
 class SkillSetSkillItem(BaseModel):

@@ -19,6 +19,7 @@ from engine.community.core.skills.layout_planner import (
     MAPPING_CONTRACT_VERSION,
 )
 from engine.community.plugins.claude_code.layout_pool import (
+    MappingApplyMode,
     MappingSourceLayout,
     activate_claude_code_pool,
     claude_code_retirement_active_roots,
@@ -153,6 +154,8 @@ class _SkillsPortMixin:
         }
         if retired.mappings:
             publish_kwargs["retired_mappings"] = list(retired.mappings)
+        if params.get("apply_mode") is not None:
+            publish_kwargs["apply_mode"] = MappingApplyMode(params["apply_mode"])
         result = await asyncio.to_thread(
             publish_claude_code_pool_mappings,
             **publish_kwargs,
@@ -191,6 +194,8 @@ class _SkillsPortMixin:
         }
         if retired.mappings:
             verify_kwargs["retired_mappings"] = list(retired.mappings)
+        if params.get("apply_mode") is not None:
+            verify_kwargs["apply_mode"] = MappingApplyMode(params["apply_mode"])
         result = await asyncio.to_thread(
             verify_claude_code_pool_mappings,
             **verify_kwargs,

@@ -11,6 +11,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentclaw.community.adapters.http.openapi_v1.runtime_projection import (
+    DesiredStateResult,
+    RuntimeProjectionResult,
+)
+
 # Request bodies reject unknown keys. Pydantic's default is to *ignore* them,
 # which on a public API means a typo'd or unsupported field is silently dropped
 # and the caller gets a 200 believing it was applied. With ``forbid`` the
@@ -389,4 +394,12 @@ class BotMcpItem(BaseModel):
     server_code: str = Field(description=_SERVER_CODE_DESC)
     active: bool = Field(
         description="Whether the MCP has a desired-state installation."
+    )
+    desired_state: DesiredStateResult | None = Field(
+        default=None,
+        description="Present on an activate/deactivate response; the durable Desired State result.",
+    )
+    runtime_projection: RuntimeProjectionResult | None = Field(
+        default=None,
+        description="Present on an activate/deactivate response; observed Runtime convergence.",
     )

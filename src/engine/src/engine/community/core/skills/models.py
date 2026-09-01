@@ -296,15 +296,74 @@ class PoolMappingSourceLayout(StrEnum):
     LEGACY = "legacy"
 
 
+class PoolMappingApplyMode(StrEnum):
+    """Runtime handling policy for one complete mapping request."""
+
+    STRICT = "STRICT"
+    BEST_EFFORT = "BEST_EFFORT"
+
+
+class PoolMappingProjectionStatus(StrEnum):
+    CONVERGED = "CONVERGED"
+    PENDING = "PENDING"
+    DEGRADED = "DEGRADED"
+
+
+@dataclass(frozen=True, slots=True)
+class PoolMappingItemResult:
+    target: str
+    source: str | None
+    status: PoolMappingProjectionStatus
+    code: str | None = None
+    retryable: bool = False
+    action: str = "APPLY"
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> "PoolMappingItemResult":
+        raw_status = str(data.get("status", PoolMappingProjectionStatus.DEGRADED))
+        try:
+            status = PoolMappingProjectionStatus(raw_status)
+        except ValueError:
+            status = PoolMappingProjectionStatus.DEGRADED
+        return cls(
+            target=str(data.get("target") or ""),
+            source=str(data["source"]) if data.get("source") is not None else None,
+            status=status,
+            code=str(data["code"]) if data.get("code") is not None else None,
+            retryable=bool(data.get("retryable")),
+            action=str(data.get("action") or "APPLY"),
+        )
+
+    def to_data(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "target": self.target,
+            "status": self.status.value,
+            "retryable": self.retryable,
+            "action": self.action,
+        }
+        if self.source is not None:
+            data["source"] = self.source
+        if self.code is not None:
+            data["code"] = self.code
+        return data
+
+
 @dataclass
 class PoolMappingPublishResult:
     """Pool mapping 全量发布结果。"""
 
     published: bool
     evidence: dict[str, Any] = field(default_factory=dict)
+    status: PoolMappingProjectionStatus = PoolMappingProjectionStatus.CONVERGED
+    items: tuple[PoolMappingItemResult, ...] = ()
 
     def to_data(self) -> dict[str, Any]:
-        return {"published": self.published, "evidence": self.evidence}
+        return {
+            "published": self.published,
+            "status": self.status.value,
+            "items": [item.to_data() for item in self.items],
+            "evidence": self.evidence,
+        }
 
 
 @dataclass
@@ -313,9 +372,16 @@ class PoolMappingVerificationResult:
 
     valid: bool
     evidence: dict[str, Any] = field(default_factory=dict)
+    status: PoolMappingProjectionStatus = PoolMappingProjectionStatus.CONVERGED
+    items: tuple[PoolMappingItemResult, ...] = ()
 
     def to_data(self) -> dict[str, Any]:
-        return {"valid": self.valid, "evidence": self.evidence}
+        return {
+            "valid": self.valid,
+            "status": self.status.value,
+            "items": [item.to_data() for item in self.items],
+            "evidence": self.evidence,
+        }
 
 
 __all__ = [
@@ -333,6 +399,9 @@ __all__ = [
     "PoolLayoutProbeStatus",
     "PoolLayoutRollbackRequest",
     "PoolMappingPublishResult",
+    "PoolMappingApplyMode",
+    "PoolMappingItemResult",
+    "PoolMappingProjectionStatus",
     "PoolMappingSourceLayout",
     "PoolMappingVerificationResult",
     "PoolQuarantineCleanupRequest",

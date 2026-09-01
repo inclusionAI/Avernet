@@ -13,6 +13,11 @@ from typing import Any, Literal
 from fastapi import UploadFile
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
+from agentclaw.community.adapters.http.openapi_v1.runtime_projection import (
+    DesiredStateResult,
+    RuntimeProjectionResult,
+)
+
 
 class Skill(BaseModel):
     """Public metadata for one Bot-owned Skill."""
@@ -168,6 +173,14 @@ class SkillUpload(BaseModel):
         "keeping its id and active state; answers 200."
     )
     skill: Skill = Field(description="The skill as stored after the upload.")
+    desired_state: DesiredStateResult | None = Field(
+        default=None,
+        description="Present for an active package replacement; the committed Desired State result.",
+    )
+    runtime_projection: RuntimeProjectionResult | None = Field(
+        default=None,
+        description="Present for an active package replacement; observed Runtime convergence.",
+    )
 
 
 # Keep this pre-existing generated component name stable for clients that have
@@ -220,6 +233,11 @@ class SkillState(BaseModel):
         description="False when the skill was already in the requested state "
         "— the call is idempotent and succeeded either way."
     )
+    # Additive response fields: canonical handlers always populate both, but
+    # keeping them optional in the published schema preserves older generated
+    # clients that only understand ``skill`` and ``changed``.
+    desired_state: DesiredStateResult | None = None
+    runtime_projection: RuntimeProjectionResult | None = None
 
 
 class SkillContent(BaseModel):

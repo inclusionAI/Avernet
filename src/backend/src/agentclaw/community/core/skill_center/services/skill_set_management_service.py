@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 from injector import inject
@@ -518,7 +519,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                 mcp_codes=frozenset(affected_mcp_codes),
             )
 
-        await self._mutate(
+        mutation_result = await self._mutate(
             bot=bot,
             bot_id=bot_id,
             actor_id=actor_id,
@@ -528,7 +529,13 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             mutation=mutation,
             skip_projection_when_unchanged=True,
         )
-        return outcomes
+        runtime_projection = mutation_result["runtime_projection"]
+        return [
+            replace(outcome, runtime_projection=runtime_projection)
+            if outcome.succeeded
+            else outcome
+            for outcome in outcomes
+        ]
 
     def list_mcps(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str

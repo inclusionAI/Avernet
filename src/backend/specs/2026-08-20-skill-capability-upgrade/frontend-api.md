@@ -643,6 +643,34 @@ GET .../skill-center-references/{reference_id}?user_id={actor_id}&owner_id={bot_
 
 新建普通 SkillSet 默认 `active=true`。空 Set 不触发 Runtime，之后添加成员立即生效。
 
+### 13.1 Desired State 与 Runtime Projection
+
+所有新的 Bot Skill / SkillSet / MCP 激活、停用和成员变更 OpenAPI response 都同时返回：
+
+```json
+{
+  "desired_state": {"changed": true, "status": "COMMITTED"},
+  "runtime_projection": {
+    "status": "CONVERGED | PENDING | DEGRADED | SKIPPED",
+    "components": {"skills": "CONVERGED", "mcp": "CONVERGED"},
+    "pending_count": 0,
+    "degraded_count": 0,
+    "issues": []
+  }
+}
+```
+
+- `desired_state.status=COMMITTED` 表示 Installation 已写入，是“Bot 应当生效哪些能力”的权威事实；
+  `UNCHANGED` 表示幂等请求没有改变该事实。
+- `CONVERGED`：当前 Runtime 已完成投影；`SKIPPED`：本次命令无需投影或兼容服务未提供观察结果。
+- `PENDING`：Runtime 暂不可达或受源文件缺失影响，前端保留已选中的能力并提示“状态已保存，稍后自动同步”。
+- `DEGRADED`：Bot 生效目录有同名实体目录或外部软链，平台不会覆盖/删除它；前端保留已选中的能力，并按
+  `issues` 展示受影响 Skill 名称、原因及 `suggested_action`。
+- 不要把 `PENDING` / `DEGRADED` 当作 mutation 失败，也不要把开关回滚。后续 Bot 生命周期事件或下一次能力变更会再次尝试投影。
+
+存量 BFF `/api/skills/skillset/activate|deactivate` 保持原成功 wire；只有 `PENDING` / `DEGRADED`
+时额外返回 `data.runtime_projection` 并使用对应中文提示文案。因此旧页面不读取该字段时仍按成功处理。
+
 | 操作 | inactive Set | active Set |
 | --- | --- | --- |
 | 添加已物化 Skill | 只写 Membership | Membership + Installation + Runtime |
