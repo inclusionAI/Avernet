@@ -455,7 +455,11 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     and_(
                         TtlRenewalScheduleModel.source_table == "baas_device",
                         TtlRenewalScheduleModel.source_id == DeviceModel.id,
-                        TtlRenewalScheduleModel.status == "ACTIVE",
+                        # D-85-AJ1: status term deliberately absent — ANY
+                        # cold-table row (ACTIVE or STOPPED) on this sandbox
+                        # suppresses the hot row, making threshold-STOPPED
+                        # terminal; the sandbox equality stays so destroy+create
+                        # swaps remain discoverable at the anti-join level.
                         TtlRenewalScheduleModel.env == env,
                         TtlRenewalScheduleModel.sandbox_id
                         == DeviceModel.provider_device_id,
