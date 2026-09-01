@@ -198,6 +198,11 @@ impl OAuthProvider for AlipayOAuthProvider {
                 OAuthError::TokenExchangeFailed(format!("read Alipay token response body: {e}"))
             })?;
 
+        // TEMP DIAGNOSTIC: dump the raw Alipay token-exchange response body so the
+        // underlying `error_response.sub_code` is visible when BCS only surfaces a
+        // generic token_exchange_failed. Remove once the root cause is pinned.
+        warn!(target: "bcs_auth_alipay", %body, "alipay.system.oauth.token raw response body");
+
         let gateway: AlipayTokenResponse = serde_json::from_str(&body)
             .map_err(|e| OAuthError::TokenExchangeFailed(format!("parse Alipay token response: {e}")))?;
 
