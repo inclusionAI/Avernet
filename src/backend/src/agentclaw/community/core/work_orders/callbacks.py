@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated
@@ -30,6 +32,26 @@ from agentclaw.community.plugin_api.http_client import (
 
 logger = get_logger()
 _RESPONSE_BODY_LOG_LIMIT = 16 * 1024
+
+
+def _principal_fingerprint(headers: Mapping[str, str]) -> str | None:
+    """Return a safe correlation fingerprint for the forwarded Principal.
+
+    The JWT itself is never logged; the short digest lets operators compare the
+    approval request credential with the BCN callback credential.
+    """
+    values = [
+        value
+        for key, value in headers.items()
+        if key.lower() == "x-avernet-principal"
+    ]
+    if not values:
+        return None
+    return hashlib.sha256(values[0].encode("utf-8")).hexdigest()[:16]
+
+
+def _principal_header_count(headers: Mapping[str, str]) -> int:
+    return sum(key.lower() == "x-avernet-principal" for key in headers)
 
 
 def _is_successful_bcn_response(payload: dict[str, object] | None) -> bool:
@@ -136,13 +158,39 @@ class FriendDecisionCallbackHandler:
         lowered_headers = {key.lower(): value for key, value in callback_headers.items()}
         has_principal = "x-avernet-principal" in lowered_headers
         has_authorization = "authorization" in lowered_headers
+        principal_header_count = _principal_header_count(callback_headers)
+        principal_fingerprint = _principal_fingerprint(callback_headers)
+        principal_length = (
+            len(lowered_headers["x-avernet-principal"])
+            if has_principal
+            else None
+        )
         logger.info(
-            "BCN callback auth headers: has_principal=%s has_authorization=%s",
+            "BCN callback auth headers: has_principal=%s "
+            "principal_header_count=%s principal_fingerprint=%s "
+            "principal_length=%s has_authorization=%s",
             has_principal,
+            principal_header_count,
+            principal_fingerprint,
+            principal_length,
             has_authorization,
         )
         logger.info(
-            "friend work-order BCN callback request",
+            "friend work-order BCN callback request: "
+            "work_order_id=%s callback_path=%s action=%s "
+            "has_principal=%s principal_header_count=%s "
+            "principal_fingerprint=%s principal_length=%s "
+            "has_authorization=%s x_request_id=%s x_trace_id=%s",
+            context.work_order.id,
+            path,
+            action,
+            has_principal,
+            principal_header_count,
+            principal_fingerprint,
+            principal_length,
+            has_authorization,
+            lowered_headers.get("x-request-id"),
+            lowered_headers.get("x-trace-id"),
             extra={
                 "work_order_id": context.work_order.id,
                 "event_type": context.source_event_type,
@@ -152,6 +200,9 @@ class FriendDecisionCallbackHandler:
                 "request_body": body,
                 "has_authorization": has_authorization,
                 "has_x_avernet_principal": has_principal,
+                "principal_header_count": principal_header_count,
+                "principal_fingerprint": principal_fingerprint,
+                "principal_length": principal_length,
                 "x_request_id": lowered_headers.get("x-request-id"),
                 "x_trace_id": lowered_headers.get("x-trace-id"),
             },
@@ -159,6 +210,7 @@ class FriendDecisionCallbackHandler:
         response = None
         response_body_raw = ""
         response_payload: dict[str, object] | None = None
+        callback_started = time.perf_counter()
         try:
             response = self._http.post(
                 path,
@@ -178,23 +230,34 @@ class FriendDecisionCallbackHandler:
                 parsed = None
             if isinstance(parsed, dict):
                 response_payload = parsed
+            duration_ms = (time.perf_counter() - callback_started) * 1000
+            response_code = response_payload.get("code") if response_payload else None
+            response_message = (
+                response_payload.get("message") if response_payload else None
+            )
+            response_request_id = (
+                response_payload.get("request_id") if response_payload else None
+            )
             logger.info(
-                "friend work-order BCN callback response",
+                "friend work-order BCN callback response: "
+                "http_status=%s response_code=%s response_message=%s "
+                "response_request_id=%s response_body_raw=%s duration_ms=%.1f",
+                response.status_code,
+                response_code,
+                response_message,
+                response_request_id,
+                logged_response_body,
+                duration_ms,
                 extra={
                     "work_order_id": context.work_order.id,
                     "event_type": context.source_event_type,
                     "request_id": request_id,
                     "action": action,
                     "http_status": response.status_code,
-                    "response_code": response_payload.get("code")
-                    if response_payload
-                    else None,
-                    "response_message": response_payload.get("message")
-                    if response_payload
-                    else None,
-                    "response_request_id": response_payload.get("request_id")
-                    if response_payload
-                    else None,
+                    "response_code": response_code,
+                    "response_message": response_message,
+                    "response_request_id": response_request_id,
+                    "duration_ms": duration_ms,
                     "response_body_raw": logged_response_body,
                 },
             )
@@ -202,28 +265,57 @@ class FriendDecisionCallbackHandler:
             if not _is_successful_bcn_response(response_payload):
                 raise ValueError("BCN callback did not report success")
         except Exception as exc:
+            failure_duration_ms = (time.perf_counter() - callback_started) * 1000
+            http_status = response.status_code if response is not None else None
+            response_code = (
+                response_payload.get("code") if response_payload else None
+            )
+            response_message = (
+                response_payload.get("message") if response_payload else None
+            )
+            response_request_id = (
+                response_payload.get("request_id") if response_payload else None
+            )
+            logged_failure_body = (
+                response_body_raw[:_RESPONSE_BODY_LOG_LIMIT] + "...<truncated>"
+                if len(response_body_raw) > _RESPONSE_BODY_LOG_LIMIT
+                else response_body_raw
+            )
             logger.warning(
-                "friend work-order decision callback failed",
+                "friend work-order decision callback failed: "
+                "work_order_id=%s callback_path=%s action=%s "
+                "http_status=%s response_code=%s response_message=%s "
+                "response_request_id=%s response_body_raw=%s duration_ms=%.1f "
+                "exception_type=%s principal_header_count=%s "
+                "principal_fingerprint=%s principal_length=%s",
+                context.work_order.id,
+                path,
+                action,
+                http_status,
+                response_code,
+                response_message,
+                response_request_id,
+                logged_failure_body,
+                failure_duration_ms,
+                type(exc).__name__,
+                principal_header_count,
+                principal_fingerprint,
+                principal_length,
                 extra={
                     "work_order_id": context.work_order.id,
                     "event_type": context.source_event_type,
                     "request_id": request_id,
                     "action": action,
-                    "http_status": response.status_code if response is not None else None,
-                    "response_code": response_payload.get("code")
-                    if response_payload
-                    else None,
-                    "response_message": response_payload.get("message")
-                    if response_payload
-                    else None,
-                    "response_request_id": response_payload.get("request_id")
-                    if response_payload
-                    else None,
-                    "response_body_raw": (
-                        response_body_raw[:_RESPONSE_BODY_LOG_LIMIT] + "...<truncated>"
-                        if len(response_body_raw) > _RESPONSE_BODY_LOG_LIMIT
-                        else response_body_raw
-                    ),
+                    "http_status": http_status,
+                    "response_code": response_code,
+                    "response_message": response_message,
+                    "response_request_id": response_request_id,
+                    "principal_header_count": principal_header_count,
+                    "principal_fingerprint": principal_fingerprint,
+                    "principal_length": principal_length,
+                    "duration_ms": failure_duration_ms,
+                    "exception_type": type(exc).__name__,
+                    "response_body_raw": logged_failure_body,
                 },
                 exc_info=True,
             )
