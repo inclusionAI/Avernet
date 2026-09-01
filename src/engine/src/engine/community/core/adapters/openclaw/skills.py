@@ -115,6 +115,7 @@ class OpenClawSkillsAdapter(SkillsService):
                 skill_uuid=d["skill_uuid"],
                 version=d["version"],
                 reason=d["reason"],
+                code=d.get("code"),
             )
             for d in raw.get("failed", [])
         ]

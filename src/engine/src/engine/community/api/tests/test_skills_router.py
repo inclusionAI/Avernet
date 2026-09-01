@@ -227,7 +227,10 @@ def test_ensure_center_skills_route_success(rich_manager, client):
                 ok=[CenterEnsureItem(skill_uuid="u1", version="1.0.0")],
                 failed=[
                     CenterEnsureFailure(
-                        skill_uuid="u2", version="2.0.0", reason="missing"
+                        skill_uuid="u2",
+                        version="2.0.0",
+                        reason="missing",
+                        code="CENTER_VERSION_NOT_FOUND",
                     )
                 ],
             )
@@ -249,7 +252,12 @@ def test_ensure_center_skills_route_success(rich_manager, client):
     assert body["success"] is True
     assert body["data"]["ok"] == [{"skill_uuid": "u1", "version": "1.0.0"}]
     assert body["data"]["failed"] == [
-        {"skill_uuid": "u2", "version": "2.0.0", "reason": "missing"}
+        {
+            "skill_uuid": "u2",
+            "version": "2.0.0",
+            "reason": "missing",
+            "code": "CENTER_VERSION_NOT_FOUND",
+        }
     ]
     assert len(captured["items"]) == 2
 
