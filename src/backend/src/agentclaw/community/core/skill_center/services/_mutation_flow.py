@@ -138,6 +138,7 @@ class MutationProjectionFlow:
                 **result.item,
                 "changed": result.changed,
                 **result.details,
+                "desired_state": self._desired_state(result.changed),
                 "runtime_projection": {"status": "SKIPPED", "issues": []},
             }
         owner_id = str(bot["owner_id"])
@@ -159,6 +160,7 @@ class MutationProjectionFlow:
                 **result.item,
                 "changed": False,
                 **result.details,
+                "desired_state": self._desired_state(False),
                 "runtime_projection": {"status": "SKIPPED", "issues": []},
             }
         if not is_bot_ready(bot):
@@ -166,6 +168,7 @@ class MutationProjectionFlow:
                 **result.item,
                 "changed": result.changed,
                 **result.details,
+                "desired_state": self._desired_state(result.changed),
                 "runtime_projection": {
                     "status": "PENDING",
                     "issues": [{
@@ -180,6 +183,7 @@ class MutationProjectionFlow:
                 **result.item,
                 "changed": result.changed,
                 **result.details,
+                "desired_state": self._desired_state(result.changed),
                 "runtime_projection": self._pending_projection(),
             }
         effective_scope = (
@@ -197,6 +201,7 @@ class MutationProjectionFlow:
             **result.item,
             "changed": result.changed,
             **result.details,
+            "desired_state": self._desired_state(result.changed),
             "runtime_projection": projection,
         }
 
@@ -241,3 +246,7 @@ class MutationProjectionFlow:
                 "suggested_action": "Retry after the runtime is available.",
             }],
         }
+
+    @staticmethod
+    def _desired_state(changed: bool) -> dict[str, object]:
+        return {"status": "COMMITTED" if changed else "UNCHANGED", "changed": changed}

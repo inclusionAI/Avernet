@@ -410,6 +410,7 @@ async def test_skill_wire_keeps_committed_desired_state_when_projection_fails():
     )
 
     assert repository.restore_calls == []
+    assert result["desired_state"] == {"status": "COMMITTED", "changed": True}
     assert result["runtime_projection"]["status"] == "PENDING"
     assert result["runtime_projection"]["issues"][0]["code"] == (
         "RUNTIME_PROJECTION_UNAVAILABLE"

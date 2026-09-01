@@ -148,6 +148,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             **skill,
             "active": active,
             "changed": result["changed"],
+            "desired_state": result["desired_state"],
             "runtime_projection": result["runtime_projection"],
         }
 
