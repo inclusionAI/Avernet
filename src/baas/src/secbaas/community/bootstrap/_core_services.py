@@ -662,6 +662,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         chunk_repository=bot_run_queue_chunk_repository,
         cache_plugin=cache_plugin,
         api_key_repository=api_gateway_repo,
+        eval_session_log=eval_session_log,
     )
 
     serializing_executor = providers.Singleton(
