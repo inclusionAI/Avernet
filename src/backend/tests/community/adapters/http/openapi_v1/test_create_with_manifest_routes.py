@@ -453,3 +453,77 @@ def _annotations(fn) -> set[str]:
         str(parameter.annotation)
         for parameter in inspect.signature(fn).parameters.values()
     }
+
+
+# ── RECORD_PRE_PROVISION: the pre-container record is the terminal one (W8) ──
+
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (  # noqa: E402
+    CreationSequence,
+)
+from agentclaw.community.core.bot_config_manifest.creation import (  # noqa: E402
+    CREATE_PRE_CONTAINER_TRIGGER,
+)
+
+_RECORD_FIRST = CreationSequence.RECORD_PRE_PROVISION
+
+
+def _record_first_state(*, bot, report=None, job=None):
+    return create_with_manifest._creation_state(
+        bot=bot, report=report, job=lambda: job, sequence=_RECORD_FIRST
+    )
+
+
+def test_record_first_the_phase_running_against_the_record_is_applying():
+    state, _ = _record_first_state(
+        bot={"status": "PENDING"}, report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.RUNNING)
+    )
+    assert state is CreationState.APPLYING
+
+
+def test_record_first_a_finished_phase_with_the_container_still_coming_is_creating():
+    state, _ = _record_first_state(
+        bot={"status": "PENDING"},
+        report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED),
+        job=_Job(TaskStatus.PENDING),
+    )
+    assert state is CreationState.CREATING
+
+
+def test_record_first_a_running_bot_reads_the_phase_as_the_outcome():
+    ready, _ = _record_first_state(
+        bot={"status": "ACTIVE"}, report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    )
+    assert ready is CreationState.READY
+    failed, _ = _record_first_state(
+        bot={"status": "ACTIVE"}, report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.PARTIAL)
+    )
+    assert failed is CreationState.APPLY_FAILED
+
+
+def test_record_first_a_bot_that_never_came_up_is_create_failed():
+    state, _ = _record_first_state(
+        bot={"status": "FAILED"},
+        report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED),
+        job=_Job(TaskStatus.FAILED, "the bot could not be provisioned: FAILED"),
+    )
+    assert state is CreationState.CREATE_FAILED
+
+
+def test_record_first_shows_the_pre_container_report_and_pre_create_on_does_not():
+    report = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    assert create_with_manifest._report_is_shown(CreationState.READY, report, _RECORD_FIRST)
+    assert not create_with_manifest._report_is_shown(CreationState.READY, report)
+    assert not create_with_manifest._report_is_shown(
+        CreationState.READY, _Report(CREATE_ON_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED), _RECORD_FIRST
+    )
+
+
+def test_pre_create_on_still_ignores_the_pre_container_record():
+    """Under today's sequence phase A's record is written before the bot and
+    never the outcome — a bot with only that record and a live job is CREATING."""
+    (state, _), _ = _state(
+        bot={"status": "ACTIVE"},
+        report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED),
+        job=_Job(TaskStatus.PENDING),
+    )
+    assert state is CreationState.CREATING

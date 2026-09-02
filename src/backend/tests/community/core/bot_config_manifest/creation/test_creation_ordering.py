@@ -235,7 +235,6 @@ def _build(db, *, scripts=None):
         manifest_service=_Manifests(),
         apply_service=applies,
         script_service_provider=lambda: scripts,
-        is_teclaw=lambda engine: engine == "teclaw",
         start_job=lambda **_kwargs: None,
         find_job=lambda **_kwargs: None,
         authorization_window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS,

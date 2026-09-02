@@ -250,22 +250,24 @@ Conventions every task assumes:
         the manifest and script row.
 - **Depends on:** Task 2, Task 12, Task 13
 
-## [ ] Task 15: The poll is sequence-aware, the refusal is lifted
+## [x] Task 15: The poll is sequence-aware, the refusal is lifted
 - **Files:** `adapters/http/openapi_v1/bots/create_with_manifest.py`,
   `core/bot_config_manifest/creation.py`, `di/modules/bot_management_module.py`,
   `tests/community/core/bot_config_manifest/creation/test_creation_preflight.py`,
   `tests/community/endpoints/test_openapi_create_with_manifest.py`,
   `tests/community/adapters/http/openapi_v1/test_create_with_manifest_routes.py`
 - **Done when:**
-  - [ ] `_TECLAW_REFUSAL`, the engine violation and `is_teclaw` are gone from
+  - [x] `_TECLAW_REFUSAL`, the engine violation and `is_teclaw` are gone from
         the preflight and the seam; `script` on teclaw is still
         `unsupported_script`.
-  - [ ] `_creation_state` takes the sequence; under `RECORD_PRE_PROVISION` the
+  - [x] `_creation_state` takes the sequence; under `RECORD_PRE_PROVISION` the
         pre-container record is the terminal one (`READY` / `APPLY_FAILED` /
         `APPLYING`), with `CREATING` between the phase and `ACTIVE`.
-  - [ ] Endpoint: `202` on teclaw; the poll walks
+  - [x] Endpoint: `202` on teclaw; the poll walks
         `AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY` with
-        the report from the single phase; ARCA scenarios unedited.
+        the report from the single phase (the assembled app, the real apply
+        service over the store-backed ports, creation and provisioning stood
+        in); ARCA scenarios unedited; `script` on teclaw is still a `422`.
 - **Depends on:** Task 14
 
 ## [ ] Task 16: The provisioner's first artifact carries the manifest

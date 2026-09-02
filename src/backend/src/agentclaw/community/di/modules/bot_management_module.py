@@ -786,14 +786,12 @@ class BotManagementModule(Module):
         manifest_service: BotConfigManifestServiceProtocol,
         apply_service: BotConfigManifestApplyService,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
-        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
         task_queue_provider: Callable[[], TaskQueueService],
         create_with_manifest_config: cfg.BotCreateWithManifestConfig,
     ) -> BotCreationManifestSeam:
         """The operations bot creation asks of the manifest layer.
 
-        ``is_teclaw`` is the capability resolver's own factory. The job's two
-        operations are bound here rather than imported by the seam:
+        The job's two operations are bound here rather than imported by the seam:
         ``create_job`` imports ``creation`` for the phase triggers, so the
         dependency has to run one way. The queue stays behind the same lazy
         provider the apply service uses.
@@ -802,7 +800,6 @@ class BotManagementModule(Module):
             manifest_service=manifest_service,
             apply_service=apply_service,
             script_service_provider=script_service_provider,
-            is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
             start_job=lambda **fields: enqueue_create_job(
                 task_queue_provider(), **fields
             ),

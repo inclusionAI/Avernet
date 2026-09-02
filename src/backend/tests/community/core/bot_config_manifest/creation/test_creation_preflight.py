@@ -75,7 +75,6 @@ def _preflight(document, *, engine="claude_code", materialised=_LANDED):
         bot_type="personal",
         validate=_validate,
         materialised=materialised,
-        is_teclaw=lambda e: e == "teclaw",
     )
 
 
@@ -120,14 +119,21 @@ def test_registering_the_materialiser_makes_the_same_document_acceptable():
     assert parsed
 
 
-def test_a_teclaw_engine_is_refused_and_the_refusal_names_w8():
-    with pytest.raises(ManifestValidationError) as caught:
-        _preflight('schema_version: 1\nmanifest:\n  mcp: []\n', engine="teclaw")
-    violation = next(
-        v for v in caught.value.violations if v.location == "engine"
+def test_a_teclaw_engine_creates_like_any_other():
+    """W8: the refusal is gone. What teclaw cannot deliver, the validator
+    refuses per construct — not this preflight per engine."""
+    parsed = _preflight('schema_version: 1\nmanifest:\n  mcp: []\n', engine="teclaw")
+    assert parsed["manifest"] == {"mcp": []}
+    assert "engine_not_supported_for_creation" not in str(
+        preflight_creation_manifest.__doc__
     )
-    assert violation.code == "engine_not_supported_for_creation"
-    assert "W8" in violation.message
+
+
+def test_script_on_teclaw_is_still_the_validators_refusal():
+    with pytest.raises(ManifestValidationError) as caught:
+        _preflight('schema_version: 1\nscript:\n  body: "echo hi"\n', engine="teclaw")
+    codes = {v.code for v in caught.value.violations}
+    assert codes == {"unsupported_script"}, codes
 
 
 def test_every_reason_is_reported_in_one_pass():
@@ -135,7 +141,6 @@ def test_every_reason_is_reported_in_one_pass():
     with pytest.raises(ManifestValidationError) as caught:
         _preflight(_UNMATERIALISED, engine="teclaw")
     codes = {v.code for v in caught.value.violations}
-    assert "engine_not_supported_for_creation" in codes
     assert "construct_not_appliable_at_creation" in codes
 
 

@@ -60,15 +60,6 @@ CREATE_PRE_CONTAINER_TRIGGER = "create:pre_container"
 #: The trigger the post-container phase records under.
 CREATE_ON_CONTAINER_TRIGGER = "create:on_container"
 
-_TECLAW_REFUSAL = (
-    "creating a bot from a manifest is not available on this engine: a teclaw "
-    "bot is configured by the artifact composed when its container is "
-    "provisioned, which is a different mechanism from this endpoint's "
-    "pre/post-container delivery. Tracked by W8 (#1476); until it lands, create "
-    "the bot first and PUT its manifest afterwards"
-)
-
-
 def _no_materialiser_refusal(construct: ApplyConstruct) -> str:
     return (
         f"'{construct.value}' cannot be applied by this build, so a bot created "
@@ -126,7 +117,6 @@ def preflight_creation_manifest(
     bot_type: Optional[str],
     validate: Callable[..., Any],
     materialised: frozenset[ApplyConstruct],
-    is_teclaw: Callable[[Optional[str]], bool],
 ) -> dict[str, Any]:
     """Refuse anything this creation path could not actually deliver.
 
@@ -134,35 +124,17 @@ def preflight_creation_manifest(
     **every** reason at once — the same all-or-nothing shape `PUT` has, so fixing
     a document is one pass rather than a queue of resubmissions.
 
-    Ordering is deliberate: the engine refusal is reported *alongside* whatever
-    else is wrong rather than short-circuiting, because a caller on teclaw with a
-    typo should learn both.
+    Every engine family creates here (W8): what a family cannot deliver is the
+    validator's to refuse per construct (``script`` on teclaw is
+    ``unsupported_script``), not this preflight's to refuse per engine.
     """
     violations: list[Violation] = []
-    if is_teclaw(engine_type):
-        violations.append(
-            Violation(
-                location="engine",
-                code="engine_not_supported_for_creation",
-                message=_TECLAW_REFUSAL,
-            )
-        )
 
-    # W1's validator, unchanged: whatever it refuses, this refuses.
-    #
-    # Its violations are **merged** rather than allowed to propagate on their
-    # own. Letting it raise here would silently drop anything already collected
-    # above — a caller on teclaw with a typo would be told about the typo, fix
-    # it, resubmit, and only then learn the engine is not supported. That is the
-    # resubmission queue the all-or-nothing rule exists to prevent.
-    try:
-        parsed = validate(
-            document=document, active_engine=engine_type, bot_type=bot_type
-        ).parsed
-    except ManifestValidationError as refused:
-        raise ManifestValidationError(
-            tuple(violations) + tuple(refused.violations)
-        ) from None
+    # W1's validator, unchanged: whatever it refuses, this refuses. Its
+    # violations propagate as they are — the all-or-nothing shape is its own.
+    parsed = validate(
+        document=document, active_engine=engine_type, bot_type=bot_type
+    ).parsed
 
     for construct in declared_constructs(parsed):
         if construct not in materialised:
@@ -205,8 +177,8 @@ class BotCreationManifestSeam:
 
     Both are passed in rather than imported, because ``create_job`` imports this
     module for the triggers below: wiring them at construction is how the DI
-    module already resolves the same shape for ``is_teclaw`` and the job's own
-    collaborators, and it keeps the two modules' dependency in one direction.
+    module already resolves the job's own collaborators, and it keeps the two
+    modules' dependency in one direction.
     """
 
     def __init__(
@@ -215,7 +187,6 @@ class BotCreationManifestSeam:
         manifest_service: BotConfigManifestServiceProtocol,
         apply_service: BotConfigManifestApplyServiceProtocol,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
-        is_teclaw: Callable[[Optional[str]], bool],
         start_job: Callable[..., None],
         find_job: Callable[..., Optional[TaskRecord]],
         authorization_window_seconds: int,
@@ -224,7 +195,6 @@ class BotCreationManifestSeam:
         self._manifests = manifest_service
         self._applies = apply_service
         self._script_service_provider = script_service_provider
-        self._is_teclaw = is_teclaw
         self._start_job = start_job
         self._find_job = find_job
         # W8: ``(owner_id, bot_id) -> rows removed`` — the managed-files store's
@@ -251,7 +221,6 @@ class BotCreationManifestSeam:
             bot_type=bot_type,
             validate=self._manifests.validate,
             materialised=self._applies.materialised_constructs(),
-            is_teclaw=self._is_teclaw,
         )
 
     def persist(
