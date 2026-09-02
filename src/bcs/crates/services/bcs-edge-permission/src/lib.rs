@@ -1776,6 +1776,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_lookup_miss_paths_and_env_scope() {
+        let (eg, pp, rq, bc, _db) = assemble().await;
+        let svc = service(&eg, &pp, &rq, &bc);
+
+        assert_eq!(svc.env(), "dev");
+
+        let err = svc
+            .approve("missing-request-approve", "decider_1")
+            .await
+            .expect_err("approve missing request should fail");
+        assert!(matches!(err, ServiceError::FriendRequestNotFound(_)), "got {err:?}");
+
+        let err = svc
+            .reject("missing-request-reject", "decider_2", None)
+            .await
+            .expect_err("reject missing request should fail");
+        assert!(matches!(err, ServiceError::FriendRequestNotFound(_)), "got {err:?}");
+
+        let err = svc
+            .cancel("missing-request-cancel")
+            .await
+            .expect_err("cancel missing request should fail");
+        assert!(matches!(err, ServiceError::FriendRequestNotFound(_)), "got {err:?}");
+
+        let err = svc
+            .get_request("missing-request-get")
+            .await
+            .expect_err("get_request missing request should fail");
+        assert!(matches!(err, ServiceError::FriendRequestNotFound(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
     async fn bot_to_human_rejected() {
         let (eg, pp, rq, bc, _db) = assemble().await;
         let svc = service(&eg, &pp, &rq, &bc);
