@@ -825,6 +825,8 @@ git commit -m "feat(w7): guarded tree readers for the git checkout"
 
 ### Task 4: `SourceSession`——per-apply 缓存、resolution 记录、基线、关闭
 
+> **CLAIMED BY B(协作会话)@2026-09-02 16:45** — B 正在交付本任务(文件:`apply/source_session.py`、`test_source_session.py`)。A 轨**请勿派发本任务**;`git status` 里这两个文件是 B 的 WIP,不碰、不提交。协调细节见文末「双 agent 协作约定」。
+
 **Files:**
 - Create: `<R>/apply/source_session.py`
 - Test: `<T>/apply/test_source_session.py`（新建）
@@ -2203,4 +2205,22 @@ git commit -m "docs(backend): mark W7 delivered in the work items"
 - **Spec coverage**：W7 验收标准逐条 → ①`sources`/`from`/互斥/未引用警告（W1 已交付，apply 侧缺名拒绝 Task 5）②auth 在源上（Task 5 fetch_declared 读 decl.auth）③atomic 解析、单次拉取复用（Task 4 cache）④ref→SHA 记入报告（Task 4+8）⑤浅层单 ref（Task 2）⑥只读、无 hook/filter（Task 2 docstring + env 隔离）⑦包含性检查在 W11 之前（Task 2 `_enumerate` + Task 3 readers）⑧解开后限额（Task 3）⑨移动 tag 收敛（Task 3 测试）⑩git 目录条目免 unpack（schema 已定，W6 消费；Task 7 单测钉住 zip 路不受影响）⑪mode 字段（schema 已定 + Task 5 strict 执行）——**唯一刻意的 v1 收窄**：git 源 + `digest` 拒绝（Task 5，带文档理由）。清理临时 checkout 由 `GitCheckout` 失败路径 + `SourceSession.close()` 双保险。
 - **Placeholder scan**：Task 6/7/8 中标注「展开为完整测试函数」的四处是仅有的弹性位——机制、构造方式、断言目标都已写死，展开时不得增删断言口径。
 - **Type consistency**：`GitSourceSpec(url, ref, subpath, mode, auth)` / `SubprocessGitClient.fetch(spec, *, headers)` / `SourceSession.checkout(spec, *, headers, display, auth_name)` / `fetch_declared(ctx, *, entry, category, entry_identity)` / `file_bytes(ctx, *, content, source_url, category, entry_identity, content_type)` 各任务间一致；`git_receipt_url(url, sha, subpath)` 单一定义点。
+
+---
+
+## 双 agent 协作约定(B 会话于 2026-09-02 16:45 追加;单干时本节作废)
+
+两个会共享同一 worktree 与分支,唯一同步介质 = 本文件 + git 历史。任务分工:
+
+| 任务 | 归属 |
+| --- | --- |
+| Task 1(已完成)、Task 2、Task 3、Task 5、Task 8、Task 9 | **A**(本计划作者,W7 主会话) |
+| Task 4、以及 Task 6/7(Task 5 合入后认领) | **B**(协作会话) |
+
+规则(与 superpowers 协作契约一致,浓缩为四条):
+
+1. **claim 先行**:认领写在任务标题下的引用块里(格式见 Task 4);开工前先 `git log --oneline -8` 查任务是否已被提交。
+2. **按文件 add**:只 `git add` 自己所有权表里的文件,**绝不 `git add -A` / `git add .` / `git stash`**——`git status` 里出现的对方 WIP 是只读信息。
+3. **提交 message 带任务号**,沿用本计划各 Task Step 5 的 message。
+4. **同文件冲突兜底**:本文件是唯一双写点,且约定 append-only;对方 claim 的任务 30 分钟无提交且会话确认死亡,方可在本文件留 takeover 记录后接管。
 
