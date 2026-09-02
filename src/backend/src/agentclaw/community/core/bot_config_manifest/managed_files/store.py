@@ -47,6 +47,13 @@ IDENTITY_NS = "identity"
 WORKSPACE_NS = "workspace"
 #: Where a local skill package lives under the workspace namespace.
 SKILLS_LOCAL_DIR = "skills-local"
+#: The scope's entity type. The identity and resources materialisers address
+#: every bot at ``("staff", owner_id)`` — the personal-bot surface's fixed
+#: pair — so the index is keyed the same way on both the write and the read
+#: side. The key prefix therefore reads ``staff_{owner}``, not the bot
+#: record's ``{entity_type}_{entity_id}`` the promotion step uses; the two
+#: never share a key (``_manifest`` versus a publish stage).
+OWNER_ENTITY_TYPE = "staff"
 #: The index categories.
 CATEGORY_IDENTITY = "identity"
 CATEGORY_RESOURCES = "resources"
@@ -245,6 +252,7 @@ __all__ = [
     "ManagedFileScope",
     "ManagedFilesStore",
     "ManagedFilesStoreError",
+    "OWNER_ENTITY_TYPE",
     "SKILLS_LOCAL_DIR",
     "WORKSPACE_NS",
     "digest_of",

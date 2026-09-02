@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     ManagedFileScope,
     ManagedFilesStore,
     ManagedFilesStoreError,
+    OWNER_ENTITY_TYPE,
     digest_of,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "ManagedFilesComposeReader",
     "ManagedFilesStore",
     "ManagedFilesStoreError",
+    "OWNER_ENTITY_TYPE",
     "SKILLS_LOCAL_DIR",
     "WORKSPACE_NS",
     "digest_of",

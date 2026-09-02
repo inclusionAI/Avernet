@@ -152,19 +152,19 @@ Conventions every task assumes:
   - [x] Tests against a fake `ObjectStoragePlugin` and SQLite.
 - **Depends on:** Task 7
 
-## [ ] Task 9: Store-backed identity and resource ports
+## [x] Task 9: Store-backed identity and resource ports
 - **Files:** `core/bot_config_manifest/managed_files/ports.py` (new),
   `tests/community/core/bot_config_manifest/managed_files/test_store_ports.py` (new)
 - **Done when:**
-  - [ ] `StoreIdentityPort` and `StoreResourcePort` implement the existing port
+  - [x] `StoreIdentityPort` and `StoreResourcePort` implement the existing port
         protocols over the store.
-  - [ ] Driving the real `IdentityMaterialiser` and `ResourcesMaterialiser`
+  - [x] Driving the real `IdentityMaterialiser` and `ResourcesMaterialiser`
         with these ports yields `created` / `updated` / `unchanged` and
         removals purely from the index, with no device involved; a directory
         entry replaces its tree in the index.
 - **Depends on:** Task 8
 
-## [ ] Task 10: Record-only activation
+## [~] Task 10: Record-only activation
 - **Files:** `core/skill_center/services/direct_activation_service.py`,
   the activation protocol under `api/`,
   `tests/community/core/skill_center/test_direct_activation_service.py`

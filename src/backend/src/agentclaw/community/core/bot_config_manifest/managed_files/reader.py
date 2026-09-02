@@ -26,6 +26,7 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_pr
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
 from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     BOT_DATA_STORE,
+    OWNER_ENTITY_TYPE,
     CATEGORY_IDENTITY,
     CATEGORY_RESOURCES,
     CATEGORY_SKILLS,
@@ -134,12 +135,24 @@ class ManagedFilesComposeReader:
 
 
 def _scope(req: ComposeRequest) -> ManagedFileScope:
+    """The store scope for a compose request — the *owner-based* address.
+
+    The identity and resources materialisers address a bot at
+    ``("staff", owner_id)`` — the personal-bot surface's fixed pair
+    (``identity_coords_from_record`` / the resources router) — and the
+    store-backed ports key the index by the pair they are handed. The
+    composer's ``user_id`` *is* the bot's ``owner_id`` (``_compose_request``
+    and the device-sync service both set it so), which is what makes the read
+    side land on the rows the write side wrote. ``req.entity_id`` is the
+    manifest's storage key, a different vocabulary that happens to share the
+    name; it is used for the manifest lookup above and never for the index.
+    """
     from agentclaw.community.utils.env_utils import get_current_env
 
     return ManagedFileScope(
         env=get_current_env(),
-        entity_type=req.entity_type or "staff",
-        entity_id=req.entity_id,
+        entity_type=OWNER_ENTITY_TYPE,
+        entity_id=req.user_id,
         bot_id=req.bot_id,
     )
 
