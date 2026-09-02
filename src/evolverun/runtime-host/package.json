@@ -1,0 +1,35 @@
+{
+  "name": "@avernet/runtime-host",
+  "version": "0.1.0",
+  "description": "Minimal public runtime host for composable Avernet modules",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "bash scripts/check-public-boundary.sh && tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "prepack": "npm run check && npm test && npm run build"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.12.3",
+    "tsx": "^4.19.2",
+    "typescript": "~6.0.2"
+  }
+}

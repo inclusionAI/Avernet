@@ -25,12 +25,27 @@ import {
 import {
   createClawevolveModule,
 } from "@avernet/clawevolve/server/create-module";
+
+import {
+  createClawevolveRuntimeModule,
+} from "@avernet/clawevolve/runtime";
 ```
 
 The module mounts in the host's existing Express process:
 
 ```ts
 app.use("/api/evolve", createClawevolveModule());
+```
+
+Hosts that support module lifecycle registration use the stable runtime
+descriptor instead. Existing hosts can continue mounting the router while they
+adopt the lifecycle contract.
+
+```ts
+const module = createClawevolveRuntimeModule();
+await module.migrate();
+await module.start();
+app.use(module.apiBasePath, module.router);
 ```
 
 The public registry contains only ClawEvolve task types. Host-only task types and integrations remain outside the package. Public command templates use placeholders; a host can provide its own reviewed command defaults through `createEvolveNodeRegistry()`.

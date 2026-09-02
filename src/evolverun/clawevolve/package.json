@@ -24,9 +24,21 @@
       "types": "./dist/server/routes/evolve.d.ts",
       "import": "./dist/server/routes/evolve.js"
     },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js"
+    },
+    "./runtime/create-runtime-module": {
+      "types": "./dist/runtime/create-runtime-module.d.ts",
+      "import": "./dist/runtime/create-runtime-module.js"
+    },
     "./server/services/evolve/command": {
       "types": "./dist/server/services/evolve/command.d.ts",
       "import": "./dist/server/services/evolve/command.js"
+    },
+    "./server/services/evolve/plan-source-contract": {
+      "types": "./dist/server/services/evolve/plan-source-contract.d.ts",
+      "import": "./dist/server/services/evolve/plan-source-contract.js"
     },
     "./server/services/evolve/task-registry": {
       "types": "./dist/server/services/evolve/task-registry.d.ts",

@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "src/evolverun/clawevolve/**"
+      - "src/evolverun/runtime-host/**"
       - ".github/workflows/clawevolve-ci.yml"
   push:
     branches:
       - dev
     paths:
       - "src/evolverun/clawevolve/**"
+      - "src/evolverun/runtime-host/**"
       - ".github/workflows/clawevolve-ci.yml"
 
 jobs:
@@ -25,6 +27,24 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: src/evolverun/clawevolve/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+      - run: npm pack --dry-run
+
+  runtime-host:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/evolverun/runtime-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: src/evolverun/runtime-host/package-lock.json
       - run: npm ci
       - run: npm run check
       - run: npm test
