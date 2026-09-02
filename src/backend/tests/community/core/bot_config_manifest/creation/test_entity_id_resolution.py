@@ -51,11 +51,20 @@ def test_both_sides_are_handed_the_same_spec_entity_id():
         "the manifest's storage key stopped coming from the spec"
     )
 
+    # The job's completion rebuilds the spec from its payload and delegates to
+    # the shared ``complete_bot_authorization``, which is where ``create_bot`` is
+    # actually called — so the second half of the guarantee is pinned there, on
+    # the function that makes the call, not on the module.
     complete = inspect.getsource(create_flow.complete_manifest_creation)
-    created = inspect.getsource(create_flow)
-    assert "entity_id=spec.entity_id" in created, (
-        "create_bot stopped being handed the spec's entity_id"
-    )
     assert "creation_spec_from_payload" in complete, (
         "the job stopped rebuilding its spec from the payload it was given"
+    )
+    assert "complete_bot_authorization(" in complete, (
+        "the job stopped going through the shared completion, so the create_bot "
+        "call this test pins below is no longer the one it reaches"
+    )
+
+    authorization = inspect.getsource(create_flow.complete_bot_authorization)
+    assert "entity_id=spec.entity_id" in authorization, (
+        "create_bot stopped being handed the spec's entity_id"
     )
