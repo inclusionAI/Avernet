@@ -21,7 +21,10 @@ import { TaskSourceService, type FrozenEvidenceReader } from "./services/evolve/
 import { dispatchEvolveCommand } from "./services/evolve-dispatcher.js";
 import { InsightPlanStepService } from "./services/evolve/insight-plan-step-service.js";
 import { InsightTaskService } from "./services/evolve/insight-task-service.js";
-import { GovernanceRuleProvider } from "./services/insight/governance-rule-provider.js";
+import {
+  GovernanceRuleProvider,
+  type GovernanceRuleProviderOptions,
+} from "./services/insight/governance-rule-provider.js";
 import type { ObjectStore } from "./services/object-storage/oss-object-store.js";
 import { startRunAnalysisTimeoutSweeper } from "./services/evolve/run-analysis-timeout.js";
 import { startSuggestionApplyTimeoutSweeper } from "./services/evolve/suggestion-apply-timeout.js";
@@ -33,12 +36,7 @@ export type ClawevolveModuleOptions = {
   cancelExecution?: EvolveRouterDeps["cancelExecution"];
   artifactStore?: ObjectStore;
   frozenEvidenceReader?: FrozenEvidenceReader;
-  governance?: {
-    environment: string;
-    filePath?: string;
-    objectStore?: ObjectStore;
-    objectKey?: string;
-  };
+  governance?: GovernanceRuleProviderOptions;
 };
 
 export type ClawevolveModule = {
