@@ -1,5 +1,5 @@
 template_id: merchant-operations-goal-to-sop
-entry_bot_id: 店主Bot-20260901_kcvvkqqs
+entry_bot_id: 20260901_kcvvkqqs
 entry_name: 店主Bot
 # execute 会根据 task_spec 的经营语义自动补入 static_plan_id；调用方无需传模板 id。
 task_type: static_plan
@@ -15,7 +15,7 @@ nodes:
     name: 明确经营目标
     title: 明确经营目标与约束
     type: bot
-    bot_id: 店主Bot-20260901_kcvvkqqs
+    bot_id: 20260901_kcvvkqqs
     depends_on: []
     input:
       okr: $.input.okr
@@ -28,7 +28,7 @@ nodes:
     name: 设计营销打法
     title: 设计营销打法与公开承诺
     type: bot
-    bot_id: 营销Bot-20260901_mylvdi1o
+    bot_id: 20260901_mylvdi1o
     depends_on: [frame_goal]
     input:
       handoff: $.frame_goal.output.handoff
@@ -41,7 +41,7 @@ nodes:
     name: 设计会员与服务承接
     title: 设计会员与服务承接
     type: bot
-    bot_id: 会员与服务Bot-20260901_5r6cdh02
+    bot_id: 20260901_5r6cdh02
     depends_on: [design_marketing]
     input:
       handoff: $.design_marketing.output.handoff
@@ -54,7 +54,7 @@ nodes:
     name: 核验客流产能与排班
     title: 核验客流、产能与排班
     type: bot
-    bot_id: 客流与产能Bot-20260901_sesl8hmo
+    bot_id: 20260901_sesl8hmo
     depends_on: [design_membership_service]
     input:
       handoff: $.design_membership_service.output.handoff
@@ -67,7 +67,7 @@ nodes:
     name: 核验供应履约
     title: 核验供应、品质与履约
     type: bot
-    bot_id: 供应履约Bot-20260901_4tn4mnnj
+    bot_id: 20260901_4tn4mnnj
     depends_on: [assess_capacity]
     input:
       handoff: $.assess_capacity.output.handoff
@@ -80,7 +80,7 @@ nodes:
     name: 评审业务风险
     title: 评审业务、质量与内部运营风险
     type: bot
-    bot_id: 业务风险Bot-20260901_rpc6nx1i
+    bot_id: 20260901_rpc6nx1i
     depends_on: [assess_fulfillment]
     input:
       handoff: $.assess_fulfillment.output.handoff
@@ -93,7 +93,7 @@ nodes:
     name: 评审舆情与平台风险
     title: 评审舆情、投诉与平台风险
     type: bot
-    bot_id: 舆情Bot-20260901_5rjroor8
+    bot_id: 20260901_5rjroor8
     depends_on: [assess_fulfillment]
     input:
       handoff: $.assess_fulfillment.output.handoff
@@ -106,7 +106,7 @@ nodes:
     name: 汇总经营方案与SOP
     title: 汇总经营方案与执行SOP
     type: bot
-    bot_id: 店主Bot-20260901_kcvvkqqs
+    bot_id: 20260901_kcvvkqqs
     depends_on: [review_business_risk, review_public_risk]
     input:
       business_risk: $.review_business_risk.output.handoff
