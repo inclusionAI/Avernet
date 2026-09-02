@@ -255,6 +255,7 @@ class BotRunRequestExecutor:
         chunk_repository: BotRunQueueChunkRepository,
         cache_plugin: CachePlugin,
         api_key_repository: APIKeyRepository,
+        eval_session_log: Any | None = None,
         stream_flush_interval_seconds: float = 0.2,
         stream_flush_max_content_bytes: int = 65536,
     ) -> None:
@@ -264,6 +265,7 @@ class BotRunRequestExecutor:
         self._chunk_repository = chunk_repository
         self._cache_plugin = cache_plugin
         self._api_key_repository = api_key_repository
+        self._eval_session_log = eval_session_log
         self._stream_flush_interval = stream_flush_interval_seconds
         # 单条 chunk content 的字节上界：超过阈值时提前 flush，避免在 ZDAS tracer
         # 等非参数化内联 SQL 路径下因单条 payload 过大触发 1064 转义断裂。
@@ -292,7 +294,9 @@ class BotRunRequestExecutor:
             if metadata.get("timeout")
             else queue_meta.get("timeout")
         )
-        chat_metadata = build_chat_metadata(metadata, run.run_id)
+        chat_metadata = build_chat_metadata(
+            metadata, run.run_id, eval_session_log=self._eval_session_log
+        )
 
         context = _rebuild_context(
             run.api_key_prefix, self._api_key_repository, metadata
@@ -328,6 +332,22 @@ class BotRunRequestExecutor:
             request_type,
             stream,
         )
+
+        # eval 对话 session 日志与保护性校验 — 委托 Plugin（与 Runner 路径对称）
+        eval_id = metadata.get("eval_id")
+        if eval_id:
+            logger.info(
+                "[BotRunExecutor] eval chat session: eval_id=%s, bot_id=%s",
+                eval_id,
+                run.bot_id,
+            )
+            if self._eval_session_log is not None:
+                self._eval_session_log.log_eval_session(
+                    eval_id=eval_id,
+                    bot_id=run.bot_id,
+                    session_id=session_id,
+                    method="execute",
+                )
 
         try:
             if request_type == "inject":
