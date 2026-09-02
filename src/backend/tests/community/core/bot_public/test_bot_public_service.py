@@ -763,7 +763,7 @@ class TestPublicBotBCSFuseSync:
 
         assert result["public"] == "1"
         request = mock_urlopen.call_args.args[0]
-        assert request.full_url == "http://bcsfuse.test/api/v1/workers/bot1/online"
+        assert request.full_url == "http://bcsfuse.test/v1/workers/bot1/online"
         assert request.get_method() == "PUT"
         mock_sync_rel.assert_called_once_with("bot1", "owner1", "OPEN", "1")
 
@@ -786,7 +786,7 @@ class TestPublicBotBCSFuseSync:
 
         assert result["public"] == "0"
         request = mock_urlopen.call_args.args[0]
-        assert request.full_url == "http://bcsfuse.test/api/v1/workers/bot1/offline"
+        assert request.full_url == "http://bcsfuse.test/v1/workers/bot1/offline"
         assert request.get_method() == "PUT"
         mock_sync_rel.assert_called_once_with("bot1", "owner1", "RESTRICTED", "0")
 
@@ -1021,7 +1021,7 @@ class TestHandlePublicApprovalCallback:
 
         assert result["success"] is True
         request = mock_urlopen.call_args.args[0]
-        assert request.full_url == "http://bcsfuse.test/api/v1/workers/bot1/online"
+        assert request.full_url == "http://bcsfuse.test/v1/workers/bot1/online"
 
     def test_agree_bcsfuse_failure_does_not_block_callback(self):
         bot_repo = MagicMock()
