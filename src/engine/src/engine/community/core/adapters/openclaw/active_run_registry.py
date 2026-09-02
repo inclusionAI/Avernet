@@ -185,6 +185,29 @@ class ActiveRunRegistry:
             updated_at=now,
         )
 
+    def rebind_run(self, old_run_id: str, new_run_id: str) -> bool:
+        """Replace a provisional run id with the gateway-assigned id.
+
+        The adapter registers the idempotency key before entering the stream so
+        silent runs are visible. If a gateway frame later carries a different
+        run id, merge the provisional record instead of exposing two active
+        entries for one execution.
+        """
+        if not old_run_id or not new_run_id or old_run_id == new_run_id:
+            return old_run_id == new_run_id
+        run = self._runs.pop(old_run_id, None)
+        if run is None:
+            return False
+        existing = self._runs.get(new_run_id)
+        if existing is not None:
+            # Keep the record already associated with the gateway id and avoid
+            # manufacturing a duplicate.
+            self._runs[old_run_id] = run
+            return False
+        run.run_id = new_run_id
+        self._runs[new_run_id] = run
+        return True
+
     def mark_terminal(
         self,
         run_id: str,

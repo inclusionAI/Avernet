@@ -26,6 +26,16 @@ def _reg() -> ActiveRunRegistry:
     return ActiveRunRegistry()
 
 
+class TestRunIdentity:
+    def test_rebind_provisional_run_id(self):
+        reg = _reg()
+        reg.register_run("idempotency-key", "session:a:user:u")
+
+        assert reg.rebind_run("idempotency-key", "gateway-run") is True
+        assert [run.run_id for run in reg.all_runs()] == ["gateway-run"]
+        assert reg.snapshot()[0].run_id == "gateway-run"
+
+
 class TestQueryVerdict:
     async def test_empty_returns_ok_clear(self):
         reg = _reg()

@@ -239,7 +239,17 @@ class OpenClawChatAdapter(ChatService):
             return
 
         if run_id not in seen_run_ids:
-            registry.register_run(run_id, session_key)
+            # The first non-inject frame normally confirms the provisional
+            # idempotency key. If the gateway assigns a different id, merge
+            # the provisional record so one execution is not reported twice.
+            provisional_run_id = next(iter(seen_run_ids), None)
+            if (
+                provisional_run_id is not None
+                and registry.rebind_run(provisional_run_id, run_id)
+            ):
+                seen_run_ids.remove(provisional_run_id)
+            else:
+                registry.register_run(run_id, session_key)
             seen_run_ids.add(run_id)
 
         state = payload.get("state")
