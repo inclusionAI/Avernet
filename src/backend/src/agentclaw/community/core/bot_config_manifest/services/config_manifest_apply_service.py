@@ -248,7 +248,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         actor_id: str,
         audit_actor: Optional[str] = None,
         trigger: str = "explicit",
-        phases: Optional[frozenset[ApplyPhase]] = None,
+        phases: frozenset[ApplyPhase],
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
         carry_from_apply_id: Optional[str] = None,
@@ -420,7 +420,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         apply_id: str,
         trigger: str,
         started_at: datetime,
-        phases: Optional[frozenset[ApplyPhase]],
+        phases: frozenset[ApplyPhase],
         lock_token: str,
         carry_from_apply_id: Optional[str] = None,
     ) -> None:
@@ -601,7 +601,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 apply_id=str(payload["apply_id"]),
                 trigger=str(payload["trigger"]),
                 started_at=_parse_started_at(payload.get("started_at")),
-                phases=phases_from_payload(payload.get("phases")),
+                phases=phases_from_payload(payload["phases"]),
                 lock_token=str(payload["lock_token"]),
                 carry_from_apply_id=payload.get("carry_from_apply_id"),
             )

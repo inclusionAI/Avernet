@@ -62,7 +62,7 @@ def build_apply_task_payload(
     trigger: str,
     lock_token: str,
     started_at: str,
-    phases: Optional[frozenset[ApplyPhase]] = None,
+    phases: frozenset[ApplyPhase],
     carry_from_apply_id: Optional[str] = None,
     engine_type: Optional[str] = None,
     bot_type: Optional[str] = None,
@@ -106,20 +106,18 @@ def build_apply_task_payload(
         # copy from disagreeing with the row it belongs to.
         "started_at": started_at,
         # Sorted for a stable payload: two enqueues of the same apply must not
-        # differ only by set iteration order.
-        "phases": sorted(p.value for p in phases) if phases is not None else None,
+        # differ only by set iteration order. Never ``None``: ``phases`` is
+        # required, so what an apply covers is always stated in its payload
+        # rather than reconstructed from a default at the far end.
+        "phases": sorted(p.value for p in phases),
         "carry_from_apply_id": carry_from_apply_id,
         "engine_type": engine_type,
         "bot_type": bot_type,
     }
 
 
-def phases_from_payload(
-    value: Optional[Sequence[str]],
-) -> Optional[frozenset[ApplyPhase]]:
-    """``None`` means both phases — the same convention ``steps_for`` uses."""
-    if value is None:
-        return None
+def phases_from_payload(value: Sequence[str]) -> frozenset[ApplyPhase]:
+    """The phases the payload names. Always present — see the builder."""
     return frozenset(ApplyPhase(item) for item in value)
 
 

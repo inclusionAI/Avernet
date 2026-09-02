@@ -210,7 +210,8 @@ _APPLY_PAYLOAD = {
     "trigger": "explicit",
     "lock_token": "tok",
     "started_at": "2026-09-01T00:00:00",
-    "phases": None,
+    # Explicit, as every payload now is — the builder has no default.
+    "phases": ["on_container", "pre_container"],
     "carry_from_apply_id": None,
     "engine_type": "claude_code",
     "bot_type": "personal",

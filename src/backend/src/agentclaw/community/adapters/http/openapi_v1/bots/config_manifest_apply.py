@@ -35,6 +35,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
 )
 from agentclaw.community.api.bot_config_manifest_apply_service import (
+    ALL_PHASES,
     BotConfigManifestApplyServiceProtocol,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -187,6 +188,12 @@ async def apply_bot_config_manifest(
         owner_id=owner_id,
         actor_id=actor_id,
         audit_actor=audit,
+        # Every phase: this route applies a whole document to a bot that already
+        # exists, so both halves are deliverable. Stated rather than defaulted —
+        # the creation path deliberately applies one phase at a time, and which
+        # of the two a call means must never be something a reader infers from
+        # an omission.
+        phases=ALL_PHASES,
     )
     return envelope(
         ConfigManifestApplyAccepted(

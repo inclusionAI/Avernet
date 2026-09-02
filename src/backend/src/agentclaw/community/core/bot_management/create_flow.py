@@ -58,10 +58,6 @@ from agentclaw.community.core.workspace.runtime_identity import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
 from agentclaw.community.plugin_api.passport import PassportError
-from agentclaw.community.utils.avernet_tenant import (
-    DEFAULT_AVERNET_TENANT,
-    get_current_avernet_tenant,
-)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -397,14 +393,21 @@ def _apply_passport(
     any other apply failure becomes a ``BotServiceError`` so it keeps the
     "Passport apply failed" mapping rather than falling into a generic bucket.
     """
-    # 默认租户:首个个人 Bot → applyFirst(跳过审批),否则 → applyAgent(走审批)。
-    # 服务 Bot 不占用“首个个人 Bot”资格；软删除过滤由仓储查询保证。
-    # 其他租户(openapi / 外部):一律 applyFirst —— 审批流不适用于外部租户,
-    # 且 applyFirst 对重复调用幂等,故不依赖首个个人 Bot 判断。见 #556。
-    if (
-        get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT
-        and not use_first_passport
-    ):
+    # ``use_first_passport`` decides, and nothing else: the first personal Bot
+    # takes applyFirst (skipping approval), everything else applyAgent. Service
+    # Bots do not consume that eligibility; soft-delete filtering is the
+    # repository query's job.
+    #
+    # **Every tenant is treated the same.** This was once gated on
+    # ``get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT`` too, so a
+    # non-default tenant took applyFirst *unconditionally* — #556's reading that
+    # approval does not apply to external tenants. That made
+    # ``use_first_passport=False`` a request this function could silently
+    # decline, and W13 is the caller that cannot survive it: submission passes
+    # ``False`` precisely to get an authorization URL, and on a non-default
+    # tenant got a bare token instead — a ``202`` carrying two empty strings and
+    # no way to authorize the creation it had just started.
+    if not use_first_passport:
         apply = passport_plugin.apply_agent_passport
     else:
         apply = passport_plugin.apply_first_agent_passport

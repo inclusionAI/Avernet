@@ -23,7 +23,10 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.core.bot_config_manifest.apply.order import (
+    ALL_PHASES,
+    ApplyPhase,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ManifestApplyInProgressError,
@@ -222,6 +225,7 @@ def _start(service):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        phases=ALL_PHASES,
     )
 
 
@@ -455,6 +459,7 @@ def test_the_audit_label_is_recorded_without_becoming_the_principal(world):
         owner_id=_ENTITY,
         actor_id=_ENTITY,
         audit_actor=label,
+        phases=ALL_PHASES,
     )
     report = _drain(service)
 
@@ -477,6 +482,7 @@ def test_the_audit_label_defaults_to_the_principal(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        phases=ALL_PHASES,
     )
     _drain(service)
 
@@ -573,6 +579,7 @@ def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
+            phases=ALL_PHASES,
         )
 
     # The report is terminal, not stranded RUNNING.
@@ -588,6 +595,7 @@ def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        phases=ALL_PHASES,
     )
     assert accepted.status is ApplyStatus.RUNNING
 
@@ -782,6 +790,7 @@ def test_a_missing_carry_id_is_ignored_rather_than_failing_the_apply(world):
         actor_id=_ENTITY,
         trigger="create:on_container",
         carry_from_apply_id="does-not-exist",
+        phases=ALL_PHASES,
     )
 
     report = service.get_apply(
@@ -923,6 +932,7 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        phases=ALL_PHASES,
     )
     # A second apply, whose rebuild will fail.
     def _refuse(**_kwargs):

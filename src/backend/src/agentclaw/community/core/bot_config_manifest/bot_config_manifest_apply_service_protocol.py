@@ -28,7 +28,10 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
-from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.core.bot_config_manifest.apply.order import (
+    ALL_PHASES,
+    ApplyPhase,
+)
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyConstruct,
     ApplyReport,
@@ -68,6 +71,7 @@ class ApplyAccepted:
 
 
 __all__ = [
+    "ALL_PHASES",
     "ApplyAccepted",
     "ApplyPhase",
     "ApplyReport",
@@ -91,7 +95,7 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         actor_id: str,
         audit_actor: Optional[str] = None,
         trigger: str = "explicit",
-        phases: Optional[frozenset[ApplyPhase]] = None,
+        phases: frozenset[ApplyPhase],
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
         carry_from_apply_id: Optional[str] = None,
@@ -117,9 +121,14 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         ``apply_id`` for an apply that did not start, and never has to poll to
         discover their document was bad.
 
-        ``phases`` defaults to both, which is what an apply on an existing bot
-        wants. W13 passes one at a time — ``PRE_CONTAINER`` before the start
-        command is composed, ``ON_CONTAINER`` once the container is up.
+        ``phases`` is **required, with no default**. An omitted-means-both
+        default read fine at the one call site that wanted both and badly
+        everywhere else: what an apply covers is the single most consequential
+        thing about it — W13's pre-container phase writing the startup-script
+        row before the container exists is the whole ordering guarantee — and a
+        caller that leaves it out is not stating a choice, it is inheriting one.
+        The explicit ``POST .../apply`` passes ``ALL_PHASES``, which says the
+        same thing the default said and says it where the reader is.
 
         Raises:
             ManifestApplyInProgressError: Another apply holds this bot's lock.

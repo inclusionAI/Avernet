@@ -39,7 +39,10 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     build_apply_task_payload,
     phases_from_payload,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.core.bot_config_manifest.apply.order import (
+    ALL_PHASES,
+    ApplyPhase,
+)
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 
 # Imported for side effect: registers the models on ``Base.metadata``.
@@ -216,6 +219,7 @@ def _start(service):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        phases=ALL_PHASES,
     )
 
 
@@ -241,6 +245,7 @@ def test_the_payload_carries_identifiers_and_not_the_document():
         trigger="explicit",
         lock_token="tok",
         started_at="2026-09-01T00:00:00",
+        phases=ALL_PHASES,
     )
     assert "document" not in payload and "parsed" not in payload
     assert "bot" not in payload
@@ -268,9 +273,11 @@ def test_the_payloads_phases_are_stable_across_two_enqueues():
     )
     assert first["phases"] == second["phases"]
     assert phases_from_payload(first["phases"]) == both
-    # ``None`` means both phases — the same convention ``steps_for`` uses, and
-    # the reason an absent value is not "no phases".
-    assert phases_from_payload(None) is None
+    # Always written, never inferred. ``phases`` is a required argument, so a
+    # payload cannot leave what an apply covers to a default at the far end —
+    # which is what an absent value used to mean.
+    assert first["phases"] is not None
+    assert phases_from_payload(first["phases"]) == ALL_PHASES
 
 
 # ── re-running ─────────────────────────────────────────────────────────────
