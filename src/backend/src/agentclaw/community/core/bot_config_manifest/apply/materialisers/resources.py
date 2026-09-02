@@ -43,6 +43,7 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
     CategoryPlan,
     Intent,
     Materialiser,
+    PlannedEntry,
     ResolveFailure,
     ResolveResult,
 )
@@ -257,12 +258,56 @@ class ResourcesMaterialiser(Materialiser):
     async def plan(
         self, ctx: ApplyContext, intents: Sequence[Intent]
     ) -> CategoryPlan:
-        return CategoryPlan()  # replaced by the classification stage (W6)
+        """Classify for the report. Never ``unchanged`` — v1 replaces on
+        every apply (the work item's recommended option (1)), so classifying
+        anything as unchanged would be a claim the write stage does not
+        honour. ``exists`` is consulted only for the created/updated label,
+        and the directory sentinels classify within the same vocabulary:
+        the orchestrator's dry-run projection feeds every planned outcome
+        through :class:`EntryOutcome`, which a bespoke label would crash.
+        """
+        entity_type, entity_id = _coords(ctx)
+        planned: list[PlannedEntry] = []
+        for intent in intents:
+            present = await self._resources.exists(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                bot_id=ctx.bot_id,
+                engine_type=ctx.engine_type,
+                path=intent.identity,
+            )
+            planned.append(
+                PlannedEntry(
+                    intent=intent,
+                    outcome="updated" if present else "created",
+                )
+            )
+        return CategoryPlan(entries=tuple(planned), removals=())
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
     ) -> Sequence[EntryResult]:
         return ()  # replaced by the delivery stage (W6)
+
+
+def _coords(ctx: ApplyContext) -> tuple[str, str]:
+    """The entity pair every resource write uses, the router's own way.
+
+    The entity is the bot's owner — the address the resources router's
+    ``_resolve_params`` resolves and ``resource_coords_from_record`` derives
+    — so ``entity_id`` here is ``ctx.owner_id``, **not** ``ctx.entity_id``:
+    that field is the manifest's storage key, a different vocabulary that
+    happens to share the name. ``entity_type`` is ``"staff"``, the
+    personal-bot surface's fixed type.
+
+    The engine halves of the address come from ``ctx.engine_type``, resolved
+    once per apply rather than re-resolved here (the context's own rule: a
+    single resolution cannot disagree with itself midway through an apply).
+    ``resource_coords_from_record`` is therefore not called — it would
+    re-resolve the engine through a bot repository this materialiser does
+    not carry, for a value the pipeline already holds.
+    """
+    return "staff", ctx.owner_id
 
 
 __all__ = ["ResourcesMaterialiser"]

@@ -678,6 +678,7 @@ class FakeResourceFileService:
     def __init__(self, exists_paths: set[str] | None = None) -> None:
         self.writes: dict[tuple[str, str], bytes] = {}
         self.deleted: list[str] = []
+        self.exists_probes: list[dict[str, Any]] = []
         self._exists = set(exists_paths or ())
 
     def record_present(self, *paths: str) -> None:
@@ -723,4 +724,16 @@ class FakeResourceFileService:
         publish_id: str | None = None,
         device_uuid: str | None = None,
     ) -> bool:
+        # Recorded so a test can pin *how* the plan stage addressed the
+        # workspace — the entity half must be the owner, the router's own
+        # address, not the manifest's storage key.
+        self.exists_probes.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "bot_id": bot_id,
+                "engine_type": engine_type,
+                "path": path,
+            }
+        )
         return path in self._exists

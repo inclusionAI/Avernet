@@ -267,3 +267,106 @@ def test_nested_paths_abort_category():
     )
     assert not resolved.ok
     assert any("nest" in f.reason for f in resolved.failures)
+
+
+# --- plan: classification for the report (Task 4) ---
+
+
+def test_plan_classifies_present_as_updated_and_new_as_created():
+    svc = FakeResourceFileService(exists_paths={"data/a.bin"})
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {"path": "data/a.bin", "source": "https://x/a.bin"},
+                {"path": "data/new.bin", "source": "https://x/new.bin"},
+            ],
+        )
+    )
+    assert resolved.ok, [f.reason for f in resolved.failures]
+    plan = _run(m.plan(ctx, resolved.intents))
+    by_id = {p.intent.identity: p.outcome for p in plan.entries}
+    # Never "unchanged": v1 replaces on every apply by design (the work
+    # item's recommended option), and a plan that claimed otherwise would
+    # be a promise the write stage does not honour.
+    assert by_id == {"data/a.bin": "updated", "data/new.bin": "created"}
+    assert plan.removals == ()
+    assert not plan.is_noop
+
+
+def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
+    """``entity_id`` must be the owner (the router's address), not ``ctx.entity_id``.
+
+    The two vocabularies share a name: ``ApplyContext.entity_id`` is the
+    manifest's *storage key*, while ``ResourceFileService`` addresses a
+    workspace by its *owner* — the address the resources router's
+    ``_resolve_params`` resolves and ``resource_coords_from_record``
+    derives. A test that left them equal would never catch the swap.
+    """
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    ctx = make_context(
+        bot_id="b_1",
+        owner_id="u_owner",
+        entity_id="man-storage-key",
+        engine_type="claude_code",
+    )
+    resolved = _run(
+        m.resolve(ctx, [{"path": "data/a.bin", "source": "https://x/a.bin"}])
+    )
+    assert resolved.ok, [f.reason for f in resolved.failures]
+    _run(m.plan(ctx, resolved.intents))
+    assert svc.exists_probes == [
+        {
+            "entity_type": "staff",
+            "entity_id": "u_owner",
+            "bot_id": "b_1",
+            "engine_type": "claude_code",
+            "path": "data/a.bin",
+        }
+    ]
+
+
+def test_plan_classifies_the_directory_sentinel_within_the_report_vocabulary():
+    """The sentinel classifies like any entry — the vocabulary stays the enum's.
+
+    A bespoke outcome ("replaced") would crash the orchestrator's dry-run
+    projection, which feeds every planned outcome through
+    ``EntryOutcome(...)``; write recognises the sentinel by its ``value is
+    None``, not by the label.
+    """
+    archive = _tgz({"a.txt": b"AAA"})
+    svc = FakeResourceFileService(exists_paths={"established/"})
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {
+                    "path": "established/",
+                    "unpack": "tar.gz",
+                    "source": "https://x/old.tgz",
+                },
+                {
+                    "path": "fresh/",
+                    "unpack": "tar.gz",
+                    "source": "https://x/new.tgz",
+                },
+            ],
+        )
+    )
+    assert resolved.ok, [f.reason for f in resolved.failures]
+    plan = _run(m.plan(ctx, resolved.intents))
+    by_id = {p.intent.identity: p.outcome for p in plan.entries}
+    # Presence is probed per identity: only the "established/" tree root was
+    # seeded present, so its member — a fresh upload under a replaced tree —
+    # classifies as created, exactly as a first apply of the member would.
+    assert by_id == {
+        "established/": "updated",
+        "established/a.txt": "created",
+        "fresh/": "created",
+        "fresh/a.txt": "created",
+    }
