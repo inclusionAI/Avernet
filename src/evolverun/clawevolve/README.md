@@ -8,6 +8,7 @@ This package is being extracted from an existing hosted implementation without r
 
 ```ts
 import {
+  parseNodeCommandYamls,
   normalizeEvolutionGoal,
   quoteCommandArgument,
   renderCommand,
@@ -29,6 +30,15 @@ import {
 import {
   createClawevolveRuntimeModule,
 } from "@avernet/clawevolve/runtime";
+
+import {
+  dispatchPendingBusinessStep,
+  startInitialEvolveStep,
+} from "@avernet/clawevolve/server/services/evolve/task-start";
+
+import {
+  startRunAnalysisTimeoutSweeper,
+} from "@avernet/clawevolve/server/services/evolve/run-analysis-timeout";
 ```
 
 The module mounts in the host's existing Express process:
@@ -48,9 +58,16 @@ await module.start();
 app.use(module.apiBasePath, module.router);
 ```
 
-The public registry contains only ClawEvolve task types. Host-only task types and integrations remain outside the package. Public command templates use placeholders; a host can provide its own reviewed command defaults through `createEvolveNodeRegistry()`.
+The public registry contains the complete ClawEvolve task and step type set,
+including repair, suggestion application, and run analysis. Deployment-specific
+task types and integrations remain outside the package. Public command templates
+use placeholders; a host can provide its own reviewed command defaults through
+`createEvolveNodeRegistry()`.
 
-Command YAML policy that contains host-specific system arguments remains in the private host until a public contract can be extracted without changing behavior.
+Command YAML validation, initial step dispatch, and run-analysis timeout handling
+are part of this package. Concrete repositories and dispatch transports are
+supplied through the public ports; the package does not import a hosting
+application's source tree.
 
 ## Development
 

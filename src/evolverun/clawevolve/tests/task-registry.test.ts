@@ -9,7 +9,7 @@ import {
   taskNodeKeys,
 } from "../src/server/services/evolve/task-registry.js";
 
-test("publishes only the public Clawevolve task set", () => {
+test("publishes the complete Clawevolve task set", () => {
   assert.deepEqual(Object.keys(EVOLVE_TASK_REGISTRY), [
     "diagnose",
     "optimize",
@@ -20,11 +20,15 @@ test("publishes only the public Clawevolve task set", () => {
     "pack",
     "pack_restore",
     "runtime_cleanup",
+    "repair",
+    "suggestion_apply",
+    "run_analysis",
   ]);
   assert.equal(isEvolveTaskType("full"), true);
-  assert.equal(isEvolveTaskType("repair"), false);
-  assert.equal(isEvolveTaskType("run_analysis"), false);
+  assert.equal(isEvolveTaskType("repair"), true);
+  assert.equal(isEvolveTaskType("run_analysis"), true);
   assert.deepEqual(taskNodeKeys("bench_optimize"), ["bench_plan", "optimize"]);
+  assert.deepEqual(taskNodeKeys("full", "insight_improvement"), ["plan", "optimize"]);
 });
 
 test("keeps private hosted defaults outside the public registry", () => {
@@ -45,7 +49,7 @@ test("builds task definitions while allowing host-only variants", () => {
   assert.deepEqual(response.variants.hosted_variant.map((node) => node.key), ["plan", "optimize"]);
 });
 
-test("allows a host to append private task definitions without publishing them", () => {
+test("allows a host to append deployment-specific task definitions", () => {
   const response = createTaskDefinitionsResponse({
     taskRegistry: {
       ...EVOLVE_TASK_REGISTRY,

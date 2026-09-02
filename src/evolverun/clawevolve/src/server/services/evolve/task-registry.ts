@@ -10,6 +10,9 @@ export const EVOLVE_TASK_TYPES = [
   "pack",
   "pack_restore",
   "runtime_cleanup",
+  "repair",
+  "suggestion_apply",
+  "run_analysis",
 ] as const;
 
 export type EvolveTaskType = typeof EVOLVE_TASK_TYPES[number];
@@ -25,6 +28,10 @@ export const EVOLVE_STEP_TYPES = [
   "pack",
   "restore",
   "runtime_cleanup",
+  "repair_plan",
+  "repair_apply",
+  "suggestion_apply",
+  "run_analysis",
 ] as const;
 
 export type EvolveStepType = typeof EVOLVE_STEP_TYPES[number];
@@ -86,10 +93,18 @@ export const EVOLVE_TASK_REGISTRY: Record<EvolveTaskType, EvolveTaskDefinition> 
   pack: { type: "pack", label: "创建Pack", initialStepType: "pack", supportsRetry: true, supportsCancel: true, nodes: [] },
   pack_restore: { type: "pack_restore", label: "应用Pack", initialStepType: "restore", supportsRetry: true, supportsCancel: true, nodes: [] },
   runtime_cleanup: { type: "runtime_cleanup", label: "任务清理", initialStepType: "runtime_cleanup", supportsRetry: true, supportsCancel: false, nodes: [] },
+  repair: { type: "repair", label: "Bot修复", initialStepType: "repair_plan", supportsRetry: false, supportsCancel: false, nodes: [] },
+  suggestion_apply: { type: "suggestion_apply", label: "应用进化建议", initialStepType: "suggestion_apply", supportsRetry: true, supportsCancel: false, nodes: [] },
+  run_analysis: { type: "run_analysis", label: "运行日志分析", initialStepType: "run_analysis", supportsRetry: true, supportsCancel: false, nodes: [] },
 };
 
-export function taskNodeKeys(type: EvolveTaskType): readonly NodeCommandKey[] {
-  return EVOLVE_TASK_REGISTRY[type].nodes;
+export const INSIGHT_IMPROVEMENT_NODES = ["plan", "optimize"] as const satisfies readonly NodeCommandKey[];
+
+export function taskNodeKeys(
+  type: EvolveTaskType,
+  source?: "insight_improvement",
+): readonly NodeCommandKey[] {
+  return source === "insight_improvement" ? INSIGHT_IMPROVEMENT_NODES : EVOLVE_TASK_REGISTRY[type].nodes;
 }
 
 export function defaultNodeCommand(
@@ -101,4 +116,29 @@ export function defaultNodeCommand(
 
 export function isEvolveTaskType(value: unknown): value is EvolveTaskType {
   return typeof value === "string" && value in EVOLVE_TASK_REGISTRY;
+}
+
+const EVOLVE_STEP_REGISTRY: Record<EvolveStepType, { baasStage: string; usesBaasRuntime: boolean }> = {
+  skill_init: { baasStage: "skill-init", usesBaasRuntime: false },
+  diagnose: { baasStage: "clawevolve-diagnose", usesBaasRuntime: true },
+  plan: { baasStage: "clawevolve-plan", usesBaasRuntime: true },
+  optimize: { baasStage: "optimize", usesBaasRuntime: true },
+  apply: { baasStage: "clawevolve-apply", usesBaasRuntime: false },
+  bench: { baasStage: "clawevolve-bench", usesBaasRuntime: true },
+  bench_plan: { baasStage: "bench-plan", usesBaasRuntime: true },
+  pack: { baasStage: "clawevolve-pack", usesBaasRuntime: true },
+  restore: { baasStage: "clawevolve-pack", usesBaasRuntime: true },
+  runtime_cleanup: { baasStage: "runtime-cleanup", usesBaasRuntime: true },
+  repair_plan: { baasStage: "repair-plan", usesBaasRuntime: false },
+  repair_apply: { baasStage: "repair-apply", usesBaasRuntime: false },
+  suggestion_apply: { baasStage: "suggestion-apply", usesBaasRuntime: false },
+  run_analysis: { baasStage: "run-analysis", usesBaasRuntime: false },
+};
+
+export function stepUsesBaasRuntime(stepType: string): boolean {
+  return EVOLVE_STEP_REGISTRY[stepType as EvolveStepType]?.usesBaasRuntime === true;
+}
+
+export function evolveStepBaasStage(stepType: string): string | undefined {
+  return EVOLVE_STEP_REGISTRY[stepType as EvolveStepType]?.baasStage;
 }

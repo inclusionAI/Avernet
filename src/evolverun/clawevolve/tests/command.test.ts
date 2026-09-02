@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   normalizeDiagnoseIntent,
   normalizeEvolutionGoal,
+  parseNodeCommandYaml,
+  parseNodeCommandYamls,
   quoteCommandArgument,
   readDiagnoseJudgeBackend,
   readNodeCommandOption,
@@ -11,6 +13,7 @@ import {
   renderCommand,
   resolveDiagnoseJudgeBackend,
   resolveOpenClawExecutionMode,
+  withoutDiagnoseApiKey,
 } from "../src/server/services/evolve/command.js";
 
 test("normalizes goals without changing the existing contract", () => {
@@ -60,5 +63,44 @@ test("reads command options and renders command templates", () => {
   assert.throws(
     () => renderCommand("/command {{value}}", { value: "x".repeat(70 * 1024) }, []),
     /64 KiB/,
+  );
+});
+
+test("parses node command YAML and rejects host-controlled arguments", () => {
+  assert.equal(
+    parseNodeCommandYaml('version: "1.0"\ncommand: /clawevolve-plan --model model-a', "plan"),
+    "/clawevolve-plan --model model-a",
+  );
+  assert.throws(
+    () => parseNodeCommandYaml('version: "1.0"\ncommand: /clawevolve-plan --task-id EV-1', "plan"),
+    /不允许定义/,
+  );
+  assert.throws(
+    () => parseNodeCommandYaml('version: "1.0"\ncommand: /clawevolve-plan --callback-url https:\/\/example.test', "plan"),
+    /不允许定义/,
+  );
+  assert.throws(
+    () => parseNodeCommandYaml('version: "1.0"\ncommand: /clawevolve-plan --skip-hostweb', "plan"),
+    /不允许定义/,
+  );
+  assert.throws(
+    () => parseNodeCommandYaml('version: "1.0"\ncommand: /clawevolve-workflow --stage optimize --stage optimize', "optimize"),
+    /只能声明一次/,
+  );
+  assert.deepEqual(parseNodeCommandYamls({
+    plan: 'version: "1.0"\ncommand: /clawevolve-plan',
+  }, ["plan"]), { plan: "/clawevolve-plan" });
+  assert.throws(() => parseNodeCommandYamls({ bench: "value" }, ["plan"]), /不支持节点/);
+});
+
+test("removes only placeholder diagnose API keys", () => {
+  const sanitized = withoutDiagnoseApiKey(
+    "/clawevolve-diagnose --api-key {{api_key}} --model model-a",
+  );
+  assert.doesNotMatch(sanitized, /--api-key/);
+  assert.match(sanitized, /--model model-a/);
+  assert.throws(
+    () => withoutDiagnoseApiKey("/clawevolve-diagnose --api-key actual-value"),
+    /不允许包含/,
   );
 });
