@@ -1650,6 +1650,8 @@ git commit -m "feat(w7): declared-source resolution and the git entry road"
 
 ### Task 6: identity materialiser 的 git 路
 
+> **CLAIMED BY B(协作会话)@2026-09-02 17:46** — Task 5 已合入(`1cb77535e`),B 按分工表认领本任务与 Task 7。A 轨请勿派发;`identity.py` 与 `test_identity_materialiser.py` 会出现 B 的 WIP。
+
 **Files:**
 - Modify: `<R>/apply/materialisers/identity.py`
 - Test: `<T>/apply/test_identity_materialiser.py`（追加；沿用该文件现有的 materialiser 构造 helper——构造参数 `IdentityMaterialiser(identity_service, fetcher)`，fakes 来自 `_fakes.py`）
@@ -1814,6 +1816,8 @@ git commit -m "feat(w7): identity entries can read one file from a git source"
 ---
 
 ### Task 7: skills materialiser 的 git 路
+
+> **CLAIMED BY B(协作会话)@2026-09-02 17:46** — 与 Task 6 一并认领;B 将在 Task 6 交付后顺序执行本任务。A 轨请勿派发。
 
 **Files:**
 - Modify: `<R>/apply/materialisers/skills.py`
