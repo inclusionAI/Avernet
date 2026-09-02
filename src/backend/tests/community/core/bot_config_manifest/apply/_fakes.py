@@ -658,10 +658,26 @@ def make_context(
     bot_type: str = "personal",
     apply_id: str | None = None,
     source_session=None,
+    bot: dict[str, Any] | None = None,
 ) -> ApplyContext:
-    """An ``ApplyContext`` with real capabilities resolved for a baas bot;
+    """An ``ApplyContext`` with real capabilities resolved for a baas bot.
+
     ``source_session`` carries the W7 per-apply named-source state when a
-    test drives the ``from``/git pipeline."""
+    test drives the ``from``/git pipeline. ``bot`` overlays the default
+    record — e.g. ``bot={"template_type": "applicationCoding"}`` for the
+    runtime-routing cases: the bot record is what the engine-provisioning
+    routing policy reads, and ``bot_type`` / ``engine_type`` stay the
+    *capability* vocabulary while the materialiser derives the workspace
+    address from the record.
+    """
+    record = {
+        "bot_id": bot_id,
+        "owner_id": owner_id,
+        "entity_id": entity_id,
+        "active_engine": engine_type,
+        "bot_type": bot_type,
+    }
+    record.update(bot or {})
     return ApplyContext(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -673,13 +689,7 @@ def make_context(
         bot_type=bot_type,
         apply_id=apply_id,
         source_session=source_session,
-        bot={
-            "bot_id": bot_id,
-            "owner_id": owner_id,
-            "entity_id": entity_id,
-            "active_engine": engine_type,
-            "bot_type": bot_type,
-        },
+        bot=record,
         capabilities=resolve_capabilities(
             active_engine=engine_type,
             bot_type=bot_type,

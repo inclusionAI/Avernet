@@ -74,6 +74,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
     UnpackError,
     unpack_archive,
 )
+from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
 #: Schema §5 states the two resource forms' fetch widths separately —
 #: ``resources_file`` (100MB) and ``resources_archive`` (200MB) — and the
@@ -384,7 +385,7 @@ class ResourcesMaterialiser(Materialiser):
         (both take ``plan.removals`` verbatim), and what gives a
         dirs-only archive's destructive replace its audit row.
         """
-        entity_type, entity_id = _coords(ctx)
+        entity_type, entity_id, engine = _coords(ctx)
         planned: list[PlannedEntry] = []
         for intent in intents:
             if intent.value is _DECLARED_TREE:
@@ -393,7 +394,7 @@ class ResourcesMaterialiser(Materialiser):
                 entity_type=entity_type,
                 entity_id=entity_id,
                 bot_id=ctx.bot_id,
-                engine_type=ctx.engine_type,
+                engine_type=engine,
                 path=intent.identity,
             )
             planned.append(
@@ -418,7 +419,7 @@ class ResourcesMaterialiser(Materialiser):
         the source of truth, no rollback is attempted. The platform-side
         unpack already kept a bad archive from reaching this far.
         """
-        entity_type, entity_id = _coords(ctx)
+        entity_type, entity_id, engine = _coords(ctx)
         results: list[EntryResult] = []
         # 1) Declared trees first — one delete per tree, from the plan's
         # removals. A tree's replace removes everything under ``path``,
@@ -438,7 +439,7 @@ class ResourcesMaterialiser(Materialiser):
                     entity_type=entity_type,
                     entity_id=entity_id,
                     bot_id=ctx.bot_id,
-                    engine_type=ctx.engine_type,
+                    engine_type=engine,
                     path=target,
                 )
             except Exception:  # noqa: BLE001 — surfaced per member, not as text
@@ -458,7 +459,7 @@ class ResourcesMaterialiser(Materialiser):
                     entity_type=entity_type,
                     entity_id=entity_id,
                     bot_id=ctx.bot_id,
-                    engine_type=ctx.engine_type,
+                    engine_type=engine,
                     path=target,
                 )
             except Exception:  # noqa: BLE001 — pessimistic default below
@@ -487,7 +488,7 @@ class ResourcesMaterialiser(Materialiser):
                     entity_type=entity_type,
                     entity_id=entity_id,
                     bot_id=ctx.bot_id,
-                    engine_type=ctx.engine_type,
+                    engine_type=engine,
                     target_dir=target_dir,
                     filename=filename,
                     data=data,
@@ -551,8 +552,8 @@ def _delivery_refusal(identity: str, data: bytes) -> str | None:
     return None
 
 
-def _coords(ctx: ApplyContext) -> tuple[str, str]:
-    """The entity pair every resource write uses, the router's own way.
+def _coords(ctx: ApplyContext) -> tuple[str, str, str]:
+    """The entity pair — and the routed engine — every resource write uses.
 
     The entity is the bot's owner — the address the resources router's
     ``_resolve_params`` resolves and ``resource_coords_from_record`` derives
@@ -561,14 +562,28 @@ def _coords(ctx: ApplyContext) -> tuple[str, str]:
     happens to share the name. ``entity_type`` is ``"staff"``, the
     personal-bot surface's fixed type.
 
-    The engine halves of the address come from ``ctx.engine_type``, resolved
-    once per apply rather than re-resolved here (the context's own rule: a
-    single resolution cannot disagree with itself midway through an apply).
-    ``resource_coords_from_record`` is therefore not called — it would
+    The engine half routes the same way the router does before it composes
+    ``{bot_dir}/{engine}/workspace``: the runtime routing policy
+    (``claude_code`` + a non-``normalCC`` template ⇒ ``aicoding``) read
+    off the bot record. ``ctx.engine_type`` is the *raw* ``active_engine``
+    and the capability vocabulary — redefining it would silently change
+    script/`${BOT_ENGINE_TYPE}` substitution — so the routing is applied
+    here, over ``ctx.bot`` (carried on the context precisely so a
+    materialiser can read engine/template facts off it, its docstring
+    records). ``resolve_bot_engine`` is pure over that dict; the import
+    stays at call time for the same no-service-graph reason as the
+    admission constants (a module-scope import would pull the engine
+    registry's strategy graph into every importer). ``resource_coords_from_record``
+    is the twin derivation for repo-carrying callers; calling it here would
     re-resolve the engine through a bot repository this materialiser does
-    not carry, for a value the pipeline already holds.
+    not carry, for a value the carried record already answers.
     """
-    return "staff", ctx.owner_id
+    from agentclaw.community.core.bot_management.engines.registry import (
+        resolve_bot_engine,
+    )
+
+    engine = resolve_bot_engine(ctx.bot) or ctx.engine_type or DEFAULT_ENGINE_TYPE
+    return "staff", ctx.owner_id, engine
 
 
 __all__ = ["ResourcesMaterialiser"]

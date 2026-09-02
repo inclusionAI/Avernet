@@ -1048,3 +1048,70 @@ def test_a_refused_member_blames_the_declared_entry_in_the_report():
     # Nothing was written and the tree still stands.
     assert svc.writes == {}
     assert svc.deleted == []
+
+
+# --- the write address's engine half: the runtime routing (F2) ---
+
+
+def test_routed_bots_address_the_runtime_engine_workspace():
+    """F2: the workspace address routes the engine the router's way.
+
+    The resources router resolves the engine through the runtime routing
+    policy (``claude_code`` + a non-``normalCC`` template ⇒ ``aicoding``)
+    before composing ``{bot_dir}/{engine}/workspace``; a raw
+    ``active_engine`` would deliver the files into a tree neither the
+    resources console nor the bot reads while the report says SUCCEEDED.
+    """
+    archive = _tgz({"a.txt": b"A"})
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(
+        engine_type="claude_code", bot={"template_type": "applicationCoding"}
+    )
+    _write_through(
+        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+    )
+    assert svc.delete_calls[0]["engine_type"] == "aicoding"
+    assert all(c["engine_type"] == "aicoding" for c in svc.upload_calls)
+    assert all(p["engine_type"] == "aicoding" for p in svc.exists_probes)
+
+
+def test_unrouted_bots_keep_the_active_engine():
+    """The control cases: no template, the ``normalCC`` template, and a
+    plain non-claude_code engine all keep the address on the active engine
+    — the routing policy must be the only thing that moves the address."""
+    archive = _tgz({"a.txt": b"A"})
+    cases = [
+        {},  # fake default: claude_code, no template_type
+        {"template_type": "normalCC"},
+    ]
+    for overlay in cases:
+        svc = FakeResourceFileService()
+        m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+        ctx = make_context(engine_type="claude_code", bot=overlay)
+        _write_through(
+            m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+        )
+        assert svc.delete_calls[0]["engine_type"] == "claude_code"
+
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(engine_type="openclaw")
+    _write_through(
+        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+    )
+    assert svc.delete_calls[0]["engine_type"] == "openclaw"
+
+
+def test_an_engineless_bot_record_falls_back_to_the_context_engine():
+    """A record without a readable engine (``active_engine`` None) falls
+    back to ``ctx.engine_type`` — never an empty string, which the path
+    factory would compose into the bot root instead of an engine dir."""
+    archive = _tgz({"a.txt": b"A"})
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(engine_type="openclaw", bot={"active_engine": None})
+    _write_through(
+        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+    )
+    assert svc.delete_calls[0]["engine_type"] == "openclaw"
