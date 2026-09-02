@@ -460,9 +460,6 @@ def _annotations(fn) -> set[str]:
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (  # noqa: E402
     CreationSequence,
 )
-from agentclaw.community.core.bot_config_manifest.creation import (  # noqa: E402
-    CREATE_PRE_CONTAINER_TRIGGER,
-)
 
 _RECORD_FIRST = CreationSequence.RECORD_PRE_PROVISION
 

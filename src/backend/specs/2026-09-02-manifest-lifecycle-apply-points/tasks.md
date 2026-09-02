@@ -270,11 +270,12 @@ Conventions every task assumes:
         in); ARCA scenarios unedited; `script` on teclaw is still a `422`.
 - **Depends on:** Task 14
 
-## [ ] Task 16: The provisioner's first artifact carries the manifest
-- **Files:** `tests/community/core/bot_management/services/test_teclaw_provision_service.py`,
-  `tests/community/core/bot_config_manifest/creation/test_first_artifact.py` (new)
+## [x] Task 16: The provisioner's first artifact carries the manifest
+- **Files:** `tests/community/core/bot_config_manifest/creation/test_first_artifact.py` (new;
+  the provisioner's own unit suite needed no change — it already asserts the
+  produced artifact reaches `create_teclaw_bot`)
 - **Done when:**
-  - [ ] An end-to-end test: stored manifest declaring identity, a resource
+  - [x] An end-to-end test: stored manifest declaring identity, a resource
         and a skill; deferred create; the phase writes to the store; the
         provisioner's composed artifact (real composer, fake collectors for
         the DB categories, real reader over the index) carries the refs, the
