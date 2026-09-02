@@ -597,6 +597,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}"): AdmissionMode.USER_GATED,
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"): AdmissionMode.USER_GATED,
     ("PUT", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"): AdmissionMode.REFUSED,

@@ -39,6 +39,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftRevisionConflictError,
     SpaceSkillIdempotencyConflictError,
     SpaceSkillGrantForbiddenError,
+    SkillOfflineError,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.core.work_orders.repository.models import WorkOrderModel
@@ -171,6 +172,7 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                 "name": row[0].name,
                 "space_type": row[1].space_type,
                 "sc_team_id": row[1].sc_team_id,
+                "offline_at": row[0].offline_at,
             }
 
     def get_upgrade_by_request_id(
@@ -280,6 +282,8 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
         )
         if grant is None:
             raise SpaceSkillGrantForbiddenError("owner or manager required")
+        if skill.offline_at is not None:
+            raise SkillOfflineError("offline Skill cannot create an upgrade Draft")
         request = (
             session.query(SkillDraftUpgradeRequest)
             .filter(

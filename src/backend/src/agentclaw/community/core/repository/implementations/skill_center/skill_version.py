@@ -98,6 +98,22 @@ class SkillVersionRepository(
             )
             return self._record(row) if row is not None else None
 
+    def get_published_by_ordinal(
+        self, *, env: str, skill_id: int, version_ordinal: int
+    ) -> SkillVersionRecord | None:
+        with self._db.orm_session() as session:
+            row = (
+                session.query(SkillVersion)
+                .filter(
+                    SkillVersion.skill_id == skill_id,
+                    SkillVersion.version_ordinal == version_ordinal,
+                    SkillVersion.env == env,
+                    SkillVersion.status == "PUBLISHED",
+                )
+                .one_or_none()
+            )
+            return self._record(row) if row is not None else None
+
     def get_materialization_target(
         self, *, env: str, skill_id: int, skill_version_id: int
     ) -> MaterializingSkillVersion | None:
@@ -177,24 +193,6 @@ class SkillVersionRepository(
                 version.status = "PUBLISHED"
                 skill.description = description
                 skill.status = "PUBLISHED"
-                # Only a real new publication of a Space-owned Skill restores
-                # TeamClaw visibility. An idempotent replay of an already
-                # PUBLISHED Version must never clear a later Offline fact, and
-                # SC Public Reference/Sync has no Space ownership to restore.
-                owns_space = (
-                    session.query(SkillSpaceBinding.id)
-                    .filter(
-                        SkillSpaceBinding.skill_id == skill_id,
-                        SkillSpaceBinding.env == env,
-                    )
-                    .one_or_none()
-                )
-                if (
-                    owns_space is not None
-                    and version.publication_attempt_id is not None
-                ):
-                    skill.offline_at = None
-                    skill.offline_by = None
                 session.flush()
             else:
                 raise RuntimeError("Skill Version is not MATERIALIZING")

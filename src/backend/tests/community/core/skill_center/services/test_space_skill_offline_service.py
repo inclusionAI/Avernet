@@ -26,13 +26,9 @@ from agentclaw.community.core.repository.space_skill_offline_types import (
     OfflinePublicationAttemptFact,
     OfflineSkillIdentity,
 )
-from agentclaw.community.core.skill_center.draft_content import DraftRevisionRef
 from agentclaw.community.core.skill_center.errors import (
     SkillOfflineBlockedError,
     SpaceSkillGrantForbiddenError,
-)
-from agentclaw.community.core.skill_center.services.published_version_draft import (
-    PreparedPublishedVersionDraft,
 )
 from agentclaw.community.core.skill_center.services.space_skill_offline_service import (
     SpaceSkillOfflineService,
@@ -85,35 +81,17 @@ def _service(*, inspection, lineage_result=None):
     repository.inspect.return_value = inspection
     lineage = MagicMock()
     lineage.scan.return_value = lineage_result or ServiceArtifactLineage((), ())
-    drafts = MagicMock()
-    prepared = PreparedPublishedVersionDraft(
-        expected_version_id=61,
-        target_version=3,
-        description="published",
-        ref=DraftRevisionRef(
-            tenant="tenant-a",
-            env="test",
-            skill_uuid=_UUID,
-            target_version=3,
-            revision_id=_NEW_REV,
-        ),
-    )
-    drafts.prepare.return_value = prepared
     repository.commit.return_value = OfflineCommit(
         changed=True,
-        target_version=3,
-        status="EDITING",
-        locator=prepared.ref.locator,
+        offline_at=datetime(2026, 9, 2),
     )
     service = SpaceSkillOfflineService(
         access=access,
         repository=repository,
         lineage=lineage,
-        drafts=drafts,
         env_provider=lambda: "test",
-        tenant_provider=lambda: "tenant-a",
     )
-    return service, access, repository, lineage, drafts, prepared
+    return service, access, repository, lineage
 
 
 def test_impact_counts_explicit_blockers_then_returns_unknown_artifact_as_warning():
@@ -177,8 +155,8 @@ def test_impact_counts_explicit_blockers_then_returns_unknown_artifact_as_warnin
     )
 
 
-def test_offline_prepares_exact_revision_then_commits_and_returns_vn_plus_one():
-    service, _access, repository, _lineage, drafts, prepared = _service(
+def test_offline_marks_existing_skill_without_creating_a_draft():
+    service, _access, repository, _lineage = _service(
         inspection=_inspection()
     )
 
@@ -186,37 +164,30 @@ def test_offline_prepares_exact_revision_then_commits_and_returns_vn_plus_one():
 
     assert result.changed is True
     assert result.lifecycle_status == "OFFLINE"
-    assert result.draft.target_version == 3
-    assert result.draft.revision_id == _NEW_REV
-    drafts.prepare.assert_called_once()
+    assert result.offline_at == datetime(2026, 9, 2)
     repository.commit.assert_called_once_with(
         space_id=7,
         skill_id=51,
         actor_id="owner-1",
-        expected_version_id=61,
-        target_version=3,
-        new_locator=prepared.ref.locator,
-        new_description="published",
         env="test",
         guard=ANY,
     )
 
 
 def test_offline_idempotent_replay_does_not_prepare_another_revision():
-    service, _access, repository, _lineage, drafts, _prepared = _service(
+    service, _access, repository, _lineage = _service(
         inspection=_inspection(identity=_identity(offline=True, draft=True))
     )
 
     result = service.offline(space_id=7, skill_id=51, actor_id="owner-1")
 
     assert result.changed is False
-    assert result.draft.revision_id == _EXISTING_REV
-    drafts.prepare.assert_not_called()
+    assert result.offline_at == datetime(2026, 8, 30)
     repository.commit.assert_not_called()
 
 
 def test_unknown_artifact_warning_does_not_block_offline():
-    service, _access, repository, _lineage, _drafts, _prepared = _service(
+    service, _access, repository, _lineage = _service(
         inspection=_inspection(),
         lineage_result=ServiceArtifactLineage(
             references=(),
@@ -236,7 +207,7 @@ def test_unknown_artifact_warning_does_not_block_offline():
 
 
 def test_transaction_recheck_unknown_artifact_warning_does_not_roll_back_offline():
-    service, _access, repository, lineage, _drafts, _prepared = _service(
+    service, _access, repository, lineage = _service(
         inspection=_inspection()
     )
     lineage.scan.side_effect = [
@@ -256,9 +227,7 @@ def test_transaction_recheck_unknown_artifact_warning_does_not_roll_back_offline
         kwargs["guard"](_inspection())
         return OfflineCommit(
             changed=True,
-            target_version=3,
-            status="EDITING",
-            locator=kwargs["new_locator"],
+            offline_at=datetime(2026, 9, 2),
         )
 
     repository.commit.side_effect = _commit
@@ -268,8 +237,8 @@ def test_transaction_recheck_unknown_artifact_warning_does_not_roll_back_offline
     assert result.changed is True
 
 
-def test_concurrent_blocker_from_transaction_recheck_discards_prepared_revision():
-    service, _access, repository, lineage, drafts, prepared = _service(
+def test_concurrent_blocker_from_transaction_recheck_rejects_offline():
+    service, _access, repository, lineage = _service(
         inspection=_inspection()
     )
     latest = OfflineImpactItem(
@@ -302,7 +271,6 @@ def test_concurrent_blocker_from_transaction_recheck_discards_prepared_revision(
         service.offline(space_id=7, skill_id=51, actor_id="owner-1")
 
     assert blocked.value.impact.items == (latest,)
-    drafts.discard.assert_called_once_with(prepared)
 
 
 @pytest.mark.parametrize(
@@ -312,7 +280,7 @@ def test_concurrent_blocker_from_transaction_recheck_discards_prepared_revision(
 def test_owner_manager_policy_is_enforced_by_service(
     space_bound: bool, actor_roles: tuple[str, ...]
 ) -> None:
-    service, _access, repository, lineage, drafts, _prepared = _service(
+    service, _access, repository, lineage = _service(
         inspection=_inspection(
             space_bound=space_bound,
             actor_roles=actor_roles,
@@ -324,4 +292,3 @@ def test_owner_manager_policy_is_enforced_by_service(
 
     repository.commit.assert_not_called()
     lineage.scan.assert_not_called()
-    drafts.prepare.assert_not_called()

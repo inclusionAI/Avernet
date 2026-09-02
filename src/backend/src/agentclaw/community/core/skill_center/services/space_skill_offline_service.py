@@ -10,7 +10,6 @@ from agentclaw.community.core.service_bot.service_artifact_lineage_reader_protoc
 )
 from agentclaw.community.core.skill_center.space_skill_offline_service_protocol import (
     OfflineBlockerKind,
-    OfflineDraft,
     OfflineImpact,
     OfflineImpactItem,
     SpaceSkillOfflineResult,
@@ -23,13 +22,9 @@ from agentclaw.community.core.repository.space_skill_offline_types import (
 from agentclaw.community.core.repository.protocols.space_skill_offline import (
     SpaceSkillOfflineRepositoryProtocol,
 )
-from agentclaw.community.core.skill_center.draft_content import DraftRevisionRef
 from agentclaw.community.core.skill_center.errors import (
     SkillOfflineBlockedError,
     SpaceSkillGrantForbiddenError,
-)
-from agentclaw.community.core.skill_center.services.published_version_draft import (
-    PublishedVersionDraftBuilder,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 
@@ -51,16 +46,12 @@ class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
         access: SpaceAccessServiceProtocol,
         repository: SpaceSkillOfflineRepositoryProtocol,
         lineage: ServiceArtifactLineageReaderProtocol,
-        drafts: PublishedVersionDraftBuilder,
         env_provider: Callable[[], str],
-        tenant_provider: Callable[[], str],
     ) -> None:
         self._access = access
         self._repository = repository
         self._lineage = lineage
-        self._drafts = drafts
         self._env_provider = env_provider
-        self._tenant_provider = tenant_provider
 
     def impact(
         self,
@@ -83,58 +74,21 @@ class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
             space_id=space_id, skill_id=skill_id, actor_id=actor_id
         )
         identity = inspection.identity
-        if (
-            identity.offline_at is not None
-            and identity.draft_status is not None
-            and identity.draft_locator
-            and identity.draft_target_version is not None
-        ):
-            return self._result(
-                changed=False,
-                target_version=identity.draft_target_version,
-                status=identity.draft_status,
-                locator=identity.draft_locator,
-            )
+        if identity.offline_at is not None:
+            return self._result(changed=False, offline_at=identity.offline_at)
         if inspection.blockers:
             raise SkillOfflineBlockedError(
                 self._impact(inspection, page=1, page_size=20)
             )
 
-        prepared = self._drafts.prepare(
-            identity={
-                "skill_uuid": identity.skill_uuid,
-                "name": identity.name,
-                "sc_team_id": identity.sc_team_id,
-            },
-            latest={
-                "id": identity.latest_version_id,
-                "version_ordinal": identity.latest_version_ordinal,
-                "sc_version_number": identity.sc_version_number,
-            },
+        committed = self._repository.commit(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            env=self._env_provider(),
+            guard=self._guard_locked_offline,
         )
-        try:
-            committed = self._repository.commit(
-                space_id=space_id,
-                skill_id=skill_id,
-                actor_id=actor_id,
-                expected_version_id=prepared.expected_version_id,
-                target_version=prepared.target_version,
-                new_locator=prepared.ref.locator,
-                new_description=prepared.description,
-                env=self._env_provider(),
-                guard=self._guard_locked_offline,
-            )
-        except Exception:
-            self._drafts.discard(prepared)
-            raise
-        if not committed.changed:
-            self._drafts.discard(prepared)
-        return self._result(
-            changed=committed.changed,
-            target_version=committed.target_version,
-            status=committed.status,
-            locator=committed.locator,
-        )
+        return self._result(changed=committed.changed, offline_at=committed.offline_at)
 
     def _inspect(
         self, *, space_id: int, skill_id: int, actor_id: str
@@ -270,22 +224,11 @@ class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
             warnings=inspection.warnings,
         )
 
-    def _result(
-        self, *, changed: bool, target_version: int, status: str, locator: str
-    ) -> SpaceSkillOfflineResult:
-        ref = DraftRevisionRef.from_locator(
-            tenant=self._tenant_provider(),
-            env=self._env_provider(),
-            locator=locator,
-        )
+    def _result(self, *, changed: bool, offline_at) -> SpaceSkillOfflineResult:
         return SpaceSkillOfflineResult(
             changed=changed,
             lifecycle_status="OFFLINE",
-            draft=OfflineDraft(
-                target_version=target_version,
-                status=status,
-                revision_id=ref.revision_id,
-            ),
+            offline_at=offline_at,
         )
 
 

@@ -100,7 +100,7 @@ artifact。本文先冻结待实现合同；实现完成后生成的 OpenAPI JSO
 50. 作为 SkillCenter Public 用户，我希望一次选择多个 Skill 后获得可跨刷新恢复的异步引用进度，且只有物化完成后才加入 SkillSet。
 51. 作为发布者，我希望发布前看到可能受 Track Latest 影响的 Bot，但该预览不阻断发布，发布成功后由后端重新计算真实候选。
 52. 作为发布者，我希望自动重试耗尽后可以针对同一个 Attempt 恢复准备、查询 SC 结果或重试物化，而不会重复发布。
-53. 作为 Skill Owner/Manager，我希望下线前看到完整血缘；无引用时保留历史 Published Vn、创建 Vn+1 Draft，并允许修改后重新发布。
+53. 作为 Skill Owner/Manager，我希望下线前看到完整血缘；无引用时保留历史 Published Vn 并下线该资产，必要时复制 Vn 为独立新 Skill。
 
 ## Implementation Decisions
 
@@ -806,6 +806,7 @@ Owner 审批，旧 Owner 不得继续审批。
 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}/retry` | 恢复同一 Attempt；按最新阶段分流，不要求新幂等键 |
 | GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact` | 下线影响检查 |
 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline` | 本地隐藏 Published Skill，并创建下一版 Draft |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy` | 复制已下线 Skill 的精确 Vn 为独立新 Skill V1 Draft |
 
 发布事务：
 
@@ -864,10 +865,10 @@ acknowledgement token。预览到 PUBLISHED 之间事实可能变化，Track Lat
 
 #### 12.1 Offline、重新发布与血缘
 
-产品“下线”是 TeamClaw-local、可恢复的 Offline，不是永久 Retirement，也不把历史 Published
-Version 改回 Draft。无 blocker 时，Offline 保留不可变 Published Vn，并基于 Vn 创建 Vn+1
-EDITING Draft；用户修改后发布 Vn+1，成功事务清空 `offline_at/offline_by`，恢复 PUBLISHED
-可见性。重新上线必须产生新 Version，禁止覆盖或重新发布旧 Vn。
+产品“下线”是 TeamClaw-local 的终态 Offline，不是永久 Retirement，也不把历史 Published
+Version 改回 Draft。无 blocker 时，Offline 仅写 `offline_at/offline_by`，保留不可变 Published
+Vn；原 Skill 不再创建 Draft、升级或重新发布。用户需要继续创作时，复制精确 Vn 为新 UUID、
+独立新 Skill 的 V1 Draft；发布新副本会在同一 SC Team 创建独立 SC Skill，绝不复用原 SC 身份。
 
 Offline 期间从 TeamClaw 市场和 consumable 列表隐藏，禁止新的 Direct activation、Membership
 和其他 Bot 消费；Owner/Manager 仍可查看历史、编辑 Draft 和发布。它不调用 Skill Center
@@ -895,16 +896,10 @@ Service Artifact 血缘不建新索引表、不 backfill。唯一 `ServiceArtifa
 仅把存活 Service Bot 的 SUCCESS/UPGRADED/RELEASED/VALIDATING 等仍可重放记录作为 blocker；
 Service Bot 仅下线仍可能重新上线，因此仍阻断，必须彻底删除/退役该 Service Bot 才释放血缘。
 
-Offline Application Service 复用 Upgrade Draft 的 exact source 规则：先做只读 impact 预检，
-从 TC Canonical Store 读取 Published Vn（失败时从 SC exact version 修复）并写新 immutable Draft
-Revision，再在一个 DB 事务中锁 Skill、重查 blocker、写 `offline_at/offline_by` 与 Vn+1 Draft
-facts。DB 失败或并发 blocker 出现时清理新 Revision；不存在“已下线但没有 Draft”的半状态。
-
-POST 已 Offline 且 Vn+1 Draft 存在时幂等 `changed=false`。存在 blocker 返回
+Offline Application Service 先做只读 impact 预检，再在一个 DB 事务中锁 Skill、重查 blocker、
+仅写 `offline_at/offline_by`。POST 已 Offline 时幂等 `changed=false`。存在 blocker 返回
 `409 SKILL_OFFLINE_BLOCKED` 与最新 counts。Offline 与新增引用共享 Skill row lock 和
-`offline_at IS NULL` 不变量；Offline 期间新引用返回 `SKILL_OFFLINE`。若用户主动放弃 Offline
-Draft，Skill 仍保持 Offline，可再次调用 `draft/upgrade` 重新创建下一版 Draft；只有新 Version
-PUBLISHED 才恢复上线。
+`offline_at IS NULL` 不变量；Offline 期间新引用和原 Skill 的 `draft/upgrade` 返回 `SKILL_OFFLINE`。
 
 ### 13. Skill Center 映射与精确版本物化
 
@@ -1298,7 +1293,7 @@ Phase 2 必测：
 - 文件型 manifest v1 additive center_skills、共享 Center mount、排除完整 Corpus、exact symlink
   校验；Teclaw v4 additive Store 与真实 Consumer/offload/re-inline。
 - Offline 覆盖 Draft/Attempt、inactive/default Membership、Installation、inline/offloaded
-  replayable Artifact 与 UNKNOWN_ARTIFACT；无 force、无 SC 下线；成功创建 Vn+1 Draft并可重新发布。
+  replayable Artifact；无 force、无 SC 下线；成功保留原 Vn 为 OFFLINE，精确 Version Copy 创建独立 V1 Draft。
 - Local/Repo/Center 并存、Mapping v2/v3、所有实际 Bot/Engine 走共享合同而无静态拒绝分支。
 
 Phase 2 完成定义：产品主流程 E2E、SC pre 联调、多引擎矩阵、Service Artifact

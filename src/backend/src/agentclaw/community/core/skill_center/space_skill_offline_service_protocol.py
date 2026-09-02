@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
@@ -34,17 +35,10 @@ class OfflineImpact:
 
 
 @dataclass(frozen=True, slots=True)
-class OfflineDraft:
-    target_version: int
-    status: str
-    revision_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class SpaceSkillOfflineResult:
     changed: bool
     lifecycle_status: str
-    draft: OfflineDraft
+    offline_at: datetime
 
 
 @runtime_checkable
@@ -68,7 +62,6 @@ class SpaceSkillOfflineServiceProtocol(Protocol):
 
 __all__ = [
     "OfflineBlockerKind",
-    "OfflineDraft",
     "OfflineImpact",
     "OfflineImpactItem",
     "SpaceSkillOfflineResult",

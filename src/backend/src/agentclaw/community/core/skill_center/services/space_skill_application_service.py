@@ -28,6 +28,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftFrozenError,
     DraftNotFoundError,
     DraftSourceNotRefreshableError,
+    SkillOfflineError,
     SkillNameChangedError,
     SpaceSkillIdempotencyConflictError,
 )
@@ -318,6 +319,8 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
             actor_id=actor_id,
             env=self._env_provider(),
         )
+        if identity.get("offline_at") is not None:
+            raise SkillOfflineError("offline Skill cannot create an upgrade Draft")
         replay = self._draft_repository.get_upgrade_by_request_id(
             request_id=request_id, env=self._env_provider()
         )
@@ -356,6 +359,55 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
         if not result["created"]:
             self._published_drafts.discard(prepared)
         return self._draft_result(result["draft"])
+
+    def copy_published_version(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        version_ordinal: int,
+        actor_id: str,
+        request_id: str,
+    ) -> SpaceSkillCreationOutcome:
+        self._access.require_space_member(space_id=space_id, user_id=actor_id)
+        request_id = self._request_id(request_id)
+        identity = self._draft_repository.get_skill_for_upgrade(
+            space_id=space_id,
+            skill_id=skill_id,
+            actor_id=actor_id,
+            env=self._env_provider(),
+        )
+        if identity.get("offline_at") is None:
+            raise SkillOfflineError("only an offline Skill can be copied")
+        request_hash = hashlib.sha256(
+            f"COPY\\0{space_id}\\0{skill_id}\\0{version_ordinal}".encode("ascii")
+        ).hexdigest()
+        replay = self._creation_replay(
+            space_id=space_id, request_id=request_id, request_hash=request_hash
+        )
+        if replay is not None:
+            return replay
+        version = self._versions.get_published_by_ordinal(
+            env=self._env_provider(),
+            skill_id=skill_id,
+            version_ordinal=version_ordinal,
+        )
+        if version is None:
+            raise DraftNotFoundError("Published Version not found")
+        package = self._published_drafts.read_exact_package(
+            identity=identity, version=version
+        )
+        return self._persist_creation(
+            space_id=space_id,
+            actor_id=actor_id,
+            request_id=request_id,
+            request_hash=request_hash,
+            package=package,
+            source_data={
+                "draft_source_kind": "PUBLISHED_VERSION",
+                "source_type": "COPY",
+            },
+        )
 
     @staticmethod
     def _draft_result(record) -> DraftMutationResult:

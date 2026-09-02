@@ -64,9 +64,27 @@ class PublishedVersionDraftBuilder:
         self._tenant_provider = tenant_provider
 
     def prepare(self, *, identity, latest) -> PreparedPublishedVersionDraft:
+        package = self.read_exact_package(identity=identity, version=latest)
+        target_version = int(latest["version_ordinal"]) + 1
+        revision = DraftRevisionIdentity(
+            tenant=self._tenant_provider(),
+            env=self._env_provider(),
+            skill_uuid=identity["skill_uuid"],
+            target_version=target_version,
+            revision_id=str(uuid4()),
+        )
+        ref = self._draft_store.write_revision(revision, package)
+        return PreparedPublishedVersionDraft(
+            expected_version_id=int(latest["id"]),
+            target_version=target_version,
+            description=package.description,
+            ref=ref,
+        )
+
+    def read_exact_package(self, *, identity, version):
         exact_identity = CanonicalCenterVersionIdentity(
             skill_uuid=identity["skill_uuid"],
-            sc_version_number=latest["sc_version_number"],
+            sc_version_number=version["sc_version_number"],
         )
         exact_ref = CanonicalCenterVersionRef(exact_identity)
         try:
@@ -83,21 +101,7 @@ class PublishedVersionDraftBuilder:
         )
         if package.name != identity["name"]:
             raise SkillNameChangedError("SKILL.md name is immutable")
-        target_version = int(latest["version_ordinal"]) + 1
-        revision = DraftRevisionIdentity(
-            tenant=self._tenant_provider(),
-            env=self._env_provider(),
-            skill_uuid=identity["skill_uuid"],
-            target_version=target_version,
-            revision_id=str(uuid4()),
-        )
-        ref = self._draft_store.write_revision(revision, package)
-        return PreparedPublishedVersionDraft(
-            expected_version_id=int(latest["id"]),
-            target_version=target_version,
-            description=package.description,
-            ref=ref,
-        )
+        return package
 
     def discard(self, prepared: PreparedPublishedVersionDraft) -> None:
         try:
