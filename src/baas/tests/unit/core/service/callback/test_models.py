@@ -15,6 +15,7 @@ class TestCallbackPayload:
             result="done",
             error="err",
             metadata={"key": "val"},
+            session_id="sess-1",
         )
         d = payload.to_dict()
         assert d == {
@@ -24,6 +25,7 @@ class TestCallbackPayload:
             "result": "done",
             "error": "err",
             "metadata": {"key": "val"},
+            "session_id": "sess-1",
         }
 
     def test_to_dict_with_defaults(self):
@@ -35,6 +37,7 @@ class TestCallbackPayload:
         assert d["result"] is None
         assert d["error"] is None
         assert d["metadata"] is None
+        assert d["session_id"] is None
 
     def test_frozen(self):
         payload = CallbackPayload(run_id="r1", bot_id="b1", status="PENDING")
