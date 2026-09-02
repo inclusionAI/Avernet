@@ -12,6 +12,8 @@ from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.core.caller_identity.contracts import (
     CALLER_IDENTITY_CAPABILITY,
     CallerCallTypeInvalidError,
+    CallerCliNotFoundError,
+    CallerCliSyncError,
     CallerContext,
     CallerIamTokenContext,
     CallerIdentityAmbiguousError,
@@ -25,11 +27,23 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerMcpSyncError,
     McpCallType,
     McpCallTypeUpdateResult,
+    CliCallTypeUpdateResult,
 )
 
 
 @runtime_checkable
 class CallerIdentityServiceProtocol(Protocol):
+    async def update_cli_call_type(
+        self,
+        *,
+        bot_id: str,
+        cli_code: str,
+        call_type: McpCallType,
+        actor_id: str,
+        lock_epoch: int | None = None,
+        entity_id: str | None = None,
+    ) -> CliCallTypeUpdateResult: ...
+
     def exchange_caller_token(
         self,
         *,
@@ -115,6 +129,8 @@ class CallerIdentityServiceProtocol(Protocol):
 __all__ = [
     "CALLER_IDENTITY_CAPABILITY",
     "CallerCallTypeInvalidError",
+    "CallerCliNotFoundError",
+    "CallerCliSyncError",
     "CallerContext",
     "CallerIamTokenContext",
     "CallerIdentityAmbiguousError",
@@ -127,6 +143,7 @@ __all__ = [
     "CallerLockEpochError",
     "CallerMcpNotFoundError",
     "CallerMcpSyncError",
+    "CliCallTypeUpdateResult",
     "McpCallType",
     "McpCallTypeUpdateResult",
 ]

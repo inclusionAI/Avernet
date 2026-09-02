@@ -75,25 +75,30 @@ class SpaceService(SpaceServiceProtocol):
         normalized = profile.nick_name.strip()
         return normalized[:128] or None
 
-    def initialize_personal(self, *, user_id: str) -> tuple[SpaceRecord, bool]:
+    def initialize_personal(
+        self, *, user_id: str, create_sc_team: bool = True
+    ) -> tuple[SpaceRecord, bool]:
         env = get_current_env()
         existing = self._repository.get_personal_space(user_id=user_id, env=env)
         if existing is not None:
-            return self._ensure_personal_sc_team_binding(existing, env=env), False
+            return self._ensure_personal_sc_team_binding(
+                existing, env=env, create_sc_team=create_sc_team
+            ), False
 
         creator_user_name = self._get_creator_user_name(user_id=user_id)
         try:
             with self._repository.create_personal_transaction(
                 user_id=user_id, creator_user_name=creator_user_name, env=env
             ) as record:
-                result = self._skill_center_client.create_team(
-                    SkillCenterTeamCreateRequest(
-                        team_code=record.space_code,
-                        team_name=record.name,
-                        ref_source_id=str(record.id),
+                if create_sc_team:
+                    result = self._skill_center_client.create_team(
+                        SkillCenterTeamCreateRequest(
+                            team_code=record.space_code,
+                            team_name=record.name,
+                            ref_source_id=str(record.id),
+                        )
                     )
-                )
-                record.sc_team_id = result.team_id
+                    record.sc_team_id = result.team_id
             return record, True
         except SpaceAlreadyExistsError:
             # A concurrent initializer may have committed the unique personal
@@ -101,12 +106,14 @@ class SpaceService(SpaceServiceProtocol):
             existing = self._repository.get_personal_space(user_id=user_id, env=env)
             if existing is None:
                 raise
-            return self._ensure_personal_sc_team_binding(existing, env=env), False
+            return self._ensure_personal_sc_team_binding(
+                existing, env=env, create_sc_team=create_sc_team
+            ), False
 
     def _ensure_personal_sc_team_binding(
-        self, space: SpaceRecord, *, env: str
+        self, space: SpaceRecord, *, env: str, create_sc_team: bool = True
     ) -> SpaceRecord:
-        if space.sc_team_id:
+        if space.sc_team_id or not create_sc_team:
             return space
 
         # Lock the existing personal Space while resolving its external mapping,
@@ -155,7 +162,9 @@ class SpaceService(SpaceServiceProtocol):
             user_ids=normalized, env=get_current_env()
         )
 
-    def create_team(self, *, name: str, creator_id: str) -> SpaceRecord:
+    def create_team(
+        self, *, name: str, creator_id: str, create_sc_team: bool = True
+    ) -> SpaceRecord:
         normalized = name.strip()
         if not normalized or len(normalized) > 128:
             raise SpaceNameInvalidError("space name must contain 1-128 characters")
@@ -176,14 +185,15 @@ class SpaceService(SpaceServiceProtocol):
             creator_user_name=creator_user_name,
             env=env,
         ) as record:
-            result = self._skill_center_client.create_team(
-                SkillCenterTeamCreateRequest(
-                    team_code=record.space_code,
-                    team_name=record.name,
-                    ref_source_id=str(record.id),
+            if create_sc_team:
+                result = self._skill_center_client.create_team(
+                    SkillCenterTeamCreateRequest(
+                        team_code=record.space_code,
+                        team_name=record.name,
+                        ref_source_id=str(record.id),
+                    )
                 )
-            )
-            record.sc_team_id = result.team_id
+                record.sc_team_id = result.team_id
         return record
 
     def repair_sc_team_binding(self, *, space_id: int) -> SpaceScTeamRepairResult:

@@ -18,6 +18,7 @@ on the allowlist still goes through address validation.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
@@ -55,6 +56,19 @@ MAX_REDIRECTS = 5
 
 #: Schemes accepted without a deployment exception (W2 验收: 仅 https)。
 SAFE_SCHEMES = frozenset({"https"})
+
+#: The digest vocabulary W2 fixed and every later wave shares: ``sha256:``
+#: followed by exactly 64 lowercase hex. The fetcher mints these addresses
+#: (declared-digest validation, FetchedObject.sha256) and the W11 content
+#: store uses them as its addressing scheme — one regex, one vocabulary, no
+#: per-module copies that drift.
+#:
+#: ``\A``/``\Z`` rather than ``^``/``$``: in Python ``$`` also matches
+#: immediately before a trailing newline, so a digest with a ``\n`` tail
+#: would pass and then fail downstream as a mismatch or a missing address —
+#: the wrong taxonomy for malformed config. A fixed-width vocabulary has no
+#: room for a newline.
+DIGEST_RE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 
 
 #: Where the allowlist lives in the YAML tree, as one constant: the block

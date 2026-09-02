@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_collaborator.models import BotCollabLockModel
 from agentclaw.community.core.caller_identity.models import (
+    BotCliCallConfigModel,
     BotMcpCallConfigModel,
     McpCallType,
 )
@@ -62,6 +63,7 @@ def db(tmp_path):
     )
     BotModel.__table__.create(engine)
     BotMcpCallConfigModel.__table__.create(engine)
+    BotCliCallConfigModel.__table__.create(engine)
     BotCollabLockModel.__table__.create(engine)
     return _FileSqliteDB(engine)
 

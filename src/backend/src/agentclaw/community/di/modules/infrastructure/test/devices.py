@@ -25,6 +25,7 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
@@ -48,6 +49,7 @@ from agentclaw.community.core.devices.services.device_service_router import Devi
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.core.devices.services.local_device_accessor import LocalDeviceAccessor
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
+from agentclaw.community.core.mcp.services.cli_passport_scope import CliPassportScopeReconciler
 from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.workspace.path_factory import _get_aidesktop_root
@@ -123,6 +125,7 @@ class TestDevicesModule(Module):
         token_vault: TokenVault,
         passport_plugin: PassportPlugin,
         sandbox_client: SandboxRuntimeClient,
+        caller_identity_repository: CallerIdentityRepositoryProtocol,
     ) -> DeviceService:
         """Local-only ``DeviceServiceRouter`` build (singlebox via BaaS)."""
         from agentclaw.community.core.devices.services.local_device_service import (
@@ -162,6 +165,10 @@ class TestDevicesModule(Module):
             arca_baas_rollout_policy=arca_baas_rollout_policy,
             passport_plugin=passport_plugin,
             sandbox_client=sandbox_client,
+            cli_scope_reconciler=CliPassportScopeReconciler(
+                passport_plugin=passport_plugin,
+                identity_repository=caller_identity_repository,
+            ),
         )
 
     @singleton

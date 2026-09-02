@@ -832,6 +832,45 @@ pub struct ChannelDingTalkConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Human mention notification
+// ---------------------------------------------------------------------------
+
+/// Human mention notification configuration (`[human_notify]`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HumanNotifyConfig {
+    /// Selected backend name; the feature is off when absent.
+    #[serde(default)]
+    pub provider: Option<String>,
+
+    /// Backend-specific configuration keyed by backend name.
+    #[serde(default)]
+    pub providers: BTreeMap<String, HumanNotifyProviderConfig>,
+}
+
+impl HumanNotifyConfig {
+    /// Returns true when `provider` selects `name` and that entry is enabled.
+    pub fn enabled_provider(&self, name: &str) -> bool {
+        self.provider.as_deref() == Some(name)
+            && self
+                .providers
+                .get(name)
+                .is_some_and(|provider| provider.enabled)
+    }
+}
+
+/// Generic human-mention notification backend configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HumanNotifyProviderConfig {
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Backend-owned options. The public host only carries these through to
+    /// the backend factory.
+    #[serde(default, flatten)]
+    pub options: BTreeMap<String, serde_json::Value>,
+}
+
+// ---------------------------------------------------------------------------
 // Auth SDK
 // ---------------------------------------------------------------------------
 
@@ -1899,5 +1938,40 @@ mod tests {
             ];
             assert!(config.validate().is_err(), "rule should be rejected: {host}");
         }
+    }
+
+    #[test]
+    fn human_notify_config_parses_provider_and_options() {
+        let value: toml::Value = toml::from_str(
+            r#"
+provider = "dingtalk"
+
+[providers.dingtalk]
+enabled = true
+robot_code = "ding-robot"
+client_secret = "s3cret"
+"#,
+        )
+        .expect("toml must parse");
+        let config: HumanNotifyConfig = value.try_into().expect("config must deserialize");
+        assert_eq!(config.provider.as_deref(), Some("dingtalk"));
+        let provider = config
+            .providers
+            .get("dingtalk")
+            .expect("dingtalk provider entry");
+        assert!(provider.enabled);
+        assert!(config.enabled_provider("dingtalk"));
+        assert_eq!(
+            provider.options.get("robot_code").and_then(|v| v.as_str()),
+            Some("ding-robot")
+        );
+    }
+
+    #[test]
+    fn human_notify_config_defaults_to_disabled() {
+        let config = HumanNotifyConfig::default();
+        assert!(config.provider.is_none());
+        assert!(config.providers.is_empty());
+        assert!(!config.enabled_provider("dummy"));
     }
 }

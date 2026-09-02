@@ -10,7 +10,7 @@ Consolidated from:
 - core/skill_center/routers/skill_scan.py
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -501,6 +501,7 @@ class CLIInSetResponse(BaseModel):
     cli_code: str
     cli_name: Optional[str] = None
     cli_desc: Optional[str] = None
+    identity_mode: Literal["owner", "caller"] | None = None
 
 
 class SkillSetWithMCPsItem(BaseModel):

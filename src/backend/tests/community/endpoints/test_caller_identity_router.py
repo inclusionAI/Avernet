@@ -19,6 +19,7 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_lock_servic
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
 )
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -36,6 +37,7 @@ from tests.community.framework import (
 _OWNER_ID = "caller_identity_owner"
 _BOT_ID = "caller_identity_bot"
 _SERVER_CODE = "mcp.caller.identity"
+_CLI_CODE = "dataphin"
 _PRINCIPAL_KEY = "caller-identity-openapi-signing-key-32b"
 
 
@@ -91,6 +93,7 @@ def _seed_service_bot(world, *, acquire_lock: bool) -> None:
         owner_id=_OWNER_ID,
         bot_type="service",
         status="ACTIVE",
+        active_engine="openclaw",
     )
     if acquire_lock:
         world.get(CollaboratorLockService).acquire_lock(
@@ -145,6 +148,19 @@ def _seed_openapi_unlocked_mutable_caller_identity(world) -> None:
     _seed_unlocked_mutable_caller_identity(world)
 
 
+def _seed_openapi_unlocked_mutable_cli_caller_identity(world) -> None:
+    _seed_openapi_unlocked_mutable_caller_identity(world)
+    world.get(PassportPlugin).set_response("query_agent_passport", {
+        "mcps": [],
+        "clis": [{
+            "cli_code": _CLI_CODE,
+            "cli_name": "Dataphin CLI",
+            "cli_desc": "",
+            "identity_mode": "owner",
+        }],
+    })
+
+
 def _seed_openapi_owner(world) -> None:
     _enable_openapi_principal()
     _seed_owner(world)
@@ -190,6 +206,7 @@ def _assert_mcp_call_type_updated(response, world) -> None:
             "capability": "caller_identity.v1",
             "stage": "draft",
             "bot_call_type": "owner",
+            "cli_call_types": {},
             "editable": True,
         },
     ),
@@ -392,6 +409,7 @@ def update_mcp_call_type_forbidden():
                 "capability": "caller_identity.v1",
                 "stage": "draft",
                 "bot_call_type": "owner",
+                "cli_call_types": {},
                 "editable": True,
             },
         },
@@ -468,3 +486,53 @@ def update_openapi_mcp_call_type_happy():
 )
 def update_openapi_mcp_call_type_not_found():
     """The owner-only mutation masks an absent Bot behind the standard 404."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type",
+    scenario="happy",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": _CLI_CODE},
+        query_params={"user_id": _OWNER_ID},
+        headers=_OPENAPI_HEADERS,
+        json_body={"call_type": "caller"},
+    ),
+    seed=_seed_openapi_unlocked_mutable_cli_caller_identity,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "cli_code": _CLI_CODE,
+                "call_type": "caller",
+                "bot_call_type": "caller",
+            },
+        },
+    ),
+)
+def update_openapi_cli_call_type_happy():
+    """A sole owner updates an active CLI without a client-supplied lock epoch."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type",
+    scenario="error",
+    input=CaseInput(
+        path_params={
+            "bot_id": "missing_caller_identity_bot",
+            "cli_code": _CLI_CODE,
+        },
+        query_params={"user_id": _OWNER_ID},
+        headers=_OPENAPI_HEADERS,
+        json_body={"call_type": "caller"},
+    ),
+    seed=_seed_openapi_owner,
+    expect=ExpectError(
+        status=404,
+        json_contains={"code": 404000, "message": "Not found", "data": None},
+    ),
+)
+def update_openapi_cli_call_type_not_found():
+    """The CLI mutation masks an absent Bot behind the standard 404."""

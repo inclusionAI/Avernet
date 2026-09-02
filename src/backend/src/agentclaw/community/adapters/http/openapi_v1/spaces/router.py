@@ -37,6 +37,7 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     FavoriteTargetRequest,
     MarketFavoriteItem,
     PersonalSpaceInitialized,
+    InitializePersonalSpaceRequest,
     SpaceListScope,
     SearchFavoritesRequest,
     SpaceCreated,
@@ -237,9 +238,13 @@ async def list_spaces(
 async def initialize_personal_space(
     request: Request,
     user_id: UserIdDep,
+    body: InitializePersonalSpaceRequest | None = None,
     service: SpaceServiceProtocol = Injected(SpaceServiceProtocol),
 ) -> Envelope[PersonalSpaceInitialized]:
-    record, was_created = service.initialize_personal(user_id=user_id)
+    create_sc_team = not body.skip_sc if body is not None else True
+    record, was_created = service.initialize_personal(
+        user_id=user_id, create_sc_team=create_sc_team
+    )
     result = PersonalSpaceInitialized(
         **_created_space(record).model_dump(), created=was_created
     )
@@ -259,7 +264,9 @@ async def create_team_space(
     user_id: UserIdDep,
     service: SpaceServiceProtocol = Injected(SpaceServiceProtocol),
 ) -> Envelope[SpaceCreated]:
-    record = service.create_team(name=body.space_name, creator_id=user_id)
+    record = service.create_team(
+        name=body.space_name, creator_id=user_id, create_sc_team=not body.skip_sc
+    )
     return created(_created_space(record), request)
 
 

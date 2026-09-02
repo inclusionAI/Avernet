@@ -19,16 +19,20 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
-from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.detail_fanout import (
     fan_out_mcp_details,
     server_code_of,
 )
 from agentclaw.community.core.mcp.services.passport_scope import (
-    merge_passport_cli_items,
     passport_mcp_codes_from_entries,
     passport_mcp_items_from_entries,
+)
+from agentclaw.community.core.mcp.services.cli_passport_scope import (
+    build_passport_resource_scope,
+)
+from agentclaw.community.core.mcp.services.passport_scope_sync import (
+    update_mcp_passport_scope,
 )
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
@@ -887,110 +891,14 @@ class MCPSyncService(MCPSyncServiceProtocol):
         engine_type: Optional[str] = None,
     ) -> dict[str, Any]:
         """更新完整 MCP scope；身份或 bot 元数据不可读取时中止覆盖。"""
-        bot_name: Optional[str] = None
-        bot_desc: Optional[str] = None
-        template_type: Optional[str] = None
-        template_config: Optional[Mapping[str, Any]] = None
-        try:
-            bot = self.bot_repository.get_by_id_and_owner(bot_id, owner_id)
-            if bot:
-                bot_name = bot.get("bot_name")
-                bot_desc = bot.get("bot_desc")
-                template_type = bot.get("template_type")
-                raw_template_config = bot.get("template_config")
-                template_config = raw_template_config if isinstance(raw_template_config, Mapping) else None
-                engine_type = bot.get("active_engine") or bot.get("engine_type") or engine_type
-        except Exception as e:
-            error = f"获取 bot 信息失败，无法安全解析默认 CLI 范围: {e}"
-            logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
-            return {"success": False, "error": error}
-
-        identity_modes: Mapping[str, object] = {}
-        try:
-            if bot:
-                identity_modes = self.caller_identity_repository.list_draft_call_types(int(bot["id"]), str(engine_type))
-            else:
-                logger.info("[MCPSyncService] 未找到持久化 bot，按 owner 刷新 MCP scope: bot_id=%s", bot_id)
-            mcp_items = passport_mcp_items_from_entries(synced_mcps, identity_modes=identity_modes)
-        except Exception as e:
-            error = f"查询 MCP 调用身份失败: {e}"
-            logger.error("[MCPSyncService] %s, bot_id=%s", error, bot_id)
-            return {"success": False, "error": error}
-
-        synced_server_codes = [item["mcp_code"] for item in mcp_items]
-        caller_mcp_codes = [
-            item["mcp_code"] for item in mcp_items if item["identity_mode"] == "caller"
-        ]
-
-        # MCP 同步触发 resourceManifest 更新时，要回填当前 CLI，避免覆盖式更新丢失 CLI 授权。
-        try:
-            current_cli_items = self.passport_update.query_passport_clis(bot_id, user_id)
-        except Exception as e:
-            error = f"查询 CLI 范围失败: {e}"
-            logger.error("[MCPSyncService] %s", error)
-            return {"success": False, "error": error}
-
-        default_cli_items = get_default_cli_items(
-            engine_type,
-            template_type,
-            ext_info={"template_config": template_config}
-            if template_config
-            else None,
+        return update_mcp_passport_scope(
+            passport_plugin=self.passport_update,
+            bot_repository=self.bot_repository,
+            caller_identity_repository=self.caller_identity_repository,
+            bot_id=bot_id,
+            user_id=user_id,
+            owner_id=owner_id,
+            synced_mcps=synced_mcps,
+            engine_type=engine_type,
+            scope_builder=build_passport_resource_scope,
         )
-        cli_items = merge_passport_cli_items(current_cli_items, default_cli_items)
-        if default_cli_items:
-            logger.info(
-                "[MCPSyncService] 合并默认 CLI 范围: bot_id=%s, current_clis=%s, "
-                "default_clis=%s, merged_clis=%s, engine_type=%s, template_type=%s",
-                bot_id,
-                current_cli_items,
-                default_cli_items,
-                cli_items,
-                engine_type,
-                template_type,
-            )
-
-        try:
-            # resource_scope 是完整快照：MCP 身份与 CLI 都必须回传，避免覆盖丢失授权。
-            resource_scope = {
-                "mcp_codes": synced_server_codes,
-                "mcp_items": mcp_items,
-                "cli_items": cli_items,
-            }
-            # 当前 Passport MCP 参数不含 token；保留完整请求以定位 TCAuth 前置校验失败值。
-            logger.info(
-                "[MCPSyncService] Passport update request: "
-                "operation=mcp_scope_refresh, bot_id=%s, user_id=%s, "
-                "resource_scope=%s, bot_name=%s, bot_desc=%s, engine_type=%s",
-                bot_id,
-                user_id,
-                resource_scope,
-                bot_name,
-                bot_desc,
-                engine_type,
-            )
-            self.passport_update.update_passport(
-                bot_id=bot_id,
-                user_id=user_id,
-                resource_scope=resource_scope,
-                bot_name=bot_name,
-                bot_desc=bot_desc,
-                engine_type=engine_type,
-            )
-            logger.info(
-                "[MCPSyncService] updatePassport 成功: "
-                "bot_id=%s, user_id=%s, mcps=%s, caller_mcps=%s, clis=%s, "
-                "engine_type=%s, bot_name=%s",
-                bot_id,
-                user_id,
-                synced_server_codes,
-                caller_mcp_codes,
-                cli_items,
-                engine_type,
-                bot_name,
-            )
-            return {"success": True}
-        except Exception as e:
-            error = f"更新 passport 失败: {e}"
-            logger.error("[MCPSyncService] %s", error)
-            return {"success": False, "error": error}

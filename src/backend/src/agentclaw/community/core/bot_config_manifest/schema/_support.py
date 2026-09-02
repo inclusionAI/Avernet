@@ -15,14 +15,19 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
     SourceForm,
 )
+from agentclaw.community.core.bot_config_manifest.schema.limits import (
+    MAX_SOURCE_URL_CHARS,
+)
 from agentclaw.community.core.bot_config_manifest.schema.placeholders import (
     unknown_placeholders,
 )
 from agentclaw.community.core.bot_config_manifest.schema.violations import Violation
 
 #: ``sha256:`` + 64 lowercase hex. One form, because a digest that can be
-#: written two ways is a digest two comparisons can disagree about.
-_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+#: written two ways is a digest two comparisons can disagree about. The
+#: ``\A``/``\Z`` form for the same reason the shared fetch-side
+#: ``DIGEST_RE`` states: ``$`` also matches before a trailing newline.
+_DIGEST_RE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 
 #: Conservative on purpose: letters, digits, and the four separators a real
 #: workspace path needs. Everything a shell, a URL or a filesystem would have to
@@ -96,7 +101,8 @@ def check_placeholders(ctx: Context, location: str, value: Any) -> None:
 
 
 def check_https_url(ctx: Context, location: str, value: Any) -> None:
-    """Refuse a source URL that is not an absolute https URL, or carries a token.
+    """Refuse a source URL that is not an absolute https URL, carries a token,
+    or exceeds the admission length cap.
 
     **Userinfo is the rule with teeth.** ``https://user:token@host/path`` puts a
     secret in a document that is stored as written, read back verbatim by
@@ -105,6 +111,15 @@ def check_https_url(ctx: Context, location: str, value: Any) -> None:
     credential store (schema §2.1) exists to avoid, so an inline credential is
     refused rather than accepted-and-redacted — redaction cannot un-store what
     was already accepted somewhere else.
+
+    **Length is an admission concern, not a post-fetch surprise.** The
+    provenance column this URL eventually lands in is 2048 chars; without a
+    check here, a 3000-char source would be accepted, fetched in full (the
+    per-entry byte cap is 100–200 MiB), and refused only at the store — the
+    expensive order, and a document every apply point rejects, which is the
+    shape this surface's one rule exists to forbid. The store keeps its own
+    check as the last line of defence for the lengths admission cannot see
+    (a redirect location); a declared URL's length, admission sees.
 
     https-only for the same reason the credential store's ``allowed_prefixes``
     are: a fetched skill or identity file is content the bot will run on, and
@@ -123,6 +138,15 @@ def check_https_url(ctx: Context, location: str, value: Any) -> None:
             location,
             "invalid_source",
             "source URL must be an absolute https:// URL",
+        )
+        return
+    if len(value) > MAX_SOURCE_URL_CHARS:
+        ctx.add(
+            location,
+            "source_url_too_long",
+            f"source URL is {len(value)} chars, over the "
+            f"{MAX_SOURCE_URL_CHARS}-char limit (the width the platform's "
+            "provenance stores it as)",
         )
         return
     if "@" in parts.netloc:

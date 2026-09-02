@@ -47,9 +47,23 @@ MAX_ENTRIES_PER_CATEGORY = 50
 #: rule §5 states.
 MAX_INLINE_CONTENT_BYTES = 64 * 1024
 
+#: One source URL, in characters (schema §5, and the column the provenance
+#: log stores it into is the same width — one number, stated once).
+#:
+#: A length check belongs HERE, at admission, not only in the W11 store: the
+#: store's refusal lands after the platform has already fetched (up to the
+#: per-entry cap) — the expensive order — and a document this surface
+#: accepts but every apply point rejects is exactly the shape the module's
+#: one rule ("this surface never accepts something it cannot apply")
+#: exists to forbid. The store keeps its check as the last line of defence
+#: for what admission cannot see (a redirect ``Location``'s length); a
+#: declared source's length, admission sees.
+MAX_SOURCE_URL_CHARS = 2048
+
 __all__ = [
     "MAX_DOCUMENT_BYTES",
     "MAX_ENTRIES_PER_CATEGORY",
     "MAX_INLINE_CONTENT_BYTES",
     "MAX_SCRIPT_BYTES",
+    "MAX_SOURCE_URL_CHARS",
 ]

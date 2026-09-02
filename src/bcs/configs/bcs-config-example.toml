@@ -52,7 +52,8 @@ api_keys = []
 allowed_switch_provider_ids = []
 
 [gateway_principal]
-issuer = "gateway"
+# Accept tokens minted by either the gateway or the backend (shared key).
+issuers = ["gateway", "backend"]
 audience = "bcs"
 key_id = "bare"
 # Runtime lookup only; set this environment variable to real secret material.
@@ -236,6 +237,20 @@ tower_http = "warn"
 # plugin is linked into the binary, then put provider-specific options under
 # [user_directory.providers.<provider>].
 enabled = false
+
+# Human mention notification: notify human participants when a message
+# @-mentions them. Select a linked backend; omit `provider` to disable.
+[human_notify]
+provider = "dummy"
+
+[human_notify.providers.dummy]
+enabled = true
+# DingTalk backend options (internal builds), for illustration:
+# [human_notify.providers.dingtalk]
+# enabled = true
+# robot_code = "ding..."
+# client_id = "ding..."
+# client_secret = "${DINGTALK_NOTIFY_CLIENT_SECRET}"
 
 [auth]
 chain = ["oauth_session"]

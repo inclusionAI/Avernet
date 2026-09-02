@@ -110,8 +110,11 @@ class TtlRenewalScheduleRepository(Protocol):
         source_table: str,
         source_id: int,
         status: str,
+        stop_reason: str | None = None,
     ) -> None:
-        """Update the status of a schedule record."""
+        """Update the status of a schedule record, optionally stamping the
+        STOPPED origin (lifecycle | orphan | threshold_gone |
+        threshold_expired)."""
         ...
 
     def count_hot_arca_devices(self, env: str) -> int:
@@ -120,4 +123,32 @@ class TtlRenewalScheduleRepository(Protocol):
 
     def count_hot_arca_bindings(self, env: str) -> int:
         """Count ACTIVE ARCA bindings in ac_entity_device_binding for env."""
+        ...
+
+    def count_hot_covered(self, env: str) -> int:
+        """Count hot-table ARCA rows covered by ANY cold schedule row (ACTIVE
+        or STOPPED), both source tables — WR-01 any-status coverage.
+
+        An INNER JOIN expresses the covered predicate: a hot row with no
+        cold row (any status) falls out of the join. Env-scoped.
+        """
+        ...
+
+    def count_suppressed_terminal(self, env: str) -> int:
+        """Count hot-table ACTIVE ARCA rows whose covering cold row is
+        STOPPED — the suppressed-but-hot-ACTIVE population (R3 metric)."""
+        ...
+
+    def hot_row_exists(
+        self,
+        env: str,
+        source_table: str,
+        source_id: int,
+    ) -> bool:
+        """Whether a renewably-alive hot row exists for the schedule source.
+
+        Mirrors list_due_for_renewal's JOIN conditions per side: the
+        device side requires the row to be undeleted; the binding side
+        carries no is_deleted filter (D-16'). Env-scoped.
+        """
         ...

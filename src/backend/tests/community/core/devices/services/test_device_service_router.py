@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -208,6 +209,134 @@ class TestDeviceServiceRouterInit:
 
         assert decision.target_provider == LOCAL_DEVICE_PROVIDER
         assert decision.reason == "local_create_policy"
+
+
+def test_bootstrap_projects_managed_cli_manifest_without_logging_credentials() -> None:
+    """Bootstrap returns only installer-safe metadata after the scope reconciliation."""
+    from agentclaw.community.core.devices.services.device_service_router import (
+        DeviceServiceRouter,
+    )
+
+    repository = MagicMock()
+    bot_query = MagicMock()
+    bot_query.get_by_id_and_owner.return_value = {
+        "id": 7,
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "active_engine": "openclaw",
+        "ext": {"passport": {"agent_code": "agent-code-secret"}},
+    }
+    passport = MagicMock()
+    passport.query_token.return_value = "passport-token-secret"
+    reconciler = MagicMock()
+    reconciler.reconcile.return_value = SimpleNamespace(
+        manifest_version="2026-08-31.1",
+        manifest_digest="d" * 64,
+        cli_codes=("dataphin", "deepinsight-cli"),
+    )
+    provider = MagicMock()
+    provider.update_device_headers.return_value = True
+    router = DeviceServiceRouter(
+        repository=repository,
+        bot_query=bot_query,
+        providers={BAAS_DEVICE_PROVIDER: provider},
+        default_provider_key=BAAS_DEVICE_PROVIDER,
+        passport_plugin=passport,
+        cli_scope_reconciler=reconciler,
+    )
+
+    with patch(
+        "agentclaw.community.core.devices.services.device_service_router.logger"
+    ) as logger:
+        result = router.bootstrap_device_auth(
+            device_id="DEVICE-1", bot_id="bot-1", owner_id="owner-1"
+        )
+
+    assert result == {
+        "agent_code": "agent-code-secret",
+        "cli_manifest_version": "2026-08-31.1",
+        "cli_manifest_digest": "d" * 64,
+        "cli_codes": ["dataphin", "deepinsight-cli"],
+    }
+    reconciler.reconcile.assert_called_once_with(bot=bot_query.get_by_id_and_owner.return_value)
+    provider.update_device_headers.assert_called_once()
+    logged = " ".join(str(call) for call in logger.method_calls)
+    assert "agent-code-secret" not in logged
+    assert "passport-token-secret" not in logged
+
+
+def test_bootstrap_reconcile_failure_is_logged_without_external_error_details() -> None:
+    """A failed complete-scope refresh blocks startup without leaking Passport data."""
+    from agentclaw.community.core.devices.services.device_service_router import (
+        DeviceServiceRouter,
+    )
+
+    bot_query = MagicMock()
+    bot_query.get_by_id_and_owner.return_value = {
+        "id": 7,
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "active_engine": "openclaw",
+    }
+    reconciler = MagicMock()
+    reconciler.reconcile.side_effect = RuntimeError("passport-token-secret")
+    router = DeviceServiceRouter(
+        repository=MagicMock(),
+        bot_query=bot_query,
+        providers={BAAS_DEVICE_PROVIDER: MagicMock()},
+        default_provider_key=BAAS_DEVICE_PROVIDER,
+        cli_scope_reconciler=reconciler,
+    )
+
+    with patch(
+        "agentclaw.community.core.devices.services.device_service_router.logger"
+    ) as logger:
+        with pytest.raises(DeviceServiceError, match="CLI passport scope"):
+            router.bootstrap_device_auth(
+                device_id="DEVICE-1", bot_id="bot-1", owner_id="owner-1"
+            )
+
+    logged = " ".join(str(call) for call in logger.method_calls)
+    assert "cli_passport_reconcile_failed" in logged
+    assert "RuntimeError" in logged
+    assert "passport-token-secret" not in logged
+
+
+def test_bootstrap_token_failure_is_logged_without_external_error_details() -> None:
+    """Passport token errors block the device callback without leaking response text."""
+    from agentclaw.community.core.devices.services.device_service_router import (
+        DeviceServiceRouter,
+    )
+
+    bot_query = MagicMock()
+    bot_query.get_by_id_and_owner.return_value = {
+        "id": 7,
+        "bot_id": "bot-1",
+        "owner_id": "owner-1",
+        "ext": {"passport": {"agent_code": "agent-code-secret"}},
+    }
+    passport = MagicMock()
+    passport.query_token.side_effect = RuntimeError("passport-token-secret")
+    router = DeviceServiceRouter(
+        repository=MagicMock(),
+        bot_query=bot_query,
+        providers={BAAS_DEVICE_PROVIDER: MagicMock()},
+        default_provider_key=BAAS_DEVICE_PROVIDER,
+        passport_plugin=passport,
+    )
+
+    with patch(
+        "agentclaw.community.core.devices.services.device_service_router.logger"
+    ) as logger:
+        with pytest.raises(DeviceServiceError, match="Passport token query failed"):
+            router.bootstrap_device_auth(
+                device_id="DEVICE-1", bot_id="bot-1", owner_id="owner-1"
+            )
+
+    logged = " ".join(str(call) for call in logger.method_calls)
+    assert "bootstrap_device_auth_token_query_failed" in logged
+    assert "RuntimeError" in logged
+    assert "passport-token-secret" not in logged
 
 
 # ---------------------------------------------------------------------------

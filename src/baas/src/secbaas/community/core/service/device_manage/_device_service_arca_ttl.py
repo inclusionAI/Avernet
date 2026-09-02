@@ -194,6 +194,7 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
                     source_table="baas_device",
                     source_id=record.id,
                     status="STOPPED",
+                    stop_reason="lifecycle",
                 )
             except Exception:
                 log.critical(
@@ -232,6 +233,7 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
                     source_table="baas_device",
                     source_id=record.id,
                     status="STOPPED",
+                    stop_reason="lifecycle",
                 )
             except Exception:
                 log.critical(

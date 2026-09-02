@@ -7,9 +7,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import re
 from typing import Any, Protocol, TypedDict, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
+
+
+_CLI_CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
+_CLI_IDENTITY_MODES = {"owner", "caller"}
 
 
 class PassportError(Exception):
@@ -44,6 +49,7 @@ class CliItem(TypedDict, total=False):
     cli_code: str | None
     cli_name: str | None
     cli_desc: str | None
+    identity_mode: str
 
 
 class McpScopeItem(TypedDict, total=False):
@@ -72,19 +78,50 @@ def extract_cli_items(passport: Mapping[str, Any] | None) -> list[CliItem]:
     """Extract normalized CLI scope items from a queryAgentPassport result."""
     if not isinstance(passport, Mapping):
         return []
-    clis = []
-    for item in passport.get("clis") or []:
-        if not isinstance(item, Mapping):
-            continue
-        cli_code = item.get("cli_code")
-        if not cli_code:
-            continue
-        clis.append({
+    raw_clis = passport.get("clis", [])
+    if raw_clis is None:
+        raw_clis = []
+    return _normalize_cli_items(raw_clis, allow_missing_identity_mode=True)
+
+
+def _normalize_cli_items(
+    raw_items: object,
+    *,
+    allow_missing_identity_mode: bool,
+) -> list[CliItem]:
+    """Validate the complete CLI scope before any overwrite-style update."""
+    if not isinstance(raw_items, list):
+        raise ValueError("CLI scope items must be a list")
+    normalized: list[CliItem] = []
+    seen_codes: set[str] = set()
+    for raw_item in raw_items:
+        if not isinstance(raw_item, Mapping):
+            raise ValueError("CLI scope item must be a mapping")
+        cli_code = raw_item.get("cli_code")
+        if not isinstance(cli_code, str) or not _CLI_CODE_RE.fullmatch(cli_code):
+            raise ValueError("CLI scope item code is invalid")
+        if cli_code in seen_codes:
+            raise ValueError("CLI scope item code is duplicated")
+        if "identity_mode" not in raw_item and not allow_missing_identity_mode:
+            raise ValueError("CLI scope item identity mode is required")
+        raw_identity = raw_item.get("identity_mode", "owner")
+        identity_mode = str(getattr(raw_identity, "value", raw_identity)).strip().lower()
+        if identity_mode not in _CLI_IDENTITY_MODES:
+            raise ValueError("CLI identity mode must be owner or caller")
+        cli_name = raw_item.get("cli_name")
+        cli_desc = raw_item.get("cli_desc")
+        if cli_name is not None and not isinstance(cli_name, str):
+            raise ValueError("CLI scope item name is invalid")
+        if cli_desc is not None and not isinstance(cli_desc, str):
+            raise ValueError("CLI scope item description is invalid")
+        seen_codes.add(cli_code)
+        normalized.append({
             "cli_code": cli_code,
-            "cli_name": item.get("cli_name"),
-            "cli_desc": item.get("cli_desc"),
+            "cli_name": cli_name,
+            "cli_desc": cli_desc,
+            "identity_mode": identity_mode,
         })
-    return clis
+    return normalized
 
 
 def unpack_resource_scope(
@@ -110,8 +147,13 @@ def unpack_resource_scope(
     """
     if resource_scope is None:
         return None, None
+    if not isinstance(resource_scope, Mapping):
+        raise ValueError("resource_scope must be a mapping")
     try:
-        cli_items = resource_scope["cli_items"]
+        cli_items = _normalize_cli_items(
+            resource_scope["cli_items"],
+            allow_missing_identity_mode=False,
+        )
     except KeyError as e:
         raise ValueError(
             "resource_scope must include mcp_codes and cli_items"

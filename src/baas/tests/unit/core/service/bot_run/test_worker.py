@@ -1252,9 +1252,7 @@ async def test_abort_runs_by_session_group_chat_target_bot_no_running_410_dimens
     assert queue.get_by_run_id(_run_a).status == "PENDING"
 
 
-async def test_abort_runs_by_session_had_terminal_narrowed_to_target_bot(
-    repo, queue
-):
+async def test_abort_runs_by_session_had_terminal_narrowed_to_target_bot(repo, queue):
     """410 维度收窄到目标 bot：其它 bot 的终态记录不影响该 bot 的 410 判定。"""
     # bot-B 在该 session 有一条 DONE 记录
     run_b = _insert_with_session(repo, queue, "bot-B", "sess-group")

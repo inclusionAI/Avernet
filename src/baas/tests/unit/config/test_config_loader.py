@@ -169,9 +169,7 @@ class TestEnvOverlaySelection:
         config = ConfigLoader.load()
         assert config.workers == 1
 
-    def test_server_env_missing_file_falls_back_to_base(
-        self, monkeypatch, tmp_path
-    ):
+    def test_server_env_missing_file_falls_back_to_base(self, monkeypatch, tmp_path):
         config_dir = tmp_path / "configs"
         config_dir.mkdir()
         (config_dir / "application.yaml").write_text(
