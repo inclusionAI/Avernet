@@ -20,12 +20,30 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Callable, Mapping
 
 #: Address resolution seam: host → resolved IP string list. Real DNS via
 #: socket in production; tests inject deterministic answers (including the
 #: check-public/connect-private rebinding pair).
 Resolver = Callable[[str], list[str]]
+
+class FetchCategory(StrEnum):
+    """The closed vocabulary a fetch's category lives in — the keys of
+    :data:`FETCH_ENTRY_LIMITS` and nothing else, bound by the module-level
+    assertion below so the two cannot drift apart (the W3
+    no-drift-assertion precedent). A misspelled category would otherwise
+    silently take the per-entry default's cap, which is the wrong quiet
+    answer for a width the schema states per category.
+    """
+
+    SKILLS = "skills"
+    RESOURCES_FILE = "resources_file"
+    IDENTITY = "identity"
+    CLI_TOOLS = "cli_tools"
+    RESOURCES_ARCHIVE = "resources_archive"
+    RESOURCES_UNPACKED = "resources_unpacked"
+
 
 #: ``schema §5`` — per-entry fetch caps, in bytes, by category.
 FETCH_ENTRY_LIMITS: Mapping[str, int] = {
@@ -36,6 +54,11 @@ FETCH_ENTRY_LIMITS: Mapping[str, int] = {
     "resources_archive": 200 * 1024 * 1024,
     "resources_unpacked": 500 * 1024 * 1024,
 }
+
+assert set(FETCH_ENTRY_LIMITS) == {c.value for c in FetchCategory}, (
+    "FETCH_ENTRY_LIMITS and FetchCategory must name the same set of "
+    "categories — a drift between them silently mis-caps entries"
+)
 
 #: ``schema §5`` — one archive may not explode beyond this many members.
 ARCHIVE_MEMBER_LIMIT = 5000

@@ -62,6 +62,7 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+    FetchCategory,
     ARCHIVE_MEMBER_LIMIT,
     FETCH_ENTRY_LIMITS,
 )
@@ -83,7 +84,7 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
-_FETCH_CATEGORY = "skills"
+_FETCH_CATEGORY = FetchCategory.SKILLS
 
 #: URL path suffix → archive kind. Ordered so the longer tar suffix is tried
 #: before a hypothetical shorter one; ``.tgz`` is the autoroute of the same

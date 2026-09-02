@@ -497,3 +497,20 @@ def test_a_byte_exhausted_budget_refuses_the_next_entry(rig):
     # and note the first fetch's receipt does NOT serve the second (the
     # receipt exists, but an unpinned entry's re-fetch is the point).
     assert len(fetcher.requests) == 1
+
+
+def test_the_funnel_requires_a_category_by_keyword(rig):
+    """Linkage by default is linkage by accident: a call site that forgets
+    its category would file an unattributed receipt and take the default
+    cap. Reject the omission loudly (type analysis flagged this as one of
+    the PR's two blocking-level type issues)."""
+    import inspect
+
+    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+        EntryFetcher,
+    )
+
+    signature = inspect.signature(EntryFetcher.fetch)
+    category = signature.parameters["category"]
+    assert category.kind is inspect.Parameter.KEYWORD_ONLY
+    assert category.default is inspect.Parameter.empty

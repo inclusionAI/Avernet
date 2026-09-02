@@ -166,7 +166,7 @@ class EntryFetcher:
         source_url: str,
         digest: Optional[str] = None,
         auth: Optional[str] = None,
-        category: str = "resources_file",
+        category: str,
         keep_last: bool = False,
         entry_identity: Optional[str] = None,
     ) -> FetchedEntry:
@@ -178,12 +178,14 @@ class EntryFetcher:
         cannot steer the request outside its credential's prefixes (or inside
         them, unseen).
 
-        ``entry_identity`` is the entry's own key (a skill ``name``, an
-        identity ``type`` — the same way the report names entries), passed
-        with the category into the receipt this files: the W11 linkage that
-        makes "what was fetched for this entry" an indexed read instead of
-        a ``source_url`` approximation. ``ctx.apply_id`` supplies the apply
-        half; both are optional for the same reason they are on ``store``.
+        ``category`` and ``entry_identity`` are REQUIRED keyword-only
+        (no defaults): the W11 linkage columns exist so a receipt can name
+        the fetch's apply, category and entry — a default here would let a
+        future call site silently file unattributed receipts, and the
+        linkage's whole point is that there are none. ``entry_identity``
+        may still be ``None`` (the fetch pipeline genuinely does not know
+        on keep_last reuse of a hand-driven fetch), but a caller must say
+        so explicitly rather than by omission.
         """
         expired = ctx.budget.expired() if ctx.budget is not None else None
         if expired is not None:

@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, Sequence
 
+from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCategory
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     EntryFetcher,
@@ -65,7 +66,7 @@ if TYPE_CHECKING:
         ApplyContext,
     )
 
-_FETCH_CATEGORY = "identity"
+_FETCH_CATEGORY = FetchCategory.IDENTITY
 
 
 class IdentityMaterialiser(Materialiser):
