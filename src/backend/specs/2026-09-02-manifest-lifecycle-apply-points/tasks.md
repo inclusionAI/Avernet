@@ -72,19 +72,19 @@ Conventions every task assumes:
 
 ## Group B — The artifact contract
 
-## [ ] Task 4: `ownership` on the artifact
+## [x] Task 4: `ownership` on the artifact
 - **Files:** `kernel/bot_config/artifact.py`, `kernel/bot_config/artifact.schema.json`,
   `tests/community/kernel/test_bot_config_artifact.py`
 - **Done when:**
-  - [ ] `ownership: dict[str, str] | None = None`; omitted by `to_dict` when
+  - [x] `ownership: dict[str, str] | None = None`; omitted by `to_dict` when
         `None`; read by `from_dict`; values restricted to `platform` / `engine`
         in the schema with the semantics in the description.
-  - [ ] Tests: unset leaves the key off the wire (byte-identical to before);
+  - [x] Tests: unset leaves the key off the wire (byte-identical to before);
         set round-trips; schema accepts both; `SCHEMA_VERSION` stays 4 and the
         existing guard test is unedited.
 - **Depends on:** —
 
-## [ ] Task 5: The contract addendum
+## [~] Task 5: The contract addendum
 - **Files:** `docs/bot-config-manifest/engine-convergence-contract.zh-CN.md`
 - **Done when:**
   - [ ] A new §9 "平台管理的类目：`ownership`" with: the map and its three

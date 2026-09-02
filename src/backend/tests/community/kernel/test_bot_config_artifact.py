@@ -339,3 +339,73 @@ def test_cli_tools_ships_without_a_schema_version_bump() -> None:
     )
 
     assert with_tools.to_dict()["schema_version"] == 4
+
+
+# ── ownership (W8) ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_unset_ownership_leaves_the_key_off_the_wire() -> None:
+    """An artifact that asserts no ownership must be byte-identical to a pre-W8 one.
+
+    That is what lets the map ship ahead of engine support: an engine that has
+    not learned it never sees it, and one that has treats its absence as the
+    behaviour it had before.
+    """
+    artifact = BotConfigArtifact(schema_version=SCHEMA_VERSION, engine_type="teclaw")
+    assert artifact.ownership is None
+    assert "ownership" not in artifact.to_dict()
+    assert BotConfigArtifact.from_dict(artifact.to_dict()).ownership is None
+
+
+@pytest.mark.unit
+def test_ownership_round_trips_and_conforms_to_schema() -> None:
+    from agentclaw.community.kernel.bot_config import (
+        OWNERSHIP_ENGINE,
+        OWNERSHIP_PLATFORM,
+    )
+
+    artifact = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION,
+        engine_type="teclaw",
+        ownership={
+            "mcp": OWNERSHIP_PLATFORM,
+            "identity_files": OWNERSHIP_PLATFORM,
+            "resources": OWNERSHIP_ENGINE,
+            "skills": OWNERSHIP_ENGINE,
+        },
+    )
+    data = artifact.to_dict()
+    assert data["ownership"] == {
+        "mcp": "platform",
+        "identity_files": "platform",
+        "resources": "engine",
+        "skills": "engine",
+    }
+    jsonschema.validate(data, json.loads(_SCHEMA_PATH.read_text()))
+    assert BotConfigArtifact.from_dict(data) == artifact
+
+
+@pytest.mark.unit
+def test_the_schema_admits_only_the_two_ownership_values() -> None:
+    schema = json.loads(_SCHEMA_PATH.read_text())
+    bad = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION, engine_type="teclaw", ownership={"mcp": "nobody"}
+    ).to_dict()
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(bad, schema)
+    unknown_category = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION, engine_type="teclaw", ownership={"engine_ext": "platform"}
+    ).to_dict()
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(unknown_category, schema)
+
+
+@pytest.mark.unit
+def test_ownership_ships_without_a_schema_version_bump() -> None:
+    """Same decision as ``cli_tools``: the map rides into v4 under A5."""
+    assert SCHEMA_VERSION == 4
+    with_map = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION, engine_type="teclaw", ownership={"mcp": "platform"}
+    )
+    assert with_map.to_dict()["schema_version"] == 4
