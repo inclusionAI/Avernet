@@ -430,14 +430,22 @@ class EntryFetcher:
         if expired is not None:
             raise EntryFetchError(expired)
 
+        inline = entry.get("source")
+        # Only the roads that read the session require one: a ``from`` name
+        # is looked up in ``session.sources`` and a git road checks out
+        # through it. The inline-URL road never touches it, and refusing it
+        # over a missing session would break the URL-only applies (and
+        # their rigs) that W5 shipped — the message says who it is for.
+        needs_session = isinstance(entry.get("from"), str) or isinstance(
+            inline, Mapping
+        )
         session = ctx.source_session
-        if session is None:
+        if needs_session and session is None:
             raise EntryFetchError(
                 "this apply carries no source session: a 'from' or git "
                 "source needs one (the apply service builds it per apply)"
             )
 
-        inline = entry.get("source")
         keep_last = entry.get("on_fetch_failure", "keep_last") == "keep_last"
         name: Optional[str] = None
         decl: Optional["Mapping[str, Any]"] = None
