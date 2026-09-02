@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use bcs_auth_api::{OAuthError, OAuthProvider, OAuthToken, ProviderUserInfo};
 use std::collections::BTreeMap;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::{
     AlipayConfig, ALIPAY_API_VERSION, ALIPAY_AUTH_URL, ALIPAY_CHARSET, ALIPAY_GATEWAY_URL,
@@ -71,7 +71,59 @@ fn alipay_error_message(
             let msg_part = msg.unwrap_or("unknown error");
             Some(format!("Alipay error code={c} ({msg_part}{detail})"))
         }
-        None => Some("Alipay response missing code field".to_string()),
+        None => None,
+    }
+}
+
+/// Mask secret/noise params before logging the outbound gateway request.
+fn redacted_params(params: &BTreeMap<String, String>) -> String {
+    const HIDDEN: &[&str] = &["sign", "auth_token", "code", "refresh_token"];
+    params
+        .iter()
+        .map(|(k, v)| {
+            let val = if HIDDEN.contains(&k.as_str()) { "<redacted>" } else { v.as_str() };
+            format!("{k}={val}")
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+/// Recursively redact secret/PII keys in a parsed gateway response.
+fn redact_secrets(v: &mut serde_json::Value) {
+    const HIDDEN: &[&str] = &[
+        "access_token",
+        "refresh_token",
+        "auth_token",
+        "user_id",
+        "open_id",
+        "nick_name",
+        "avatar",
+        "sign",
+    ];
+    match v {
+        serde_json::Value::Object(m) => {
+            for (k, val) in m.iter_mut() {
+                if HIDDEN.contains(&k.as_str()) {
+                    *val = serde_json::Value::String("<redacted>".to_string());
+                } else {
+                    redact_secrets(val);
+                }
+            }
+        }
+        serde_json::Value::Array(a) => a.iter_mut().for_each(redact_secrets),
+        _ => {}
+    }
+}
+
+/// Mask secret/PII fields in a gateway JSON response before logging. Non-JSON
+/// bodies (e.g. an HTML error page) are returned unchanged.
+fn redacted_body(body: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(body) {
+        Ok(mut v) => {
+            redact_secrets(&mut v);
+            v.to_string()
+        }
+        Err(_) => body.to_string(),
     }
 }
 
@@ -114,6 +166,11 @@ impl AlipayOAuthProvider {
         );
         params.insert("version".to_string(), ALIPAY_API_VERSION.to_string());
         params
+    }
+
+    /// Build the gateway request URL with `charset` in the query string.
+    fn gateway_url() -> String {
+        format!("{}?charset={}", ALIPAY_GATEWAY_URL, urlencoding::encode(ALIPAY_CHARSET))
     }
 
     /// Sign the parameters and add the `sign` field. The caller provides the
@@ -182,14 +239,21 @@ impl OAuthProvider for AlipayOAuthProvider {
         params.insert("code".to_string(), code.to_string());
 
         self.sign_and_append(&mut params, OAuthError::TokenExchangeFailed)?;
+        debug!(
+            target: "bcs_auth_alipay",
+            method = "alipay.system.oauth.token",
+            request = %redacted_params(&params),
+            "alipay gateway request",
+        );
 
         let resp = self
             .http
-            .post(ALIPAY_GATEWAY_URL)
+            .post(Self::gateway_url())
             .form(&params)
             .send()
             .await
             .map_err(|e| OAuthError::TokenExchangeFailed(e.to_string()))?;
+        let status = resp.status();
 
         let body = resp
             .text()
@@ -197,19 +261,27 @@ impl OAuthProvider for AlipayOAuthProvider {
             .map_err(|e| {
                 OAuthError::TokenExchangeFailed(format!("read Alipay token response body: {e}"))
             })?;
-
-        // TEMP DIAGNOSTIC: dump the raw Alipay token-exchange response body so the
-        // underlying `error_response.sub_code` is visible when BCS only surfaces a
-        // generic token_exchange_failed. Remove once the root cause is pinned.
-        warn!(target: "bcs_auth_alipay", %body, "alipay.system.oauth.token raw response body");
+        debug!(
+            target: "bcs_auth_alipay",
+            method = "alipay.system.oauth.token",
+            status = %status,
+            response = %redacted_body(&body),
+            "alipay gateway response",
+        );
 
         let gateway: AlipayTokenResponse = serde_json::from_str(&body)
-            .map_err(|e| OAuthError::TokenExchangeFailed(format!("parse Alipay token response: {e}")))?;
+            .map_err(|e| {
+                OAuthError::TokenExchangeFailed(format!(
+                    "parse Alipay token response: {e}; body={}",
+                    redacted_body(&body)
+                ))
+            })?;
 
         let data = gateway.data.ok_or_else(|| {
-            OAuthError::TokenExchangeFailed(
-                "Alipay token response missing alipay_system_oauth_token_response".to_string(),
-            )
+            OAuthError::TokenExchangeFailed(format!(
+                "Alipay token response missing alipay_system_oauth_token_response; body={}",
+                redacted_body(&body)
+            ))
         })?;
 
         // Verify response signature if present (fail-open: log only).
@@ -259,14 +331,21 @@ impl OAuthProvider for AlipayOAuthProvider {
         params.insert("auth_token".to_string(), token.access_token.clone());
 
         self.sign_and_append(&mut params, OAuthError::UserInfoFailed)?;
+        debug!(
+            target: "bcs_auth_alipay",
+            method = "alipay.user.info.share",
+            request = %redacted_params(&params),
+            "alipay gateway request",
+        );
 
         let resp = self
             .http
-            .post(ALIPAY_GATEWAY_URL)
+            .post(Self::gateway_url())
             .form(&params)
             .send()
             .await
             .map_err(|e| OAuthError::UserInfoFailed(e.to_string()))?;
+        let status = resp.status();
 
         let body = resp
             .text()
@@ -274,14 +353,27 @@ impl OAuthProvider for AlipayOAuthProvider {
             .map_err(|e| {
                 OAuthError::UserInfoFailed(format!("read Alipay userinfo response body: {e}"))
             })?;
+        debug!(
+            target: "bcs_auth_alipay",
+            method = "alipay.user.info.share",
+            status = %status,
+            response = %redacted_body(&body),
+            "alipay gateway response",
+        );
 
         let gateway: AlipayUserInfoResponse = serde_json::from_str(&body)
-            .map_err(|e| OAuthError::UserInfoFailed(format!("parse Alipay userinfo response: {e}")))?;
+            .map_err(|e| {
+                OAuthError::UserInfoFailed(format!(
+                    "parse Alipay userinfo response: {e}; body={}",
+                    redacted_body(&body)
+                ))
+            })?;
 
         let data = gateway.data.ok_or_else(|| {
-            OAuthError::UserInfoFailed(
-                "Alipay userinfo response missing alipay_user_info_share_response".to_string(),
-            )
+            OAuthError::UserInfoFailed(format!(
+                "Alipay userinfo response missing alipay_user_info_share_response; body={}",
+                redacted_body(&body)
+            ))
         })?;
 
         // Verify response signature if present (fail-open: log only).
@@ -314,5 +406,24 @@ impl OAuthProvider for AlipayOAuthProvider {
             email: None,
             avatar: data.avatar,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gateway_request_url_places_charset_in_query_string() {
+        let url = AlipayOAuthProvider::gateway_url();
+        assert!(url.starts_with(ALIPAY_GATEWAY_URL));
+        assert!(url.contains("charset=utf-8"));
+        assert!(url.contains('?'));
+    }
+
+    #[test]
+    fn token_response_without_code_can_still_be_success() {
+        let err = alipay_error_message(None, None, None, None);
+        assert!(err.is_none());
     }
 }
