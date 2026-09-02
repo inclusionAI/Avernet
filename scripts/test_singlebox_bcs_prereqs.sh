@@ -68,7 +68,28 @@ test_cargo_hint_when_cargo_is_not_installed() {
   grep -F "rustup.rs" <<<"$message" >/dev/null || fail "rustup hint missing"
 }
 
+test_setup_skips_debug_build_when_requested() {
+  setup_env
+
+  # shellcheck source=/dev/null
+  source "$MODULE"
+
+  check_directory_exists() { return 0; }
+  build_bcs_panel_asset() { return 0; }
+  bcs_binaries_stale() { BCS_BUILD_REASON="stale for test"; return 0; }
+  build_bcs() { printf 'BUILD_BCS_CALLED\n'; return 0; }
+
+  output="$(BCS_SKIP_DEBUG_BUILD=1 bcs_setup)"
+  grep -F "BUILD_BCS_CALLED" <<<"$output" >/dev/null && fail "BCS_SKIP_DEBUG_BUILD=1 should not run the debug cargo build"
+  grep -F "Skipping BCS debug build" <<<"$output" >/dev/null || fail "skip message missing"
+  grep -F "BCS setup complete" <<<"$output" >/dev/null || fail "setup should still complete when the build is skipped"
+
+  output="$(BCS_SKIP_DEBUG_BUILD=0 bcs_setup)"
+  grep -F "BUILD_BCS_CALLED" <<<"$output" >/dev/null || fail "stale binaries should still trigger the debug cargo build by default"
+}
+
 test_cargo_hint_when_rustup_cargo_exists_outside_path
 test_cargo_hint_when_cargo_is_not_installed
+test_setup_skips_debug_build_when_requested
 
 printf 'PASS: singlebox BCS prereq tests\n'

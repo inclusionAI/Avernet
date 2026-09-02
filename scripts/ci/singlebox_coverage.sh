@@ -208,7 +208,13 @@ run_real_singlebox() {
   }
   trap cleanup_real_singlebox EXIT
   bcs_e2e_mock_start "$coverage_root/mock-services"
-  env OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
+  # BCS_SKIP_DEBUG_BUILD=1: `setup all` would otherwise compile the
+  # non-instrumented bcs/bcs-cli/bcs-admin into src/bcs/target/debug, a full
+  # cargo build (~2 minutes in CI) that nothing in this run uses. The
+  # `--with-bcs-coverage start all` below builds the instrumented binaries
+  # under src/bcs/target/cov-e2e and exports BCS_BIN/BCS_CLI_BIN; the BCS e2e
+  # reads the same instrumented bcs-cli.
+  env OCB_SKIP_GIT_HOOKS=1 BCS_SKIP_DEBUG_BUILD=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     bash "$repo_root/scripts/singlebox.sh" --standalone setup all
