@@ -21,13 +21,13 @@ Conventions every task assumes:
 
 ## Group A — The seam
 
-## [~] Task 1: Trigger constants and the §2.12 pin
+## [x] Task 1: Trigger constants and the §2.12 pin
 - **Files:** `apply/triggers.py` (new), `apply/outcomes.py`,
   `tests/community/core/bot_config_manifest/test_iteration1_ordering.py` (new)
 - **Done when:**
-  - [ ] `EXPLICIT`, `PUT` constants; creation triggers referenced from
+  - [x] `EXPLICIT`, `PUT` constants; creation triggers referenced from
         `creation.py`; `ApplyReport.trigger` docstring lists the vocabulary.
-  - [ ] The ordering test pins ARCA's `PRE_CONTAINER == (script,)` and names
+  - [x] The ordering test pins ARCA's `PRE_CONTAINER == (script,)` and names
         #1508; a second case pins that `TeclawDelivery(switch on)` puts every
         non-script construct in `PRE_CONTAINER`.
 - **Depends on:** Task 2 (for the teclaw case)
@@ -52,7 +52,7 @@ Conventions every task assumes:
         selection.
 - **Depends on:** —
 
-## [ ] Task 3: The apply service runs through the strategy
+## [~] Task 3: The apply service runs through the strategy
 - **Files:** `services/config_manifest_apply_service.py`,
   `apply/orchestrator.py` (only if it calls `steps_for` directly),
   `di/modules/bot_management_module.py`,

@@ -197,8 +197,10 @@ class ApplyReport:
 
     apply_id: str
     bot_id: str
-    #: ``explicit`` here. W8 and W13 add ``republish`` / ``restart`` / ``create``
-    #: without this type changing.
+    #: What started the apply. The vocabulary lives in ``apply/triggers.py``:
+    #: ``explicit``, ``put`` (W8), and W13's ``create:pre_container`` /
+    #: ``create:on_container``. Restart and republish are not triggers in
+    #: iteration 1 (spec D-1).
     trigger: str
     status: ApplyStatus
     started_at: datetime
