@@ -74,6 +74,12 @@ from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
     UnpackError,
     unpack_archive,
 )
+from agentclaw.community.core.bot_config_manifest.schema._support import (
+    relative_path_refusal,
+)
+from agentclaw.community.core.bot_config_manifest.schema.entries import (
+    VALID_UNPACK,
+)
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
 #: Schema §5 states the two resource forms' fetch widths separately —
@@ -132,15 +138,30 @@ class ResourcesMaterialiser(Materialiser):
         """
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
+        # The PUT layer refuses a duplicate resource path (one owner per
+        # path); the belt re-asks it — two entries at one path would
+        # otherwise converge to whatever wrote last, a no-rule answer.
+        seen: set[str] = set()
         for index, entry in enumerate(entries):
             path = entry.get("path") if isinstance(entry, dict) else None
             failed = self._entry_failure(entry, path, index)
             if failed is not None:
                 failures.append(failed)
                 continue
+            assert isinstance(path, str)  # _entry_failure passed it
+            if path in seen:
+                failures.append(
+                    ResolveFailure(
+                        path,
+                        "a resources path is declared more than once "
+                        "in this category",
+                    )
+                )
+                continue
+            seen.add(path)
             if isinstance(path, str) and path.endswith("/"):
                 unpack_kind = entry.get("unpack")
-                if unpack_kind not in ("zip", "tar.gz"):
+                if unpack_kind not in VALID_UNPACK:
                     failures.append(
                         ResolveFailure(
                             path,
@@ -329,14 +350,18 @@ class ResourcesMaterialiser(Materialiser):
         A stored document can predate a rule, or have skipped the validator
         (a hand-built apply in W8's lifecycle points) — this is the half the
         path-safety question needs answered at *apply* time, not only at
-        write time.
+        write time. The rule itself is the schema's own pure predicate
+        (:func:`relative_path_refusal`), not a re-derivation: the belt must
+        refuse exactly what the PUT layer refuses — "~", drive letters,
+        quoted characters and all — or it is a second, weaker rule.
         """
         if not isinstance(path, str) or not path:
             return ResolveFailure(
                 f"[{index}]", "a resources entry must declare a 'path'"
             )
-        if path.startswith("/") or ".." in path.split("/") or "\x00" in path:
-            return ResolveFailure(path, "path must be workspace-relative")
+        refusal = relative_path_refusal(path, what="path")
+        if refusal is not None:
+            return ResolveFailure(path, refusal[1])
         return None
 
     def _check_nesting(
