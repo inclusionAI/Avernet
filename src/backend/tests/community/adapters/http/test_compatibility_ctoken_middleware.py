@@ -19,6 +19,7 @@ from agentclaw.community.adapters.http.middleware import (
     [
         "/api/bots/a-bot/caller-context",
         "/api/bots/a-bot/mcps/a-server/call-type",
+        "/api/bots/a-bot/clis/a-cli/call-type",
         "/api/v1/user-lists/check",
         "/api/v1/user-lists/correct",
     ],

@@ -19,6 +19,10 @@ from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyStatus,
     EntryOutcome,
+    SourceResolution,
+)
+from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+    SourceSession,
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     build_materialisers,
@@ -27,22 +31,55 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
     ManifestSection,
 )
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    EntryFetcher,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+    FetchFailedError,
+)
 
 from ._fakes import (
     FakeActivationService,
+    FakeCapabilityReader,
+    FakeCredentials,
+    FakeGitClient,
+    FakeGuardedFetcher,
+    FakeIdentityService,
+    FakeManifestContent,
     FakeMcpAuth,
+    FakeResourceFileService,
+    FakeSkillUploadService,
     FakeStartupScriptService,
+    fetched_object,
     make_context,
+    real_validator,
 )
 
 
 def _engine(scripts=None, activations=None, auth=None):
+    """The W4-shaped engine: mcp + script over their fakes (these tests are
+    the engine's contract, not the two fetch-consuming categories' — those
+    have their own materialiser files)."""
     return ApplyOrchestrator(
         build_materialisers(
             script_service=scripts or FakeStartupScriptService(),
             activation_service=activations or FakeActivationService(),
             mcp_auth_service=auth or FakeMcpAuth(),
+            identity_service=FakeIdentityService(),
+            upload_service=FakeSkillUploadService(),
+            capability_reader=FakeCapabilityReader(),
+            package_validator=real_validator(),
+            entry_fetcher=_dummy_entry_fetcher(),
+            resource_service=FakeResourceFileService(),
         )
+    )
+
+
+def _dummy_entry_fetcher():
+    """The engine tests never declare skills/identity sources, so the fetcher
+    the registry holds for them can be a never-called placeholder."""
+    return EntryFetcher(
+        FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
     )
 
 
@@ -290,34 +327,40 @@ async def test_applying_one_category_leaves_the_others_alone():
 
 @pytest.mark.asyncio
 async def test_a_category_with_no_materialiser_fails_and_writes_nothing():
-    """W5/W6's categories are an expected state, not a crash.
+    """Post-W6 categories are an expected state, not a crash.
 
     Every entry fails with a readable reason, the category is aborted so nothing
     is destroyed, and the categories that *do* have materialisers still apply.
+
+    Declared with ``cli_tools``, the sparse construct after W6: the test was
+    written against ``skills`` in W4's era and moved forward with each wave
+    that materialises its previous subject — W5 took skills, W6 resources.
+    W9 will move it forward again.
     """
     scripts = FakeStartupScriptService()
     report = await _apply(
         _engine(scripts),
         """schema_version: 1
 manifest:
-  skills:
-    - name: quality-check
-      content: "x"
+  cli_tools:
+    - name: jq
+      source: https://cdn.example.com/jq
+      digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 script:
   body: "echo hi"
 """,
     )
 
-    assert _outcomes(report)["quality-check"] is EntryOutcome.FAILED
+    assert _outcomes(report)["jq"] is EntryOutcome.FAILED
     assert _outcomes(report)["script"] is EntryOutcome.CREATED
     assert report.status is ApplyStatus.PARTIAL
 
-    skills = next(
-        c for c in report.categories if c.construct is ManifestCategory.SKILLS
+    cli_tools = next(
+        c for c in report.categories if c.construct is ManifestCategory.CLI_TOOLS
     )
-    assert skills.aborted is True
-    assert skills.removals == ()
-    reason = skills.entries[0].reason or ""
+    assert cli_tools.aborted is True
+    assert cli_tools.removals == ()
+    reason = cli_tools.entries[0].reason or ""
     assert "materializer" in reason
 
 
@@ -712,3 +755,144 @@ async def test_an_abort_before_the_write_says_nothing_changed():
     category = report.categories[0]
     assert category.aborted is True
     assert category.partially_written is False
+
+
+@pytest.mark.asyncio
+async def test_a_fetching_document_applies_all_four_categories_in_order():
+    """The W5 integration: one document declaring identity, skills, mcp and
+    script walks the complete registry, categories land in ``APPLY_ORDER``
+    position (identity before skills), a fetch failure in one category
+    neither touches the bot nor stops the others, and the status summarises
+    the partial delivery.
+    """
+    from ._fakes import (
+        SOUL_BODY as _SOUL_BODY,
+        SOUL_URL as _SOUL_URL,
+        build_skill_zip,
+    )
+
+    qc_zip = build_skill_zip("quality-check")
+    qc_url = "https://content.example/skills/quality-check.zip"
+    rules_url = "https://content.example/identity/rules.md"
+    import hashlib
+
+    qc_digest = "sha256:" + hashlib.sha256(qc_zip).hexdigest()
+    identity = FakeIdentityService()
+    uploads = FakeSkillUploadService()
+    activation = FakeActivationService()
+    reader = FakeCapabilityReader()
+    fetcher = FakeGuardedFetcher(
+        responses={
+            _SOUL_URL: fetched_object(_SOUL_BODY, url=_SOUL_URL),
+            qc_url: fetched_object(qc_zip, url=qc_url, content_type="application/zip"),
+            # identity rules fetch: the source is gone — a real outage shape.
+        },
+        failures={rules_url: FetchFailedError("source answered 404")},
+    )
+    engine = ApplyOrchestrator(
+        build_materialisers(
+            script_service=FakeStartupScriptService(),
+            activation_service=activation,
+            mcp_auth_service=FakeMcpAuth(),
+            identity_service=identity,
+            upload_service=uploads,
+            capability_reader=reader,
+            package_validator=real_validator(),
+            entry_fetcher=EntryFetcher(
+                fetcher, FakeManifestContent(), FakeCredentials()
+            ),
+            resource_service=FakeResourceFileService(),
+        )
+    )
+
+    report = await _apply(
+        engine,
+        f"""schema_version: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      source: "{_SOUL_URL}"
+    - type: RULES.md
+      source: "{rules_url}"
+  skills:
+    - name: quality-check
+      source: "{qc_url}"
+      digest: "{qc_digest}"
+script:
+  body: "echo hi"
+""",
+        ctx=make_context(engine_type="openclaw"),
+    )
+
+    # identity aborted on the failed RULES fetch — nothing written there;
+    # RULES itself failed, its neighbour was skipped, and SOUL.md not written.
+    by_construct = {c.construct: c for c in report.categories}
+    identity_category = by_construct[ManifestCategory.IDENTITY]
+    assert identity_category.aborted is True
+    outcomes = _outcomes(report)
+    assert outcomes["RULES.md"] is EntryOutcome.FAILED
+    assert outcomes["SOUL.md"] is EntryOutcome.SKIPPED
+    assert identity.writes == []
+
+    # skills delivered, after identity per APPLY_ORDER position (1 < 3).
+    assert [c.construct for c in report.categories] == [
+        ManifestSection.SCRIPT,
+        ManifestCategory.IDENTITY,
+        ManifestCategory.SKILLS,
+    ]
+    assert outcomes["quality-check"] is EntryOutcome.CREATED
+    assert uploads.uploads[0]["name"] == "quality-check"
+
+    # script is a plain row write, unaffected by anything upstream.
+    assert outcomes["script"] is EntryOutcome.CREATED
+    assert report.status is ApplyStatus.PARTIAL
+
+
+# ── W7: the report's sources section ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_sessions_resolutions_ride_into_the_report():
+    """W7 wiring: the report's ``sources`` is the session's records and
+    nothing else.
+
+    The orchestrator holds no per-apply state, so the resolutions cannot
+    live on it — they ride the context's session and are read out at report
+    time. A session with no resolutions and no session at all both stay
+    empty, which is what every pre-W7 document expects.
+    """
+    engine = _engine()
+    resolution = SourceResolution(
+        name="charts", ref="main", resolved_sha="f" * 40, auth="ci-token"
+    )
+    # The test-visible seam for a checkout that a materialiser's resolve
+    # would have recorded: the session's own record list, appended directly.
+    session = SourceSession(sources={}, baselines={}, git=FakeGitClient())
+    session._resolutions.append(resolution)
+    empty_session = SourceSession(sources={}, baselines={}, git=FakeGitClient())
+
+    report = await _apply(
+        engine,
+        'script:\n  body: "echo hi"\n',
+        ctx=make_context(source_session=session),
+    )
+    assert report.as_payload()["sources"] == [
+        {
+            "name": "charts",
+            "ref": "main",
+            "resolved_sha": "f" * 40,
+            "auth": "ci-token",
+        }
+    ]
+
+    # No resolutions recorded — the section is empty, not absent.
+    plain = await _apply(
+        engine,
+        'script:\n  body: "echo hi"\n',
+        ctx=make_context(source_session=empty_session),
+    )
+    assert plain.as_payload()["sources"] == []
+
+    # No session at all (pre-W7 callers, hand-driven tests) — same answer.
+    bare = await _apply(engine, 'script:\n  body: "echo hi"\n')
+    assert bare.as_payload()["sources"] == []

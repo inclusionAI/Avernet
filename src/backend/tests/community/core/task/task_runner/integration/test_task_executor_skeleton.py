@@ -19,12 +19,12 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-def test_bbs_dispatch_is_noop_and_returns_true(caplog):
+def test_bbs_dispatch_without_graph_returns_false(caplog):
     exe = TaskExecutor(bot=None, bcs=None, formatter=None, context=None, sink=None, poller=None)
     with caplog.at_level(logging.INFO):
         res = _run(exe.dispatch([_node(run_mode="bbs")]))
-    assert res == [True]
-    assert any("bbs" in r.getMessage().lower() for r in caplog.records)
+    assert res == [False]
+    assert "dispatch failed: graph missing" in caplog.text
 
 
 def test_unknown_mode_returns_false():
@@ -36,7 +36,7 @@ def test_unknown_mode_returns_false():
 def test_dispatch_returns_one_bool_per_node():
     exe = TaskExecutor(bot=None, bcs=None, formatter=None, context=None, sink=None, poller=None)
     res = _run(exe.dispatch([_node("a", run_mode="bbs"), _node("b", run_mode="bbs")]))
-    assert res == [True, True]
+    assert res == [False, False]
 
 
 def test_runner_falls_back_to_stub_without_backend():

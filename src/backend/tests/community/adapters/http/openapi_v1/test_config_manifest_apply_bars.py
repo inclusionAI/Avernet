@@ -128,6 +128,12 @@ def test_apply_declares_the_bar_w10_settled():
             script_service=object(),
             activation_service=object(),
             mcp_auth_service=object(),
+            identity_service=object(),
+            upload_service=object(),
+            capability_reader=object(),
+            package_validator=object(),
+            entry_fetcher=object(),
+            resource_service=object(),
         )
     ),
 )
@@ -179,6 +185,12 @@ def test_apply_admission_mode_is_no_wider_than_the_categories_it_writes():
         script_service=object(),
         activation_service=object(),
         mcp_auth_service=object(),
+        identity_service=object(),
+        upload_service=object(),
+        capability_reader=object(),
+        package_validator=object(),
+        entry_fetcher=object(),
+        resource_service=object(),
     ):
         for path in _CATEGORY_WRITE_PATHS[construct.value]:
             for (method, candidate), mode in ADMISSION.items():

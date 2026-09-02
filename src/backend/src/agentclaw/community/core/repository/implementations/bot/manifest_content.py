@@ -18,6 +18,8 @@ Behavior:
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from injector import inject
 
 from agentclaw.community.core.bot_config_manifest.content.models import (
@@ -105,3 +107,35 @@ class ManifestContentRepository(ManifestContentRepositoryProtocol):
                 .all()
             )
             return [row.to_record() for row in rows]
+
+    def latest_for(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        source_url: str,
+    ) -> Optional[StoredContentRecord]:
+        """The newest receipt for one bot and one source URL, or ``None``.
+
+        Same ordering as ``records_for`` (gmt_create leading on the index, id
+        breaking the same-second tie) with the source as an exact-equality
+        filter. Unbounded on purpose: the per-source lookup answers for one
+        URL, so the question's own shape is the bound. The tenant half of the
+        filter is the model guard's, as everywhere else here.
+        """
+        with self._db.orm_session() as session:
+            row = (
+                session.query(self._Manifest)
+                .filter(
+                    self._Manifest.env == env,
+                    self._Manifest.entity_id == entity_id,
+                    self._Manifest.bot_id == bot_id,
+                    self._Manifest.source_url == source_url,
+                )
+                .order_by(
+                    self._Manifest.gmt_create.desc(), self._Manifest.id.desc()
+                )
+                .first()
+            )
+            return row.to_record() if row is not None else None

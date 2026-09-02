@@ -429,16 +429,15 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # exactly the two operations that mutate it.
     ("PUT", "/openapi/v1/bots/source-credentials/{name}"):
         NoCheck("tenant-guarded credential write; the owner-app check is the service's"),
-    ("GET", "/openapi/v1/bots/source-credentials/{name}"):
-        NoCheck("tenant-guarded masked metadata; every tenant app may read"),
-    ("GET", "/openapi/v1/bots/source-credentials"):
-        NoCheck("tenant-guarded inventory; every tenant app may read"),
+    ("GET", "/openapi/v1/bots/source-credentials/{name}"): NoCheck("tenant-guarded masked metadata; every tenant app may read"),
+    ("GET", "/openapi/v1/bots/source-credentials"): NoCheck("tenant-guarded inventory; every tenant app may read"),
     ("DELETE", "/openapi/v1/bots/source-credentials/{name}"):
         NoCheck("tenant-guarded credential delete; the owner-app check is the service's"),
-    ("GET", "/openapi/v1/org/dept"):
-        NoCheck("the caller's own directory record"),
+    ("GET", "/openapi/v1/org/dept"): NoCheck("the caller's own directory record"),
     ("GET", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
     ("POST", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
+    ("POST", "/openapi/v1/bots/with-manifest"): NoCheck("a creation, not one addressed bot — as POST /openapi/v1/bots"),
+    ("GET", "/openapi/v1/bots/{bot_id}/with-manifest/status"): NoCheck("the caller's own creation: for most of one there is no bot record to check against, so what scopes it is that every row it reads — the job's idempotency key included — is keyed by the entity_id the caller's principal resolves to. That holds ONLY BECAUSE admission REFUSES an app-only caller here: for one of those require_user_id returns the user_id QUERY PARAMETER, and the entity_id would be request-supplied. Lifting that refusal without a check able to authorize an app→user pair before a bot exists invalidates this reason — see admission.py"),
     ("GET", "/openapi/v1/bots/all"): NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/authorized"):
         NoCheck("a collection, not one addressed bot"),

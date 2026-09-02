@@ -191,18 +191,6 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "user_app_grant": _USER_APP_GRANT_EXEMPT_REASON,
     "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
-        "bot_config_manifest": (
-        "W3 (#1471) is credential storage: CRUD + prefix policy, no "
-        "singlebox-observable fetch flow yet (the guarded fetcher lands in "
-        "W2's own PR). Covered by "
-        "tests/community/core/bot_config_manifest/credentials/ (policy "
-        "matrix, service all-or-nothing + fail-closed, repository over a "
-        "real database), the adapter suite in "
-        "tests/community/adapters/http/openapi_v1/test_source_credentials_endpoints.py, "
-        "and the assembled-app endpoint cases in "
-        "tests/community/endpoints/test_openapi_source_credentials.py. "
-        "Drain this when W4's apply gives singlebox an observable flow."
-    ),
 "bot_dormant": _EXEMPT_REASON,
     "bot_inventory": (
         "New public inventory/local Bot aggregation module. Covered by HTTP endpoint, "
@@ -217,15 +205,20 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "above — every route in the group is /openapi/v1 and needs a "
         "gateway-signed principal, which singlebox has no way to produce, the "
         "manifest routes and the apply routes (W4, #1472) alike. The "
-        "machine-part waves — W2 fetch + unpack (#1470) and the W11 content "
-        "store (#1510) — add only "
-        "transport/storage behavior with no singlebox-visible flow of their "
+        "machine-part waves — W2 fetch + unpack (#1470), the W11 content "
+        "store (#1510), and W5's skills/identity materialisers (#1473) — add "
+        "only transport/storage/materialisation behavior with no "
+        "singlebox-visible flow of their "
         "own, covered by the security matrix in "
         "tests/community/core/bot_config_manifest/fetch/ and the store "
         "contract tests in "
         "tests/community/core/bot_config_manifest/content/ (plus its "
         "repository over a real database in "
         "tests/community/repository/bot/test_manifest_content_repository.py), "
+        "by the materialiser suites in "
+        "tests/community/core/bot_config_manifest/apply/ (the two fetching "
+        "categories over fakes that count every write, and the entry-fetch "
+        "pipeline's pinned/unpinned/keep_last policy), "
         "and by W1's own cover meanwhile: "
         "tests/community/repository/bot/test_bot_config_manifest_repository.py "
         "(repository over a real database), "

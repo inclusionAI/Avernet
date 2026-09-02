@@ -35,6 +35,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
 )
 from agentclaw.community.api.bot_config_manifest_apply_service import (
+    ALL_PHASES,
     BotConfigManifestApplyServiceProtocol,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -102,11 +103,16 @@ async def apply_bot_config_manifest(
         Query(
             description="Return the plan without performing it. Synchronous; it "
             "applies no part of your manifest and writes no apply record, so it "
-            "mints no `apply_id` and appears in no history. One caveat: reading "
-            "a bot's installed MCP set reconciles platform-managed installation "
-            "rows against SkillSet membership, which any read of that state "
-            "does — so a preview is not a guarantee that no row anywhere "
-            "changed. Nothing your manifest declares is applied."
+            "mints no `apply_id` and appears in no history. Two caveats, both "
+            "by design: a declared source MAY really be fetched (a preview "
+            "that cannot tell you whether your sources are reachable and your "
+            "digests match is a weak preview), bounded by the same per-apply "
+            "fetch ledger a real apply uses — and the bytes acquired are kept "
+            "as the platform's own copy, because that audit trail records "
+            "acquisition, not delivery; and reading a bot's installed MCP set "
+            "reconciles platform-managed installation rows against SkillSet "
+            "membership, which any read of that state does. Nothing your "
+            "manifest declares is applied to the bot."
         ),
     ] = False,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -182,6 +188,12 @@ async def apply_bot_config_manifest(
         owner_id=owner_id,
         actor_id=actor_id,
         audit_actor=audit,
+        # Every phase: this route applies a whole document to a bot that already
+        # exists, so both halves are deliverable. Stated rather than defaulted —
+        # the creation path deliberately applies one phase at a time, and which
+        # of the two a call means must never be something a reader infers from
+        # an omission.
+        phases=ALL_PHASES,
     )
     return envelope(
         ConfigManifestApplyAccepted(

@@ -108,7 +108,13 @@ class ApplyOrchestrator:
 
         ``phases`` selects which half runs; ``None`` is both, which is what an
         apply on an existing bot wants. ``dry_run`` stops each construct after
-        its plan, so no write of any kind occurs.
+        its plan, so no write to the BOT or any bot-owned entity occurs —
+        "no write of any kind" stopped being true when fetch moved into
+        ``resolve`` (W5): a declared source may be fetched, and the bytes the
+        platform acquires are filed as its own copy (§2.8's audit trail is
+        about acquisition, not delivery); the fetch is bounded by the same
+        per-apply ledger a real apply uses. No materialisation, activation
+        or removal happens — the write paths are simply never entered.
         """
         results: list[CategoryResult] = []
         for step in steps_for(phases):
@@ -133,6 +139,14 @@ class ApplyOrchestrator:
             started_at=started_at,
             finished_at=datetime.now(),
             categories=categories,
+            # W7: the named sources this apply resolved, read out of the
+            # context's session — the orchestrator holds no per-apply state,
+            # so this is the only place the report's sources can come from.
+            sources=(
+                tuple(ctx.source_session.resolution_records())
+                if ctx.source_session is not None
+                else ()
+            ),
         )
 
     async def _apply_construct(
@@ -191,8 +205,11 @@ class ApplyOrchestrator:
             )
 
         if dry_run:
-            # Stop here. The plan is the answer, and no write of any kind has
-            # happened — because the call that would make one was not made.
+            # Stop here. The plan is the answer, and no write path has been
+            # entered — because the call that would enter one was not made
+            # (fetch-side acquisition is resolve's business and may already
+            # have happened; writing to the bot is write's, and it is not
+            # made).
             return self._projected(construct, plan)
 
         try:

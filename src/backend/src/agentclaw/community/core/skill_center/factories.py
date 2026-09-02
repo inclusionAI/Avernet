@@ -59,13 +59,21 @@ from agentclaw.community.core.skill_center.skill_service_factory_protocol import
 from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import SkillSetServiceFactoryProtocol
 
 if TYPE_CHECKING:
-    # Runtime-keyed device dispatchers stay in the DI layer (they bridge
-    # to plugins). These factories are constructed via explicit
-    # @provider methods, so the injector never introspects this class's
-    # type hints — the string annotations below are never resolved at
-    # runtime, making the TYPE_CHECKING import sufficient and the
-    # core->di boundary intact.
-    pass
+    # Runtime-keyed device dispatchers and the workspace path factory are
+    # constructor *types* only. These factories are constructed via explicit
+    # @provider methods, so the injector never introspects this class's type
+    # hints at runtime — a TYPE_CHECKING import is sufficient for the tools
+    # that do resolve annotations, and no importable boundary is crossed.
+    from agentclaw.community.core.devices.services.device_context_resolver import (
+        DeviceContextResolver,
+    )
+    from agentclaw.community.core.devices.services.device_filesystem_dispatcher import (
+        DeviceFilesystemDispatcher,
+    )
+    from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+    from agentclaw.community.plugin_api.device_sync_dispatcher import (
+        DeviceSyncDispatcher,
+    )
 
 logger = get_logger()
 
@@ -199,6 +207,17 @@ class LocalSkillPackageStorage:
         """Read and validate every package file without changing storage."""
         await self._read_package_files()
         return True
+
+    async def read_package_files(self) -> list[tuple[str, bytes]]:
+        """The installed package's bytes, read back the way verify/copy_to read
+        them: every listed path validated before a single read is issued.
+
+        The public alias of the private reader those flows share — a caller
+        that needs the authoritative bytes (not just a boolean) reads the
+        same thing the bot is actually running, with no new traversal or
+        locator knowledge of its own.
+        """
+        return await self._read_package_files()
 
     async def copy_to(
         self, target: "LocalSkillPackageStorage", *, replace: bool = False

@@ -8,7 +8,7 @@ the call site. Domain imports are ``TYPE_CHECKING``-only — see
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Protocol, TYPE_CHECKING, runtime_checkable
+from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_config_manifest.content.models import (
@@ -61,5 +61,25 @@ class ManifestContentRepositoryProtocol(Protocol):
         "this bot has no receipts" — a claim, not a page — and a negative
         LIMIT changes meaning per dialect (SQLite reads it as unbounded),
         so clamping it to nothing would merely be the quieter wrong answer.
+        """
+        ...
+
+    @abstractmethod
+    def latest_for(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        source_url: str,
+    ) -> Optional[StoredContentRecord]:
+        """The newest provenance row for one bot and one source URL, or ``None``.
+
+        The per-source lookup the fetch pipeline asks ("does this bot's newest
+        receipt for *this* URL hold these bytes?"): newest-first on the same
+        ordering ``records_for`` uses, filtered to one source, bounded by no
+        ``DEFAULT_RECORD_LIMIT`` — a busy bot cannot evict from the answer the
+        one row a category wants. ``source_url`` is compared by exact string
+        equality, never ``startswith``: a sibling path is a different source.
         """
         ...

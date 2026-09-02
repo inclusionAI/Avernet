@@ -10,6 +10,7 @@ All tests use mocked dependencies to isolate the service under test.
 """
 
 import asyncio
+import logging
 from unittest import mock
 from unittest.mock import AsyncMock, MagicMock
 
@@ -5401,7 +5402,7 @@ class TestDestroyOrphanWithLogging:
 
     @pytest.mark.asyncio
     async def test_exception_during_destroy_is_logged(
-        self, local_paas_service, mock_repository
+        self, local_paas_service, mock_repository, caplog
     ):
         """Exception during orphan destruction is caught and logged (lines 1350-1356)."""
         # Setup: make destroy_device fail
@@ -5409,6 +5410,7 @@ class TestDestroyOrphanWithLogging:
 
         # Directly call _destroy_orphan_with_logging - it catches exceptions
         # destroy_device will raise DeviceCreationError because machine not found
+        caplog.set_level(logging.WARNING)
         result = await local_paas_service._destroy_orphan_with_logging(
             paas_device_id="container--machine-001--user-001",
             triple_id="container--machine-001--user-001",
@@ -5416,6 +5418,14 @@ class TestDestroyOrphanWithLogging:
 
         # Should not raise - exception is caught and logged
         assert result is None
+
+        failed_records = [
+            r
+            for r in caplog.records
+            if "[HEARTBEAT_ORPHAN_DELETE_FAILED]" in r.message
+        ]
+        assert len(failed_records) == 1
+        assert failed_records[0].levelno == logging.WARNING
 
 
 class TestHandleHeartbeatContainers:

@@ -1245,19 +1245,19 @@ literals the routes actually publish:
 ```text
 all  approvals  authorized  catalog  ceiling  check-name  connection  engine  identity
 loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
-source-credentials  work-order-notifications  work-orders
+source-credentials  with-manifest  work-order-notifications  work-orders
 ```
 
-Eight of those twenty-four — `approvals`, `connection`, `engine`, `identity`,
+Eight of those twenty-five — `approvals`, `connection`, `engine`, `identity`,
 `models`, `resources`, `routines`, and `sessions` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
 of that segment. The tenant-level Skill Workbench status route now keeps
 `skills` current at this level, so once the deprecated addresses are removed the
-list is the sixteen that remain:
+list is the seventeen that remain:
 
 ```text
 all  authorized  catalog  ceiling  check-name  loadtest  local  logs  market  metadata  mcp  skills
-source-credentials  spaces  work-order-notifications  work-orders
+source-credentials  spaces  with-manifest  work-order-notifications  work-orders
 ```
 
 They are still reserved today, and the list above is the accurate one: a bot

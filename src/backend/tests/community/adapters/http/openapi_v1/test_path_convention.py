@@ -120,6 +120,11 @@ _BOT_FREE = frozenset(
         # shares the bots namespace the bots domain routes, but never
         # names one bot, exactly like the other literal groups above.
         "source-credentials",
+        # Creating a bot with its manifest (W13, #1696): a creation, so there is
+        # no bot to address yet — the same shape as `POST /openapi/v1/bots`,
+        # which needs no entry here only because it adds no segment at all. Its
+        # status poll *is* `{bot_id}`-first and needs nothing here.
+        "with-manifest",
         "work-order-notifications",
         "work-orders",
     }

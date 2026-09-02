@@ -48,12 +48,14 @@ pub fn parse_public_key(pem: &str) -> Result<RsaPublicKey, AlipaySignError> {
 
 /// Build the canonical signing string from sorted parameters.
 ///
-/// Excludes `sign` and `sign_type`. Parameters are sorted by key (using
-/// BTreeMap ensures this). Values are NOT URL-encoded per Alipay spec.
+/// Excludes only `sign`. `sign_type` is INCLUDED (the Alipay gateway verifies
+/// with `sign_type` present in the string-to-sign). Parameters are sorted by
+/// key (using BTreeMap ensures this). Values are NOT URL-encoded per Alipay
+/// spec.
 pub fn build_sign_string(params: &std::collections::BTreeMap<String, String>) -> String {
     params
         .iter()
-        .filter(|(k, _)| k != &"sign" && k != &"sign_type")
+        .filter(|(k, _)| k != &"sign")
         .filter(|(_, v)| !v.is_empty())
         .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
@@ -66,11 +68,12 @@ pub fn sign_params(
     private_key: &RsaPrivateKey,
 ) -> Result<String, AlipaySignError> {
     let sign_string = build_sign_string(params);
-    let signing_key = rsa::pkcs1v15::SigningKey::<Sha256>::new_unprefixed(private_key.clone());
+    let signing_key = rsa::pkcs1v15::SigningKey::<Sha256>::new(private_key.clone());
     let signature = signing_key
         .try_sign(sign_string.as_bytes())
         .map_err(|e| AlipaySignError::SignFailed(e.to_string()))?;
-    Ok(BASE64.encode(signature.to_bytes()))
+    let result = BASE64.encode(signature.to_bytes());
+    Ok(result)
 }
 
 /// Verify a response signature against the Alipay public key using sorted
@@ -91,7 +94,7 @@ pub fn verify_raw(
     sign: &str,
     public_key: &RsaPublicKey,
 ) -> Result<(), AlipaySignError> {
-    let verifying_key = VerifyingKey::<Sha256>::new_unprefixed(public_key.clone());
+    let verifying_key = VerifyingKey::<Sha256>::new(public_key.clone());
     let signature_bytes = BASE64
         .decode(sign)
         .map_err(|e| AlipaySignError::VerifyFailed(format!("base64 decode: {e}")))?;
@@ -115,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn build_sign_string_excludes_sign_and_sign_type() {
+    fn build_sign_string_excludes_sign_keeps_sign_type() {
         let mut params = std::collections::BTreeMap::new();
         params.insert("app_id".to_string(), "2021001".to_string());
         params.insert("method".to_string(), "alipay.test".to_string());
@@ -124,10 +127,10 @@ mod tests {
         params.insert("charset".to_string(), "utf-8".to_string());
 
         let result = build_sign_string(&params);
-        // BTreeMap sorts keys alphabetically: app_id, charset, method
-        assert_eq!(result, "app_id=2021001&charset=utf-8&method=alipay.test");
-        assert!(!result.contains("sign"));
-        assert!(!result.contains("sign_type"));
+        // BTreeMap sorts keys alphabetically: app_id, charset, method, sign_type
+        assert_eq!(result, "app_id=2021001&charset=utf-8&method=alipay.test&sign_type=RSA2");
+        assert!(!result.contains("sign="));
+        assert!(result.contains("sign_type=RSA2"));
     }
 
     #[test]

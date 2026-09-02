@@ -296,6 +296,32 @@ manifest:
     assert ("manifest.skills[0]", "missing_digest") in _reject(document)
 
 
+def test_inline_content_is_accepted_for_identity_but_not_for_skills():
+    """Both categories reach the validator through the same source machinery,
+    and only identity can mean something by inline text: an identity file IS
+    one text body, while a skill is a package — SKILL.md plus the scripts it
+    names. Accepting a content-form skill would violate W1's rule (the
+    surface never accepts a construct nothing can apply) with W5 the wave
+    that has to catch it: nothing materialises a package from inline text."""
+    identity = """schema_version: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      content: |
+        # Who I am
+"""
+    assert _accept(identity).schema_version == 1
+
+    skill = """schema_version: 1
+manifest:
+  skills:
+    - name: qc
+      content: |
+        # not a package
+"""
+    assert ("manifest.skills[0].content", "content_not_a_skill_package") in _reject(skill)
+
+
 def test_the_dropped_on_fetch_failure_value_is_refused():
     """``skip`` meant "leave this one alone" under per-entry diffing; under
     category overwrite it would mean "delete this one"."""
@@ -812,3 +838,37 @@ manifest:
       source: "{boundary}"
 """
     )
+
+
+def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
+    """The PUT-time predicate, pure, exposed for the apply-time belt.
+
+    The resources materialiser re-asks this rule at apply time (a stored
+    document can predate the validator); sharing one function is what
+    keeps the belt from being a weaker copy of the schema's rule.
+    """
+    from agentclaw.community.core.bot_config_manifest.schema._support import (
+        relative_path_refusal,
+    )
+
+    refused = [
+        ("/etc/passwd", "absolute_path"),
+        ("~/.ssh/id", "absolute_path"),
+        ("C:evil.md", "absolute_path"),
+        ("../../etc/passwd", "path_traversal"),
+        ("data/../../etc", "path_traversal"),
+        ("a\\b.md", "invalid_path"),
+        ("a b.md", "invalid_path"),
+        ("", "invalid_path"),
+    ]
+    for value, code in refused:
+        refusal = relative_path_refusal(value)
+        assert refusal is not None, value
+        assert refusal[0] == code, (value, refusal)
+        assert refusal[1]
+    # A non-string is the belt's own business (declared by the index) — the
+    # predicate refuses it as invalid rather than assuming str.
+    assert relative_path_refusal(123)[0] == "invalid_path"
+    # The legitimate shapes, including the per-segment '..' reading.
+    for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md"):
+        assert relative_path_refusal(value) is None, value

@@ -62,15 +62,16 @@ class TaskRunner:
         多节点经 ``asyncio.gather`` + ``_DELIVER_CONCURRENCY`` Semaphore 并发限流(对齐 backend lifecycle
         模式,防投递雪崩);否则 stub 记日志返 True。
         协程化:真实投递(单 bot workflow/BCS 协作群/BBS 广场)是网络 IO,并发 await 不阻塞编排核。"""
+        if self._execution_backend is not None:
+            # 真实后端一次接收完整批次，由其统一 semaphore 控制三种模态的并发。
+            return list(await self._execution_backend.dispatch(toDoTaskList))
+
         sem = asyncio.Semaphore(self._DELIVER_CONCURRENCY)
 
         async def _deliver_one(node: TaskNode) -> bool:
             mode = node.run_info.run_mode
             if mode not in ("single_bot", "coop_group", "bbs"):
                 return False
-            if self._execution_backend is not None:
-                # execution_backend.dispatch 自身按 run_mode 三模态分流(含 bbs no-op)
-                return await self._execution_backend.dispatch([node]) == [True]
             async with sem:
                 port = self._deliveries.get(mode)
                 if port is not None:
@@ -140,16 +141,6 @@ class TaskRunner:
         if self._execution_backend is not None:
             return await self._execution_backend.get_group_session(group_id)
         logger.debug("[task][runner] get_group_session 退桩→ None(group_id=%s 无 execution_backend)", group_id)
-        return None
-
-    async def run_bbs(self, execution_graph) -> None:
-        """升 BBS 可恢复态后主动通知 dream-mode bot 抢单(委托 execution_backend)。
-        注入 execution_backend 时委托其 run_bbs(→ TaskExecutor.run_bbs → bbs_runner.notify);
-        否则 stub 记日志(Avernet 无后端兜底,不抛)。"""
-        logger.info("[task][bbs_mode] run_bbs, begin, task=%s", execution_graph.task_id)
-        if self._execution_backend is not None:
-            return await self._execution_backend.run_bbs(execution_graph)
-        logger.info("[task][bbs_mode] run_bbs, finish, task=%s", execution_graph.task_id)
         return None
 
     def _build_context(self, task_id: str, node_id: str) -> dict[str, Any]:
