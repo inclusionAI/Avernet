@@ -1,6 +1,6 @@
 ---
 agent: tc-pr
-status: in_progress
+status: complete
 created: 2026-09-01T00:00:00+08:00
 ---
 
@@ -68,3 +68,12 @@ Validation after the fix will rerun the 16 failing gates first, then the affecte
 - Follow-up PR: [#1812](https://github.com/inclusionAI/Avernet/pull/1812), title `feat(backend): expose legacy CLI call-type updates`, head `rebase/legacy-cli-call-type-on-dev`, base `dev`.
 - PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec. Human comments mode: `auto`.
 - Initial remote state: OPEN, review required, no comments or reviews; eight CI checks are queued or in progress and therefore remain `PENDING`.
+
+## Follow-up PR validation result
+
+- CI-validated head: `daf45f66e8eb24740ccbcbdce2e8cdd3d52cf0fe`.
+- All eight GitHub checks passed: Backend unit tests, BCS unit tests, Engine unit tests, BaaS unit tests, Gateway unit tests, Sandbox-proxy unit tests, Singlebox coverage, and BCS E2E.
+- Backend unit tests completed successfully in 17m36s; Singlebox coverage completed successfully in 13m32s.
+- PR #1812 is open, non-draft, and mergeable. GitHub still reports `REVIEW_REQUIRED` because no approval has been submitted.
+- There are no issue comments, inline review comments, or submitted reviews to address.
+- This report-only status update does not change the implementation. Its final PR head is revalidated by the same required GitHub checks after push.
