@@ -599,6 +599,30 @@ class FakeActivationService:
         )
 
 
+class FakeGitClient:
+    """The git transport for suites whose documents fetch nothing — every
+    call is a wiring bug, so it counts and refuses.
+
+    ``constructed`` is the class-level construction count the lifecycle
+    suite reads: one session per apply means one client per apply, and the
+    provider (not the test) is what builds it, so the only observable of
+    "a session was built" is how many times the provider ran.
+    """
+
+    constructed: int = 0
+
+    def __init__(self) -> None:
+        self.calls = 0
+        type(self).constructed += 1
+
+    def fetch(self, spec, *, headers=None):
+        self.calls += 1
+        raise AssertionError(
+            "this suite's document declares no git sources; "
+            f"git fetch({spec.url!r}) must not run"
+        )
+
+
 class FakeMcpAuth:
     """Permission answers, per server code.
 
@@ -633,8 +657,11 @@ def make_context(
     engine_type: str = "claude_code",
     bot_type: str = "personal",
     apply_id: str | None = None,
+    source_session=None,
 ) -> ApplyContext:
-    """An ``ApplyContext`` with real capabilities resolved for a baas bot."""
+    """An ``ApplyContext`` with real capabilities resolved for a baas bot;
+    ``source_session`` carries the W7 per-apply named-source state when a
+    test drives the ``from``/git pipeline."""
     return ApplyContext(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -645,6 +672,7 @@ def make_context(
         engine_type=engine_type,
         bot_type=bot_type,
         apply_id=apply_id,
+        source_session=source_session,
         bot={
             "bot_id": bot_id,
             "owner_id": owner_id,

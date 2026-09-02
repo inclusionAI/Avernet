@@ -1948,6 +1948,17 @@ directory-level ownership semantics; teclaw per-file expansion.
 
 **Owner.** `lucas-xzp` · 0.25 d · day 4 · build (§7)
 
+> **✅ Delivered (2026-09-02).** Named sources and git sources are in:
+> subprocess git CLI shallow single-ref fetch (W2's refusal semantics and
+> caps, containment checks before W11), `from`/`sources` resolution in
+> `EntryFetcher.fetch_declared`, the per-apply `SourceSession` (one
+> `{git, ref}` fetch reused), `SourceResolution` in the apply report, and
+> strict baselines read back from the last apply's report. v1 narrowing:
+> git sources take no `digest` (pin by writing the commit SHA as the
+> source's ref); `resources` entries still accept URL sources only —
+> wiring W6's materialiser to the git road is follow-up work (W6 merged
+> before W7 and carries no git consumption).
+
 
 **Goal.** One `ref` change resolves a whole configuration to one commit, and
 content hosted in the company's git service is a first-class source.

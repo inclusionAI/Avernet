@@ -139,6 +139,14 @@ class ApplyOrchestrator:
             started_at=started_at,
             finished_at=datetime.now(),
             categories=categories,
+            # W7: the named sources this apply resolved, read out of the
+            # context's session — the orchestrator holds no per-apply state,
+            # so this is the only place the report's sources can come from.
+            sources=(
+                tuple(ctx.source_session.resolution_records())
+                if ctx.source_session is not None
+                else ()
+            ),
         )
 
     async def _apply_construct(

@@ -16,12 +16,16 @@ from __future__ import annotations
 import ast
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
 from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
     IdentityMaterialiser,
+)
+from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+    SourceSession,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
@@ -408,3 +412,109 @@ def test_the_real_identity_service_satisfies_the_port():
         # operation's own arguments, owner/operator last — itself a subset
         # of the router's own calls.
         assert len(inspect.signature(method).parameters) >= 5, name
+
+
+# ── resolve: the git road (W7) ──────────────────────────────────────────────
+
+
+class _StaticGit:
+    """A git client that serves one checkout with stable bytes.
+
+    The checkout shape mirrors :class:`GitCheckout` where the materialiser
+    reaches it: ``read_file``/``files`` take the source's subpath argument
+    the way the guarded readers do, and the bytes are static so the intent,
+    the note and the store filing can be asserted exactly.
+    """
+
+    def __init__(self, sha: str = "a" * 40, body: bytes = b"# rules\n") -> None:
+        self.sha = sha
+        self.body = body
+        self.specs: list = []
+
+    def fetch(self, spec, *, headers=None):
+        self.specs.append(spec)
+        return SimpleNamespace(
+            root=None,
+            sha=self.sha,
+            url=spec.url,
+            ref=spec.ref,
+            files=lambda subpath=None: [],
+            read_file=lambda subpath=None: self.body,
+        )
+
+
+def _git_ctx(git: _StaticGit | None = None, *, sources=None, baselines=None):
+    """The W7 context: a source session over a scripted git client, with
+    the document's ``sources`` declarations and the strict baselines."""
+    session = SourceSession(
+        sources=sources or {}, baselines=baselines or {}, git=git or _StaticGit()
+    )
+    return _ctx(source_session=session)
+
+
+IDENTITY_GIT_SOURCE = {
+    "git": "https://git.corp/id.git",
+    "ref": "main",
+    "subpath": "files/rules.md",
+}
+
+
+def test_an_identity_entry_can_read_one_file_from_a_git_source():
+    materialiser, identity, _, _ = identity_rig()
+    git = _StaticGit()
+    ctx = _git_ctx(git, sources={"id": IDENTITY_GIT_SOURCE})
+    result, plan, written = _run(
+        _apply(materialiser, ctx, [{"type": "RULES.md", "from": "id"}])
+    )
+    assert result.ok
+    assert [e.outcome.value for e in written] == ["created"]
+    assert identity.writes[0]["file_type"] == "RULES.md"
+    assert identity.writes[0]["content"] == "# rules\n"
+    # The declaration's subpath is what named the file on the git road.
+    assert git.specs[0].subpath == "files/rules.md"
+
+
+def test_a_git_identity_without_subpath_is_a_resolve_failure():
+    materialiser, identity, _, _ = identity_rig()
+    ctx = _git_ctx(
+        sources={"id": {"git": "https://git.corp/id.git", "ref": "main"}}
+    )
+    resolved = _run(materialiser.resolve(ctx, [{"type": "RULES.md", "from": "id"}]))
+    assert not resolved.ok
+    # Identity reads exactly one file — the subpath is where it is named.
+    assert "subpath" in resolved.failures[0].reason
+    assert resolved.intents == ()
+    assert identity.writes == []
+
+
+def test_a_moved_ref_on_the_git_road_lands_in_the_note():
+    materialiser, _, _, _ = identity_rig()
+    git = _StaticGit(sha="a" * 40)
+    ctx = _git_ctx(
+        git,
+        sources={"id": IDENTITY_GIT_SOURCE},
+        baselines={"id": "b" * 40},
+    )
+    resolved = _run(materialiser.resolve(ctx, [{"type": "RULES.md", "from": "id"}]))
+    assert resolved.ok
+    # Non-strict moves are applied and reported: both SHAs, the old one
+    # first — the report is the only outlet for the drift (§2.7 pull-only).
+    assert resolved.intents[0].note is not None
+    assert "b" * 40 in resolved.intents[0].note
+    assert "a" * 40 in resolved.intents[0].note
+
+
+def test_the_git_road_files_its_bytes_with_the_store():
+    materialiser, identity, _, content = identity_rig()
+    git = _StaticGit()
+    ctx = _git_ctx(git, sources={"id": IDENTITY_GIT_SOURCE})
+    result, _, _ = _run(
+        _apply(materialiser, ctx, [{"type": "RULES.md", "from": "id"}])
+    )
+    assert result.ok
+    # The receipt identity is the canonical git URL, full SHA in it: the
+    # same log audit and keep_last read for every category (§2.8).
+    assert content.store_calls[-1]["source_url"] == (
+        f"git+https://git.corp/id.git@{'a' * 40}:files/rules.md"
+    )
+

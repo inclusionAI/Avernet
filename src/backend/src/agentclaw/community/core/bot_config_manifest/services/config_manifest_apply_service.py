@@ -35,6 +35,9 @@ from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
 from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
     ManifestResourcePort,
 )
+from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
+    GitSourceClient,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     APPLY_BUDGET_S,
     APPLY_FETCH_TOTAL_LIMIT,
@@ -55,6 +58,9 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     build_materialisers,
+)
+from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+    SourceSession,
 )
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ApplyAccepted,
@@ -131,6 +137,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], EntryFetcher],
         resource_service_provider: Callable[[], ManifestResourcePort],
+        git_client_provider: Callable[[], GitSourceClient],
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_repository
@@ -158,6 +165,14 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # file service dispatches to devices, another arm of the same
         # bot-configuration graph that made every provider above lazy.
         self._resource_service_provider = resource_service_provider
+        # W7's git transport, held the same lazy way: the sessions built
+        # above reach it by lookup rather than by a held instance, so no
+        # client state can outlive the apply that asked for it. The type is
+        # the fetch-side Protocol — already in this file's import tree via
+        # ``source_session`` — and a runtime import rather than a
+        # TYPE_CHECKING one because the injector resolves this constructor's
+        # string annotations against this module's globals.
+        self._git_client_provider = git_client_provider
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -210,11 +225,25 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             if lock is None:
                 raise ManifestApplyInProgressError(bot_id)
 
+        session: Optional[SourceSession] = None
         try:
             # Raises ManifestValidationError, before an id is minted, if the
             # stored document no longer validates for this bot.
             parsed = self._parsed_or_empty(
                 entity_id=entity_id, bot_id=bot_id, bot=bot
+            )
+            # W7's per-apply source session: the document's ``sources``
+            # declarations, frozen at apply start, against the strict-mode
+            # baselines read back from the LAST apply's report (before this
+            # apply runs, so a re-apply while an apply is in flight cannot
+            # read its own future resolutions). Built here in the request
+            # thread, so the worker never races a baseline read.
+            session = SourceSession(
+                sources=parsed.get("sources") or {},
+                baselines=self._last_resolutions(
+                    entity_id=entity_id, bot_id=bot_id
+                ),
+                git=self._git_client_provider(),
             )
             apply_id = uuid.uuid4().hex
             started_at = datetime.now()
@@ -238,7 +267,12 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 ),
             )
         except Exception:
-            # Nothing started, so the lock must not be left behind.
+            # Nothing started, so the lock must not be left behind — and any
+            # session already built must not keep whatever it fetched (it
+            # cannot have fetched, but the close is the invariant, not the
+            # schedule).
+            if session is not None:
+                session.close()
             self._locks.release(
                 env=env,
                 entity_id=entity_id,
@@ -260,6 +294,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 # apply fetch" as an indexed read.
                 apply_id=apply_id,
                 budget=budget,
+                source_session=session,
             )
 
             # ``bind_current_avernet_tenant`` captures the tenant AT WRAP TIME —
@@ -295,6 +330,11 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             # never ran. So the apply is terminally FAILED here, the lock is
             # released for the next attempt, and the caller hears the
             # original failure rather than a later poll's mystery.
+            if session is not None:
+                # ``_run``'s finally would have closed it; this apply has no
+                # _run, so the close belongs here — before the terminal write,
+                # so the report is never mistaken for a live session's owner.
+                session.close()
             self._terminate_on_launch_failure(
                 env=env,
                 entity_id=entity_id,
@@ -366,12 +406,21 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                         report=json.dumps(report.as_payload()),
                     )
             finally:
-                self._locks.release(
-                    env=ctx.env,
-                    entity_id=ctx.entity_id,
-                    bot_id=ctx.bot_id,
-                    lock_token=lock_token,
-                )
+                # W7: the session's checkout trees are this process's to
+                # clean or nobody's — close runs whether the finish write
+                # succeeded or not, and wrapped so a close that raised still
+                # frees the bot. The resolutions survive the close: the
+                # report above has already read them out.
+                try:
+                    if ctx.source_session is not None:
+                        ctx.source_session.close()
+                finally:
+                    self._locks.release(
+                        env=ctx.env,
+                        entity_id=ctx.entity_id,
+                        bot_id=ctx.bot_id,
+                        lock_token=lock_token,
+                    )
 
     def _terminate_on_launch_failure(
         self,
@@ -478,18 +527,33 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 deadline=time.monotonic() + APPLY_BUDGET_S,
                 total_bytes=APPLY_FETCH_TOTAL_LIMIT,
             ),
+            # The same per-apply source session a real apply runs under,
+            # baselines and all: a dry run's strict-mode answers must be the
+            # answers the real apply would give, and the resolutions it
+            # reports are what the caller is previewing.
+            source_session=SourceSession(
+                sources=parsed.get("sources") or {},
+                baselines=self._last_resolutions(entity_id=entity_id, bot_id=bot_id),
+                git=self._git_client_provider(),
+            ),
         )
-        return await self._orchestrator().apply(
-            ctx,
-            parsed,
-            # No id: a dry run appears in no history, so there is nothing to
-            # address it by. Naming it explicitly rather than minting one keeps
-            # "writes nothing" true of the record as well as of the bot.
-            apply_id="",
-            trigger="dry_run",
-            started_at=datetime.now(),
-            dry_run=True,
-        )
+        try:
+            return await self._orchestrator().apply(
+                ctx,
+                parsed,
+                # No id: a dry run appears in no history, so there is nothing to
+                # address it by. Naming it explicitly rather than minting one keeps
+                # "writes nothing" true of the record as well as of the bot.
+                apply_id="",
+                trigger="dry_run",
+                started_at=datetime.now(),
+                dry_run=True,
+            )
+        finally:
+            # No worker thread exists for a dry run, so its session closes
+            # here — the one terminal path whose ``finally`` is this one.
+            if ctx.source_session is not None:
+                ctx.source_session.close()
 
     # ── reading ─────────────────────────────────────────────────────────────
 
@@ -513,6 +577,25 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             env=get_current_env(), entity_id=entity_id, bot_id=bot_id
         )
         return self._to_report(record, entity_id=entity_id, bot_id=bot_id)
+
+    def _last_resolutions(
+        self, *, entity_id: str, bot_id: str
+    ) -> dict[str, str]:
+        """Each source's SHA as the LAST apply recorded it (W7 strict).
+
+        The previous apply's report is where "what did we resolve" already
+        lives (``ApplyReport.sources``), so strict mode reads it back rather
+        than keeping a second table the two could drift apart on. A report
+        with no resolutions — or no report — yields no opinions.
+        """
+        last = self.last_apply(entity_id=entity_id, bot_id=bot_id)
+        if last is None:
+            return {}
+        return {
+            source.name: source.resolved_sha
+            for source in last.sources
+            if source.resolved_sha is not None
+        }
 
     # ── internals ───────────────────────────────────────────────────────────
 
@@ -543,6 +626,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         env: str,
         apply_id: Optional[str] = None,
         budget: Optional[ApplyFetchBudget] = None,
+        source_session: Optional[SourceSession] = None,
     ) -> ApplyContext:
         return ApplyContext(
             bot_id=bot_id,
@@ -560,6 +644,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             # rather than an id nothing joins to.
             apply_id=apply_id,
             budget=budget,
+            source_session=source_session,
         )
 
     def _parsed_or_empty(
