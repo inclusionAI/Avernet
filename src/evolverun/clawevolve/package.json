@@ -64,6 +64,14 @@
       "types": "./dist/server/services/evolve/run-analysis-timeout.d.ts",
       "import": "./dist/server/services/evolve/run-analysis-timeout.js"
     },
+    "./server/services/evolve/task-source-service": {
+      "types": "./dist/server/services/evolve/task-source-service.d.ts",
+      "import": "./dist/server/services/evolve/task-source-service.js"
+    },
+    "./server/services/evolve/adapters/insight-plan-source-adapter": {
+      "types": "./dist/server/services/evolve/adapters/insight-plan-source-adapter.d.ts",
+      "import": "./dist/server/services/evolve/adapters/insight-plan-source-adapter.js"
+    },
     "./server/ports": {
       "types": "./dist/server/ports/index.d.ts",
       "import": "./dist/server/ports/index.js"

@@ -39,6 +39,14 @@ import {
 import {
   startRunAnalysisTimeoutSweeper,
 } from "@avernet/clawevolve/server/services/evolve/run-analysis-timeout";
+
+import {
+  TaskSourceService,
+} from "@avernet/clawevolve/server/services/evolve/task-source-service";
+
+import {
+  buildInsightPlanSource,
+} from "@avernet/clawevolve/server/services/evolve/adapters/insight-plan-source-adapter";
 ```
 
 The module mounts in the host's existing Express process:
@@ -68,6 +76,12 @@ Command YAML validation, initial step dispatch, and run-analysis timeout handlin
 are part of this package. Concrete repositories and dispatch transports are
 supplied through the public ports; the package does not import a hosting
 application's source tree.
+
+Insight-driven evolution uses a minimal handoff contract rather than importing
+the full Insight implementation. `TaskSourceService` freezes source references,
+validates evidence integrity, and resolves a versioned Plan Source through an
+injected repository and evidence reader. Deployment-specific producer metadata
+can be injected without placing hosting details in this package.
 
 ## Development
 
