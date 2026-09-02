@@ -36,7 +36,6 @@ class ManifestCreationSeam(Protocol):
         self,
         *,
         spec_entity_id: str,
-        user_id: str,
         bot_id: str,
         document: str,
         modifier: str,

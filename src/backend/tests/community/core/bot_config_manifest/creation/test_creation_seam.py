@@ -153,7 +153,6 @@ def test_persist_goes_through_the_ordinary_manifest_service():
     manifests = _Manifests()
     entity_id = _seam(manifests=manifests).persist(
         spec_entity_id="e",
-        user_id="u1",
         bot_id="b",
         document="schema_version: 1\n",
         modifier="someone",
@@ -166,17 +165,23 @@ def test_persist_goes_through_the_ordinary_manifest_service():
     assert entity_id == "e", "the caller needs the key it was stored under"
 
 
-def test_persist_applies_create_bots_entity_id_default():
-    """The key must be the one the bot record will carry, not the raw request."""
+def test_persist_keys_by_the_spec_entity_id_and_nothing_else():
+    """The key is the value ``create_bot`` will be handed, not a derived one.
+
+    This used to assert a ``staff_{user_id}`` default, mirroring ``create_bot``'s
+    own. Both fallbacks are unreachable — ``entity_id`` is a required ``str`` on
+    the spec and reaches both sides concrete — so the mirror pinned nothing while
+    reading as though it did. What matters is that nothing between the request
+    and the ``put`` transforms the value.
+    """
     manifests = _Manifests()
     entity_id = _seam(manifests=manifests).persist(
-        spec_entity_id=None,
-        user_id="u1",
+        spec_entity_id="u_owner",
         bot_id="b",
         document="schema_version: 1\n",
         modifier="someone",
         engine_type="claude_code",
         bot_type="personal",
     )
-    assert entity_id == "staff_u1"
-    assert manifests.puts[0]["entity_id"] == "staff_u1"
+    assert entity_id == "u_owner"
+    assert manifests.puts[0]["entity_id"] == "u_owner"

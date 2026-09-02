@@ -78,34 +78,30 @@ def _no_materialiser_refusal(construct: ApplyConstruct) -> str:
     )
 
 
-def resolve_manifest_entity_id(
-    *, spec_entity_id: Optional[str], user_id: str
-) -> str:
-    """The storage key's ``entity_id``, resolved exactly as creation will.
+def resolve_manifest_entity_id(*, spec_entity_id: str) -> str:
+    """The storage key's ``entity_id``. The caller's, unchanged.
 
-    **One definition, because a second one is silent.** The manifest is stored
-    before the bot record exists, keyed by ``(tenant, sha256(env, entity_id,
-    bot_id))``; the bot record is written later by ``BotService.create_bot``,
-    which resolves ``entity_id or f"staff_{user_id}"``. If the two ever
-    disagreed, submission would store a document at one key and everything
-    afterwards would look for it at another — and nothing would raise. The apply
-    would find no manifest, report that it applied nothing, and be *correct*
-    about what it did. The bot would simply come up unconfigured.
+    **Why this is a named function rather than a bare attribute read.** The
+    manifest is stored *before* the bot record exists, keyed by
+    ``(tenant, sha256(env, entity_id, bot_id))``; the record is written later by
+    ``BotService.create_bot``. If those two ever keyed off different values,
+    submission would store a document at one key and everything afterwards would
+    look for it at another — and **nothing would raise**. The apply would find no
+    manifest, report that it applied nothing, and be *correct* about what it did.
+    The bot would simply come up unconfigured.
 
-    Mirroring the rule here rather than importing ``BotService`` keeps this
-    module free of the creation graph; the pairing is held by a test that reads
-    ``create_bot``'s own source, so the mirror cannot rot quietly.
+    What makes them agree is not a rule mirrored here, it is that both are handed
+    the **same** ``BotCreateSpec.entity_id``: this seam gets it from
+    ``submit_bot_creation_with_manifest``, and ``create_bot`` gets it from the
+    spec the job payload carries. That is what the pairing test pins.
 
-    **``spec_entity_id`` stays optional here even though ``persist`` now
-    requires it**, and the two are not in tension: this function's contract is
-    to answer for *whatever* ``create_bot`` would be given, and ``create_bot``
-    takes ``entity_id: Optional[str] = None``. Narrowing it would make the
-    mirror narrower than the thing it mirrors, which is the one way this could
-    start disagreeing again. The default is ``staff_{user_id}`` rather than
-    ``user_id`` for the same reason: it is not a preference, it is the other
-    side's literal expression.
+    It took ``user_id`` and defaulted to ``staff_{user_id}`` for a while,
+    mirroring ``create_bot``'s own ``entity_id or f"staff_{user_id}"``. That was
+    dead weight, and misleading with it: ``entity_id`` is a required ``str`` on
+    the spec and reaches both sides concrete, so neither fallback can fire and
+    the mirror had nothing to keep in step.
     """
-    return spec_entity_id or f"staff_{user_id}"
+    return spec_entity_id
 
 
 def declared_constructs(parsed: dict[str, Any]) -> tuple[ApplyConstruct, ...]:
@@ -257,7 +253,6 @@ class BotCreationManifestSeam:
         self,
         *,
         spec_entity_id: str,
-        user_id: str,
         bot_id: str,
         document: str,
         modifier: str,
@@ -280,9 +275,7 @@ class BotCreationManifestSeam:
         cycle through the creation graph), and the resolution belongs with the
         storage that depends on it anyway.
         """
-        entity_id = resolve_manifest_entity_id(
-            spec_entity_id=spec_entity_id, user_id=user_id
-        )
+        entity_id = resolve_manifest_entity_id(spec_entity_id=spec_entity_id)
         self._manifests.put(
             entity_id=entity_id,
             bot_id=bot_id,

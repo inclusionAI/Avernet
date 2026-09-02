@@ -723,7 +723,6 @@ def submit_bot_creation_with_manifest(
     # graph), and the key's rule belongs with the storage that depends on it.
     entity_id = manifest_seam.persist(
         spec_entity_id=spec.entity_id,
-        user_id=user_id,
         bot_id=bot_id,
         document=document,
         modifier=modifier,
