@@ -237,7 +237,20 @@ class BotConfigManifestService(BotConfigManifestServiceProtocol):
                 env=get_current_env(),
                 tenant=get_current_avernet_tenant(),
             )
-            size = len(resolved.encode("utf-8"))
+            try:
+                size = len(resolved.encode("utf-8"))
+            except UnicodeEncodeError:
+                # The validator's own refusal, raised here because the size
+                # check runs first; a lone surrogate survives JSON and str.
+                raise ManifestValidationError(
+                    [
+                        Violation(
+                            location="script.body",
+                            code="invalid_script",
+                            message="'script.body' is not encodable as UTF-8",
+                        )
+                    ]
+                ) from None
             if size > MAX_SCRIPT_BYTES:
                 raise ManifestValidationError(
                     [

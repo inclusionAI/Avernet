@@ -90,6 +90,8 @@ def splice_script_section(document: str, body: Optional[str]) -> str:
             left = yaml.safe_load(removed) if removed.strip() else {}
         except yaml.YAMLError:
             left = None
+        if left is None:
+            left = {}  # comments only: the parser's "nothing", same as empty
         if not isinstance(left, dict) or left.get(SECTION) is not None:
             raise ManifestValidationError(
                 [

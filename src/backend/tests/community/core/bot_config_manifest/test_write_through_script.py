@@ -155,3 +155,11 @@ def test_a_body_that_outgrows_the_row_after_substitution_is_refused_before_stori
     assert caught.value.violations[0].code == "script_too_large"
     assert repository.writes == [] and scripts.writes == 0
     assert service.get(entity_id=_ENTITY, bot_id=_BOT).document == _DOCUMENT
+
+
+def test_a_non_encodable_body_is_the_validators_refusal_not_a_crash() -> None:
+    service, repository, scripts = _service(_DOCUMENT)
+    with pytest.raises(ManifestValidationError) as caught:
+        _write(service, "\ud800")
+    assert caught.value.violations[0].code == "invalid_script"
+    assert repository.writes == [] and scripts.writes == 0
