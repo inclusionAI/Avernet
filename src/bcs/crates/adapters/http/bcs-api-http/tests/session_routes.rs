@@ -25,8 +25,8 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
 use bcs_service_api::{
-    ActorKind, DeliveryType, GroupMessage, GroupMessageType, MessageRole, ParticipantMode,
-    ParticipantRole, SessionCaller, SessionKind,
+    ActorKind, DeliveryType, GroupMessage, GroupMessageType, MessageHistoryOptions, MessageRole,
+    ParticipantMode, ParticipantRole, SessionCaller, SessionKind,
 };
 use bcs_storage_api::byte_stream_from_bytes;
 use bytes::Bytes;
@@ -552,6 +552,7 @@ impl SessionService for FakeSessionService {
 #[derive(Default)]
 struct FakeSessionMessageService {
     listed: Mutex<Option<ListSessionMessages>>,
+    options: Mutex<Option<MessageHistoryOptions>>,
 }
 
 #[async_trait]
@@ -562,6 +563,15 @@ impl SessionMessageService for FakeSessionMessageService {
     ) -> Result<Vec<GroupMessage>, ApplicationError> {
         *self.listed.lock().expect("list messages lock") = Some(query.clone());
         Ok(rich_group_messages())
+    }
+
+    async fn list_with_options(
+        &self,
+        query: ListSessionMessages,
+        options: MessageHistoryOptions,
+    ) -> Result<Vec<GroupMessage>, ApplicationError> {
+        *self.options.lock().expect("list messages options lock") = Some(options);
+        self.list(query).await
     }
 }
 
@@ -1445,6 +1455,33 @@ async fn list_session_messages_wraps_legacy_group_message_array_in_envelope() {
         assert_eq!(listed.before, None);
         assert_eq!(listed.limit, 50);
     }
+    assert_eq!(
+        *message.options.lock().expect("list messages options lock"),
+        Some(MessageHistoryOptions::default())
+    );
+}
+
+#[tokio::test]
+async fn list_session_messages_passes_pending_history_opt_in_through() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session, message.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "GET",
+            "/openapi/v1/collaboration/sessions/session-1/messages?limit=50&include_pending=true",
+            Value::Null,
+        ))
+        .await
+        .expect("list messages response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        *message.options.lock().expect("list messages options lock"),
+        Some(MessageHistoryOptions {
+            include_pending: true,
+        })
+    );
 }
 
 #[tokio::test]

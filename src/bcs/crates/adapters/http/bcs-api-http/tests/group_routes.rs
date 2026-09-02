@@ -26,7 +26,10 @@ use bcs_service_api::application::v1::{
     SessionCompletionResult, SessionDetail, SessionMessageService, SessionParticipant,
     SessionService, SessionSummary, UpdateSession, UpdateSessionParticipant,
 };
-use bcs_service_api::{ActorKind, ParticipantMode, ParticipantRole};
+use bcs_service_api::{
+    ActorKind, InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState, ParticipantMode,
+    ParticipantRole,
+};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -59,6 +62,8 @@ struct FakeGroupService {
     created: Mutex<Option<CreateGroup>>,
     inline_event_subscriptions: Mutex<Vec<InlineGroupEventSubscriptionRequest>>,
     reuse_dm: AtomicBool,
+    initial_session_id: Mutex<Option<String>>,
+    initial_run: Mutex<Option<InitialGroupRun>>,
     get: Mutex<Option<GetGroup>>,
     updated: Mutex<Option<UpdateGroup>>,
     deleted: Mutex<Option<DeleteGroup>>,
@@ -98,6 +103,12 @@ impl GroupService for FakeGroupService {
         Ok(CreateGroupOutcome {
             group,
             created: !self.reuse_dm.load(Ordering::Relaxed),
+            initial_session_id: self
+                .initial_session_id
+                .lock()
+                .expect("initial Session lock")
+                .clone(),
+            initial_run: self.initial_run.lock().expect("initial run lock").clone(),
             event_subscriptions: Vec::new(),
         })
     }
@@ -172,6 +183,47 @@ impl GroupService for FakeGroupService {
             .expect("remove participant lock") = Some(command);
         Ok(DeleteResult { deleted: true })
     }
+}
+
+#[tokio::test]
+async fn create_group_exposes_initial_manager_run() {
+    let service = Arc::new(FakeGroupService::default());
+    *service
+        .initial_session_id
+        .lock()
+        .expect("initial Session lock") = Some("session-initial".to_string());
+    *service.initial_run.lock().expect("initial run lock") = Some(InitialGroupRun {
+        run_id: "run-manager".to_string(),
+        bot_uuid: "bot-1".to_string(),
+        activity_kind: InitialGroupRunActivityKind::GroupBootstrap,
+        state: InitialGroupRunState::Running,
+        started_at: "2026-08-31T00:00:00Z".to_string(),
+    });
+
+    let response = test_router(service)
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/groups",
+            json!({
+                "group_kind": "normal",
+                "driver_bot_uuid": "bot-1",
+                "participants": [{"actor_id": "bot-1", "role": "manager"}],
+                "collaboration": {"strategy": "manager_worker"}
+            }),
+        ))
+        .await
+        .expect("create Group response");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["initial_session_id"], "session-initial");
+    assert_eq!(body["data"]["initial_run"]["run_id"], "run-manager");
+    assert_eq!(body["data"]["initial_run"]["bot_uuid"], "bot-1");
+    assert_eq!(
+        body["data"]["initial_run"]["activity_kind"],
+        "group_bootstrap"
+    );
+    assert_eq!(body["data"]["initial_run"]["state"], "running");
 }
 
 struct NoopSessionService;

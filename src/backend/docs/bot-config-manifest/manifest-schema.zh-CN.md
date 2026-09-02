@@ -278,7 +278,7 @@ identity:
     source:
       git: https://code.example-corp.com/team/content.git
       ref: v1.2.0
-      subpath: bots/${BOT_ID}/soul.md # 变量替换照常可用
+      subpath: bots/support-agent/soul.md # 源内路径；变量替换照常可用
     auth: corp-git-content
 ```
 
@@ -329,7 +329,7 @@ manifest:
   identity:
     - type: SOUL.md
       from: content
-      subpath: bots/${BOT_ID}/soul.md
+      subpath: bots/support-agent/soul.md
   skills:
     - name: quality-check
       from: content
@@ -503,7 +503,7 @@ engine_config:
 ```yaml
 identity:
   - type: SOUL.md                # 必须属于该引擎的合法 identity 文件集
-    source: https://my-svc.example.com/bots/${BOT_ID}/soul.md
+    source: https://my-svc.example.com/bots/support-agent/soul.md
   - type: RULES.md
     content: |                   # 小文件可内联
       # 团队规范
@@ -605,7 +605,6 @@ cli_tools:
 
 | 变量 | 含义 |
 | --- | --- |
-| `BOT_ID` | bot 标识 |
 | `BOT_ENGINE_TYPE` | 当前引擎类型 |
 | `BOT_ENV` | 环境（dev/prod/…） |
 | `BOT_TENANT` | 租户标识 |
@@ -616,6 +615,12 @@ cli_tools:
 > 是必要的——它们会作为环境变量注入 `script`，不带前缀的 `${ENV}` 会跟脚本
 > 作者自己的变量撞车。`BOT_ARCH` **现在就实现**（而不只是占个名字）：将来
 > 机群若变成混合的，改的只是这个值从哪来，不改 schema、用户什么都不用重写。
+
+> **没有 `BOT_ID`。**上表里每个变量都是**机群**的属性——环境、租户、引擎、
+> 架构——这正是一份文档能被多个 bot 复用的原因。bot 标识不是：它在创建时生成
+> （日期 + 8 位随机字符），调用方并不能指定，所以在 git 仓库里准备内容的作者
+> 根本无从得知。真要按 bot 区分的内容，写在那个 bot 自己的 manifest 里、直接
+> 写字面量即可。`${BOT_ID}` 和任何未知占位符一样会被 `PUT` 拒绝。
 
 - manifest 中以 `${BOT_*}` 占位、apply 时替换；仅允许白名单变量，未知占位
   报错。

@@ -1,22 +1,34 @@
 # BCS 自定义协作开场白控制副屏接入指南
 
-本文面向接入 BCS 自定义协作群的系统，说明如何在建群时指定开场消息，并在每次
-StateMachine Run 开始时打开自定义副屏。
+本文面向接入 BCS 自定义协作群的系统，说明如何在建群时指定开场消息。Chat 和
+ManagerWorker 在新 Session 创建时展示一次；StateMachine 在每次 Run 开始时展示一次。
 
 ## 1. 接入范围
 
-该能力当前仅适用于：
+该能力适用于：
 
 - `group_kind` 为 `normal`；
-- `collaboration.strategy` 为 `state_machine`；
+- `collaboration.strategy` 为 `chat`、`manager_worker` 或 `state_machine`；
 - 前端已经通过现有 AixUI 组件注册机制注册目标副屏组件。
 
-Chat、ManagerWorker 和 DM 群暂不支持 `opening_message`。不配置该字段时，BCS 继续打开默认的
-`bcsPanel.StateMachineRunView` 副屏。
+DM 群不支持 `opening_message`。Chat 和 ManagerWorker 不配置时不展示开场白；StateMachine
+不配置时继续打开默认的 `bcsPanel.StateMachineRunView` 副屏。
 
 ## 2. 工作方式
 
-每次 StateMachine Run 开始时，BCS 按以下顺序处理：
+Chat 和 ManagerWorker 在新 Session 创建时，BCS 按以下顺序处理：
+
+1. 生成 Session ID；
+2. 使用 Group 和 Session 信息渲染 `opening_message`；
+3. 将渲染后的最终消息持久化到 Session 消息历史；
+4. 将同一条消息发送给当前前端连接。
+
+开场白不会发送给 Bot，并且会从 Bot 的历史/上下文回放中排除。Session 重连、重新激活、成员加入和
+页面刷新不会创建第二条开场白。页面刷新直接读取已经持久化的最终消息，不使用 Group 当前配置重新渲染。
+Chat 或 ManagerWorker Session 内临时启动的一次性 StateMachine 仍使用 StateMachine 默认副屏，
+不会把该 Session 级 `opening_message` 当作 Run 开场消息。
+
+StateMachine 每次 Run 开始时，BCS 按以下顺序处理：
 
 1. 生成本次执行的 Group ID、Session ID 和 Run ID；
 2. 使用这些运行信息渲染 Group 上配置的 `opening_message`；
@@ -161,13 +173,13 @@ BCS 不负责下载或注册业务组件。
 
 ## 5. 模板变量
 
-一期支持以下大小写敏感的完整占位符：
+支持以下大小写敏感的完整占位符：
 
 | 变量 | 渲染值 |
 | --- | --- |
 | `{{bcs.group_id}}` | 当前 Group ID |
 | `{{bcs.session_id}}` | 当前 Session ID |
-| `{{bcs.run_id}}` | 当前 StateMachine Run ID |
+| `{{bcs.run_id}}` | 当前 StateMachine Run ID；仅 `state_machine` 可用 |
 | `{{bcs.group_name}}` | 当前 Group 名称；未命名时为空字符串 |
 | `{{bcs.session_name}}` | 当前 Session 名称；未命名时为空字符串 |
 
@@ -182,7 +194,7 @@ BCS 不负责下载或注册业务组件。
 
 ## 6. 更新或恢复默认开场消息
 
-修改已经存在的 StateMachine Group：
+修改已经存在的 Normal Group：
 
 ```http
 PATCH /openapi/v1/collaboration/groups/{group_id}
@@ -216,8 +228,8 @@ Content-Type: application/json
 }
 ```
 
-PATCH 请求省略 `opening_message` 表示不修改。更新只影响随后开始的 Run；已经开始的 Run 以及已经
-持久化的历史开场消息不会变化。
+PATCH 请求省略 `opening_message` 表示不修改。更新只影响随后创建的 Session（Chat、ManagerWorker）
+或随后开始的 Run（StateMachine）；已经持久化的历史开场消息不会变化。
 
 ## 7. 前端接入要求
 
@@ -241,7 +253,7 @@ GET /openapi/v1/collaboration/sessions/{session_id}/messages
 ```
 
 Group detail 返回原始模板；Session messages 返回已经完成变量替换的最终消息。不要使用 Group 当前
-配置重新推导旧 Run 的副屏内容。
+配置重新推导旧 Session 或 Run 的副屏内容。
 
 ## 8. 校验规则和错误处理
 
@@ -253,7 +265,8 @@ Group detail 返回原始模板；Session messages 返回已经完成变量替�
 
 错误码为 `invalid_opening_message`。常见原因包括：
 
-- Group 不是 StateMachine Group；
+- Group 是 DM Group；
+- Chat 或 ManagerWorker 使用了 `{{bcs.run_id}}`；
 - 字符串为空或只包含空白；
 - 使用了未知模板变量；
 - 模板变量缺少结束的 `}}`；

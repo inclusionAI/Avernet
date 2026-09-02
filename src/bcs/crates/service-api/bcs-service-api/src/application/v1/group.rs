@@ -8,6 +8,7 @@ use super::{
 use crate::types::{
     EventActor, EventPayload, EventSubscriptionScope, EventSubscriptionScopeType, Group, Session,
 };
+use crate::InitialGroupRun;
 
 pub use bcs_domain::{ActorKind, OpeningMessage, ParticipantMode, ParticipantRole};
 
@@ -323,6 +324,8 @@ pub struct CreateGroup {
 pub struct CreateGroupOutcome {
     pub group: GroupDetail,
     pub created: bool,
+    pub initial_session_id: Option<String>,
+    pub initial_run: Option<InitialGroupRun>,
     /// Subscriptions provisioned as part of this create operation. Empty for
     /// legacy requests and for a reused DM that did not request subscriptions.
     pub event_subscriptions: Vec<EventSubscription>,
@@ -391,8 +394,10 @@ pub trait GroupEventSubscriptionProvisioner: Send + Sync {
     ) -> Result<(), ApplicationError>;
 
     /// Atomically make the Group available, activate all prepared
-    /// subscriptions, and persist the ordered creation Events. The optional
-    /// Session is the initial Session created by Group management.
+    /// subscriptions, snapshot matching Group Events persisted after prepare
+    /// while those subscriptions were pending, and persist the ordered
+    /// creation Events. The optional Session is the initial Session created by
+    /// Group management.
     async fn finalize(
         &self,
         prepared: &PreparedGroupEventSubscriptions,
@@ -516,6 +521,8 @@ pub trait GroupService: Send + Sync {
         Ok(CreateGroupOutcome {
             group: self.create(command).await?,
             created: true,
+            initial_session_id: None,
+            initial_run: None,
             event_subscriptions: Vec::new(),
         })
     }

@@ -884,6 +884,20 @@ Named so a reader looking for them stops here rather than in the source:
   `stage`, and that is not an omission. It is backed by
   `ac_bot_startup_script`, keyed `(env, entity_id, bot_id)` — one row per bot,
   not one per runtime — so the parameter would be inert.
+- **Config manifest** (`GET`/`PUT`/`DELETE …/{bot_id}/config-manifest`, plus
+  `GET …/config-manifest/capabilities`) takes no `stage` for the same reason
+  and with the same shape: `ac_bot_config_manifest` is keyed
+  `(env, entity_id, bot_id)`, one row per bot.
+
+  Two further things a caller should know before writing against it. The group
+  is behind a **deployment switch** and answers `404` where it is not enabled —
+  it stays off until the manifest apply engine ships, because until then an
+  accepted manifest changes nothing about the bot. And `PUT` is
+  **all-or-nothing**: a document is stored only if every part of it is valid and
+  supported for that bot, and the `422` carries `data.violations`, one entry per
+  reason with the `location` in the submitted document that it applies to.
+  `…/capabilities` is answered by the same rules the write refuses with, so it
+  can never promise something a `PUT` then rejects.
 - **MCP** addresses no bot at all; its six operations are keyed by
   `server_code` and `user_id`. The config write does fan out to every bot's
   **draft** device, which is correct for the same reason the writes above are
@@ -1324,6 +1338,10 @@ the other six: this is what "done" looks like per category.
 | GET | `/openapi/v1/bots/{bot_id}/startup-script` | Read the bot's startup script | `Envelope[StartupScript]` |
 | PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/{bot_id}/config-manifest` | Read the bot's configuration manifest (empty when it has none) | `Envelope[ConfigManifest]` |
+| PUT | `/openapi/v1/bots/{bot_id}/config-manifest` | Set/replace it; all-or-nothing, `422` lists every violation | `Envelope[ConfigManifest]` |
+| DELETE | `/openapi/v1/bots/{bot_id}/config-manifest` | Clear it | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/{bot_id}/config-manifest/capabilities` | Which manifest constructs this bot accepts | `Envelope[ConfigManifestCapabilities]` |
 
 #### Creating an Application Coding Bot
 

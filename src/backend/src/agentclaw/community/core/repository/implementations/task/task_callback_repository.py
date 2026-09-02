@@ -84,6 +84,29 @@ class TaskCallbackRepository(TaskCallbackRepositoryProtocol):
             db.refresh(row)
             return row.to_record()
 
+    def upsert_error(self, rec: TaskCallbackRecord) -> TaskCallbackRecord:
+        """解析失败兜底:按 ``(run_id, node_id)`` 仅更新 ``exec_error`` + ``extend_props``,
+        保留既有行其它可变列(不覆盖 status/result/execution_graph 等);行不存在 → 插入。"""
+        with self._db.orm_session() as db:
+            existing = (
+                db.query(self._model)
+                .filter(
+                    self._model.run_id == rec.run_id,
+                    self._model.node_id == rec.node_id,
+                )
+                .first()
+            )
+            if existing is not None:
+                existing.exec_error = rec.exec_error
+                existing.extend_props = _dumps(rec.extend_props)
+                db.flush()
+                return existing.to_record()
+            row = self._to_row(rec)
+            db.add(row)
+            db.flush()
+            db.refresh(row)
+            return row.to_record()
+
     def get(self, run_id: str, node_id: str) -> Optional[TaskCallbackRecord]:
         with self._db.orm_session() as db:
             row = (

@@ -115,6 +115,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                         created_by: None,
                         status: StateMachineRunStatus::Running,
                         input: serde_json::Value::Null,
+                        opening_message_override: None,
                         output: None,
                         error: None,
                         created_at: 1,

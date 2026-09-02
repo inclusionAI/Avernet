@@ -19,7 +19,9 @@ use bcs_service_api::{
     GroupUpdateVisibilityCommand, GroupUpdateWorkspaceCommand,
     GroupUseCaseError, GroupWorkspaceQueryCommand, RegisteredBot, RelationEdge, RelationCoreService,
     Participant, ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy, ServiceError, ServiceResult, Session, SessionKind,
-    SessionManagementService, SessionStatus, SessionUseCaseError, WorkbenchChatAuthorizationCommand,
+    SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageDispatchOutcome,
+    SystemMessageEvent, SystemMessageRecipientResult, SystemMessageService,
+    WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchSessionService, WorkbenchUseCaseError, Workspace,
 };
 use bcs_service_api::types::OpeningMessage;
@@ -118,6 +120,51 @@ async fn interaction_resolve_rejects_absent_human_and_non_human_actor() {
 use bcs_group::{GroupConfig, GroupManagement, GroupStore};
 use bcs_test_support::NoopSystemMessageService;
 use tokio::sync::Mutex;
+
+struct InitialRunSystemMessage;
+
+#[async_trait]
+impl SystemMessageService for InitialRunSystemMessage {
+    async fn notify(
+        &self,
+        _group_id: &str,
+        _event: SystemMessageEvent,
+        _session_id: &str,
+        _session_participants: &[Participant],
+    ) -> ServiceResult<usize> {
+        Ok(1)
+    }
+
+    async fn notify_with_outcome(
+        &self,
+        _group_id: &str,
+        _event: SystemMessageEvent,
+        _session_id: &str,
+        _session_participants: &[Participant],
+    ) -> ServiceResult<SystemMessageDispatchOutcome> {
+        Ok(SystemMessageDispatchOutcome {
+            total_recipients: 2,
+            successful_deliveries: 2,
+            failed_deliveries: 0,
+            recipient_results: vec![
+                SystemMessageRecipientResult {
+                    recipient_id: "manager".to_string(),
+                    run_id: "manager-bootstrap-run".to_string(),
+                    delivery_type: bcs_service_api::DeliveryType::Send,
+                    delivered: true,
+                    error: None,
+                },
+                SystemMessageRecipientResult {
+                    recipient_id: "worker".to_string(),
+                    run_id: "worker-inject-run".to_string(),
+                    delivery_type: bcs_service_api::DeliveryType::Inject,
+                    delivered: true,
+                    error: None,
+                },
+            ],
+        })
+    }
+}
 
 #[derive(Default)]
 struct RecordingChannelBindingCleanup {
@@ -345,7 +392,7 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
 }
 
 #[tokio::test]
-async fn create_chat_group_rejects_opening_message() {
+async fn create_chat_group_accepts_session_scoped_opening_message() {
     let fixture = Fixture::new().with_bot("driver", "Driver", "public", Some("alice"));
     let service = fixture.service_with_limits(5, 10, 10);
     let mut cmd = create_cmd(
@@ -353,13 +400,21 @@ async fn create_chat_group_rejects_opening_message() {
         "driver",
         vec![participant("driver", Some("driver"))],
     );
-    cmd.opening_message = Some(OpeningMessage::Text("hello".to_string()));
+    let opening_message = OpeningMessage::Text(
+        "hello {{bcs.session_id}}".to_string(),
+    );
+    cmd.opening_message = Some(opening_message.clone());
 
-    let error = service
-        .create_group(cmd)
-        .await
-        .expect_err("Chat Group must reject opening_message");
-    assert!(error.to_string().contains("invalid_opening_message"));
+    service.create_group(cmd).await.expect("create Chat Group");
+    assert_eq!(
+        fixture
+            .group
+            .get("group-under-test")
+            .await
+            .expect("created group")
+            .opening_message,
+        Some(opening_message)
+    );
 }
 
 #[tokio::test]
@@ -533,6 +588,67 @@ async fn create_manager_worker_group_allows_provider_downlink_bot() {
         .create_group(cmd)
         .await
         .expect("provider downlink bot can join manager_worker group");
+}
+
+#[tokio::test]
+async fn create_manager_worker_group_returns_only_manager_send_as_initial_run() {
+    let fixture = Fixture::new()
+        .with_bot("manager", "Manager", "public", Some("alice"))
+        .with_bot("worker", "Worker", "public", None);
+    let service = fixture.service_with_system_message(Arc::new(InitialRunSystemMessage));
+    let mut cmd = create_cmd(
+        Some("manager"),
+        "manager",
+        vec![
+            participant("manager", Some("manager")),
+            participant("worker", Some("worker")),
+        ],
+    );
+    cmd.group_strategy = Some(GroupStrategy::ManagerWorker);
+
+    let created = service.create_group(cmd).await.expect("create group");
+
+    let initial_run = created.initial_run.expect("manager initial run");
+    assert_eq!(initial_run.run_id, "manager-bootstrap-run");
+    assert_eq!(initial_run.bot_uuid, "manager");
+    assert_eq!(
+        initial_run.activity_kind,
+        bcs_service_api::InitialGroupRunActivityKind::GroupBootstrap
+    );
+    assert_eq!(
+        initial_run.state,
+        bcs_service_api::InitialGroupRunState::Running
+    );
+}
+
+#[tokio::test]
+async fn create_chat_group_returns_driver_send_as_initial_run() {
+    let fixture = Fixture::new()
+        .with_bot("manager", "Driver", "public", Some("alice"))
+        .with_bot("worker", "Member", "public", None);
+    let service = fixture.service_with_system_message(Arc::new(InitialRunSystemMessage));
+    let cmd = create_cmd(
+        Some("manager"),
+        "manager",
+        vec![
+            participant("manager", Some("driver")),
+            participant("worker", Some("consultant")),
+        ],
+    );
+
+    let created = service.create_group(cmd).await.expect("create group");
+
+    let initial_run = created.initial_run.expect("driver initial run");
+    assert_eq!(initial_run.run_id, "manager-bootstrap-run");
+    assert_eq!(initial_run.bot_uuid, "manager");
+    assert_eq!(
+        initial_run.activity_kind,
+        bcs_service_api::InitialGroupRunActivityKind::GroupBootstrap
+    );
+    assert_eq!(
+        initial_run.state,
+        bcs_service_api::InitialGroupRunState::Running
+    );
 }
 
 #[tokio::test]
@@ -2389,6 +2505,33 @@ impl Fixture {
             },
             session_management,
             Arc::new(NoopSystemMessageService),
+        )
+        .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
+            provider_downlink_bots: self.provider_downlink_bots.clone(),
+        }))
+    }
+
+    fn service_with_system_message(
+        &self,
+        system_message: Arc<dyn SystemMessageService>,
+    ) -> GroupManagement {
+        GroupManagement::new(
+            self.group.clone(),
+            self.registry.clone(),
+            self.friend.clone(),
+            self.relation.clone(),
+            GroupConfig {
+                max_group_members: 5,
+                max_groups_as_driver: 10,
+                max_groups_as_member: 10,
+                relation_env: "dev".to_string(),
+            },
+            Arc::new(StaticSessionManagement::new(test_session(
+                "group-under-test:abcdef12",
+                "group-under-test",
+                Vec::new(),
+            ))),
+            system_message,
         )
         .with_bot_runtime(Arc::new(FakeBotRuntimeConnectionService {
             provider_downlink_bots: self.provider_downlink_bots.clone(),

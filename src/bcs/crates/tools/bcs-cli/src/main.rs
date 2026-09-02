@@ -453,6 +453,51 @@ fn parse_json_arg(raw: &str) -> Result<serde_json::Value> {
     }
 }
 
+fn build_panel_opening_message(
+    component: Option<String>,
+    params: Option<String>,
+    tab_id: Option<String>,
+    tab_title: Option<String>,
+    tab_closable: Option<bool>,
+) -> Result<Option<serde_json::Value>> {
+    let Some(component) = component else {
+        if params.is_some() || tab_id.is_some() || tab_title.is_some() || tab_closable.is_some() {
+            return Err(anyhow!(
+                "--panel-params and --panel-tab-* require --panel-component"
+            ));
+        }
+        return Ok(None);
+    };
+
+    let mut opening_message = serde_json::Map::from_iter([
+        ("type".to_string(), json!("panel")),
+        ("component".to_string(), json!(component)),
+    ]);
+    if let Some(params) = params {
+        let params = parse_json_arg(&params)?;
+        if !params.is_object() {
+            return Err(anyhow!("--panel-params must be a JSON object"));
+        }
+        opening_message.insert("params".to_string(), params);
+    }
+
+    let mut tab = serde_json::Map::new();
+    if let Some(id) = tab_id {
+        tab.insert("id".to_string(), json!(id));
+    }
+    if let Some(title) = tab_title {
+        tab.insert("title".to_string(), json!(title));
+    }
+    if let Some(closable) = tab_closable {
+        tab.insert("closable".to_string(), json!(closable));
+    }
+    if !tab.is_empty() {
+        opening_message.insert("tab".to_string(), serde_json::Value::Object(tab));
+    }
+
+    Ok(Some(serde_json::Value::Object(opening_message)))
+}
+
 fn merge_baas_session_id_into_meta(
     meta: Option<serde_json::Value>,
     baas_session_id: Option<&str>,
@@ -1426,6 +1471,26 @@ enum CollaborationCommands {
         /// Runtime input JSON, or @path/to/input.json
         #[arg(long, default_value = "{}")]
         input: String,
+
+        /// AixUI panel component to show when this Run starts
+        #[arg(long)]
+        panel_component: Option<String>,
+
+        /// Panel params JSON object, or @path/to/params.json
+        #[arg(long, requires = "panel_component")]
+        panel_params: Option<String>,
+
+        /// Optional panel tab ID template
+        #[arg(long, requires = "panel_component")]
+        panel_tab_id: Option<String>,
+
+        /// Optional panel tab title template
+        #[arg(long, requires = "panel_component")]
+        panel_tab_title: Option<String>,
+
+        /// Whether the optional panel tab is closable
+        #[arg(long, requires = "panel_component")]
+        panel_tab_closable: Option<bool>,
     },
 
     /// Validate a custom collaboration definition against the current BCS server
@@ -3052,12 +3117,24 @@ pub async fn run() -> Result<()> {
                 session,
                 bindings,
                 input,
+                panel_component,
+                panel_params,
+                panel_tab_id,
+                panel_tab_title,
+                panel_tab_closable,
             } => {
                 let definition_yaml = std::fs::read_to_string(&file).map_err(|error| {
                     anyhow!("Failed to read YAML file {}: {error}", file.display())
                 })?;
                 let participant_bindings = parse_custom_group_bindings(&bindings)?;
                 let input = parse_json_arg(&input)?;
+                let opening_message = build_panel_opening_message(
+                    panel_component,
+                    panel_params,
+                    panel_tab_id,
+                    panel_tab_title,
+                    panel_tab_closable,
+                )?;
                 let token = get_token(token.as_deref())?;
                 let client = create_client(
                     &bcs_url,
@@ -3065,15 +3142,19 @@ pub async fn run() -> Result<()> {
                     bcs_cookie.as_deref(),
                     oauth_headers.as_ref(),
                 );
+                let mut debug_payload = json!({
+                    "definition_yaml": &definition_yaml,
+                    "participant_bindings": &participant_bindings,
+                    "input": &input,
+                });
+                if let Some(opening_message) = opening_message.as_ref() {
+                    debug_payload["opening_message"] = opening_message.clone();
+                }
                 debug_request!(
                     debug,
                     "POST",
                     &format!("/sessions/{session}/state-machine-runs"),
-                    json!({
-                        "definition_yaml": &definition_yaml,
-                        "participant_bindings": &participant_bindings,
-                        "input": &input,
-                    })
+                    debug_payload
                 );
                 let result = client
                     .run_session_collaboration(RunSessionCollaborationOptions {
@@ -3081,6 +3162,7 @@ pub async fn run() -> Result<()> {
                         participant_bindings,
                         definition_yaml,
                         input,
+                        opening_message,
                     })
                     .await?;
                 debug_response!(debug, "202", &result);
@@ -5125,6 +5207,11 @@ mod tests {
                         session,
                         bindings,
                         input,
+                        panel_component: None,
+                        panel_params: None,
+                        panel_tab_id: None,
+                        panel_tab_title: None,
+                        panel_tab_closable: None,
                     },
             } => {
                 assert_eq!(token, "test-token");
@@ -5138,6 +5225,91 @@ mod tests {
             }
             _ => panic!("expected collaborate run command"),
         }
+    }
+
+    #[test]
+    fn collaborate_run_parses_panel_arguments() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "collaborate",
+            "run",
+            "/tmp/workflow.yaml",
+            "--session",
+            "group-1:abc12345",
+            "--binding",
+            "writer=bot-writer",
+            "--panel-component",
+            "partnerPanel.OneShotRunView",
+            "--panel-params",
+            r#"{"scene":"release","runId":"{{bcs.run_id}}"}"#,
+            "--panel-tab-id",
+            "one-shot-{{bcs.run_id}}",
+            "--panel-tab-title",
+            "一次性协作",
+            "--panel-tab-closable",
+            "true",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Collaboration {
+                command:
+                    CollaborationCommands::Run {
+                        panel_component,
+                        panel_params,
+                        panel_tab_id,
+                        panel_tab_title,
+                        panel_tab_closable,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(
+                    panel_component.as_deref(),
+                    Some("partnerPanel.OneShotRunView")
+                );
+                assert_eq!(
+                    panel_params.as_deref(),
+                    Some(r#"{"scene":"release","runId":"{{bcs.run_id}}"}"#)
+                );
+                assert_eq!(panel_tab_id.as_deref(), Some("one-shot-{{bcs.run_id}}"));
+                assert_eq!(panel_tab_title.as_deref(), Some("一次性协作"));
+                assert_eq!(panel_tab_closable, Some(true));
+            }
+            _ => panic!("expected collaborate run command"),
+        }
+    }
+
+    #[test]
+    fn collaborate_run_requires_panel_component_for_dependent_arguments() {
+        let error = Cli::try_parse_from([
+            "bcs-cli",
+            "collaborate",
+            "run",
+            "/tmp/workflow.yaml",
+            "--session",
+            "group-1:abc12345",
+            "--binding",
+            "writer=bot-writer",
+            "--panel-params",
+            "{}",
+        ])
+        .err()
+        .expect("panel params without a component must be rejected");
+        assert!(error.to_string().contains("--panel-component"));
+    }
+
+    #[test]
+    fn panel_opening_message_requires_object_params() {
+        let error = build_panel_opening_message(
+            Some("partnerPanel.OneShotRunView".to_string()),
+            Some("[]".to_string()),
+            None,
+            None,
+            None,
+        )
+        .expect_err("array params must be rejected");
+        assert!(error.to_string().contains("must be a JSON object"));
     }
 
     #[test]

@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
+import jwt
 
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
 from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
+from gateway.community.plugins.authn.oauth_session import OauthSessionStrategy
 from gateway.community.spi.access_key import RegisteredAccessKey
 from gateway.community.spi.app import RegisteredApp
 from gateway.community.spi.authn import CredentialBundle, PrincipalType
@@ -96,6 +98,34 @@ class TestGoogleUserStrategy(AuthStrategyContract):
         )
         self.applicable_creds = CredentialBundle(
             headers={"x-avernet-google-token": "tok"}, cookies={}, query={}
+        )
+        self.inapplicable_creds = CredentialBundle(headers={}, cookies={}, query={})
+
+    async def test_builds_user_principal(self) -> None:
+        from gateway.community.spi.authn import UserPrincipal
+
+        result = await self.strategy.build(self.applicable_creds)  # type: ignore[attr-defined]
+        assert isinstance(result, UserPrincipal)
+
+
+class TestOauthSessionStrategy(AuthStrategyContract):
+    def setup_method(self) -> None:
+        self.strategy = OauthSessionStrategy(
+            jwt_secret="test-bcs-session-secret-32-bytes!!"
+        )
+        now = datetime.now(tz=UTC)
+        token = jwt.encode(
+            {
+                "sub": "user-123",
+                "src": "google",
+                "iat": int(now.timestamp()),
+                "exp": int((now + timedelta(minutes=5)).timestamp()),
+            },
+            "test-bcs-session-secret-32-bytes!!",
+            algorithm="HS256",
+        )
+        self.applicable_creds = CredentialBundle(
+            headers={}, cookies={"bcs_session": token}, query={}
         )
         self.inapplicable_creds = CredentialBundle(headers={}, cookies={}, query={})
 

@@ -1,14 +1,18 @@
 # 引擎侧要求：工作量、能力矩阵与待确认清单
 
-> 状态：DRAFT（讨论稿）。内容：每个引擎/形态要做什么、要确认什么、以及
-> 尚未定案的问题。设计论证见 `design.zh-CN.md`。
+> 状态：DRAFT（讨论稿），**§2 能力矩阵与 §3 的 T1/T2/T4 已按 2026-08-31 的
+> teclaw 确认更新**。内容：每个引擎/形态要做什么、要确认什么、以及尚未定案的
+> 问题。设计论证见 `design.zh-CN.md`。
+>
+> **本文早于 `engine-convergence-contract.zh-CN.md` 与 `teclaw-cli-contract.zh-CN.md`；
+> 两者与本文冲突时以两者为准。**
 
 ## 1. 先说结论：各方工作量
 
 | 团队 | v1 工作量 | 说明 |
 | --- | --- | --- |
 | backend（平台） | **主体**：配置清单文档存储 + API、平台侧 apply、guarded fetcher、能力表、apply report | 全部在平台侧 |
-| teclaw | **零改动**（必答确认 T1–T3；`cli_tools` 相关 T4、可选优化 T5，见 §3） | artifact schema 不动、组装管线不动、不加出网要求 |
+| teclaw | **仅 `cli_tools` 一项新增**（T1/T2/T4 已确认；T3 移出第一期，T5 可选） | 组装管线不动、不加出网要求；artifact 新增一个 `cli_tools` 字段，**`schema_version` 不升版** |
 | ARCA 系引擎（openclaw / claude_code / aicoding / hermes / moltis） | **零改动**（2 项确认，见 §4） | 声明式走平台实体 + 现有交付；script 走 #935 现状；cli_tools 需确认 PATH 注入点（A2） |
 | BaaS | **零改动** | 启动链、hook 派发均不变 |
 | 业务方 | 回答 §6 的确认清单 | 决定 v1 边界是否够用 |
@@ -27,7 +31,7 @@ skill / identity 之后完全相同。
 | --- | --- | --- | --- | --- |
 | openclaw / aicoding / hermes / moltis @ ARCA/BaaS（ARCA, SIGMA, POOLAB, DOCKER） | ✅ 全部 | ✅（排期后置；PATH 注入点见 A2） | ✅ | 现状主流形态 |
 | claude_code @ ARCA/BaaS | ✅（identity 仅 `CLAUDE.md`） | ✅（同上） | ✅ | identity 合法集按引擎校验 |
-| teclaw @ TECLAW | ✅ 全部（engine_config 见确认项 T3） | **待确认（T4）** | ❌ 写入拒绝 | 经 artifact 组装生效 |
+| teclaw @ TECLAW | ✅ 全部（engine_config 移出第一期） | ✅ **已确认**（2026-08-31；契约见 `teclaw-cli-contract.zh-CN.md`） | ❌ 写入拒绝（teclaw owner 再次确认，2026-08-31） | 经 artifact 组装生效 |
 | desktop | ✅（平台侧 apply 可行，交付按其现状通道） | 待定（随 O2） | ❌ 写入拒绝（#935 现状口径） | 需 desktop owner 确认交付路径，见 O2 |
 | LOCAL / singlebox | ✅ | 待定 | ❌ 写入拒绝 | #935 的静默坑（hook 不派发）在新判定中变为显式拒绝 |
 | ARCA-direct 遗留 bot | ✅ | 待定 | ❌ 写入拒绝 | 同上，静默不执行 → 显式拒绝 |
@@ -47,14 +51,15 @@ manifest 结果（apply 先于组装），不存在「起来之后逐个补打�
 需 teclaw 团队确认的事项（T1–T3 为 v1 必答；T4 随 `cli_tools` 排期；T5
 为可选优化）：
 
-- **T1（就绪时序）**：引擎在向 publish-poll 报告就绪**之前**完成 artifact
-  应用（skills / identity / resources / mcp 落地）。我们理解现状即如此，
-  请确认——这是「配置先于就绪」语义在 teclaw 侧的落点。
+- **T1（就绪时序）—— ✅ 已确认**：引擎在向 publish-poll 报告就绪**之前**完成
+  artifact 应用（skills / identity / resources / mcp 落地）。这是「配置先于
+  就绪」语义在 teclaw 侧的落点，对应
+  `engine-convergence-contract.zh-CN.md` A4。
 - **T2（收敛应用）**：同一份 artifact 重复投递（update、restart 重拉）收敛
   到同一状态、无副作用累积；条目内容变化时（同 name 的 skill 指到新的
-  store 对象）旧内容被替换而非并存。我们理解现有整包重投模型已隐含此语义，
-  请确认为显式契约。
-- **T3（engine config 的创建时序）**：`engine_config` 类别**不落 artifact
+  store 对象）旧内容被替换而非并存。**✅ 已确认（2026-08-30）**，对应
+  `engine-convergence-contract.zh-CN.md` A1/A3。
+- **T3（engine config 的创建时序）—— ➖ 移出第一期范围**，问题不会出现：`engine_config` 类别**不落 artifact
   字段**——它走既有通道：provider-blind 的 engine-config 服务把逻辑路径
   `config/teclaw.json` 的 JSON 文档经贵侧引擎的 `/api/v1/file/upload`
   逐文件写入（`DeviceFilesystemDispatcher.engine_config_path` +
@@ -65,17 +70,16 @@ manifest 结果（apply 先于组装），不存在「起来之后逐个补打�
   实例——初始文件集是否会包含它，还是 apply 需在 ACTIVE 后经逐文件通道
   补写；② 引擎何时读取该文件（仅启动读一次，还是会重读）——这决定
   ACTIVE 后补写是否需要重启才生效。
-- **T4（`cli_tools`，随该类目排期）**：manifest 新增「给模型调用的命令行
-  工具」类目（schema §3.7）。**完整的引擎侧规格已写成
-  `teclaw-cli-contract.zh-CN.md`**，本条只剩它的摘要：artifact 顶层新增
-  `cli_tools` 数组（`{name, store, path, md5, version}`，`schema_version`
-  4 → 5），**一个条目 = 一个命令 = 一个文件**——拉取、digest 校验、解包、
-  取文件全部在平台侧完成。需要贵侧表态的仍是三件事：① 落地时能否给这个
-  文件**置可执行位**（对象存储不保留权限位，所以只能由取下来的一方置）；
-  ② 是否愿意让它按 `name` 出现在 agent 进程的 **PATH** 上；③ **策略**——
-  贵侧不支持 script 的理由是无用户代码执行通道，而「装用户二进制 + agent
-  会执行它」在能力面上与之相邻，是否接受、如何约束由贵侧定。三者任一
-  不成立，则 teclaw 上本类目按能力矩阵标不支持，写入时拒绝。
+- **T4（`cli_tools`）—— ✅ 已确认（2026-08-31）**：完整的引擎侧规格见
+  `teclaw-cli-contract.zh-CN.md`。要点：artifact 顶层新增 `cli_tools` 数组
+  （`{name, store, path, md5, version}`），**一个条目 = 一个命令 = 一个文件**
+  ——拉取、`sha256` 强校验、解包、取文件全部在平台侧完成；**`schema_version`
+  不升版**，靠「未知字段忽略」兼容。
+  引擎侧的五条要求（放置、按 `md5` 判断是否需要重新落地、可执行位、PATH、
+  全量覆盖）已作为**要求**写入契约 §3.4，不再作为待确认项——**落点、PATH 的
+  具体做法与沙箱策略属 teclaw 自治，平台不过问、也不记录**。
+  `md5` 的定位已修订为**变更判据**（同名工具 `md5` 未变即无需重下/替换），
+  **不是**落地前的拒绝门。
 - **T5（可选优化，不阻塞任何排期）**：目录型资源默认在 compose 时逐文件
   展开为 `ResourceRef`（契约零改动）；若贵侧确认 `ResourceRef.path` 可
   引用**目录子树**（`SkillRef` 已有目录先例），大目录场景 artifact 可以
@@ -119,7 +123,7 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 | O6 | 模板级 manifest（一份声明 → 多个 bot） | v2；v1 仅 bot 级 | 业务 |
 | O7 | `center://` skill-center 引用源 | v2 | backend |
 | O8 | 凭证注入方式是否需要请求头之外的形态（query 参数 token / mTLS） | v1 仅请求头；有真实业务源依赖再评估 | backend + 业务 |
-| O9 | `cli_tools` 的目标架构：容器架构是否统一（x86_64），是否需要多架构源（per-arch URL / `${OCB_ARCH}` 变量） | 先确认容器架构现状；v1 单 URL | backend + 业务 |
+| O9 | `cli_tools` 的目标架构：容器架构是否统一（x86_64），是否需要多架构源（per-arch URL / `${BOT_ARCH}` 变量） | 先确认容器架构现状；v1 单 URL | backend + 业务 |
 | O10 | engine plugin 类目（openclaw extensions / claude_code plugins）如何声明化 | v2；方向定为**注册表引用**（照 MCP 模子，不走任意 URL——插件在引擎进程内自动执行，供应链敏感度最高）。两项引擎侧前置确认：openclaw extensions 目录作为落点是否成立；claude_code 的同步规则**刻意排除 `plugins/`** 的原因 | backend + 两引擎 + 业务 |
 | O11 | 公司 git 托管服务（业务内容源）的能力确认：① 有无仓库级只读 token（Project/Deploy Token 类；无则机器人账号方案是否合规）；② 归档 API 能否按 ref + 子目录取 tar/zip，配额如何；③ refs 解析 API 形态、tag 有无不可变保护；④ 鉴权头形态（`PRIVATE-TOKEN` / `Authorization`）；⑤ 平台侧网络可达性 | 走 API 编译为归档拉取（design §10.5）；①②不成立再评估 clone / 退回 zip | backend + git 托管方 + 业务 |
 

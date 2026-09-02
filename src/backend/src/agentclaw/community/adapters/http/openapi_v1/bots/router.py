@@ -123,7 +123,9 @@ from agentclaw.community.core.service_bot.errors import (
     ServicePublicationUnsupportedError,
 )
 
-from .engine_config import _engine_config_target
+from agentclaw.community.core.services.engine_config import (
+    engine_config_coords_from_bot,
+)
 from .startup_script_support import (
     _startup_script_payload,
     _startup_script_target,
@@ -1506,7 +1508,8 @@ async def trigger_bot_data_init(
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard (→ 404)
     _require_personal_cloud_bot(bot)
-    entity_id, entity_type, _engine = _engine_config_target(bot)
+    _coords = engine_config_coords_from_bot(bot, bot_id=bot_id, owner_id=owner_id)
+    entity_id, entity_type = _coords.entity_id, _coords.entity_type
 
     # Cookie parsing belongs to the HTTP adapter. The transport-agnostic service
     # decides whether and when the temporary credential must be persisted.

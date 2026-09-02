@@ -12,7 +12,8 @@ use async_trait::async_trait;
 use bcs_eventing::{EventCatalog, EventDispatcher, EventFanoutWorker, EventRetryPolicy};
 use bcs_service_api::application::v1::EventSubscriptionService;
 use bcs_service_api::port::repo::{
-    AppendEventRecord, ClaimEventDeliveries, EventRepoPort, ListEventDeliveryRecords,
+    AppendEventRecord, ClaimEventDeliveries, EventDeliveryAttemptRecordResult, EventRepoPort,
+    ListEventDeliveryRecords, ReplaceEventSubscriptionRevision,
 };
 use bcs_service_api::port::{
     EventDeliveryDisposition, EventDeliveryError, EventDeliveryPort, EventDeliveryRequest,
@@ -66,6 +67,84 @@ async fn fanout_projects_the_fixed_revision_and_dispatcher_completes_delivery() 
             .body,
         delivery.payload_bytes
     );
+    assert_eq!(
+        metrics
+            .attempts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn invalid_claimed_endpoint_completes_a_terminal_attempt() {
+    let harness = harness(true);
+    let created = harness
+        .service
+        .create(create_command(
+            vec!["group.*".to_string()],
+            EventPayloadMode::MetadataOnly,
+        ))
+        .await
+        .expect("Subscription");
+    let (subscription, mut invalid_revision) = harness
+        .repo
+        .get_subscription(&created.subscription_id, "test")
+        .await
+        .expect("read Subscription")
+        .expect("Subscription exists");
+    invalid_revision.revision = 2;
+    invalid_revision.endpoint_url = "not-a-webhook-url".to_string();
+    invalid_revision.activated_at_ms = NOW_MS + 1;
+    harness
+        .repo
+        .replace_subscription_revision(ReplaceEventSubscriptionRevision {
+            subscription_id: subscription.subscription_id.clone(),
+            expected_revision: 1,
+            name: subscription.name.clone(),
+            status: EventSubscriptionStatus::Active,
+            revision: invalid_revision,
+            cancel_retired_pending_deliveries: false,
+            actor: subscription.created_by.clone(),
+            reason: Some("inject invalid endpoint for dispatcher contract".to_string()),
+            updated_at_ms: NOW_MS + 1,
+            env: "test".to_string(),
+        })
+        .await
+        .expect("store invalid revision through repository boundary");
+    append_test_event(&harness, "evt-invalid-endpoint").await;
+
+    let metrics = Arc::new(CaptureMetrics::default());
+    fanout(&harness, metrics.clone(), "del-invalid-endpoint").await;
+    assert_eq!(
+        dispatcher(&harness, metrics.clone(), EventRetryPolicy::default())
+            .run_once("dispatcher-invalid-endpoint")
+            .await
+            .expect("dispatch invalid endpoint"),
+        1
+    );
+
+    let (delivery, attempts) = harness
+        .repo
+        .get_delivery("del-invalid-endpoint", "test")
+        .await
+        .expect("read Delivery")
+        .expect("Delivery exists");
+    assert_eq!(delivery.status, EventDeliveryStatus::DeadLettered);
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(
+        attempts[0].result,
+        Some(EventDeliveryAttemptRecordResult::Terminal)
+    );
+    assert!(attempts[0].completed_at_ms.is_some());
+    assert_eq!(attempts[0].error_category.as_deref(), Some("invalid_endpoint"));
+    assert!(harness
+        .delivery
+        .requests
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .is_empty());
     assert_eq!(
         metrics
             .attempts
@@ -525,6 +604,11 @@ async fn create_subscription_and_event(
         ))
         .await
         .expect("Subscription");
+    append_test_event(harness, event_id).await;
+    created
+}
+
+async fn append_test_event(harness: &support::Harness, event_id: &str) {
     harness
         .repo
         .append_event(AppendEventRecord {
@@ -556,7 +640,6 @@ async fn create_subscription_and_event(
         })
         .await
         .expect("append Event");
-    created
 }
 
 #[allow(dead_code)]

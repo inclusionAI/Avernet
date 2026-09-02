@@ -22,6 +22,7 @@ from gateway.community.config._config_loader import (
     _merge,
     _parse_config,
     _resolve_base_path,
+    _resolve_env_overlay_name,
     _resolve_named_overlay_path,
     _resolve_overlay_path,
 )
@@ -236,6 +237,35 @@ class TestResolvePaths:
         assert _resolve_overlay_path("dev") == configs / "application-dev.yaml"
 
 
+# ── _resolve_env_overlay_name ────────────────────────────────────────────────
+
+
+class TestResolveEnvOverlayName:
+    def test_community_deploy_wins_over_server_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        monkeypatch.setenv("COMMUNITY_DEPLOY", "community")
+        assert _resolve_env_overlay_name() == "community"
+
+    def test_falls_back_to_server_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("SERVER_ENV", "prepub")
+        assert _resolve_env_overlay_name() == "prepub"
+
+    def test_blank_community_deploy_ignored(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("COMMUNITY_DEPLOY", "   ")
+        monkeypatch.setenv("SERVER_ENV", "dev")
+        assert _resolve_env_overlay_name() == "dev"
+
+    def test_blank_values_yield_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("COMMUNITY_DEPLOY", "")
+        monkeypatch.setenv("SERVER_ENV", "")
+        assert _resolve_env_overlay_name() == ""
+
+
 # ── _resolve_named_overlay_path ────────────────────────────────────────────
 
 
@@ -313,6 +343,34 @@ class TestConfigLoader:
         monkeypatch.setenv("SERVER_ENV", "dev")
         config = ConfigLoader.load()
         assert config.app_name == "dir-dev"
+
+    def test_load_with_community_deploy_overlay(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # COMMUNITY_DEPLOY names the env overlay and wins over SERVER_ENV: with
+        # both set, application-community.yaml applies, not application-prod.yaml.
+        base = tmp_path / "application.yaml"
+        base.write_text("app_name: base\nworkers: 1\n")
+        (tmp_path / "application-prod.yaml").write_text("workers: 4\n")
+        (tmp_path / "application-community.yaml").write_text("workers: 9\n")
+        monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(base))
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        monkeypatch.setenv("COMMUNITY_DEPLOY", "community")
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        assert config.workers == 9
+
+    def test_load_community_deploy_missing_overlay_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        base = tmp_path / "application.yaml"
+        base.write_text("app_name: base\n")
+        monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(base))
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        # No application-community.yaml: the env overlay is skipped, base wins.
+        monkeypatch.setenv("COMMUNITY_DEPLOY", "community")
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
 
     def test_load_raw_returns_raw_dict(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

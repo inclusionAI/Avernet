@@ -94,6 +94,115 @@ class TestLoad:
         assert config.user_config["extra_key"] == "extra_value"
 
 
+class TestEnvOverlaySelection:
+    """Tests for the application-<env>.yaml overlay name selection.
+
+    COMMUNITY_DEPLOY, when set, names the overlay and wins over SERVER_ENV.
+    """
+
+    def test_server_env_selects_env_overlay(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        (config_dir / "application-dev.yaml").write_text("workers: 4\n")
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("SERVER_ENV", "dev")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        assert config.workers == 4
+
+    def test_community_deploy_wins_over_server_env(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        # Both overlays exist: COMMUNITY_DEPLOY must pick community, not prod.
+        (config_dir / "application-prod.yaml").write_text("workers: 5\n")
+        (config_dir / "application-community.yaml").write_text("workers: 6\n")
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        monkeypatch.setenv("COMMUNITY_DEPLOY", "community")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.workers == 6
+
+    def test_community_deploy_without_server_env(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        (config_dir / "application-community.yaml").write_text("workers: 6\n")
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.setenv("COMMUNITY_DEPLOY", "community")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.workers == 6
+
+    def test_community_deploy_missing_file_falls_back_to_base(
+        self, monkeypatch, tmp_path
+    ):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        # No application-community.yaml: the missing overlay is ignored.
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.setenv("COMMUNITY_DEPLOY", "community")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.workers == 1
+
+    def test_server_env_missing_file_falls_back_to_base(
+        self, monkeypatch, tmp_path
+    ):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("SERVER_ENV", "nonexistent")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.workers == 1
+
+    def test_no_env_vars_loads_base_only(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        (config_dir / "application-dev.yaml").write_text("workers: 4\n")
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.workers == 1
+
+
 class TestEnvInterpolation:
     """Tests for `${NAME}` (and `${NAME:-default}`) placeholder expansion."""
 

@@ -93,6 +93,9 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
                      # deliberately no FastAPI, which is what lets them be
                      # tested without a client. Named in full rather than as a
                      # short pattern so this entry cannot exempt anything else.
+    "config_manifest_support",
+                     # the same split, for the same reason, in the bots group's
+                     # config-manifest helpers. Also named in full.
     "auth",          # callback HMAC verification ports (e.g. task/auth.py) —
                      # import-light by design: a pluggable authenticator must not
                      # depend on the HTTP stack.
@@ -284,6 +287,24 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "is_readonly",
     "_HIDDEN_BASENAMES", "_HIDDEN_DIRNAMES",
     "_POOL_SKILLS_LOCAL_RELPATH", "_SKILLS_LOCAL_RELPATH",
+    # The bot-config seam (#1509): the rules each config category enforces,
+    # moved out of the router handler bodies that used to own them so that
+    # manifest apply runs the same ones instead of a second copy. Same family
+    # as ``is_readonly`` directly above and the pure helpers below — module-level
+    # functions over values, not service instances to resolve through Injected.
+    # This entry is *why* they are allowed here, so read it before adding more:
+    # a name belongs on this list only if it is a pure function or a domain
+    # type. A stateful service still goes through its Protocol.
+    #
+    # ``core/bot_config_surface/table.py`` names these same objects, and
+    # ``tests/community/core/bot_config_surface/`` asserts with ``is`` that the
+    # routers and that table hold the identical function — so this list and that
+    # one cannot drift onto different implementations.
+    "safe_workspace_path", "require_workspace_path", "is_write_forbidden",
+    "resource_coords_from_record",
+    "identity_coords_from_record", "identity_physical_file_name",
+    "require_addressed_bot",
+    "engine_config_coords_from_record", "engine_config_coords_from_bot",
     # Genuine pre-existing violations, NOT endorsements. Both are concrete
     # service classes injected directly by routers that predate this guard
     # covering their path; the engine-config service in the same directory was

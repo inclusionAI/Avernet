@@ -82,8 +82,11 @@ class ConfigLoader:
         base = _load_yaml(base_path) if base_path is not None else {}
         applied: list[str] = []
 
-        # SERVER_ENV → configs/application-{env}.yaml (existing gateway mechanism).
-        env = os.getenv("SERVER_ENV", "").strip()
+        # COMMUNITY_DEPLOY (community deployment) → configs/application-{value}.yaml.
+        # When set it takes precedence over SERVER_ENV for overlay selection, so a
+        # community stack picks application-community.yaml while SERVER_ENV stays
+        # free for env-dependent behaviour (principal signer, dev cookie, ...).
+        env = _resolve_env_overlay_name()
         overlay_path = _resolve_overlay_path(env) if env else None
         if overlay_path and overlay_path.exists():
             base = _merge(base, _load_yaml(overlay_path))
@@ -152,6 +155,21 @@ def _resolve_base_path() -> Path | None:
         return cwd_path
     # No config file found: fall back to built-in defaults (no file read).
     return None
+
+
+def _resolve_env_overlay_name() -> str:
+    """Return the suffix of the ``application-<suffix>.yaml`` env overlay.
+
+    ``COMMUNITY_DEPLOY`` wins when set: its value names the overlay for a
+    community deployment (e.g. ``COMMUNITY_DEPLOY=community`` loads
+    ``application-community.yaml``) regardless of ``SERVER_ENV``, which retains
+    its env-detection role elsewhere. Falls back to the legacy ``SERVER_ENV``
+    behaviour when it is unset.
+    """
+    community_deploy = os.getenv("COMMUNITY_DEPLOY", "").strip()
+    if community_deploy:
+        return community_deploy
+    return os.getenv("SERVER_ENV", "").strip()
 
 
 def _resolve_overlay_path(env: str) -> Path | None:

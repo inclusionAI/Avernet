@@ -15,6 +15,7 @@ import pytest
 from agentclaw.community.kernel.bot_config import (
     SCHEMA_VERSION,
     BotConfigArtifact,
+    CliToolRef,
     FileRef,
     McpManifest,
     McpServerRef,
@@ -222,3 +223,119 @@ def test_example_artifact_conforms_and_roundtrips() -> None:
     jsonschema.validate(instance=EXAMPLE_ARTIFACT.to_dict(), schema=schema)
     assert BotConfigArtifact.from_dict(EXAMPLE_ARTIFACT.to_dict()) == EXAMPLE_ARTIFACT
     assert EXAMPLE_ARTIFACT.schema_version == SCHEMA_VERSION
+
+
+@pytest.mark.unit
+def test_unpopulated_cli_tools_leaves_the_key_off_the_wire() -> None:
+    """Nothing populates the field yet, so it must not appear on the wire.
+
+    ``asdict`` would put ``"cli_tools": []`` on every artifact — a new key
+    delivered to every engine ahead of the feature that gives it meaning. An
+    artifact built while the platform produces no tools must be byte-identical
+    to one built before the field existed.
+
+    This is transitional, not a semantic the engine has to honour: an artifact
+    is a full snapshot of platform state, so once the composer fills the field
+    it is always present and always complete, like every other category.
+    """
+    artifact = BotConfigArtifact(schema_version=SCHEMA_VERSION, engine_type="teclaw")
+
+    assert artifact.cli_tools is None
+    assert "cli_tools" not in artifact.to_dict()
+
+
+@pytest.mark.unit
+def test_empty_cli_tools_is_carried_as_a_complete_empty_set() -> None:
+    """``[]`` is a real snapshot value — "this bot has no tools" — and must ship."""
+    artifact = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION, engine_type="teclaw", cli_tools=[]
+    )
+
+    assert artifact.to_dict()["cli_tools"] == []
+
+
+@pytest.mark.unit
+def test_cli_tool_entry_carries_one_file_per_command() -> None:
+    artifact = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION,
+        engine_type="teclaw",
+        cli_tools=[
+            CliToolRef(
+                name="mycli",
+                store="bot-data",
+                path="staff_u1/bot7/teclaw/cli/mycli",
+                md5="9f2c1b7d4e5a60318c2f0ab4d7e9c135",
+                version="1.4.2",
+            )
+        ],
+    )
+
+    entry = artifact.to_dict()["cli_tools"][0]
+    assert entry == {
+        "name": "mycli",
+        "store": "bot-data",
+        "path": "staff_u1/bot7/teclaw/cli/mycli",
+        "md5": "9f2c1b7d4e5a60318c2f0ab4d7e9c135",
+        "version": "1.4.2",
+    }
+
+
+@pytest.mark.unit
+def test_from_dict_does_not_manufacture_an_empty_array() -> None:
+    """Reading an artifact without the key must not invent one.
+
+    Round-tripping is where this would bite: had ``from_dict`` defaulted to
+    ``[]``, an artifact read and re-emitted would come back out carrying a key
+    the original never had, changing its bytes.
+    """
+    v4_payload = {"schema_version": 4, "engine_type": "teclaw"}
+
+    restored = BotConfigArtifact.from_dict(v4_payload)
+
+    assert restored.cli_tools is None
+    assert "cli_tools" not in restored.to_dict()
+
+
+@pytest.mark.unit
+def test_cli_tools_roundtrip_preserves_both_states() -> None:
+    for declared in ([], [CliToolRef(name="t", store="s", path="p", md5="d")]):
+        artifact = BotConfigArtifact(
+            schema_version=SCHEMA_VERSION, engine_type="teclaw", cli_tools=declared
+        )
+        assert BotConfigArtifact.from_dict(artifact.to_dict()) == artifact
+
+
+@pytest.mark.unit
+def test_cli_tools_artifacts_conform_to_schema() -> None:
+    schema = json.loads(_SCHEMA_PATH.read_text())
+    for declared in ([], [CliToolRef(name="t", store="s", path="p", md5="d")]):
+        artifact = BotConfigArtifact(
+            schema_version=SCHEMA_VERSION, engine_type="teclaw", cli_tools=declared
+        )
+        jsonschema.validate(instance=artifact.to_dict(), schema=schema)
+
+
+@pytest.mark.unit
+def test_cli_tools_ships_without_a_schema_version_bump() -> None:
+    """``cli_tools`` was added to v4 on purpose; the constant must not drift up.
+
+    Decided with the teclaw owner (2026-08-31): rather than bump, the field
+    rides into existing v4 artifacts and compatibility rests on the engine
+    contract's "ignore unknown fields rather than reject" rule (A5), which
+    teclaw agreed to. ``ConfigComposer`` stamps this constant onto every
+    artifact, so raising it is a wire change for every running engine with
+    nothing to gain.
+
+    The consequence this test guards: ``schema_version`` no longer tracks the
+    contract's evolution, so nothing may infer "this artifact has cli_tools"
+    from the version. Probe for the key.
+    """
+    assert SCHEMA_VERSION == 4
+
+    with_tools = BotConfigArtifact(
+        schema_version=SCHEMA_VERSION,
+        engine_type="teclaw",
+        cli_tools=[CliToolRef(name="t", store="s", path="p", md5="d")],
+    )
+
+    assert with_tools.to_dict()["schema_version"] == 4

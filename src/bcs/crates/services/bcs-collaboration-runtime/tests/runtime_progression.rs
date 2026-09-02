@@ -299,6 +299,7 @@ async fn current_session_permission_is_owned_by_chat_and_manager_group_driver() 
                     extensions: Default::default(),
                 },
             )]),
+            opening_message: None,
             input: Value::Null,
             judge_available: false,
         })
@@ -344,7 +345,10 @@ async fn current_session_permission_is_owned_by_chat_and_manager_group_driver() 
 #[tokio::test]
 async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publishes_as_initiator() {
     let group_store = Arc::new(GroupStore::new());
-    let group = test_group();
+    let mut group = test_group();
+    group.opening_message = Some(OpeningMessage::Text(
+        "Chat session opening {{bcs.session_id}}".to_string(),
+    ));
     group_store
         .upsert(group.clone())
         .await
@@ -392,6 +396,40 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
     .with_message_repo(message_repo.clone())
     .with_result_publisher(result_publisher.clone());
 
+    let invalid_opening_message = runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_authoring_yaml(),
+            participant_bindings: BTreeMap::from([(
+                "writer".to_string(),
+                RuntimeParticipantBinding {
+                    source: "manual".to_string(),
+                    bot_ids: vec!["worker-bot".to_string()],
+                    extensions: Default::default(),
+                },
+            )]),
+            opening_message: Some(OpeningMessage::Text(
+                "Invalid {{bcs.unknown}}".to_string(),
+            )),
+            input: Value::Null,
+            judge_available: false,
+        })
+        .await
+        .expect_err("invalid one-shot opening message must be rejected");
+    assert!(matches!(
+        invalid_opening_message,
+        CollaborationRuntimeError::InvalidRequest(message)
+            if message.contains("invalid_opening_message")
+    ));
+    assert!(
+        StateMachineRunRepoPort::get_run_by_session_id(&*store, &session.id)
+            .await
+            .expect("query run after invalid opening message")
+            .is_none()
+    );
+    assert!(delivery.commands.lock().await.is_empty());
+
     let started = runtime
         .start_session_state_machine_run(StartSessionStateMachineRunCommand {
             session_id: session.id.clone(),
@@ -405,6 +443,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
                     extensions: Default::default(),
                 },
             )]),
+            opening_message: None,
             input: json!({"question": "resolve this"}),
             judge_available: false,
         })
@@ -454,6 +493,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         .expect("panel AixUI text");
     assert!(panel_text.contains("<AixUI"));
     assert!(panel_text.contains("bcsPanel.StateMachineRunView"));
+    assert!(!panel_text.contains("Chat session opening"));
     drop(frontend_commands);
 
     let panel_history = message_repo
@@ -559,7 +599,8 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
 #[tokio::test]
 async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun() {
     let group_store = Arc::new(GroupStore::new());
-    let group = test_group();
+    let mut group = test_group();
+    group.label = Some("Original Group".to_string());
     group_store
         .upsert(group.clone())
         .await
@@ -590,18 +631,36 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
         .session;
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
+    let message_repo = Arc::new(MemoryMessageRepo::new());
+    let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
     let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
         store.clone(),
-        group_store,
+        group_store.clone(),
         sessions.clone(),
         delivery.clone(),
         noop_judge(),
     )
-    .with_message_repo(Arc::new(MemoryMessageRepo::new()))
+    .with_message_repo(message_repo.clone())
+    .with_frontend_delivery(frontend_delivery.clone())
     .with_result_publisher(Arc::new(FailingResultPublisher));
+    let opening_message: OpeningMessage = serde_json::from_value(json!({
+        "type": "panel",
+        "component": "custom.OneShotRunView",
+        "params": {
+            "groupName": "{{bcs.group_name}}",
+            "runId": "{{bcs.run_id}}",
+            "sessionId": "{{bcs.session_id}}"
+        },
+        "tab": {
+            "id": "one-shot-{{bcs.run_id}}",
+            "title": "One Shot",
+            "closable": true
+        }
+    }))
+    .expect("valid one-shot opening panel");
 
     let started = runtime
         .start_session_state_machine_run(StartSessionStateMachineRunCommand {
@@ -616,11 +675,27 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
                     extensions: Default::default(),
                 },
             )]),
+            opening_message: Some(opening_message.clone()),
             input: json!({"question": "resolve this"}),
             judge_available: false,
         })
         .await
         .expect("start one-shot run");
+    let persisted_source = StateMachineRunRepoPort::get_run(&*store, &started.view.run.run_id)
+        .await
+        .expect("load persisted source run")
+        .expect("persisted source run");
+    assert_eq!(
+        persisted_source.opening_message_override.as_ref(),
+        Some(&opening_message)
+    );
+    assert!(
+        serde_json::to_value(&started.view)
+            .expect("serialize public run view")
+            .pointer("/run/opening_message_override")
+            .is_none(),
+        "the raw one-shot override must not be exposed in the public Run view"
+    );
     let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
     let completed = runtime
         .handle_bot_terminal_event(bcs_service_api::HandleBotTerminalEventCommand {
@@ -688,6 +763,10 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
         Some(started.view.run.run_id.as_str())
     );
     assert_eq!(rerun.view.run.input, started.view.run.input);
+    assert_eq!(
+        rerun.view.run.opening_message_override,
+        started.view.run.opening_message_override
+    );
     assert_eq!(rerun.view.nodes.len(), 1);
     assert_eq!(rerun.view.nodes[0].attempt, 0);
     assert_eq!(rerun.view.nodes[0].status, StateMachineNodeStatus::Running);
@@ -727,6 +806,42 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
     assert_eq!(panel_run_ids.len(), 2);
     assert!(panel_run_ids.contains(&started.view.run.run_id.as_str()));
     assert!(panel_run_ids.contains(&rerun.view.run.run_id.as_str()));
+    let panel_history = message_repo
+        .query_messages(MessageQuery {
+            group_id: group.id.clone(),
+            session_id: session.id.clone(),
+            cursor: None,
+            limit: 20,
+            keyword: None,
+            sender_id: None,
+            message_type: Some(STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string()),
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: None,
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query custom panel history");
+    let panel_text_for = |run_id: &str| {
+        panel_history
+            .messages
+            .iter()
+            .find(|message| message.run_id == run_id)
+            .and_then(|message| message.content["text"].as_str())
+            .expect("persisted panel text")
+    };
+    let source_panel = panel_text_for(&started.view.run.run_id);
+    assert!(source_panel.contains("custom.OneShotRunView"));
+    assert!(source_panel.contains(&started.view.run.run_id));
+    let rerun_panel = panel_text_for(&rerun.view.run.run_id);
+    assert!(rerun_panel.contains("custom.OneShotRunView"));
+    assert!(rerun_panel.contains("Original Group"));
+    assert!(rerun_panel.contains(&rerun.view.run.run_id));
+    assert!(!rerun_panel.contains(&started.view.run.run_id));
+
+    group_store
+        .update_label(&group.id, Some("Renamed Group".to_string()))
+        .await
+        .expect("rename group after rerun panel persistence");
 
     let repeated = runtime
         .rerun_state_machine_run(RerunStateMachineCommand {
@@ -738,6 +853,24 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
     assert!(!repeated.created);
     assert_eq!(repeated.view.run.run_id, rerun.view.run.run_id);
     assert_eq!(delivery.commands.lock().await.len(), 2);
+    let frontend_commands = frontend_delivery.commands.lock().await;
+    let repeated_event: Value = serde_json::from_str(
+        &frontend_commands
+            .last()
+            .expect("repeated rerun frontend event")
+            .event_json,
+    )
+    .expect("decode repeated rerun frontend event");
+    assert_eq!(
+        repeated_event["payload"]["content"].as_str(),
+        Some(rerun_panel),
+        "an idempotent rerun must publish the already persisted opening message"
+    );
+    assert!(!repeated_event["payload"]["content"]
+        .as_str()
+        .unwrap()
+        .contains("Renamed Group"));
+    drop(frontend_commands);
 
     let rerun_delivery_run_id = delivery.commands.lock().await[1].run_id.clone();
     let failed_rerun = runtime
@@ -857,6 +990,7 @@ async fn human_input_without_authenticated_or_present_human_is_invalid_request()
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_untrusted".to_string()),
             authenticated_human: None,
@@ -916,6 +1050,7 @@ async fn human_input_can_start_without_authenticated_human_when_session_has_pres
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("bot_driver".to_string()),
             authenticated_human: None,
@@ -971,6 +1106,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("bot_driver".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1024,6 +1160,7 @@ async fn authenticated_human_is_added_or_restored_before_human_input_starts() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("bot_driver".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1078,6 +1215,7 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1280,6 +1418,7 @@ async fn frontend_human_input_skips_im_delivery_and_accepts_present_human() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "review in frontend"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1366,6 +1505,7 @@ async fn im_human_input_rejects_a_different_present_human() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "assigned review"}),
             caller_id: Some("bot_driver".to_string()),
             authenticated_human: None,
@@ -1423,6 +1563,7 @@ async fn state_machine_session_rejects_message_without_pending_human_input() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "wait for the bot"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1489,6 +1630,7 @@ async fn human_run_owner_can_cancel_through_human_access_api() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "cancel it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1554,6 +1696,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "validate errors"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1580,6 +1723,7 @@ async fn human_runtime_rejects_missing_context_and_invalid_response_targets() {
                 definition: None,
                 definition_ref: None,
                 participant_bindings: None,
+                opening_message_override: None,
                 input: json!({"proposal": "invalid start"}),
                 caller_id: Some("human_1001".to_string()),
                 authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1747,6 +1891,7 @@ async fn human_input_uses_the_same_judge_contract_as_bot_output() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1799,6 +1944,7 @@ async fn human_input_is_persisted_and_no_longer_pending_while_judging() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1891,6 +2037,7 @@ async fn human_input_remains_persisted_when_judge_fails() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -1957,6 +2104,7 @@ async fn human_input_timeout_ignores_global_retries_and_rejects_late_response() 
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"proposal": "ship it"}),
             caller_id: Some("human_1001".to_string()),
             authenticated_human: Some(AuthenticatedHumanCaller {
@@ -2025,6 +2173,7 @@ async fn timeout_scanner_aborts_run_when_group_is_missing() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "group will be deleted"}),
             caller_id: None,
             authenticated_human: None,
@@ -2077,6 +2226,7 @@ async fn timeout_scanner_aborts_run_when_session_is_missing() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "session will be deleted"}),
             caller_id: None,
             authenticated_human: None,
@@ -2132,6 +2282,7 @@ async fn timeout_scanner_skips_invalid_candidate_and_processes_later_run() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "valid timeout"}),
             caller_id: None,
             authenticated_human: None,
@@ -2230,6 +2381,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "review this"}),
             caller_id: None,
             authenticated_human: None,
@@ -2504,6 +2656,7 @@ async fn state_machine_bot_delivery_registers_message_flow_run_context() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "stream this"}),
             caller_id: None,
             authenticated_human: None,
@@ -2559,6 +2712,7 @@ async fn state_machine_explicit_node_timeout_overrides_provider_chat_default() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "stream this"}),
             caller_id: None,
             authenticated_human: None,
@@ -2607,6 +2761,7 @@ async fn start_run_fails_and_marks_node_failed_when_delivery_returns_not_deliver
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "review this"}),
             caller_id: None,
             authenticated_human: None,
@@ -2670,6 +2825,7 @@ async fn message_less_final_fails_attempt_and_schedules_retry() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "empty final should retry"}),
             caller_id: None,
             authenticated_human: None,
@@ -2786,6 +2942,7 @@ async fn state_machine_completion_dispatches_service_callback() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "callback after completion"}),
             caller_id: None,
             authenticated_human: None,
@@ -2838,6 +2995,7 @@ async fn state_machine_runtime_logs_run_node_and_terminal_lifecycle() {
                 definition: None,
                 definition_ref: None,
                 participant_bindings: None,
+                opening_message_override: None,
                 input: json!({"question": "logging"}),
                 caller_id: Some("caller-1".to_string()),
                 authenticated_human: None,
@@ -2938,6 +3096,7 @@ async fn start_run_uses_group_default_definition_binding() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "use binding"}),
             caller_id: None,
             authenticated_human: None,
@@ -2973,6 +3132,7 @@ async fn deleting_session_aborts_all_active_state_machine_runs() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "delete the session"}),
             caller_id: None,
             authenticated_human: None,
@@ -3035,6 +3195,7 @@ async fn deleting_group_aborts_active_state_machine_runs() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "delete the group"}),
             caller_id: None,
             authenticated_human: None,
@@ -3089,6 +3250,7 @@ async fn retrying_deleted_group_cleanup_aborts_orphaned_active_runs() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "recover orphaned run"}),
             caller_id: None,
             authenticated_human: None,
@@ -3155,6 +3317,7 @@ async fn group_runtime_cleanup_aborts_runs_and_removes_sessions_and_binding() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "review this"}),
             caller_id: Some("driver-bot".to_string()),
             authenticated_human: None,
@@ -3253,6 +3416,7 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: Value::Null,
             caller_id: None,
             authenticated_human: None,
@@ -3519,6 +3683,7 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "use binding without rewriting definition"}),
             caller_id: None,
             authenticated_human: None,
@@ -3594,12 +3759,17 @@ async fn custom_opening_message_is_rendered_once_and_reused_from_history() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: Value::Null,
             caller_id: None,
             authenticated_human: None,
         })
         .await
         .expect("start run");
+    assert!(
+        started.view.run.opening_message_override.is_none(),
+        "configured StateMachine Runs must keep the request override unset"
+    );
     let expected = format!(
         "群=发布检查 session=Single Node group=group-1 session_id={} run={}",
         started.view.run.session_id, started.view.run.run_id
@@ -3638,6 +3808,7 @@ async fn custom_opening_message_is_rendered_once_and_reused_from_history() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: Value::Null,
             caller_id: None,
             authenticated_human: None,
@@ -3692,6 +3863,7 @@ async fn opening_message_persistence_failure_fails_run_before_node_dispatch() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: Value::Null,
             caller_id: None,
             authenticated_human: None,
@@ -3760,6 +3932,7 @@ async fn start_run_uses_group_participant_bindings_for_template_definition() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "use participant binding"}),
             caller_id: None,
             authenticated_human: None,
@@ -3829,6 +4002,7 @@ async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime()
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "multi"}),
             caller_id: None,
             authenticated_human: None,
@@ -3865,6 +4039,7 @@ async fn graph_view_returns_snapshot_edges_and_node_status() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "graph"}),
             caller_id: None,
             authenticated_human: None,
@@ -3939,6 +4114,7 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "join"}),
             caller_id: None,
             authenticated_human: None,
@@ -4038,6 +4214,7 @@ async fn judged_node_routes_selected_outcome_and_skips_unselected_branch() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
@@ -4128,6 +4305,7 @@ async fn judged_node_publishes_bot_output_but_not_judge_message_to_workbench() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
@@ -4193,6 +4371,7 @@ async fn judged_node_failure_records_runtime_event_and_fails_run() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
@@ -4273,6 +4452,7 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "judge branch"}),
             caller_id: None,
             authenticated_human: None,
@@ -4349,6 +4529,7 @@ async fn judged_node_keeps_shared_merge_reachable_from_selected_branch() {
             definition: None,
             definition_ref: None,
             participant_bindings: None,
+            opening_message_override: None,
             input: json!({"question": "judge shared merge"}),
             caller_id: None,
             authenticated_human: None,

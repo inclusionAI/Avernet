@@ -1,5 +1,6 @@
-# Proxy production overlay — env-driven host overrides for deployed editions.
-# Loaded on top of application.yaml when SERVER_ENV=prod (see
+# Proxy community-deployment overlay — env-driven host overrides for deployed
+# editions. Loaded on top of application.yaml when COMMUNITY_DEPLOY=community
+# (COMMUNITY_DEPLOY wins over SERVER_ENV for overlay selection; see
 # sandboxproxy.community.config._config_loader.ConfigLoader).
 #
 # Hosts that point at in-cluster or environment-specific endpoints are

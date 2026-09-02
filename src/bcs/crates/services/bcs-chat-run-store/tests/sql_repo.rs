@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -11,8 +11,8 @@ use bcs_chat_run_store::{
     ChatRunState, SqlChatRunRepo,
 };
 use bcs_db_api::{
-    DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbSqlFlavor, DbStatement,
-    DbTransactionStep, DbTransactionStepResult,
+    db_get_column, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbSqlFlavor, DbStatement,
+    DbTransactionStep, DbTransactionStepResult, DbValue,
 };
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::ChatResponseMode;
@@ -195,6 +195,77 @@ fn record(run_id: &str, version: u64) -> ChatRunRecord {
     );
     record.version = version;
     record
+}
+
+struct RecordingDb {
+    executed_sql: Mutex<Vec<String>>,
+}
+
+impl RecordingDb {
+    fn new() -> Self {
+        Self {
+            executed_sql: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn executed_sql(&self) -> Vec<String> {
+        self.executed_sql
+            .lock()
+            .expect("recording db lock")
+            .clone()
+    }
+}
+
+#[async_trait]
+impl DbPlugin for RecordingDb {
+    async fn query(&self, _statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        Ok(Vec::new())
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.executed_sql
+            .lock()
+            .expect("recording db lock")
+            .push(statement.sql().to_string());
+        Ok(DbExecuteResult {
+            affected_rows: 1,
+            last_insert_id: None,
+        })
+    }
+
+    async fn transaction(
+        &self,
+        _steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        Ok(Vec::new())
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        Ok(DbHealth::healthy())
+    }
+}
+
+#[tokio::test]
+async fn mysql_create_does_not_issue_runtime_ddl() {
+    let db = Arc::new(RecordingDb::new());
+    let repo = SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Mysql,
+        Arc::new(InMemoryCachePlugin::new()),
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    );
+
+    repo.create(record("remote", 1)).await.unwrap();
+
+    let sql = db.executed_sql();
+    assert_eq!(sql.len(), 1, "remote create must issue only the INSERT");
+    assert!(sql[0].starts_with("INSERT INTO bcs_chat_runs"));
+    assert!(
+        sql.iter()
+            .all(|statement| !statement.starts_with("CREATE "))
+    );
 }
 
 #[tokio::test]
@@ -856,4 +927,155 @@ async fn terminal_tombstone_covers_failed_overlay_delete() {
     // The terminal CAS bumped the DB row (still at v1) to v2; the tombstone
     // carries the same version.
     assert_eq!(stored.version, 2);
+}
+
+// ---------------------------------------------------------------------------
+// original_request audit column (write-once, outside the app read surface)
+// ---------------------------------------------------------------------------
+
+/// Read the `original_request` column straight from the DB. The repo's `get`
+/// path never SELECTs this column (it is a write-once audit field), so the
+/// only way to inspect it is a raw column query scoped to `env`.
+async fn select_original_request(db: &dyn DbPlugin, run_id: &str, env: &str) -> String {
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT original_request FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+            vec![
+                DbValue::from(run_id.to_string()),
+                DbValue::from(env.to_string()),
+            ],
+        ))
+        .await
+        .expect("select original_request");
+    db_get_column(&rows[0], "original_request").expect("original_request column")
+}
+
+#[tokio::test]
+async fn original_request_persisted_but_not_read_back() {
+    // `original_request` is a write-once-at-create audit column deliberately
+    // kept OUT of the repo's read surface: every SELECT omits it and the
+    // overlay serde skips it, so `get` returns the record with the field empty.
+    // Inspecting it requires a direct query of that column (what an operator
+    // does against the run table later).
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let repo = SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Sqlite,
+        cache,
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    );
+
+    let payload = r#"{"method":"chat.send","params":{"message":{"content":"hi"}}}"#;
+    let mut rec = record("audit", 1);
+    rec.original_request = payload.to_string();
+    repo.create(rec).await.unwrap();
+
+    // The port deliberately does NOT surface the audit column.
+    let stored = repo.get("audit").await.unwrap().unwrap();
+    assert_eq!(stored.original_request, "");
+
+    // Only a direct column query reads it back; the audit value landed verbatim.
+    assert_eq!(
+        select_original_request(db.as_ref(), "audit", "test").await,
+        payload
+    );
+}
+
+#[tokio::test]
+async fn original_request_is_write_once_across_state_streaming_and_terminal() {
+    // No UPDATE path (state CAS, DB-fail-over streaming append, terminal CAS)
+    // touches `original_request`; the audit column keeps its create-time value
+    // through every lifecycle mutation.
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    let dyn_cache: Arc<dyn CachePlugin> = Arc::new(FailingWritesCache::new());
+    let repo = SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Sqlite,
+        dyn_cache,
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    );
+
+    let payload = r#"{"method":"chat.send","params":{"message":"q"}}"#;
+    let mut rec = record("w", 1);
+    rec.original_request = payload.to_string();
+    repo.create(rec).await.unwrap();
+
+    // state CAS UPDATE
+    let mut running = record("w", 1);
+    running.state = ChatRunState::Running;
+    repo.compare_and_set_state("w", 1, running)
+        .await
+        .unwrap();
+
+    // streaming append via the DB fail-over UPDATE (overlay write rejected).
+    assert!(
+        repo.append_streaming_content("w", 2, "delta".to_string(), false)
+            .await
+            .unwrap()
+    );
+
+    // terminal CAS UPDATE
+    let v = repo.get("w").await.unwrap().unwrap().version;
+    let mut done = record("w", v);
+    done.state = ChatRunState::Completed;
+    done.accumulated_content = "delta".to_string();
+    repo.compare_and_set_terminal("w", v, done)
+        .await
+        .unwrap();
+
+    // Audit column untouched by any UPDATE.
+    assert_eq!(
+        select_original_request(db.as_ref(), "w", "test").await,
+        payload
+    );
+}
+
+#[tokio::test]
+async fn gmt_columns_are_db_managed_and_mapped_to_record_timestamps() {
+    // The internal `gmt_create`/`gmt_modified` convention replaces the
+    // app-written created_at_ms/updated_at_ms columns: the app never writes them
+    // (the DB defaults them at insert and advances gmt_modified on every UPDATE
+    // via set_modified_now), and on read the record's created_at_ms/updated_at_ms
+    // are derived from gmt_create/gmt_modified as Unix-epoch millis.
+    let db = Arc::new(LocalSqliteDbPlugin::new().expect("sqlite db"));
+    let cache = Arc::new(InMemoryCachePlugin::new());
+    let repo = SqlChatRunRepo::new(
+        db.clone(),
+        DbSqlFlavor::Sqlite,
+        cache.clone(),
+        "bcs:".to_string(),
+        120_000,
+        "test".to_string(),
+    );
+    repo.create(record("ts", 1)).await.unwrap();
+
+    // The DB populated the convention columns on insert (the app never wrote them).
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT CAST(strftime('%s', gmt_create) AS INTEGER) AS gmt_create_ts, \
+             CAST(strftime('%s', gmt_modified) AS INTEGER) AS gmt_modified_ts \
+             FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+            vec![
+                DbValue::from("ts".to_string()),
+                DbValue::from("test".to_string()),
+            ],
+        ))
+        .await
+        .unwrap();
+    let gmt_create_ts: i64 = db_get_column(&rows[0], "gmt_create_ts").unwrap();
+    let gmt_modified_ts: i64 = db_get_column(&rows[0], "gmt_modified_ts").unwrap();
+    assert!(gmt_create_ts > 0, "gmt_create must be DB-set on insert");
+    assert!(gmt_modified_ts > 0, "gmt_modified must be DB-set on insert");
+
+    // Evict the seeded overlay so the next `get` falls back to the DB row, where
+    // created_at_ms/updated_at_ms are derived from gmt_create/gmt_modified.
+    cache.delete("bcs:chat_run:ts").await.unwrap();
+    let stored = repo.get("ts").await.unwrap().unwrap();
+    assert_eq!(stored.created_at_ms, (gmt_create_ts as u64) * 1000);
+    assert_eq!(stored.updated_at_ms, (gmt_modified_ts as u64) * 1000);
 }

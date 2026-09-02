@@ -410,6 +410,17 @@ pub async fn event_delivery_repo_port_contract_tests<T: EventRepoPort + ?Sized>(
         .lease_owner
         .clone()
         .expect("claimed Delivery lease owner");
+    let (_, in_flight_attempts) = repo
+        .get_delivery(&first_delivery.delivery_id, &env)
+        .await
+        .expect("read claimed Delivery")
+        .expect("claimed Delivery exists");
+    assert_eq!(in_flight_attempts.len(), 1);
+    assert_eq!(in_flight_attempts[0].attempt_no, 1);
+    assert_eq!(in_flight_attempts[0].started_at_ms, BASE + 20);
+    assert_eq!(in_flight_attempts[0].completed_at_ms, None);
+    assert_eq!(in_flight_attempts[0].result, None);
+    assert_eq!(in_flight_attempts[0].worker_id, "delivery-a");
     let renewed = repo
         .renew_delivery_lease(RenewEventDeliveryLease {
             delivery_id: first_delivery.delivery_id.clone(),
@@ -504,6 +515,14 @@ pub async fn event_delivery_repo_port_contract_tests<T: EventRepoPort + ?Sized>(
     assert_eq!(first_attempts.len(), 2);
     assert_eq!(first_attempts[0].attempt_no, 1);
     assert_eq!(first_attempts[1].attempt_no, 2);
+    assert_eq!(
+        first_attempts[0].result,
+        Some(EventDeliveryAttemptRecordResult::Retryable)
+    );
+    assert_eq!(
+        first_attempts[1].result,
+        Some(EventDeliveryAttemptRecordResult::Success)
+    );
     assert!(
         repo.list_deliveries(ListEventDeliveryRecords {
             subscription_id: Some(subscription_id.clone()),
@@ -543,6 +562,23 @@ pub async fn event_delivery_repo_port_contract_tests<T: EventRepoPort + ?Sized>(
         .expect("recover expired Delivery lease");
     assert_eq!(recovered.len(), 1);
     assert_eq!(recovered[0].attempt_count, 2);
+    let (_, recovered_attempts) = repo
+        .get_delivery(&second_delivery.delivery_id, &env)
+        .await
+        .expect("read recovered Delivery")
+        .expect("recovered Delivery exists");
+    assert_eq!(recovered_attempts.len(), 2);
+    assert_eq!(recovered_attempts[0].completed_at_ms, Some(BASE + 81));
+    assert_eq!(
+        recovered_attempts[0].result,
+        Some(EventDeliveryAttemptRecordResult::Retryable)
+    );
+    assert_eq!(
+        recovered_attempts[0].error_category.as_deref(),
+        Some("lease_expired")
+    );
+    assert_eq!(recovered_attempts[1].completed_at_ms, None);
+    assert_eq!(recovered_attempts[1].result, None);
     assert!(matches!(
         repo.complete_delivery_attempt(completion(
             &crashed[0],

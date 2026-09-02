@@ -14,6 +14,7 @@ from the per-bot content ``version``).
 from .artifact import (  # noqa: F401  (relative intra-kernel import — no cross-layer dep)
     SCHEMA_VERSION,
     BotConfigArtifact,
+    CliToolRef,
     FileRef,
     McpManifest,
     McpServerRef,
@@ -26,6 +27,7 @@ from .artifact import (  # noqa: F401  (relative intra-kernel import — no cros
 __all__ = [
     "SCHEMA_VERSION",
     "BotConfigArtifact",
+    "CliToolRef",
     "FileRef",
     "McpManifest",
     "McpServerRef",

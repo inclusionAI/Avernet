@@ -151,6 +151,7 @@ pub async fn post_invocation(
                         definition: None,
                         definition_ref: None,
                         participant_bindings: None,
+                        opening_message_override: None,
                         input: outcome.session.input.clone().unwrap_or(Value::Null),
                         caller_id: outcome.session.caller_id.clone(),
                         authenticated_human: None,

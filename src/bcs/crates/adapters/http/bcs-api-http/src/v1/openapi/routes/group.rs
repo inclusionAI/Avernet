@@ -118,6 +118,8 @@ async fn create_group(
             message,
             CreateGroupResponse {
                 group: result.group,
+                initial_session_id: result.initial_session_id,
+                initial_run: result.initial_run,
                 event_subscriptions: result.event_subscriptions,
             },
             request_id.0,
@@ -130,6 +132,10 @@ async fn create_group(
 struct CreateGroupResponse {
     #[serde(flatten)]
     group: GroupDetail,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    initial_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    initial_run: Option<bcs_service_api::InitialGroupRun>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     event_subscriptions: Vec<EventSubscription>,
 }

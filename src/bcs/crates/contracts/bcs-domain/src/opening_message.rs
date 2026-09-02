@@ -7,6 +7,8 @@ use serde_json::Value;
 
 pub const MAX_OPENING_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_OPENING_MESSAGE_COMPONENT_BYTES: usize = 256;
+/// Maximum encoded JSON size that fits in the MySQL `TEXT` persistence column.
+pub const MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES: usize = 65_535;
 
 const GROUP_ID_TOKEN: &str = "{{bcs.group_id}}";
 const SESSION_ID_TOKEN: &str = "{{bcs.session_id}}";
@@ -73,13 +75,55 @@ where
     BTreeMap::<String, Value>::deserialize(deserializer).map(Some)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpeningMessageScope {
+    Session,
+    StateMachineRun,
+}
+
 #[derive(Debug, Clone, Copy)]
-pub struct OpeningMessageRenderContext<'a> {
-    pub group_id: &'a str,
-    pub session_id: &'a str,
-    pub run_id: &'a str,
-    pub group_name: Option<&'a str>,
-    pub session_name: Option<&'a str>,
+pub enum OpeningMessageRenderContext<'a> {
+    Session {
+        group_id: &'a str,
+        session_id: &'a str,
+        group_name: Option<&'a str>,
+        session_name: Option<&'a str>,
+    },
+    StateMachineRun {
+        group_id: &'a str,
+        session_id: &'a str,
+        run_id: &'a str,
+        group_name: Option<&'a str>,
+        session_name: Option<&'a str>,
+    },
+}
+
+impl<'a> OpeningMessageRenderContext<'a> {
+    fn scope(self) -> OpeningMessageScope {
+        match self {
+            Self::Session { .. } => OpeningMessageScope::Session,
+            Self::StateMachineRun { .. } => OpeningMessageScope::StateMachineRun,
+        }
+    }
+
+    fn value(self, token: &str) -> &'a str {
+        match (token, self) {
+            (GROUP_ID_TOKEN, Self::Session { group_id, .. })
+            | (GROUP_ID_TOKEN, Self::StateMachineRun { group_id, .. }) => group_id,
+            (SESSION_ID_TOKEN, Self::Session { session_id, .. })
+            | (SESSION_ID_TOKEN, Self::StateMachineRun { session_id, .. }) => session_id,
+            (RUN_ID_TOKEN, Self::StateMachineRun { run_id, .. }) => run_id,
+            (GROUP_NAME_TOKEN, Self::Session { group_name, .. })
+            | (GROUP_NAME_TOKEN, Self::StateMachineRun { group_name, .. }) => {
+                group_name.unwrap_or_default()
+            }
+            (SESSION_NAME_TOKEN, Self::Session { session_name, .. })
+            | (SESSION_NAME_TOKEN, Self::StateMachineRun { session_name, .. }) => {
+                session_name.unwrap_or_default()
+            }
+            _ => unreachable!("validated template variable for render scope"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,17 +148,23 @@ pub enum OpeningMessageError {
     CardWithTab,
     #[error("opening_message could not be serialized: {0}")]
     Serialization(String),
+    #[error("opening_message JSON encoding exceeds the {MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES}-byte persistence limit")]
+    PersistedEncodingTooLarge,
 }
 
 impl OpeningMessage {
     pub fn validate(&self) -> Result<(), OpeningMessageError> {
+        self.validate_for(OpeningMessageScope::StateMachineRun)
+    }
+
+    pub fn validate_for(&self, scope: OpeningMessageScope) -> Result<(), OpeningMessageError> {
         match self {
             Self::Text(template) => {
                 if template.trim().is_empty() {
                     return Err(OpeningMessageError::Empty);
                 }
                 ensure_size(template)?;
-                validate_template(template)
+                validate_template(template, scope)
             }
             Self::AixUi(message) => {
                 validate_component(&message.component)?;
@@ -123,26 +173,32 @@ impl OpeningMessage {
                 }
                 if let Some(params) = &message.params {
                     for value in params.values() {
-                        validate_value_templates(value)?;
+                        validate_value_templates(value, scope)?;
                     }
                 }
                 if let Some(tab) = &message.tab {
                     for template in [tab.id.as_deref(), tab.title.as_deref()].into_iter().flatten() {
-                        validate_template(template)?;
+                        validate_template(template, scope)?;
                     }
                 }
                 let canonical = serde_json::to_string(message)
                     .map_err(|error| OpeningMessageError::Serialization(error.to_string()))?;
                 ensure_size(&canonical)
             }
+        }?;
+        let persisted = serde_json::to_string(self)
+            .map_err(|error| OpeningMessageError::Serialization(error.to_string()))?;
+        if persisted.len() > MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES {
+            return Err(OpeningMessageError::PersistedEncodingTooLarge);
         }
+        Ok(())
     }
 
     pub fn render(
         &self,
         context: OpeningMessageRenderContext<'_>,
     ) -> Result<RenderedOpeningMessage, OpeningMessageError> {
-        self.validate()?;
+        self.validate_for(context.scope())?;
         let rendered = match self {
             Self::Text(template) => RenderedOpeningMessage {
                 content: render_template(template, context),
@@ -201,16 +257,26 @@ fn validate_component(component: &str) -> Result<(), OpeningMessageError> {
     Ok(())
 }
 
-fn validate_value_templates(value: &Value) -> Result<(), OpeningMessageError> {
+fn validate_value_templates(
+    value: &Value,
+    scope: OpeningMessageScope,
+) -> Result<(), OpeningMessageError> {
     match value {
-        Value::String(template) => validate_template(template),
-        Value::Array(values) => values.iter().try_for_each(validate_value_templates),
-        Value::Object(values) => values.values().try_for_each(validate_value_templates),
+        Value::String(template) => validate_template(template, scope),
+        Value::Array(values) => values
+            .iter()
+            .try_for_each(|value| validate_value_templates(value, scope)),
+        Value::Object(values) => values
+            .values()
+            .try_for_each(|value| validate_value_templates(value, scope)),
         Value::Null | Value::Bool(_) | Value::Number(_) => Ok(()),
     }
 }
 
-fn validate_template(template: &str) -> Result<(), OpeningMessageError> {
+fn validate_template(
+    template: &str,
+    scope: OpeningMessageScope,
+) -> Result<(), OpeningMessageError> {
     let mut remainder = template;
     while let Some(start) = remainder.find("{{") {
         remainder = &remainder[start..];
@@ -218,10 +284,11 @@ fn validate_template(template: &str) -> Result<(), OpeningMessageError> {
             return Err(OpeningMessageError::UnterminatedTemplateVariable);
         };
         let token = &remainder[..end + 2];
-        if !matches!(
+        let supported = matches!(
             token,
-            GROUP_ID_TOKEN | SESSION_ID_TOKEN | RUN_ID_TOKEN | GROUP_NAME_TOKEN | SESSION_NAME_TOKEN
-        ) {
+            GROUP_ID_TOKEN | SESSION_ID_TOKEN | GROUP_NAME_TOKEN | SESSION_NAME_TOKEN
+        ) || (scope == OpeningMessageScope::StateMachineRun && token == RUN_ID_TOKEN);
+        if !supported {
             return Err(OpeningMessageError::UnsupportedTemplateVariable(
                 token.to_string(),
             ));
@@ -241,14 +308,7 @@ fn render_template(template: &str, context: OpeningMessageRenderContext<'_>) -> 
             .find("}}")
             .expect("validated template must have a closing delimiter");
         let token = &token_start[..end + 2];
-        result.push_str(match token {
-            GROUP_ID_TOKEN => context.group_id,
-            SESSION_ID_TOKEN => context.session_id,
-            RUN_ID_TOKEN => context.run_id,
-            GROUP_NAME_TOKEN => context.group_name.unwrap_or_default(),
-            SESSION_NAME_TOKEN => context.session_name.unwrap_or_default(),
-            _ => unreachable!("validated template variable"),
-        });
+        result.push_str(context.value(token));
         remainder = &token_start[end + 2..];
     }
     result.push_str(remainder);
@@ -304,7 +364,7 @@ mod tests {
     use super::*;
 
     fn context<'a>() -> OpeningMessageRenderContext<'a> {
-        OpeningMessageRenderContext {
+        OpeningMessageRenderContext::StateMachineRun {
             group_id: "bcs_grp_1",
             session_id: "session_1",
             run_id: "run_1",
@@ -323,8 +383,13 @@ mod tests {
 
     #[test]
     fn template_substitution_is_single_pass() {
-        let mut context = context();
-        context.group_name = Some("{{bcs.run_id}}");
+        let context = OpeningMessageRenderContext::StateMachineRun {
+            group_id: "bcs_grp_1",
+            session_id: "session_1",
+            run_id: "run_1",
+            group_name: Some("{{bcs.run_id}}"),
+            session_name: Some("第一轮"),
+        };
         let message = OpeningMessage::Text("{{bcs.group_name}}/{{bcs.run_id}}".to_string());
         assert_eq!(
             message.render(context).expect("render").content,
@@ -338,9 +403,13 @@ mod tests {
             "{{bcs.group_id}}|{{bcs.session_id}}|{{bcs.run_id}}|{{bcs.group_name}}|{{bcs.session_name}}"
                 .to_string(),
         );
-        let mut context = context();
-        context.group_name = None;
-        context.session_name = None;
+        let context = OpeningMessageRenderContext::StateMachineRun {
+            group_id: "bcs_grp_1",
+            session_id: "session_1",
+            run_id: "run_1",
+            group_name: None,
+            session_name: None,
+        };
         assert_eq!(
             message.render(context).expect("render").content,
             "bcs_grp_1|session_1|run_1||"
@@ -441,8 +510,64 @@ mod tests {
         );
         let message = OpeningMessage::Text(GROUP_ID_TOKEN.to_string());
         let huge_group_id = "x".repeat(MAX_OPENING_MESSAGE_BYTES + 1);
-        let mut context = context();
-        context.group_id = &huge_group_id;
+        let context = OpeningMessageRenderContext::StateMachineRun {
+            group_id: &huge_group_id,
+            session_id: "session_1",
+            run_id: "run_1",
+            group_name: None,
+            session_name: None,
+        };
         assert_eq!(message.render(context), Err(OpeningMessageError::TooLarge));
+    }
+
+    #[test]
+    fn encoded_opening_message_must_fit_the_mysql_text_column() {
+        let largest_plain_text = OpeningMessage::Text(
+            "x".repeat(MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES - 2),
+        );
+        assert_eq!(largest_plain_text.validate(), Ok(()));
+        assert_eq!(
+            serde_json::to_string(&largest_plain_text).unwrap().len(),
+            MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES
+        );
+
+        let oversized_plain_text = OpeningMessage::Text(
+            "x".repeat(MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES - 1),
+        );
+        assert_eq!(
+            oversized_plain_text.validate(),
+            Err(OpeningMessageError::PersistedEncodingTooLarge)
+        );
+
+        let escaped_raw = "\"".repeat(MAX_OPENING_MESSAGE_PERSISTED_JSON_BYTES / 2);
+        assert!(escaped_raw.len() < MAX_OPENING_MESSAGE_BYTES);
+        let escaped_text = OpeningMessage::Text(escaped_raw);
+        assert_eq!(
+            escaped_text.validate(),
+            Err(OpeningMessageError::PersistedEncodingTooLarge)
+        );
+    }
+
+    #[test]
+    fn session_scope_renders_session_variables_and_rejects_run_id() {
+        let context = OpeningMessageRenderContext::Session {
+            group_id: "bcs_grp_1",
+            session_id: "session_1",
+            group_name: Some("自由聊天"),
+            session_name: Some("第一轮"),
+        };
+        let message = OpeningMessage::Text(
+            "{{bcs.group_name}}/{{bcs.session_name}}/{{bcs.group_id}}/{{bcs.session_id}}"
+                .to_string(),
+        );
+        assert_eq!(
+            message.render(context).expect("render").content,
+            "自由聊天/第一轮/bcs_grp_1/session_1"
+        );
+        assert!(matches!(
+            OpeningMessage::Text(RUN_ID_TOKEN.to_string())
+                .validate_for(OpeningMessageScope::Session),
+            Err(OpeningMessageError::UnsupportedTemplateVariable(token)) if token == RUN_ID_TOKEN
+        ));
     }
 }

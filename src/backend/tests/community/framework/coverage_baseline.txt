@@ -420,6 +420,4 @@ PUT /openapi/v1/bots/{bot_id}/engine-config: missing [happy, error]
 # unavailable to the local endpoint harness.
 GET /api/v1/collaboration/tasks/settings: missing [happy, error]
 POST /api/v1/collaboration/tasks/nodes/update: missing [happy, error]
-POST /api/v1/collaboration/tasks/run-template: missing [happy, error]
 POST /api/v1/collaboration/tasks/settings: missing [happy, error]
-POST /openapi/v1/collaboration/tasks/run-template: missing [happy, error]

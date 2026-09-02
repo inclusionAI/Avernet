@@ -127,7 +127,10 @@ GroupsPath:
         description: >-
           Created group detail. When event_subscriptions were supplied, the
           response includes their redacted active summaries. Their scope is
-          fixed by the server to the newly created Group.
+          fixed by the server to the newly created Group. When creation starts
+          an initial responder run, initial_session_id identifies its Session
+          and initial_run exposes the Driver run for a chat group or the Manager
+          run for a manager-worker group, including its current dispatch state.
         content:
           application/json:
             schema:
@@ -589,6 +592,9 @@ CreateCollaborationGroup:
     context:
       type: string
     opening_message:
+      description: >-
+        Optional opening-message template. Chat and Manager-Worker render it
+        once when a new Session is created; StateMachine renders it per Run.
       oneOf:
         - $ref: ../domain-models.yaml#/OpeningMessage
         - type: "null"
@@ -606,10 +612,12 @@ CreateCollaborationGroup:
         Optional caller-designated originator. When omitted, the selected
         HumanOrOwnedBot Principal becomes the originator. A Human Principal
         may instead select a registered Bot it owns (`created_by` matches the
-        caller). A Bot Principal may select only itself. When a Human selects
-        an owned Bot distinct from the driver, the driver must be reachable
-        from that originator (public visibility, or a friend of it). The `dm`
-        group kind does not carry an originator.
+        caller). A Bot Principal may select only itself. Every Bot participant
+        — including the driver when it differs from the originator — is
+        anchored on the originator: a public bot is always reachable; a
+        protected bot is reachable only if the originator is a Human that owns
+        it (`created_by` matches the caller) or a Bot that is friends with it.
+        The `dm` group kind does not carry an originator.
     event_subscriptions:
       type: array
       maxItems: 32
@@ -648,6 +656,9 @@ UpdateGroup:
     context:
       type: string
     opening_message:
+      description: >-
+        Replaces or clears the Group opening-message template. The selected
+        collaboration strategy determines the supported variables.
       oneOf:
         - $ref: ../domain-models.yaml#/OpeningMessage
         - type: "null"

@@ -6,16 +6,48 @@ use bcs_service_api::application::session::{
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
+use bcs_domain::{
+    MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, OpeningMessage, PersistedMessage,
+    SESSION_OPENING_MESSAGE_TYPE,
+};
+use bcs_service_api::port::repo::{
+    GroupRepoPort, MessageRepoError, MessageRepoPort, NewSessionParams, SessionRepoPort,
+};
 use bcs_service_api::{
     BotDeliveryTarget, BotRuntimeConnectCommand, BotRuntimeConnectOutcome,
     BotRuntimeConnectionService, BotRuntimeDisconnectCommand, BotRuntimeStatusCommand,
-    BotRuntimeStatusOutcome, BotUseCaseError, Group, GroupStrategy, Participant, ParticipantRole,
-    ParticipantMode, ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
+    BotRuntimeStatusOutcome, BotUseCaseError, FrontendDeliveryCommand, FrontendDeliveryPort,
+    FrontendDeliveryResult, Group, GroupStrategy, Participant, ParticipantMode, ParticipantRole,
+    ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
 };
 use bcs_group_store::MemoryGroupRepo;
+use bcs_message_store::MemoryMessageRepo;
 use bcs_session::{NoopSessionManagementService, SessionManagementServiceImpl};
 use bcs_session_store::MemorySessionRepo;
+use tokio::sync::Mutex;
+
+#[derive(Default)]
+struct RecordingFrontendDelivery {
+    commands: Mutex<Vec<FrontendDeliveryCommand>>,
+}
+
+#[async_trait]
+impl FrontendDeliveryPort for RecordingFrontendDelivery {
+    async fn publish(
+        &self,
+        command: FrontendDeliveryCommand,
+    ) -> ServiceResult<FrontendDeliveryResult> {
+        self.commands.lock().await.push(command.clone());
+        Ok(FrontendDeliveryResult {
+            target: command.target,
+            delivered: 1,
+        })
+    }
+
+    async fn unregister_run(&self, _run_id: &str) -> ServiceResult<()> {
+        Ok(())
+    }
+}
 
 fn participants() -> Vec<Participant> {
     vec![Participant::bot("bot1", ParticipantRole::Driver)]
@@ -29,6 +61,39 @@ fn manager_worker_participants(worker_id: &str) -> Vec<Participant> {
 }
 
 struct FailingMembershipSessionRepo;
+
+struct FailingMessageRepo;
+
+#[async_trait]
+impl MessageRepoPort for FailingMessageRepo {
+    async fn append_message(
+        &self,
+        _message: NewMessage,
+    ) -> Result<PersistedMessage, MessageRepoError> {
+        Err(MessageRepoError::StorageError(
+            "opening message write failed".to_string(),
+        ))
+    }
+
+    async fn query_messages(
+        &self,
+        _query: MessageQuery,
+    ) -> Result<MessagePage, MessageRepoError> {
+        unimplemented!("not used by persistence failure test")
+    }
+
+    async fn get_message_by_id(
+        &self,
+        _session_id: &str,
+        _message_id: &str,
+    ) -> Result<Option<PersistedMessage>, MessageRepoError> {
+        unimplemented!("not used by persistence failure test")
+    }
+
+    async fn get_current_seq(&self, _session_id: &str) -> Result<i64, MessageRepoError> {
+        unimplemented!("not used by persistence failure test")
+    }
+}
 
 #[async_trait]
 impl SessionRepoPort for FailingMembershipSessionRepo {
@@ -180,6 +245,183 @@ async fn impl_creates_chat_session() {
         .expect("create chat ok");
     assert!(outcome.created);
     assert_eq!(outcome.session.status, SessionStatus::Running);
+}
+
+#[tokio::test]
+async fn impl_persists_and_publishes_chat_opening_message_once() {
+    let repo = Arc::new(MemorySessionRepo::new());
+    let group_repo = Arc::new(MemoryGroupRepo::new());
+    let message_repo = Arc::new(MemoryMessageRepo::new());
+    let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
+    let mut group = Group::new("g1", "bot1", participants());
+    group.label = Some("研发群".to_string());
+    group.opening_message = Some(OpeningMessage::Text(
+        "欢迎来到 {{bcs.group_name}} / {{bcs.session_name}} / {{bcs.session_id}}".to_string(),
+    ));
+    group_repo.upsert(group).await.expect("seed group");
+    let svc = SessionManagementServiceImpl::new(repo, group_repo)
+        .with_opening_message_delivery(message_repo.clone(), frontend_delivery.clone());
+
+    let outcome = svc
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: "g1".to_string(),
+            session_id: None,
+            params: NewSessionParams {
+                session_title: Some("第一轮".to_string()),
+                session_kind: SessionKind::ServiceInvocation,
+                participants: participants(),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("create chat with opening message");
+    let session_id = outcome.session.id.clone();
+    let page = message_repo
+        .query_messages(MessageQuery {
+            group_id: "g1".to_string(),
+            session_id: session_id.clone(),
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: None,
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: None,
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query opening message");
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(
+        page.messages[0].message_type,
+        SESSION_OPENING_MESSAGE_TYPE
+    );
+    assert_eq!(
+        page.messages[0].content["text"],
+        format!("欢迎来到 研发群 / 第一轮 / {session_id}")
+    );
+    assert_eq!(frontend_delivery.commands.lock().await.len(), 1);
+
+    svc.complete_if_running(&session_id, None, None)
+        .await
+        .expect("complete session");
+    svc.update_callback_status(&session_id, "success")
+        .await
+        .expect("complete callback");
+    svc.create_or_reactivate(CreateOrReactivateCommand {
+        group_id: "g1".to_string(),
+        session_id: Some(session_id.clone()),
+        params: NewSessionParams::default(),
+    })
+    .await
+    .expect("reactivate session");
+    let page = message_repo
+        .query_messages(MessageQuery {
+            group_id: "g1".to_string(),
+            session_id,
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: None,
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: None,
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query after reactivation");
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(frontend_delivery.commands.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn impl_persists_manager_worker_opening_message() {
+    let repo = Arc::new(MemorySessionRepo::new());
+    let group_repo = Arc::new(MemoryGroupRepo::new());
+    let message_repo = Arc::new(MemoryMessageRepo::new());
+    let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
+    let participants = manager_worker_participants("worker");
+    let mut group = Group::new("mw", "manager", participants.clone());
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    group.opening_message = Some(OpeningMessage::Text(
+        "任务会话 {{bcs.session_id}}".to_string(),
+    ));
+    group_repo.upsert(group).await.expect("seed group");
+    let svc = SessionManagementServiceImpl::new(repo, group_repo)
+        .with_opening_message_delivery(message_repo.clone(), frontend_delivery.clone());
+
+    let outcome = svc
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: "mw".to_string(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("create Manager-Worker session");
+    let page = message_repo
+        .query_messages(MessageQuery {
+            group_id: "mw".to_string(),
+            session_id: outcome.session.id.clone(),
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: None,
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: None,
+            visible_from_seq: None,
+        })
+        .await
+        .expect("query opening message");
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(
+        page.messages[0].content["text"],
+        format!("任务会话 {}", outcome.session.id)
+    );
+    assert_eq!(
+        page.messages[0].content["metadata"]["opening_message"]["strategy"],
+        "manager_worker"
+    );
+    assert_eq!(frontend_delivery.commands.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn impl_fails_and_completes_new_session_when_opening_message_persistence_fails() {
+    let repo = Arc::new(MemorySessionRepo::new());
+    let group_repo = Arc::new(MemoryGroupRepo::new());
+    let mut group = Group::new("g1", "bot1", participants());
+    group.opening_message = Some(OpeningMessage::Text("欢迎".to_string()));
+    group_repo.upsert(group).await.expect("seed group");
+    let svc = SessionManagementServiceImpl::new(repo.clone(), group_repo)
+        .with_opening_message_delivery(
+            Arc::new(FailingMessageRepo),
+            Arc::new(RecordingFrontendDelivery::default()),
+        );
+
+    let error = svc
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: "g1".to_string(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: participants(),
+                ..Default::default()
+            },
+        })
+        .await
+        .expect_err("opening-message persistence must fail session creation");
+    assert!(error.to_string().contains("opening message write failed"));
+    let sessions = repo.list_by_group("g1", None, 0, 10, None, None).await;
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].status, SessionStatus::Completed);
+    assert_eq!(
+        sessions[0].error_message.as_deref(),
+        Some("opening_message_persistence_failed")
+    );
 }
 
 #[tokio::test]

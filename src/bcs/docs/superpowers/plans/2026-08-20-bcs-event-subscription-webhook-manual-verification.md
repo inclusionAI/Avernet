@@ -665,8 +665,9 @@ failpoint 后同一请求正常成功。不得在共享数据库执行。
 
 分别在 pending、retry_wait，以及 Receiver 已收请求但尚未响应时终止 BCS，再用同一数据库和 env 启动。
 
-预期：lease 到期后未完成 Delivery 恢复，不永久丢失或卡死；最后一种场景允许重复 Attempt，Receiver 通过 event_id
-去重。已 succeeded 的 Delivery 不应因普通重启重新投递。
+预期：领取后立即存在 `completed_at/result` 为空的 Attempt；lease 到期后未完成 Delivery 恢复，不永久丢失或卡死，
+上一条 Attempt 被补记为 `retryable`、`error_category=lease_expired`，错误摘要说明远端结果未知，并创建新的执行中
+Attempt。最后一种场景允许重复请求，Receiver 通过 event_id 去重。已 succeeded 的 Delivery 不应因普通重启重新投递。
 
 ### MV-32 多实例 claim、lease heartbeat 和并发限制（P1，MySQL）
 

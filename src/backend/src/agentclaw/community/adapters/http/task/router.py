@@ -1,13 +1,12 @@
 """Task 内部 HTTP adapter routes —— 不经 gateway spanner(内部 API)。
 
 任务模块内部前缀 ``/api/v1/collaboration/tasks``。本 router 承载:
-- 公开面镜像(run-template/execute/dashboard/list 副本):供内部调用方(bot / 服务间)免 gateway spanner 直调;
+- 公开面镜像(execute/dashboard/list 副本):供内部调用方(bot / 服务间)免 gateway spanner 直调;
   与 ``adapters/http/openapi_v1/task/`` 公开面同一 ``TaskServiceProtocol`` 委托,逻辑保持一致(改其一须同步)。
 - 回投 / BBS 接力 / 任务发现阶段:前端不直面的内部写口/阶段接口。
 前端公开面(经 gateway spanner)见 ``adapters/http/openapi_v1/task/``。本 router 只转协议,不持领域策略(Rule 22)。
 
 端点(同一任务模块,不同阶段):
-  POST /api/v1/collaboration/tasks/run-template     — 运行预置静态模板(delegate TaskServiceProtocol.run_template)
   POST /api/v1/collaboration/tasks/execute          — 提交任务(公开面镜像;delegate TaskServiceProtocol.execute)
   GET  /api/v1/collaboration/tasks/dashboard         — 查任务图(公开面镜像;delegate get_task_dashboard)
   GET  /api/v1/collaboration/tasks/list              — 列持久化任务记录(公开面镜像;delegate list_tasks)
@@ -31,6 +30,7 @@ task_loop inbound PUSH callback(前缀 ``/api/v1/collaboration/tasks/callback``)
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -52,7 +52,6 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskInfoRecordDTO,
     TaskInfoRequestDTO,
     TaskNodeUpdateDTO,
-    TemplateRunRequestDTO,
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
     acceptance_result_from_dto,
@@ -136,36 +135,9 @@ def _validate_status_filter(status: str | None) -> None:
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
 
 
-# ===== 公开面镜像(run-template/execute/dashboard/list;内部 /api/v1 副本,不经 spanner)=====
+# ===== 公开面镜像(execute/dashboard/list;内部 /api/v1 副本,不经 spanner)=====
 # 与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol`` 委托,
 # 逻辑保持一致 —— 内部调用方(bot / 服务间)走此副本免 gateway spanner。改其一须同步。
-
-
-@router.post("/run-template", response_model=Envelope[TaskOpResultDTO])
-@envelope_errors
-async def run_template_internal(
-    body: TemplateRunRequestDTO,
-    request: Request,
-    user: AuthenticatedUser = Depends(get_current_user),
-    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[TaskOpResultDTO]:
-    """运行预置静态模板(内部接口)。
-
-    与动态任务 ``/execute`` 同属内部 Task API；调用方只提交模板标识和模板输入，
-    模板节点、Bot 绑定及 DAG 由后端配置提供。触发者身份从 IAM cookie 解析:
-    ``owner_user_id=user.staffId``(工号)→ 持久化 task_info,面板可按 owner 过滤;
-    ``owner_account_id=user.operatorName``(账号)→ 存入 execution_config,
-    供 engine notify 终端节点取 DingTalk account_id 发钉钉(免硬编码兜底)。
-    """
-    result = await service.run_template(
-        body.template_id,
-        body.input,
-        owner_user_id=user.staffId,
-        owner_bot_id=body.caller_bot_id,
-        auto_advance=body.auto_advance,
-        owner_account_id=user.operatorName,
-    )
-    return envelope(op_result_to_dto(result), request)
 
 
 @router.post("/execute", response_model=Envelope[TaskOpResultDTO])
@@ -847,10 +819,11 @@ async def set_dingtalk_config(
     injected = ["dingtalk credentials"]
 
     if frontend_url:
-        logger.info(
-            "[task_discovery] frontend_url provided via API (no-op, use DI FrontendUrlProvider instead): %s",
-            frontend_url,
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
         )
+
+        FrontendUrlHolder.set(frontend_url)
 
     logger.info(
         "[task_discovery] injected via API: %s (robot=%s, template=%s)",
@@ -908,6 +881,29 @@ async def _dispatch(
     registry: CallbackCorrelationRegistry,
     enricher: CallbackDataEnricher,
 ) -> Envelope[dict[str, Any]]:
+    """回调数据处理总入口(计时包装):实际分流/落库委派 ``_dispatch_impl``;全程计时到毫秒,
+    ``finally`` 打 ``elapsed_ms``(覆盖正常 + 异常路径,便于定位慢回投)。"""
+    _t0 = time.perf_counter()
+    try:
+        return await _dispatch_impl(
+            request, disposition, schema_cls, svc, auth, registry, enricher,
+        )
+    finally:
+        logger.info(
+            "[task_callback] _dispatch 总耗时 elapsed_ms=%.0f disposition=%s",
+            (time.perf_counter() - _t0) * 1000, disposition,
+        )
+
+
+async def _dispatch_impl(
+    request: Request,
+    disposition: str,
+    schema_cls: type[TaskCallbackRequest],
+    svc: TaskServiceProtocol,
+    auth: CallbackAuthenticator,
+    registry: CallbackCorrelationRegistry,
+    enricher: CallbackDataEnricher,
+) -> Envelope[dict[str, Any]]:
     raw = await request.body()
     # 回调 body 按调用者分流:ClawMind(HttpCallbackPayload 四字段)/ BCN(CloudEvent 信封)/ 羽雀(默认 schema)。
     try:
@@ -930,9 +926,19 @@ async def _dispatch(
             method=request.method,
             path=request.url.path,
         )
-        _tc = translate_claw_mind(_raw_obj, disposition)
-        enricher.enrich_claw_mind(_tc.data, _raw_obj)
-        await svc.callback.ingest(_tc.data)
+        # 解析(translate+构图)+落库任一步出错(如内嵌 JSON 非法)→ 打 error 日志,兜底落错误记录
+        # (exec_error=错误信息、extend_props=原始 body;经 ingest_parse_error→upsert_error 仅改这两列,
+        # 其它已有字段不动),再 ack 返回——不跳过落库,也不全量覆盖污染已有 task_callback。
+        try:
+            _tc = translate_claw_mind(_raw_obj, disposition)
+            enricher.enrich_claw_mind(_tc.data, _raw_obj)
+            await svc.callback.ingest(_tc.data)
+        except Exception as exc:  # noqa: BLE001 解析失败不阻断回投应答;兜底落错误记录而非全量覆盖
+            logger.error(
+                "[task_callback] claw_mind 回调解析失败,兜底落错误记录 session_id=%s: %s",
+                _sid, exc, exc_info=True,
+            )
+            await svc.callback.ingest_parse_error(_raw_obj, str(exc))
         return envelope({"ok": True}, request)
     if is_bcn_event_payload(_raw_obj):
         logger.info("[task_callback] bcn event received session_id=%s", _sid)

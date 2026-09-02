@@ -156,7 +156,8 @@ user_config:
   #
   # Neutral default = localhost only, so a single-box UI works out of the box.
   # A deployment adds its own frontend origins in its `application-<env>.yaml`
-  # overlay (selected by `SERVER_ENV`), e.g.:
+  # overlay (selected by `COMMUNITY_DEPLOY` when set, otherwise `SERVER_ENV`),
+  # e.g.:
   #
   #   user_config:
   #     cors:

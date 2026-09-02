@@ -205,6 +205,26 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"):
         ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.authorized_apps.router"),
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
+    # Config manifest. Read at MEMBER, write at ADMIN — the same split the
+    # channels rows above make, and for the same reason: reading how a bot is
+    # configured is part of working on it, while replacing that configuration
+    # decides what the bot is. There is no reason a collaborator who may read a
+    # bot's channels may not read its manifest, which is why these are not
+    # OWNER_SCOPED like the startup script beside them.
+    #
+    # No EDIT_LOCK. The lock asks who holds the Bot's *draft*, and a manifest is
+    # not drafted — one `PUT` replaces the whole document, and the row it lands
+    # on is guarded by its own uniqueness key rather than by a lease.
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest"): Check(PermissionLevel.MEMBER),
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest/capabilities",
+    ): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/config-manifest"): Check(PermissionLevel.ADMIN),
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/config-manifest",
+    ): Check(PermissionLevel.ADMIN),
     ("GET", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
@@ -559,8 +579,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # ── the gateway spanner + `_PUBLIC_AUTH`; `list` uses caller-selected
     # ── user_id only as a task-record filter. `NoCheck` is the settled mode here, not a
     # ── placeholder — see `admission.py` for the machine-caller decision.
-    ("POST", "/openapi/v1/collaboration/tasks/run-template"):
-        NoCheck("a task template, not a bot; the submitter is the task owner"),
     ("POST", "/openapi/v1/collaboration/tasks/execute"):
         NoCheck("a task, not a bot; the submitter is the task owner"),
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping, Sequence
 
 from injector import inject
@@ -43,7 +44,9 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import McpScopeItem, PassportPlugin
-from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import BotRuntimeProjectorProtocol
+from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import (
+    BotRuntimeProjectorProtocol,
+)
 
 
 logger = get_logger()
@@ -103,19 +106,17 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             raise LocalSkillNotFoundError()
         engine = str(bot.get("active_engine") or "openclaw")
         skill_assets = list(
-            self._reader.active_skill_assets(
-                bot_id=bot_id, owner_id=owner_id, bot=bot
-            )
+            self._reader.active_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
         )
         # The engine refuses what its runtime has no contract for. Asked here
         # rather than tested here, so a caller of this module never has to
         # know which engines those are.
-        self._registry.for_engine(engine).validate_plan(
-            skill_assets=skill_assets
+        self._registry.for_engine(engine).validate_plan(skill_assets=skill_assets)
+        return (
+            RuntimeProjectionResolver()
+            .resolve_skills(tuple(skill_assets))
+            .skill_mappings
         )
-        return RuntimeProjectionResolver().resolve_skills(
-            tuple(skill_assets)
-        ).skill_mappings
 
     async def project(
         self,
@@ -169,7 +170,8 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             logger.info(
                 "[BotRuntimeProjector] Passport update skipped, scope declares "
                 "no MCP change: bot_id=%s, engine=%s",
-                plan.bot_id, plan.engine,
+                plan.bot_id,
+                plan.engine,
             )
         return result
 
@@ -228,11 +230,30 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
-        skill_plan = self._build_skill_plan(
-            bot=bot,
+        skill_plan_started_at = time.perf_counter()
+        try:
+            skill_plan = self._build_skill_plan(
+                bot=bot,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                retired_mappings=retired_mappings,
+            )
+        except Exception:
+            self._log_plan_timing(
+                stage="build_skill_plan",
+                bot_id=bot_id,
+                engine=str(bot.get("active_engine") or "openclaw"),
+                started_at=skill_plan_started_at,
+                outcome="error",
+            )
+            raise
+        self._log_plan_timing(
+            stage="build_skill_plan",
             bot_id=bot_id,
-            owner_id=owner_id,
-            retired_mappings=retired_mappings,
+            engine=skill_plan.engine,
+            started_at=skill_plan_started_at,
+            outcome="success",
+            skill_count=len(skill_plan.projection.skill_assets),
         )
         if not scope.mcp:
             logger.info(
@@ -242,7 +263,54 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 skill_plan.engine,
             )
             return skill_plan
-        return self._build_capability_plan(skill_plan)
+        capability_plan_started_at = time.perf_counter()
+        try:
+            capability_plan = self._build_capability_plan(skill_plan)
+        except Exception:
+            self._log_plan_timing(
+                stage="build_mcp_plan",
+                bot_id=bot_id,
+                engine=skill_plan.engine,
+                started_at=capability_plan_started_at,
+                outcome="error",
+            )
+            raise
+        self._log_plan_timing(
+            stage="build_mcp_plan",
+            bot_id=bot_id,
+            engine=skill_plan.engine,
+            started_at=capability_plan_started_at,
+            outcome="success",
+            mcp_count=len(capability_plan.projection.mcp_server_codes),
+            cli_count=len(capability_plan.effective_cli_items),
+        )
+        return capability_plan
+
+    @staticmethod
+    def _log_plan_timing(
+        *,
+        stage: str,
+        bot_id: str,
+        engine: str,
+        started_at: float,
+        outcome: str,
+        skill_count: int | None = None,
+        mcp_count: int | None = None,
+        cli_count: int | None = None,
+    ) -> None:
+        logger.info(
+            "[BotRuntimeProjector] timing stage=%s bot_id=%s engine=%s "
+            "duration_ms=%.3f outcome=%s skill_count=%s mcp_count=%s "
+            "cli_count=%s",
+            stage,
+            bot_id,
+            engine,
+            (time.perf_counter() - started_at) * 1000,
+            outcome,
+            skill_count,
+            mcp_count,
+            cli_count,
+        )
 
     def _resolve_mcp_identity_modes(
         self, *, bot: dict, bot_id: str, engine: str
@@ -288,9 +356,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         # over Installation that agrees with Set configuration — the lazy
         # flush every read runs, not a projector-only repair.
         skill_assets = tuple(
-            self._reader.active_skill_assets(
-                bot_id=bot_id, owner_id=owner_id, bot=bot
-            )
+            self._reader.active_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
         )
         # Reject before querying or writing any external MCP, Passport, or
         # runtime boundary. What an engine's runtime cannot carry is the
@@ -343,9 +409,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         )
         try:
             # Passport is the authority for the effective Default CLI scope.
-            effective_cli_items = self._passport.query_passport_clis(
-                bot_id, owner_id
-            )
+            effective_cli_items = self._passport.query_passport_clis(bot_id, owner_id)
         except Exception as exc:
             raise SkillSetRuntimeReconcileError() from exc
         projection = RuntimeProjectionResolver().resolve(
@@ -400,9 +464,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         so a stale row for an MCP this Bot no longer holds cannot re-grant it.
         """
         items = passport_mcp_items_from_codes(codes, identity_modes=identity_modes)
-        caller_count = sum(
-            1 for item in items if item.get("identity_mode") == "caller"
-        )
+        caller_count = sum(1 for item in items if item.get("identity_mode") == "caller")
         logger.info(
             "[BotRuntimeProjector] Passport MCP scope resolved: bot_id=%s, "
             "engine=%s, mcps=%s, caller=%s, owner=%s",
@@ -437,9 +499,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         ``identity_mode: "owner"`` for every MCP.
         """
         try:
-            passport_codes = filter_passport_mcp_codes(
-                plan.projection.mcp_server_codes
-            )
+            passport_codes = filter_passport_mcp_codes(plan.projection.mcp_server_codes)
             # Mandatory, not an optimisation — see ``_passport_mcp_items``.
             mcp_items = self._passport_mcp_items(
                 identity_modes=plan.identity_modes,
@@ -463,8 +523,6 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             )
         except Exception as exc:
             raise SkillSetRuntimeReconcileError() from exc
-
-
 
 
 __all__ = [

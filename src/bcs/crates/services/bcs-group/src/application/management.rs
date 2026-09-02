@@ -8,7 +8,7 @@ use crate::core::validate_service_spec_patch;
 use crate::noop::{
     EmptyRelationCoreService, EmptySessionManagementService, NoopSystemMessageService,
 };
-use bcs_service_api::types::{EventActor, EventActorType};
+use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
     CallbackChannelConfig, CanResolveInteraction, CanResolveInteractionCommand,
@@ -16,6 +16,7 @@ use bcs_service_api::{
     DmCreateResult, FriendCoreService, Group as DomainGroup, GroupAddMemberCommand,
     GroupAddMemberResult, GroupCoreService, GroupCreateCommand, GroupDeleteCommand,
     GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind, GroupListCommand,
+    InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState,
     GroupListEntry, GroupListResult, GroupManagementService, GroupMutableFieldsPatch,
     GroupParticipantModeCommand, GroupParticipantModeResult, GroupParticipantView,
     GroupPatchSettingsCommand, GroupPatchSettingsConflict, GroupPatchSettingsResult,
@@ -26,7 +27,7 @@ use bcs_service_api::{
     GroupWorkspaceResult, NoopChannelBindingCleanupPort, Participant, ParticipantMode,
     ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, ServiceResult, ServiceSpec,
     ServiceSpecPatchConflictField, Session, SessionKind, SessionManagementService,
-    SystemMessageEvent, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
+    DeliveryType, SystemMessageEvent, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
     WorkbenchConnectOutcome, WorkbenchParticipantView, WorkbenchSessionService,
     WorkbenchUseCaseError, backfill_bot_names, generated_group_id, validate_sender_routes,
 };
@@ -963,11 +964,30 @@ impl GroupManagementService for GroupManagement {
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
             if bot.actor_kind == ActorKind::Bot {
                 if self.v1_openapi_create_policy {
-                    if bot_id != cmd.driver_bot_id {
-                        self.ensure_v1_reachable(&cmd.driver_bot_id, &bot).await?;
-                    }
-                    if bot_id != cmd.driver_bot_id && bot.capabilities.visibility == "public" {
-                        subscription_targets.push(bot.clone());
+                    // Originator-anchored (aligned with legacy): every Bot
+                    // participant except the originator itself — including the
+                    // driver when it differs from the originator — must be
+                    // reachable from the originator. A Human originator reaches
+                    // a bot via public visibility or ownership (`created_by`);
+                    // a Bot originator reaches it via public visibility or
+                    // friendship.
+                    if bot_id != originator {
+                        if is_human_originator {
+                            let staff_no = originator.trim_start_matches("human_");
+                            if bot.capabilities.visibility != "public"
+                                && bot.created_by.as_deref() != Some(staff_no)
+                            {
+                                return Err(GroupUseCaseError::Forbidden(format!(
+                                    "Bot '{}' is neither public nor owned by human '{}'",
+                                    bot_id, staff_no
+                                )));
+                            }
+                        } else {
+                            self.ensure_v1_reachable(&originator, &bot).await?;
+                        }
+                        if bot.capabilities.visibility == "public" {
+                            subscription_targets.push(bot.clone());
+                        }
                     }
                 } else if bot_id != originator {
                     if is_human_originator {
@@ -1006,13 +1026,11 @@ impl GroupManagementService for GroupManagement {
         }
         let requested_strategy = cmd.group_strategy.unwrap_or_default();
         if let Some(opening_message) = &cmd.opening_message {
-            if requested_strategy != GroupStrategy::StateMachine {
-                return Err(GroupUseCaseError::InvalidProposal(
-                    "invalid_opening_message: opening_message is only supported for state_machine groups"
-                        .to_string(),
-                ));
-            }
-            opening_message.validate().map_err(|error| {
+            let scope = match requested_strategy {
+                GroupStrategy::StateMachine => OpeningMessageScope::StateMachineRun,
+                GroupStrategy::Chat | GroupStrategy::ManagerWorker => OpeningMessageScope::Session,
+            };
+            opening_message.validate_for(scope).map_err(|error| {
                 GroupUseCaseError::InvalidProposal(format!("invalid_opening_message: {error}"))
             })?;
         }
@@ -1120,6 +1138,7 @@ impl GroupManagementService for GroupManagement {
         )
         .unwrap_or_default();
         let initial_session_id;
+        let mut initial_run = None;
         let context_injected = match self
             .session_management
             .create_or_reactivate(bcs_service_api::CreateOrReactivateCommand {
@@ -1152,8 +1171,8 @@ impl GroupManagementService for GroupManagement {
                     let sid = outcome.session.id.clone();
                     let gid = group.id.clone();
                     let session_participants = outcome.session.participants.clone();
-                    self.system_message
-                        .notify(
+                    match self.system_message
+                        .notify_with_outcome(
                             &gid,
                             SystemMessageEvent::SessionContext {
                                 group_id: gid.clone(),
@@ -1167,7 +1186,51 @@ impl GroupManagementService for GroupManagement {
                             &session_participants,
                         )
                         .await
-                        .unwrap_or(0) as u64
+                    {
+                        Ok(dispatch) => {
+                            let bootstrap_responder = match requested_strategy {
+                                GroupStrategy::Chat => Some(group.driver_bot.as_str()),
+                                GroupStrategy::ManagerWorker => group
+                                    .participants
+                                    .iter()
+                                    .find(|participant| {
+                                        participant.role == ParticipantRole::Manager
+                                    })
+                                    .map(|participant| participant.bot_uuid.as_str()),
+                                GroupStrategy::StateMachine => None,
+                            };
+                            if let Some(bot_uuid) = bootstrap_responder
+                                && let Some(result) = dispatch.recipient_results.iter().find(
+                                    |result| {
+                                        result.recipient_id == bot_uuid
+                                            && result.delivery_type == DeliveryType::Send
+                                    },
+                                )
+                            {
+                                initial_run = Some(InitialGroupRun {
+                                    run_id: result.run_id.clone(),
+                                    bot_uuid: bot_uuid.to_string(),
+                                    activity_kind: InitialGroupRunActivityKind::GroupBootstrap,
+                                    state: if result.delivered {
+                                        InitialGroupRunState::Running
+                                    } else {
+                                        InitialGroupRunState::Failed
+                                    },
+                                    started_at: chrono::Utc::now().to_rfc3339(),
+                                });
+                            }
+                            dispatch.successful_deliveries as u64
+                        }
+                        Err(error) => {
+                            warn!(
+                                group_id = %gid,
+                                session_id = %sid,
+                                error = %error,
+                                "failed to deliver initial group context"
+                            );
+                            0
+                        }
+                    }
                 }
             }
             Err(error) => {
@@ -1191,6 +1254,7 @@ impl GroupManagementService for GroupManagement {
 
         let mut detail = group_to_detail_with_context(group, context_injected);
         detail.latest_running_session_id = initial_session_id;
+        detail.initial_run = initial_run;
         Ok(detail)
     }
 
@@ -2281,6 +2345,7 @@ fn group_to_detail_with_context(group: DomainGroup, context_injected: u64) -> Gr
         context_injected,
         service_spec: group.service_spec.clone(),
         latest_running_session_id: None,
+        initial_run: None,
         originator: group.originator,
         visibility: group.visibility.clone(),
     }

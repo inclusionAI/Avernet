@@ -180,7 +180,9 @@ so exactly one `Access-Control-Allow-Origin` reaches the browser — the edge's.
 
 Origins are configuration, not code. Add a deployment's frontend origins to the
 `user_config.cors` block of its `application-<env>.yaml` overlay (selected by
-`SERVER_ENV`); the shipped `configs/application.yaml` allows only localhost:
+`COMMUNITY_DEPLOY` when set — e.g. `COMMUNITY_DEPLOY=community` loads
+`application-community.yaml` — otherwise by `SERVER_ENV`); the shipped
+`configs/application.yaml` allows only localhost:
 
 ```yaml
 user_config:

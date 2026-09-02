@@ -850,7 +850,9 @@ async def test_handle_chat_abort_success(service_with_abort, mock_abort_surface)
 
     assert result.aborted is True
     assert result.aborted_run_ids == ["run-a", "run-b"]
-    mock_abort_surface.abort_runs_by_session.assert_awaited_once_with("session-abort-1")
+    mock_abort_surface.abort_runs_by_session.assert_awaited_once_with(
+        "session-abort-1", "bot-1"
+    )
 
 
 @pytest.mark.asyncio
@@ -905,6 +907,42 @@ async def test_handle_chat_abort_no_run_record_returns_aborted_false(
 async def test_handle_chat_abort_no_surface_returns_aborted_false(service):
     """When no abort_surface wired, best-effort returns aborted=false (no raise)."""
     result = await service.handle_chat_abort(_make_chat_abort_input())
+
+    assert result.aborted is False
+    assert result.aborted_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_abort_passes_provider_bot_ref_as_bot_id(
+    service_with_abort, mock_abort_surface
+):
+    """abort_runs_by_session 的 bot_id 入参取自 to_bot.provider_bot_ref。"""
+    mock_abort_surface.abort_runs_by_session.return_value = AbortOutcome(
+        aborted_run_ids=["run-x"], had_terminal=False
+    )
+    alt_input = _make_chat_abort_input(
+        to_bot=BotRef(provider_id="baas", provider_bot_ref="bot-other")
+    )
+
+    result = await service_with_abort.handle_chat_abort(alt_input)
+
+    assert result.aborted is True
+    mock_abort_surface.abort_runs_by_session.assert_awaited_once_with(
+        "session-abort-1", "bot-other"
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_abort_group_chat_410_narrowed_to_target_bot(
+    service_with_abort, mock_abort_surface
+):
+    """群聊：目标 bot 在该 session 无终态记录时返回 200，不被其它 bot 的终态记录影响。"""
+    # 模拟 worker 只在 bot-A 维度判 had_terminal=False
+    mock_abort_surface.abort_runs_by_session.return_value = AbortOutcome(
+        aborted_run_ids=[], had_terminal=False
+    )
+
+    result = await service_with_abort.handle_chat_abort(_make_chat_abort_input())
 
     assert result.aborted is False
     assert result.aborted_run_ids == []

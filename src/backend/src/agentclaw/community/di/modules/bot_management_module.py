@@ -17,7 +17,7 @@ they pick up the swapped repositories transparently.
 
 from __future__ import annotations
 
-from typing import Annotated, Callable, cast
+from typing import Annotated, Callable
 
 from injector import (
     Binder,
@@ -55,6 +55,7 @@ from agentclaw.community.core.bot_management.render_screen.services.render_scree
     RenderScreenService,
 )
 from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManifestRepositoryProtocol,
     BotRestartLockRepositoryProtocol,
     BotStartupScriptRepositoryProtocol,
 )
@@ -68,6 +69,12 @@ from agentclaw.community.core.bot_startup_script.protocols import (
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
 )
+from agentclaw.community.api.bot_config_manifest_service import (
+    BotConfigManifestServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
+    BotConfigManifestService,
+)
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
 )
@@ -79,7 +86,6 @@ from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
 from agentclaw.community.core.devices.protocols import McpSyncProtocol
-from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.bot_management.services.bot_space_service import (
     BotSpaceService,
 )
@@ -147,6 +153,9 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
 )
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
+)
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
@@ -165,6 +174,9 @@ from agentclaw.community.core.repository.implementations.bot.restart_lock import
 )
 from agentclaw.community.core.repository.implementations.bot.startup_script import (
     BotStartupScriptRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.config_manifest import (
+    BotConfigManifestRepository,
 )
 from agentclaw.community.core.repository.implementations.bot.render_screen import (
     RenderScreenRepository as UnifiedRenderScreenRepository,
@@ -260,6 +272,26 @@ class BotManagementModule(Module):
             to=BotStartupScriptService,
             scope=singleton,
         )
+        # BotConfigManifestRepository: single unified ORM impl, same shape as
+        # the startup script above — UNIQUE(avernet_tenant, env, entity_id,
+        # bot_id) on ac_bot_config_manifest, one manifest per bot at most.
+        binder.bind(
+            BotConfigManifestRepositoryProtocol,
+            to=BotConfigManifestRepository,
+            scope=singleton,
+        )
+        # Bound here rather than in a module of its own: the manifest service
+        # shares this module's ``teclaw_engine_test_factory``, which is the one
+        # definition of "runs in a teclaw container" and the only reason either
+        # service needs a lazy provider at all.
+        binder.bind(
+            BotConfigManifestService, to=BotConfigManifestService, scope=singleton
+        )
+        binder.bind(
+            BotConfigManifestServiceProtocol,
+            to=BotConfigManifestService,
+            scope=singleton,
+        )
         # TemplateService: constructed with injected TemplateRepository.
         binder.bind(TemplateService, to=TemplateService, scope=singleton)
         # CronAutoSetupService: constructed with injected dependencies.
@@ -283,14 +315,14 @@ class BotManagementModule(Module):
         self,
         repository: BotRepository,
         template_service: TemplateService,
-        mcp_sync_service: MCPSyncService,
         skill_set_factory: SkillSetServiceFactory,
+        injector: Injector,
     ) -> AicodingRestartAuthorizationBaasPublishListener:
         return AicodingRestartAuthorizationBaasPublishListener(
             bot_repo=repository,
             template_service=template_service,
-            mcp_sync=mcp_sync_service,
             skill_set_factory=skill_set_factory,
+            runtime_reconciler_provider=lambda: injector.get(CoreBotRuntimeProjectorProtocol),
         )
 
     @singleton
@@ -369,7 +401,6 @@ class BotManagementModule(Module):
         task_queue_service: TaskQueueService,
         common_config_service: CommonConfigService,
         caller_identity_repo: CallerIdentityRepositoryProtocol,
-        mcp_sync_service: MCPSyncService,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -415,7 +446,7 @@ class BotManagementModule(Module):
             task_queue_service=task_queue_service,
             common_config_service=common_config_service,
             caller_identity_repo=caller_identity_repo,
-            mcp_sync=cast(McpSyncProtocol, mcp_sync_service),
+            runtime_reconciler_provider=lambda: injector.get(CoreBotRuntimeProjectorProtocol),
         )
 
     @singleton

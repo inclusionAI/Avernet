@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use bcs_domain::{Participant, SystemMessageEvent};
 
-use crate::ServiceResult;
+use crate::{ServiceResult, SystemMessageDispatchOutcome};
 
 #[async_trait]
 pub trait SystemMessageService: Send + Sync {
@@ -14,6 +14,24 @@ pub trait SystemMessageService: Send + Sync {
         session_id: &str,
         session_participants: &[Participant],
     ) -> ServiceResult<usize>;
+
+    async fn notify_with_outcome(
+        &self,
+        group_id: &str,
+        event: SystemMessageEvent,
+        session_id: &str,
+        session_participants: &[Participant],
+    ) -> ServiceResult<SystemMessageDispatchOutcome> {
+        let successful_deliveries = self
+            .notify(group_id, event, session_id, session_participants)
+            .await?;
+        Ok(SystemMessageDispatchOutcome {
+            total_recipients: successful_deliveries,
+            successful_deliveries,
+            failed_deliveries: 0,
+            recipient_results: Vec::new(),
+        })
+    }
 }
 
 /// Resolves the `目标` (topic/reason) line for a session-context system message

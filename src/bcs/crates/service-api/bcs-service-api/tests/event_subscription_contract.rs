@@ -6,9 +6,9 @@ use bcs_service_api::application::v1::{
     ERROR_EVENT_SUBSCRIPTION_FORBIDDEN, ERROR_EVENT_SUBSCRIPTION_LIMIT_REACHED,
     ERROR_EVENT_SUBSCRIPTION_NOT_FOUND, ERROR_EVENT_SUBSCRIPTION_REVISION_CONFLICT,
     ERROR_INVALID_EVENT_FILTER, ERROR_INVALID_EVENT_SCOPE, ERROR_INVALID_WEBHOOK_URL, EventActor,
-    EventActorType, EventEnvelope, EventPayload, EventPayloadMode, EventScope, EventStream,
-    EventSubject, EventSubscriptionScope, EventSubscriptionScopeType, EventSubscriptionService,
-    PatchEventSubscriptionRequest,
+    EventActorType, EventDeliveryAttemptSummary, EventEnvelope, EventPayload, EventPayloadMode,
+    EventScope, EventStream, EventSubject, EventSubscriptionScope, EventSubscriptionScopeType,
+    EventSubscriptionService, PatchEventSubscriptionRequest,
 };
 use serde_json::json;
 
@@ -62,6 +62,26 @@ fn event_envelope_has_stable_json_shape_and_accepts_additive_fields() {
         decoded.actor.expect("actor").actor_type,
         EventActorType::Bot
     );
+}
+
+#[test]
+fn in_flight_attempt_summary_omits_completion_fields() {
+    let value = serde_json::to_value(EventDeliveryAttemptSummary {
+        attempt_no: 4,
+        started_at: "2026-08-28T08:00:00.000Z".to_string(),
+        completed_at: None,
+        latency_ms: None,
+        result: None,
+        http_status: None,
+        error_category: None,
+    })
+    .expect("serialize in-flight Attempt");
+
+    assert_eq!(value["attempt_no"], 4);
+    assert_eq!(value["started_at"], "2026-08-28T08:00:00.000Z");
+    assert!(value.get("completed_at").is_none());
+    assert!(value.get("latency_ms").is_none());
+    assert!(value.get("result").is_none());
 }
 
 #[test]

@@ -52,24 +52,19 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
-from agentclaw.community.core.bot_management.services.bot_service import (
-    BotNotFoundError,
+from agentclaw.community.core.services.engine_config import (
+    engine_config_coords_from_record,
 )
-from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/engine", tags=["bots"], route_class=PublicAPIRoute)
 
 
-def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:
-    """Resolve (entity_id, entity_type, engine) for an engine-config call."""
-    entity_id = bot.get("entity_id")
-    if not entity_id:
-        raise BotNotFoundError("bot has no associated entity")
-    entity_type = bot.get("entity_type") or "staff"
-    engine = bot.get("active_engine") or DEFAULT_ENGINE_TYPE
-    return entity_id, entity_type, engine
+#: Where an engine-config call writes, and the ownership guard in the same
+#: call. Lives in ``core`` so manifest apply reaches the identical resolution
+#: without a request; bound here so both handlers below read as they did.
+_engine_config_coords = engine_config_coords_from_record
 
 
 #: Named explicitly, and the only two operations on this surface that are.
@@ -108,8 +103,10 @@ async def get_bot_engine_config(
     object — every engine keeps this configuration in a file its runtime creates
     on first use, so "not configured yet" is an ordinary state, not an error.
     """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id, entity_type, engine = _engine_config_target(bot)
+    coords = _engine_config_coords(bot_id, owner_id, bot_service=bot_service)
+    entity_id, entity_type, engine = (
+        coords.entity_id, coords.entity_type, coords.engine_type
+    )
     data = await engine_config_service.read_bot_config(
         bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
         entity_type=entity_type, engine_type=engine, stage=stage.value,
@@ -141,8 +138,10 @@ async def update_bot_engine_config(
     produced and is replaced by publishing again, never edited, so naming one is
     refused and nothing is written.
     """
-    bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
-    entity_id, entity_type, engine = _engine_config_target(bot)
+    coords = _engine_config_coords(bot_id, owner_id, bot_service=bot_service)
+    entity_id, entity_type, engine = (
+        coords.entity_id, coords.entity_type, coords.engine_type
+    )
     await engine_config_service.write_bot_config(
         bot_id=bot_id, owner_id=owner_id, entity_id=entity_id,
         entity_type=entity_type, engine_type=engine, config=body,

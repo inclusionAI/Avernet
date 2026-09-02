@@ -354,3 +354,8 @@ class TestZeroCase:
         assert patch.acceptance_result is not None
         assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
 
+
+
+def test_ingest_parse_error_without_repository_is_noop():
+    cb = TaskLoopCallback(CallbackAdapter(), RecordingEngine())
+    _run(cb.ingest_parse_error({"flow_id": "flow-1"}, "bad embedded json"))

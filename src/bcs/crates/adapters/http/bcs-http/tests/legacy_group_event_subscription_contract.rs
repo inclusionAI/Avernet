@@ -51,6 +51,8 @@ impl GroupService for RecordingGroupService {
         Ok(CreateGroupOutcome {
             group: group_detail(),
             created: true,
+            initial_session_id: None,
+            initial_run: None,
             event_subscriptions: Vec::new(),
         })
     }

@@ -870,7 +870,12 @@ pending
 ```
 
 - worker 通过有期限 lease 领取 Delivery；
+- 领取 Delivery、递增 `attempt_count` 和创建对应 Attempt 必须在同一事务内完成；新 Attempt 立即记录
+  `started_at`、`worker_id`，执行期间 `completed_at`、`latency_ms` 和 `result` 为空；
+- HTTP 结束后必须在同一事务内更新既有 Attempt 和 Delivery，不能到完成时才创建 Attempt；
 - 进程退出或崩溃后，lease 到期可由其他实例恢复；
+- 恢复过期 lease 时，上一条未完成 Attempt 记为 `retryable`，`error_category=lease_expired`，并明确远端
+  处理结果未知，然后创建下一条 Attempt；
 - 同一 Delivery 同时只能有一个有效 lease；
 - lease 不能提供 exactly-once，因此 receiver 仍必须去重；
 - strict lane 只允许领取 head Delivery。
@@ -1392,12 +1397,16 @@ revision 下重新投影 canonical Event，生成新的 Delivery 和 payload；�
 | 字段 | 说明 |
 | --- | --- |
 | `(delivery_id, attempt_no)` PK | Attempt |
-| `started_at`, `completed_at`, `latency_ms` | 时间 |
-| `result` | success/retryable/terminal |
+| `started_at`, `completed_at`, `latency_ms` | 时间；后两项在 Attempt 执行中可空 |
+| `result` | success/retryable/terminal；Attempt 执行中可空 |
 | `http_status` | 可空 HTTP status |
 | `error_category`, `error_summary` | 脱敏错误 |
 | `response_bytes_observed` | 诊断大小，不存原 body |
 | `worker_id` | 领取 worker |
+
+Delivery 详情允许返回执行中的 Attempt；此时只保证 `attempt_no`、`started_at` 和 `worker_id` 已持久化，完成时间、
+耗时和结果字段省略。这样即使 Worker 在 HTTP 返回或完成事务之前退出，也能审计该次尝试；后续租约恢复会补齐
+`lease_expired` 诊断，但不能推断远端是否已经处理请求。
 
 ### 18.9 Message schema 变更
 

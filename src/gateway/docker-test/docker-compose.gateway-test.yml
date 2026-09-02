@@ -28,6 +28,8 @@ services:
     image: gateway:local
     environment:
       SERVER_ENV: prod
+      # COMMUNITY_DEPLOY selects the application-community.yaml overlay.
+      COMMUNITY_DEPLOY: community
       DATABASE_URL: "${DATABASE_URL:-mysql+aiomysql://gateway:gatewaypass@mariadb:3306/gateway_test?charset=utf8mb4}"
       REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
       GATEWAY_PORT: "${GATEWAY_PORT:-8888}"

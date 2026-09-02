@@ -237,6 +237,13 @@ class TaskCallbackRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def upsert_error(self, rec: "TaskCallbackRecord") -> "TaskCallbackRecord":
+        """解析失败兜底落库:按 ``(run_id, node_id)`` **仅更新 ``exec_error`` + ``extend_props``**,
+        保留既有行的其它字段(status/result/execution_graph/main_session_id 等不被覆盖);行不存在 → 插入。
+        供 claw_mind 回调解析失败时兜底(错误信息落 exec_error、原始上报数据落 extend_props)。"""
+        ...
+
+    @abstractmethod
     def get(self, run_id: str, node_id: str) -> Optional["TaskCallbackRecord"]:
         """Return the callback, or ``None``."""
         ...

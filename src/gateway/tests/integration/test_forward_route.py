@@ -15,13 +15,16 @@ import httpx
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from httpx import AsyncClient
 
 from gateway.community.adapters.web._cors import install_cors
 from gateway.community.adapters.web._forward import (
     _ALL_METHODS,
+    _PRINCIPAL_HEADER,
     _request_body,
     forward_request,
 )
+from gateway.community.adapters.web.app import create_app
 from gateway.community.bootstrap._principal_signer import build_principal_signer
 from gateway.community.config import ConfigLoader, CorsConfig, UserConfig
 from gateway.community.core.forwarding import DomainMap
@@ -176,6 +179,32 @@ class _RequestWithStream:
 
     def stream(self) -> _FailingRequestStream:
         return self._stream
+
+
+class _CapturingForwarder:
+    class _Upstream:
+        def __init__(self) -> None:
+            self.status_code = 200
+            self.headers = []
+            self.body = self
+            self._sent = False
+
+        def __aiter__(self) -> _CapturingForwarder._Upstream:
+            return self
+
+        async def __anext__(self) -> bytes:
+            if self._sent:
+                raise StopAsyncIteration
+            self._sent = True
+            return b"{}"
+
+    def __init__(self) -> None:
+        self.captured: ForwardRequest | None = None
+
+    @asynccontextmanager
+    async def forward(self, request: ForwardRequest) -> AsyncIterator[object]:
+        self.captured = request
+        yield self._Upstream()
 
 
 class _EntryFailureForwarder:
@@ -578,3 +607,80 @@ def test_real_authenticator_rejects_missing_required_identity() -> None:
         resp = c.get("/openapi/v1/bots")
     assert resp.status_code == 401
     assert resp.json()["code"] == 401001
+
+
+_TEST_BCS_SECRET = "integration-bcs-session-secret-32b!!"
+
+
+def _real_auth_app() -> FastAPI:
+    from gateway.community.bootstrap._authn import build_authenticator
+    from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
+    from gateway.community.plugins.authn.app_token import AppTokenStrategy
+    from gateway.community.plugins.authn.bot_token import BotTokenStrategy
+    from gateway.community.plugins.authn.google_token import GoogleUserStrategy
+    from gateway.community.plugins.authn.oauth_session import OauthSessionStrategy
+
+    app = create_app()
+    app.state.domain_map = DomainMap.from_config(
+        {
+            "domains": {"bots": {"server": "up"}},
+            "servers": {"up": {"base_url": "http://upstream"}},
+        },
+        variables={},
+    )
+    app.state.forwarder = _CapturingForwarder()
+    app.state.principal_signer = _build_signer()
+    app.state.authenticator = build_authenticator(
+        strategies={
+            "google": GoogleUserStrategy(token_header="x-google-token"),
+            "oauth_session": OauthSessionStrategy(jwt_secret=_TEST_BCS_SECRET),
+            "bot_token": BotTokenStrategy(registry=None),
+            "app_token": AppTokenStrategy(registry=None),
+            "access_key_token": AccessKeyTokenStrategy(registry=None),
+        },
+        user_config=UserConfig(
+            identity_strategies={"user": ["oauth_session"]},
+            route_security={"/**": {"user": "required"}},
+        ),
+    )
+    return app
+
+
+async def test_forward_uses_bcs_session_cookie_to_resolve_user_principal() -> None:
+    import time
+
+    import jwt
+
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "sub": "bcs-user-1",
+            "src": "google",
+            "iat": now,
+            "exp": now + 300,
+        },
+        _TEST_BCS_SECRET,
+        algorithm="HS256",
+    )
+
+    app = _real_auth_app()
+    transport = httpx.ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/openapi/v1/bots/x",
+            headers={"cookie": f"bcs_session={token}"},
+        )
+
+    assert resp.status_code == 200
+    forwarder = app.state.forwarder
+    assert forwarder.captured is not None
+    signed = forwarder.captured.headers[_PRINCIPAL_HEADER]
+    decoded = jwt.decode(
+        signed,
+        _TEST_KEY,
+        algorithms=["HS256"],
+        audience="up",
+        issuer="gateway",
+    )
+    assert decoded["principals"][0]["type"] == "user"
+    assert decoded["principals"][0]["subject"]["id"] == "bcs-user-1"

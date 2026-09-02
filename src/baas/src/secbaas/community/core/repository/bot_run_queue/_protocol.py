@@ -89,3 +89,24 @@ class BotRunQueueRepository(Protocol):
         清理前可见。
         """
         ...
+
+    def find_running_by_bot_session(
+        self, session_id: str, bot_id: str
+    ) -> list[BotRunQueueRecord]:
+        """按 (bot_id, session_id) 维度查询所有 RUNNING 的队列工作项。
+
+        供群聊 ``chat.abort`` 精确定位目标 bot 的 RUNNING run，避免误杀同 session
+        下其它 bot 的 run。``session_id`` 或 ``bot_id`` 为空时返回空列表。PENDING
+        工作项不命中，由超时扫描路径兜底。
+        """
+        ...
+
+    def find_terminal_by_bot_session(
+        self, session_id: str, bot_id: str
+    ) -> list[BotRunQueueRecord]:
+        """按 (bot_id, session_id) 维度查询所有已终结（DONE）的队列工作项。
+
+        用于群聊 ``chat.abort`` 维度收窄后的"已终结"判定（410 vs 200），仅参考
+        目标 bot 的终态记录，不被同 session 其它 bot 的终态记录影响。
+        """
+        ...

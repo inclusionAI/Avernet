@@ -37,10 +37,10 @@
 | **D3** reconcile 校验 — *已解决* | #1468 | **W6** resources | #1474 |
 | **D4** 启动前下发 — *推迟* | #1508 | **W7** 命名源 + git 源 | #1475 |
 | **W1** manifest 文档 | #1469 | **W8** 生命周期 apply 点 | #1476 |
-| **W2** 带防护的 fetcher | #1470 | **W9** `cli_tools`（推迟） | #1477 |
-| **W3** 源凭证 | #1471 | **W10** 服务层缝 | #1509 |
+| **W2** 带防护的 fetcher | #1470 | **W9** `cli_tools`（推迟 — *artifact 形状已落地*） | #1477 |
+| **W3** 源凭证 | #1471 | **W10** 服务层缝 — *已合入* | #1509 |
 | | | **W11** 平台侧物化与留存 | #1510 |
-| | | **W12** 跨引擎语义契约 | #1684 |
+| | | **W12** 跨引擎语义契约 — *已完成* | #1684 |
 | | | **W13** 用 manifest 创建 bot | #1696 |
 
 规划 PR：#1465。**十三项全部在 §7 分配完毕**，每一项都带一行 **Owner**，注明
@@ -285,10 +285,16 @@ apply 回答「我们有没有下发」，容器和引擎回答「有没有生�
 `__OCB_RC`（启动命令包装器里的私有 shell 变量）和 `OCB_AGENT_LOG_PRICE_*`
 （后端配置）。它从来就不是一个面向用户的命名空间。
 
-改名为 **`BOT_ID`、`BOT_ENGINE_TYPE`、`BOT_ENV`、`BOT_TENANT`、`BOT_ARCH`**：
+改名为 **`BOT_ENGINE_TYPE`、`BOT_ENV`、`BOT_TENANT`、`BOT_ARCH`**：
 自解释（用户配置的就是一个 bot）、与容器环境里已有的 `BOT_DATA_DIR` 一致、而且
 仍然带前缀——这点重要，因为它们会作为环境变量注入 `script`，不带前缀的
 `${ENV}` 会跟脚本作者自己的变量撞车。
+
+`OCB_BOT_ID` 没有对应的 `BOT_ID`，是**去掉**而不是改名（W1 评审结论）。留下的
+四个都是**机群**属性，这正是一份文档能被多个 bot 复用的原因；bot 标识不是——
+它由 `generate_bot_id()` 在创建时生成（日期 + 8 位随机字符），调用方指定不了，
+在 git 仓库里准备内容的作者也无从得知。真按 bot 区分的内容，写在那个 bot 自己
+的 manifest 里、直接写字面量。
 
 ### 2.10 校验与鉴权迁到一个可复用的缝上
 
@@ -975,6 +981,26 @@ engine_config）：找出目前住在 `openapi_v1` router 里的检查——归�
 - **本项现在是一份写作任务，不是一个开放问题。**它陈述双方各做什么，剩余的日历
   成本是他们对 CLI 新增部分的评审，而不是语义谈判。
 
+**交付物。**`engine-convergence-contract.zh-CN.md` —— 本节的规则写成对 applier 的
+要求（R1–R9）、逐类目的区域表、双方分工，以及一份自查清单。它与
+`teclaw-cli-contract.zh-CN.md` 一起构成交给 teclaw 的完整那一份：前者是所有类目的
+收敛语义，后者是唯一需要他们新增实现的 `cli_tools`。
+
+> **✅ 本项已完成（2026-08-31）。**四条验收标准全部满足：契约写成对 applier 的
+> 要求、保留名条款、teclaw 已评审并逐条同意、结论已写进能力矩阵
+> （`engine-requirements.zh-CN.md` §2 与 §3 的 T1/T2/T4）。
+>
+> **评审过程中改正了一处实质错误，记在这里以免重犯。**初稿把「被声明的类目覆盖、
+> 未声明的不碰、空集合是声明、缺席≠空集合」写成了**对 teclaw 的要求**。那是错的：
+> `ConfigComposer` 是从**平台实体**读出全量状态来组装 artifact 的，不是从 manifest
+> 读，所以 **artifact 永远是完整快照，不是差分**——「声明 / 未声明」这个区分在
+> artifact 组装之前就已经消解，根本到不了引擎手上。契约已重构为
+> **A1–A5（对 applier 的要求）** 与 **P1–P4（平台侧规则，仅供理解）** 两层。
+>
+> 一并定下的还有两条：**`md5` 是变更判据而非校验门**（同名工具 `md5` 未变即无需
+> 重下/替换）；**`schema_version` 不升版**，`cli_tools` 直接进 v4，靠 A5「未知字段
+> 忽略」兼容。落点、PATH 做法、沙箱策略属 teclaw 自治，平台不过问。
+
 **依赖。**§3.2 已定（已定） · **阻塞于。**—
 
 **验收标准。**
@@ -1108,12 +1134,14 @@ APPLYING                 manifest apply 进行中（fetch → 物化 → 下发�
 
 - 新模块 `core/bot_config_manifest/`，带一份含 Context Boundary 块的 `README.md`
   （`docs/arch/context-boundary-format.md` 要求）。
-- DDL 放在 `core/bot_config_manifest/sql/`。每个 bot 一行；唯一性在
-  `(avernet_tenant, manifest_key)`，其中
-  `manifest_key = sha256(env, entity_id, bot_id)`——与 `ac_bot_startup_script`
-  同样的 InnoDB 3072 字节索引预算、同样的租户隔离推理，那张表已经把两者都写明了。
+- DDL 放在 `core/bot_config_manifest/sql/`。每个 bot 一行；唯一性直接落在逻辑键
+  `(avernet_tenant, env, entity_id, bot_id)` 上，不用代理列。InnoDB 的 3072 字节
+  索引预算因此变成对列宽的约束：`entity_id` 取 `varchar(256)` 而不是 `ac_bots`
+  的 1024（后者单列就 4096 字节，直接超限），四列合计 2384 字节。
+  `ac_bot_startup_script` 把同样的逻辑键哈希成了代理列——它其实不必，这张表也
+  不照抄。租户隔离的推理与那张表相同。
 - 仓储契约 `core/repository/protocols/bot/config_manifest.py` 与实现
-  `core/repository/implementations/bot/config_manifest/`，协议声明为基类，缺成员
+  `core/repository/implementations/bot/config_manifest.py`，协议声明为基类，缺成员
   在构造时就失败。
 - 服务 API 契约 `api/bot_config_manifest_service.py`，注册进一致性 `_PAIRS`。
 - schema v1 解析 + 校验，覆盖：`schema_version`（未知 ⇒ 拒绝）；顶层 `sources`；
@@ -1170,8 +1198,8 @@ APPLYING                 manifest apply 进行中（fetch → 物化 → 下发�
   - 源上出现未知的 `mode` 取值：只接受 `strict` 与 `non_strict`，缺省
     `non_strict`（§3.2 的移动 ref 规则）。形状与 `on_fetch_failure` 的枚举检查
     一样，拒绝的理由也一样——拼错的 mode 否则会静默地落到缺省值，什么都没钉住；
-  - 未知的 `${...}` 占位符；只接受 `BOT_ID`、`BOT_ENGINE_TYPE`、`BOT_ENV`、
-    `BOT_TENANT`、`BOT_ARCH`。`BOT_ARCH` 今天解析为常量 `amd64`（§4, X3）：现在
+  - 未知的 `${...}` 占位符；只接受 `BOT_ENGINE_TYPE`、`BOT_ENV`、
+    `BOT_TENANT`、`BOT_ARCH`（没有 `BOT_ID`，见 §2.9）。`BOT_ARCH` 今天解析为常量 `amd64`（§4, X3）：现在
     就实现它而不是仅仅保留名字，意味着将来若机群变成混合的，改的只是值从哪来，
     不改 schema、用户什么都不用重写；
   - 绝对路径或含 `../` 的 `resources.path`；
@@ -1705,21 +1733,53 @@ manifest 层，所以 W8 没有「去激活」需要安放。）
 
 **状态。**schema 已定稿（§3.7）；交付在设计中就按业务优先级后置。未排期。
 
-**依赖。**W8。
+> **进度：artifact 形状已提前落地，其余未开工**（PR #1734，与 W12 同一个 PR —— 那次
+> 是顺着 W12 的交付把 `artifact.schema.json` 一起对齐了，属于**有意为之的例外**，不是
+> §8「每项一个 PR」的新惯例）。接手本项的人，从这里开始：
+>
+> | | 状态 |
+> | --- | --- |
+> | `artifact.schema.json` 的 `cliToolRef` + 可选 `cli_tools` | ✅ 已合入 |
+> | `artifact.py` 的 `CliToolRef`；`to_dict` 未声明时省略该键、`from_dict` 不把缺席读成 `[]` | ✅ 已合入，有测试钉住 |
+> | `README.zh-CN.md` 三处「artifact schema 不变」的表述 | ✅ 已调和 |
+> | `SCHEMA_VERSION` 4 → 5 | ➖ **已决定不做**（2026-08-31）—— `cli_tools` 直接进 v4，靠「未知字段忽略」兼容 |
+> | manifest schema `cli_tools`（§3.7）的落地、校验、物化器 | ❌ 未开工 |
+> | 拉取 / `sha256` 强校验 / 解包 / 取 `subpath` / 算 `md5` / 写 store | ❌ 未开工 |
+> | ELF 头校验、`${BOT_ARCH}` → `amd64` | ❌ 未开工 |
+> | ARCA 侧的 PATH 方案 + 默认技能集里的用法 skill | ❌ 未开工 |
+> | `bcs-cli` 接进来当第一个消费者 | ❌ 未开工 |
+>
+> **`SCHEMA_VERSION` 不升版，这是终局决定，不是待办。**与 teclaw owner 定于
+> 2026-08-31：`cli_tools` 直接作为新增字段进入 v4 artifact，兼容性由引擎侧
+> 「未知字段忽略而非报错」承担（`engine-convergence-contract.zh-CN.md` A5，已同意）。
+> **代价写明：`schema_version` 从此不再跟踪本契约的演进**——判断一份 artifact 有没有
+> `cli_tools`，要探测字段是否存在，不能看版本号。
+> `tests/community/kernel/test_bot_config_artifact.py` 有一条测试守着它不要漂上去。
+>
+> **注意 #1477 的 issue 正文仍是摊平之前的旧描述**（`entrypoints`、「引擎收到一个
+> 已解包的目录」）。以本文档与 `teclaw-cli-contract.zh-CN.md` 为准。
+
+**依赖。**W8。（上面已落地的那部分是例外：它只声明形状、不产出内容，所以不依赖 W8。）
 
 **artifact 契约确实变了，`artifact.schema.json` 也是其中一部分。**
 `kernel/bot_config/artifact.py` 与它语言无关的 `artifact.schema.json` 是已发布的
-契约；那份 schema 顶层写的是 `"additionalProperties": false`，所以在它被修改之前，
-带 `cli_tools` 的 artifact 会被**判为非法**。本项同时负责改这个文件、把
-`SCHEMA_VERSION` 从 4 升到 5，并调和 `README.zh-CN.md` 与 §9 里那些「artifact
-schema 不变」的表述 —— 那些话对其他每个类目都成立，唯独对这一个不再成立。
+契约；那份 schema 顶层原本写着 `"additionalProperties": false`，所以在它被修改之前，
+带 `cli_tools` 的 artifact 会被**判为非法**。**这一处已经改掉了**（见上方进度表），
+同时调和了 `README.zh-CN.md` 与 §9 里那些「artifact schema 不变」的表述 —— 那些话对
+其他每个类目都成立，唯独对这一个不再成立。**但 `SCHEMA_VERSION` 不动**：见上方
+「不升版，这是终局决定」。
+
+> **`cli_tools` 目前不出现在 wire 上。**平台还不产出这个字段，`to_dict` 因此整个
+> 省略这个键，今天的 artifact 与本改动之前逐字节同构。**这是过渡态，不是语义**：
+> artifact 是平台状态的全量快照，所以一旦 composer 开始填充，这个字段就与其他类目
+> 一样**每次都完整出现**，`[]` 的含义就是「这个 bot 没有平台下发的工具」。
 
 **teclaw 那一半已经写好，可以直接交付出去。**
 `teclaw-cli-contract.zh-CN.md` 就是面向引擎的规格：下发契约不变，`cli_tools` 是
 唯一新增，而且拉取、digest 校验、解包、取文件全部由平台完成，引擎每个条目收到的是
 **一个可执行文件**（`{name, store, path, md5, version}`）。teclaw 要实现的是放置、
-`md5` 校验、可执行位、PATH，以及与其他类目一样的全量覆盖语义。文档带六个用例和
-一份验收清单。`schema_version` 从 4 升到 5。
+按 `md5` 判断是否需要重新落地、可执行位、PATH，以及与其他类目一样的全量覆盖语义。
+文档带六个用例和一份验收清单。**`schema_version` 不升版**（2026-08-31 决定）。
 
 **阻塞于。**—。**X3 已关闭**（§4）：ARCA 机群是 `linux/amd64`，所以每个工具一个
 URL 足够。teclaw 只需要我们给出 artifact 协议；ARCA 的 PATH 方案和默认技能集里的

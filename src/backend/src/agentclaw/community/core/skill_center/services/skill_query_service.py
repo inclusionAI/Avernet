@@ -18,6 +18,7 @@ from typing import Any, Callable, Protocol, TYPE_CHECKING
 from injector import inject
 
 from agentclaw.community.core.skill_center.skill_query_service_protocol import SkillQueryServiceProtocol
+from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
@@ -43,6 +44,58 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
+
+
+def require_addressed_bot(record: dict[str, Any], bot_id: str) -> None:
+    """The skill must belong to the bot the address names.
+
+    Without this the ``{bot_id}`` segment on the ``{skill_id}`` operations would
+    be decorative — a client could name any bot and reach a skill on another
+    one, which is the precise defect bot-first addressing exists to remove. A
+    skill id resolves its own bot, so the two can be compared, and a mismatch is
+    answered as the skill not existing.
+
+    Masked as a 404 rather than reported as a mismatch, for the same reason the
+    rest of the surface masks: a distinguishable "wrong bot" answer confirms the
+    skill exists somewhere, which is an enumeration oracle over other people's
+    bots.
+
+    Lives here rather than in the router that used to own it: it is a statement
+    about a skill record, not about a request, and manifest apply reaching
+    skills by id needs the same comparison.
+    """
+    if str(record["bolt_id"]) != bot_id:
+        raise LocalSkillNotFoundError()
+
+
+def skill_coords_from_record(bot_id: str, owner_id: str) -> BotConfigCoords:
+    """Where the ``skills`` category writes, for a bot that exists.
+
+    ``engine_type`` is ``None``: the skill services address a bot by
+    ``(bot_id, owner_id)`` and resolve any engine detail themselves, so there is
+    no engine for this category to carry.
+    """
+    return BotConfigCoords(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        entity_type="staff",
+        entity_id=owner_id,
+        engine_type=None,
+    )
+
+
+def skill_coords_from_spec(bot_id: str, owner_id: str) -> BotConfigCoords:
+    """The same address, for a bot that does not exist yet.
+
+    Note what has no equivalent here: :func:`require_addressed_bot` compares a
+    skill record against an address, and at preflight a manifest's declared
+    skills have no records to compare — they do not exist yet. That validation
+    is inherently record-bound and simply does not run on the create path.
+    Saying so is better than inventing a check that would always pass.
+
+    No caller until W13 (#1696).
+    """
+    return skill_coords_from_record(bot_id, owner_id)
 
 
 class SkillAssetKind(StrEnum):

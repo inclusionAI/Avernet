@@ -6,17 +6,29 @@
 #
 # Runtime model (mirrors OCB arca-openclaw):
 #   - supervisord is PID 1
-#   - [program:engine]    autostart=false — started by start_service.sh
-#   - [program:openclaw]  autostart=false — started on demand by engine
-#                        via `sudo supervisorctl start openclaw`
+#   - [program:engine]       autostart=false — started by start_service.sh
+#                            (engine type from .adaptorEnv CHAT_ENGINE; the
+#                            openclaw default is start_service.sh's ENGINE
+#                            default, claude_code via --engine)
+#   - [program:openclaw]     autostart=false — started on demand by engine
+#                            via `sudo supervisorctl start openclaw`
+#   - [program:claude_relay] autostart=false — started by start_service.sh when
+#                            --engine claude_code (reads .relayEnv), serves
+#                            ws://127.0.0.1:18900 for the engine's claude_code
+#                            adapter
 #
 # Pod startup flow:
 #   1. entrypoint.sh: pre-init (directories, config), then exec supervisord
-#   2. start_service.sh (background): save credentials → start engine
-#      via supervisorctl → poll /health → write ready marker
+#   2. start_service.sh (background): parse args → save credentials → check
+#      --engine → exec start_openclaw.sh (engine program; openclaw gateway
+#      on demand by the engine) or start_claude_code.sh (claude_relay
+#      health-gated, then engine) → poll /health → write ready marker
 #
 # Build args:
 #   OPENCLAW_VERSION   npm version of openclaw (default 2026.6.1)
+#   CLAUDE_CODE_VERSION  npm version of @anthropic-ai/claude-code (default 2.1.251 —
+#                       pinned, unlike scripts/toolchain.sh which installs latest;
+#                       image builds must be reproducible), from npmmirror
 #   UV_VERSION         uv version for pin (default: latest)
 #   NPM_STRICT_SSL     npm strict-ssl toggle (default true)
 
@@ -55,6 +67,14 @@ RUN npm config set registry "https://registry.npmmirror.com" \
     && npm config set strict-ssl "${NPM_STRICT_SSL}" \
     && npm install -g "openclaw@${OPENCLAW_VERSION}"
 
+# Install Claude Code CLI (global, pinned — same package + registry as
+# scripts/toolchain.sh CLAUDE_CODE_NPM_PACKAGE/CLAUDE_CODE_NPM_REGISTRY; pinned
+# here for reproducible image builds). Installed in BOTH runtime engines' scope:
+# the claude_code adapter path (vendored gateway spawns the CLI when
+# CLAUDE_BRIDGE=cli) and the sdk bridge's CLAUDE_CODE_PATH convention.
+ARG CLAUDE_CODE_VERSION=2.1.251
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
 # Install uv via pip (Aliyun mirror — astral.sh is unreachable in CN build envs).
 # --break-system-packages: required by PEP 668 on Debian 12 system Python.
 ARG UV_VERSION=
@@ -73,6 +93,18 @@ RUN uv venv --python 3 /opt/.venv \
     && find /opt/.venv -name "*.pyc" -delete \
     && find /opt/.venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true \
     && rm -rf /root/.cache/uv /root/.local/share/uv
+
+# Build the vendored claude_code relay gateway (the Node WS server the engine's
+# claude_code mode connects to at ws://127.0.0.1:18900). Build command mirrors
+# scripts/modules/claude_relays.sh::claude_relays_setup (npm install --include=dev
+# --ignore-scripts, tshy build via prepublishOnly), then prune devDeps like the
+# bcn plugin build below keeps the runtime layer lean. The repo ships no dist/;
+# it must be built here or the relay cannot run in the image.
+RUN cd /opt/engine/src/engine/community/claude_code_gateway \
+    && npm install --include=dev --ignore-scripts --no-audit --no-fund \
+    && npm run prepublishOnly \
+    && npm prune --omit=dev \
+    && test -f dist/esm/server.js
 
 # Build the openclaw-channel-bcn plugin (BCS WebSocket channel).
 # Mirrors Dockerfile.ocb: npm install → build → prune devDeps.
@@ -129,7 +161,7 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
         sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Bring over installed openclaw from builder.
+# Bring over installed openclaw + claude-code from builder.
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 # Recreate npm bin symlink: COPY --from resolves symlinks to files,
 # which breaks the script's __dirname-based dist/ path resolution.
@@ -141,6 +173,18 @@ RUN BIN_REL=$(node -e "\
     && ln -sf "/usr/local/lib/node_modules/openclaw/${BIN_REL}" \
               /usr/local/bin/openclaw \
     && chmod +x /usr/local/bin/openclaw
+
+# Recreate the claude bin symlink (same COPY --from symlink issue, scoped pkg).
+# The generic bin-field parse handles any bin shape the package may use.
+RUN CC_BIN=$(node -e "\
+  const p = require('/usr/local/lib/node_modules/@anthropic-ai/claude-code/package.json'); \
+  const b = p.bin || {}; \
+  const t = typeof b === 'string' ? b : (b.claude || Object.values(b)[0]); \
+  console.log(t)") \
+    && ln -sf "/usr/local/lib/node_modules/@anthropic-ai/claude-code/${CC_BIN}" \
+              /usr/local/bin/claude \
+    && chmod +x /usr/local/bin/claude \
+    && /usr/local/bin/claude --version
 
 # Bring over the engine venv + source code.
 COPY --from=builder /opt/.venv /opt/.venv
@@ -184,19 +228,39 @@ COPY docker/agent/avernet-supervisord.conf /etc/supervisor/supervisord.conf
 # OpenClaw default config template (env-var placeholders substituted at runtime).
 COPY docker/agent/openclaw.json /opt/openclaw.json.template
 
+# Claude Code provider settings template — staged like openclaw.json above:
+# /home/admin is NAS-mounted at pod start, which SHADOWS anything baked
+# there, so the file must live in /opt and be copied into ~/.claude AFTER
+# the mount (start_claude_code.sh does the copy; mount-wins: a file already
+# on the NAS is kept). Content is FULLY STATIC, mirroring openclaw.json's
+# hardcoded config: URL, model (glm-5.2), and the auth token as the literal
+# placeholder "Bearer ${API-KEY}" — the gateway on the upstream side
+# replaces the placeholder with the real key (same pattern as openclaw.json's
+# "apiKey": "Bearer ${API-KEY}"). No credentials are injected into the pod
+# at runtime for this engine. The claude CLI reads the file natively via
+# CLAUDE_CONFIG_DIR; the relay gateway's model-provider loader via
+# RELAY_MODEL_SETTINGS_SOURCE (set in start_claude_code.sh). A deployment
+# with a different provider scenario mounts its own file at the final path.
+COPY docker/agent/claude-settings.json /opt/claude-settings.json.template
+
 # Shared utility functions (logging, helpers).
 COPY docker/agent/util.sh /usr/local/bin/util.sh
 
-# Simplified pod startup script (starts engine, waits for health).
+# Pod startup: thin dispatcher (parses args, saves credentials, checks
+# --engine, execs the right script) + one per-engine script.
 COPY docker/agent/start_service.sh /usr/local/bin/start_service.sh
+COPY docker/agent/start_openclaw.sh /usr/local/bin/start_openclaw.sh
+COPY docker/agent/start_claude_code.sh /usr/local/bin/start_claude_code.sh
 
 # Entrypoint: pre-init, config generation from template, then execs supervisord.
 COPY docker/agent/avernet-entrypoint.sh /usr/local/bin/avernet-entrypoint
 RUN chmod +x /usr/local/bin/avernet-entrypoint \
              /usr/local/bin/start_service.sh \
+             /usr/local/bin/start_openclaw.sh \
+             /usr/local/bin/start_claude_code.sh \
              /usr/local/bin/util.sh
 
-EXPOSE 20003 18789
+EXPOSE 20003 18789 18900
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=6 \
     CMD curl -fsS "http://127.0.0.1:20003/health" >/dev/null || exit 1

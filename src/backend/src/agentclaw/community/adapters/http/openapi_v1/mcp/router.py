@@ -120,6 +120,13 @@ ServerCodePath = Annotated[
 # The caller's own identity is used as both entity id and (staff) entity type
 # for the config push, mirroring the internal route's defaults and how the bots
 # slice threads ``entity_id=owner_id``.
+#
+# Not routed through ``core.mcp.config_flow.mcp_coords_from_record`` despite the
+# resemblance, and the difference is the point: this constant belongs to the
+# *account-level* config operations, which take no ``bot_id`` at all, while
+# those coordinates address one bot. A manifest never reaches this write — its
+# ``mcp`` category activates servers on a bot through ``DirectActivationService``
+# — so forcing the two together would state a sharing that does not exist.
 _ENTITY_TYPE = "staff"
 
 

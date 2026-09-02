@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -10,7 +11,9 @@ from agentclaw.community.core.skills_pool.models import (
     PoolCutoverStatus,
     PoolSkillMapping,
 )
-from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupStatus
+from agentclaw.community.core.skills_pool.quarantine import (
+    RuntimeQuarantineCleanupStatus,
+)
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     MAPPING_V3_CONTRACT_VERSION,
@@ -74,7 +77,13 @@ class CenterEnsureTransport(FakeTransport):
     async def invoke(self, conn_info, method, path, *, body, timeout):
         if path.endswith("/center/ensure"):
             self.calls.append(
-                {"conn_info": conn_info, "method": method, "path": path, "body": body, "timeout": timeout}
+                {
+                    "conn_info": conn_info,
+                    "method": method,
+                    "path": path,
+                    "body": body,
+                    "timeout": timeout,
+                }
             )
             return {"success": True, "data": {"ok": body["items"], "failed": []}}
         return await super().invoke(conn_info, method, path, body=body, timeout=timeout)
@@ -198,8 +207,35 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
 
 
 @pytest.mark.asyncio
+async def test_pool_runtime_logs_device_context_resolution_timing(caplog) -> None:
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=FakeTransport(),
+        probe_service=FakeProbe(),
+    )
+    caplog.set_level(logging.INFO)
+
+    assert await runtime.verify_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        mappings=[],
+    )
+
+    assert any(
+        "[skills_pool.runtime] timing stage=resolve_device_context"
+        in record.getMessage()
+        and "bot_id=bot-1" in record.getMessage()
+        and "path=/api/skills/layout/mappings/verify" in record.getMessage()
+        and "duration_ms=" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["local", "baas"])
-async def test_repo_retirement_projection_reaches_each_device_provider(provider: str) -> None:
+async def test_repo_retirement_projection_reaches_each_device_provider(
+    provider: str,
+) -> None:
     """Repo Direct deactivate clears the old entry for Local and BaaS engines."""
     transport = FakeTransport()
     runtime = OpenClawSkillsPoolRuntime(

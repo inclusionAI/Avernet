@@ -163,7 +163,13 @@ impl SqlChatRunRepo {
         if self.schema_ready.load(Ordering::Relaxed) {
             return Ok(());
         }
+        if self.flavor != DbSqlFlavor::Sqlite {
+            return Ok(());
+        }
         let create = "CREATE TABLE IF NOT EXISTS bcs_chat_runs (\
+            id INTEGER PRIMARY KEY AUTOINCREMENT,\
+            gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\
+            gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\
             env TEXT NOT NULL,\
             run_id TEXT NOT NULL,\
             bot_uuid TEXT NOT NULL,\
@@ -172,8 +178,7 @@ impl SqlChatRunRepo {
             state TEXT NOT NULL,\
             accumulated_content TEXT,\
             error_message TEXT,\
-            created_at_ms INTEGER NOT NULL,\
-            updated_at_ms INTEGER NOT NULL,\
+            original_request TEXT,\
             completed_at_ms INTEGER,\
             expires_at_ms INTEGER NOT NULL,\
             version INTEGER NOT NULL,\
@@ -182,16 +187,17 @@ impl SqlChatRunRepo {
             response_mode TEXT NOT NULL,\
             completion_policy TEXT NOT NULL,\
             delivery_ack_at_ms INTEGER,\
-            PRIMARY KEY (env, run_id))";
+            CONSTRAINT uk_env_run_id UNIQUE (env, run_id))";
         self.db
             .execute(DbStatement::new(create))
             .await
             .map_err(backend)?;
         if self.flavor == DbSqlFlavor::Sqlite {
             for stmt in [
-                "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_expires ON bcs_chat_runs(env, state, expires_at_ms)",
-                "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_completed ON bcs_chat_runs(env, state, completed_at_ms)",
-                "CREATE INDEX IF NOT EXISTS idx_chat_runs_env_from_bot ON bcs_chat_runs(env, from_bot_id)",
+                "CREATE INDEX IF NOT EXISTS idx_env_expires ON bcs_chat_runs(env, state, expires_at_ms)",
+                "CREATE INDEX IF NOT EXISTS idx_env_completed ON bcs_chat_runs(env, state, completed_at_ms)",
+                "CREATE INDEX IF NOT EXISTS idx_env_from_bot ON bcs_chat_runs(env, from_bot_id)",
+                "CREATE INDEX IF NOT EXISTS idx_env_bot ON bcs_chat_runs(env, bot_uuid)",
             ] {
                 let _ = self.db.execute(DbStatement::new(stmt)).await;
             }
@@ -204,10 +210,10 @@ impl SqlChatRunRepo {
         let rows = self
             .db
             .query(DbStatement::with_params(
-                "SELECT run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
-                 error_message, created_at_ms, updated_at_ms, completed_at_ms, expires_at_ms, \
-                 version, content_truncated, client, response_mode, completion_policy, \
-                 delivery_ack_at_ms FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+                &format!(
+                    "SELECT {} FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+                    select_columns(self.flavor)
+                ),
                 vec![DbValue::from(run_id), DbValue::from(self.env.as_str())],
             ))
             .await
@@ -312,18 +318,17 @@ impl SqlChatRunRepo {
         truncated: bool,
         intended_version: u64,
     ) -> Result<bool, ChatRunRepoError> {
-        let now = now_ms();
         let stmt = DbStatement::with_params(
             &format!(
                 "UPDATE bcs_chat_runs SET accumulated_content = ?, content_truncated = ?, \
-                 version = ?, updated_at_ms = ? \
-                 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?"
+                 version = ?, {gmt_modified} \
+                 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?",
+                gmt_modified = self.flavor.set_modified_now()
             ),
             vec![
                 DbValue::from(accumulated.to_string()),
                 DbValue::from(truncated),
                 DbValue::from(intended_version as i64),
-                DbValue::from(now as i64),
                 DbValue::from(run_id.to_string()),
                 DbValue::from(self.env.as_str()),
             ],
@@ -375,6 +380,17 @@ fn now_ms() -> u64 {
 
 fn backend(err: impl std::fmt::Display) -> ChatRunRepoError {
     ChatRunRepoError::Backend(err.to_string())
+}
+
+/// Read a `*_ts` Unix-epoch-seconds column as milliseconds (0 if absent),
+/// used to derive the record's `created_at_ms`/`updated_at_ms` from the
+/// DB-managed `gmt_create`/`gmt_modified` convention columns.
+fn row_seconds_to_millis(row: &bcs_db_api::DbRow, column: &'static str) -> u64 {
+    match row.get(column) {
+        Some(DbValue::I64(value)) if *value >= 0 => (*value as u64).saturating_mul(1000),
+        Some(DbValue::U64(value)) => (*value).saturating_mul(1000),
+        _ => 0,
+    }
 }
 
 fn state_str(state: ChatRunState) -> &'static str {
@@ -448,8 +464,11 @@ fn row_to_record(row: &bcs_db_api::DbRow) -> Result<ChatRunRecord, ChatRunRepoEr
         db_get_column_opt::<String>(row, "accumulated_content").map_err(backend)?;
     let error_message: Option<String> =
         db_get_column_opt::<String>(row, "error_message").map_err(backend)?;
-    let created_at_ms: u64 = db_get_column(row, "created_at_ms").map_err(backend)?;
-    let updated_at_ms: u64 = db_get_column(row, "updated_at_ms").map_err(backend)?;
+    // created_at_ms/updated_at_ms are derived from the DB-managed
+    // gmt_create/gmt_modified convention columns (projected as Unix-epoch
+    // seconds under gmt_create_ts/gmt_modified_ts by `select_columns`).
+    let created_at_ms = row_seconds_to_millis(row, "gmt_create_ts");
+    let updated_at_ms = row_seconds_to_millis(row, "gmt_modified_ts");
     let completed_at_ms: Option<u64> =
         db_get_column_opt::<u64>(row, "completed_at_ms").map_err(backend)?;
     let expires_at_ms: u64 = db_get_column(row, "expires_at_ms").map_err(backend)?;
@@ -469,6 +488,9 @@ fn row_to_record(row: &bcs_db_api::DbRow) -> Result<ChatRunRecord, ChatRunRepoEr
         state: parse_state(&state).unwrap_or(ChatRunState::Pending),
         accumulated_content: accumulated_content.unwrap_or_default(),
         error_message,
+        // original_request is a write-once audit column never read back by the
+        // port (absent from every SELECT), so it stays empty here.
+        original_request: String::new(),
         created_at_ms,
         updated_at_ms,
         completed_at_ms,
@@ -482,18 +504,36 @@ fn row_to_record(row: &bcs_db_api::DbRow) -> Result<ChatRunRecord, ChatRunRepoEr
     })
 }
 
+/// Per-flavor SELECT column list for `bcs_chat_runs`. The DB-managed
+/// `gmt_create`/`gmt_modified` convention columns are projected to Unix-epoch
+/// seconds under `gmt_create_ts`/`gmt_modified_ts` so `row_to_record` can
+/// derive the record's `created_at_ms`/`updated_at_ms` (millis). Other columns
+/// are named verbatim; `original_request` is a write-only audit column and is
+/// intentionally NOT read back.
+fn select_columns(flavor: DbSqlFlavor) -> String {
+    format!(
+        "run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
+         error_message, {gmt_create} AS gmt_create_ts, {gmt_modified} AS gmt_modified_ts, \
+         completed_at_ms, expires_at_ms, version, content_truncated, client, response_mode, \
+         completion_policy, delivery_ack_at_ms",
+        gmt_create = flavor.unix_ts("gmt_create"),
+        gmt_modified = flavor.unix_ts("gmt_modified"),
+    )
+}
+
 /// Classify a CAS update that affected 0 rows by reading the current row.
 async fn classify_cas_failure(
+    flavor: DbSqlFlavor,
     db: &dyn DbPlugin,
     run_id: &str,
     env: &str,
 ) -> Result<CasOutcome, ChatRunRepoError> {
     let rows = db
         .query(DbStatement::with_params(
-            "SELECT run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
-             error_message, created_at_ms, updated_at_ms, completed_at_ms, expires_at_ms, \
-             version, content_truncated, client, response_mode, completion_policy, \
-             delivery_ack_at_ms FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+            &format!(
+                "SELECT {} FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+                select_columns(flavor)
+            ),
             vec![DbValue::from(run_id.to_string()), DbValue::from(env.to_string())],
         ))
         .await
@@ -515,14 +555,18 @@ async fn classify_cas_failure(
     }
 }
 
-const SELECT_COLS: &str = "run_id, bot_uuid, from_bot_id, session_key, state, accumulated_content, \
-     error_message, created_at_ms, updated_at_ms, completed_at_ms, expires_at_ms, \
-     version, content_truncated, client, response_mode, completion_policy, delivery_ack_at_ms";
-
-async fn read_full(db: &dyn DbPlugin, run_id: &str, env: &str) -> Result<Option<ChatRunRecord>, ChatRunRepoError> {
+async fn read_full(
+    flavor: DbSqlFlavor,
+    db: &dyn DbPlugin,
+    run_id: &str,
+    env: &str,
+) -> Result<Option<ChatRunRecord>, ChatRunRepoError> {
     let rows = db
         .query(DbStatement::with_params(
-            &format!("SELECT {SELECT_COLS} FROM bcs_chat_runs WHERE run_id = ? AND env = ?"),
+            &format!(
+                "SELECT {} FROM bcs_chat_runs WHERE run_id = ? AND env = ?",
+                select_columns(flavor)
+            ),
             vec![DbValue::from(run_id.to_string()), DbValue::from(env.to_string())],
         ))
         .await
@@ -540,9 +584,9 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         self.ensure_schema().await?;
         let stmt = DbStatement::with_params(
             "INSERT INTO bcs_chat_runs (env, run_id, bot_uuid, from_bot_id, session_key, state, \
-             accumulated_content, error_message, created_at_ms, updated_at_ms, completed_at_ms, \
-             expires_at_ms, version, content_truncated, client, response_mode, completion_policy, \
-             delivery_ack_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             accumulated_content, error_message, original_request, completed_at_ms, expires_at_ms, \
+             version, content_truncated, client, response_mode, completion_policy, \
+             delivery_ack_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             vec![
                 DbValue::from(self.env.clone()),
                 DbValue::from(record.run_id.clone()),
@@ -552,8 +596,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
                 DbValue::from(state_str(record.state)),
                 DbValue::from(record.accumulated_content.clone()),
                 record.error_message.clone().map(DbValue::from).unwrap_or(DbValue::Null),
-                DbValue::from(record.created_at_ms as i64),
-                DbValue::from(record.updated_at_ms as i64),
+                DbValue::from(record.original_request.clone()),
                 record.completed_at_ms.map(|v| DbValue::from(v as i64)).unwrap_or(DbValue::Null),
                 DbValue::from(record.expires_at_ms as i64),
                 DbValue::from(record.version as i64),
@@ -605,15 +648,14 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         _expected_version: u64,
         new: ChatRunRecord,
     ) -> Result<CasOutcome, ChatRunRepoError> {
-        let now = now_ms();
         let stmt = DbStatement::with_params(
             &format!(
-                "UPDATE bcs_chat_runs SET state = ?, updated_at_ms = ?, delivery_ack_at_ms = ?, \
-                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?"
+                "UPDATE bcs_chat_runs SET state = ?, {gmt_modified}, delivery_ack_at_ms = ?, \
+                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?",
+                gmt_modified = self.flavor.set_modified_now()
             ),
             vec![
                 DbValue::from(state_str(new.state)),
-                DbValue::from(now as i64),
                 new.delivery_ack_at_ms.map(|v| DbValue::from(v as i64)).unwrap_or(DbValue::Null),
                 DbValue::from(run_id.to_string()),
                 DbValue::from(self.env.as_str()),
@@ -621,7 +663,9 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         );
         let result = self.db.execute(stmt).await.map_err(backend)?;
         if result.affected_rows > 0 {
-            let updated = read_full(self.db.as_ref(), run_id, &self.env).await?.unwrap_or(new.clone());
+            let updated = read_full(self.flavor, self.db.as_ref(), run_id, &self.env)
+                .await?
+                .unwrap_or(new.clone());
             // Refresh the read-cache overlay of the just-applied DB state; best
             // effort, since the DB row is authoritative on a read miss.
             // Compose, don't mirror: the DB row is authoritative for version,
@@ -639,7 +683,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             let _ = self.write_overlay_record(run_id, &refreshed).await;
             Ok(CasOutcome::Applied(updated))
         } else {
-            classify_cas_failure(self.db.as_ref(), run_id, &self.env).await
+            classify_cas_failure(self.flavor, self.db.as_ref(), run_id, &self.env).await
         }
     }
 
@@ -654,14 +698,14 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         let stmt = DbStatement::with_params(
             &format!(
                 "UPDATE bcs_chat_runs SET state = ?, accumulated_content = ?, error_message = ?, \
-                 updated_at_ms = ?, completed_at_ms = ?, content_truncated = ?, \
-                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?"
+                 {gmt_modified}, completed_at_ms = ?, content_truncated = ?, \
+                 version = version + 1 WHERE run_id = ? AND state NOT IN ({TERMINAL_STATES}) AND env = ?",
+                gmt_modified = self.flavor.set_modified_now()
             ),
             vec![
                 DbValue::from(state_str(new.state)),
                 DbValue::from(new.accumulated_content.clone()),
                 new.error_message.clone().map(DbValue::from).unwrap_or(DbValue::Null),
-                DbValue::from(now as i64),
                 DbValue::from(completed_at as i64),
                 DbValue::from(new.content_truncated),
                 DbValue::from(run_id.to_string()),
@@ -670,7 +714,9 @@ impl ChatRunRepoPort for SqlChatRunRepo {
         );
         let result = self.db.execute(stmt).await.map_err(backend)?;
         if result.affected_rows > 0 {
-            let updated = read_full(self.db.as_ref(), run_id, &self.env).await?.unwrap_or(new);
+            let updated = read_full(self.flavor, self.db.as_ref(), run_id, &self.env)
+                .await?
+                .unwrap_or(new);
             // Tombstone before delete: best-effort write of the terminal record
             // first, so a failed delete cannot leave a readable pre-terminal
             // overlay snapshot served cache-first. The delete then reclaims the key so
@@ -682,7 +728,7 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             self.delete_overlay(run_id).await;
             Ok(CasOutcome::Applied(updated))
         } else {
-            classify_cas_failure(self.db.as_ref(), run_id, &self.env).await
+            classify_cas_failure(self.flavor, self.db.as_ref(), run_id, &self.env).await
         }
     }
 
@@ -741,11 +787,12 @@ impl ChatRunRepoPort for SqlChatRunRepo {
             .db
             .query(DbStatement::with_params(
                 &format!(
-                    "SELECT {SELECT_COLS} FROM bcs_chat_runs \
+                    "SELECT {} FROM bcs_chat_runs \
                      WHERE state NOT IN ({TERMINAL_STATES}) AND expires_at_ms < ? \
                      AND env = ? \
                      AND NOT (completion_policy = 'detach_delivery_ack' \
-                              AND delivery_ack_at_ms IS NOT NULL)"
+                              AND delivery_ack_at_ms IS NOT NULL)",
+                    select_columns(self.flavor)
                 ),
                 vec![DbValue::from(now_ms as i64), DbValue::from(self.env.as_str())],
             ))

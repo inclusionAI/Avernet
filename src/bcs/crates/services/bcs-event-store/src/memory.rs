@@ -8,11 +8,12 @@ use bcs_service_api::port::repo::{
     AppendEventRecord, AppendEventRecordResult, CancelPendingEventSubscriptions,
     ClaimEventDeliveries, ClaimFanoutTargets, CompleteEventDeliveryAttempt,
     CreateEventReplayTarget, CreateEventSubscriptionRecord, EventDeliveryAttemptRecord,
-    EventDeliveryRecord, EventFanoutStatus, EventFanoutTargetPurpose, EventFanoutTargetRecord,
-    EventFanoutTargetStatus, EventRecord, EventRepoError, EventRepoPort, EventRetentionRequest,
-    EventRetentionResult, EventSubscriptionRecord, EventSubscriptionRevisionRecord,
-    ListEventDeliveryRecords, ListEventSubscriptionRecords, MaterializeFanoutTarget,
-    RenewEventDeliveryLease, ReplaceEventSubscriptionRevision, SkipDeadLetteredEventDelivery,
+    EventDeliveryAttemptRecordResult, EventDeliveryRecord, EventFanoutStatus,
+    EventFanoutTargetPurpose, EventFanoutTargetRecord, EventFanoutTargetStatus, EventRecord,
+    EventRepoError, EventRepoPort, EventRetentionRequest, EventRetentionResult,
+    EventSubscriptionRecord, EventSubscriptionRevisionRecord, ListEventDeliveryRecords,
+    ListEventSubscriptionRecords, MaterializeFanoutTarget, RenewEventDeliveryLease,
+    ReplaceEventSubscriptionRevision, SkipDeadLetteredEventDelivery,
 };
 use bcs_service_api::types::{
     EVENT_SOURCE, EVENT_SPEC_VERSION, EventDeliveryStatus, EventEnvelope, EventStream,
@@ -115,8 +116,10 @@ impl MemoryEventStore {
     }
 
     /// Commit the in-memory half of Group provisioning while the caller holds
-    /// its Group write guard. The callback flips Group availability only after
-    /// a complete candidate Event state has been built; both locks remain held
+    /// its Group write guard. Matching Events produced while the inline
+    /// subscriptions were pending are snapshotted before the creation Events
+    /// are appended. The callback flips Group availability only after a
+    /// complete candidate Event state has been built; both locks remain held
     /// until the Event state is published.
     pub async fn finalize_group_provisioning<F>(
         &self,
@@ -234,6 +237,13 @@ impl MemoryEventStore {
                 ))
                 .or_default() += 1;
         }
+        backfill_group_provisioning_targets(
+            &mut candidate,
+            group_id,
+            subscription_ids,
+            finalized_at_ms,
+            env,
+        )?;
         let mut results = Vec::with_capacity(events.len());
         for event in events {
             results.push(append_event_to_state(&mut candidate, event)?);
@@ -990,13 +1000,30 @@ impl EventRepoPort for MemoryEventStore {
                         .lease_until_ms
                         .is_none_or(|lease_until| lease_until <= command.now_ms)
             })
-            .map(|target| (target.created_at_ms, target.target_id.clone()))
+            .map(|target| {
+                let (stream_key, sequence) = state
+                    .events
+                    .get(&target.event_id)
+                    .map(|event| {
+                        (
+                            event.envelope.stream.key.clone(),
+                            event.envelope.stream.sequence,
+                        )
+                    })
+                    .unwrap_or_default();
+                (
+                    target.created_at_ms,
+                    stream_key,
+                    sequence,
+                    target.target_id.clone(),
+                )
+            })
             .collect::<Vec<_>>();
         candidate_ids.sort();
         candidate_ids.truncate(command.limit as usize);
 
         let mut claimed = Vec::with_capacity(candidate_ids.len());
-        for (_, target_id) in candidate_ids {
+        for (_, _, _, target_id) in candidate_ids {
             let target = state.targets.get_mut(&target_id).ok_or_else(|| {
                 EventRepoError::Storage(
                     "candidate target disappeared while state was write locked".into(),
@@ -1147,21 +1174,76 @@ impl EventRepoPort for MemoryEventStore {
             if !delivery_is_eligible(&state, &delivery_id, command.now_ms)? {
                 continue;
             }
-            let delivery = state.deliveries.get_mut(&delivery_id).ok_or_else(|| {
-                EventRepoError::Storage(
-                    "candidate Delivery disappeared while state was write locked".into(),
-                )
-            })?;
-            delivery.status = EventDeliveryStatus::InFlight;
-            delivery.attempt_count = delivery.attempt_count.checked_add(1).ok_or_else(|| {
-                EventRepoError::Conflict("Delivery attempt counter overflow".into())
-            })?;
-            delivery.first_attempt_at_ms.get_or_insert(command.now_ms);
-            delivery.last_attempt_at_ms = Some(command.now_ms);
-            delivery.next_attempt_at_ms = None;
-            delivery.lease_owner = Some(lease_owner.clone());
-            delivery.lease_until_ms = Some(command.lease_until_ms);
-            claimed.push(delivery.clone());
+            let next_attempt_no = state
+                .deliveries
+                .get(&delivery_id)
+                .ok_or_else(|| {
+                    EventRepoError::Storage(
+                        "candidate Delivery disappeared while state was write locked".into(),
+                    )
+                })?
+                .attempt_count
+                .checked_add(1)
+                .ok_or_else(|| {
+                    EventRepoError::Conflict("Delivery attempt counter overflow".into())
+                })?;
+            if state
+                .attempts
+                .get(&delivery_id)
+                .is_some_and(|attempts| attempts.contains_key(&next_attempt_no))
+            {
+                return Err(EventRepoError::Conflict(format!(
+                    "attempt {next_attempt_no} already exists for Delivery {delivery_id}"
+                )));
+            }
+            let (abandoned_attempt_no, claimed_delivery) = {
+                let delivery = state.deliveries.get_mut(&delivery_id).ok_or_else(|| {
+                    EventRepoError::Storage(
+                        "candidate Delivery disappeared while state was write locked".into(),
+                    )
+                })?;
+                let abandoned_attempt_no = (delivery.status == EventDeliveryStatus::InFlight)
+                    .then_some(delivery.attempt_count);
+                delivery.status = EventDeliveryStatus::InFlight;
+                delivery.attempt_count = next_attempt_no;
+                delivery.first_attempt_at_ms.get_or_insert(command.now_ms);
+                delivery.last_attempt_at_ms = Some(command.now_ms);
+                delivery.next_attempt_at_ms = None;
+                delivery.lease_owner = Some(lease_owner.clone());
+                delivery.lease_until_ms = Some(command.lease_until_ms);
+                (abandoned_attempt_no, delivery.clone())
+            };
+            let attempts = state.attempts.entry(delivery_id.clone()).or_default();
+            if let Some(attempt_no) = abandoned_attempt_no
+                && let Some(attempt) = attempts.get_mut(&attempt_no)
+                && attempt.completed_at_ms.is_none()
+            {
+                attempt.completed_at_ms = Some(command.now_ms);
+                attempt.result = Some(EventDeliveryAttemptRecordResult::Retryable);
+                attempt.error_category = Some("lease_expired".to_string());
+                attempt.error_summary = Some(
+                    "Delivery lease expired before completion; remote outcome is unknown"
+                        .to_string(),
+                );
+                attempt.response_bytes_observed = Some(0);
+            }
+            attempts.insert(
+                claimed_delivery.attempt_count,
+                EventDeliveryAttemptRecord {
+                    delivery_id: delivery_id.clone(),
+                    attempt_no: claimed_delivery.attempt_count,
+                    started_at_ms: command.now_ms,
+                    completed_at_ms: None,
+                    latency_ms: None,
+                    result: None,
+                    http_status: None,
+                    error_category: None,
+                    error_summary: None,
+                    response_bytes_observed: None,
+                    worker_id: command.worker_id.clone(),
+                },
+            );
+            claimed.push(claimed_delivery);
         }
         Ok(claimed)
     }
@@ -1191,30 +1273,33 @@ impl EventRepoPort for MemoryEventStore {
         }
         let attempts = state
             .attempts
-            .entry(command.delivery_id.clone())
-            .or_default();
-        if attempts.contains_key(&command.attempt_no) {
+            .get_mut(&command.delivery_id)
+            .ok_or_else(|| {
+                EventRepoError::Storage(format!(
+                    "active attempt {} is missing for Delivery {}",
+                    command.attempt_no, command.delivery_id
+                ))
+            })?;
+        let attempt = attempts.get_mut(&command.attempt_no).ok_or_else(|| {
+            EventRepoError::Storage(format!(
+                "active attempt {} is missing for Delivery {}",
+                command.attempt_no, command.delivery_id
+            ))
+        })?;
+        if attempt.completed_at_ms.is_some() {
             return Err(EventRepoError::Conflict(format!(
-                "attempt {} already exists for Delivery {}",
+                "attempt {} is already complete for Delivery {}",
                 command.attempt_no, command.delivery_id
             )));
         }
-        attempts.insert(
-            command.attempt_no,
-            EventDeliveryAttemptRecord {
-                delivery_id: command.delivery_id.clone(),
-                attempt_no: command.attempt_no,
-                started_at_ms: command.started_at_ms,
-                completed_at_ms: command.completed_at_ms,
-                latency_ms: command.completed_at_ms - command.started_at_ms,
-                result: command.result,
-                http_status: command.http_status,
-                error_category: command.error_category.clone(),
-                error_summary: command.error_summary.clone(),
-                response_bytes_observed: command.response_bytes_observed,
-                worker_id: lease_worker_id(&command.expected_lease_owner).to_string(),
-            },
-        );
+        attempt.started_at_ms = command.started_at_ms;
+        attempt.completed_at_ms = Some(command.completed_at_ms);
+        attempt.latency_ms = Some(command.completed_at_ms - command.started_at_ms);
+        attempt.result = Some(command.result);
+        attempt.http_status = command.http_status;
+        attempt.error_category = command.error_category.clone();
+        attempt.error_summary = command.error_summary.clone();
+        attempt.response_bytes_observed = Some(command.response_bytes_observed);
         let result = {
             let delivery = state
                 .deliveries
@@ -1812,6 +1897,141 @@ fn target_id(
     format!("evtgt_{digest:x}")
 }
 
+fn backfill_group_provisioning_targets(
+    state: &mut MemoryState,
+    group_id: &str,
+    subscription_ids: &[String],
+    finalized_at_ms: u64,
+    env: &str,
+) -> Result<(), EventRepoError> {
+    let subscriptions = subscription_ids
+        .iter()
+        .map(|subscription_id| {
+            let stored = state.subscriptions.get(subscription_id).ok_or_else(|| {
+                EventRepoError::NotFound(format!(
+                    "active subscription {subscription_id} was not found"
+                ))
+            })?;
+            let revision = stored
+                .revisions
+                .get(&stored.record.current_revision)
+                .ok_or_else(|| {
+                    EventRepoError::Storage(format!(
+                        "subscription {subscription_id} current revision is missing"
+                    ))
+                })?;
+            Ok((
+                subscription_id.clone(),
+                revision.revision,
+                stored.record.created_at_ms,
+                revision.event_filters.clone(),
+            ))
+        })
+        .collect::<Result<Vec<_>, EventRepoError>>()?;
+    let mut events = state
+        .events
+        .values()
+        .filter(|event| {
+            event.env == env
+                && event.envelope.scope.group_id.as_deref() == Some(group_id)
+                && event.retention_until_ms > finalized_at_ms
+        })
+        .map(|event| {
+            Ok((
+                parse_timestamp_ms(&event.envelope.recorded_at)?,
+                event.clone(),
+            ))
+        })
+        .collect::<Result<Vec<_>, EventRepoError>>()?;
+    events.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.envelope.stream.key.cmp(&right.1.envelope.stream.key))
+            .then_with(|| {
+                left.1
+                    .envelope
+                    .stream
+                    .sequence
+                    .cmp(&right.1.envelope.stream.sequence)
+            })
+            .then_with(|| left.1.envelope.event_id.cmp(&right.1.envelope.event_id))
+    });
+
+    for (subscription_id, revision, created_at_ms, filters) in subscriptions {
+        let matching_events = events
+            .iter()
+            .filter(|(recorded_at_ms, event)| {
+                *recorded_at_ms >= created_at_ms
+                    && *recorded_at_ms <= finalized_at_ms
+                    && filters
+                        .iter()
+                        .any(|filter| event_filter_matches(filter, &event.envelope.event_type))
+            })
+            .collect::<Vec<_>>();
+        for (recorded_at_ms, event) in &matching_events {
+            let normal_target_id = target_id(
+                env,
+                &event.envelope.event_id,
+                &subscription_id,
+                revision,
+                EventFanoutTargetPurpose::Normal,
+            );
+            if state.targets.contains_key(&normal_target_id) {
+                continue;
+            }
+            state.targets.insert(
+                normal_target_id.clone(),
+                EventFanoutTargetRecord {
+                    target_id: normal_target_id,
+                    event_id: event.envelope.event_id.clone(),
+                    subscription_id: subscription_id.clone(),
+                    subscription_revision: revision,
+                    purpose: EventFanoutTargetPurpose::Normal,
+                    replay_request_id: None,
+                    replay_of_delivery_id: None,
+                    depends_on_target_id: None,
+                    status: EventFanoutTargetStatus::Pending,
+                    created_at_ms: *recorded_at_ms,
+                    materialized_at_ms: None,
+                    cancelled_at_ms: None,
+                    lease_owner: None,
+                    lease_until_ms: None,
+                    env: env.to_string(),
+                },
+            );
+            if let Some(stored_event) = state.events.get_mut(&event.envelope.event_id) {
+                stored_event.fanout_status = EventFanoutStatus::Pending;
+            }
+        }
+        for (recorded_at_ms, event) in matching_events {
+            let depends_on_target_id = resolve_causal_target(
+                state,
+                env,
+                event.envelope.causation_event_id.as_deref(),
+                &subscription_id,
+                revision,
+                *recorded_at_ms,
+            )?;
+            let normal_target_id = target_id(
+                env,
+                &event.envelope.event_id,
+                &subscription_id,
+                revision,
+                EventFanoutTargetPurpose::Normal,
+            );
+            let normal_target = state.targets.get_mut(&normal_target_id).ok_or_else(|| {
+                EventRepoError::Storage(format!(
+                    "backfilled normal target {normal_target_id} is missing"
+                ))
+            })?;
+            if normal_target.depends_on_target_id.is_none() {
+                normal_target.depends_on_target_id = depends_on_target_id;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn resolve_causal_target(
     state: &mut MemoryState,
     env: &str,
@@ -1932,12 +2152,6 @@ fn validate_claim(
 
 fn claim_owner(worker_id: &str) -> String {
     format!("{worker_id}#{}", uuid::Uuid::new_v4())
-}
-
-fn lease_worker_id(lease_owner: &str) -> &str {
-    lease_owner
-        .split_once('#')
-        .map_or(lease_owner, |(worker, _)| worker)
 }
 
 fn validate_materialization(command: &MaterializeFanoutTarget) -> Result<(), EventRepoError> {
@@ -2100,11 +2314,11 @@ fn validate_completion(command: &CompleteEventDeliveryAttempt) -> Result<(), Eve
         ));
     }
     let valid = match command.result {
-        bcs_service_api::port::repo::EventDeliveryAttemptRecordResult::Success => {
+        EventDeliveryAttemptRecordResult::Success => {
             command.next_status == EventDeliveryStatus::Succeeded
                 && command.next_attempt_at_ms.is_none()
         }
-        bcs_service_api::port::repo::EventDeliveryAttemptRecordResult::Retryable => {
+        EventDeliveryAttemptRecordResult::Retryable => {
             (command.next_status == EventDeliveryStatus::RetryWait
                 && command
                     .next_attempt_at_ms
@@ -2112,7 +2326,7 @@ fn validate_completion(command: &CompleteEventDeliveryAttempt) -> Result<(), Eve
                 || (command.next_status == EventDeliveryStatus::DeadLettered
                     && command.next_attempt_at_ms.is_none())
         }
-        bcs_service_api::port::repo::EventDeliveryAttemptRecordResult::Terminal => {
+        EventDeliveryAttemptRecordResult::Terminal => {
             command.next_status == EventDeliveryStatus::DeadLettered
                 && command.next_attempt_at_ms.is_none()
         }

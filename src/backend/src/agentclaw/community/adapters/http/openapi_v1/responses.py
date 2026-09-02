@@ -45,6 +45,12 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptNotEncodableError,
     StartupScriptTooLargeError,
 )
+from agentclaw.community.api.bot_config_manifest_service import (
+    MAX_DOCUMENT_BYTES,
+    ManifestNotEncodableError,
+    ManifestTooLargeError,
+    ManifestValidationError,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotAccessRefusedError,
     BotEditLockCheckError,
@@ -630,6 +636,18 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         409,
         "Startup script is not supported for this bot",
     ),
+    # Config manifest (issue #1469). The 422 is the all-or-nothing refusal, and
+    # it is one of only two errors on this surface that carry ``data``: the
+    # fixed message says a document was refused, and ``data.violations`` names
+    # each offending entry and the rule it broke. Those come from the caller's
+    # own document — locations and rule names — never from an internal path or
+    # another tenant's data, which is what the fixed-message rule protects.
+    ManifestValidationError: (422, "Config manifest is invalid"),
+    ManifestTooLargeError: (
+        413,
+        f"Config manifest exceeds the {MAX_DOCUMENT_BYTES}-byte limit",
+    ),
+    ManifestNotEncodableError: (400, "Config manifest is not valid UTF-8"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
@@ -784,6 +802,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillTooLargeError: 413101,
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
+    ManifestValidationError: 422109,
     LocalSkillRuntimeSyncError: 502102,
     SkillRuntimeNameConflictError: 409106,
     SkillEngineNotSupportedError: 409107,
@@ -967,6 +986,28 @@ def envelope_errors(
     return wrapper
 
 
+def _error_data(exc: Exception) -> object | None:
+    """The ``data`` block a failure carries, or ``None`` for the usual case.
+
+    Almost every error on this surface answers with a fixed message and a null
+    ``data`` — the message is contract, and anything caller- or
+    internal-specific stays out of it. Two failures are genuinely different:
+    they have a *structured* answer the caller needs in order to act, and it is
+    derived entirely from what that caller sent or already knows.
+
+    Named exception types rather than a duck-typed ``payload`` attribute, so
+    that admitting a third one is a deliberate line in this function instead of
+    something a new exception class can grant itself.
+    """
+    if isinstance(exc, SkillOfflineBlockedError):
+        return exc.impact
+    if isinstance(exc, ManifestValidationError):
+        # The all-or-nothing refusal. The fixed message says a document was
+        # rejected; this says which entries and why, in the caller's own terms.
+        return exc.as_payload()
+    return None
+
+
 def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | None:
     """The enveloped response for ``exc``, or ``None`` if it is not mapped.
 
@@ -992,6 +1033,6 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
                 message,
                 request,
                 code=ENVELOPE_ERROR_CODES.get(error_type),
-                data=(exc.impact if isinstance(exc, SkillOfflineBlockedError) else None),
+                data=_error_data(exc),
             )
     return None

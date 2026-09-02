@@ -28,12 +28,14 @@ services:
     image: baas:local
     environment:
       SERVER_ENV: prod
+      # COMMUNITY_DEPLOY selects the application-community.yaml overlay.
+      COMMUNITY_DEPLOY: community
       DATABASE_URL: "${DATABASE_URL:-mysql+aiomysql://baas:baaspass@mariadb:3306/baas_test?charset=utf8mb4}"
       REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
       BAAS_PORT: "${BAAS_PORT:-8888}"
-      # prod overlay references these under strict env expansion; inject test
-      # values so config loading succeeds (aliyun_ack sandbox is a lazy factory,
-      # never contacted during boot/health).
+      # community overlay references these under strict env expansion; inject
+      # test values so config loading succeeds (aliyun_ack sandbox is a lazy
+      # factory, never contacted during boot/health).
       ACK_SERVER: "${ACK_SERVER:-https://ack-test.example.com}"
       ACK_TOKEN: "${ACK_TOKEN:-ack-test-token}"
       DEFAULT_IMAGE: "${DEFAULT_IMAGE:-openclaw:latest}"

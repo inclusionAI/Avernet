@@ -63,6 +63,7 @@ See `configs/application.yaml`. Environment-specific overlays live in
 | Variable | Purpose |
 |----------|---------|
 | `SERVER_ENV` | Environment overlay (dev/prod/etc.) |
+| `COMMUNITY_DEPLOY` | When set, its value replaces `SERVER_ENV` for naming the `application-<value>.yaml` overlay (community deployments set `COMMUNITY_DEPLOY=community`) |
 | `SOFAPY_CONFIG_OVERLAY` | Named overlay `configs/overlays/{name}.yaml` |
 | `SANDBOXPROXY_CONFIG_PATH` | Explicit config path (dir or file) |
 | `SANDBOXPROXY_PORT` | Override listen port |

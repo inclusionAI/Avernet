@@ -167,7 +167,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     )
 
 
-def test_group_opening_message_contract_is_state_machine_scoped_and_nullable() -> None:
+def test_group_opening_message_contract_is_normal_group_scoped_and_nullable() -> None:
     contract = load_contract(CONTRACT_ROOT)
     request_variants = contract["paths"][GROUPS_PATH]["post"]["requestBody"][
         "content"
@@ -203,6 +203,25 @@ def test_group_opening_message_contract_is_state_machine_scoped_and_nullable() -
         ]["schema"]["properties"]["code"]["const"]
         == 20_000
     )
+
+
+def test_group_create_response_exposes_optional_initial_manager_run() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    created = contract["paths"][GROUPS_PATH]["post"]["responses"]["201"]["content"][
+        "application/json"
+    ]["schema"]["properties"]["data"]
+    collaboration_detail = created["oneOf"][0]
+    assert collaboration_detail["properties"]["initial_session_id"]["type"] == "string"
+    initial_run = collaboration_detail["properties"]["initial_run"]
+    assert set(initial_run["required"]) == {
+        "run_id",
+        "bot_uuid",
+        "activity_kind",
+        "state",
+        "started_at",
+    }
+    assert initial_run["properties"]["activity_kind"]["enum"] == ["group_bootstrap"]
+    assert set(initial_run["properties"]["state"]["enum"]) == {"running", "failed"}
 
 
 def test_group_create_inline_event_subscriptions_cannot_supply_scope() -> None:

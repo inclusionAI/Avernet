@@ -414,9 +414,14 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: request-body fields rather than a ``bot_id`` parameter, adding two more
 #: operations without changing the path/query counts.
 #:
-#: download-dir (openapi v1 resources) adds one more path-addressed operation:
-#: 146 → 147.
-_BOT_ID_PLACEMENT = {"path": 147, "query": 1, "none": 98}
+#: ``path`` then moved 146 → 150 with the four config-manifest operations
+#: (``GET``/``PUT``/``DELETE …/{bot_id}/config-manifest`` and
+#: ``GET …/config-manifest/capabilities``). Each addresses one bot and
+#: resolves it as the named user's, so all four are bot-path-addressed like
+#: the rest of the surface. ``none`` is 97 because task template execution
+#: is internal to ``execute`` and has no separate route. Directory download
+#: then adds one more path-addressed operation: 150 → 151.
+_BOT_ID_PLACEMENT = {"path": 151, "query": 1, "none": 97}
 
 
 def _schema() -> dict:
@@ -549,11 +554,13 @@ def test_the_pinned_number_of_operations_take_it():
     # operations, Group 4 adds three Bot-addressed Reference operations plus
     # one account-level manual SC Public Sync operation, and Group 5 adds the
     # Offline impact and command operations. All twelve are user-scoped,
-    # bringing the combined surface to 218. The public static-template mirror
-    # adds one more user-scoped operation, bringing the current surface to 219.
-    # download-dir (openapi v1 resources) takes user_id like every other
-    # resources operation: 219 → 220.
-    assert len(taking) == 220
+    # bringing the combined surface to 218. The public task execute operation is the single task submission surface;
+    # static-template execution is selected inside execute rather than exposed as a route. The config
+    # manifest adds four Bot-addressed operations — read, replace, clear, and
+    # the capability read — all user-scoped, bringing it to 222 after removing
+    # the obsolete run-template route. Directory download adds one more
+    # user-scoped resource operation, bringing the current surface to 223.
+    assert len(taking) == 223
 
 
 def test_the_exempt_operations_take_none():

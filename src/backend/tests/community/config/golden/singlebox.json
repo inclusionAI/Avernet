@@ -66,6 +66,9 @@
     "bcsfuse": {
       "base_url": "https://bcsfuse-pre.teamclaw.com"
     },
+    "bot_config_manifest": {
+      "fetch_transport_allowlist": []
+    },
     "bot_oss_config": {
       "access_key_secret": "oss_m_manual_agentclaw_botdata",
       "bucket_name": "antsys-agentclaw-dev",

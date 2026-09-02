@@ -16,6 +16,9 @@ from agentclaw.community.core.repository.protocols.bot.bot import (
     TemplateRepository,
     RenderScreenRepository,
 )
+from agentclaw.community.core.repository.protocols.bot.config_manifest import (
+    BotConfigManifestRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot.friend import (
     BotFriendRepositoryProtocol,
 )
@@ -35,6 +38,7 @@ __all__ = [
     "BotAppGrantRepositoryProtocol",
     "BotCollabLockRepositoryProtocol",
     "BotCollabLogRepositoryProtocol",
+    "BotConfigManifestRepositoryProtocol",
     "BotFriendRepositoryProtocol",
     "BotRepository",
     "BotRestartLockRepositoryProtocol",

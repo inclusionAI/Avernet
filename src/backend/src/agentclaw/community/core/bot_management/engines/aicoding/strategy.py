@@ -11,7 +11,7 @@ import json
 from copy import deepcopy
 import threading
 import uuid
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Mapping, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
@@ -63,6 +63,12 @@ logger = get_logger()
 def _as_mapping(value: Any) -> Mapping[str, Any] | None:
     """Coerce a raw bot-record field to a read-only mapping, or None."""
     return value if isinstance(value, Mapping) else None
+
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        BotRuntimeProjectorProtocol,
+    )
 
 
 def _validate_application_coding_config(
@@ -715,6 +721,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         *,
         mcp_sync: Any = None,
         skill_set_factory: Any = None,
+        runtime_reconciler: "BotRuntimeProjectorProtocol | None" = None,
         template_service: Any = None,
     ) -> bool:
         """Refresh AICoding restart authorization and runtime skill symlinks.
@@ -743,58 +750,11 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             import asyncio
 
             refresh_succeeded = True
-            if mcp_sync is not None:
-                try:
-                    async def _do_mcp_sync() -> tuple[dict, dict | None]:
-                        scope_result = await mcp_sync.refresh_mcp_scope(
-                            user_id=effective_entity_id,
-                            entity_id=effective_entity_id,
-                            bot_id=ctx.bot_id,
-                            entity_type=effective_entity_type,
-                            engine_type=effective_engine,
-                        )
-                        if not scope_result.get("success"):
-                            return scope_result, None
-
-                        detail_result = await mcp_sync.sync_mcp_details(
-                            user_id=effective_entity_id,
-                            entity_id=effective_entity_id,
-                            bot_id=ctx.bot_id,
-                            entity_type=effective_entity_type,
-                            engine_type=effective_engine,
-                        )
-                        return scope_result, detail_result
-
-                    scope_result, detail_result = asyncio.run(_do_mcp_sync())
-                    if not scope_result.get("success"):
-                        refresh_succeeded = False
-                        logger.error(
-                            "[aicoding.restart] MCP scope resync failed: "
-                            "bot_id=%s, engine_type=%s, error=%s",
-                            ctx.bot_id, effective_engine, scope_result.get("error"),
-                        )
-                    elif detail_result and not detail_result.get("success"):
-                        refresh_succeeded = False
-                        logger.error(
-                            "[aicoding.restart] MCP detail resync failed: "
-                            "bot_id=%s, engine_type=%s, error=%s",
-                            ctx.bot_id, effective_engine, detail_result.get("error"),
-                        )
-                    else:
-                        logger.info(
-                            "[aicoding.restart] MCP resync succeeded: "
-                            "bot_id=%s, engine_type=%s",
-                            ctx.bot_id, effective_engine,
-                        )
-                except Exception as mcp_error:
-                    refresh_succeeded = False
-                    logger.error(
-                        "[aicoding.restart] MCP resync error: "
-                        "bot_id=%s, engine_type=%s, error=%s",
-                        ctx.bot_id, effective_engine, mcp_error,
-                        exc_info=True,
-                    )
-
+            skill_set_service = None
+            logger.info(
+                "[aicoding.restart] begin restart resync: bot_id=%s, engine_type=%s, entity_id=%s, entity_type=%s",
+                ctx.bot_id, effective_engine, effective_entity_id, effective_entity_type,
+            )
             if skill_set_factory is not None:
                 try:
                     skill_set_service = skill_set_factory.create(
@@ -804,10 +764,65 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         entity_type=effective_entity_type,
                         engine_type=effective_engine,
                     )
+                    logger.info(
+                        "[aicoding.restart] skill set service created for restart resync: bot_id=%s, engine_type=%s",
+                        ctx.bot_id, effective_engine,
+                    )
+                except Exception as skill_error:
+                    refresh_succeeded = False
+                    logger.error(
+                        "[aicoding.restart] skill set service create error: "
+                        "bot_id=%s, engine_type=%s, error=%s; continue with remaining restart resync steps",
+                        ctx.bot_id, effective_engine, skill_error,
+                        exc_info=True,
+                    )
+
+            if runtime_reconciler is not None:
+                try:
+                    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+                        ProjectionScope,
+                    )
+
+                    async def _do_mcp_projection() -> None:
+                        await runtime_reconciler.project_mcp_and_cli(
+                            bot_id=ctx.bot_id,
+                            owner_id=effective_entity_id,
+                            scope=ProjectionScope(mcp=True),
+                        )
+
+                    asyncio.run(_do_mcp_projection())
+                    logger.info(
+                        "[aicoding.restart] MCP projection resync succeeded: "
+                        "bot_id=%s, engine_type=%s",
+                        ctx.bot_id, effective_engine,
+                    )
+                except Exception as mcp_error:
+                    refresh_succeeded = False
+                    logger.error(
+                        "[aicoding.restart] MCP projection resync failed: "
+                        "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
+                        ctx.bot_id, effective_engine, mcp_error,
+                        exc_info=True,
+                    )
+            else:
+                refresh_succeeded = False
+                logger.error(
+                    "[aicoding.restart] MCP projection resync skipped: "
+                    "bot_id=%s, engine_type=%s, error=%s; continue with skill sync",
+                    ctx.bot_id, effective_engine,
+                    "runtime reconciler unavailable",
+                )
+
+            if skill_set_service is not None:
+                try:
+                    logger.info(
+                        "[aicoding.restart] start skill symlink resync after MCP stage: bot_id=%s, engine_type=%s",
+                        ctx.bot_id, effective_engine,
+                    )
                     # ``project_skills`` is async so that both halves of the
                     # capability boundary are awaited the same way; this is a
                     # worker thread with no running loop, so it bridges the
-                    # same way ``_do_mcp_sync`` above does.
+                    # same way ``_do_mcp_projection`` above does.
                     skill_synced = bool(asyncio.run(skill_set_service.project_skills()))
                     if skill_synced:
                         logger.info(
@@ -820,14 +835,14 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                         refresh_succeeded = False
                         logger.error(
                             "[aicoding.restart] skill symlink sync failed: "
-                            "bot_id=%s, engine_type=%s",
+                            "bot_id=%s, engine_type=%s; continue without clearing restart marker",
                             ctx.bot_id, effective_engine,
                         )
                 except Exception as skill_error:
                     refresh_succeeded = False
                     logger.error(
                         "[aicoding.restart] skill symlink sync error: "
-                        "bot_id=%s, engine_type=%s, error=%s",
+                        "bot_id=%s, engine_type=%s, error=%s; continue without clearing restart marker",
                         ctx.bot_id, effective_engine, skill_error,
                         exc_info=True,
                     )

@@ -21,7 +21,7 @@ use bcs_service_api::application::v1::{
     require_authenticated_user, require_human, select_principal,
 };
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
-use bcs_service_api::types::{EventActor, EventActorType};
+use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, AuthenticatedHumanCaller, BotRegistryCoreService,
     CollaborationDefinitionRef, CollaborationRuntimeError, CollaborationRuntimeService,
@@ -583,37 +583,6 @@ impl GroupServiceImpl {
         Ok(())
     }
 
-    /// When the originator is a caller-owned Bot distinct from the caller,
-    /// the driver must be reachable from that originator bot (public or a
-    /// friend of it). Skipped when the originator is the human caller itself
-    /// — the driver is ungated against the caller by design.
-    async fn ensure_originator_can_reach_driver(
-        &self,
-        originator_bot_id: &str,
-        driver_bot_id: &str,
-    ) -> Result<(), ApplicationError> {
-        let driver = self.load_bot(driver_bot_id).await?;
-        if driver.status == ActorStatus::Hidden {
-            return Err(ApplicationError::forbidden(format!(
-                "Bot '{driver_bot_id}' is hidden and cannot be invited into a group"
-            )));
-        }
-        if driver.capabilities.visibility == "public" {
-            return Ok(());
-        }
-        if self
-            .friends
-            .try_are_friends(originator_bot_id, driver_bot_id)
-            .await
-            .map_err(map_service_error)?
-        {
-            return Ok(());
-        }
-        Err(ApplicationError::forbidden(format!(
-            "Driver '{driver_bot_id}' is not reachable from originator '{originator_bot_id}'"
-        )))
-    }
-
     async fn can_read_group(
         &self,
         principal: &Principal,
@@ -1046,7 +1015,7 @@ impl GroupServiceImpl {
         mut request: CreateCollaborationGroup,
         group_id: Option<String>,
         provisioning: bool,
-    ) -> Result<(GroupDetail, Option<String>), ApplicationError> {
+    ) -> Result<(GroupDetail, Option<String>, Option<bcs_service_api::InitialGroupRun>), ApplicationError> {
         let originator = request
             .originator
             .take()
@@ -1054,22 +1023,13 @@ impl GroupServiceImpl {
         self.authorize_originator(&principal, &originator)
             .await?;
         // Structural validity only: the driver must be a registered Bot Actor.
-        // This is NOT a caller↔driver relationship check (that was deliberately
-        // dropped); callers may drive bots they do not own, as long as the bot
-        // exists and is a Bot.
+        // The driver↔originator reachability gate runs in the core loop
+        // (GroupManagement::create_group), where every Bot participant —
+        // including the driver when it differs from the originator — is
+        // anchored on the originator (public, owned-by-human, or a friend of a
+        // bot originator).
         self.ensure_driver_is_registered_bot(&request.driver_bot_uuid)
             .await?;
-        // The driver is ungated against the caller (caller↔driver is not
-        // checked). Only when the originator is a caller-owned Bot distinct
-        // from both the caller and the driver must the driver be reachable
-        // from that originator (an originator that is itself the driver is
-        // self-reachable; a protected bot cannot friend itself).
-        if originator != principal.actor_id()
-            && originator != request.driver_bot_uuid
-        {
-            self.ensure_originator_can_reach_driver(&originator, &request.driver_bot_uuid)
-                .await?;
-        }
         if request
             .participants
             .iter()
@@ -1109,13 +1069,7 @@ impl GroupServiceImpl {
         let (strategy, routing_policy, state_machine) =
             map_create_collaboration(request.collaboration.clone());
         if let Some(opening_message) = &request.opening_message {
-            if strategy != GroupStrategy::StateMachine {
-                return Err(ApplicationError::invalid(
-                    "invalid_opening_message",
-                    "opening_message is only supported for StateMachine Groups",
-                ));
-            }
-            opening_message.validate().map_err(|error| {
+            opening_message.validate_for(opening_message_scope(strategy)).map_err(|error| {
                 ApplicationError::invalid("invalid_opening_message", error.to_string())
             })?;
         }
@@ -1238,6 +1192,7 @@ impl GroupServiceImpl {
             .await
             .map_err(map_group_error)?;
         let initial_session_id = created.latest_running_session_id.clone();
+        let initial_run = created.initial_run.clone();
 
         if let Some(state_machine) = state_machine {
             let mut response_state_machine = state_machine.clone();
@@ -1319,7 +1274,7 @@ impl GroupServiceImpl {
                 let detail = self
                     .project_detail_with_state_machine(group, Some(response_state_machine))
                     .await?;
-                return Ok((detail, initial_session_id));
+                return Ok((detail, initial_session_id, initial_run));
             }
 
             let session_id = match created.latest_running_session_id.clone() {
@@ -1387,6 +1342,7 @@ impl GroupServiceImpl {
                     definition: None,
                     definition_ref: None,
                     participant_bindings: None,
+                    opening_message_override: None,
                     input: session.input.unwrap_or(Value::Null),
                     caller_id: Some(principal_actor_id),
                     authenticated_human,
@@ -1418,7 +1374,7 @@ impl GroupServiceImpl {
             let detail = self
                 .project_detail_with_state_machine(group, Some(response_state_machine))
                 .await?;
-            return Ok((detail, initial_session_id));
+            return Ok((detail, initial_session_id, initial_run));
         }
 
         let group = self
@@ -1429,7 +1385,7 @@ impl GroupServiceImpl {
             .ok_or_else(|| {
                 ApplicationError::internal("created Group disappeared before projection")
             })?;
-        Ok((self.project_detail(group).await?, initial_session_id))
+        Ok((self.project_detail(group).await?, initial_session_id, initial_run))
     }
 
     async fn rollback_state_machine_creation(
@@ -1508,6 +1464,8 @@ impl GroupServiceImpl {
         Ok(CreateGroupOutcome {
             group: self.project_detail(group).await?,
             created: result.created,
+            initial_session_id: None,
+            initial_run: None,
             event_subscriptions: Vec::new(),
         })
     }
@@ -1607,14 +1565,18 @@ impl GroupServiceImpl {
         principal: Principal,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
         match command.group {
-            CreateGroupSpec::Collaboration(request) => Ok(CreateGroupOutcome {
-                group: self
+            CreateGroupSpec::Collaboration(request) => {
+                let (group, initial_session_id, initial_run) = self
                     .create_collaboration(principal, request, None, false)
-                    .await?
-                    .0,
-                created: true,
-                event_subscriptions: Vec::new(),
-            }),
+                    .await?;
+                Ok(CreateGroupOutcome {
+                    group,
+                    created: true,
+                    initial_session_id,
+                    initial_run,
+                    event_subscriptions: Vec::new(),
+                })
+            }
             CreateGroupSpec::DirectMessage(request) => {
                 self.create_dm(principal, request, None, false).await
             }
@@ -1850,11 +1812,13 @@ impl GroupService for GroupServiceImpl {
             CreateGroupSpec::Collaboration(request) => self
                 .create_collaboration(principal, request, Some(group_id.clone()), true)
                 .await
-                .map(|(group, initial_session_id)| {
+                .map(|(group, initial_session_id, initial_run)| {
                     (
                         CreateGroupOutcome {
                             group,
                             created: true,
+                            initial_session_id: initial_session_id.clone(),
+                            initial_run,
                             event_subscriptions: Vec::new(),
                         },
                         initial_session_id,
@@ -2056,14 +2020,10 @@ impl GroupService for GroupServiceImpl {
             ));
         }
         if let Some(opening_message) = &command.patch.opening_message {
-            if group.group_strategy != GroupStrategy::StateMachine {
-                return Err(ApplicationError::invalid(
-                    "invalid_opening_message",
-                    "opening_message is only supported for StateMachine Groups",
-                ));
-            }
             if let Some(opening_message) = opening_message {
-                opening_message.validate().map_err(|error| {
+                opening_message
+                    .validate_for(opening_message_scope(group.group_strategy))
+                    .map_err(|error| {
                     ApplicationError::invalid("invalid_opening_message", error.to_string())
                 })?;
             }
@@ -2417,6 +2377,13 @@ impl GroupService for GroupServiceImpl {
             }
             Err(error) => Err(map_group_error(error)),
         }
+    }
+}
+
+fn opening_message_scope(strategy: GroupStrategy) -> OpeningMessageScope {
+    match strategy {
+        GroupStrategy::StateMachine => OpeningMessageScope::StateMachineRun,
+        GroupStrategy::Chat | GroupStrategy::ManagerWorker => OpeningMessageScope::Session,
     }
 }
 

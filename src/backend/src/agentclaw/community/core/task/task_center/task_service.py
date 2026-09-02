@@ -34,17 +34,12 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskNodePatch,
     TaskOpResult,
-    TaskSourceType,
     TaskSpec,
     TaskType,
 )
-from agentclaw.community.core.task.domain.requests import (
-    RequestContext,
-    RequestGoal,
-    RequestMetadata,
-    RequestTaskSpec,
-    TaskInfoRequest,
-)
+from agentclaw.community.core.task.domain.requests import TaskInfoRequest
+from agentclaw.community.core.task.domain.errors import TaskStateError
+
 from agentclaw.community.core.task.repository.types import (
     TaskInfoRecord,
     TaskNodeRecord,
@@ -61,37 +56,13 @@ from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 logger = logging.getLogger("task.service")
 
 
-def _parse_status_filter(status: str | None) -> list[Status] | None:
-    """逗号分隔的运行时态 ``status`` 字符串 -> ``list[Status]``。
-
-    供 list_tasks / list_tasks_page 把 HTTP query 的多值("PLANNING,RUNNING")解析为运行时态集合，
-    交给 repository 做 SQL IN 过滤。None/空串/全空段 -> None(不过滤)。
-    非法 token 理论上由 router 校验拦截(返回 400)，此处假设已校验，不二次校验。
-    """
-    if not status or not status.strip():
-        return None
-    parts = [t.strip().upper() for t in status.split(",") if t.strip()]
-    if not parts:
-        return None
-    return [Status(p) for p in parts]
+from agentclaw.community.core.task.task_center.task_service_support import (
+    STATIC_PLAN_TEMPLATES,
+    parse_status_filter,
+    resolve_coop_collab_mode,
+)
 
 
-def _resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
-    """Resolve the BCS collaboration mode from task execution metadata."""
-    if has_yaml:
-        return "state_machine"
-    if group_kind in ("chat", "manager_worker"):
-        return group_kind
-    if group_kind is None:
-        return "manager_worker"
-    if group_kind == "state_machine":
-        raise ValueError("group_kind=state_machine 需要 yaml 定义")
-    raise ValueError(f"未知 group_kind: {group_kind!r}")
-
-
-# TaskService 结构化实现 api.task.task_service.TaskServiceProtocol —— 依 api/README 四层
-# 契约,core/ 不 import api/(见 test_service_api_conformance.py:core 服务不继承 api Protocol,
-# 由 @runtime_checkable 的 isinstance/issubclass 做结构化一致性校验)。此处置空基类即可。
 class TaskService:
     """对外 facade;内部持 ExecutionEngine 编排核 + TaskGraphService + Harness(可选)+ TaskLoopCallback。
 
@@ -191,74 +162,116 @@ class TaskService:
             notify_messages_provider=self._notify_provider,
         )
 
-    async def run_template(self, template_id: str, inputs: dict[str, Any], *,
-                           owner_user_id: str, owner_bot_id: str,
-                           auto_advance: bool | None = None,
-                           owner_account_id: str | None = None) -> TaskOpResult:
-        """Load and validate a static template, then enter the existing execute path."""
-        from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
-        logger.info(
-            "[task][template-run] start template=%s owner_bot_id=%s input_keys=%s",
-            template_id,
-            owner_bot_id,
-            sorted(inputs),
+    def _resolve_static_plan_template_id(self, request: "TaskInfoRequest") -> str | None:
+        """内容路由:按 ``task_spec`` 的 title/instruction/objective 命中已注册静态模板的关键字 →
+        返回 template_id;否则返回 ``None``(跳出内容路由,走默认 dynamic planner,LLM 自发现 plan)。
+        调用方不感知"模板/``template_input``"任何字段,也不存在"调用方指定模板"的契约——
+        ``static_plan_id`` 仅作 materialize 后写回 ``execution_config`` 的内部落库信号,供 engine 识别走预置
+        plan runtime,不是对外选择入口。今天仅 ``okr-implementation`` 一个模板;新增模板在模块顶部
+        ``STATIC_PLAN_TEMPLATES`` 注册。
+        """
+        text_parts = (
+            request.task_spec.metadata.title,
+            request.task_spec.metadata.instruction,
+            request.task_spec.goal.objective,
         )
+        text = " ".join(p for p in text_parts if p).lower()
+        for template_id, keywords in STATIC_PLAN_TEMPLATES:
+            if any(keyword.lower() in text for keyword in keywords):
+                return template_id
+        return None
+
+    def _materialize_static_plan_if_needed(self, request: "TaskInfoRequest") -> "TaskInfoRequest":
+        """Fold static-plan template loading into execute (Rule 22: one public API).
+
+        ``execute`` 入口统一处理 "动态任务 + 预置模板 plan" 两种 plan 源:
+        - 按 ``task_spec`` 的 title/instruction/objective 关键字命中已注册模板(``okr-implementation``) → 加载该模板
+        - 命中 → 加载 yaml 校验 input/bindings → 把 ``static_plan_id``/``static_plan_yaml``/
+          ``template_input`` 补进 execution_config,engine 内经 ``_static_runtime`` 走预置 plan runtime
+          (与 LLM planner 路径等价);调用方原始 task_spec 原样保留,不合成占位
+        - 未命中且 ``task_type=STATIC_PLAN`` 显式要预置模板 → 抛 ``TaskStateError``(→422)
+        - 未命中(默认 dynamic) → 返回 request 不变,execute 内 ``_static_runtime`` 取不到 yaml,
+          自然走 LLM planner 自发现 plan
+
+        调用方不感知"模板/``template_input``"任何字段,也不存在"调用方指定模板"的契约——``static_plan_id``
+        仅作 materialize 后写回 ``execution_config`` 的内部落库信号;调用方只需提交一个任务 + 业务语义,
+        无需关心 plan 是预置还是 planner 生成(都是动态任务)。
+        """
+        from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
+        cfg = request.execution_config
+        template_id = self._resolve_static_plan_template_id(request)
+        if not template_id:
+            if cfg.get("task_type") == TaskType.STATIC_PLAN:
+                raise TaskStateError(
+                    "static plan template could not be selected: include an OKR-related task_spec "
+                    "so the content-router matches a registered template"
+                )
+            return request  # 内容未命中任何预置模板 → 走默认 dynamic planner(LLM 自发现 plan)
         template_dir = Path(__file__).resolve().parents[1] / "task_plan" / "plans"
-        template_path = template_dir / f"{template_id}.yaml"
+        inputs = dict(cfg.get("template_input") or {})
+        _obj = request.task_spec.goal.objective
+        _inst = request.task_spec.metadata.instruction
+        _title = request.task_spec.metadata.title
+        logger.info(
+            "[task][template-run][DIAG] materialize enter template_id=%s task_type=%s cfg_static_plan_id=%s "
+            "cfg_template_input=%s objective=%r instruction=%r title=%r",
+            template_id, cfg.get("task_type"), cfg.get("static_plan_id"), dict(inputs), _obj, _inst, _title,
+        )
         try:
             definition = StaticPlanDefinition.from_file(template_id, template_dir)
+            logger.info(
+                "[task][template-run][DIAG] definition parsed template_id=%s input_schema=%s",
+                template_id, dict(definition.input_schema),
+            )
+            for _name, _schema in (definition.input_schema or {}).items():
+                _required = bool(_schema.get("required")) if isinstance(_schema, dict) else False
+                _cur = inputs.get(_name)
+                logger.info(
+                    "[task][template-run][DIAG] fill check name=%s required=%s cur=%r require_fill=%s",
+                    _name, _required, _cur, (_required and _cur in (None, "")),
+                )
+                if _required and _cur in (None, ""):
+                    _fallback = next(
+                        (t for t in (_obj, _inst, _title) if t),
+                        "",
+                    )
+                    logger.info(
+                        "[task][template-run][DIAG] fill apply name=%s fallback=%r",
+                        _name, _fallback,
+                    )
+                    if _fallback:
+                        inputs[_name] = _fallback
+            logger.info(
+                "[task][template-run][DIAG] pre-validate inputs=%s",
+                sorted(inputs),
+            )
             definition.validate_input(inputs)
             definition.validate_bindings()
+        except TaskStateError:
+            raise
         except Exception as exc:
             logger.exception(
                 "[task][template-run] validation failed template=%s exc_type=%s",
-                template_id,
-                type(exc).__name__,
+                template_id, type(exc).__name__,
             )
-            raise
+            raise TaskStateError(f"static plan template validation failed: {exc}") from exc
         logger.info(
             "[task][template-run] validated template=%s nodes=%s entry_bot_id=%s",
             template_id,
-            [node.node_id for node in definition.nodes],
+            [n.node_id for n in definition.nodes],
             definition.entry_bot_id,
         )
-        plan_yaml = template_path.read_text(encoding="utf-8")
-        request = TaskInfoRequest(
-            task_spec=RequestTaskSpec(
-                metadata=RequestMetadata(
-                    title=template_id,
-                    instruction=f"运行静态模板 {template_id}",
-                ),
-                context=RequestContext(
-                    background="",
-                    extend_props={"template_input": dict(inputs)},
-                ),
-                goal=RequestGoal(objective=template_id),
-            ),
-            source_type=TaskSourceType.API,
-            owner_user_id=owner_user_id,
-            owner_bot_id=owner_bot_id,
-            execution_config={
-                "task_type": TaskType.STATIC_PLAN,
-                "static_plan_id": template_id,
-                "static_plan_yaml": plan_yaml,
-                "template_input": dict(inputs),
-                "static_auto_report": auto_advance,
-                # 触发者账号(DingTalk account_id);engine notify 终端节点取此处 recipient 发钉钉,
-                # 免去硬编码兜底。内部 /api/v1 路由由 get_current_user→user.operatorName 注入。
-                "owner_account_id": owner_account_id,
-            },
-        )
-        result = await self.execute(request)
-        logger.info(
-            "[task][template-run] submitted template=%s task=%s success=%s run_id=%s error=%s",
-            template_id,
-            result.task_id,
-            result.success,
-            result.run_id,
-            result.error,
-        )
-        return result
+        yaml_path = template_dir / f"{template_id}.yaml"
+        patched_cfg = dict(cfg)
+        patched_cfg.setdefault("static_plan_id", template_id)
+        patched_cfg.setdefault("static_plan_yaml", yaml_path.read_text(encoding="utf-8"))
+        # 兜底补齐后的 inputs 落回(即便调用方传了空 template_input 也覆盖,避免 setdefault 丢值)
+        patched_cfg["template_input"] = inputs
+        # 固定 plan 与动态 plan 等价:这里只把"提前固化的 yaml plan"补进 execution_config,
+        # 不自行合成任何占位 task_spec。调用方原始 task_spec(title/instruction/objective/
+        # context.background/acceptances)保留不动,与走 LLM planner 的动态任务在 taskinfo
+        # 封装上完全一致——唯一差别只是 plan 源:yaml 预置 vs planner 自发现。
+        return replace(request, execution_config=patched_cfg)
 
     @property
     def callback(self) -> TaskLoopCallback:
@@ -298,6 +311,7 @@ class TaskService:
         调用方经 ``get_task_dashboard`` 轮询观察推进。后台任务异常经 done_callback 记 log
         (不向调用方抛;图停在中间态由 harness 旁路巡检兜底复位)。"""
         request = self._normalize_owner_bot_id(request)
+        request = self._materialize_static_plan_if_needed(request)
         task_id = self._task_id_provider()
         task_info = request.to_task_info(task_id)
         if self._task_info_repo is not None:
@@ -330,13 +344,6 @@ class TaskService:
             return await self._run_workflow(task_id, request, task_info, graph.run_id)
         if task_type == TaskType.YAML:
             return await self._run_yaml(task_id, request, task_info, graph.run_id)
-        if task_type == TaskType.STATIC_PLAN:
-            if self._harness is not None:
-                self._harness.register(task_id)
-            bg = asyncio.create_task(self._engine.on_execute(task_id))
-            self._bg_tasks.add(bg)
-            bg.add_done_callback(self._on_bg_done)
-            return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
         if task_type == TaskType.BBS:
             return await self._run_bbs(task_id, request, task_info, graph.run_id)
 
@@ -412,7 +419,7 @@ class TaskService:
                 compose_bot_identity(request.owner_bot_id, request.owner_user_id),
                 *ec.get("participant_bot_ids", []),
             ],
-            collab_mode=_resolve_coop_collab_mode(has_yaml, ec.get("group_kind")),
+            collab_mode=resolve_coop_collab_mode(has_yaml, ec.get("group_kind")),
             group_name=ec.get("group_name", f"task-{task_id}"),
             members_info=[],
             extend_props={
@@ -855,7 +862,7 @@ class TaskService:
         """列持久化 ``task_info`` 记录,可选按状态(逗号分隔的运行时态集合)和 owner 过滤。"""
         if self._task_info_repo is None:
             return []
-        statuses = _parse_status_filter(status)
+        statuses = parse_status_filter(status)
         records = self._task_info_repo.list_records(statuses, owner_user_id=owner_user_id)
         return self._enrich_task_owner_display(records)
 
@@ -869,7 +876,7 @@ class TaskService:
         """列持久化 ``task_info`` 记录的一页(1-based),可选按状态(逗号分隔的运行时态集合)和 owner 过滤。"""
         if self._task_info_repo is None:
             return [], 0
-        statuses = _parse_status_filter(status)
+        statuses = parse_status_filter(status)
         records, total = self._task_info_repo.list_records_page(
             statuses, owner_user_id=owner_user_id, page=page, page_size=page_size
         )
@@ -960,3 +967,4 @@ class TaskService:
 def run_execute(facade: TaskService, request: TaskInfoRequest) -> TaskOpResult:
     """同步执行 ``execute``(无事件循环依赖的调用方/单测用)。"""
     return asyncio.new_event_loop().run_until_complete(facade.execute(request))
+

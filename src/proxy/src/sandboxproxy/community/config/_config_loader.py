@@ -62,7 +62,10 @@ class ConfigLoader:
         base = _load_yaml(base_path) if base_path is not None else {}
         applied: list[str] = []
 
-        env = os.getenv("SERVER_ENV", "").strip()
+        # COMMUNITY_DEPLOY, when set, wins over SERVER_ENV for the env overlay:
+        # its value names application-<value>.yaml, so a community deployment
+        # (COMMUNITY_DEPLOY=community) loads application-community.yaml.
+        env = _resolve_env_overlay_name()
         overlay_path = _resolve_overlay_path(env) if env else None
         if overlay_path and overlay_path.exists():
             base = _merge(base, _load_yaml(overlay_path))
@@ -117,6 +120,20 @@ def _resolve_base_path() -> Path | None:
     if cwd_path.exists():
         return cwd_path
     return None
+
+
+def _resolve_env_overlay_name() -> str:
+    """Return the suffix of the ``application-<suffix>.yaml`` env overlay.
+
+    ``COMMUNITY_DEPLOY`` wins when set: its value names the overlay for a
+    community deployment (e.g. ``COMMUNITY_DEPLOY=community`` loads
+    ``application-community.yaml``) regardless of ``SERVER_ENV``. Falls back
+    to the legacy ``SERVER_ENV`` behaviour when it is unset.
+    """
+    community_deploy = os.getenv("COMMUNITY_DEPLOY", "").strip()
+    if community_deploy:
+        return community_deploy
+    return os.getenv("SERVER_ENV", "").strip()
 
 
 def _resolve_overlay_path(env: str) -> Path | None:

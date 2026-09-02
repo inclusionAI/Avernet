@@ -17,12 +17,19 @@ enforces in the DB.
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentclaw.community.core.bot_management.engines.default import (
+    DefaultProvisioningStrategy,
+)
+from agentclaw.community.core.bot_management.engines.registry import (
+    get_engine_provisioning_registry,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     RESTART_LOCK_TTL_SECONDS,
     BotInvalidLifecycleStateError,
@@ -109,6 +116,26 @@ class _SyncThread:
             self._target()
 
 
+class RecordingRestartProvisioningStrategy(DefaultProvisioningStrategy):
+    def __init__(self, engine_type: str) -> None:
+        super().__init__(engine_type)
+        self.refresh_restart_authorization = MagicMock(return_value=True)
+
+
+@contextmanager
+def _temporarily_register_strategy(strategy: DefaultProvisioningStrategy):
+    registry = get_engine_provisioning_registry()
+    original = registry._strategies.get(strategy.engine_type)
+    registry._strategies[strategy.engine_type] = strategy
+    try:
+        yield
+    finally:
+        if original is None:
+            registry._strategies.pop(strategy.engine_type, None)
+        else:
+            registry._strategies[strategy.engine_type] = original
+
+
 def _make_bot(
     bot_id: str = "bot001",
     owner_id: str = "user001",
@@ -146,6 +173,7 @@ def _make_service(
     task_queue_service: MagicMock | None = None,
     common_config_service: MagicMock | None = None,
     mcp_sync: object | None = None,
+    runtime_reconciler: object | None = None,
 ) -> BotService:
     if lock_repo is None:
         lock_repo = FakeRestartLockRepo()
@@ -164,7 +192,7 @@ def _make_service(
     svc._baas_template_resolver = baas_template_resolver
     svc._task_queue_service = task_queue_service or MagicMock()
     svc._common_config_service = common_config_service
-    svc._mcp_sync = mcp_sync if mcp_sync is not None else MagicMock()
+    svc._runtime_reconciler = runtime_reconciler if runtime_reconciler is not None else MagicMock()
     svc._teclaw_provision_provider = lambda: SimpleNamespace(
         is_teclaw=lambda active_engine: active_engine == "teclaw"
     )
@@ -2190,32 +2218,31 @@ class TestRestartAuthorizationResyncWiring:
     def test_async_replacement_refreshes_after_device_apply(self):
         repo = FakeRestartLockRepo()
         device_service = MagicMock()
-        mcp_sync = object()
         device_service.apply_device.return_value = SimpleNamespace(
             id=42,
             device_id="dev-42",
             device_provider="arca",
             status=DeviceBindingStatus.ACTIVE.value,
         )
-        svc = _make_service(repo, device_provider=device_service, mcp_sync=mcp_sync)
+        svc = _make_service(repo, device_provider=device_service)
+        test_engine = "test_restart_engine"
         bot = _make_bot(
             owner_id="owner001",
             status="PENDING",
-            active_engine="claude_code",
+            active_engine=test_engine,
             template_type="normalCC",
         )
         svc._repository.get_by_id_and_owner.return_value = bot
         svc._repository.update_by_owner.return_value = {**bot, "binding_id": 42}
         svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value = []
+        svc._skill_set_factory.create.return_value.project_skills = AsyncMock(return_value=True)
+        svc._runtime_reconciler = SimpleNamespace(project_mcp_and_cli=AsyncMock(return_value=None))
         svc._template_service.get_template_config.return_value = {}
-        refresh_strategy = MagicMock()
+        refresh_strategy = RecordingRestartProvisioningStrategy(test_engine)
 
-        with patch(
+        with _temporarily_register_strategy(refresh_strategy), patch(
             "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
             _SyncThread,
-        ), patch(
-            "agentclaw.community.core.bot_management.engines.resolve_provisioning",
-            return_value=(object(), refresh_strategy),
         ), patch.object(svc, "_is_new_bot_use_nas", return_value=False), \
                 patch.object(svc, "_build_engine_extra_envs", return_value={}), \
                 patch.object(svc, "_query_admin_worknos", return_value=[]), \
@@ -2226,8 +2253,8 @@ class TestRestartAuthorizationResyncWiring:
                 nick_name="nick",
                 entity_id="staff_user001",
                 entity_type="staff",
-                engine_types=["claude_code"],
-                active_engine="claude_code",
+                engine_types=[test_engine],
+                active_engine=test_engine,
                 owner_id="owner001",
                 restart_lock_key=("test", "staff_user001", "bot001", "token"),
                 extra_configs={"confirmed_template_update": True},
@@ -2237,8 +2264,65 @@ class TestRestartAuthorizationResyncWiring:
             ANY,
             bot,
             {"confirmed_template_update": True},
-            mcp_sync=mcp_sync,
             skill_set_factory=svc._skill_set_factory,
+            runtime_reconciler=svc._runtime_reconciler,
+            template_service=svc._template_service,
+        )
+        assert repo.release_calls == 1
+
+    def test_async_replacement_refreshes_even_when_runtime_reconciler_provider_fails(self):
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.apply_device.return_value = SimpleNamespace(
+            id=42,
+            device_id="dev-42",
+            device_provider="arca",
+            status=DeviceBindingStatus.ACTIVE.value,
+        )
+        svc = _make_service(repo, device_provider=device_service)
+        svc._runtime_reconciler = None
+        svc._runtime_reconciler_provider = MagicMock(side_effect=RuntimeError("runtime down"))
+        test_engine = "test_restart_engine"
+        bot = _make_bot(
+            owner_id="owner001",
+            status="PENDING",
+            active_engine=test_engine,
+            template_type="normalCC",
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.update_by_owner.return_value = {**bot, "binding_id": 42}
+        svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value = []
+        svc._skill_set_factory.create.return_value.project_skills = AsyncMock(return_value=True)
+        svc._template_service.get_template_config.return_value = {}
+        refresh_strategy = RecordingRestartProvisioningStrategy(test_engine)
+
+        with _temporarily_register_strategy(refresh_strategy), patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _SyncThread,
+        ), patch.object(svc, "_is_new_bot_use_nas", return_value=False), \
+                patch.object(svc, "_build_engine_extra_envs", return_value={}), \
+                patch.object(svc, "_query_admin_worknos", return_value=[]), \
+                patch.object(svc, "_attach_template_uid_context", return_value={}):
+            svc._allocate_device_async(
+                bot_id="bot001",
+                user_id="user001",
+                nick_name="nick",
+                entity_id="staff_user001",
+                entity_type="staff",
+                engine_types=[test_engine],
+                active_engine=test_engine,
+                owner_id="owner001",
+                restart_lock_key=("test", "staff_user001", "bot001", "token"),
+                extra_configs={"confirmed_template_update": True},
+            )
+
+        svc._runtime_reconciler_provider.assert_called_once_with()
+        refresh_strategy.refresh_restart_authorization.assert_called_once_with(
+            ANY,
+            bot,
+            {"confirmed_template_update": True},
+            skill_set_factory=svc._skill_set_factory,
+            runtime_reconciler=None,
             template_service=svc._template_service,
         )
         assert repo.release_calls == 1
@@ -2246,7 +2330,6 @@ class TestRestartAuthorizationResyncWiring:
     def test_baas_in_place_restart_defers_refresh_to_publish_event(self):
         repo = FakeRestartLockRepo()
         device_service = MagicMock()
-        mcp_sync = object()
         device_service.get_device.return_value = SimpleNamespace(
             id=42,
             device_provider="baas",
@@ -2257,20 +2340,21 @@ class TestRestartAuthorizationResyncWiring:
             repo,
             device_provider=device_service,
             baas_service_provider=lambda: MagicMock(),
-            mcp_sync=mcp_sync,
         )
+        test_engine = "test_restart_engine"
+        refresh_strategy = RecordingRestartProvisioningStrategy(test_engine)
         bot = _make_bot(
             status="ACTIVE",
             binding_id=42,
-            active_engine="claude_code",
+            active_engine=test_engine,
             template_type="normalCC",
         )
         svc._repository.get_by_id_and_owner.return_value = bot
-        refresh_strategy = MagicMock()
+        svc._skill_set_factory.create.return_value.project_skills = AsyncMock(return_value=True)
+        svc._runtime_reconciler = SimpleNamespace(project_mcp_and_cli=AsyncMock(return_value=None))
 
-        with patch.object(svc, "_restart_bot_baas", return_value=bot), patch(
-            "agentclaw.community.core.bot_management.engines.resolve_provisioning",
-            return_value=(object(), refresh_strategy),
+        with _temporarily_register_strategy(refresh_strategy), patch.object(
+            svc, "_restart_bot_baas", return_value=bot
         ):
             result = svc.restart_bot(
                 bot_id="bot001",

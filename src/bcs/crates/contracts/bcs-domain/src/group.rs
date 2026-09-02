@@ -338,7 +338,8 @@ pub struct Group {
     /// User-provided group context (optional description of collaboration goal/background).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
-    /// Optional StateMachine Run opening-message template.
+    /// Optional Group opening-message template. Its render scope is selected
+    /// by `group_strategy`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opening_message: Option<crate::opening_message::OpeningMessage>,
     /// All participants.

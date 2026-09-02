@@ -299,7 +299,7 @@ EventDeliveryDetailEnvelope:
           items:
             type: object
             additionalProperties: false
-            required: [attempt_no, started_at, completed_at, latency_ms, result]
+            required: [attempt_no, started_at]
             properties:
               attempt_no: {type: integer}
               started_at: {type: string, format: date-time}

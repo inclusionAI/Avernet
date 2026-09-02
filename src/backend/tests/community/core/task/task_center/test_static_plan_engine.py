@@ -136,3 +136,59 @@ def test_static_plan_rejects_implementation_when_approval_is_false():
     assert implementation.status == Status.DONE
     assert implementation.run_info.output["skipped"] is True
     assert "implementation" not in runner.started[-1:]
+
+
+def test_static_plan_default_real_report_with_fallback_timeout(monkeypatch):
+    # 固定流程默认 = 真实上报(_static_auto_report_on False),并带 fallback 超时兜底(默认 80s),
+    # 避免单节点不上报致整流程卡死;超时可由 execution_config.static_fallback_timeout / env 覆盖。
+    monkeypatch.delenv("OCB_TASK_STATIC_FALLBACK_TIMEOUT", raising=False)
+    monkeypatch.delenv("OCB_TASK_STATIC_AUTO_REPORT", raising=False)
+    monkeypatch.delenv("OCB_TASK_STATIC_AUTO_REPORT_DELAY", raising=False)
+
+    graph_service = TaskGraphService()
+    graph_service.initialize_graph(_task_info())
+    engine = _engine(graph_service, _Runner())
+
+    # 默认真实上报模式
+    assert engine._static_auto_report_on("t1") is False
+    # fallback 兜底超时默认 80s
+    assert engine._static_fallback_delay("t1") == 80.0
+
+    # env OCB_TASK_STATIC_FALLBACK_TIMEOUT 覆盖
+    monkeypatch.setenv("OCB_TASK_STATIC_FALLBACK_TIMEOUT", "30")
+    assert engine._static_fallback_delay("t1") == 30.0
+    monkeypatch.delenv("OCB_TASK_STATIC_FALLBACK_TIMEOUT")
+
+    # execution_config.static_fallback_timeout 覆盖(env 缺省)
+    gs2 = TaskGraphService()
+    ti2 = TaskInfo(
+        task_spec=TaskSpec(
+            Metadata("t2", "OKR", "implement"),
+            Context("", {"template_input": {"okr": "x"}}),
+            Goal("okr-implementation", []),
+        ),
+        source_type="api", owner_bot_id="entry-bot",
+        execution_config={"task_type": "static_plan", "static_plan_yaml": PLAN,
+                          "template_input": {"okr": "x"}, "static_fallback_timeout": 15},
+    )
+    gs2.initialize_graph(ti2)
+    assert _engine(gs2, _Runner())._static_fallback_delay("t2") == 15.0
+
+
+def test_static_plan_invalid_fallback_timeout_uses_default(monkeypatch):
+    monkeypatch.delenv("OCB_TASK_STATIC_FALLBACK_TIMEOUT", raising=False)
+
+    graph_service = TaskGraphService()
+    task_info = _task_info()
+    task_info.execution_config["static_fallback_timeout"] = "not-a-number"
+    graph_service.initialize_graph(task_info)
+
+    assert _engine(graph_service, _Runner())._static_fallback_delay("t1") == 80.0
+
+
+def test_static_plan_status_filter_ignores_empty_tokens():
+    from agentclaw.community.core.task.task_center.task_service_support import (
+        parse_status_filter,
+    )
+
+    assert parse_status_filter(", ,") is None

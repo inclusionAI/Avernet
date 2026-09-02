@@ -97,6 +97,26 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/data-init"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    # The config manifest may address a *shared* bot: its collaborator bars are
+    # MEMBER to read and ADMIN to write (authorization.py), so the owner arrives
+    # on the wire rather than being pinned to the caller, and the grant is
+    # checked against that addressed owner.
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PUT",
+        "/openapi/v1/bots/{bot_id}/config-manifest",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/config-manifest",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest/capabilities",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skill-sets",
@@ -552,13 +572,12 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
     # Served at the external contract path the gateway verbatim-forwards here.
     ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): AdmissionMode.OPEN,
-    # Task public surface (run-template/execute/dashboard/list) — mounted together with the
+    # Task public surface (execute/dashboard/list) — mounted together with the
     # gateway `collaboration-tasks` domain → backend. Tasks are not bot-scoped
     # (no grant), and the public face is open to any authenticated app caller
     # (a human principal is admitted regardless); `list` still scopes its answer
     # by the `user_id` it receives. OPEN is the contract label — at the
     # require_principal gate it behaves the same as USER_GATED.
-    ("POST", "/openapi/v1/collaboration/tasks/run-template"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/execute"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,

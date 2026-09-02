@@ -244,3 +244,114 @@ def test_singlebox_bootstrap_reports_missing_local_skills_repo(
     assert "local skills repo not found" in result["error"]
     assert local_result["success"] is False
     assert local_result["method"] == "local_missing"
+
+
+# ---------------------------------------------------------------------------
+# enable_skill_sync gate (community deployments disable skill git sync)
+# ---------------------------------------------------------------------------
+
+
+class _FakeSofaConfig:
+    """Stands in for the lazy sofa handle; model_dump() mirrors AppConfig."""
+
+    def __init__(self, user_config):
+        self.user_config = user_config
+
+    def model_dump(self):
+        return {"user_config": self.user_config}
+
+
+def _patch_sofa_config(monkeypatch, user_config):
+    # GitSyncConfig does ``from agentclaw.community.core.config import sofa``
+    # at call time, so patching the module attribute is picked up on the
+    # next construction.
+    monkeypatch.setattr(
+        "agentclaw.community.core.config.sofa.sofa_config",
+        _FakeSofaConfig(user_config),
+    )
+
+
+def test_enable_skill_sync_defaults_true(mock_bolt_shared, monkeypatch):
+    """No git_sync block in the merged config → sync stays enabled."""
+    _patch_sofa_config(monkeypatch, {})
+    cfg = GitSyncConfig()
+    assert cfg.enable_skill_sync is True
+
+
+def test_enable_skill_sync_false_from_config(mock_bolt_shared, monkeypatch):
+    """user_config.git_sync.enable_skill_sync=false is respected."""
+    _patch_sofa_config(
+        monkeypatch, {"git_sync": {"enable_skill_sync": False}}
+    )
+    cfg = GitSyncConfig()
+    assert cfg.enable_skill_sync is False
+
+
+def test_enable_skill_sync_bool_coercion(mock_bolt_shared, monkeypatch):
+    """A truthy non-bool value keeps sync enabled (no strict typing here)."""
+    _patch_sofa_config(
+        monkeypatch, {"git_sync": {"enable_skill_sync": "false"}}
+    )
+    cfg = GitSyncConfig()
+    # YAML anchors aside, the overlay ships a real boolean; a truthy string
+    # (e.g. "false" in an env-substituted overlay) only warns by still
+    # enabling sync — disabling must be explicit.
+    assert cfg.enable_skill_sync == "false"
+
+
+def test_enable_skill_sync_config_exception_keeps_default(
+    mock_bolt_shared, monkeypatch
+):
+    """sofa read raising → except branch keeps the enabled default."""
+    class _Boom:
+        def model_dump(self):
+            raise RuntimeError("config backend unreachable")
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.config.sofa.sofa_config", _Boom()
+    )
+    cfg = GitSyncConfig()
+    assert cfg.enable_skill_sync is True
+
+
+def test_startup_skips_all_sync_when_disabled(mock_bolt_shared, monkeypatch):
+    """enable_skill_sync=False → startup returns before any sync work."""
+    from unittest.mock import MagicMock
+    from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
+
+    monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
+    _patch_sofa_config(
+        monkeypatch, {"git_sync": {"enable_skill_sync": False}}
+    )
+    config = GitSyncConfig()
+    assert config.enable_skill_sync is False
+
+    svc = GitSyncService(
+        cache_plugin=MagicMock(),
+        skill_service_factory=MagicMock(),
+        config=config,
+        oss_storage=MagicMock(),
+        secret_resolver=MagicMock(),
+        allow_missing_repo_url=True,
+    )
+
+    # The gate must short-circuit before bootstrap/db sync/periodic sync —
+    # none of these may run.
+    with (
+        patch.object(svc, "sync_bootstrap", new_callable=MagicMock) as boot,
+        patch.object(
+            svc, "_sync_existing_local_market", new_callable=MagicMock
+        ) as seed,
+        patch.object(
+            svc, "start_periodic_sync", new_callable=MagicMock
+        ) as periodic,
+    ):
+        try:
+            asyncio.run(svc.startup())
+        finally:
+            svc._executor.shutdown(wait=True)
+
+    boot.assert_not_called()
+    seed.assert_not_called()
+    periodic.assert_not_called()
+    assert svc._started is False
