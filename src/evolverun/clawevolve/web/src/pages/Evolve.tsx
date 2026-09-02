@@ -2536,7 +2536,7 @@ function EvolveShell({ children }: { children: ReactNode }) {
       <aside className="sticky top-[53px] hidden h-[calc(100vh-53px)] w-56 shrink-0 self-start flex-col overflow-hidden border-r border-gray-200 bg-white px-3 py-5 lg:flex">
         <div className="mb-5 flex items-center gap-2 px-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white"><Icon name="spark" /></span>
-          <div><p className="text-sm font-semibold text-gray-900">Claw进化</p><p className="text-[10px] text-gray-400">ClawEvolve</p></div>
+          <div><p className="text-sm font-semibold text-gray-900">Claw进化 <span className="text-[10px] font-normal text-blue-500">(Open 版本)</span></p><p className="text-[10px] text-gray-400">ClawEvolve</p></div>
         </div>
         <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
           <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">进化中心</div>
