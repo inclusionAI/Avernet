@@ -14,7 +14,10 @@ use bcs_config::resolve_env_str;
 use bcs_http::{
     router::build_router,
     service_key::{ApiKeyEntry, ApiKeyRegistry},
-    state::{ChainUserIdentityPort, HttpAppState, HttpUserIdentity, UserIdentityPort},
+    state::{
+        ChainUserIdentityPort, HttpAppState, HttpUserIdentity, UserIdentityPort,
+        VisibilitySyncPort, VisibilitySyncRequest,
+    },
 };
 use bcs_service_api::application::v1::ApplicationError;
 use bcs_user_directory_api::{UserDirectoryPlugin, UserDirectoryProfile};
@@ -29,6 +32,7 @@ use bcs_service_api::{
 use bcs_services_container::Services;
 use serde_json::{Value, json};
 use tempfile::TempDir;
+use tokio::sync::Notify;
 use tower::ServiceExt;
 
 struct TestApp {
@@ -39,7 +43,41 @@ struct TestApp {
     relation: Arc<RecordingRelationCoreService>,
     control_plane: Arc<BotControlPlaneCore>,
     internal_bot_attributes: Arc<RecordingInternalBotAttributesService>,
+    visibility_sync: Option<Arc<RecordingVisibilitySyncPort>>,
     _temp_dir: TempDir,
+}
+
+#[derive(Default)]
+struct RecordingVisibilitySyncPort {
+    requests: tokio::sync::Mutex<Vec<VisibilitySyncRequest>>,
+    notify: Notify,
+}
+
+#[async_trait::async_trait]
+impl VisibilitySyncPort for RecordingVisibilitySyncPort {
+    async fn sync_visibility(&self, request: VisibilitySyncRequest) {
+        self.requests.lock().await.push(request);
+        self.notify.notify_waiters();
+    }
+}
+
+impl RecordingVisibilitySyncPort {
+    async fn wait_for(&self, count: usize) {
+        let mut retries = 0;
+        loop {
+            if self.requests.lock().await.len() >= count {
+                return;
+            }
+            retries += 1;
+            if retries > 200 {
+                panic!(
+                    "timed out waiting for {count} visibility sync requests, got {}",
+                    self.requests.lock().await.len()
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
 }
 
 #[derive(Default)]
@@ -91,7 +129,7 @@ fn test_app_with_user_identity_and_user_directory(
     user_identity: Arc<dyn UserIdentityPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
 ) -> TestApp {
-    test_app_with_options(user_identity, user_directory, Vec::new(), Vec::new())
+    test_app_with_options(user_identity, user_directory, Vec::new(), Vec::new(), None)
 }
 
 fn test_app_with_allowed_switch_provider_ids(allowed_provider_ids: Vec<String>) -> TestApp {
@@ -101,6 +139,21 @@ fn test_app_with_allowed_switch_provider_ids(allowed_provider_ids: Vec<String>) 
         None,
         allowed_provider_ids,
         Vec::new(),
+        None,
+    )
+}
+
+fn test_app_with_allowed_switch_provider_ids_and_visibility_sync(
+    allowed_provider_ids: Vec<String>,
+    visibility_sync: Arc<RecordingVisibilitySyncPort>,
+) -> TestApp {
+    let chain = static_auth_chain("11111111", "Admin");
+    test_app_with_options(
+        Arc::new(ChainUserIdentityPort::new(chain)),
+        None,
+        allowed_provider_ids,
+        Vec::new(),
+        Some(visibility_sync),
     )
 }
 
@@ -109,6 +162,7 @@ fn test_app_with_options(
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     allowed_provider_ids: Vec<String>,
     service_keys: Vec<ApiKeyEntry>,
+    visibility_sync: Option<Arc<RecordingVisibilitySyncPort>>,
 ) -> TestApp {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let provider_store = Arc::new(MemoryProviderStore::new());
@@ -157,20 +211,24 @@ fn test_app_with_options(
         .provider_management(provider_management)
         .build_for_test();
 
+    let mut state_builder = HttpAppState::new(services)
+        .with_user_identity(user_identity)
+        .with_allowed_switch_provider_ids(allowed_provider_ids)
+        .with_internal_bot_attributes_service(internal_bot_attributes.clone())
+        .with_service_api_keys(Arc::new(ApiKeyRegistry::new(service_keys)));
+    if let Some(visibility_sync) = visibility_sync.clone() {
+        state_builder = state_builder.with_visibility_sync(visibility_sync);
+    }
+
     TestApp {
-        app: build_router(
-            HttpAppState::new(services)
-                .with_user_identity(user_identity)
-                .with_allowed_switch_provider_ids(allowed_provider_ids)
-                .with_internal_bot_attributes_service(internal_bot_attributes.clone())
-                .with_service_api_keys(Arc::new(ApiKeyRegistry::new(service_keys))),
-        ),
+        app: build_router(state_builder),
         provider_repo,
         provider_credentials,
         registry,
         relation,
         control_plane,
         internal_bot_attributes,
+        visibility_sync,
         _temp_dir: temp_dir,
     }
 }
@@ -3022,4 +3080,138 @@ async fn list_provider_bots_by_task_modes_rejects_invalid_toggle_and_accepts_fal
         task_mode_roster(&app, &provider_id, Some(admin_token), "?task_claim_mode=maybe").await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "invalid toggle not rejected: {body}");
     assert_eq!(body["status"], 400);
+}
+
+async fn seed_allowed_provider(
+    provider_repo: &Arc<dyn ProviderRepoPort>,
+    provider_credentials: &Arc<dyn ProviderCredentialRepoPort>,
+    provider_id: &str,
+    admin_token: &str,
+) {
+    seed_provider_admin(provider_repo, provider_credentials, provider_id, admin_token, "11111111")
+        .await;
+}
+
+#[tokio::test]
+async fn register_provider_bot_dispatches_visibility_sync_for_allowlisted_provider() {
+    let provider_id = "prv_visibility_sync_allowed".to_string();
+    let admin_token = "admin-token";
+    let sync = Arc::new(RecordingVisibilitySyncPort::default());
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        visibility_sync,
+        ..
+    } = test_app_with_allowed_switch_provider_ids_and_visibility_sync(
+        vec![provider_id.clone()],
+        sync.clone(),
+    );
+    seed_allowed_provider(&provider_repo, &provider_credentials, &provider_id, &admin_token).await;
+
+    let bot = register_provider_bot(&app, &provider_id, &admin_token, "teamclaw-bot:alice").await;
+    let bot_uuid = bot["bot_uuid"].as_str().unwrap().to_string();
+    let sync = visibility_sync.expect("visibility sync port wired");
+    sync.wait_for(1).await;
+    let requests = sync.requests.lock().await;
+    assert_eq!(requests.len(), 1, "expected exactly one visibility sync dispatch");
+    assert_eq!(requests[0].bot_uuid, bot_uuid);
+    assert_eq!(requests[0].actor_kind, ActorKind::Bot);
+    assert_eq!(requests[0].capabilities.visibility, "protected");
+    assert_eq!(requests[0].visibility, "protected");
+}
+
+#[tokio::test]
+async fn register_provider_bot_skips_visibility_sync_for_non_allowlisted_provider() {
+    let sync = Arc::new(RecordingVisibilitySyncPort::default());
+    let TestApp {
+        app,
+        visibility_sync,
+        ..
+    } = test_app_with_allowed_switch_provider_ids_and_visibility_sync(Vec::new(), sync);
+    let provider = register_provider(&app, json!({ "mode": "static_bearer" })).await;
+    let provider_id = provider["provider_id"].as_str().unwrap();
+    let admin_token = provider["provider_admin_token"].as_str().unwrap();
+
+    let _ = register_provider_bot(&app, provider_id, admin_token, "reviewer-v2").await;
+    // No notify is emitted for 0 requests, so poll briefly instead of wait_for.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let sync = visibility_sync.expect("visibility sync port wired");
+    let requests = sync.requests.lock().await;
+    assert!(
+        requests.is_empty(),
+        "non-allowlisted provider must not dispatch visibility sync, got {requests:?}"
+    );
+}
+
+#[tokio::test]
+async fn register_provider_bot_skips_visibility_sync_for_idempotent_gateway_replay() {
+    let provider_id = "prv_visibility_sync_replay".to_string();
+    let admin_token = "admin-token";
+    let sync = Arc::new(RecordingVisibilitySyncPort::default());
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        visibility_sync,
+        ..
+    } = test_app_with_allowed_switch_provider_ids_and_visibility_sync(
+        vec![provider_id.clone()],
+        sync,
+    );
+    seed_allowed_provider(&provider_repo, &provider_credentials, &provider_id, &admin_token).await;
+
+    let first = register_provider_bot(&app, &provider_id, &admin_token, "teamclaw-bot:alice").await;
+    let first_bot_uuid = first["bot_uuid"].as_str().unwrap().to_string();
+    let sync = visibility_sync.expect("visibility sync port wired");
+    sync.wait_for(1).await;
+
+    // Idempotent replay with the same provider_bot_ref: Gateway short-circuits in
+    // core (`duplicate_registration=true`) and the message indicates the existing
+    // bot was returned.
+    let _ = register_provider_bot(&app, &provider_id, &admin_token, "teamclaw-bot:alice").await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let requests = sync.requests.lock().await;
+    assert_eq!(
+        requests.len(),
+        1,
+        "idempotent replay must not dispatch a second visibility sync, got {requests:?}"
+    );
+    assert_eq!(requests[0].bot_uuid, first_bot_uuid);
+}
+
+#[tokio::test]
+async fn register_provider_bot_dispatches_visibility_sync_for_plugin_mode_allowlisted() {
+    let provider_id = "prv_visibility_sync_plugin".to_string();
+    let admin_token = "admin-token";
+    let sync = Arc::new(RecordingVisibilitySyncPort::default());
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        visibility_sync,
+        ..
+    } = test_app_with_allowed_switch_provider_ids_and_visibility_sync(
+        vec![provider_id.clone()],
+        sync,
+    );
+    seed_allowed_provider(&provider_repo, &provider_credentials, &provider_id, &admin_token).await;
+
+    let bot_ref = "plugin-bot:alice";
+    let (status, body) =
+        register_provider_bot_mode(&app, &provider_id, &admin_token, bot_ref, "plugin").await;
+    assert_eq!(status, StatusCode::OK, "plugin mode rejected: {body}");
+    assert_eq!(body["bot_uuid"].as_str(), Some(bot_ref));
+
+    let sync = visibility_sync.expect("visibility sync port wired");
+    sync.wait_for(1).await;
+    let requests = sync.requests.lock().await;
+    assert_eq!(
+        requests.len(),
+        1,
+        "plugin mode over allowlisted provider should dispatch visibility sync once, got {requests:?}"
+    );
+    assert_eq!(requests[0].bot_uuid, bot_ref);
+    assert_eq!(requests[0].actor_kind, ActorKind::Bot);
 }
