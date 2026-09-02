@@ -390,7 +390,9 @@ def test_shipped_config_requires_user_and_app_to_grant_account_level_access() ->
     assert req[PrincipalType.APP] is Presence.REQUIRED
 
 
-def test_shipped_config_lets_the_user_list_and_withdraw_account_level_access_without_an_app() -> None:
+def test_shipped_config_lets_the_user_list_and_withdraw_account_level_access_without_an_app() -> (
+    None
+):
     """Listing and withdrawing the account-level grant need only the user.
 
     Both inherit the org rule, under which an app may ride along but is not
