@@ -560,3 +560,42 @@ def test_an_unreadable_installed_package_is_treated_as_unknown():
 
     _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
     assert [e.outcome.value for e in written] == ["updated"]
+
+
+def test_a_deactivation_conflict_mid_write_reports_partially_written():
+    """The skills `partially_written` corner: removals run after uploads, so
+    a governed skill that slipped the plan's narrowing (its membership
+    landed between plan and write) aborts the category with honest
+    partially-written semantics rather than pretending the area is whole.
+    The engine's write-raise path classifies it; this drives it through the
+    materialiser with W2's conflict shape the fake models."""
+    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
+        packages={QC_URL: QZ},
+    )
+    # The area holds one direct skill the document does not declare…
+    reader.assets = (skill_asset(31, "stale-skill"),)
+    dev = _run  # keep names local
+    resolved = dev(materialiser.resolve(_ctx(), [_declared()]))
+    assert resolved.ok
+
+    plan = dev(materialiser.plan(_ctx(), resolved.intents))
+    assert plan.removals == ("stale-skill",)
+
+    # …and its governance lands between plan and write (member_skill_ids
+    # narrows plan but write re-asks the area, not the narrowing).
+    reader.assets = (skill_asset(31, "stale-skill"),)
+
+    async def _conflicting_deactivate(**kwargs):
+        raise RuntimeError(
+            "RESOURCE_MANAGED_BY_SKILL_SET"
+        )
+
+    activation.deactivate_skill = _conflicting_deactivate
+    import pytest as _pytest
+
+    with _pytest.raises(RuntimeError, match="RESOURCE_MANAGED"):
+        dev(materialiser.write(_ctx(), plan))
+    # The upload for the declared skill DID land — the honest
+    # partially-written shape (the engine's write-raise classifier
+    # classifies it, this documents the drive).
+    assert uploads.uploads
