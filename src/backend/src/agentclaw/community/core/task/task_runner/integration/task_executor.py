@@ -295,8 +295,9 @@ class TaskExecutor:
             "backend": self._api_base_url,
         })
         message = self._formatter.format_execute(ctx, node)
-        # BCS driver_bot/participant 用纯 bot_id(去 :owner 透传,见 e2e docstring 契约),
-        # 否则 BCS resolve_group_create_caller 解析不出 caller → 401 caller is required。
+        # BCS driver_bot/participant 用纯 bot_id(去 :owner 透传,见 e2e docstring 契约);
+        # originator 不设人类(BCS 拒人类建群 → 403 not authorized)—— 人类走观察者 participant,
+        # 让 BCS 从纯 driver_bot 解析建群 caller(需 driver_bot 为可解析的真 bot,见上一行)。
         driver_bot = openapi_bot_id.partition(":")[0]
         gf = GroupFormation(
             bot_ids=[driver_bot],
@@ -306,7 +307,6 @@ class TaskExecutor:
             extend_props={
                 "owner_user_id": owner_user_id,
                 "loop_task_id": loop_task_id,
-                "originator": f"human_{owner_user_id}",
                 "task_instruction": message,
             },
         )
