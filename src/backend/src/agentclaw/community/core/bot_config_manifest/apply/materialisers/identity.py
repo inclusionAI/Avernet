@@ -198,13 +198,16 @@ class IdentityMaterialiser(Materialiser):
                 def _read_and_file() -> bytes:
                     body = decl.read_file()
                     # The one file's bytes go through the same store the URL
-                    # road files with: one log for audit and keep_last.
+                    # road files with — auth included, so the lineage's
+                    # answer to "which credential served this" is the same
+                    # on both roads.
                     self._fetcher.file_bytes(
                         ctx,
                         content=body,
                         source_url=decl.receipt_url(),
                         category=_FETCH_CATEGORY,
                         entry_identity=file_type,
+                        credential_name=decl.auth,
                     )
                     return body
 

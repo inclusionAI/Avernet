@@ -8,7 +8,9 @@ mocked.
 """
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
+from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -632,13 +634,44 @@ def test_a_source_session_is_built_per_apply_and_closed(world, monkeypatch):
     assert len(closed) == 2, "every finished apply must close its session"
 
 
-def test_a_strict_baseline_is_read_back_from_the_last_report(world, monkeypatch):
-    """``_last_resolutions``: the previous report IS the baseline table.
+def _row(report: ApplyReport) -> object:
+    """A duck-typed apply row carrying one report payload — every field
+    ``_report_from_payload`` re-reads off the record (apply_id, bot_id,
+    trigger, started_at, finished_at, report, status)."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        apply_id=report.apply_id,
+        bot_id=report.bot_id,
+        trigger=report.trigger,
+        started_at=report.started_at,
+        finished_at=None,
+        report=json.dumps(report.as_payload()),
+        status=report.status.value,
+    )
+
+
+def _report_with_sources(
+    resolutions, *, status=ApplyStatus.SUCCEEDED, apply_id: str = "prior"
+) -> ApplyReport:
+    return ApplyReport(
+        apply_id=apply_id,
+        bot_id=_BOT,
+        trigger="explicit",
+        status=status,
+        started_at=datetime.now(),
+        sources=tuple(resolutions),
+    )
+
+
+def test_a_strict_baseline_is_read_back_from_report_history(world, monkeypatch):
+    """``_last_resolutions``: the reports ARE the baseline table.
 
     Strict mode reads "what did we resolve last time" out of
     ``ApplyReport.sources`` rather than a second table, so the two cannot
     drift. No report — and a report with no resolutions — yield no
-    opinions; a recorded resolution yields its SHA by name.
+    opinions; a recorded resolution yields its SHA by name; and the walk is
+    bounded by the history window rather than one row (see the next test).
     """
     service, _applies, _locks, _scripts, _manifests = world
 
@@ -652,25 +685,59 @@ def test_a_strict_baseline_is_read_back_from_the_last_report(world, monkeypatch)
     assert report.sources == ()
     assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {}
 
-    # A last report that did resolve a source is read back by name.
-    crafted = ApplyReport(
-        apply_id="prior",
-        bot_id=_BOT,
-        trigger="explicit",
-        status=ApplyStatus.SUCCEEDED,
-        started_at=report.started_at,
-        sources=(
-            SourceResolution(
-                name="charts", ref="main", resolved_sha="f" * 40, auth="ci-token"
-            ),
-        ),
+    charts = SourceResolution(
+        name="charts", ref="main", resolved_sha="f" * 40, auth="ci-token"
     )
     monkeypatch.setattr(
-        service, "last_apply", lambda *, entity_id, bot_id: crafted
+        service._applies,
+        "recent",
+        lambda *, env, entity_id, bot_id, limit: [_row(
+            _report_with_sources([charts])
+        )],
     )
     assert service._last_resolutions(
         entity_id=_ENTITY, bot_id=_BOT
     ) == {"charts": "f" * 40}
+
+
+def test_a_failed_apply_does_not_wipe_a_strict_baseline(world, monkeypatch):
+    """The walk-back is the fix the review required: only the newest row
+    reads as "the last apply", and a newest apply whose fetch failed (its
+    report carries no resolution for the source) must not disarm strict
+    mode for the apply after it — the record one row back still holds the
+    baseline, and the newest row that carries a source wins per source."""
+    service, _applies, _locks, _scripts, _manifests = world
+    charts = SourceResolution(name="charts", ref="main", resolved_sha="e" * 40)
+    empty_failed = _report_with_sources(
+        [], status=ApplyStatus.FAILED, apply_id="failed-1"
+    )
+    succeeded = _report_with_sources([charts], apply_id="prior-1")
+
+    # Newest first: the failed fetch recorded nothing; the row before it did.
+    monkeypatch.setattr(
+        service._applies,
+        "recent",
+        lambda *, env, entity_id, bot_id, limit: [_row(empty_failed), _row(succeeded)],
+    )
+    assert service._last_resolutions(
+        entity_id=_ENTITY, bot_id=_BOT
+    ) == {"charts": "e" * 40}
+
+    # Newest wins per source: a newer report that re-resolved the source is
+    # the baseline, not an older one.
+    moved = SourceResolution(name="charts", ref="main", resolved_sha="b" * 40)
+    monkeypatch.setattr(
+        service._applies,
+        "recent",
+        lambda *, env, entity_id, bot_id, limit: [
+            _row(_report_with_sources([moved])), _row(succeeded)
+        ],
+    )
+    assert service._last_resolutions(
+        entity_id=_ENTITY, bot_id=_BOT
+    ) == {"charts": "b" * 40}
+
+
 
 
 def test_a_failed_handoff_has_no_session_to_leak(world, monkeypatch):

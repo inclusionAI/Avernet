@@ -472,6 +472,7 @@ class SkillsMaterialiser(Materialiser):
                 category=_FETCH_CATEGORY,
                 entry_identity=name,
                 content_type="application/zip",
+                credential_name=decl.auth,
             )
         except EntryFetchError as exc:
             raise _PackageRefusal(str(exc)) from exc

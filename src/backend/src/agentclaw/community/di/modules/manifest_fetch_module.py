@@ -149,8 +149,24 @@ class ManifestFetchModule(Module):
         Like ``GuardedFetcher``, everything about it except construction is
         the shipped default — https-only scheme, hermetic env, header-only
         credential injection — and not configurable from here.
+
+        The base subprocess environment is read **here**, the composition
+        root, per the repo rule that raw environment access belongs to
+        configuration loading and composition roots, never to core. The
+        client drops every ``GIT_*`` key this snapshot still carries and adds
+        its own hermetic overrides, so this env is a plain inheritance
+        surface: proxy settings ride along exactly as they do for the W2
+        httpx transport (``trust_env`` is that client's default), while an
+        operator's ``insteadOf`` rewrite or upload-pack default cannot.
         """
-        return SubprocessGitClient()
+        import os
+
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        }
+        return SubprocessGitClient(env=env)
 
     # ── the lazy factories the registry wiring asks for ────────────────────
 

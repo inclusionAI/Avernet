@@ -164,6 +164,14 @@ def _engine_and_bot_type(
         return str(bot.get("active_engine") or ""), str(bot.get("bot_type") or "")
     return str(engine_type or ""), str(bot_type or "")
 
+#: How many report rows the strict-mode baseline read walks back through.
+#: The common case resolves the newest report on the first row; the walk
+#: exists so a run of failed fetches (each carrying no resolution for the
+#: source it could not reach) cannot wipe a baseline that a report further
+#: back still records. Bounded because a source a document no longer names
+#: must age out eventually, rather than be remembered forever.
+_BASELINE_HISTORY_APPLIES = 10
+
 
 class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
     """Start applies, and read what they did."""
@@ -811,21 +819,36 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
     def _last_resolutions(
         self, *, entity_id: str, bot_id: str
     ) -> dict[str, str]:
-        """Each source's SHA as the LAST apply recorded it (W7 strict).
+        """Each source's SHA as the last apply that RESOLVED it (W7 strict).
 
-        The previous apply's report is where "what did we resolve" already
-        lives (``ApplyReport.sources``), so strict mode reads it back rather
-        than keeping a second table the two could drift apart on. A report
-        with no resolutions — or no report — yields no opinions.
+        The reports are where "what did we resolve" already lives
+        (``ApplyReport.sources``), so strict mode reads them back rather than
+        keeping a second table the two could drift apart on. The read walks a
+        bounded history, **not just the newest report**: the newest apply may
+        have failed to fetch a source (its report carries no resolution for
+        it — a failed fetch or a strict refusal adopts nothing), and reading
+        only that row would wipe the baseline, silently disarming strict mode
+        and the ``keep_last`` receipt after one outage. Per source, the
+        newest report that carries it wins; a report with no resolutions —
+        or no reports — yields no opinions.
         """
-        last = self.last_apply(entity_id=entity_id, bot_id=bot_id)
-        if last is None:
-            return {}
-        return {
-            source.name: source.resolved_sha
-            for source in last.sources
-            if source.resolved_sha is not None
-        }
+        records = self._applies.recent(
+            env=get_current_env(),
+            entity_id=entity_id,
+            bot_id=bot_id,
+            limit=_BASELINE_HISTORY_APPLIES,
+        )
+        baselines: dict[str, str] = {}
+        for record in records:
+            report = self._to_report(record, entity_id=entity_id, bot_id=bot_id)
+            if report is None:
+                continue
+            for source in report.sources:
+                if source.resolved_sha is None:
+                    continue
+                # Newest wins: an earlier walk-back entry is not overwritten.
+                baselines.setdefault(source.name, source.resolved_sha)
+        return baselines
 
     # ── internals ───────────────────────────────────────────────────────────
 

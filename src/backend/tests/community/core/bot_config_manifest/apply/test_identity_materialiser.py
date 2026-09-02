@@ -438,8 +438,8 @@ class _StaticGit:
             sha=self.sha,
             url=spec.url,
             ref=spec.ref,
-            files=lambda subpath=None: [],
-            read_file=lambda subpath=None: self.body,
+            files=lambda subpath=None, file_limit=None: [],
+            read_file=lambda subpath=None, file_limit=None: self.body,
         )
 
 

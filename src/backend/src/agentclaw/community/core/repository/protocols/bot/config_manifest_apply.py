@@ -89,6 +89,19 @@ class BotConfigManifestApplyRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
+    def recent(
+        self, *, env: str, entity_id: str, bot_id: str, limit: int
+    ) -> list[BotConfigManifestApplyRecord]:
+        """The newest ``limit`` rows for this bot, newest first.
+
+        Strict mode's baselines are read back through report *history*: the
+        newest row may be an apply that failed to resolve a source (its
+        report carries no resolution for it), and the record that did resolve
+        the ref lives further back. ``limit`` bounds the walk, newest first.
+        """
+        ...
+
 
 @runtime_checkable
 class BotConfigManifestApplyLockRepositoryProtocol(Protocol):

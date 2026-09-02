@@ -43,6 +43,23 @@ VALID_ON_FETCH_FAILURE: frozenset[str] = frozenset({"keep_last", "fail"})
 #: Archive forms the platform unpacks.
 VALID_UNPACK: frozenset[str] = frozenset({"zip", "tar.gz"})
 
+#: The v1 (category, source-form) narrowing: W7 resolved named and git sources
+#: for skills and identity entries only. Resources entries are refused in
+#: ``resolve_source`` by these reasons — precise, at PUT, instead of the
+#: misleading runtime failures the materialiser's URL-only road would give.
+_UNDELIVERED_FORM_REASON: dict[str, str] = {
+    SourceForm.GIT.value: (
+        "git sources are not delivered for resources entries in v1 — the "
+        "resources materialiser reads the URL road; wiring it to the git "
+        "road is the follow-up work the W7 delivery records"
+    ),
+    SourceForm.NAMED.value: (
+        "named sources ('from') are not delivered for resources entries in "
+        "v1 — a resources entry declares an inline 'source' URL or 'content'; "
+        "'from' is resolved for skills and identity entries"
+    ),
+}
+
 #: Selector for a moving ref (work-items §3.2). Declared on the **source**,
 #: never on an entry: the property being described is "may this ref move under
 #: me", which belongs to the thing holding the ref.
@@ -142,11 +159,15 @@ def check_entry_keys(
 
 
 def resolve_source(
-    ctx: Context, location: str, entry: dict[str, Any]
+    ctx: Context,
+    location: str,
+    entry: dict[str, Any],
+    category: ManifestCategory,
 ) -> EntrySource:
     """Settle which source an entry uses, and refuse the illegal combinations.
 
-    Four rules, all from schema §2, and each names the offending entry:
+    Five rules, all from schema §2 (plus the v1 category narrowing below), and
+    each names the offending entry:
 
     * **exactly one source.** ``from``/``source``/``content`` are mutually
       exclusive; two of them is an entry whose content has two origins and no
@@ -158,6 +179,12 @@ def resolve_source(
     * **``digest`` and ``on_fetch_failure`` need a fetch.** Inline ``content``
       has none, and a git ref's commit SHA *is* its digest (§2.2), so writing
       one there is a second, weaker pin that can disagree with the first.
+    * **the form must be delivered for the category.** W7 resolved named and
+      git sources for the entries ``skills`` and ``identity`` consume; the
+      resources materialiser is still on the URL road it shipped with (W6),
+      so a resources entry naming ``from`` or a git source is refused HERE,
+      with a reason that says so, rather than passing PUT and failing at
+      apply under a misleading message.
     """
     present = [key for key in _SOURCE_SELECTORS if key in entry]
     if len(present) > 1:
@@ -178,6 +205,16 @@ def resolve_source(
 
     selector = present[0]
     form = _classify(ctx, location, entry, selector)
+    if (
+        category is ManifestCategory.RESOURCES
+        and form.form in (SourceForm.GIT, SourceForm.NAMED)
+    ):
+        ctx.add(
+            location,
+            "unsupported_source",
+            _UNDELIVERED_FORM_REASON[form.form.value],
+        )
+        return EntrySource(form=None)
 
     if "auth" in entry:
         if selector == "from":
@@ -455,7 +492,7 @@ def validate_resource_entry(
     path = entry.get("path")
     usable = check_relative_path(ctx, f"{location}.path", path, what="path")
     is_directory = isinstance(path, str) and path.endswith("/")
-    form = resolve_source(ctx, location, entry)
+    form = resolve_source(ctx, location, entry, ManifestCategory.RESOURCES)
     # A git or named source carries directory structure natively, so no archive
     # is involved (schema §2.2); only a URL source needs one to move a tree.
     check_unpack(
@@ -479,7 +516,7 @@ def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> 
     check_entry_keys(ctx, location, entry, ManifestCategory.SKILLS)
     name = entry.get("name")
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
-    form = resolve_source(ctx, location, entry)
+    form = resolve_source(ctx, location, entry, ManifestCategory.SKILLS)
     check_unpack(ctx, location, entry, archive_expected=True)
     if form.form is SourceForm.CONTENT:
         # A skill is a package — SKILL.md plus the files it names — and a body
@@ -534,7 +571,7 @@ def validate_identity_entry(
             "writes it and never removes it, so a manifest declaring it could "
             "never converge",
         )
-    resolve_source(ctx, location, entry)
+    resolve_source(ctx, location, entry, ManifestCategory.IDENTITY)
 
 
 def validate_cli_tool_entry(
@@ -554,7 +591,7 @@ def validate_cli_tool_entry(
     check_entry_keys(ctx, location, entry, ManifestCategory.CLI_TOOLS)
     name = entry.get("name")
     name_ok = check_name(ctx, f"{location}.name", name, what="a tool name")
-    form = resolve_source(ctx, location, entry)
+    form = resolve_source(ctx, location, entry, ManifestCategory.CLI_TOOLS)
     check_unpack(ctx, location, entry, archive_expected="unpack" in entry)
     if "version" in entry and not isinstance(entry["version"], str):
         ctx.add(f"{location}.version", "invalid_version", "'version' must be a string")
