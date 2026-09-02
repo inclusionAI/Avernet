@@ -2242,4 +2242,6 @@ git commit -m "docs(backend): mark W7 delivered in the work items"
 - 18:4x **B 的跨轨前置修复** `3664a729c`:`fetch_declared` 的 no-session 门槛原先进门就抛,把纯内联 URL 路(W5 老,不经 W7)也拦了,导致 identity 套件 9 个存量用例与 engine 的 SKIPPED 邻居用例在 Task 6 重路由后转红。门槛改为只守真正读 session 的路(`from` 查找与 git 路)。entry_fetch.py 属 A 轨文件,B 仅在 A idle(Task 8 已提交、Task 9 未派发)时做了这个前置修复,在此留痕;Task 9 如有冲突以本日志为准。
 - 18:45 B 落盘 Task 7 skills git 路(`28f7f921e`)。A 续任会话独立复核中发现的同一批转红与 B 的修复相互印证(门槛下移方向一致),无需返工。
 - 18:48 **A 续任会话 claim Task 9**(收尾:全套回归、架构守卫、coverage gate、work-items 标记、PR)。开工前 `git log` 核对:Task 1–8 全部已有提交,工作区干净。
+- 19:0x A 的跨轨 lint 清理(Task 9 收尾项,ruff 对全部 W7 改动文件 6 处告警全消):`test_git_source.py` 导入上提(E402)+ 删未用名,`source_session.py`/`test_source_session.py` 删未用 import(后两文件属 B 轨 Task 4 已交付面,均为行为无关的机械清理,照 B 的留痕先例在此备案)。全量门禁 `ci_test.sh` 于清理前已跑过(16661 passed / 行 88.36% / **改动行 83.46%** ≥80%;source_session 的行号表受本次清理轻微错位影响,真实值更高)。
+
 

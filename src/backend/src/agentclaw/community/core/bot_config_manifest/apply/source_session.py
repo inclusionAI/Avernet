@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (

@@ -20,6 +20,15 @@ from pathlib import Path
 
 import pytest
 
+from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
+    GitSourceSpec,
+    SubprocessGitClient,
+    _GitCommandError,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+    FetchFailedError,
+    FetchRefusedError,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     ARCHIVE_MEMBER_LIMIT,
     FETCH_ENTRY_LIMITS,
@@ -37,19 +46,6 @@ def test_git_limits_align_with_the_archives_they_generalise():
     assert GIT_CHECKOUT_MEMBER_LIMIT == ARCHIVE_MEMBER_LIMIT
     assert GIT_SINGLE_FILE_LIMIT == FETCH_ENTRY_LIMITS["skills"]
     assert GIT_FETCH_TIMEOUT_S > 0
-
-
-from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
-    GitCheckout,
-    GitSourceClient,
-    GitSourceSpec,
-    SubprocessGitClient,
-    _GitCommandError,
-)
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchFailedError,
-    FetchRefusedError,
-)
 
 
 class _RecordingRunner:

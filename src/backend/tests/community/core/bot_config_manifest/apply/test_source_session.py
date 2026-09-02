@@ -24,7 +24,6 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
-    FetchRefusedError,
 )
 
 
