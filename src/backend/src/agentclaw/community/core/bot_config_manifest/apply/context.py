@@ -15,7 +15,7 @@ six core packages and one of them reaches the DI container at import time.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
@@ -57,6 +57,13 @@ class ApplyContext:
     #: the document: a bot's engine can change after a manifest is stored, and
     #: the construct that was appliable then may not be now.
     capabilities: ManifestCapabilities
+    #: The apply's own id, stamped into every receipt the fetch pipeline files
+    #: (W11's linkage column) — so "what did apply X fetch" is an indexed read,
+    #: which that table's own DDL says is why the column exists. ``None`` only
+    #: for a dry run, which mints no id by the same rule that makes it write
+    #: no report row; the entry identity half of the linkage is per fetch and
+    #: rides the materialisers' call instead.
+    apply_id: Optional[str] = None
 
 
 __all__ = ["ApplyContext"]

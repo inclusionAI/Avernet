@@ -52,7 +52,20 @@ class FakeManifestContent:
         self.blobs: dict[str, bytes] = {}
         self.store_calls: list[dict[str, Any]] = []
 
-    def store(self, fetched, *, scope, source_url, credential_name=None, modifier=""):
+    def store(
+        self,
+        fetched,
+        *,
+        scope,
+        source_url,
+        credential_name=None,
+        modifier="",
+        apply_id=None,
+        category=None,
+        entry_identity=None,
+    ):
+        # Signed with the real W11 contract: the credential NAME, and the
+        # apply/entry linkage the pipeline threads — no secret anywhere.
         record = SimpleNamespace(
             digest=fetched.sha256,
             source_url=source_url,
@@ -69,6 +82,9 @@ class FakeManifestContent:
                 "credential_name": credential_name,
                 "modifier": modifier,
                 "digest": fetched.sha256,
+                "apply_id": apply_id,
+                "category": category,
+                "entry_identity": entry_identity,
             }
         )
         return record
@@ -571,6 +587,7 @@ def make_context(
     entity_id: str = "u_owner",
     engine_type: str = "claude_code",
     bot_type: str = "personal",
+    apply_id: str | None = None,
 ) -> ApplyContext:
     """An ``ApplyContext`` with real capabilities resolved for a baas bot."""
     return ApplyContext(
@@ -582,6 +599,7 @@ def make_context(
         tenant="teamclaw",
         engine_type=engine_type,
         bot_type=bot_type,
+        apply_id=apply_id,
         bot={
             "bot_id": bot_id,
             "owner_id": owner_id,

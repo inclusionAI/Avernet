@@ -135,6 +135,7 @@ class EntryFetcher:
         auth: Optional[str] = None,
         category: str = "resources_file",
         keep_last: bool = False,
+        entry_identity: Optional[str] = None,
     ) -> FetchedEntry:
         """Acquire one entry's bytes. Raises :class:`EntryFetchError`.
 
@@ -143,6 +144,13 @@ class EntryFetcher:
         against the URL the request will actually name, so a substituted URL
         cannot steer the request outside its credential's prefixes (or inside
         them, unseen).
+
+        ``entry_identity`` is the entry's own key (a skill ``name``, an
+        identity ``type`` — the same way the report names entries), passed
+        with the category into the receipt this files: the W11 linkage that
+        makes "what was fetched for this entry" an indexed read instead of
+        a ``source_url`` approximation. ``ctx.apply_id`` supplies the apply
+        half; both are optional for the same reason they are on ``store``.
         """
         target = _substitute(ctx, source_url)
         scope = scope_of(ctx)
@@ -199,6 +207,9 @@ class EntryFetcher:
             source_url=target,
             credential_name=auth,
             modifier=ctx.actor_id,
+            apply_id=ctx.apply_id,
+            category=category,
+            entry_identity=entry_identity,
         )
         return FetchedEntry(
             content=fetched.bytes,

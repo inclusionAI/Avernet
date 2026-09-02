@@ -373,3 +373,20 @@ def test_an_omitted_on_fetch_failure_defaults_to_keep_last():
     )
     assert result.ok
     assert identity.files["SOUL.md"] == SOUL_BODY.decode("utf-8")
+
+
+def test_the_receipts_link_the_apply_and_the_entry():
+    """The linkage the W11 columns exist for: a fetch filed from an apply
+    carries the apply key and the entry's identity, so "what did apply X
+    fetch" and "what was fetched for this entry" are reads, not guesses."""
+    materialiser, identity, fetcher, content = identity_rig()
+    ctx = _ctx(apply_id="apply-4")
+    _run(_apply(materialiser, ctx, [DECLARED]))
+    call = content.store_calls[0]
+    assert call["apply_id"] == "apply-4"
+    assert call["category"] == "identity"
+    assert call["entry_identity"] == "SOUL.md"
+    # A context with no apply id (a dry run's shape) files NULL linkage.
+    _run(_apply(materialiser, _ctx(), [DECLARED]))
+    assert all(call["apply_id"] is not None for call in content.store_calls[:1])
+    assert content.store_calls[-1]["apply_id"] is None

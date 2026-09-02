@@ -473,3 +473,14 @@ def test_an_unpinned_skill_source_defaults_to_keep_last():
     _, _, second = _run(_apply(materialiser, _ctx(), entries))
     assert [e.outcome.value for e in second] == ["unchanged"]
     assert len(uploads.uploads) == 1  # the store's copy answered, no re-upload
+
+
+def test_the_receipts_link_the_apply_and_the_entry():
+    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
+        packages={QC_URL: QZ}
+    )
+    _run(_apply(materialiser, _ctx(apply_id="apply-7"), [_declared()]))
+    call = content.store_calls[0]
+    assert call["apply_id"] == "apply-7"
+    assert call["category"] == "skills"
+    assert call["entry_identity"] == "quality-check"

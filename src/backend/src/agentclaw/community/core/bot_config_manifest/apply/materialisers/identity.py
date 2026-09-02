@@ -165,6 +165,7 @@ class IdentityMaterialiser(Materialiser):
                     auth=entry.get("auth"),
                     category=_FETCH_CATEGORY,
                     keep_last=entry.get("on_fetch_failure", "keep_last") == "keep_last",
+                    entry_identity=file_type,
                 )
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(file_type, exc.reason))

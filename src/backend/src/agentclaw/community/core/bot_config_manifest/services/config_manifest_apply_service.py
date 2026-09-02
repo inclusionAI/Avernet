@@ -230,6 +230,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             actor_id=actor_id,
             entity_id=entity_id,
             env=env,
+            # The id this context's fetch pipeline stamps into every receipt —
+            # minted above, so the linkage column answers "what did THIS
+            # apply fetch" as an indexed read.
+            apply_id=apply_id,
         )
 
         # ``bind_current_avernet_tenant`` captures the tenant AT WRAP TIME —
@@ -419,6 +423,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         actor_id: str,
         entity_id: str,
         env: str,
+        apply_id: Optional[str] = None,
     ) -> ApplyContext:
         return ApplyContext(
             bot_id=bot_id,
@@ -431,6 +436,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             bot_type=str(bot.get("bot_type") or ""),
             bot=bot,
             capabilities=self._manifests.capabilities_for_bot(bot),
+            # A dry run mints no id (its own documented rule) and writes no
+            # report row; its fetches' receipts therefore carry NULL linkage
+            # rather than an id nothing joins to.
+            apply_id=apply_id,
         )
 
     def _parsed_or_empty(
