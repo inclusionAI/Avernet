@@ -590,6 +590,22 @@ class BotCreateWithManifestConfig:
 
     authorization_window_seconds: int = 10 * 60
 
+    @classmethod
+    def from_block(cls, block: dict) -> "BotCreateWithManifestConfig":
+        """Parse the ``bot_create_with_manifest`` block, defaulting defensively.
+
+        A missing key, an unreadable value and a non-positive one all take the
+        default. Non-positive is *refused* rather than honoured: zero would
+        expire every creation at the instant of submission, which from a
+        caller's side is indistinguishable from the feature being broken.
+        """
+        default = cls().authorization_window_seconds
+        try:
+            window = int(block.get("authorization_window_seconds", default))
+        except (TypeError, ValueError):
+            window = default
+        return cls(authorization_window_seconds=window if window > 0 else default)
+
 
 # ── Dormant bot recycle ──────────────────────────────────────────────────
 

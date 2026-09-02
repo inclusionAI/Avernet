@@ -83,8 +83,17 @@ def resolve_manifest_entity_id(
     about what it did. The bot would simply come up unconfigured.
 
     Mirroring the rule here rather than importing ``BotService`` keeps this
-    module free of the creation graph; the pairing is held by a test that runs
-    both.
+    module free of the creation graph; the pairing is held by a test that reads
+    ``create_bot``'s own source, so the mirror cannot rot quietly.
+
+    **``spec_entity_id`` stays optional here even though ``persist`` now
+    requires it**, and the two are not in tension: this function's contract is
+    to answer for *whatever* ``create_bot`` would be given, and ``create_bot``
+    takes ``entity_id: Optional[str] = None``. Narrowing it would make the
+    mirror narrower than the thing it mirrors, which is the one way this could
+    start disagreeing again. The default is ``staff_{user_id}`` rather than
+    ``user_id`` for the same reason: it is not a preference, it is the other
+    side's literal expression.
     """
     return spec_entity_id or f"staff_{user_id}"
 
@@ -237,7 +246,7 @@ class BotCreationManifestSeam:
     def persist(
         self,
         *,
-        spec_entity_id: Optional[str],
+        spec_entity_id: str,
         user_id: str,
         bot_id: str,
         document: str,

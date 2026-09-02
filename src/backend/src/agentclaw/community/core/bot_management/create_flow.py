@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.bot_management.engines.provisioning import (
     BotCreateTemplateValidationMode,
@@ -35,6 +35,9 @@ from agentclaw.community.core.bot_management.engines.registry import (
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AICODING_ENGINE_TYPE,
     CLAUDE_CODE_ENGINE_TYPE,
+)
+from agentclaw.community.core.bot_management.manifest_seam import (
+    ManifestCreationSeam,
 )
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
@@ -659,60 +662,6 @@ class ManifestCreationSubmitted:
 
 
 
-class ManifestCreationSeam(Protocol):
-    """What creation needs from the manifest package, named without importing it.
-
-    A ``Protocol`` rather than the concrete
-    ``BotCreationManifestSeam``: this module must not import
-    ``core/bot_config_manifest`` — that closes a cycle, since the manifest
-    package reaches back into the creation graph — and structural typing states
-    the contract with no import at all. The real seam satisfies it by shape; a
-    test double satisfies it by shape too, which is the second reason.
-
-    Only the four operations submission calls are here. The pre-container apply
-    and the job's own steps belong to the creation job, which holds the seam
-    directly and needs no stand-in for it.
-    """
-
-    def preflight(
-        self, *, document: str, engine_type: str | None, bot_type: str | None
-    ) -> dict[str, Any]:
-        """Refuse an unusable manifest now. Raises ``ManifestValidationError``."""
-        ...
-
-    def persist(
-        self,
-        *,
-        spec_entity_id: str | None,
-        user_id: str,
-        bot_id: str,
-        document: str,
-        modifier: str,
-        engine_type: str | None,
-        bot_type: str | None,
-    ) -> str:
-        """Store the document and return the ``entity_id`` it was keyed by."""
-        ...
-
-    def start_job(
-        self,
-        *,
-        bot_id: str,
-        entity_id: str,
-        user_id: str,
-        document_owner: str,
-        spec: dict[str, Any],
-        iframe_url: str | None,
-        redirect_url: str | None,
-    ) -> None:
-        """Hand the creation to its durable job."""
-        ...
-
-    def discard(self, *, entity_id: str, bot_id: str) -> bool:
-        """Undo what submission wrote. Never raises; reports whether it landed."""
-        ...
-
-
 def submit_bot_creation_with_manifest(
     *,
     user_id: str,
@@ -756,11 +705,6 @@ def submit_bot_creation_with_manifest(
     """
     spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
-    is_first_bot = bot_service.is_first_bot(user_id)
-    use_first_passport = is_first_bot or (
-        spec.bot_type == "personal"
-        and bot_service.is_first_personal_bot(user_id)
-    )
     bot_service.check_create_bot_preflight(
         user_id=user_id,
         bot_id=bot_id,
@@ -808,7 +752,6 @@ def submit_bot_creation_with_manifest(
             bot_name=bot_name,
             spec=spec,
             context=context,
-            use_first_passport=use_first_passport,
         )
     except Exception:
         # Best-effort by construction: ``discard`` never raises, so a cleanup
@@ -828,7 +771,6 @@ def _apply_and_hand_off(
     bot_name: str | None,
     spec: BotCreateSpec,
     context: BotCreateContext,
-    use_first_passport: bool,
 ) -> ManifestCreationSubmitted:
     """Apply for the Passport, then hand the creation to its durable job.
 
@@ -856,7 +798,17 @@ def _apply_and_hand_off(
             if spec.template_config is not None
             else None,
         ),
-        use_first_passport=use_first_passport,
+        # **No first-bot skip on this surface.** ``create_bot_with_authorization``
+        # asks Passport to skip approval for a user's very first bot; this
+        # endpoint deliberately does not. An OpenAPI client routes its users
+        # through consent every time, the first included, so what a client
+        # integrates against is one flow rather than two.
+        #
+        # This governs the default tenant, which is where the approval flow
+        # lives. A non-default tenant still takes ``applyFirst`` unconditionally
+        # — #556's rule that approval does not apply to external tenants — and
+        # that is a separate decision, not this one.
+        use_first_passport=False,
     )
 
     iframe_url = passport_result.get("iframe_url") if passport_result else None

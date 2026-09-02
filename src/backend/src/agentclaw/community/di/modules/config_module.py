@@ -956,36 +956,6 @@ class ConfigModule(Module):
 
     @singleton
     @provider
-    def bot_create_with_manifest(self) -> cfg.BotCreateWithManifestConfig:
-        """Creating a bot with its configuration manifest (W13).
-
-        YAML shape under ``user_config.bot_create_with_manifest``::
-
-            bot_create_with_manifest:
-              authorization_window_seconds: 600
-
-        A missing block, an unreadable value or a non-positive one all take the
-        default. Non-positive is refused rather than honoured because it would
-        expire every creation at the moment of submission — a configuration
-        mistake that reads, from the caller's side, as the feature being broken.
-        """
-        block = _block("bot_create_with_manifest")
-        defaults = cfg.BotCreateWithManifestConfig()
-        try:
-            window = int(
-                block.get(
-                    "authorization_window_seconds",
-                    defaults.authorization_window_seconds,
-                )
-            )
-        except (TypeError, ValueError):
-            window = defaults.authorization_window_seconds
-        if window <= 0:
-            window = defaults.authorization_window_seconds
-        return cfg.BotCreateWithManifestConfig(authorization_window_seconds=window)
-
-    @singleton
-    @provider
     def task_queue_worker(self) -> cfg.TaskQueueWorkerConfig:
         """In-process distributed-task-queue worker policy.
 

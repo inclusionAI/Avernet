@@ -203,6 +203,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.modules.config_module import read_user_config
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -750,6 +751,19 @@ class BotManagementModule(Module):
     ) -> BotConfigManifestApplyServiceProtocol:
         """The Protocol every adapter injects, delegated to the one instance."""
         return service
+
+    @singleton
+    @provider
+    def bot_create_with_manifest_config(self) -> cfg.BotCreateWithManifestConfig:
+        """W13's creation policy, read through ``config_module``'s public seam.
+
+        Parsed here rather than in ``config_module`` for the reason
+        ``manifest_fetch_module`` does the same: the read goes through the one
+        seam, and the parsing lives with the graph that consumes it.
+        """
+        return cfg.BotCreateWithManifestConfig.from_block(
+            read_user_config().get("bot_create_with_manifest") or {}
+        )
 
     @singleton
     @provider

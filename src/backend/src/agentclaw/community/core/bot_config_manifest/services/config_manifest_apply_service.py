@@ -305,10 +305,28 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 raise ManifestApplyInProgressError(bot_id)
 
         try:
-            # Raises ManifestValidationError, before an id is minted, if the
-            # stored document no longer validates for this bot. Kept here rather
-            # than left to the handler so the failure still reaches the caller
-            # synchronously, as it did before the work moved to the queue.
+            # Called for its **exception**, not its value: the parsed document
+            # is rebuilt by the handler, so nothing here needs it. What this
+            # buys is that a document which cannot be applied is refused
+            # synchronously, to the caller, before an ``apply_id`` exists —
+            # exactly as it was before the work moved to the queue.
+            #
+            # It was validated at ``PUT``, so why again? Because validity is
+            # relative to the bot, and the bot moves:
+            #
+            # * **The engine changed.** A document declaring an
+            #   ``identity`` file only Claude Code accepts validated against a
+            #   Claude Code bot; the bot has since been switched to another
+            #   engine, and the capability set it resolves against no longer
+            #   admits that construct.
+            # * **The build changed.** A category whose materialiser has been
+            #   withdrawn since the ``PUT`` — or a document written against a
+            #   newer schema and rolled back to.
+            #
+            # Neither is hypothetical enough to skip: both leave a stored
+            # document that was valid when written and is not now, and both
+            # would otherwise surface as a failed apply on a live bot rather
+            # than a ``422`` on the request that asked for it.
             self._parsed_or_empty(
                 entity_id=entity_id,
                 bot_id=bot_id,

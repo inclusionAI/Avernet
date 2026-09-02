@@ -384,11 +384,22 @@ def test_the_poll_and_the_job_agree_on_what_never_comes_up():
     assert create_with_manifest._PROVISIONING_FAILED == _CONTAINER_FAILED_STATUSES
 
 
-def test_both_routes_refuse_an_application_caller():
-    """The same bar the ordinary create carries, for the same reason: no bot
-    exists yet for a grant to cover, and creation spends the user's quota."""
-    assert ADMISSION[_SUBMIT] is AdmissionMode.REFUSED
-    assert ADMISSION[_POLL] is AdmissionMode.REFUSED
+def test_both_routes_admit_an_application_caller():
+    """This pair exists for one, so refusing it would make it unusable.
+
+    An integration creates a bot with its configuration in one submission and
+    polls until it is ready; there is no human on that wire by design. Neither
+    operation can be grant-checked — a grant covers a bot, and for most of a
+    creation there is no bot, which is what AWAITING_AUTHORIZATION *means* — so
+    what scopes them is the ``entity_id`` resolved server-side from the caller's
+    own principal. Another caller's ``bot_id`` finds no rows and answers 404.
+
+    Pinned as an equality rather than "not REFUSED" so that a later change to a
+    grant-checked mode fails here, where the reason lives, instead of at the
+    first poll a caller makes before their bot exists.
+    """
+    assert ADMISSION[_SUBMIT] is AdmissionMode.OPEN
+    assert ADMISSION[_POLL] is AdmissionMode.OPEN
 
 
 def test_the_poll_takes_nothing_but_its_path():

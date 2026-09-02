@@ -64,12 +64,17 @@ class _Seam:
 
 def _submit(seam, apply_result=None, passport=None):
     passport = passport or MagicMock()
-    passport.apply_first_agent_passport.return_value = (
+    # ``apply_agent_passport``, not ``applyFirst``: this endpoint never asks
+    # Passport to skip approval, not even for a user's first bot, so the
+    # approval-flow call is the only one it makes on the default tenant.
+    passport.apply_agent_passport.return_value = (
         apply_result
         if apply_result is not None
         else {"iframe_url": "https://auth.example/consent"}
     )
     bot_service = MagicMock()
+    # True on purpose: even for a caller whose very first bot this is, the
+    # consent step is not skipped here.
     bot_service.is_first_bot.return_value = True
     bot_service.is_first_personal_bot.return_value = True
     skill_set_factory = MagicMock()
@@ -87,6 +92,27 @@ def _submit(seam, apply_result=None, passport=None):
         manifest_seam=seam,
     )
     return outcome, passport, bot_service
+
+
+def test_a_first_bot_still_goes_through_consent_on_this_surface():
+    """No "first bot skips approval" shortcut here, deliberately.
+
+    ``create_bot_with_authorization`` asks Passport to skip approval for a
+    user's very first bot. This endpoint does not: an OpenAPI client routes its
+    users through consent every time, so what a client integrates against is one
+    flow rather than two — and the branch that returns a token with nowhere to
+    send anyone never arises on the default tenant.
+
+    Asserted on the *call*, not on the outcome, because the outcome of the two
+    Passport methods looks the same from here. The stand-in reports this caller
+    as first-bot in both senses, so a re-introduced shortcut fails this.
+    """
+    seam = _Seam()
+    _outcome, passport, bot_service = _submit(seam)
+
+    assert bot_service.is_first_bot.return_value is True, "the premise"
+    passport.apply_agent_passport.assert_called_once()
+    passport.apply_first_agent_passport.assert_not_called()
 
 
 def test_submission_stores_the_manifest_and_returns_the_authorization_handles():
