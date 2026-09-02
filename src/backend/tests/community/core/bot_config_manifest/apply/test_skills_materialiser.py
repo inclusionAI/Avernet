@@ -484,3 +484,79 @@ def test_the_receipts_link_the_apply_and_the_entry():
     assert call["apply_id"] == "apply-7"
     assert call["category"] == "skills"
     assert call["entry_identity"] == "quality-check"
+
+
+def test_a_dry_run_receipt_is_not_installation_evidence():
+    """The P0 audit's scenario: the document's pin moved from (S1, D1) to
+    (S2, D2); a dry run fetched and filed D2's receipt (dry runs fetch);
+    the name is still active **with D1's package installed**. The real apply
+    must class the entry for a WRITE — a receipt proves the platform
+    fetched the content, never that it was installed, and reporting
+    UNCHANGED here would mean D2 silently never lands while the report says
+    SUCCEEDED."""
+    old_zip = build_skill_zip("quality-check", extra=[("v1.txt", b"old")])
+    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
+        packages={QC_URL: QZ}
+    )
+    # World: installed and active is D1 (the OLD package).
+    uploads.rows["quality-check"] = {"id": 12, "name": "quality-check"}
+    uploads.installed["quality-check"] = old_zip
+    reader.assets = (skill_asset(12, "quality-check"),)
+    # The dry run's fetch of D2 filed its receipt…
+    content.store(
+        fetched_object(QZ, url=QC_URL, content_type="application/zip"),
+        scope=None,
+        source_url=QC_URL,
+    )
+
+    _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
+    assert [e.outcome.value for e in written] == ["updated"]
+    # What got written is D2's canonical repack (the passthrough road).
+    assert (
+        uploads.uploads[0]["package"]
+        == real_validator().validate_zip(QZ).canonical_zip
+    )
+    assert activation.skill_activations == []  # already active: replaced only
+
+
+def test_a_receipt_left_behind_by_an_aborted_write_is_not_evidence():
+    """Apply #1's resolve filed this entry's receipt, its write stage then
+    aborted (the category's other half failed): apply #2 must still WRITE,
+    not read the leftover receipt as 'already installed'."""
+    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
+        packages={QC_URL: QZ}
+    )
+    # The leftover receipt from the aborted apply…
+    content.store(
+        fetched_object(QZ, url=QC_URL, content_type="application/zip"),
+        scope=None,
+        source_url=QC_URL,
+    )
+    # …an active name (installed with the *older* package, because abort #1
+    # never reached this entry's write)…
+    uploads.rows["quality-check"] = {"id": 12, "name": "quality-check"}
+    uploads.installed["quality-check"] = build_skill_zip(
+        "quality-check", extra=[("v1.txt", b"pre-abort")]
+    )
+    reader.assets = (skill_asset(12, "quality-check"),)
+
+    _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
+    assert [e.outcome.value for e in written] == ["updated"]
+
+
+def test_an_unreadable_installed_package_is_treated_as_unknown():
+    """Unreadable ≠ equal: a name whose installed package cannot be read back
+    (or holds bytes that no longer form a package) must be classed for a
+    full write, never guessed into UNCHANGED."""
+    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
+        packages={QC_URL: QZ}
+    )
+    uploads.rows["quality-check"] = {"id": 12, "name": "quality-check"}
+    # Installed bytes that are NOT this package: digest differs on purpose —
+    # "unreadable" is modeled by the real service returning None; here the
+    # neighbor case (stale content) proves the same verdict.
+    uploads.installed["quality-check"] = b"not-a-zip"
+    reader.assets = (skill_asset(12, "quality-check"),)
+
+    _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
+    assert [e.outcome.value for e in written] == ["updated"]

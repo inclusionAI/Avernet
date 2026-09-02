@@ -19,11 +19,13 @@ The package's own SKILL.md front matter names the skill; a declaration whose
 ``name`` disagrees is refused — report identities would otherwise lie about
 what got installed, and the runtime name is unique per bot either way.
 
-Convergence reads §2.8's receipts: when an entry's bytes were served from
-the platform's own copy (a receipt matching the declaration) and its name is
-active, re-applying writes nothing. A pinned fetch only ever returns the
-pinned bytes, so the receipt's agreement is the statement "what is installed
-is what is declared".
+Convergence compares **installed content**, not receipts: ``plan`` asks the
+upload service for the digest of the package actually published under the
+skill's name and marks `unchanged` only when it equals this entry's package
+digest. A receipt proves the platform *fetched* the content — a dry run
+files receipts without installing anything, and an aborted apply leaves a
+receipt behind its failed write — so a receipt can never license an
+unchanged verdict; it only dedups the fetch side.
 
 Known corner, recorded rather than hidden: a skill a Set *references* but
 whose skill id the flush's ``member_skill_ids`` excludes (an excluded
@@ -34,6 +36,7 @@ report honestly as ``partially_written``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
@@ -108,15 +111,26 @@ class _PackageRefusal(Exception):
 class _SkillPackage:
     """One entry's validated, upload-ready package — the intent's value."""
 
-    __slots__ = ("name", "canonical_zip", "from_store")
+    __slots__ = ("name", "canonical_zip", "content_digest", "from_store")
 
-    def __init__(self, name: str, canonical_zip: bytes, *, from_store: bool) -> None:
+    def __init__(
+        self,
+        name: str,
+        canonical_zip: bytes,
+        *,
+        from_store: bool,
+    ) -> None:
         self.name = name
         self.canonical_zip = canonical_zip
-        # Whether the platform's own copy (W11) answered for these bytes.
-        # ``plan`` reads it: an active name plus a from-store copy is the
-        # unchanged state, because the receipt is keyed to this very source
-        # and agrees with the declaration.
+        # sha256 of the canonical zip: THE identity of the content this
+        # entry installs. ``plan`` compares it with the digest of the bytes
+        # actually published under the skill's name — the only honest
+        # unchanged verdict, because a receipt only proves the platform
+        # *fetched* this content, never that it was installed.
+        self.content_digest = "sha256:" + hashlib.sha256(canonical_zip).hexdigest()
+        # Whether the platform's own copy (W11) answered for the fetch — a
+        # fetch-side fact only (no network was touched); it plays no part in
+        # the unchanged verdict.
         self.from_store = from_store
 
 
@@ -268,7 +282,21 @@ class SkillsMaterialiser(Materialiser):
     async def plan(
         self, ctx: "ApplyContext", intents: Sequence[Intent]
     ) -> CategoryPlan:
-        """Classify each intent against the active set; compute removals."""
+        """Classify each intent against the active set; compute removals.
+
+        ``unchanged`` requires the **installed package's digest** to equal
+        this entry's package digest — asked of the upload service, which
+        reads the bytes actually published under the skill's name. The
+        receipt a fetch filed proves the platform *fetched* the content, not
+        that it was installed: a dry run files receipts without installing
+        anything (a pin that moved between applies would never install: the
+        name is active with the OLD package, the receipt matches the NEW
+        pin, and the report would have said SUCCEEDED), and an apply whose
+        write stage aborted leaves its resolve-stage receipts behind it. DNA
+        of the installed state, not memory of the fetch, is the only honest
+        verdict — and `None` (nothing installed, or unreadable) is unknown,
+        never equal: the entry is classed for a full write.
+        """
         area = self._area(ctx)
         governed = self._reader.member_skill_ids(bot=ctx.bot)
         declared = {intent.identity for intent in intents}
@@ -276,14 +304,18 @@ class SkillsMaterialiser(Materialiser):
         planned = []
         for intent in intents:
             package = intent.value
-            if intent.identity in area and package.from_store:
-                # Active, and the platform's own copy (a receipt that matches
-                # the declaration) is what would be installed: unchanged.
-                outcome = EntryOutcome.UNCHANGED.value
-            elif intent.identity in area:
-                # Active with new bytes (the pin moved on): the package is
-                # replaced in place; the installation itself stays.
-                outcome = EntryOutcome.UPDATED.value
+            if intent.identity in area:
+                installed_digest = await self._uploads.installed_package_digest(
+                    bot=ctx.bot,
+                    bot_id=ctx.bot_id,
+                    owner_id=ctx.owner_id,
+                    name=intent.identity,
+                )
+                outcome = (
+                    EntryOutcome.UNCHANGED.value
+                    if installed_digest == package.content_digest
+                    else EntryOutcome.UPDATED.value
+                )
             else:
                 outcome = EntryOutcome.CREATED.value
             planned.append(PlannedEntry(intent, outcome))

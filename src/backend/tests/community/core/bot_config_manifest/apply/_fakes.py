@@ -279,6 +279,10 @@ class FakeSkillUploadService:
     def __init__(self) -> None:
         self.uploads: list[dict[str, Any]] = []
         self.rows: dict[str, dict[str, Any]] = {}
+        # name -> the canonical package the INSTALL published. A dry run
+        # never touches this: the fake models "installed" the way the real
+        # service does — only a completed upload/replace publishes.
+        self.installed: dict[str, bytes] = {}
         self._next_id = 100
 
     async def upload_local_skill(
@@ -297,6 +301,7 @@ class FakeSkillUploadService:
             self._next_id += 1
             record = {"id": self._next_id, "name": name}
             self.rows[name] = record
+        self.installed[name] = package
         self.uploads.append(
             {
                 "bot_id": bot_id,
@@ -312,6 +317,19 @@ class FakeSkillUploadService:
             "skill": {**record, "active": False},
             "actor_id": actor_id,
         }
+
+    async def installed_package_digest(
+        self, *, bot, bot_id: str, owner_id: str, name: str
+    ):
+        # The same verdict the real service computes: the digest of the bytes
+        # an install published under the name — None when nothing was ever
+        # installed (the dry-run shape).
+        import hashlib
+
+        package = self.installed.get(name)
+        if package is None:
+            return None
+        return "sha256:" + hashlib.sha256(package).hexdigest()
 
     def uploaded_packages(self, *, name: str) -> list[bytes]:
         return [

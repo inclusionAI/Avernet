@@ -200,6 +200,17 @@ class LocalSkillPackageStorage:
         await self._read_package_files()
         return True
 
+    async def read_package_files(self) -> list[tuple[str, bytes]]:
+        """The installed package's bytes, read back the way verify/copy_to read
+        them: every listed path validated before a single read is issued.
+
+        The public alias of the private reader those flows share — a caller
+        that needs the authoritative bytes (not just a boolean) reads the
+        same thing the bot is actually running, with no new traversal or
+        locator knowledge of its own.
+        """
+        return await self._read_package_files()
+
     async def copy_to(
         self, target: "LocalSkillPackageStorage", *, replace: bool = False
     ) -> None:
