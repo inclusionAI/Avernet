@@ -12,7 +12,7 @@ without a client.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
@@ -96,12 +96,19 @@ def _startup_script_payload(
     record: Any,
     state: str,
     reason: str,
+    declared: Optional[str] = None,
 ) -> StartupScript:
-    """Shape a stored record — or its absence — as the response model."""
+    """Shape a stored record — or its absence — as the response model.
+
+    ``declared`` (W8, §2.2) is the manifest's own ``script.body`` when the bot
+    carries a manifest that declares one: the alias view answers with it, and
+    the row supplies the audit fields it has.
+    """
+    script = declared if declared is not None else (record.script if record is not None else "")
     return StartupScript(
         bot_id=bot_id,
-        script=record.script if record is not None else "",
-        size_bytes=record.size_bytes if record is not None else 0,
+        script=script,
+        size_bytes=len(script.encode("utf-8")),
         updated_by=record.modifier if record is not None else "",
         updated_at=record.gmt_modified if record is not None else None,
         supported=state == SUPPORTED,

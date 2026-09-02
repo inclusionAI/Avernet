@@ -56,6 +56,9 @@ from agentclaw.community.core.bot_inventory.protocols import (
 )
 from agentclaw.community.core.bot_inventory.types import BusinessSpaceRef
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
+from agentclaw.community.api.bot_config_manifest_service import (
+    BotConfigManifestServiceProtocol,
+)
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
@@ -176,6 +179,16 @@ def startup_script():
     return m
 
 
+@pytest.fixture
+def manifest_service():
+    """The manifest service as the startup-script alias sees it (W8): a bot
+    with no manifest by default, so every legacy case runs its own path."""
+    m = MagicMock()
+    m.write_through_script.return_value = None
+    m.script_body.return_value = None
+    return m
+
+
 class _CountingNoopSpace(NoopBusinessSpaceContext):
     """Noop space context that counts ``bot_space`` resolutions per instance."""
 
@@ -199,6 +212,7 @@ def client(
     skill_set_factory,
     auth_rel,
     startup_script,
+    manifest_service,
 ):
     space = _CountingNoopSpace()
 
@@ -213,6 +227,7 @@ def client(
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
+            binder.bind(BotConfigManifestServiceProtocol, to=manifest_service)
             binder.bind(BusinessSpaceContextProtocol, to=space)
 
     app = FastAPI()
@@ -2129,3 +2144,68 @@ def test_startup_script_audit_names_the_application_not_the_delegating_user():
     actor = _audit_actor(app, "alice")
     assert actor != "alice", "an app's write must not read as the user's own"
     assert "7" in actor and "alice" in actor, "name the app, keep who it acted for"
+
+
+# ── the startup-script alias (W8, §2.2) ────────────────────────────────────
+
+
+def _written(script: str = "echo through\n"):
+    """What ``write_through_script`` answers on a manifest bot."""
+    return MagicMock(declares_script=True)
+
+
+def test_startup_script_put_writes_through_the_manifest_when_there_is_one(
+    client, svc, startup_script, manifest_service
+):
+    manifest_service.write_through_script.return_value = _written()
+    startup_script.get.return_value = MagicMock(
+        script="echo through\n", size_bytes=13, modifier="u1", gmt_modified=None
+    )
+
+    data = _ok(client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo through\n"}))
+
+    kwargs = manifest_service.write_through_script.call_args.kwargs
+    assert kwargs["body"] == "echo through\n" and kwargs["modifier"] == "u1"
+    startup_script.put.assert_not_called()
+    assert data["script"] == "echo through\n" and data["updated_by"] == "u1"
+
+
+def test_startup_script_put_takes_the_legacy_path_without_a_manifest(
+    client, svc, startup_script, manifest_service
+):
+    manifest_service.write_through_script.return_value = None
+    startup_script.put.return_value = MagicMock(
+        script="echo legacy\n", size_bytes=12, modifier="u1", gmt_modified=None
+    )
+    data = _ok(client.put("/openapi/v1/bots/b1/startup-script", json={"script": "echo legacy\n"}))
+    startup_script.put.assert_called_once()
+    assert data["script"] == "echo legacy\n"
+
+
+def test_startup_script_delete_goes_through_the_manifest_when_there_is_one(
+    client, svc, startup_script, manifest_service
+):
+    manifest_service.write_through_script.return_value = _written()
+    _ok(client.delete("/openapi/v1/bots/b1/startup-script"))
+    assert manifest_service.write_through_script.call_args.kwargs["body"] is None
+    startup_script.delete.assert_not_called()
+
+    manifest_service.write_through_script.return_value = None
+    _ok(client.delete("/openapi/v1/bots/b1/startup-script"))
+    startup_script.delete.assert_called_once()
+
+
+def test_startup_script_get_answers_with_the_declared_body(
+    client, svc, startup_script, manifest_service
+):
+    startup_script.get.return_value = MagicMock(
+        script="echo row\n", size_bytes=9, modifier="u1", gmt_modified=None
+    )
+    manifest_service.script_body.return_value = "echo declared\n"
+    data = _ok(client.get("/openapi/v1/bots/b1/startup-script"))
+    assert data["script"] == "echo declared\n"
+    assert data["size_bytes"] == len("echo declared\n")
+    assert data["updated_by"] == "u1"
+
+    manifest_service.script_body.return_value = None
+    assert _ok(client.get("/openapi/v1/bots/b1/startup-script"))["script"] == "echo row\n"

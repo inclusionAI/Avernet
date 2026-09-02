@@ -323,11 +323,15 @@ Conventions every task assumes:
 - **Done when:** as revision 2's Task 7.
 - **Depends on:** Task 18
 
-## [ ] Task 20: The three startup-script routes
+## [x] Task 20: The three startup-script routes
 - **Files:** `adapters/http/openapi_v1/bots/{router.py,startup_script_support.py}`,
   `tests/community/endpoints/test_openapi_startup_script.py`,
   `tests/community/adapters/http/openapi_v1/test_bots_endpoints.py`
-- **Done when:** as revision 2's Task 8.
+- **Done when:** as revision 2's Task 8 — done: `PUT` / `DELETE` go through
+  `write_through_script` and fall back to the legacy path on `None`; `GET`
+  answers the declared body; the withdraw guard runs on both `PUT` arms; the
+  legacy cases pass unedited (the unit suite only gained a manifest-service
+  stand-in in its injector).
 - **Depends on:** Task 19
 
 ---

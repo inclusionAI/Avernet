@@ -322,3 +322,109 @@ def delete_startup_script_absent_is_idempotent():
 )
 def delete_startup_script_unknown_bot():
     """Idempotence covers an absent script, not an absent bot."""
+
+
+# ── on a bot with a manifest, the endpoints are a view of its script (W8) ──
+
+from agentclaw.community.core.repository.protocols.bot import (  # noqa: E402
+    BotConfigManifestRepositoryProtocol,
+)
+
+_MANIFEST_BOT_ID = "startup-script-manifest-bot"
+_MANIFEST = (
+    "schema_version: 1\n"
+    "manifest:\n"
+    "  identity: []\n"
+    "script:\n"
+    "  body: |\n"
+    "    echo declared\n"
+)
+_DECLARED = "echo declared\n"
+
+
+def _seed_manifest_bot(world) -> None:
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_MANIFEST_BOT_ID)
+    world.get(BotConfigManifestRepositoryProtocol).upsert(
+        env=get_current_env(),
+        entity_id=_OWNER,
+        bot_id=_MANIFEST_BOT_ID,
+        document=_MANIFEST,
+        size_bytes=len(_MANIFEST.encode("utf-8")),
+        schema_version=1,
+        modifier=_OWNER,
+    )
+
+
+def _manifest_document(world) -> str:
+    return world.get(BotConfigManifestRepositoryProtocol).get(
+        env=get_current_env(), entity_id=_OWNER, bot_id=_MANIFEST_BOT_ID
+    ).document
+
+
+def _row(world):
+    return world.get(BotStartupScriptRepositoryProtocol).get(
+        env=get_current_env(), entity_id=_OWNER, bot_id=_MANIFEST_BOT_ID
+    )
+
+
+def _the_manifest_and_the_row_carry_the_new_body(_response, world) -> None:
+    assert _manifest_document(world) == (
+        "schema_version: 1\nmanifest:\n  identity: []\nscript:\n  body: |\n    echo rewritten\n"
+    )
+    assert _row(world).script == "echo rewritten\n"
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/{bot_id}/startup-script",
+    scenario="writes_through_the_manifest",
+    input=CaseInput(
+        path_params={"bot_id": _MANIFEST_BOT_ID},
+        query_params=_QUERY,
+        headers=_HEADERS,
+        json_body={"script": "echo rewritten\n"},
+    ),
+    seed=_seed_manifest_bot,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"script": "echo rewritten\n", "updated_by": _OWNER}},
+    ),
+    extra_assertions=(_the_manifest_and_the_row_carry_the_new_body,),
+)
+def put_startup_script_on_a_manifest_bot():
+    """The document's script section is rewritten — every other byte kept —
+    and the row follows, so GET …/config-manifest and this endpoint agree."""
+
+
+def _the_section_and_the_row_are_gone(_response, world) -> None:
+    assert _manifest_document(world) == "schema_version: 1\nmanifest:\n  identity: []\n"
+    assert _row(world) is None
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/{bot_id}/startup-script",
+    scenario="removes_the_manifest_section",
+    input=CaseInput(path_params={"bot_id": _MANIFEST_BOT_ID}, query_params=_QUERY, headers=_HEADERS),
+    seed=_seed_manifest_bot,
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
+    extra_assertions=(_the_section_and_the_row_are_gone,),
+)
+def delete_startup_script_on_a_manifest_bot():
+    """The section is removed and stored; the row is cleared with it."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/bots/{bot_id}/startup-script",
+    scenario="reads_the_manifests_declared_body",
+    input=CaseInput(path_params={"bot_id": _MANIFEST_BOT_ID}, query_params=_QUERY, headers=_HEADERS),
+    seed=_seed_manifest_bot,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"script": _DECLARED, "size_bytes": len(_DECLARED), "supported": True}},
+    ),
+)
+def get_startup_script_on_a_manifest_bot():
+    """The manifest declares a script: this is a view of it, row or no row."""
