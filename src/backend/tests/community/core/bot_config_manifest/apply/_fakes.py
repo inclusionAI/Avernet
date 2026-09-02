@@ -658,3 +658,69 @@ def make_context(
             is_teclaw=lambda engine: engine == "teclaw",
         ),
     )
+
+
+class FakeResourceFileService:
+    """Stands in for ``ResourceFileService``: uploads and deletes, recorded.
+
+    ``ResourceFileService`` is v1's single write chain for manifest resources
+    (its dispatcher covers the arca / baas / teclaw transports uniformly), so
+    the fake needs only the three entry points the materialiser calls:
+    ``upload_file``, ``delete`` — plus ``exists`` for the plan stage's
+    classification. Signatures mirror the real service's, so a drift shows up
+    as a TypeError in these tests before it shows up mid-apply in production.
+
+    ``delete`` removes from the presence set as well — the real service's
+    contract — because the plan stage classifies by ``exists`` and would
+    otherwise call a deleted path "unchanged".
+    """
+
+    def __init__(self, exists_paths: set[str] | None = None) -> None:
+        self.writes: dict[tuple[str, str], bytes] = {}
+        self.deleted: list[str] = []
+        self._exists = set(exists_paths or ())
+
+    def record_present(self, *paths: str) -> None:
+        self._exists.update(paths)
+
+    async def upload_file(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        target_dir: str,
+        filename: str,
+        data: bytes,
+        preserve_structure: bool = False,
+    ) -> dict[str, Any]:
+        self.writes[(target_dir, filename)] = data
+        self._exists.add(f"{target_dir}/{filename}".replace("//", "/"))
+        return {"path": f"{target_dir}/{filename}"}
+
+    async def delete(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+    ) -> bool:
+        self.deleted.append(path)
+        self._exists.discard(path)
+        return True
+
+    async def exists(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+    ) -> bool:
+        return path in self._exists
