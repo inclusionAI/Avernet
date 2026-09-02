@@ -117,12 +117,14 @@ def test_the_reader_yields_collector_shaped_refs_from_the_index(monkeypatch) -> 
         ("RULES.md", "bot-data", "staff_u1/bot7_manifest/teclaw/identity/RULES.md")
     ]
     resources = reader.resources(_REQ)
-    assert [f.path for f in resources] == [
-        "staff_u1/bot7_manifest/teclaw/workspace/kb/a.md",
-        "staff_u1/bot7_manifest/teclaw/workspace/skills-local/order-lookup/SKILL.md",
-        "staff_u1/bot7_manifest/teclaw/workspace/skills-local/order-lookup/scripts/run.py",
-    ]
+    assert [f.path for f in resources] == ["staff_u1/bot7_manifest/teclaw/workspace/kb/a.md"]
     skills = reader.skills(_REQ)
     assert [(s.name, s.scope, s.store, s.path) for s in skills] == [
         ("order-lookup", "user", "bot-data", "staff_u1/bot7_manifest/teclaw/workspace/skills-local/order-lookup")
     ]
+    # A package's files, as resources refs, for the names the collector keeps.
+    assert [f.path for f in reader.skill_files(_REQ, ["order-lookup"])] == [
+        "staff_u1/bot7_manifest/teclaw/workspace/skills-local/order-lookup/SKILL.md",
+        "staff_u1/bot7_manifest/teclaw/workspace/skills-local/order-lookup/scripts/run.py",
+    ]
+    assert reader.skill_files(_REQ, []) == []

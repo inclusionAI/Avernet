@@ -11,7 +11,7 @@ with a fake collector.
 """
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Collection, Protocol, runtime_checkable
 
 from agentclaw.community.core.config_compose.models import (
     CollectedFile,
@@ -56,7 +56,14 @@ class ManagedFilesReader(Protocol):
 
     def resources(self, req: ComposeRequest) -> list[CollectedFile]: ...
 
-    def skills(self, req: ComposeRequest) -> list[CollectedSkill]: ...
+    def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
+        """Every local package the platform holds — the collector keeps only
+        the active ones."""
+        ...
+
+    def skill_files(self, req: ComposeRequest, names: Collection[str]) -> list[CollectedFile]:
+        """The named packages' files, as resources refs."""
+        ...
 
 
 @runtime_checkable

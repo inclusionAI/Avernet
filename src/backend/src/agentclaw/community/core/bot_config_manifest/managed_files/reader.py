@@ -13,7 +13,7 @@ means at apply time: a declared-empty category is declared.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Collection, Optional
 
 import yaml
 
@@ -101,15 +101,16 @@ class ManagedFilesComposeReader:
         return [self._as_file(f) for f in self._files(req, CATEGORY_IDENTITY)]
 
     def resources(self, req: ComposeRequest) -> list[CollectedFile]:
-        # A local skill's files ride as resources refs under
-        # ``workspace/skills-local/<name>/…`` — the shape the publish gather
-        # produces — beside the ``SkillRef`` that names the package.
-        return [
-            self._as_file(f)
-            for f in self._files(req, CATEGORY_RESOURCES) + self._files(req, CATEGORY_SKILLS)
-        ]
+        return [self._as_file(f) for f in self._files(req, CATEGORY_RESOURCES)]
 
     def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
+        """Every package the index holds, active or not.
+
+        The index keeps a package after the manifest stops declaring it — the
+        way a deactivated local skill keeps its files on an ARCA host — so
+        the collector intersects this with the bot's active set before it
+        emits a ``SkillRef``; the reader does not know the active set.
+        """
         by_name: dict[str, str] = {}
         for f in self._files(req, CATEGORY_SKILLS):
             # The package prefix: the ref path up to and including the skill's
@@ -122,6 +123,18 @@ class ManagedFilesComposeReader:
         return [
             CollectedSkill(name=name, scope="user", store=BOT_DATA_STORE, path=prefix)
             for name, prefix in sorted(by_name.items())
+        ]
+
+    def skill_files(self, req: ComposeRequest, names: Collection[str]) -> list[CollectedFile]:
+        """The named packages' files, as resources refs.
+
+        A local skill's files ride as resources refs under
+        ``workspace/skills-local/<name>/…`` — the shape the publish gather
+        produces — beside the ``SkillRef`` that names the package.
+        """
+        wanted = set(names)
+        return [
+            self._as_file(f) for f in self._files(req, CATEGORY_SKILLS) if f.name in wanted
         ]
 
     def _files(self, req: ComposeRequest, category: str) -> list[ManagedFile]:

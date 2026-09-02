@@ -97,33 +97,31 @@ Conventions every task assumes:
         owner.
 - **Depends on:** Task 4
 
-## [ ] Task 6: The composer emits the map and reads the index for teclaw
-- **Files:** `core/config_compose/models.py`, `core/config_compose/protocols.py`,
-  `core/config_compose/services/config_composer.py`,
+## [x] Task 6: The composer emits the map and reads the index for teclaw
+- **Files:** `core/config_compose/protocols.py` (`skill_files` on
+  `ManagedFilesReader`), `core/config_compose/services/config_composer.py`,
   `core/config_compose/services/collector.py`,
-  `core/service_bot/services/deploy/external_compose_producer.py`,
-  `core/devices/services/teclaw_device_sync.py`,
-  `di/modules/service_bot_module.py`, `di/modules/devices_module.py`,
-  tests under `tests/community/core/config_compose/`
+  `core/bot_config_manifest/managed_files/reader.py`,
+  `di/modules/service_bot_module.py`,
+  `tests/community/core/config_compose/test_ownership.py` (new)
 - **Done when:**
-  - [ ] `ComposeRequest.platform_managed: frozenset[str] | None` (carry-along,
-        `compare=False`).
-  - [ ] `PlatformManagedCategoriesReader` and `ManagedFilesReader` protocols;
-        the producer and the device-sync service fill `platform_managed` from
-        the first; the collector's teclaw branches for identity, resources and
-        skills read the second when the category is `platform`.
-  - [ ] The composer sets `ownership` on teclaw requests: `mcp: platform`;
-        `identity_files` / `resources` / `skills`: `platform` when in
-        `platform_managed`, else `engine`. ARCA requests carry no map.
-  - [ ] Tests: ARCA compose unchanged; teclaw compose without a manifest emits
+  - [x] The collector holds the managed-files reader (optional) and answers
+        `platform_managed(req)` once per compose (memoized on the request);
+        the producer and the device-sync service are untouched — no
+        `ComposeRequest` field was needed, since the collector already sees
+        the request. The teclaw branches for identity, resources and skills
+        read the index when the category is `platform`; a platform skill is
+        emitted only while the bot has it active, and its files ride as
+        resources refs beside the `SkillRef`.
+  - [x] The composer sets `ownership` on teclaw requests: `mcp: platform`;
+        `identity_files` / `resources` / `skills`: `platform` when asserted,
+        else `engine` (`cli_tools` is not written — absent keeps its own
+        contract's rule). ARCA requests carry no map.
+  - [x] Tests: ARCA compose unchanged; teclaw compose without a manifest emits
         `engine` for the file categories and today's empty lists; teclaw
         compose with declared identity emits `platform` and the index refs;
         each ref resolves against the configured `bot-data` store.
 - **Depends on:** Task 4, Task 8 (reader implementation)
-
----
-
-## Group C — teclaw platform-managed delivery
 
 ## [x] Task 7: The managed-files index
 - **Files:** `core/bot_config_manifest/repository/managed_files_models.py` (new),

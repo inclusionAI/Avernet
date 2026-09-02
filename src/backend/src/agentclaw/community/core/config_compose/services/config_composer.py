@@ -21,9 +21,15 @@ Explicitly **not** its job:
 from __future__ import annotations
 
 from agentclaw.community.core.config_compose.models import ComposeRequest
-from agentclaw.community.core.config_compose.protocols import ComposeInputCollector
+from agentclaw.community.core.config_compose.protocols import (
+    ComposeInputCollector,
+    PlatformManagedCategoriesReader,
+)
 from agentclaw.community.core.config_compose.services.mcporter_composer import McporterComposer
 from agentclaw.community.kernel.bot_config import (
+    OWNERSHIP_CATEGORIES,
+    OWNERSHIP_ENGINE,
+    OWNERSHIP_PLATFORM,
     SCHEMA_VERSION,
     BotConfigArtifact,
     FileRef,
@@ -37,6 +43,15 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 __all__ = ["ConfigComposer"]
+
+#: The categories the composer writes into ``ownership`` — the four the engine
+#: contract's §9 table names. ``cli_tools`` is admitted by the artifact
+#: (``OWNERSHIP_CATEGORIES``) but not written: nothing composes it yet, and an
+#: absent category keeps the engine's pre-W8 behaviour (A5) — for ``cli_tools``
+#: that is its own contract's removal rule, which the map must not restate.
+_OWNERSHIP_WRITTEN: tuple[str, ...] = tuple(
+    c for c in OWNERSHIP_CATEGORIES if c != "cli_tools"
+)
 
 
 class ConfigComposer:
@@ -169,8 +184,36 @@ class ConfigComposer:
             stores=stores,
             engine_overrides=engine_overrides,
             version=req.version,
+            ownership=self._ownership(req),
             # engine_ext intentionally left default ({}) — owned by the producer.
         )
+
+    def _ownership(self, req: ComposeRequest) -> dict[str, str] | None:
+        """The artifact's ``ownership`` map (W8, contract §9) — teclaw only.
+
+        ``mcp`` is always the platform's on teclaw: the artifact has carried
+        the whole MCP set since W12. Each file category is the platform's
+        when the collector says the platform asserts it (a stored manifest
+        declares it and the platform-managed switch is on) and the engine's
+        otherwise — which is what the engine did with every category before
+        the map existed. An ARCA artifact carries no map: nothing composes
+        for ARCA at runtime, and a map would state a delivery that does not
+        happen. A collector that cannot answer (the bare/unit collector)
+        asserts nothing, so every file category reads ``engine``.
+        """
+        if req.engine_type != "teclaw":
+            return None
+        asserted: frozenset[str] = frozenset()
+        if isinstance(self._collector, PlatformManagedCategoriesReader):
+            asserted = frozenset(self._collector.platform_managed(req))
+        return {
+            category: (
+                OWNERSHIP_PLATFORM
+                if category == "mcp" or category in asserted
+                else OWNERSHIP_ENGINE
+            )
+            for category in _OWNERSHIP_WRITTEN
+        }
 
     def store_key_for(self, host_path: str) -> str:
         """Canonical object key for a bot-data file: ``bot-data base + '/' + relpath``.
