@@ -1589,6 +1589,14 @@ manifest 概念。
 
 **Owner.** `lucas-xzp` · 0.25 天 · 第 4 天 · 实现（§7）
 
+> **✅ 本项已完成（2026-09-02）。**命名源与 git 源已交付：subprocess git CLI
+> 浅层单 ref fetch（W2 同门拒绝语义与限额、包含性检查在 W11 之前）、
+> `from`/`sources` 解析进 `EntryFetcher.fetch_declared`、per-apply
+> `SourceSession`（一次 `{git, ref}` 拉取复用）、`SourceResolution` 进
+> apply 报告、strict 基线读上次 apply 报告。v1 收窄：git 源不支持
+> `digest`（以 SHA 形式的 ref 钉住）；`resources` 条目仍只认 URL 源——
+> W6 的物化器接上 git 路是后续工作（W6 先于 W7 合入，未携带 git 消费）。
+
 
 **目标。**一次 `ref` 变更把整份配置解析到同一个 commit，且公司 git 服务上托管的内容是
 一等公民源。
