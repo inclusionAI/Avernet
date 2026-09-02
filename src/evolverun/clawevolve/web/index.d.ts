@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 
 export declare const Evolve: ComponentType;
+export declare const ClawevolveApp: ComponentType;
 
 export type EvolveTaskType =
   | "diagnose"
