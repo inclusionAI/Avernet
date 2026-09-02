@@ -98,18 +98,10 @@ def _sys_mount(entries):
     raise AssertionError(f"No sys mount in entries: {entries}")
 
 
-def _skills_repo_mount(entries):
-    """从 mount_points 中找到 skills-repo 那个条目。"""
-    for entry in entries:
-        if entry.remote_dir == "/skills-repo/b1":
-            return entry
-    raise AssertionError(f"No skills-repo mount in entries: {entries}")
-
-
 @pytest.mark.unit
 class TestSetupDirectoryEngineAware:
     def test_default_mount_points(self):
-        """验证默认返回 bolt_data、skills-repo 和 agentclaw-sys 三个挂载点。"""
+        """BaaS 只挂 platform storage；Repo/Center 由 OCB entrypoint 挂载。"""
         composer = _make_composer()
 
         entries = composer._setup_directory(
@@ -119,14 +111,13 @@ class TestSetupDirectoryEngineAware:
             engine_type="openclaw",
         )
 
-        assert len(entries) == 3
+        assert len(entries) == 2
         bolt_data = _bolt_data_mount(entries)
         assert bolt_data.permission == "READ_WRITE"
-        skills_repo = _skills_repo_mount(entries)
-        assert skills_repo.local_dir == "/home/admin/.openclaw/workspace/skills/skills-repo"
-        assert skills_repo.permission == "READ_ONLY"
         sys_mount = _sys_mount(entries)
         assert sys_mount.permission == "READ_ONLY"
+        assert all("skills-repo" not in entry.remote_dir for entry in entries)
+        assert all("skills-center" not in entry.remote_dir for entry in entries)
 
     def test_claude_code_engine_type_same_mounts(self):
         """claude_code 引擎类型的挂载点与 openclaw 相同。"""
@@ -139,12 +130,9 @@ class TestSetupDirectoryEngineAware:
             engine_type="claude_code",
         )
 
-        assert len(entries) == 3
+        assert len(entries) == 2
         bolt_data = _bolt_data_mount(entries)
         assert bolt_data.permission == "READ_WRITE"
-        skills_repo = _skills_repo_mount(entries)
-        assert skills_repo.local_dir == "/home/admin/.claude_code/workspace/skills/skills-repo"
-        assert skills_repo.permission == "READ_ONLY"
         sys_mount = _sys_mount(entries)
         assert sys_mount.permission == "READ_ONLY"
 
@@ -161,12 +149,10 @@ class TestSetupDirectoryEngineAware:
             engine_type="",
         )
 
-        assert len(entries) == 3
+        assert len(entries) == 2
         bolt_data = _bolt_data_mount(entries)
         assert bolt_data.permission == "READ_WRITE"
-        skills_repo = _skills_repo_mount(entries)
-        assert skills_repo.local_dir == "/home/admin/.openclaw/workspace/skills/skills-repo"
-        assert skills_repo.permission == "READ_ONLY"
+        assert all("skills-repo" not in entry.remote_dir for entry in entries)
 
     def test_custom_mount_path_is_appended(self):
         composer = _make_composer()
@@ -186,7 +172,7 @@ class TestSetupDirectoryEngineAware:
         assert custom is not None
         assert custom.permission == "READ_WRITE"
 
-    def test_hermes_engine_uses_its_own_build_provider(self):
+    def test_hermes_engine_does_not_add_shared_corpus_mounts(self):
         composer = _make_composer()
 
         entries = composer._setup_directory(
@@ -196,10 +182,11 @@ class TestSetupDirectoryEngineAware:
             engine_type="hermes",
         )
 
-        skills_repo = _skills_repo_mount(entries)
-        assert skills_repo.local_dir == "/home/admin/.hermes/skills/skills-repo"
+        assert len(entries) == 2
+        assert all("skills-repo" not in entry.remote_dir for entry in entries)
+        assert all("skills-center" not in entry.remote_dir for entry in entries)
 
-    def test_center_artifact_adds_frozen_read_only_mount(self):
+    def test_center_artifact_does_not_turn_manifest_into_mount_instructions(self):
         composer = _make_composer()
         manifest = {
             "schema_version": 1,
@@ -242,27 +229,9 @@ class TestSetupDirectoryEngineAware:
             ext_info={"skills_manifest": manifest},
         )
 
-        center = next(entry for entry in entries if "skills-center" in entry.remote_dir)
-        repo = next(
-            entry
-            for entry in entries
-            if entry.local_dir
-            == "/home/admin/.openclaw/workspace/skills-pool/skills-repo"
-        )
-        assert repo.remote_dir == "/skills-repo/b1"
-        assert repo.permission == "READ_ONLY"
-        assert all(
-            entry.local_dir
-            != "/home/admin/.openclaw/workspace/skills/skills-repo"
-            for entry in entries
-        )
-        assert center.remote_dir == (
-            "/aidesktop/aidesktop_dev/bolt_shared/skills-center"
-        )
-        assert center.local_dir == (
-            "/home/admin/.openclaw/workspace/skills-pool/skill-center"
-        )
-        assert center.permission == "READ_ONLY"
+        assert len(entries) == 2
+        assert all("skills-repo" not in entry.remote_dir for entry in entries)
+        assert all("skills-center" not in entry.remote_dir for entry in entries)
 
     def test_old_artifact_does_not_add_center_mount(self):
         composer = _make_composer()
@@ -281,9 +250,7 @@ class TestSetupDirectoryEngineAware:
         )
 
         assert all("skills-center" not in entry.remote_dir for entry in entries)
-        assert _skills_repo_mount(entries).local_dir == (
-            "/home/admin/.openclaw/workspace/skills/skills-repo"
-        )
+        assert all("skills-repo" not in entry.remote_dir for entry in entries)
 
 
 @pytest.mark.unit
