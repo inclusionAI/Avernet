@@ -535,13 +535,15 @@ Query：`page=1&page_size=20`。响应：
 {
   "blocked": true,
   "total": 1,
-  "counts": {"MEMBERSHIP": 1, "INSTALLATION": 0, "SERVICE_ARTIFACT": 0},
-  "items": [{"kind": "MEMBERSHIP", "resource_id": "1115804", "display_name": "基础能力集"}]
+  "counts": {"MEMBERSHIP": 1},
+  "items": [{"kind": "MEMBERSHIP", "resource_id": "1115804", "display_name": "基础能力集"}],
+  "warnings": [{"kind": "UNKNOWN_ARTIFACT", "resource_id": "artifact-scan", "display_name": "Service Artifact lineage is unreadable"}]
 }
 ```
 
-Blocker kind：`DRAFT | PUBLICATION | MEMBERSHIP | INSTALLATION | SERVICE_ARTIFACT |
-UNKNOWN_ARTIFACT`。UNKNOWN 必须 fail closed。
+Blocker kind：`DRAFT | PUBLICATION | MEMBERSHIP | INSTALLATION | SERVICE_ARTIFACT`。
+`UNKNOWN_ARTIFACT` 是 `warnings[]` 中的诊断类别：Artifact 血缘不可读不能证明存在实际引用，
+不计入 `blocked`、`total`、`counts` 或 `items`，也不阻断 Offline。
 
 #### P2-OFF-002 执行 Offline
 

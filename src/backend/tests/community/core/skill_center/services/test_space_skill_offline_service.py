@@ -116,7 +116,7 @@ def _service(*, inspection, lineage_result=None):
     return service, access, repository, lineage, drafts, prepared
 
 
-def test_impact_counts_all_blocker_kinds_then_paginates_items():
+def test_impact_counts_explicit_blockers_then_returns_unknown_artifact_as_warning():
     inspection = _inspection(
         identity=_identity(draft=True),
         publication_attempts=(
@@ -155,12 +155,23 @@ def test_impact_counts_all_blocker_kinds_then_paginates_items():
     )
 
     assert impact.blocked is True
-    assert impact.total == 6
-    assert impact.counts == {kind.value: 1 for kind in OfflineBlockerKind}
+    assert impact.total == 5
+    assert impact.counts == {
+        kind.value: 1
+        for kind in OfflineBlockerKind
+        if kind is not OfflineBlockerKind.UNKNOWN_ARTIFACT
+    }
     assert [item.kind for item in impact.items] == [
         OfflineBlockerKind.MEMBERSHIP,
         OfflineBlockerKind.INSTALLATION,
     ]
+    assert impact.warnings == (
+        OfflineImpactItem(
+            kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
+            resource_id="6",
+            display_name="Unknown artifact",
+        ),
+    )
     access.require_space_member.assert_called_once_with(
         space_id=7, user_id="owner-1"
     )
@@ -202,6 +213,59 @@ def test_offline_idempotent_replay_does_not_prepare_another_revision():
     assert result.draft.revision_id == _EXISTING_REV
     drafts.prepare.assert_not_called()
     repository.commit.assert_not_called()
+
+
+def test_unknown_artifact_warning_does_not_block_offline():
+    service, _access, repository, _lineage, _drafts, _prepared = _service(
+        inspection=_inspection(),
+        lineage_result=ServiceArtifactLineage(
+            references=(),
+            unknown=(
+                UnknownServiceArtifact(
+                    resource_id="artifact-scan",
+                    display_name="Service Artifact lineage is unreadable",
+                ),
+            ),
+        ),
+    )
+
+    result = service.offline(space_id=7, skill_id=51, actor_id="owner-1")
+
+    assert result.changed is True
+    repository.commit.assert_called_once()
+
+
+def test_transaction_recheck_unknown_artifact_warning_does_not_roll_back_offline():
+    service, _access, repository, lineage, _drafts, _prepared = _service(
+        inspection=_inspection()
+    )
+    lineage.scan.side_effect = [
+        ServiceArtifactLineage((), ()),
+        ServiceArtifactLineage(
+            (),
+            (
+                UnknownServiceArtifact(
+                    resource_id="artifact-scan",
+                    display_name="Service Artifact lineage is unreadable",
+                ),
+            ),
+        ),
+    ]
+
+    def _commit(**kwargs):
+        kwargs["guard"](_inspection())
+        return OfflineCommit(
+            changed=True,
+            target_version=3,
+            status="EDITING",
+            locator=kwargs["new_locator"],
+        )
+
+    repository.commit.side_effect = _commit
+
+    result = service.offline(space_id=7, skill_id=51, actor_id="owner-1")
+
+    assert result.changed is True
 
 
 def test_concurrent_blocker_from_transaction_recheck_discards_prepared_revision():

@@ -41,6 +41,7 @@ _BLOCKER_ORDER = {kind: index for index, kind in enumerate(OfflineBlockerKind)}
 class _OfflineEvaluation:
     identity: OfflineSkillIdentity
     blockers: tuple[OfflineImpactItem, ...]
+    warnings: tuple[OfflineImpactItem, ...] = ()
 
 
 class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
@@ -217,7 +218,8 @@ class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
             )
             for reference in lineage.references
         )
-        blockers.extend(
+        warnings = list(evaluation.warnings)
+        warnings.extend(
             OfflineImpactItem(
                 kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
                 resource_id=item.resource_id,
@@ -235,7 +237,21 @@ class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
                 ),
             )
         )
-        return _OfflineEvaluation(identity=evaluation.identity, blockers=ordered)
+        ordered_warnings = tuple(
+            sorted(
+                warnings,
+                key=lambda item: (
+                    _BLOCKER_ORDER[item.kind],
+                    item.resource_id,
+                    item.display_name,
+                ),
+            )
+        )
+        return _OfflineEvaluation(
+            identity=evaluation.identity,
+            blockers=ordered,
+            warnings=ordered_warnings,
+        )
 
     @staticmethod
     def _impact(
@@ -251,6 +267,7 @@ class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
             total=len(blockers),
             counts={kind: count for kind, count in counts.items() if count},
             items=blockers[start : start + page_size],
+            warnings=inspection.warnings,
         )
 
     def _result(

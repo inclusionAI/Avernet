@@ -884,7 +884,7 @@ GET impact 供产品预览，POST 必须在事务内锁定 Skill 并重新检查
 | 任意普通/Default Membership，含 inactive/excluded | 是 |
 | Bot Skill Installation | 是 |
 | 存活 Service Bot 仍可 restart/scale/rollback 的 exact Artifact ref | 是 |
-| 无法读取/解析/完整扫描的 Artifact | 是，返回 UNKNOWN_ARTIFACT |
+| 无法读取/解析/完整扫描的 Artifact | 否；作为 `UNKNOWN_ARTIFACT` diagnostic warning 返回，不计入 blocker |
 | Published Version、Canonical Store、Favorite、Grant、Space Binding | 否 |
 | Source Service Bot 已彻底删除，只剩审计 Artifact | 否 |
 
