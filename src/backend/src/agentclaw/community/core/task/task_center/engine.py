@@ -49,6 +49,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskGraphPatch,
     TaskNode,
     TaskNodePatch,
+    effective_run_mode,
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
@@ -1703,7 +1704,7 @@ class ExecutionEngine:
         is_bbs_recovery = (
             is_root_parent
             and triggering is not None
-            and (triggering.run_info.run_mode or "") == "bbs"
+            and effective_run_mode(triggering) == "bbs"
         )
         logger.info(
             "[task][on_pass] task=%s node=%s 父=%s 父态=%s 兄弟=%s bbs_recovery=%s",
@@ -2375,7 +2376,7 @@ class ExecutionEngine:
         状态机:RUNNING=真执行;派发命中只填执行者+置 dispatching,PENDING 维持到 start_run 成功后才翻。
         跳过:① dispatching=True 节点(已交付 _drain 待翻 RUNNING 的飞行态,防双派发);② dispatch_error 节点
         (搜推异常/派发失败,harness owns 重试+HUNG 上限,正常 cycle 不重复搜推防 bot 调用风暴);
-        ③ run_mode=="bbs" 节点(FR-EXT-06:bbs 由 bot 经 bbs/attach 自驱,框架不自动派发/翻态)。
+        ③ effective_run_mode(node)=="bbs" 节点(FR-EXT-06:bbs 由 bot 经 bbs/attach 自驱,框架不自动派发/翻态)。
         reset 节点(FAILED/RUNNING→PENDING 复位,无 dispatching)不在跳过之列→重新派发执行。"""
         if self._is_external_managed_task(task_id):
             logger.info("[task][prepare] task=%s external-managed, skip dynamic dispatch", task_id)
@@ -2388,12 +2389,21 @@ class ExecutionEngine:
             for n in all_pending
             if not n.run_info.extend_props.get("dispatching")
             and not n.run_info.extend_props.get("dispatch_error")
-            and n.run_info.run_mode != "bbs"
+            and effective_run_mode(n) != "bbs"
         ]
         if not pending:
             return
+        dispatch_started_at = _now_ms()
+        for node in pending:
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=node.node_id,
+                    start_time=dispatch_started_at,
+                )
+            )
         logger.info(
-            "[task][prepare] task=%s 待派发节点=%s",
+            "[task][prepare] task=%s 待派发节点=%s dispatch_started_at=%s",
             task_id,
             [n.node_id for n in pending],
         )

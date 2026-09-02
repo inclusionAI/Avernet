@@ -472,6 +472,9 @@ class TaskGraphService:
                 allowed = _DIRECT_TRANSITIONS.get(node.status, set())
                 if new_status not in allowed:
                     _LOG.warning(f"status 直驱非法: {node.status} → {new_status}")
+            if patch.start_time is not None:
+                node.run_info.start_time = patch.start_time
+                node.run_info.end_time = None
             if patch.output_patch is not None:
                 node.run_info.output.update(patch.output_patch)
             if patch.run_mode is not None:
@@ -675,12 +678,18 @@ class TaskGraphService:
                 )
                 raise TaskStateError(f"attach_bbs_node: BBS relay 深度达上限 task={task_id}")
             node_id = f"bbs-{uuid.uuid4().hex[:8]}"
+            claim_at = root.run_info.extend_props.get("bbs_claim_at") or int(time.time() * 1000)
             node = TaskNode(
                 node_id=node_id,
                 task_id=task_id,
                 status=Status.PENDING,
                 task_spec=task_spec,
-                run_info=RuntimeInfo(run_mode="bbs", assignee=bot_id, start_time=int(time.time() * 1000)),
+                run_info=RuntimeInfo(
+                    run_mode="bbs",
+                    assignee=bot_id,
+                    start_time=int(claim_at),
+                    extend_props={"bbs_claim_at": int(claim_at)},
+                ),
                 node_run_graph=graph,
             )
             self.add_task_nodes(

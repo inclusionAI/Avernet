@@ -185,7 +185,7 @@ class RuntimeInfo:
 
     run_mode: str | None = None              # "single_bot"/"coop_group"/"bbs";无 collab_mode
     assignee: str | None = None              # 执行者(bot_id / group_id)
-    start_time: int | None = None         # 任务/节点开始时间(根在 init_graph 时写;叶子首次 RUNNING 时写)
+    start_time: int | None = None         # 任务/节点开始时间(根在 init_graph;叶子 task_dispatch/BBS claim 时写)
     end_time: int | None = None           # 进终态时写(毫秒,int(time.time()*1000))
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None
@@ -201,6 +201,22 @@ class Relation:
     dst_id: str                   # 结构子(分解产物/依赖方)
     type: RelationType = RelationType.DEPENDENCY
     extend_props: dict[str, Any] = field(default_factory=dict)
+
+
+def effective_run_mode(node: TaskNode) -> str | None:
+    """Return the authoritative execution mode for a task node.
+
+    ``actual_run_mode`` is an execution/session-permission override introduced
+    by the task runtime. Empty or missing values preserve legacy ``run_mode``.
+    """
+    runtime = getattr(node, "run_info", None)
+    if runtime is None:
+        return None
+    actual = runtime.extend_props.get("actual_run_mode")
+    if actual is not None and str(actual).strip():
+        return str(actual).strip()
+    mode = runtime.run_mode
+    return str(mode).strip() if mode is not None and str(mode).strip() else None
 
 
 @dataclass
@@ -278,6 +294,7 @@ class TaskNodePatch:
     status: Status | None = None
     run_mode: str | None = None
     assignee: str | None = None
+    start_time: int | None = None                    # 节点进入 task_dispatch/BBS claim 的时间
     output_patch: dict[str, Any] | None = None               # fold 到 run_info.output
     acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(PASS→DONE/FAIL+gaps→DONE)
     exec_error: str | None = None                            # 执行报错信号(非验收;→ on_harness 重投,)

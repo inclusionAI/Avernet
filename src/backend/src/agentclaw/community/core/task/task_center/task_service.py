@@ -40,6 +40,7 @@ from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
     RuntimeInfo,
+    effective_run_mode,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -822,7 +823,7 @@ class TaskService:
         bot_cache: dict[str, dict | None] = {}
         pair_lookup = getattr(self._bot_service, "list_bots_by_owner_bot_pairs", None)
         for node in graph.tasks:
-            if node.run_info.run_mode not in ("single_bot", "bbs"):
+            if effective_run_mode(node) not in ("single_bot", "bbs"):
                 continue
             assignee = (node.run_info.assignee or "").strip()
             if not assignee:
@@ -988,7 +989,7 @@ class TaskService:
         search_word: str | None = None,
         status: str | None = None,
     ) -> "tuple[list[BbsTaskOverviewRecord], int]":
-        """列 BBS 接力任务(run_mode='bbs')的一页(1-based):run_info ⋈ node 联合,按 task_id 补 publisher(owner_bot_id)。
+        """列 BBS 接力任务(有效执行模态为 'bbs')的一页(1-based):run_info ⋈ node 联合,按 task_id 补 publisher(owner_bot_id)。
 
         供 bbs/list 路由调用,委托 ``TaskGraphService.list_bbs_tasks_overview``,透传 status/search_word
         可选过滤(为空不过滤,退化为纯分页)。返回 ``(records, total)``——``records`` 为

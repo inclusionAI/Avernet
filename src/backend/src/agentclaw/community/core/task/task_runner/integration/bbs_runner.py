@@ -110,6 +110,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     winner_bot_id = winner["bot_id"]
     try:
         graph.claim_bbs_owner(task_id, winner_bot_id)
+        bbs_claim_at = int(time.time() * 1000)
     except Exception as exc:
         logger.warning("[task][bbs_mode] claim 失败 task=%s:%s", task_id, exc)
         return
@@ -134,7 +135,8 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         run_info=RuntimeInfo(
             run_mode=actual_run_mode,
             assignee=winner_bot_id,
-            extend_props={"actual_run_mode": "bbs"}
+            start_time=bbs_claim_at,
+            extend_props={"actual_run_mode": "bbs", "bbs_claim_at": bbs_claim_at},
         ),
         node_run_graph=None
     )

@@ -17,6 +17,7 @@ from agentclaw.community.core.task.domain.models import (
     Status,
     TaskNodePatch,
     TaskNodeQueryCriteria,
+    effective_run_mode,
 )
 
 _DEFAULT_SLA_TIMEOUT = 1200.0  # RUNNING 卡死 backstop(>poller execute SLA 600s,poller 先判 FAIL 走正常重试;此仅兜底 poller 漏判)
@@ -85,7 +86,7 @@ class TaskHarness:
         return float(t) if t is not None else self._default_pending
 
     def _poll_once(self) -> list[TaskNodePatch]:
-        """巡检一轮:遍历已登记 task 的 RUNNING 节点,首见记时,超时复位。
+        """巡检一轮:遍历已登记 task 的 RUNNING 节点,首见记时,超时复位。节点执行模态优先读取 actual_run_mode。
 
         复位经 ``on_harness_fn``(编排核 on_harness:复位 PENDING + 正常重投);未注入则只返复位 patch(测试用)。
         返回本轮应用的复位 patch 列表(测试断言用)。"""
@@ -105,7 +106,7 @@ class TaskHarness:
             # 只监控真正派发执行的叶子(run_mode ∈ 三模态);委托态父节点是 Status.PLANNING(非 RUNNING),
             # 不执行 bot run,不纳入 SLA 超时巡检(避免误复位委托中的分解/聚合节点)。
             _EXEC_MODES = ("single_bot", "coop_group", "bbs")
-            nodes = [n for n in nodes if n.run_info.run_mode in _EXEC_MODES]
+            nodes = [n for n in nodes if effective_run_mode(n) in _EXEC_MODES]
             sla = self._sla_timeout(task_id)
             now = self._clock()
             for n in nodes:
@@ -116,7 +117,7 @@ class TaskHarness:
                     self._dispatched_at[key] = now  # 首见:记时,本轮不判
                     continue
                 if now - t0 > sla:
-                    if n.run_info.run_mode == "bbs":
+                    if effective_run_mode(n) == "bbs":
                         # BBS lease 到期(FR-EXT-06):owner bot 崩溃/挂起导致 RUNNING 超 SLA。
                         # 直写图(self._graph),不走 on_harness_fn:后者复位 RUNNING→PENDING 重派,
                         # 与"标终态不重派"语义相反。① scoped 节点验收 FAIL→DONE(终态);
@@ -154,9 +155,9 @@ class TaskHarness:
             except Exception:  # noqa: BLE001
                 continue
             for n in failed:
-                if n.run_info.run_mode not in _EXEC_MODES:
+                if effective_run_mode(n) not in _EXEC_MODES:
                     continue
-                if n.run_info.run_mode == "bbs":
+                if effective_run_mode(n) == "bbs":
                     # bbs 节点 bot 自驱;FAILED 后由下个 bot 接力挂新节点(§10.4),harness 不重派。
                     # 与 RUNNING-scan 的 bbs lease-expire 分支一致(标终态不重派 FR-EXT-06)。
                     continue
