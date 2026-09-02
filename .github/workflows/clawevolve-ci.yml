@@ -46,6 +46,9 @@ jobs:
           cache: npm
           cache-dependency-path: src/evolverun/runtime-host/package-lock.json
       - run: npm ci
+      - name: Install Clawevolve conformance dependencies
+        run: npm ci
+        working-directory: src/evolverun/clawevolve
       - run: npm run check
       - run: npm test
       - run: npm run build
