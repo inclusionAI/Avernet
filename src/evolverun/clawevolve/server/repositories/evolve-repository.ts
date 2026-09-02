@@ -622,7 +622,7 @@ export class EvolveRepository {
     return row;
   }
 
-  
+
   async listEligibleBotsForSuggestion(userId: string, workflowId: string): Promise<{ botId: string; botName: string | null; env: string | null; accessType: string; ownerId: string | null }[]> {
     // Collect all bot IDs that have edit permission for this workflow under this user.
     // Two sources: owner-level (bot_id IS NULL) and bot-level grants.
