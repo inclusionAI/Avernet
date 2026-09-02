@@ -5,6 +5,11 @@ Re-exports all implementation classes. Consumers import from this __init__.py
 or from the parent health_check package, not from private _*.py modules.
 """
 
+from ._active_session_inspector import (
+    ActiveSessionInspector,
+    ActiveSessionInspectResult,
+    ActiveSessionVerdict,
+)
 from ._arca_paas_health_provider import ArcaPaaSHealthProvider
 from ._docker_paas_health_provider import DockerPaaSHealthProvider
 from ._k8s_paas_health_provider import K8sPaaSHealthProvider
@@ -23,4 +28,7 @@ __all__ = [
     "K8sPaaSHealthProvider",
     "SigmaPaaSHealthProvider",
     "PaaSHealthProviderFactory",
+    "ActiveSessionInspector",
+    "ActiveSessionVerdict",
+    "ActiveSessionInspectResult",
 ]

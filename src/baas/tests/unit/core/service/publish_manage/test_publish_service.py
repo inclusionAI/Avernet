@@ -24,6 +24,9 @@ from secbaas.community.api.publish_manage import (
 from secbaas.community.core.repository.publish_batch import (
     PublishBatchRecord,
 )
+from secbaas.community.core.service.health_check.paas import (
+    ActiveSessionVerdict,
+)
 from secbaas.community.core.service.publish_manage import DefaultPublishService
 
 
@@ -931,16 +934,25 @@ class TestStateTransitions:
 
 
 class TestDeviceDrain:
-    """SVC-PUB-09, SVC-PUB-10: Device drain tests"""
+    """SVC-PUB-09, SVC-PUB-10: Device drain tests.
+
+    Drain is now driven by ``ActiveSessionVerdict`` returned from
+    ``_get_active_sessions``: ``CLEAR`` advances drain; ``ACTIVE`` or
+    ``UNKNOWN`` block until timeout. DB count no longer drives the decision.
+    """
 
     @pytest.mark.asyncio
     async def test_drain_waits_for_sessions(self):
-        """SVC-PUB-09: Graceful device drain waits for sessions"""
+        """SVC-PUB-09: Graceful device drain clears when verdict=CLEAR."""
+        from secbaas.community.core.service.health_check.paas import (
+            ActiveSessionVerdict,
+        )
+
         with patch.object(
             DefaultPublishService,
             "_get_active_sessions",
             new_callable=AsyncMock,
-            return_value=0,
+            return_value=ActiveSessionVerdict.CLEAR,
         ):
             result = await _publish_service_instance._drain_device(
                 tenant="test_tenant",
@@ -952,16 +964,21 @@ class TestDeviceDrain:
             assert result.success is True
             assert result.sessions_remaining == 0
             assert result.timeout_reached is False
+            assert result.verdict == ActiveSessionVerdict.CLEAR.value
 
     @pytest.mark.asyncio
     async def test_drain_timeout(self):
-        """SVC-PUB-10: Drain timeout enforcement (default 30s)"""
-        # Simulate sessions that never complete
+        """SVC-PUB-10: Drain timeout enforcement with verdict=ACTIVE."""
+        from secbaas.community.core.service.health_check.paas import (
+            ActiveSessionVerdict,
+        )
+
+        # ACTIVE never completes -> drain blocks -> timeout failure.
         with patch.object(
             DefaultPublishService,
             "_get_active_sessions",
             new_callable=AsyncMock,
-            return_value=5,
+            return_value=ActiveSessionVerdict.ACTIVE,
         ):
             result = await _publish_service_instance._drain_device(
                 tenant="test_tenant",
@@ -971,9 +988,35 @@ class TestDeviceDrain:
             )
 
             assert result.success is False  # Timed out
-            assert result.sessions_remaining == 5
+            assert result.sessions_remaining > 0
             assert result.timeout_reached is True
             assert result.duration_seconds >= 0.5
+            assert result.verdict == ActiveSessionVerdict.ACTIVE.value
+
+    @pytest.mark.asyncio
+    async def test_drain_unknown_blocks_until_timeout(self):
+        """UNKNOWN must not release the device: drain blocks until timeout."""
+        from secbaas.community.core.service.health_check.paas import (
+            ActiveSessionVerdict,
+        )
+
+        with patch.object(
+            DefaultPublishService,
+            "_get_active_sessions",
+            new_callable=AsyncMock,
+            return_value=ActiveSessionVerdict.UNKNOWN,
+        ):
+            result = await _publish_service_instance._drain_device(
+                tenant="test_tenant",
+                device_id=1,
+                timeout_seconds=1,
+                check_interval=0.1,
+            )
+
+            assert result.success is False
+            assert result.sessions_remaining > 0
+            assert result.timeout_reached is True
+            assert result.verdict == ActiveSessionVerdict.UNKNOWN.value
 
 
 class TestBatchExecution:
@@ -3022,94 +3065,204 @@ class TestBotFailedStateOnPublishFailure:
 
 
 class TestGetActiveSessions:
-    """Tests for _get_active_sessions method."""
+    """Tests for _get_active_sessions method.
+
+    ``_get_active_sessions`` now returns ``ActiveSessionVerdict`` driven by
+    ``ActiveSessionInspector``. The DB count via
+    ``count_active_sessions_by_device`` is retained **only** as an audit log
+    field and does NOT drive the verdict. Any failure (missing device,
+    missing paas_device_id, missing paas_facade, inspector error, exception)
+    collapses to ``UNKNOWN`` — never ``CLEAR``.
+    """
+
+    def _setup_device(
+        self, device_uuid: str = "dev-uuid-123", paas_device_id: str | None = "dev--0@tpl-1"
+    ) -> MagicMock:
+        mock_device = MagicMock()
+        mock_device.device_uuid = device_uuid
+        mock_device.provider_device_id = paas_device_id
+        return mock_device
 
     @pytest.mark.asyncio
-    async def test_get_active_sessions_returns_count(self):
-        """Test that _get_active_sessions returns active session count."""
-        mock_device = MagicMock()
-        mock_device.device_uuid = "dev-uuid-123"
+    async def test_get_active_sessions_returns_clear_verdict(self):
+        """Test that _get_active_sessions returns CLEAR verdict from inspector."""
+        from secbaas.community.core.service.health_check.paas import (
+            ActiveSessionInspectResult,
+            ActiveSessionVerdict,
+        )
+
+        mock_device = self._setup_device()
 
         _publish_service_instance._device_repo = MagicMock()
         _publish_service_instance._device_repo.get_by_id.return_value = mock_device
-
         _publish_service_instance._session_repo = MagicMock()
         _publish_service_instance._session_repo.count_active_sessions_by_device.return_value = 3
 
+        mock_facade = MagicMock()
+        mock_facade.execute_command = AsyncMock()
+        mock_inspector = MagicMock()
+        mock_inspector.inspect = AsyncMock(
+            return_value=ActiveSessionInspectResult(
+                verdict=ActiveSessionVerdict.CLEAR,
+                query_status="ok",
+                duration_ms=12,
+            )
+        )
+        _publish_service_instance._paas_facade = mock_facade
+        _publish_service_instance._active_session_inspector = mock_inspector
+
         with patch(
             "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
             return_value="test",
         ):
-            count = await _publish_service_instance._get_active_sessions(
+            verdict = await _publish_service_instance._get_active_sessions(
                 tenant="test-tenant", device_id=1
             )
 
-            assert count == 3
+            assert verdict is ActiveSessionVerdict.CLEAR
             _publish_service_instance._device_repo.get_by_id.assert_called_once_with(
                 1, tenant="test-tenant", env="test"
             )
+            # Audit DB count is queried but does not drive verdict.
             _publish_service_instance._session_repo.count_active_sessions_by_device.assert_called_once_with(
                 device_uuid="dev-uuid-123", tenant="test-tenant"
             )
+            mock_inspector.inspect.assert_awaited_once()
+            inspect_kwargs = mock_inspector.inspect.await_args.kwargs
+            assert inspect_kwargs["paas_device_id"] == "dev--0@tpl-1"
+            assert inspect_kwargs["paas_facade"] is mock_facade
 
     @pytest.mark.asyncio
-    async def test_get_active_sessions_returns_zero_when_no_device(self):
-        """Test that _get_active_sessions returns 0 when device not found."""
+    async def test_get_active_sessions_returns_unknown_when_no_device(self):
+        """Test that _get_active_sessions returns UNKNOWN when device not found."""
         _publish_service_instance._device_repo = MagicMock()
-        _publish_service_instance._device_repo.get_by_id.return_value = (
-            None  # Device not found
-        )
+        _publish_service_instance._device_repo.get_by_id.return_value = None
+        _publish_service_instance._session_repo = MagicMock()
+        _publish_service_instance._paas_facade = MagicMock()
+        mock_inspector = MagicMock()
+        mock_inspector.inspect = AsyncMock()
+        _publish_service_instance._active_session_inspector = mock_inspector
 
         with patch(
             "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
             return_value="test",
         ):
-            count = await _publish_service_instance._get_active_sessions(
+            verdict = await _publish_service_instance._get_active_sessions(
                 tenant="test-tenant", device_id=999
             )
 
-            assert count == 0
+            assert verdict is ActiveSessionVerdict.UNKNOWN
+            # Inspector must not be called without a device/paas_device_id.
+            mock_inspector.inspect.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_get_active_sessions_handles_exception(self):
-        """Test that _get_active_sessions returns 0 on error (graceful degradation)."""
+    async def test_get_active_sessions_returns_unknown_on_exception(self):
+        """Test that _get_active_sessions returns UNKNOWN on error (no degrade to CLEAR)."""
         _publish_service_instance._device_repo = MagicMock()
         _publish_service_instance._device_repo.get_by_id.side_effect = Exception(
             "Database error"
         )
+        _publish_service_instance._session_repo = MagicMock()
+        _publish_service_instance._paas_facade = MagicMock()
+        mock_inspector = MagicMock()
+        mock_inspector.inspect = AsyncMock()
+        _publish_service_instance._active_session_inspector = mock_inspector
 
         with patch(
             "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
             return_value="test",
         ):
-            count = await _publish_service_instance._get_active_sessions(
+            verdict = await _publish_service_instance._get_active_sessions(
                 tenant="test-tenant", device_id=1
             )
 
-            # Should return 0 on error to allow drain to proceed
-            assert count == 0
+            # Must NOT degrade to CLEAR; device stays safe-by-default.
+            assert verdict is ActiveSessionVerdict.UNKNOWN
+            mock_inspector.inspect.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_get_active_sessions_zero_sessions(self):
-        """Test that _get_active_sessions returns 0 when no active sessions."""
-        mock_device = MagicMock()
-        mock_device.device_uuid = "dev-uuid-456"
+    async def test_get_active_sessions_unknown_when_paas_device_id_missing(self):
+        """Device without paas_device_id must collapse to UNKNOWN."""
+        mock_device = self._setup_device(paas_device_id=None)
 
         _publish_service_instance._device_repo = MagicMock()
         _publish_service_instance._device_repo.get_by_id.return_value = mock_device
-
         _publish_service_instance._session_repo = MagicMock()
-        _publish_service_instance._session_repo.count_active_sessions_by_device.return_value = 0
+        _publish_service_instance._paas_facade = MagicMock()
+        mock_inspector = MagicMock()
+        mock_inspector.inspect = AsyncMock()
+        _publish_service_instance._active_session_inspector = mock_inspector
 
         with patch(
             "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
             return_value="test",
         ):
-            count = await _publish_service_instance._get_active_sessions(
+            verdict = await _publish_service_instance._get_active_sessions(
                 tenant="test-tenant", device_id=1
             )
 
-            assert count == 0
+            assert verdict is ActiveSessionVerdict.UNKNOWN
+            mock_inspector.inspect.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_active_sessions_unknown_when_no_paas_facade(self):
+        """Without paas_facade the engine cannot be queried -> UNKNOWN."""
+        mock_device = self._setup_device()
+
+        _publish_service_instance._device_repo = MagicMock()
+        _publish_service_instance._device_repo.get_by_id.return_value = mock_device
+        _publish_service_instance._session_repo = MagicMock()
+        _publish_service_instance._paas_facade = None
+        mock_inspector = MagicMock()
+        mock_inspector.inspect = AsyncMock()
+        _publish_service_instance._active_session_inspector = mock_inspector
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            verdict = await _publish_service_instance._get_active_sessions(
+                tenant="test-tenant", device_id=1
+            )
+
+            assert verdict is ActiveSessionVerdict.UNKNOWN
+            mock_inspector.inspect.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_active_sessions_active_verdict_from_inspector(self):
+        """ACTIVE verdict from inspector is forwarded unchanged."""
+        from secbaas.community.core.service.health_check.paas import (
+            ActiveSessionInspectResult,
+            ActiveSessionVerdict,
+        )
+
+        mock_device = self._setup_device()
+        _publish_service_instance._device_repo = MagicMock()
+        _publish_service_instance._device_repo.get_by_id.return_value = mock_device
+        _publish_service_instance._session_repo = MagicMock()
+        _publish_service_instance._session_repo.count_active_sessions_by_device.return_value = 5
+        mock_facade = MagicMock()
+        mock_facade.execute_command = AsyncMock()
+        mock_inspector = MagicMock()
+        mock_inspector.inspect = AsyncMock(
+            return_value=ActiveSessionInspectResult(
+                verdict=ActiveSessionVerdict.ACTIVE,
+                query_status="ok",
+                duration_ms=42,
+            )
+        )
+        _publish_service_instance._paas_facade = mock_facade
+        _publish_service_instance._active_session_inspector = mock_inspector
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            verdict = await _publish_service_instance._get_active_sessions(
+                tenant="test-tenant", device_id=1
+            )
+
+            assert verdict is ActiveSessionVerdict.ACTIVE
 
 
 class TestRetryPublish:

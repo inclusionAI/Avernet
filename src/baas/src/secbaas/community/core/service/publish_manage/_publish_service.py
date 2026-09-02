@@ -71,7 +71,15 @@ from secbaas.community.core.repository.publish_record import (
     PublishRecordRecord,
     PublishRecordRepository,
 )
-from secbaas.community.core.service.paas import is_paas_mock_mode
+from secbaas.community.core.service.health_check.paas import (
+    ActiveSessionInspector,
+    ActiveSessionInspectResult,
+    ActiveSessionVerdict,
+)
+from secbaas.community.core.service.paas import (
+    PaasServiceFacade,
+    is_paas_mock_mode,
+)
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
 
@@ -130,8 +138,20 @@ class DefaultPublishService(PublishService):
         template_service: DeviceTemplateManageService,
         bot_service: BotManageService,
         device_service: DeviceService,
+        paas_facade: PaasServiceFacade | None = None,
+        active_session_inspector: ActiveSessionInspector | None = None,
     ) -> None:
-        """Initialize with injected dependencies."""
+        """Initialize with injected dependencies.
+
+        Args:
+            paas_facade: Optional PaaS facade used by ``_get_active_sessions`` to
+                query the in-sandbox engine ``/api/engine/active-sessions`` endpoint.
+                When ``None``, active-session inspection collapses to ``UNKNOWN``
+                (drain does not proceed on missing fact source).
+            active_session_inspector: Optional inspector override (mainly for
+                tests); when ``None`` a default ``ActiveSessionInspector`` is
+                constructed lazily.
+        """
         self._bot_repo = bot_repo
         self._device_repo = device_repo
         self._rel_repo = rel_repo
@@ -142,6 +162,10 @@ class DefaultPublishService(PublishService):
         self._template_service = template_service
         self._bot_service = bot_service
         self._device_service = device_service
+        self._paas_facade = paas_facade
+        self._active_session_inspector = (
+            active_session_inspector or ActiveSessionInspector()
+        )
 
     # ====================================================================
     # UTILITY METHODS
@@ -3491,6 +3515,13 @@ class DefaultPublishService(PublishService):
         Per D-04: Timeout after specified seconds (default 30s)
         Per D-09: No session migration - existing sessions complete or timeout
 
+        Drain decision is driven by ``ActiveSessionInspector`` querying the
+        in-sandbox engine ``/api/engine/active-sessions`` endpoint and mapping
+        to ``ActiveSessionVerdict``: ``CLEAR`` advances drain; ``ACTIVE`` or
+        ``UNKNOWN`` block drain until timeout. Previous behavior degraded any
+        query failure to 0/CLEAR, which could mis-release an in-use device;
+        the new ``UNKNOWN`` branch keeps the device safe-by-default.
+
         Args:
             tenant: Tenant name for isolation
             device_id: Device to drain
@@ -3498,14 +3529,17 @@ class DefaultPublishService(PublishService):
             check_interval: Seconds between session checks
 
         Returns:
-            DrainResult with success flag and session count at completion
+            DrainResult with success flag, sessions_remaining (0 only when
+            CLEAR; positive otherwise) and the final verdict.
         """
         start_time = datetime.now()
         check_count = 0
 
         logger.info(f"[drain_device] device={device_id}, timeout={timeout_seconds}s")
 
-        # In mock mode, skip drain wait entirely
+        # In mock mode, skip drain wait entirely (CLEAR-equivalent behavior).
+        # Preserves the previous e2e mock-mode shortcut; production path goes
+        # through the inspector below.
         if is_paas_mock_mode():
             logger.info(
                 f"[drain_device] mock mode: skipping drain for device={device_id}"
@@ -3515,91 +3549,150 @@ class DefaultPublishService(PublishService):
                 sessions_remaining=0,
                 duration_seconds=0,
                 timeout_reached=False,
+                verdict=ActiveSessionVerdict.CLEAR.value,
             )
 
         while True:
-            # Check for active sessions on this device
-            active_sessions = await self._get_active_sessions(
+            # Inspect engine for active-session verdict (replaces DB count as
+            # the drain fact source; DB count remains audit-only — see
+            # ``_get_active_sessions``).
+            verdict = await self._get_active_sessions(
                 tenant=tenant, device_id=device_id
             )
 
-            if active_sessions == 0:
+            if verdict == ActiveSessionVerdict.CLEAR:
                 duration = (datetime.now() - start_time).total_seconds()
                 logger.info(
                     f"Device {device_id} drained after {check_count} checks, "
-                    f"duration={duration:.1f}s"
+                    f"duration={duration:.1f}s, verdict=clear"
                 )
                 return DrainResult(
                     success=True,
                     sessions_remaining=0,
                     duration_seconds=duration,
                     timeout_reached=False,
+                    verdict=ActiveSessionVerdict.CLEAR.value,
                 )
 
-            # Check timeout
+            # ACTIVE or UNKNOWN: keep waiting; do not release the device.
+            # sessions_remaining is reported as a positive sentinel (1) to
+            # preserve backward-compatible logging ("N sessions remaining").
             elapsed = (datetime.now() - start_time).total_seconds()
             if elapsed >= timeout_seconds:
                 logger.warning(
                     f"Device {device_id} drain timeout after {elapsed:.1f}s, "
-                    f"{active_sessions} sessions still active"
+                    f"verdict={verdict.value} (drain blocked)"
                 )
                 return DrainResult(
                     success=False,
-                    sessions_remaining=active_sessions,
+                    sessions_remaining=1,
                     duration_seconds=elapsed,
                     timeout_reached=True,
+                    verdict=verdict.value,
                 )
 
             check_count += 1
             await asyncio.sleep(check_interval)
 
-    async def _get_active_sessions(self, tenant: str, device_id: int) -> int:
-        """Get count of active sessions (PENDING, RUNNING) on a device.
+    async def _get_active_sessions(
+        self, tenant: str, device_id: int
+    ) -> ActiveSessionVerdict:
+        """Get the active-session verdict for a device.
 
-        Queries the bot session repository for sessions in PENDING or RUNNING
-        status associated with the given device.
+        Issues an in-sandbox engine ``/api/engine/active-sessions`` query via
+        :class:`ActiveSessionInspector` and returns the mapped
+        ``ActiveSessionVerdict`` (``CLEAR`` / ``ACTIVE`` / ``UNKNOWN``).
+
+        The previous implementation used ``bot_session`` repository
+        ``count_active_sessions_by_device`` as the sole fact source and
+        degraded every error to ``0`` (i.e. ``CLEAR``), risking mis-release of
+        in-use devices. The repository count is now retained **only** as an
+        audit log field; drain decision is driven by the engine verdict.
+
+        Any failure — missing device, missing ``paas_device_id``, missing
+        ``paas_facade``, inspector error — collapses to ``UNKNOWN`` so that
+        ``_drain_device`` keeps the device safe-by-default instead of
+        releasing it.
 
         Args:
             tenant: Tenant name for multi-tenant isolation
-            device_id: Device internal ID (used to look up device_uuid)
+            device_id: Device internal ID (used to look up paas_device_id)
 
         Returns:
-            Count of active sessions, or 0 on error (graceful degradation)
+            ``ActiveSessionVerdict``; never raises.
         """
         try:
-            # Import here to avoid circular imports
             env = get_current_env()
 
-            # Look up device to get device_uuid (session table stores device_uuid, not device_id)
+            # Look up device to obtain paas_device_id (provider_device_id) for
+            # the in-sandbox engine query, and device_uuid for the audit count.
             device_repo = self._device_repo
             device = device_repo.get_by_id(device_id, tenant=tenant, env=env)
 
             if device is None:
                 logger.warning(
-                    f"[get_active_sessions] Device {device_id} not found, "
-                    "assuming no active sessions"
+                    f"[get_active_sessions] device_id={device_id} not found, "
+                    "verdict=unknown"
                 )
-                return 0
+                return ActiveSessionVerdict.UNKNOWN
 
-            # Count active sessions by device_uuid
-            session_repo = self._session_repo
-            count = session_repo.count_active_sessions_by_device(
-                device_uuid=device.device_uuid, tenant=tenant
+            paas_device_id = getattr(device, "provider_device_id", None)
+            device_uuid = getattr(device, "device_uuid", None)
+
+            # Audit-only DB count (no longer drives drain decision).
+            audit_count: int | None = None
+            try:
+                session_repo = self._session_repo
+                audit_count = session_repo.count_active_sessions_by_device(
+                    device_uuid=device_uuid, tenant=tenant
+                )
+            except Exception as audit_err:  # noqa: BLE001
+                logger.warning(
+                    f"[get_active_sessions] audit count failed for "
+                    f"device_id={device_id}: {audit_err}"
+                )
+
+            if not paas_device_id:
+                logger.warning(
+                    f"[get_active_sessions] device_id={device_id} has no "
+                    f"paas_device_id (provider_device_id), verdict=unknown, "
+                    f"audit_count={audit_count}"
+                )
+                return ActiveSessionVerdict.UNKNOWN
+
+            if self._paas_facade is None:
+                logger.warning(
+                    f"[get_active_sessions] no paas_facade configured for "
+                    f"device_id={device_id}, verdict=unknown, "
+                    f"audit_count={audit_count}"
+                )
+                return ActiveSessionVerdict.UNKNOWN
+
+            result: ActiveSessionInspectResult = (
+                await self._active_session_inspector.inspect(
+                    paas_device_id=paas_device_id,
+                    paas_facade=self._paas_facade,
+                    device_id=device_id,
+                    lifecycle_stage="online",
+                )
             )
 
             logger.info(
                 f"[get_active_sessions] device_id={device_id}, "
-                f"device_uuid={device.device_uuid}, active_sessions={count}"
+                f"device_uuid={device_uuid}, verdict={result.verdict.value}, "
+                f"query_status={result.query_status}, "
+                f"audit_count={audit_count}, duration_ms={result.duration_ms}"
             )
-            return count
+            return result.verdict
 
         except Exception as e:
+            # Defensive catch-all: never let _get_active_sessions raise into
+            # _drain_device; collapse to UNKNOWN so the device is not released.
             logger.warning(
-                f"[get_active_sessions] Error querying sessions for device {device_id}: {e}"
+                f"[get_active_sessions] error for device_id={device_id}: {e}, "
+                f"verdict=unknown"
             )
-            # Graceful degradation: return 0 to allow drain to proceed
-            # This matches the original placeholder behavior on error
-            return 0
+            return ActiveSessionVerdict.UNKNOWN
 
     async def handle_device_callback(
         self,

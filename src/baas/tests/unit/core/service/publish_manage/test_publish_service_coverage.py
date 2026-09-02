@@ -3502,6 +3502,10 @@ class TestDrainDevice:
 
     @pytest.mark.asyncio
     async def test_drain_zero_sessions(self):
+        from secbaas.community.core.service.health_check.paas import (
+            ActiveSessionVerdict,
+        )
+
         svc = _make_service()
         with (
             patch(
@@ -3512,17 +3516,22 @@ class TestDrainDevice:
                 svc,
                 "_get_active_sessions",
                 new_callable=AsyncMock,
-                return_value=0,
+                return_value=ActiveSessionVerdict.CLEAR,
             ),
         ):
             result = await svc._drain_device("t", 1, timeout_seconds=30)
             assert result.success is True
             assert result.sessions_remaining == 0
+            assert result.verdict == ActiveSessionVerdict.CLEAR.value
 
     @pytest.mark.asyncio
     async def test_drain_timeout(self):
+        from secbaas.community.core.service.health_check.paas import (
+            ActiveSessionVerdict,
+        )
+
         svc = _make_service()
-        # Always return 5 sessions, timeout=0 should hit immediately
+        # Always ACTIVE, timeout=0 should hit immediately and block drain.
         with (
             patch(
                 "secbaas.community.core.service.publish_manage._publish_service.is_paas_mock_mode",
@@ -3532,7 +3541,7 @@ class TestDrainDevice:
                 svc,
                 "_get_active_sessions",
                 new_callable=AsyncMock,
-                return_value=5,
+                return_value=ActiveSessionVerdict.ACTIVE,
             ),
         ):
             result = await svc._drain_device(
@@ -3542,8 +3551,9 @@ class TestDrainDevice:
                 check_interval=0.01,
             )
             assert result.success is False
-            assert result.sessions_remaining == 5
+            assert result.sessions_remaining > 0
             assert result.timeout_reached is True
+            assert result.verdict == ActiveSessionVerdict.ACTIVE.value
 
 
 # ====================================================================
