@@ -373,12 +373,21 @@ impl SessionManagementService for StaticSessionManagement {
 }
 
 fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>) -> Session {
+    test_session_with_status(session_id, group_id, participants, SessionStatus::Running)
+}
+
+fn test_session_with_status(
+    session_id: &str,
+    group_id: &str,
+    participants: Vec<Participant>,
+    status: SessionStatus,
+) -> Session {
     Session {
         id: session_id.to_string(),
         group_id: group_id.to_string(),
         session_title: None,
         env: None,
-        status: SessionStatus::Running,
+        status,
         session_kind: SessionKind::Chat,
         participants,
         group_version: Some(1),
@@ -749,6 +758,22 @@ async fn build_group_app_with_identity(
     Arc<RecordingMessageFlow>,
     Arc<RecordingGroupMessageHistory>,
 ) {
+    build_group_app_with_identity_and_session_status(user_identity, SessionStatus::Running).await
+}
+
+async fn build_group_app_with_identity_and_session_status(
+    user_identity: Arc<dyn UserIdentityPort>,
+    session_status: SessionStatus,
+) -> (
+    axum::Router,
+    Arc<GroupStore>,
+    Arc<RecordingRouting>,
+    Arc<RecordingBotDelivery>,
+    Arc<RecordingFrontendDelivery>,
+    Arc<RecordingBotRequest>,
+    Arc<RecordingMessageFlow>,
+    Arc<RecordingGroupMessageHistory>,
+) {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     for (bot_id, name) in [
@@ -825,7 +850,8 @@ async fn build_group_app_with_identity(
         .frontend_delivery(frontend_delivery.clone())
         .message_flow(message_flow.clone())
         .system_message(message_flow.clone())
-        .session_management(Arc::new(StaticSessionManagement::new(test_session(
+        .session_management(Arc::new(StaticSessionManagement::new(
+            test_session_with_status(
                 "group-1:abcdef12",
                 "group-1",
                 vec![
@@ -833,7 +859,9 @@ async fn build_group_app_with_identity(
                     Participant::bot("target-bot", ParticipantRole::Consultant),
                     Participant::human("human_123", ParticipantRole::Observer),
                 ],
-            ))))
+                session_status,
+            ),
+        )))
         .group_query(group_use_cases)
         .group_message_history(group_message_history.clone())
         .build_for_test();
@@ -1101,6 +1129,53 @@ async fn session_chat_auto_joins_authenticated_human_and_binds_sender_identity()
     assert_eq!(participant["role"], "observer");
     assert_eq!(participant["actor_kind"], "human");
     assert_eq!(participant["mode"], "present");
+}
+
+#[tokio::test]
+async fn session_chat_allows_completed_chat_session() {
+    let (
+        app,
+        _group_store,
+        _routing,
+        _bot_delivery,
+        _frontend_delivery,
+        _bot_request,
+        message_flow,
+        _group_message_history,
+    ) = build_group_app_with_identity_and_session_status(
+        Arc::new(ChainUserIdentityPort::new(static_auth_chain(
+            "123", "Owner",
+        ))),
+        SessionStatus::Completed,
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/group-1:abcdef12/chat")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"message": "continue completed chat"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["session_id"], "group-1:abcdef12");
+    assert_eq!(json["delivered_count"], 2);
+
+    let group_chats = message_flow.group_chats.lock().await;
+    assert_eq!(group_chats.len(), 1);
+    assert_eq!(
+        group_chats[0].session_id.as_deref(),
+        Some("group-1:abcdef12")
+    );
 }
 
 #[tokio::test]

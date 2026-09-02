@@ -1312,16 +1312,7 @@ pub async fn session_chat(
         Err(e) => return session_error_to_response(&e),
     };
 
-    // 2. Session must be running
-    if !matches!(sess.status, bcs_service_api::SessionStatus::Running) {
-        return (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({"error": "session is not running"})),
-        )
-            .into_response();
-    }
-
-    // 3. Resolve caller
+    // 2. Resolve caller
     let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
         Ok(c) => c,
         Err(_) => {
@@ -1333,7 +1324,7 @@ pub async fn session_chat(
         }
     };
 
-    // 4. Caller must be a session participant
+    // 3. Caller must be a session participant
     let caller_id = match &caller {
         GroupChatCaller::Bot { bot_uuid } => bot_uuid.clone(),
         GroupChatCaller::Human(h) => h.actor_id.clone(),
@@ -1413,7 +1404,7 @@ pub async fn session_chat(
         }
     }
 
-    // 5. Route via MessageFlowService with session_id pinned from path
+    // 4. Route via MessageFlowService with session_id pinned from path
     // COSEC: Human messages are always bound to the authenticated actor, even
     // when the request supplies `from`; Bot callers retain legacy validation.
     let requested_sender_id = match &caller {
