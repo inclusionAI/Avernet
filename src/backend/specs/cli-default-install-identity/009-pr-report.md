@@ -1,6 +1,6 @@
 ---
 agent: tc-pr
-status: in_progress
+status: complete
 created: 2026-09-01T00:00:00+08:00
 ---
 
@@ -56,3 +56,24 @@ Validation after the fix will rerun the 16 failing gates first, then the affecte
 
 - GitHub Backend unit tests then found two remaining integration gaps: the generic endpoint runner seeded the CLI happy path without a phase-one engine, and the shared HTTP status-map module exceeded the 1000-line cap after the new CLI mappings.
 - The endpoint seed now explicitly uses `openclaw`; duplicate callback map rows were removed while adding the CLI mappings, returning the module to the cap. The exact generic endpoint case and the oversized-module gate pass locally, along with Ruff and whitespace checks.
+
+## Follow-up: legacy frontend CLI call-type route
+
+- PR #1796 is merged and cannot receive the follow-up change.
+- Source repository: GitHub `inclusionAI/Avernet`; base: `dev`.
+- Scope: expose `PATCH /api/bots/{bot_id}/clis/{cli_code}/call-type` through the authenticated legacy frontend surface, add exact `ctoken` boundary sanitization, response schema, endpoint coverage, and frontend contract documentation.
+- Security boundary: the actor is derived only from the authenticated request context; Bot ownership, CLI authorization, collaboration-lock fencing, persistence, and AgentPass reconciliation remain in the existing Caller Identity service.
+- Local validation: the new route and compatibility middleware passed 9 tests; the related Caller Identity suite passed 64 tests; endpoint coverage gate, Ruff, bytecode compilation, and `git diff --check` passed.
+- Rebase result: branch `rebase/legacy-cli-call-type-on-dev` contains only follow-up commit `c5226bf9b` above GitHub `dev@cb842b314`; the already-merged #1796 commits are not duplicated.
+- Follow-up PR: [#1812](https://github.com/inclusionAI/Avernet/pull/1812), title `feat(backend): expose legacy CLI call-type updates`, head `rebase/legacy-cli-call-type-on-dev`, base `dev`.
+- PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec. Human comments mode: `auto`.
+- Initial remote state: OPEN, review required, no comments or reviews; eight CI checks are queued or in progress and therefore remain `PENDING`.
+
+## Follow-up PR validation result
+
+- CI-validated head: `daf45f66e8eb24740ccbcbdce2e8cdd3d52cf0fe`.
+- All eight GitHub checks passed: Backend unit tests, BCS unit tests, Engine unit tests, BaaS unit tests, Gateway unit tests, Sandbox-proxy unit tests, Singlebox coverage, and BCS E2E.
+- Backend unit tests completed successfully in 17m36s; Singlebox coverage completed successfully in 13m32s.
+- PR #1812 is open, non-draft, and mergeable. GitHub still reports `REVIEW_REQUIRED` because no approval has been submitted.
+- There are no issue comments, inline review comments, or submitted reviews to address.
+- This report-only status update does not change the implementation. Its final PR head is revalidated by the same required GitHub checks after push.

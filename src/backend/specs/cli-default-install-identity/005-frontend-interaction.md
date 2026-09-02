@@ -90,28 +90,34 @@ X-User-Id: {currentUserId}
 与资源请求同时读取 Caller Context：
 
 ```http
-GET /openapi/v1/bots/{botId}/caller-context?user_id={currentUserId}&owner_id={ownerId}
+GET /api/bots/{botId}/caller-context?ctoken={opaqueCtoken}&stage=draft&entity_id={entityId}
 ```
 
-使用既有 `/openapi/v1` 鉴权客户端。响应中 `mcp_call_types` 与 `cli_call_types` 是同一语义的稀疏 map：键为资源 code，缺少的 key 表示 `owner`。因此每一个已列出的 CLI 均按以下规则得到唯一身份状态：
+预发环境的完整 URL 形态如下，实际值均从当前老平台页面上下文取得：
+
+```text
+https://agentclaw-pre.alipay.com/api/bots/{botId}/caller-context?ctoken={opaqueCtoken}&stage=draft&entity_id={entityId}
+```
+
+使用老平台既有登录态和请求客户端。`ctoken` 是网关追加的兼容参数，前端不得持久化、打印或上报其值；用户身份仍以后端解析到的登录态为准。`entity_id` 从当前 Bot 页面上下文读取，不能由用户自由输入。
+
+该老平台接口直接返回 Caller Context 对象，不使用 OpenAPI envelope。响应中 `mcp_call_types` 与 `cli_call_types` 是同一语义的稀疏 map：键为资源 code，缺少的 key 表示 `owner`。因此每一个已列出的 CLI 均按以下规则得到唯一身份状态：
 
 ```ts
-const identityMode = callerContext.data.cli_call_types[cli.cli_code] ?? 'owner';
+const identityMode = callerContext.cli_call_types[cli.cli_code] ?? 'owner';
 ```
 
 示例：
 
 ```json
 {
-  "code": 200000,
-  "data": {
-    "capability": "caller_identity.v1",
-    "stage": "draft",
-    "bot_call_type": "owner",
-    "mcp_call_types": { "mcp.calendar": "caller" },
-    "cli_call_types": { "dataphin": "caller" },
-    "editable": true
-  }
+  "capability": "caller_identity.v1",
+  "stage": "draft",
+  "publish_id": null,
+  "bot_call_type": "owner",
+  "mcp_call_types": { "mcp.calendar": "caller" },
+  "cli_call_types": { "dataphin": "caller" },
+  "editable": true
 }
 ```
 
@@ -177,31 +183,29 @@ const identityMode = callerContext.data.cli_call_types[cli.cli_code] ?? 'owner';
 次按钮：取消
 ```
 
-### 4.3 写接口
+### 4.3 写接口（老平台兼容路由）
+
+老平台前端期望使用与 MCP caller 配置一致的兼容路径：
 
 ```http
-PATCH /openapi/v1/bots/{botId}/clis/{cliCode}/call-type?user_id={currentUserId}&owner_id={ownerId}
+PATCH /api/bots/{botId}/clis/{cliCode}/call-type?ctoken={opaqueCtoken}&entity_id={entityId}
 Content-Type: application/json
 
 {
-  "call_type": "caller"
+  "call_type": "caller",
+  "lock_epoch": 123
 }
 ```
 
-使用既有 `/openapi/v1` 鉴权客户端。不要向请求 body 添加 `actor_id`、`lock_epoch`、AgentPass token、IAM token 或 CLI 安装参数。
+使用老平台既有登录态和请求客户端。`ctoken`、`entity_id` 和可选 `lock_epoch` 的来源及安全约束与现有 MCP call-type 接口一致：当前 Bot 存在协作编辑锁时必须传入前端已持有的锁版本；没有锁时可省略。后端只从已认证登录态解析操作者；前端不得向请求 body 添加 `actor_id`、AgentPass token、IAM token 或 CLI 安装参数。
 
-成功响应采用 OpenAPI envelope：
+期望成功响应采用老平台直接对象结构：
 
 ```json
 {
-  "code": 200000,
-  "message": "OK",
-  "data": {
-    "cli_code": "dataphin",
-    "call_type": "caller",
-    "bot_call_type": "caller"
-  },
-  "request_id": "..."
+  "cli_code": "dataphin",
+  "call_type": "caller",
+  "bot_call_type": "caller"
 }
 ```
 
@@ -218,7 +222,7 @@ Content-Type: application/json
 | `422` | 请求 body 校验失败 | 记录前端诊断事件，不向用户暴露请求细节；恢复原选择。 |
 | `5xx` / 网络错误 | AgentPass 收敛失败或网络失败；后端会补偿本地 sparse 覆盖 | 提示“保存失败，请稍后重试”，刷新资源列表和 Caller Context 后允许用户手动重试。 |
 
-错误提示中可展示 `request_id` 供排查，但不能展示完整响应、HTTP 请求头、token 或用户身份凭据。
+错误响应若包含 `request_id`，可展示它供排查；不能展示完整响应、HTTP 请求头、`ctoken`、其他 token 或用户身份凭据。
 
 ## 5. 关键前端状态模型
 
@@ -246,7 +250,7 @@ type DefaultCliRow = {
 
 1. Default 能力集包含 CLI 时，正确展示 `cli_name`、`cli_desc`，并由 Caller Context 的 `cli_call_types` 显示身份；非 Default 能力集不显示 CLI 区块。
 2. `dataphin` 和 `deepinsight-cli` 在 AgentPass 已注册时可展示；页面不硬编码或客户端补造它们。
-3. Owner 在 Active 的 `openclaw` 或 `claude_code/generalCC` Bot 中可将 CLI 切为 caller，Bot aggregate 随之变为 caller；最后一个 caller 切回 owner 返回既有 `409 CALLER_TO_OWNER_UNSUPPORTED`，若仍有其它 caller 则允许切回 owner。每次成功后同时刷新资源列表和 Caller Context。
+3. 后端发布老平台 CLI PATCH 兼容路由后，Owner 在 Active 的 `openclaw` 或 `claude_code/generalCC` Bot 中可将 CLI 切为 caller，Bot aggregate 随之变为 caller；最后一个 caller 切回 owner 返回既有 `409 CALLER_TO_OWNER_UNSUPPORTED`，若仍有其它 caller 则允许切回 owner。每次成功后同时刷新资源列表和 Caller Context。
 4. `claude_code/normalCC`、其他引擎、非 service、非 Active 或非 Owner 状态下，UI 只读；即便前端预判遗漏，收到 `409/404` 也能安全回退。
 5. 他人持锁时收到 `423` 后不改本地身份、不自动重试。
 6. Caller Context 读取失败、`cli_call_types` 缺失或值未知时不允许切换；资源接口的 `identity_mode` 不影响选择器。
@@ -258,8 +262,9 @@ type DefaultCliRow = {
 | 目的 | 后端入口 |
 |---|---|
 | Default 能力集资源列表 | `adapters/http/skill_center/skillsets.py:list_skill_set_resources` |
-| MCP / CLI 统一 Caller 状态 | `adapters/http/openapi_v1/caller_identity/router.py:get_caller_context` |
-| CLI 身份切换 HTTP 入口 | `adapters/http/openapi_v1/caller_identity/router.py:update_cli_call_type` |
+| 老平台 MCP / CLI 统一 Caller 状态 | `adapters/http/caller_identity/router.py:get_caller_context`，对应 `GET /api/bots/{bot_id}/caller-context` |
+| 老平台 CLI 身份切换 HTTP 入口 | `adapters/http/caller_identity/router.py:update_cli_call_type`，对应 `PATCH /api/bots/{bot_id}/clis/{cli_code}/call-type` |
+| 现有 CLI 写实现（老平台前端不直连） | `adapters/http/openapi_v1/caller_identity/router.py:update_cli_call_type` |
 | 身份切换领域逻辑和补偿 | `core/caller_identity/service.py:CallerIdentityService.update_cli_call_type` |
 | Default CLI/历史 scope 收敛 | `core/mcp/services/cli_passport_scope.py:CliPassportScopeReconciler` |
 | UI 返回的 CLI 数据结构 | `adapters/http/skill_center/schemas.py:CLIInSetResponse` |

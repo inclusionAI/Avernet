@@ -12,6 +12,7 @@ from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.caller_identity.schemas import (
     CallerContextQuery,
     CallerContextResponse,
+    UpdateCliCallTypeResponse,
     UpdateMcpCallTypeQuery,
     UpdateMcpCallTypeRequest,
     UpdateMcpCallTypeResponse,
@@ -169,6 +170,80 @@ async def update_mcp_call_type(
         "server_code=%s call_type=%s bot_call_type=%s lock_epoch=%s entity_scoped=%s",
         bot_id,
         response.server_code,
+        response.call_type.value,
+        response.bot_call_type.value,
+        request.lock_epoch,
+        query.entity_id is not None,
+    )
+    return response
+
+
+@router.patch(
+    "/{bot_id}/clis/{cli_code}/call-type",
+    response_model=UpdateCliCallTypeResponse,
+)
+async def update_cli_call_type(
+    bot_id: str,
+    cli_code: str,
+    request: UpdateMcpCallTypeRequest,
+    query: Annotated[UpdateMcpCallTypeQuery, Query()],
+    user: AuthenticatedUser = Depends(get_current_user),
+    service: CallerIdentityServiceProtocol = Injected(CallerIdentityServiceProtocol),
+) -> UpdateCliCallTypeResponse:
+    """Update one authorized draft CLI using the authenticated Bot owner."""
+    logger.info(
+        "cli_call_type_http_update_started bot_id=%s stage=draft "
+        "cli_code=%s call_type=%s lock_epoch=%s entity_scoped=%s",
+        bot_id,
+        cli_code,
+        request.call_type.value,
+        request.lock_epoch,
+        query.entity_id is not None,
+    )
+    # COSEC: the authenticated request context is the only actor source; query
+    # and body values may locate a Bot or select a mode but cannot impersonate it.
+    try:
+        result = await service.update_cli_call_type(
+            bot_id=bot_id,
+            cli_code=cli_code,
+            call_type=request.call_type,
+            actor_id=user.staffId,
+            lock_epoch=request.lock_epoch,
+            entity_id=query.entity_id,
+        )
+    except DomainError:
+        logger.warning(
+            "cli_call_type_http_update_failed bot_id=%s stage=draft "
+            "cli_code=%s call_type=%s lock_epoch=%s entity_scoped=%s",
+            bot_id,
+            cli_code,
+            request.call_type.value,
+            request.lock_epoch,
+            query.entity_id is not None,
+        )
+        raise
+    except Exception:
+        logger.warning(
+            "cli_call_type_http_update_failed bot_id=%s stage=draft "
+            "cli_code=%s call_type=%s lock_epoch=%s entity_scoped=%s",
+            bot_id,
+            cli_code,
+            request.call_type.value,
+            request.lock_epoch,
+            query.entity_id is not None,
+        )
+        # COSEC: suppress untrusted dependency details from the HTTP response.
+        raise InternalError("CALLER_IDENTITY_INTERNAL_ERROR") from None
+    response = UpdateCliCallTypeResponse(
+        cli_code=result.cli_code,
+        call_type=result.call_type,
+        bot_call_type=result.bot_call_type,
+    )
+    logger.info(
+        "cli_call_type_http_update_succeeded bot_id=%s stage=draft "
+        "cli_code=%s call_type=%s bot_call_type=%s lock_epoch=%s entity_scoped=%s",
+        bot_id,
+        response.cli_code,
         response.call_type.value,
         response.bot_call_type.value,
         request.lock_epoch,

@@ -80,9 +80,20 @@ class UpdateMcpCallTypeResponse(BaseModel):
     bot_call_type: McpCallType
 
 
+class UpdateCliCallTypeResponse(BaseModel):
+    """Low-sensitivity result of one draft CLI identity update."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cli_code: str
+    call_type: McpCallType
+    bot_call_type: McpCallType
+
+
 __all__ = [
     "CallerContextQuery",
     "CallerContextResponse",
+    "UpdateCliCallTypeResponse",
     "UpdateMcpCallTypeQuery",
     "UpdateMcpCallTypeRequest",
     "UpdateMcpCallTypeResponse",
