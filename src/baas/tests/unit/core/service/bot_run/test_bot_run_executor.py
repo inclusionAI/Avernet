@@ -1298,3 +1298,108 @@ async def test_executor_handles_missing_attachments_in_meta():
     # Verify repo state updates still called normally
     repo.update_status.assert_called_once_with("r1", "RUNNING")
     repo.update_result.assert_called_once()
+
+
+# ----------------------------- eval_session_log 注入 -----------------------------
+
+
+async def test_executor_eval_session_log_enriches_chat_metadata():
+    """eval_session_log 非空时，build_chat_metadata 传入 eval_session_log，enrich_chat_metadata 被调用。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-eval",
+        bot_id="bot-1:ent",
+        metadata={
+            "app_id": "a",
+            "app_type": "T",
+            "tenant": "t",
+            "request_type": "chat",
+            "eval_id": "eval-abc",
+            "default_tag": "eval",
+        },
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.send_message = AsyncMock(
+        return_value=BotResponse(content="eval response", usage=None)
+    )
+    selector.select.return_value = bot_svc
+
+    # 构造 mock eval_session_log
+    eval_log = MagicMock()
+    eval_log.enrich_chat_metadata.return_value = {
+        "biz_task_id": "r-eval",
+        "biz_scene": "eval:eval",
+        "eval_observed": "true",
+        "eval_run_id": "eval-abc",
+    }
+
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(),
+        eval_session_log=eval_log,
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-eval", bot_id="bot-1:ent", session_id="sess-eval")
+    )
+
+    # enrich_chat_metadata 应被调用
+    eval_log.enrich_chat_metadata.assert_called_once()
+
+    # log_eval_session 应被调用
+    eval_log.log_eval_session.assert_called_once_with(
+        eval_id="eval-abc",
+        bot_id="bot-1:ent",
+        session_id="sess-eval",
+        method="execute",
+    )
+
+    # chat_metadata 传入 send_message 应包含 eval 观测字段
+    call_kwargs = bot_svc.send_message.call_args.kwargs
+    assert call_kwargs["chat_metadata"]["eval_observed"] == "true"
+    assert call_kwargs["chat_metadata"]["eval_run_id"] == "eval-abc"
+
+
+async def test_executor_without_eval_id_does_not_write_eval_session_log():
+    """The required eval plugin enriches metadata without recording a normal run."""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-no-eval",
+        bot_id="bot-1:ent",
+        metadata={
+            "app_id": "a",
+            "app_type": "T",
+            "tenant": "t",
+            "request_type": "chat",
+        },
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    bot_svc = MagicMock()
+    bot_svc.send_message = AsyncMock(
+        return_value=BotResponse(content="normal response", usage=None)
+    )
+    selector.select.return_value = bot_svc
+    eval_log = MagicMock()
+    eval_log.enrich_chat_metadata.return_value = {
+        "biz_task_id": "r-no-eval",
+        "biz_scene": "default",
+    }
+
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(),
+        eval_session_log=eval_log,
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-no-eval", bot_id="bot-1:ent", session_id="sess-normal")
+    )
+
+    bot_svc.send_message.assert_awaited_once()
+    eval_log.enrich_chat_metadata.assert_called_once()
+    eval_log.log_eval_session.assert_not_called()
