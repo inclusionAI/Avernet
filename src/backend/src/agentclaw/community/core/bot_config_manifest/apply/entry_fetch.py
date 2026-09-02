@@ -51,12 +51,26 @@ whole category under a wrapped surprise. The one leniency: a pinned
 store-hit whose blob has gone missing falls through to the guarded fetch —
 the pin is byte-provable, so a re-fetch re-filed with the store heals the
 address and nobody upstream learns anything happened.
+
+W7 adds the declared-source front door, :meth:`fetch_declared`: the ``from``
+and inline-git roads resolve through the apply's source session, and the git
+road returns a :class:`GitEntrySource` — the tree is the entry's to
+interpret (a file? a package?) — while its canonical, entry-level bytes are
+filed with the store via :meth:`file_bytes`, so audit and ``keep_last`` read
+the same receipts the URL roads always have.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
+import httpx
+
+from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+    SourceSession,
+)
 from agentclaw.community.core.bot_config_manifest.content.errors import (
     ContentMissingError,
     ContentStoreError,
@@ -70,6 +84,11 @@ from agentclaw.community.core.bot_config_manifest.credentials.errors import (
 )
 from agentclaw.community.core.bot_config_manifest.credentials.policy import (
     PrefixAuthorizationError,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
+    GitCheckout,
+    GitSourceSpec,
+    git_receipt_url,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
@@ -127,6 +146,51 @@ class FetchedEntry:
     #: entry's note. A plain store-hit (from_store, no note) is the
     #: legitimate pinned fast path and stays silent.
     fallback_reason: Optional[str] = None
+    #: The URL the bytes came by, when the caller needs it for shape
+    #: inference (the skills materialiser's archive-kind detection). ``None``
+    #: on the roads that never knew one.
+    source_url: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class GitEntrySource:
+    """A fresh git checkout for one entry to consume — files, not bytes.
+
+    The URL road hands back bytes because there was exactly one blob on the
+    wire; the git road hands back a proven tree and lets the materialiser
+    read it, because what "the entry's bytes" are (a file? a package? a
+    canonical zip?) is a *category* question the fetch layer must not answer.
+    """
+
+    checkout: GitCheckout
+    source_url: str
+    subpath: Optional[str]
+    moved_from: Optional[str]
+
+    def files(self) -> list[tuple[str, bytes]]:
+        try:
+            return self.checkout.files(self.subpath)
+        except FetchRefusedError as exc:
+            raise EntryFetchError(str(exc)) from exc
+
+    def read_file(self) -> bytes:
+        try:
+            return self.checkout.read_file(self.subpath)
+        except FetchRefusedError as exc:
+            raise EntryFetchError(str(exc)) from exc
+
+    def receipt_url(self) -> str:
+        """The W11 identity for this entry's git-sourced bytes."""
+        return git_receipt_url(self.source_url, self.checkout.sha, self.subpath)
+
+    def moved_note(self) -> Optional[str]:
+        """The non-strict road's report line about a moved ref."""
+        if self.moved_from is None:
+            return None
+        return (
+            f"ref moved: the last apply recorded {self.moved_from}, "
+            f"this one resolved {self.checkout.sha}"
+        )
 
 
 def scope_of(ctx: "ApplyContext") -> ContentScope:
@@ -219,6 +283,7 @@ class EntryFetcher:
                     digest=digest,
                     from_store=True,
                     content_type=receipt.content_type,
+                    source_url=target,
                 )
             except ContentMissingError:
                 # The platform's copy of the pinned bytes is gone. Fall
@@ -269,6 +334,7 @@ class EntryFetcher:
                         digest=receipt.digest,
                         from_store=True,
                         content_type=receipt.content_type,
+                        source_url=target,
                         # Visible in the report, not only in the log: the
                         # source was tried and failed, and the stored bytes
                         # stood in. The receipt's agreement with the pin
@@ -331,12 +397,228 @@ class EntryFetcher:
             content=fetched.bytes,
             digest=fetched.sha256,
             from_store=False,
+            source_url=target,
             # The object's own content type is what the source served; the
             # receipt's is the width-checked column copy of the same. Either
             # may be None, and the caller's archive detection treats that as
             # "the source did not say".
             content_type=fetched.content_type,
         )
+
+    def fetch_declared(
+        self,
+        ctx: "ApplyContext",
+        *,
+        entry: "Mapping[str, Any]",
+        category: str,
+        entry_identity: Optional[str] = None,
+    ) -> "FetchedEntry | GitEntrySource":
+        """Resolve one entry's declared source — inline, or by ``from`` name —
+        and acquire it. Raises :class:`EntryFetchError`.
+
+        The URL roads (inline string ``source``, or a ``from`` source that
+        declares ``url``) delegate to :meth:`fetch` unchanged, fold in the
+        *source's* ``auth``, and inherit its pinned/keep_last policy. The git
+        road resolves the ref once per ``(url, ref)`` per apply through the
+        context's source session, enforces ``mode`` against the last apply's
+        resolved SHA, and hands back a :class:`GitEntrySource` — the tree is
+        the entry's to interpret, and ``keep_last`` falls back to the
+        baseline-SHA receipt with the same keep_last-only ruling as wire
+        failures.
+        """
+        expired = ctx.budget.expired() if ctx.budget is not None else None
+        if expired is not None:
+            raise EntryFetchError(expired)
+
+        session = ctx.source_session
+        if session is None:
+            raise EntryFetchError(
+                "this apply carries no source session: a 'from' or git "
+                "source needs one (the apply service builds it per apply)"
+            )
+
+        inline = entry.get("source")
+        keep_last = entry.get("on_fetch_failure", "keep_last") == "keep_last"
+        name: Optional[str] = None
+        decl: Optional["Mapping[str, Any]"] = None
+
+        if isinstance(entry.get("from"), str):
+            name = entry["from"]
+            decl = session.sources.get(name)
+            if decl is None:
+                raise EntryFetchError(
+                    f"'from' names source {name!r}, which is not declared "
+                    "under 'sources'"
+                )
+        elif isinstance(inline, str):
+            return self.fetch(
+                ctx,
+                source_url=inline,
+                digest=entry.get("digest"),
+                auth=entry.get("auth"),
+                category=category,
+                keep_last=keep_last,
+                entry_identity=entry_identity,
+            )
+        elif isinstance(inline, Mapping):
+            decl = inline
+        else:
+            raise EntryFetchError(
+                "an entry must name one of 'from', 'source' or 'content'"
+            )
+        assert decl is not None
+
+        if "git" not in decl:
+            # A named or inline URL source: the same road, with the source's
+            # own auth — the declaration, not the entry, carries it (W7).
+            return self.fetch(
+                ctx,
+                source_url=decl["url"],
+                digest=entry.get("digest"),
+                auth=decl.get("auth"),
+                category=category,
+                keep_last=keep_last,
+                entry_identity=entry_identity,
+            )
+
+        if entry.get("digest") is not None:
+            # v1 narrowing, documented: a pin against git-sourced bytes has no
+            # stable meaning across the fresh-tree/canonical-zip roads. A
+            # SHA-pinned ref is the pin this source speaks.
+            raise EntryFetchError(
+                "digest pinning is not supported on a git source in v1 — "
+                "pin by writing the commit SHA as the source's ref"
+            )
+
+        spec = GitSourceSpec(
+            url=_substitute(ctx, decl["git"]),
+            ref=decl.get("ref") or "HEAD",
+            subpath=decl.get("subpath"),
+            mode=decl.get("mode") or "non_strict",
+        )
+        display = name if name is not None else spec.url
+        auth = decl.get("auth")
+
+        try:
+            headers: dict[str, str] = {}
+            if auth:
+                binding = self._credentials.binding(name=auth)
+                binding.reauthorize(httpx.URL(spec.url))
+                headers = dict(binding.headers_for(httpx.URL(spec.url)))
+            checkout = session.checkout(
+                spec, headers=headers, display=display, auth_name=auth
+            )
+        except CredentialError as exc:
+            raise EntryFetchError(str(exc)) from exc
+        except PrefixAuthorizationError as exc:
+            raise EntryFetchError(str(exc)) from exc
+        except FetchRefusedError as exc:
+            raise EntryFetchError(str(exc)) from exc
+        except FetchFailedError as exc:
+            fallback = self._git_keep_last(
+                ctx, session=session, spec=spec, display=display,
+                keep_last=keep_last, wire_error=exc,
+            )
+            if fallback is not None:
+                return fallback
+            raise EntryFetchError(str(exc)) from exc
+
+        baseline = session.baseline(display)
+        if (
+            spec.mode == "strict"
+            and baseline is not None
+            and baseline != checkout.sha
+        ):
+            raise EntryFetchError(
+                f"strict source {display!r} moved: the last apply recorded "
+                f"{baseline}, this one resolved {checkout.sha} — the entry "
+                "is refused and the bot keeps running what it has"
+            )
+        moved = baseline if (baseline is not None and baseline != checkout.sha) else None
+        return GitEntrySource(
+            checkout=checkout,
+            source_url=spec.url,
+            subpath=spec.subpath,
+            moved_from=moved,
+        )
+
+    def _git_keep_last(
+        self,
+        ctx: "ApplyContext",
+        *,
+        session: SourceSession,
+        spec: GitSourceSpec,
+        display: str,
+        keep_last: bool,
+        wire_error: FetchFailedError,
+    ) -> "Optional[FetchedEntry]":
+        """`keep_last` for the git road: the receipt of the *last-resolved*
+        SHA, when there was one. A first-time source has no baseline — and
+        therefore no stored copy entitled to answer for it."""
+        if not keep_last:
+            return None
+        baseline = session.baseline(display)
+        if baseline is None:
+            return None
+        target = git_receipt_url(spec.url, baseline, spec.subpath)
+        try:
+            receipt = self._content.latest_receipt(
+                scope_of(ctx), source_url=target
+            )
+            if receipt is None:
+                return None
+            return FetchedEntry(
+                content=self._content.read(receipt.digest),
+                digest=receipt.digest,
+                from_store=True,
+                content_type=receipt.content_type,
+                source_url=target,
+                fallback_reason=(
+                    "delivered from the platform's stored copy (keep_last): "
+                    f"the git fetch failed — {wire_error}"
+                ),
+            )
+        except (ContentStoreError, ContentStoreFault) as exc:
+            raise EntryFetchError(str(exc)) from exc
+
+    def file_bytes(
+        self,
+        ctx: "ApplyContext",
+        *,
+        content: bytes,
+        source_url: str,
+        category: str,
+        entry_identity: Optional[str] = None,
+        content_type: Optional[str] = None,
+    ) -> str:
+        """File entry-level bytes the wire never fetched — the git road's
+        canonical form (a package's canonical zip, a single file's bytes)
+        — so audit and ``keep_last`` read the same store everyone else does.
+
+        Returns the content digest. Raises :class:`EntryFetchError` on a
+        store fault; the charge against the apply budget keeps the ledger
+        honest about what the entry cost, disk-read or not.
+        """
+        digest = "sha256:" + hashlib.sha256(content).hexdigest()
+        obj = FetchedObject(
+            bytes=content, sha256=digest, url=source_url,
+            content_type=content_type,
+            fetched_at=datetime.now(timezone.utc), size_bytes=len(content),
+        )
+        try:
+            self._content.store(
+                obj, scope=scope_of(ctx), source_url=source_url,
+                modifier=ctx.actor_id, apply_id=ctx.apply_id,
+                category=category, entry_identity=entry_identity,
+            )
+        except (ContentStoreError, ContentStoreFault) as exc:
+            raise EntryFetchError(
+                "the bytes could not be filed with the platform's store: "
+                f"{exc}"
+            ) from exc
+        if ctx.budget is not None:
+            ctx.budget.charge(len(content))
+        return digest
 
     def _fetch(
         self,
@@ -382,4 +664,10 @@ def _substitute(ctx: "ApplyContext", source_url: str) -> str:
     )
 
 
-__all__ = ["EntryFetchError", "EntryFetcher", "FetchedEntry", "scope_of"]
+__all__ = [
+    "EntryFetchError",
+    "EntryFetcher",
+    "FetchedEntry",
+    "GitEntrySource",
+    "scope_of",
+]

@@ -9,12 +9,21 @@ a secret cannot ride out through an error.
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     EntryFetcher,
+    GitEntrySource,
+)
+from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+    SourceSession,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
+    GitSourceSpec,
+    git_receipt_url,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
@@ -514,3 +523,198 @@ def test_the_funnel_requires_a_category_by_keyword(rig):
     category = signature.parameters["category"]
     assert category.kind is inspect.Parameter.KEYWORD_ONLY
     assert category.default is inspect.Parameter.empty
+
+
+# --- the W7 declared-source front door: fetch_declared / file_bytes ---
+
+GIT_URL = "https://git.corp/repo.git"
+_FAKE_SHA = "a" * 40
+
+
+class _ScriptedGit:
+    def __init__(self, *, sha: str = _FAKE_SHA, error: Exception | None = None):
+        self.specs: list[GitSourceSpec] = []
+        self.headers: list[dict] = []
+        self._sha = sha
+        self._error = error
+
+    def fetch(self, spec, *, headers=None):
+        self.specs.append(spec)
+        self.headers.append(dict(headers or {}))
+        if self._error:
+            raise self._error
+        return SimpleNamespace(
+            root=None, sha=self._sha, url=spec.url, ref=spec.ref,
+            members=(("100644", spec.subpath or "pkg/skill.md"),),
+            files=lambda subpath=None: [("skill.md", b"file-bytes")],
+            read_file=lambda: b"file-bytes",
+        )
+
+
+def _session(git, *, sources=None, baselines=None):
+    return SourceSession(
+        sources=sources or {}, baselines=baselines or {}, git=git
+    )
+
+
+def test_fetch_declared_serves_a_url_from_a_named_source(rig):
+    content, fetcher, credentials, pipeline = rig
+    fetcher.responses["https://content.example/named.bin"] = fetched_object(
+        BODY, url="https://content.example/named.bin"
+    )
+    ctx = make_context(
+        source_session=_session(_ScriptedGit(), sources={
+            "cdn": {"url": "https://content.example/named.bin", "auth": None},
+        })
+    )
+    result = pipeline.fetch_declared(
+        ctx, entry={"from": "cdn"}, category="identity"
+    )
+    # The same URL road as 'source', with the source's own auth folded in.
+    assert result.content == BODY
+    assert fetcher.requests[0].url == "https://content.example/named.bin"
+
+
+def test_fetch_declared_gives_the_git_road_a_checkout(rig):
+    _, _, credentials, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(git, sources={
+            "app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"},
+        })
+    )
+    decl = pipeline.fetch_declared(
+        ctx, entry={"from": "app"}, category="skills", entry_identity="s1"
+    )
+    assert isinstance(decl, GitEntrySource)
+    assert decl.checkout.sha == _FAKE_SHA
+    assert decl.files() == [("skill.md", b"file-bytes")]
+    # No named credential on this source: none was asked of W3, and the
+    # session recorded the resolution the report will carry.
+    assert credentials.binding_calls == []
+    assert ctx.source_session.resolution_records()[0].resolved_sha == _FAKE_SHA
+
+
+def test_fetch_declared_refuses_a_from_that_names_nothing(rig):
+    _, _, _, pipeline = rig
+    ctx = make_context(source_session=_session(_ScriptedGit()))
+    with pytest.raises(EntryFetchError, match="not declared"):
+        pipeline.fetch_declared(ctx, entry={"from": "ghost"}, category="skills")
+
+
+def test_fetch_declared_missing_session_is_loud(rig):
+    _, _, _, pipeline = rig
+    ctx = make_context()
+    with pytest.raises(EntryFetchError, match="no source session"):
+        pipeline.fetch_declared(ctx, entry={"from": "x"}, category="skills")
+
+
+def test_strict_refuses_when_the_ref_moved(rig):
+    _, _, _, pipeline = rig
+    git = _ScriptedGit()
+    # An inline source's report identity is its repository URL, so that is
+    # the key its baseline is read back by.
+    ctx = make_context(
+        source_session=_session(git, baselines={GIT_URL: "b" * 40})
+    )
+    with pytest.raises(EntryFetchError, match="moved"):
+        pipeline.fetch_declared(
+            ctx,
+            entry={"source": {"git": GIT_URL, "ref": "main", "mode": "strict"}},
+            category="skills",
+        )
+
+
+def test_non_strict_records_the_move_in_the_note(rig):
+    _, _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(git, baselines={GIT_URL: "b" * 40})
+    )
+    decl = pipeline.fetch_declared(
+        ctx,
+        entry={"source": {"git": GIT_URL, "ref": "main"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitEntrySource)
+    assert decl.moved_note() and "b" * 40 in decl.moved_note()
+    assert "a" * 40 in decl.moved_note()
+
+
+def test_strict_on_the_first_apply_has_no_opinion(rig):
+    _, _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(source_session=_session(git))  # no baselines
+    decl = pipeline.fetch_declared(
+        ctx,
+        entry={"source": {"git": GIT_URL, "ref": "main", "mode": "strict"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitEntrySource)
+    assert decl.moved_note() is None
+
+
+def test_digest_on_a_git_source_is_refused(rig):
+    _, _, _, pipeline = rig
+    ctx = make_context(source_session=_session(_ScriptedGit()))
+    with pytest.raises(EntryFetchError, match="digest"):
+        pipeline.fetch_declared(
+            ctx,
+            entry={"source": {"git": GIT_URL, "ref": "main"},
+                   "digest": "sha256:" + "0" * 64},
+            category="skills",
+        )
+
+
+def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
+    content, _, credentials, pipeline = rig
+    old_sha = "b" * 40
+    baseline_url = git_receipt_url(GIT_URL, old_sha, "pkg")
+    content.store(
+        fetched_object(b"stored-tree-zip", url=baseline_url,
+                       content_type="application/zip"),
+        scope=None, source_url=baseline_url,
+    )
+    git = _ScriptedGit(error=FetchFailedError("git fetch failed"))
+    ctx = make_context(source_session=_session(
+        git,
+        sources={"app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"}},
+        baselines={"app": old_sha},
+    ))
+    result = pipeline.fetch_declared(
+        ctx,
+        entry={"from": "app", "on_fetch_failure": "keep_last"},
+        category="skills",
+        entry_identity="s1",
+    )
+    assert result.from_store is True
+    assert result.content == b"stored-tree-zip"
+    assert result.content_type == "application/zip"
+    assert result.fallback_reason and "keep_last" in result.fallback_reason
+
+
+def test_git_credentials_reach_the_transport_as_headers(rig):
+    _, fetcher, credentials, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(source_session=_session(git, sources={
+        "app": {"git": GIT_URL, "ref": "main", "auth": "ci-token"},
+    }))
+    pipeline.fetch_declared(ctx, entry={"from": "app"}, category="skills")
+    assert credentials.binding_calls == ["ci-token"]
+    assert git.headers == [{"X-Custom-Auth": "payload-of-ci-token"}]
+
+
+def test_file_bytes_files_canonical_entry_bytes_with_the_store(rig):
+    content, _, _, pipeline = rig
+    ctx = make_context(apply_id="apply-1")
+    digest = pipeline.file_bytes(
+        ctx, content=b"canonical-zip",
+        source_url=git_receipt_url(GIT_URL, _FAKE_SHA, "pkg"),
+        category="skills", entry_identity="s1",
+        content_type="application/zip",
+    )
+    assert digest == "sha256:" + hashlib.sha256(b"canonical-zip").hexdigest()
+    call = content.store_calls[-1]
+    assert call["source_url"] == f"git+{GIT_URL}@{_FAKE_SHA}:pkg"
+    assert call["apply_id"] == "apply-1"
+    assert call["entry_identity"] == "s1"
