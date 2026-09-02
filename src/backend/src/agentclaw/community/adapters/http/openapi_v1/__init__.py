@@ -175,6 +175,7 @@ from fastapi import APIRouter, Depends
 
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
+from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
 from .collaboration_bots import public_router as collaboration_public_router
 from .task import task_router
@@ -238,8 +239,8 @@ from .spaces.skill_routes import router as space_skill_router
 from .spaces.publication_routes import router as space_skill_publication_router
 from .work_orders import router as work_orders_router
 from .source_credentials import router as source_credentials_router
-from agentclaw.community.adapters.http.openapi_v1.authorization import (
-    PublicAPIRoute,
+from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.authorization_inventory import (
     assert_every_route_authorized,
 )
 from .token import token_router
@@ -310,6 +311,9 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
+    # The account-level record, beneath the org group: what USER_GATED is
+    # checked against. Not under `bots`, so it needs no ordering here.
+    user_authorized_apps_router,
     # Product Bot Chat reads are bot-first and use the product service's
     # owner/collaborator adjudication. Their own route dependency checks an
     # app-only caller's grant against the addressed owner.

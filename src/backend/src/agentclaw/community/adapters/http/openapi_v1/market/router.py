@@ -19,7 +19,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import DelegatedUserIdDep
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.skill_market_service import (
     SkillMarketSearchQuery,
@@ -237,7 +237,7 @@ async def search_skill_center_skills(
 @envelope_errors
 async def sync_materialized_skill_center_skills(
     request: Request,
-    user_id: UserIdDep,
+    user_id: DelegatedUserIdDep,
     service: SkillCenterSyncServiceProtocol = Injected(
         SkillCenterSyncServiceProtocol
     ),

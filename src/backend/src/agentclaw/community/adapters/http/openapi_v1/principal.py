@@ -99,6 +99,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 )
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+from agentclaw.community.api.user_app_grant_service import UserAppGrantServiceProtocol
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -306,31 +307,40 @@ async def require_acting_caller(
     # the ones with no grant: a large, silent regression for callers who did
     # nothing but present the credential the gateway asked them for.
     app_id = None if caller_names_a_user(principal) else caller_app_id(principal)
+    if app_id is None:
+        return ActingCaller(user_id=user_id, app_id=None)
+    # Both records, because which one governs the request is the operation's
+    # shape, not the caller's: a bot-addressed operation asks the bot grant, a
+    # USER_GATED one asks the user-level grant, and the caller is built before
+    # either dependency runs.
     return ActingCaller(
         user_id=user_id,
         app_id=app_id,
-        grants=_grant_reader(request) if app_id is not None else None,
+        grants=_grant_reader(request, BotAppGrantServiceProtocol),
+        user_grants=_grant_reader(request, UserAppGrantServiceProtocol),
     )
 
 
-def _grant_reader(request: Request) -> BotAppGrantServiceProtocol | None:
-    """The grant service for this app, or ``None`` when it is not wired.
+def _grant_reader(request: Request, protocol: type):
+    """The grant service of the given kind for this app, or ``None`` when it is
+    not wired.
 
-    ``None`` is not a shrug: :meth:`ActingCaller.require_bot` refuses outright
-    when it has no reader, so an application caller on an app without the grant
-    service is denied rather than admitted unchecked. Returning ``None`` here
-    and failing closed there keeps the two concerns apart — this one knows how
-    to find the service, that one knows what its absence means.
+    ``None`` is not a shrug: :meth:`ActingCaller.require_bot` and
+    :meth:`ActingCaller.require_user` refuse outright when they have no
+    reader, so an application caller on an app without the grant service is
+    denied rather than admitted unchecked. Returning ``None`` here and failing
+    closed there keeps the two concerns apart — this one knows how to find the
+    service, that one knows what its absence means.
     """
     injector = getattr(request.app.state, "injector", None)
     if injector is None:
         return None
     try:
-        return injector.get(BotAppGrantServiceProtocol)
+        return injector.get(protocol)
     except Exception:  # noqa: BLE001 — any resolution failure is "not wired"
         logger.warning(
             "no %s bound; an application caller cannot be authorized on this app",
-            BotAppGrantServiceProtocol.__name__,
+            protocol.__name__,
         )
         return None
 
@@ -463,6 +473,39 @@ def _require_granted_bot(
 #: What an engine-runtime handler's ``resolve_owner_id`` declares to have the
 #: addressed bot authorized *and* receive the owner the grant actually covers.
 AddressedBotGrantDep = Annotated[str, Depends(require_granted_addressed_bot)]
+
+
+async def require_granted_user(caller: ActingCallerDep) -> str:
+    """Authorize the application to act as the named user **at the account
+    level**; return that user's id.
+
+    The dependency every ``USER_GATED`` operation declares — the operations
+    that name no bot but answer about a person's account: their quota, their
+    routines across every bot, their Spaces, work orders, local devices. A
+    bot grant is the wrong proof for those: it is consent to reach one bot,
+    and an application holding one used to be waved through to the whole
+    account on the strength of it. This asks the user-level record instead
+    (``core/user_app_grant``), through :meth:`ActingCaller.require_user`.
+
+    Declaring it *is* the mode, exactly as the two bot dependencies above are
+    theirs: ``test_admission_inventory.py`` holds the set of operations
+    declaring this equal to the table's ``USER_GATED`` entries, in both
+    directions — so an operation cannot be ``USER_GATED`` in the table and
+    unchecked on the wire, which is the state several of them were in while
+    the check was a private helper each router copied for itself.
+
+    For a human caller this is a no-op returning their own id. For an
+    application with no live user-level grant it raises
+    :class:`GrantNotResolvableError`, mapped to the same masked ``404`` a
+    nonexistent bot gets.
+    """
+    return caller.require_user()
+
+
+#: What a ``USER_GATED`` handler declares to receive the request's user id with
+#: the application's account-level authorization proven. Takes the place of
+#: ``UserIdDep`` on those handlers: same value, one more check.
+DelegatedUserIdDep = Annotated[str, Depends(require_granted_user)]
 
 
 async def refuse_app_only_caller(

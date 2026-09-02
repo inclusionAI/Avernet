@@ -42,10 +42,10 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
+    DelegatedUserIdDep,
     UserIdDep,
     refuse_app_only_caller,
     require_granted_own_bot,
@@ -602,7 +602,7 @@ async def list_bots(
     projected template snapshot. For richer inventory fields such as
     deployment mode, use GET /openapi/v1/bots/all.
     """
-    granted = caller.granted_bot_ids(owned_by_delegator=True)
+    granted = caller.granted_bot_ids()
     if granted is not None and not granted:
         return page(0, [], request)
     result = bot_service.list_bots_by_conditions(
@@ -715,42 +715,28 @@ async def check_bot_name(
 @envelope_errors
 async def get_bots_ceiling(
     request: Request,
-    owner_id: UserIdDep,
-    caller: ActingCallerDep,
+    owner_id: DelegatedUserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Ceiling]:
     """Get the named user's bot-creation quota ceiling.
 
     The number creation actually enforces: creating a bot while the user owns
     this many live bots is refused (409). A ceiling of 0 or less means the
-    limit is disabled. For an application caller, reading it requires holding
-    at least one live delegation from the named user; without one the user is
+    limit is disabled. For an application caller, reading it requires a live
+    user-level authorization from the named user; without one the user is
     answered as if they did not exist.
     """
-    # Names no bot, so there is no grant to check against one — but the answer
+    # Names no bot, so there is no bot grant to check against — but the answer
     # is still about a person's account, and a stranger application must not be
-    # able to read it by naming a user id. So it is gated on the application
-    # holding at least one live delegation from that user: proof of a
-    # relationship, the closest thing this operation has to a scope. An
-    # application with no delegation learns nothing it did not already know.
+    # able to read it by naming a user id. ``DelegatedUserIdDep`` is that gate:
+    # the application must hold the user's account-level grant, and one with
+    # none learns nothing it did not already know.
     #
     # Resolved through the same method creation enforces, not
     # PolicyService.get_bots_ceiling directly: that one falls back to its own
     # hardcoded default of 5, while creation falls back to the configured
     # max_devices_per_entity. Reading it directly would advertise 5 to a caller
     # whose deployment allows (or rejects at) a different number.
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
-        # The named user goes to the log bounded and escaped, never into the
-        # exception message: that message reaches a log line verbatim, and
-        # ``user_id`` is declared ``min_length=1`` with no upper bound, so raw
-        # it would let a refused caller forge log lines and choose how many
-        # bytes each refusal costs.
-        logger.warning(
-            "[bots] app holds no delegation from user=%s; refusing the ceiling",
-            for_log(owner_id),
-        )
-        raise BotNotFoundError("no authorization from the named user")
     ceiling = bot_service.get_bots_ceiling_for_owner(owner_id)
     return envelope(Ceiling(ceiling=ceiling), request)
 
@@ -810,7 +796,7 @@ async def list_inventory(
     ),
 ) -> Envelope[Page[BotInventoryItem]]:
     """List personal cloud, service, and local Bots in the current space."""
-    granted = caller.granted_bot_ids(owned_by_delegator=True)
+    granted = caller.granted_bot_ids()
     if granted is not None and not granted:
         return page(0, [], request)
     current_space = space_context.resolve_current(

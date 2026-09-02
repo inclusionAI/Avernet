@@ -44,8 +44,10 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
     PublicRouteNotAuthorized,
     ServiceChecked,
     UNMOUNTED_OPERATIONS,
-    assert_every_route_authorized,
     scaffolding_row_count,
+)
+from agentclaw.community.adapters.http.openapi_v1.authorization_inventory import (
+    assert_every_route_authorized,
 )
 from tests.community.adapters.http.openapi_v1._route_walk import (
     depends_on,

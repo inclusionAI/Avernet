@@ -85,6 +85,8 @@ provides:
   # import at runtime for DI; a change here is a change to their constructors.
   # bot
   - BotAppGrantRepositoryProtocol
+  - UserAppGrantRepositoryProtocol
+  - UserAppGrantRepository
   - BotCollabLockRepositoryProtocol
   - SourceCredentialRepositoryProtocol
   - BotCollabLogRepositoryProtocol
@@ -244,6 +246,7 @@ internal_dependencies:
   - agentclaw.community.core.models
   - agentclaw.community.core.access
   - agentclaw.community.core.bot_app_grant
+  - agentclaw.community.core.user_app_grant
   - agentclaw.community.core.bot_chat
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management

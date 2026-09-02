@@ -11,33 +11,27 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParams,
 )
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    require_granted_user,
+)
 from agentclaw.community.adapters.http.openapi_v1.routines.owner_router import (
     list_owner_routines,
 )
-from agentclaw.community.core.bot_management.services.bot_service import (
-    BotNotFoundError,
-)
 
 
-def _human(user_id: str) -> ActingCaller:
-    """A caller with a person on the wire — no grant governs the request."""
-    return ActingCaller(user_id=user_id, app_id=None)
+def _app(user_id: str, *, user_grant: bool) -> ActingCaller:
+    """An application caller, with or without the user's account-level grant.
 
-
-def _app_with_delegations(user_id: str, *bot_ids: str) -> ActingCaller:
-    """An application caller holding one live delegation per named bot.
-
-    ``granted_bot_ids()`` reads the grant protocol; a stub returning the
-    records inline keeps the handler test off the database.
+    ``require_user()`` reads the user-level grant protocol; a stub answering
+    inline keeps the test off the database.
     """
 
-    class _Grants:
-        def list_for_app(self, *, app_id, user_id):
-            return [
-                SimpleNamespace(bot_id=b, owner_id=user_id) for b in bot_ids
-            ]
+    class _UserGrants:
+        def find(self, *, user_id, app_id):
+            return SimpleNamespace(user_id=user_id) if user_grant else None
 
-    return ActingCaller(user_id=user_id, app_id=7, grants=_Grants())
+    return ActingCaller(user_id=user_id, app_id=7, user_grants=_UserGrants())
 
 
 def _request_without_trace() -> SimpleNamespace:
@@ -81,7 +75,6 @@ async def test_returns_envelope_page_with_bot_metadata():
     env = await list_owner_routines(
         page=PageParams(page=1, page_size=20),
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -112,7 +105,6 @@ async def test_asks_for_the_user_whole_fleet_all_stages():
     await list_owner_routines(
         page=PageParams(page=1, page_size=20),
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -132,7 +124,6 @@ async def test_paginates_items():
     env = await list_owner_routines(
         page=PageParams(page=2, page_size=1),
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -148,7 +139,6 @@ async def test_empty_fleet_answers_an_empty_page():
     env = await list_owner_routines(
         page=PageParams(page=1, page_size=20),
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )
@@ -159,42 +149,25 @@ async def test_empty_fleet_answers_an_empty_page():
 
 
 @pytest.mark.asyncio
-async def test_refuses_an_application_with_no_delegation():
-    """An app naming a user it holds no delegation from learns nothing.
+async def test_refuses_an_application_with_no_account_level_grant():
+    """An app naming a user it holds no account-level grant from learns nothing.
 
-    Same gate and same answer as the ceiling: the refusal is a 404 shaped by
-    ``envelope_errors`` from ``BotNotFoundError``, so it is indistinguishable
-    from a user who does not exist.
+    The gate is the route's ``DelegatedUserIdDep`` — the same one the ceiling
+    declares — so the refusal happens before the handler runs and is answered
+    with the masked 404 ``GrantNotResolvableError`` maps to.
     """
-    service = _StubCronService([_adapter_dict()])
-    # granted_bot_ids(): app_id set, grants None → frozenset() → refused.
-    stranger = ActingCaller(user_id="u1", app_id=7)
-
-    with pytest.raises(BotNotFoundError):
-        await list_owner_routines(
-            page=PageParams(page=1, page_size=20),
-            owner_id="u1",
-            caller=stranger,
-            factory=service,
-            request=_request_without_trace(),
-        )
-    assert service.last_call_kwargs == {}
+    with pytest.raises(GrantNotResolvableError):
+        await require_granted_user(_app("u1", user_grant=False))
 
 
 @pytest.mark.asyncio
-async def test_admits_an_application_with_a_delegation():
-    service = _StubCronService([_adapter_dict()])
+async def test_admits_an_application_with_an_account_level_grant():
+    assert await require_granted_user(_app("u1", user_grant=True)) == "u1"
 
-    env = await list_owner_routines(
-        page=PageParams(page=1, page_size=20),
-        owner_id="u1",
-        caller=_app_with_delegations("u1", "bot-x"),
-        factory=service,
-        request=_request_without_trace(),
-    )
 
-    assert env.code == CODE_OK
-    assert env.data.total == 1
+@pytest.mark.asyncio
+async def test_a_human_caller_passes_the_gate_without_a_grant():
+    assert await require_granted_user(ActingCaller(user_id="u1", app_id=None)) == "u1"
 
 
 @pytest.mark.asyncio
@@ -210,7 +183,6 @@ async def test_partial_failure_returns_the_successes():
     env = await list_owner_routines(
         page=PageParams(page=1, page_size=20),
         owner_id="u1",
-        caller=_human("u1"),
         factory=service,
         request=_request_without_trace(),
     )

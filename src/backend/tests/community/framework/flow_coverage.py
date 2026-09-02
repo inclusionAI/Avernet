@@ -169,12 +169,26 @@ _SPACES_FAMILY_EXEMPT_REASON = (
     "gateway in the box unblocks them all."
 )
 
+_USER_APP_GRANT_EXEMPT_REASON = (
+    "TEMPORARY, blocked on the same single thing as _BOT_APP_GRANT_EXEMPT_REASON "
+    "above: its three routes are /openapi/v1 and require a signed principal, "
+    "and the grant requires an App identity only a gateway can mint. Covered "
+    "by tests/community/core/user_app_grant/ (service + repository over a "
+    "real SQLite database) and "
+    "tests/community/adapters/http/openapi_v1/authorized_apps/test_user_router.py "
+    "(the three operations, both identity postures, the machine-caller "
+    "refusal); the USER_GATED admission it feeds is pinned by "
+    "test_admission_inventory.py and test_app_only_listings.py. Drained with "
+    "bot_app_grant, the day a gateway is in the box."
+)
+
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "aicoding": _EXEMPT_REASON,
     "spaces": _SPACES_FAMILY_EXEMPT_REASON,
     "market_favorites": _SPACES_FAMILY_EXEMPT_REASON,
     "work_orders": _SPACES_FAMILY_EXEMPT_REASON,
     "bot_app_grant": _BOT_APP_GRANT_EXEMPT_REASON,
+    "user_app_grant": _USER_APP_GRANT_EXEMPT_REASON,
     "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
         "bot_config_manifest": (

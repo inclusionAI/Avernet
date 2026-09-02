@@ -439,7 +439,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: for polling, never what authorizes the read — the bot is still addressed in
 #: the path and still resolved as the named user's, which is what makes an id
 #: from another bot resolve to nothing.
-_BOT_ID_PLACEMENT = {"path": 153, "query": 1, "none": 101}
+#: The account-level user→app authorizations (grant, list, withdraw under
+#: ``/org/user/authorized-apps``) address no bot: ``none`` 101 → 104.
+_BOT_ID_PLACEMENT = {"path": 153, "query": 1, "none": 104}
 
 
 def _schema() -> dict:
@@ -581,8 +583,10 @@ def test_the_pinned_number_of_operations_take_it():
     # the user parameter — the surface is application-operated, the audit
     # actor composes off the principal alone — landing on 222 again.
     # Applying the manifest (W4, #1472) adds three more — apply, the
-    # last-apply read, and the poll by ``apply_id``: 222 → 225.
-    assert len(taking) == 225
+    # last-apply read, and the poll by ``apply_id``: 222 → 225. The
+    # account-level user→app authorizations (grant, list, withdraw under
+    # /org/user/authorized-apps) add three user-scoped operations: 225 → 228.
+    assert len(taking) == 228
 
 
 def test_the_exempt_operations_take_none():

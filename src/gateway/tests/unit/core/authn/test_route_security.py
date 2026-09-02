@@ -110,6 +110,9 @@ def test_shipped_config_admits_app_only_market_queries(method: str, path: str) -
 #: enumeration rather than by a shared import.
 _HUMAN_ONLY = [
     ("GET", "/openapi/v1/org/user"),
+    ("GET", "/openapi/v1/org/user/authorized-apps"),
+    ("DELETE", "/openapi/v1/org/user/authorized-apps/42"),
+    ("GET", "/openapi/v1/bots/skills/skill-1/readme"),
     ("GET", "/openapi/v1/bots/spaces"),
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"),
     ("POST", "/openapi/v1/bots/spaces/create"),
@@ -370,6 +373,39 @@ def test_shipped_config_requires_user_and_app_to_grant_a_bot_authorization() -> 
     assert req is not None
     assert req[PrincipalType.USER] is Presence.REQUIRED
     assert req[PrincipalType.APP] is Presence.REQUIRED
+
+
+def test_shipped_config_requires_user_and_app_to_grant_account_level_access() -> None:
+    """The account-level grant is a consent moment too: both parties on the wire.
+
+    Method-qualified under the ``/openapi/v1/org/**`` rule, which requires a
+    user and merely permits an app; the grant needs the app REQUIRED because
+    the handler reads the authorized application off the App principal.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("POST", "/openapi/v1/org/user/authorized-apps")
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.REQUIRED
+    assert req[PrincipalType.APP] is Presence.REQUIRED
+
+
+def test_shipped_config_lets_the_user_list_and_withdraw_account_level_access_without_an_app() -> None:
+    """Listing and withdrawing the account-level grant need only the user.
+
+    Both inherit the org rule, under which an app may ride along but is not
+    required — so a withdrawal never depends on the application's key.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    for method, path in (
+        ("GET", "/openapi/v1/org/user/authorized-apps"),
+        ("DELETE", "/openapi/v1/org/user/authorized-apps/42"),
+    ):
+        req = rs.resolve(method, path)
+        assert req is not None, (method, path)
+        assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)
+        assert req.get(PrincipalType.APP) is not Presence.REQUIRED, (method, path)
 
 
 def test_shipped_config_lets_the_owner_list_and_withdraw_without_an_app() -> None:

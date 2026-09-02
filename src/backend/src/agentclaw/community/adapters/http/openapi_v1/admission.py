@@ -20,6 +20,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 )
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+from agentclaw.community.api.user_app_grant_service import UserAppGrantServiceProtocol
 from agentclaw.community.log import get_logger
 logger = get_logger()
 _SPACE_SKILL_BASE = "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"
@@ -270,7 +271,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     # The owner-level aggregate lists the named user's fleet, not one bot —
-    # gated on a live delegation like the ceiling (see owner_router).
+    # gated on the user-level grant like the ceiling (see owner_router).
     ("GET", "/openapi/v1/bots/routines/all"): AdmissionMode.USER_GATED,
     (
         "GET",
@@ -576,6 +577,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # without this it would be undiscoverable.
     ("GET", "/openapi/v1/bots/authorized"): AdmissionMode.GRANT_FILTERED,
     # ── C: no bot dimension, but about the named user's account ──────────────
+    # Every USER_GATED operation declares ``require_granted_user``: an
+    # application acting alone is admitted only while it holds a live
+    # **user-level** grant from the named user (``core/user_app_grant``). A bot
+    # grant is consent on a bot, not on the account, and admits nothing here.
     ("GET", "/openapi/v1/bots/ceiling"): AdmissionMode.USER_GATED,
     # ── OPEN: no user on the wire, tenant-identical answer ───────────────────
     # Not a new exposure: every authenticated caller in the tenant already gets
@@ -726,7 +731,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/editor-requests",
     ): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/skills/{skill_code}/publish/status"): AdmissionMode.OPEN,
-    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): AdmissionMode.USER_GATED,
+    # Derives its actor from the verified principal and takes no ``user_id``,
+    # so an application acting alone names nobody to act as. Labelled
+    # USER_GATED once, while the handler refused every such caller anyway.
+    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/market/skill-center/tags"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/work-orders/events"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/work-orders"): AdmissionMode.USER_GATED,
@@ -764,8 +772,8 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/all"): AdmissionMode.GRANT_FILTERED,
     ("GET", "/openapi/v1/bots/local"): AdmissionMode.GRANT_FILTERED,
     # Device discovery names no bot but does expose the named user's account.
-    # A live delegation from that user proves the relationship; no delegation
-    # is masked as not-found before the desktop service is called.
+    # A live user-level grant from that user proves the relationship; none is
+    # masked as not-found before the desktop service is called.
     ("GET", "/openapi/v1/bots/local/devices"): AdmissionMode.USER_GATED,
     (
         "GET",
@@ -828,6 +836,13 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # is nothing to return — its scope question is answered by
     # ``GET /openapi/v1/bots/authorized`` instead.
     ("GET", "/openapi/v1/org/user"): AdmissionMode.REFUSED,
+    # The user-level grant — the record USER_GATED is checked against. Consent
+    # is a human act, exactly as for the bot-level record below: an
+    # application must not widen its own account-level access, withdraw a
+    # competitor's, or enumerate who else may act as the user.
+    ("POST", "/openapi/v1/org/user/authorized-apps"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/org/user/authorized-apps"): AdmissionMode.REFUSED,
+    ("DELETE", "/openapi/v1/org/user/authorized-apps/{app_id}"): AdmissionMode.REFUSED,
     # Local creation has no existing bot for a grant to cover and may initiate
     # Passport consent. Polling completes that same creation transaction, so
     # both require a human on the wire.
@@ -926,13 +941,58 @@ class ActingCaller:
     #: grant, and an application from falling through to an unscoped read.
     app_id: int | None
 
-    #: The grant reader. Never consulted for a human caller.
+    #: The bot-grant reader. Never consulted for a human caller.
     grants: BotAppGrantServiceProtocol | None = None
+
+    #: The user-level grant reader, for the operations that name no bot.
+    #: Never consulted for a human caller either.
+    user_grants: UserAppGrantServiceProtocol | None = None
 
     @property
     def is_application(self) -> bool:
         """Whether a grant governs this request."""
         return self.app_id is not None
+
+    def require_user(self) -> str:
+        """Confirm the application may act as the delegating user at the account
+        level; return that user's id.
+
+        The ``USER_GATED`` check, for operations that name no bot: a human
+        caller passes straight through, and an application must hold a live
+        **user-level** grant from ``user_id`` (``core/user_app_grant``). A bot
+        grant does not count — it is consent to reach one bot, not consent to
+        read the account those bots belong to — which is why this reads a
+        different record from :meth:`require_bot` rather than asking whether
+        *any* delegation exists.
+
+        A missing grant raises :class:`GrantNotResolvableError`, which the app
+        maps to a ``404`` byte-identical to a nonexistent bot's: an application
+        naming a user who never authorized it learns nothing about them.
+        """
+        if self.app_id is None:
+            return self.user_id
+        if self.user_grants is None:
+            # Unreachable through the seam, which always supplies the reader for
+            # an application. Refusing rather than defaulting, because the
+            # alternative to a grant check here is no check at all.
+            raise GrantNotResolvableError(
+                "no user-level grant reader for an application caller"
+            )
+        record = self.user_grants.find(user_id=self.user_id, app_id=self.app_id)
+        if record is None:
+            # The named user goes to the log bounded and escaped, never into
+            # the exception message — see :meth:`require_bot` for why.
+            logger.warning(
+                "[user_app_grant] app_id=%s holds no live user-level grant "
+                "from user=%s",
+                self.app_id,
+                for_log(self.user_id),
+            )
+            raise GrantNotResolvableError(
+                f"app {self.app_id} holds no live user-level grant from the "
+                "named user"
+            )
+        return record.user_id
 
     def require_bot(self, bot_id: str, *, owner_id: str) -> str:
         """Confirm the application may act on the addressed bot; return its owner.
@@ -1009,10 +1069,9 @@ class ActingCaller:
             )
         return record.owner_id
 
-    def granted_bot_ids(
-        self, *, owned_by_delegator: bool = False
-    ) -> frozenset[str] | None:
-        """The bots to narrow a listing to, or ``None`` to not narrow at all.
+    def granted_bot_ids(self) -> frozenset[str] | None:
+        """The bots to narrow an owner-scoped listing to, or ``None`` to not
+        narrow at all.
 
         ``None`` and the empty set are different answers and must stay so:
         ``None`` is a human caller, whose listing is not filtered; an empty set
@@ -1020,16 +1079,18 @@ class ActingCaller:
         Collapsing them would hand an ungranted application the delegating
         user's entire bot list.
 
-        ``owned_by_delegator`` narrows further, to grants naming the delegating
-        user as the bot's owner, and an **owner-scoped listing must set it**.
-        The ids are bare ``bot_id`` strings, and ``bot_id`` is not unique across
-        owners: filtering an owner-scoped query by a set that includes someone
-        else's ``default`` matches the delegating user's own ``default`` and
-        returns a bot nobody granted. Nothing is lost by narrowing — an
-        owner-scoped listing cannot show a bot the user does not own anyway.
+        Narrowed to grants naming the delegating user as the bot's owner,
+        because every caller is an **owner-scoped listing**. The ids are bare
+        ``bot_id`` strings, and ``bot_id`` is not unique across owners:
+        filtering an owner-scoped query by a set that includes someone else's
+        ``default`` matches the delegating user's own ``default`` and returns a
+        bot nobody granted. Nothing is lost by narrowing — an owner-scoped
+        listing cannot show a bot the user does not own anyway.
 
-        Callers that only ask *whether any delegation exists* leave it off:
-        there the question is about the relationship, not about which bots.
+        This used to take an ``owned_by_delegator`` switch, off for the callers
+        that asked only *whether any delegation exists* — the proxy the
+        ``USER_GATED`` operations ran on. Those now ask :meth:`require_user`
+        against the user-level record, so the unnarrowed form has no caller.
         """
         if self.app_id is None:
             return None
@@ -1037,9 +1098,7 @@ class ActingCaller:
             return frozenset()
         records = self.grants.list_for_app(app_id=self.app_id, user_id=self.user_id)
         return frozenset(
-            record.bot_id
-            for record in records
-            if not owned_by_delegator or record.owner_id == self.user_id
+            record.bot_id for record in records if record.owner_id == self.user_id
         )
 
 

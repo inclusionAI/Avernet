@@ -17,8 +17,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
-    ActingCallerDep,
-    UserIdDep,
+    DelegatedUserIdDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
@@ -27,15 +26,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.adapters.http.openapi_v1.authorization import (
     PublicAPIRoute,
 )
-from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.cron_relay_service import (
     CronRelayServiceProtocol,
 )
-from agentclaw.community.core.bot_management.services.bot_service import (
-    BotNotFoundError,
-)
 from agentclaw.community.di import Injected
-from agentclaw.community.log import get_logger
 
 from .router import _map_routine
 from .schemas import Routine
@@ -46,15 +40,12 @@ router = APIRouter(
     route_class=PublicAPIRoute,
 )
 
-logger = get_logger()
-
 
 @router.get("", response_model=Envelope[Page[Routine]])
 @envelope_errors
 async def list_owner_routines(
     page: PageParamsDep,
-    owner_id: UserIdDep,
-    caller: ActingCallerDep,
+    owner_id: DelegatedUserIdDep,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Page[Routine]]:
@@ -65,20 +56,16 @@ async def list_owner_routines(
     and one definition can answer more than one row, differing by
     `runtime_stage`. Bots the user collaborates on are included, matching
     the listing the internal console has always shown.
+
+    For an application caller, reading it requires a live user-level
+    authorization from the named user; without one the user is answered as
+    if they did not exist.
     """
-    # Names no bot, so there is no grant to check against one — but the
+    # Names no bot, so there is no bot grant to check against — but the
     # answer is still about a person's fleet, and a stranger application must
-    # not read it by naming a user id. Gated like the ceiling: an application
-    # needs at least one live delegation from the named user; without one the
-    # user is answered as if they did not exist.
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
-        logger.warning(
-            "[owner routines] app holds no delegation from user=%s; "
-            "refusing the listing",
-            for_log(owner_id),
-        )
-        raise BotNotFoundError("no authorization from the named user")
+    # not read it by naming a user id. Gated like the ceiling, by
+    # ``DelegatedUserIdDep``: the application must hold the user's
+    # account-level grant.
     result = await factory.list_all_crons(
         user_id=owner_id,
         nick_name=owner_id,

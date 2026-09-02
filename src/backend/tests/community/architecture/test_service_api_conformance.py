@@ -78,6 +78,9 @@ from agentclaw.community.api.engine_connection_service import (
 from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
+from agentclaw.community.api.user_app_grant_service import (
+    UserAppGrantServiceProtocol,
+)
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.health_diagnosis_service import (
     HealthDiagnosisServiceProtocol,
@@ -213,6 +216,7 @@ from agentclaw.community.core.skill_center.services.direct_activation_service im
     DirectActivationService,
 )
 from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
+from agentclaw.community.core.user_app_grant.services import UserAppGrantService
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
@@ -270,6 +274,7 @@ from agentclaw.community.core.spaces.services import (
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
     (BotAppGrantServiceProtocol, BotAppGrantService),
+    (UserAppGrantServiceProtocol, UserAppGrantService),
     (CollaboratorServiceProtocol, CollaboratorService),
     (BotInventoryServiceProtocol, BotInventoryService),
     (BotStartupScriptServiceProtocol, BotStartupScriptService),

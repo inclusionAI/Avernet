@@ -14,8 +14,6 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParamsDep,
     BotIdPath,
 )
-from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
-from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     created,
@@ -26,6 +24,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
+    DelegatedUserIdDep,
     UserIdDep,
     refuse_app_only_caller,
     require_granted_own_bot,
@@ -54,15 +53,6 @@ router = APIRouter(prefix="/openapi/v1/bots", tags=["local-bots"], route_class=P
 
 _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
-
-
-def _require_user_delegation(caller: ActingCaller) -> None:
-    """Require some live Bot delegation before exposing user-level device data."""
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
-        raise GrantNotResolvableError(
-            "application holds no live delegation from the named user"
-        )
 
 
 SpaceIdHeader = Annotated[
@@ -116,8 +106,7 @@ def _lifecycle_result(
 @envelope_errors
 async def list_local_devices(
     page: PageParamsDep,
-    owner_id: UserIdDep,
-    caller: ActingCallerDep,
+    owner_id: DelegatedUserIdDep,
     request: Request,
     x_space_id: SpaceIdHeader = None,
     status: Annotated[
@@ -128,7 +117,6 @@ async def list_local_devices(
     ),
 ) -> Envelope[Page[LocalDevice]]:
     """List local devices usable for personal local Bots."""
-    _require_user_delegation(caller)
     total, items = service.list_devices(
         owner_id=owner_id,
         header_space_id=x_space_id,
@@ -162,8 +150,7 @@ async def list_local_devices(
 @envelope_errors
 async def list_local_device_files(
     machine_id: MachineIdPath,
-    owner_id: UserIdDep,
-    caller: ActingCallerDep,
+    owner_id: DelegatedUserIdDep,
     request: Request,
     x_space_id: SpaceIdHeader = None,
     dir: Annotated[
@@ -174,7 +161,6 @@ async def list_local_device_files(
     ),
 ) -> Envelope[dict[str, Any]]:
     """List a local device directory tree for mount-path selection."""
-    _require_user_delegation(caller)
     return envelope(
         service.list_device_files(
             owner_id=owner_id,
@@ -254,7 +240,7 @@ async def list_local_bots(
     ),
 ) -> Envelope[Page[LocalBot]]:
     """List personal local Bots, narrowed to an application's delegated scope."""
-    granted = caller.granted_bot_ids(owned_by_delegator=True)
+    granted = caller.granted_bot_ids()
     if granted is not None and not granted:
         return page_envelope(0, [], request)
     total, rows = service.list_bots(

@@ -37,6 +37,12 @@ Nothing here reads a framework, a request, or an HTTP status (Rule 7). The HTTP
 seam is `adapters/http/openapi_v1/authorized_apps/`; the Service API contract the
 adapter depends on is `api/bot_app_grant_service.py`.
 
+**What this record does not cover.** The public API's operations that name no
+bot — a user's quota, routines across every bot, Spaces, work orders, local
+devices (`admission.py` mode `USER_GATED`) — are gated on a separate
+**account-level** record, `core/user_app_grant`. A bot grant admits an
+application to nothing there, and an account-level grant admits it to no bot.
+
 **Who reads this record, and when.** `find` is the authorization probe the
 public API runs on every bot-scoped request from an application acting alone —
 one unique-key lookup, and the only thing standing between that caller and the

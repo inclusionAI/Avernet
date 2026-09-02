@@ -238,6 +238,25 @@ user_config:
       user: required
       app: optional
 
+    # Granting an application ACCOUNT-LEVEL access — acting as the user on
+    # the operations that name no bot (backend admission mode USER_GATED) —
+    # is a consent moment like the bot-level grant below, and needs both
+    # parties on the wire. The application is never named as a parameter;
+    # the handler reads it off the App principal. GET (list) and DELETE
+    # (withdraw) on the same prefix inherit the org rule: a user, no
+    # application required, so a withdrawal never depends on holding the
+    # application's key.
+    "POST /openapi/v1/org/user/authorized-apps":
+      user: required
+      app: required
+
+    # The skill README derives its actor from the verified principal and
+    # publishes no user_id, so an application acting alone names nobody to
+    # act as; the backend refuses it (admission mode REFUSED) and the edge
+    # says so too.
+    "GET /openapi/v1/bots/skills/{skill_id}/readme":
+      user: required
+
     "/openapi/v1/bots/spaces/**":
       user: required
     "/openapi/v1/bots/work-orders/**":

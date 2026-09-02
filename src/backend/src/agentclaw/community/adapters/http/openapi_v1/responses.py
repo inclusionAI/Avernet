@@ -84,6 +84,10 @@ from agentclaw.community.core.bot_app_grant.errors import (
     GrantNotFoundError,
     GrantOwnerConflictError,
 )
+from agentclaw.community.core.user_app_grant.errors import (
+    UserGrantIdentityTooLongError,
+    UserGrantNotFoundError,
+)
 from agentclaw.community.core.bot_collaborator.errors import (
     BotNotFoundError as CollaboratorBotNotFoundError,
     BotNotServiceTypeError,
@@ -479,6 +483,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # 400, not 404: the delegation is not missing, it is unrepresentable. The
     # message names no caller-supplied value.
     GrantIdentityTooLongError: (400, "User id is too long to authorize"),
+    # The account-level record's two outcomes, mapped exactly as the bot-level
+    # ones above and for the same reasons.
+    UserGrantNotFoundError: (404, "Not found"),
+    UserGrantIdentityTooLongError: (400, "User id is too long to authorize"),
     # 409: the request is well-formed and the caller is entitled to it, but it
     # conflicts with a live authorization on another owner's same-named bot.
     # Retrying is futile and the remedy is a withdrawal, which is what a

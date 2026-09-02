@@ -25,6 +25,7 @@ from agentclaw.community.di.config import HttpClientPoolConfig, TaskQueueConfig
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
+from agentclaw.community.di.modules.user_app_grant_module import UserAppGrantModule
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
@@ -138,6 +139,7 @@ def build_injector(
         HarnessModule(),
         BotCollaboratorModule(),
         BotAppGrantModule(),
+        UserAppGrantModule(),
         BotChatOpenModule(),
         CallerIdentityModule(),
         UserListModule(),

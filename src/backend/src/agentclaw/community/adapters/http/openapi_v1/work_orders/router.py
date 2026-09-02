@@ -6,15 +6,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
 from agentclaw.community.adapters.http.openapi_v1.principal import (
-    ActingCallerDep,
+    DelegatedUserIdDep,
     UserIdDep,
     caller_owner_id,
     refuse_app_only_caller,
@@ -100,15 +98,6 @@ def _callback_credential(request: Request) -> WorkOrderCallbackCredential:
             if key.lower() in _CALLBACK_HEADER_NAMES
         }
     )
-
-
-def _require_user_delegation(caller: ActingCaller) -> str:
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
-        raise GrantNotResolvableError(
-            "application holds no live delegation from the named user"
-        )
-    return caller.user_id
 
 
 def _list_item(item: DomainListItem) -> WorkOrderListItem:
@@ -208,7 +197,7 @@ async def create_bot_editor_request(
     bot_id: BotIdPath,
     body: CreateBotEditorRequest,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     owner_id: Annotated[
         str | None,
         Query(
@@ -218,7 +207,6 @@ async def create_bot_editor_request(
     ] = None,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[BotEditorRequestCreated]:
-    actor_id = _require_user_delegation(caller)
     record = service.create_bot_editor_request(
         bot_id=bot_id,
         owner_id=owner_id or actor_id,
@@ -274,10 +262,9 @@ async def create_space_join_request(
 async def create_work_order_event(
     body: CreateWorkOrderEventRequest,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderEventCreated]:
-    actor_id = _require_user_delegation(caller)
     logger.info(
         "work-order event received",
         extra={"work_order_event": body.model_dump(mode="json")},
@@ -297,7 +284,7 @@ async def create_work_order_event(
 @envelope_errors
 async def list_work_orders(
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     query_type: Annotated[
         WorkOrderQueryType,
         Query(description="Relationship between the current user and returned items."),
@@ -320,7 +307,6 @@ async def list_work_orders(
     page_size: PageSizeQuery = 20,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[Page[WorkOrderListItem]]:
-    actor_id = _require_user_delegation(caller)
     total, items = service.list_items(
         actor_id=actor_id,
         query_type=DomainWorkOrderQueryType(query_type),
@@ -341,10 +327,9 @@ async def list_work_orders(
 async def get_work_order(
     work_order_id: PositiveIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderDetailResponse]:
-    actor_id = _require_user_delegation(caller)
     detail = service.get_detail(work_order_id=work_order_id, actor_id=actor_id)
     work_order = detail.work_order
     return envelope(
@@ -403,10 +388,9 @@ async def process_work_order_approval(
     work_order_id: PositiveIdPath,
     body: WorkOrderApprovalRequest,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: WorkOrderServiceProtocol = Injected(WorkOrderServiceProtocol),
 ) -> Envelope[WorkOrderReviewResponse]:
-    actor_id = _require_user_delegation(caller)
     result = service.process_approval(
         work_order_id=work_order_id,
         actor_id=actor_id,
@@ -462,12 +446,11 @@ async def reject_work_order(
 @envelope_errors
 async def unread_notification_count(
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: WorkOrderNotificationServiceProtocol = Injected(
         WorkOrderNotificationServiceProtocol
     ),
 ) -> Envelope[UnreadCountResponse]:
-    actor_id = _require_user_delegation(caller)
     summary = service.badge_summary(actor_id=actor_id)
     return envelope(UnreadCountResponse(**summary.model_dump()), request)
 
@@ -479,12 +462,11 @@ async def unread_notification_count(
 @envelope_errors
 async def mark_all_notifications_read(
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: WorkOrderNotificationServiceProtocol = Injected(
         WorkOrderNotificationServiceProtocol
     ),
 ) -> Envelope[NotificationsReadAllResponse]:
-    actor_id = _require_user_delegation(caller)
     count = service.mark_all_read(actor_id=actor_id)
     return envelope(NotificationsReadAllResponse(updated_count=count), request)
 
@@ -497,12 +479,11 @@ async def mark_all_notifications_read(
 async def get_notification(
     notification_id: PositiveIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: WorkOrderNotificationServiceProtocol = Injected(
         WorkOrderNotificationServiceProtocol
     ),
 ) -> Envelope[NotificationDetailResponse]:
-    actor_id = _require_user_delegation(caller)
     detail = service.get_detail(notification_id=notification_id, actor_id=actor_id)
     record = detail.notification
     return envelope(
@@ -535,12 +516,11 @@ async def get_notification(
 async def mark_notification_read(
     notification_id: PositiveIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: WorkOrderNotificationServiceProtocol = Injected(
         WorkOrderNotificationServiceProtocol
     ),
 ) -> Envelope[NotificationReadResponse]:
-    actor_id = _require_user_delegation(caller)
     record = service.mark_read(notification_id=notification_id, actor_id=actor_id)
     return envelope(
         NotificationReadResponse(

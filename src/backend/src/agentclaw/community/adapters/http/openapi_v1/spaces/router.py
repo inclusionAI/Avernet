@@ -12,11 +12,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, Path, Query, Request
 from starlette.concurrency import run_in_threadpool
 
-from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
-from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
 from agentclaw.community.adapters.http.openapi_v1.principal import (
-    ActingCallerDep,
+    DelegatedUserIdDep,
     UserIdDep,
     refuse_app_only_caller,
 )
@@ -147,15 +145,6 @@ def _require_draft_file_content_size(content: str) -> None:
             raise SkillPackageTooLargeError()
 
 
-def _require_user_delegation(caller: ActingCaller) -> str:
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
-        raise GrantNotResolvableError(
-            "application holds no live delegation from the named user"
-        )
-    return caller.user_id
-
-
 def _space_item(record: SpaceSummaryRecord) -> SpaceItem:
     return SpaceItem(
         space_id=record.space.id,
@@ -212,7 +201,7 @@ def _favorite_item(record: MarketFavoriteRecord) -> MarketFavoriteItem:
 @envelope_errors
 async def list_spaces(
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     keyword: Annotated[
         str | None,
         Query(max_length=128, description="Optional Space-name search text."),
@@ -228,7 +217,6 @@ async def list_spaces(
     ] = SpaceListScope.ALL,
     service: SpaceServiceProtocol = Injected(SpaceServiceProtocol),
 ) -> Envelope[Page[SpaceItem]]:
-    actor_id = _require_user_delegation(caller)
     total, records = service.list_spaces(
         user_id=actor_id,
         keyword=keyword,
@@ -283,7 +271,7 @@ async def create_team_space(
 async def list_space_members(
     space_id: SpaceIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     keyword: Annotated[
         str | None, Query(max_length=256, description="Optional member-id search text.")
     ] = None,
@@ -291,7 +279,6 @@ async def list_space_members(
     page_size: PageSizeQuery = 20,
     service: SpaceMemberServiceProtocol = Injected(SpaceMemberServiceProtocol),
 ) -> Envelope[Page[SpaceMemberItem]]:
-    actor_id = _require_user_delegation(caller)
     total, records = service.list_members(
         space_id=space_id,
         actor_id=actor_id,
@@ -311,12 +298,11 @@ async def get_space_skill_draft_file_tree(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: SpaceSkillApplicationServiceProtocol = Injected(
         SpaceSkillApplicationServiceProtocol
     ),
 ) -> Envelope[DraftFileTree]:
-    actor_id = _require_user_delegation(caller)
     result = await run_in_threadpool(
         service.get_draft_file_tree,
         space_id=space_id,
@@ -338,12 +324,11 @@ async def read_space_skill_draft_file(
         str, Path(description="Normalized POSIX-relative Draft file path.")
     ],
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: SpaceSkillApplicationServiceProtocol = Injected(
         SpaceSkillApplicationServiceProtocol
     ),
 ) -> Envelope[DraftFileContent]:
-    actor_id = _require_user_delegation(caller)
     result = await run_in_threadpool(
         service.read_draft_file,
         space_id=space_id,
@@ -488,10 +473,9 @@ async def list_space_skill_grants(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: SpaceSkillGrantServiceProtocol = Injected(SpaceSkillGrantServiceProtocol),
 ) -> Envelope[SpaceSkillGrants]:
-    actor_id = _require_user_delegation(caller)
     return envelope(
         SpaceSkillGrants.model_validate(
             service.list_grants(space_id=space_id, skill_id=skill_id, actor_id=actor_id)
@@ -782,10 +766,9 @@ async def add_market_favorite(
     space_id: SpaceIdPath,
     body: FavoriteTargetRequest,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
 ) -> Envelope[FavoriteAddedResult]:
-    actor_id = _require_user_delegation(caller)
     record, changed = service.add(
         space_id=space_id,
         actor_id=actor_id,
@@ -814,10 +797,9 @@ async def cancel_market_favorite(
     space_id: SpaceIdPath,
     body: FavoriteTargetRequest,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
 ) -> Envelope[FavoriteCanceledResult]:
-    actor_id = _require_user_delegation(caller)
     changed = service.cancel(
         space_id=space_id,
         actor_id=actor_id,
@@ -845,10 +827,9 @@ async def search_market_favorites(
     space_id: SpaceIdPath,
     body: SearchFavoritesRequest,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
 ) -> Envelope[Page[MarketFavoriteItem]]:
-    actor_id = _require_user_delegation(caller)
     total, records = service.search(
         space_id=space_id,
         actor_id=actor_id,
@@ -878,10 +859,9 @@ async def find_market_favorite_statuses(
     space_id: SpaceIdPath,
     body: FavoriteStatusesRequest,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: MarketFavoriteServiceProtocol = Injected(MarketFavoriteServiceProtocol),
 ) -> Envelope[FavoriteStatusesResult]:
-    actor_id = _require_user_delegation(caller)
     target_codes = service.find_favorited_codes(
         space_id=space_id,
         actor_id=actor_id,

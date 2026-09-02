@@ -12,7 +12,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import DelegatedUserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -36,7 +36,7 @@ router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["repository-skills"],
 @envelope_errors
 async def list_repository_skills(
     request: Request,
-    _actor_id: UserIdDep,
+    _actor_id: DelegatedUserIdDep,
     page: PageParamsDep,
     keyword: str = Query(
         default="",
@@ -73,7 +73,7 @@ async def list_repository_skills(
 @envelope_errors
 async def repository_tree(
     request: Request,
-    _actor_id: UserIdDep,
+    _actor_id: DelegatedUserIdDep,
     service: RepositoryCatalogServiceProtocol = Injected(
         RepositoryCatalogServiceProtocol
     ),
@@ -89,7 +89,7 @@ async def get_repository_skill(
         str, Path(description="Decimal public identifier of the shared Repo Skill.")
     ],
     request: Request,
-    _actor_id: UserIdDep,
+    _actor_id: DelegatedUserIdDep,
     service: RepositoryCatalogServiceProtocol = Injected(
         RepositoryCatalogServiceProtocol
     ),
@@ -104,7 +104,7 @@ async def get_repository_skill(
 @envelope_errors
 async def sync_repository_skills(
     request: Request,
-    _actor_id: UserIdDep,
+    _actor_id: DelegatedUserIdDep,
     service: RepositoryCatalogServiceProtocol = Injected(
         RepositoryCatalogServiceProtocol
     ),

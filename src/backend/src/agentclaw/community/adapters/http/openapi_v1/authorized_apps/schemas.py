@@ -13,7 +13,10 @@ they would see that an application has access and have no way to learn who let
 it in or whose access it borrows. The application's view omits it, because there
 it would only repeat the ``user_id`` the caller sent.
 
-Neither exposes ``owner_id`` or ``avernet_tenant``. Both are on the record — the
+The account-level record has a view of its own, ``UserAuthorizedApp``: no
+bot, no owner — the application and the user who let it act as them.
+
+Neither bot-level view exposes ``owner_id`` or ``avernet_tenant``. Both are on the record — the
 machine-caller path resolves the addressed bot from ``owner_id`` — but on this
 surface the owner is already implied by the bot in the path, and a tenant is not
 something this API has ever named in a body.
@@ -85,4 +88,31 @@ class AuthorizedBot(BaseModel):
     )
 
 
-__all__ = ["AuthorizedApp", "AuthorizedBot"]
+class UserAuthorizedApp(BaseModel):
+    """An application authorized to act as a user at the account level."""
+
+    app_id: int = Field(..., description="The authorized application's id.")
+    app_name: str = Field(
+        ...,
+        description=(
+            "The application's name as it stood when the authorization was "
+            "granted. A snapshot, not a live lookup."
+        ),
+    )
+    user_id: str = Field(
+        ...,
+        description=(
+            "The user who granted this authorization, and whom the application "
+            "acts as on the account-level operations of this API."
+        ),
+    )
+    granted_at: datetime = Field(
+        ...,
+        description=(
+            "When this authorization began. Unchanged by re-granting an "
+            "authorization that is already in force."
+        ),
+    )
+
+
+__all__ = ["AuthorizedApp", "AuthorizedBot", "UserAuthorizedApp"]

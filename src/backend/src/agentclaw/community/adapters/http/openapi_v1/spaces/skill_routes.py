@@ -16,11 +16,9 @@ from fastapi import (
 )
 from starlette.concurrency import run_in_threadpool
 
-from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
-from agentclaw.community.adapters.http.openapi_v1.errors import GrantNotResolvableError
 from agentclaw.community.adapters.http.openapi_v1.principal import (
-    ActingCallerDep,
+    DelegatedUserIdDep,
     UserIdDep,
     refuse_app_only_caller,
 )
@@ -94,15 +92,6 @@ PublishedFilePath = Annotated[
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
 
 
-def _require_user_delegation(caller: ActingCaller) -> str:
-    granted = caller.granted_bot_ids()
-    if granted is not None and not granted:
-        raise GrantNotResolvableError(
-            "application holds no live delegation from the named user"
-        )
-    return caller.user_id
-
-
 def _space_skill_summary(record: SpaceSkillSummaryRecord) -> SpaceSkillSummary:
     return SpaceSkillSummary.model_validate({**record, "skill_id": str(record["id"])})
 
@@ -118,7 +107,7 @@ def _space_skill_detail(record) -> SpaceSkillDetail:
 @envelope_errors
 async def list_space_skills(
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     space_id: SpaceIdPath,
     keyword: Annotated[
         str | None,
@@ -133,7 +122,6 @@ async def list_space_skills(
     page_size: PageSizeQuery = 20,
     service: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
 ) -> Envelope[Page[SpaceSkillSummary]]:
-    actor_id = _require_user_delegation(caller)
     total, records = service.list_space_skills(
         space_id=space_id,
         actor_id=actor_id,
@@ -244,7 +232,7 @@ async def import_space_skill_from_git(
 async def list_consumable_space_skills(
     space_id: SpaceIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     keyword: Annotated[
         str | None,
         Query(max_length=128, description="Optional name or description search text."),
@@ -257,7 +245,6 @@ async def list_consumable_space_skills(
         SpaceSkillVersionQueryServiceProtocol
     ),
 ) -> Envelope[Page[ConsumableSpaceSkill]]:
-    actor_id = _require_user_delegation(caller)
     total, records = service.list_consumable(
         space_id=space_id,
         actor_id=actor_id,
@@ -281,10 +268,9 @@ async def get_space_skill_detail(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
 ) -> Envelope[SpaceSkillDetail]:
-    actor_id = _require_user_delegation(caller)
     return envelope(
         _space_skill_detail(
             service.get_space_skill(
@@ -304,7 +290,7 @@ async def list_space_skill_versions(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     page_number: Annotated[
         int, Query(alias="page", ge=1, description="One-based page number.")
     ] = 1,
@@ -313,7 +299,6 @@ async def list_space_skill_versions(
         SpaceSkillVersionQueryServiceProtocol
     ),
 ) -> Envelope[Page[SkillVersionDetail]]:
-    actor_id = _require_user_delegation(caller)
     total, records = service.list_versions(
         space_id=space_id,
         skill_id=skill_id,
@@ -338,12 +323,11 @@ async def get_space_skill_version(
     skill_id: SkillIdPath,
     version: VersionPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: SpaceSkillVersionQueryServiceProtocol = Injected(
         SpaceSkillVersionQueryServiceProtocol
     ),
 ) -> Envelope[SkillVersionDetail]:
-    actor_id = _require_user_delegation(caller)
     return envelope(
         SkillVersionDetail.model_validate(
             service.get_version(
@@ -367,12 +351,11 @@ async def get_space_skill_version_file_tree(
     skill_id: SkillIdPath,
     version: VersionPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: SpaceSkillVersionQueryServiceProtocol = Injected(
         SpaceSkillVersionQueryServiceProtocol
     ),
 ) -> Envelope[PublishedVersionFileTree]:
-    actor_id = _require_user_delegation(caller)
     result = await run_in_threadpool(
         service.get_version_file_tree,
         space_id=space_id,
@@ -397,12 +380,11 @@ async def read_space_skill_version_file(
     version: VersionPath,
     path: PublishedFilePath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: DelegatedUserIdDep,
     service: SpaceSkillVersionQueryServiceProtocol = Injected(
         SpaceSkillVersionQueryServiceProtocol
     ),
 ) -> Envelope[PublishedVersionFileContent]:
-    actor_id = _require_user_delegation(caller)
     result = await run_in_threadpool(
         service.read_version_file,
         space_id=space_id,
@@ -427,7 +409,7 @@ async def get_space_skill_offline_impact(
     space_id: SpaceIdPath,
     skill_id: SkillIdPath,
     request: Request,
-    caller: ActingCallerDep,
+    actor_id: UserIdDep,
     page_number: Annotated[
         int,
         Query(alias="page", ge=1, description="One-based blocker page number."),
@@ -437,7 +419,6 @@ async def get_space_skill_offline_impact(
         SpaceSkillOfflineServiceProtocol
     ),
 ) -> Envelope[SkillOfflineImpact]:
-    actor_id = _require_user_delegation(caller)
     result = await run_in_threadpool(
         service.impact,
         space_id=space_id,

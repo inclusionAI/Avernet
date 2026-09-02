@@ -121,6 +121,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py
   - agentclaw.community.core.access.models            # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_app_grant.models    # BotAppGrantRecord — typed in bot_app_grant_service.py (real signatures, so the conformance gate can compare them)
+  - agentclaw.community.core.user_app_grant.user_app_grant_service_protocol  # UserAppGrantServiceProtocol and UserAppGrantRecord — defined in the owning core module, re-exported by user_app_grant_service.py
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
   - agentclaw.community.core.bot_inventory.types   # Bot inventory/local workflow DTOs — typed in bot_inventory_service.py and local_bot_workflow_service.py
   - agentclaw.community.core.bot_management.bot_space  # Bot Space assignment result typed in bot_space_service.py

@@ -204,7 +204,7 @@ DDL. Full ruling and per-endpoint mapping in
 | Item | State | Note |
 |---|---|---|
 | Real caller-identity verifier (auth workstream) | ✅ **DONE both halves** — backend PR [#634](https://github.com/inclusionAI/Avernet/pull/634), gateway PR [#599](https://github.com/inclusionAI/Avernet/pull/599) **merged** | `require_principal` + `resolve_avernet_tenant` verify the gateway's signed `X-Avernet-Principal` (HS256, `aud=backend`) and read tenant + owner from it. The wire contract was checked by round-tripping the **real** gateway signer into the **real** backend verifier (2026-08-02): user/bot/app/access_key shapes, secret non-projection, `aud`/`iss` refusal. **A `user` caller works end to end.** What remains is *which* callers are admitted — see the identity-admission row below |
-| **Identity admission: `user`, plus `app` under a grant** | ✅ **DONE 2026-08-10** | Widened from user-only (#950). An **application acting alone** — its own credential, no human on the wire — is admitted on the operations placed in an admission group (`adapters/http/openapi_v1/admission.py`), and reaches only what the user who authorized it has authorized it *for*, re-adjudicated per request. `bot` / `access_key` callers are still refused outright at verification. The end-user requirement moved from `verify_principal_token` to `require_principal`, which every public route declares — so an operation absent from the table refuses a machine caller by omission. SDD: `specs/2026-08-10-openapi-v1-app-only-caller/` (earlier: `specs/2026-08-02-public-api-user-only-principal/`) |
+| **Identity admission: `user`, plus `app` under a grant** | ✅ **DONE 2026-08-10** | Widened from user-only (#950). An **application acting alone** — its own credential, no human on the wire — is admitted on the operations placed in an admission group (`adapters/http/openapi_v1/admission.py`), and reaches only what the user who authorized it has authorized it *for*, re-adjudicated per request. `bot` / `access_key` callers are still refused outright at verification. The end-user requirement moved from `verify_principal_token` to `require_principal`, which every public route declares — so an operation absent from the table refuses a machine caller by omission. SDD: `specs/2026-08-10-openapi-v1-app-only-caller/` (earlier: `specs/2026-08-02-public-api-user-only-principal/`). **2026-09-02**: the operations that name no bot (`USER_GATED`) are gated on a separate **account-level grant** (`/openapi/v1/org/user/authorized-apps`, `core/user_app_grant`) rather than on any bot grant — see *Admitting an application acting alone*. SDD: `specs/2026-09-02-openapi-v1-user-app-grant/` |
 | **No cross-repo test pins the principal wire shape** | ⬜ TODO | Both sides are tested against their own hand-written idea of the payload (`test_verifier.py` builds dicts; the gateway tests its own models). Renaming a field on one side leaves both suites green and 401s production |
 | Tenant-leading indexes (F2, **MANDATORY** policy) | ⬜ TODO | before multi-tenant go-live |
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
@@ -948,6 +948,50 @@ and on no retiring address that did not already have them;
 `tests/community/core/engine_runtime/test_stage.py` pins the liveness rule;
 `…/openapi_v1/test_stage_addressed_bot_files.py` pins the five file operations,
 including that their retiring twins still read the draft.
+
+---
+
+## Admitting an application acting alone (two records, one per shape)
+
+An **application acting alone** — its own credential, no human on the wire —
+names the user it acts for in `?user_id=` and is authorized against a
+**record of that user's consent** rather than compared with a caller that is
+not there. Which record depends on the operation's shape, and
+`adapters/http/openapi_v1/admission.py` writes the decision down per operation:
+
+| Mode | Shape | Proof an application must hold | Declared by |
+| --- | --- | --- | --- |
+| `GRANT_CHECKED_OWN_BOT` / `GRANT_CHECKED_ADDRESSED_BOT` | names one bot | a live **bot grant** — `POST /openapi/v1/bots/{bot_id}/authorized-apps` (`core/bot_app_grant`) | `require_granted_own_bot` / `require_granted_addressed_bot` |
+| `GRANT_FILTERED` | lists bots | none; the listing is narrowed to the granted bots | the handler, through `ActingCaller.granted_bot_ids()` |
+| `USER_GATED` | names no bot, answers about the user's account | a live **account-level grant** — `POST /openapi/v1/org/user/authorized-apps` (`core/user_app_grant`) | `require_granted_user` (`DelegatedUserIdDep`) |
+| `OPEN` | tenant-identical | none beyond authentication | — |
+| `REFUSED` | a human act, or no user to act as | refused outright (401) | `refuse_app_only_caller` |
+
+**The two records are independent.** A bot grant is consent to reach *one
+bot* as the user; it says nothing about the user's quota, routines across every
+bot, Spaces, work orders, notifications, local devices or the files on them —
+the `USER_GATED` operations. Those need the account-level grant, which in turn
+confers nothing on any bot. Before the account-level record existed,
+`USER_GATED` borrowed the bot record ("any live bot grant from the user"), which
+made a consent on one bot a consent on the whole account, with no way to
+withdraw the account-level part on its own, and was enforced by a helper
+copied into each router rather than a dependency the inventory test could hold
+a route to. `test_admission_inventory.py` now holds every `USER_GATED`
+operation to `require_granted_user`, in both directions.
+
+The account-level group (`openapi_v1/authorized_apps/user_router.py`) has the
+bot-level group's identity asymmetry: granting needs the user **and** the
+application on the wire (the application is read off the principal, never a
+parameter — gateway rule `POST /openapi/v1/org/user/authorized-apps`), listing
+and withdrawing need only the user. All three are `REFUSED` to a machine
+caller. It sits under `/openapi/v1/org/user` because it is a property of the
+user rather than of any bot, and the reserved-component list under `/bots`
+does not grow. SDD: `specs/2026-09-02-openapi-v1-user-app-grant/`.
+
+An application holding neither record is answered on every gated operation
+with the same masked `404` a nonexistent bot receives; an integration that
+relied on the retired bot-grant proxy re-consents once through the new grant
+operation.
 
 ---
 
@@ -1912,6 +1956,23 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-09-02** — **Account-level authorization for applications.** A user
+  can now authorize an application to act as them on the operations that name
+  no bot (`POST/GET /openapi/v1/org/user/authorized-apps`,
+  `DELETE …/{app_id}`; record `ac_user_app_grant` + `_log`,
+  `core/user_app_grant`). `USER_GATED` means exactly that record: every such
+  operation declares `require_granted_user` and the inventory test holds the
+  set to the table. The bot-grant proxy ("any live delegation from the user")
+  is retired — a bot grant no longer opens the user's ceiling, routines
+  aggregate, Spaces, work orders, notifications or local devices — and the five
+  per-router copies of it are deleted. Three `USER_GATED` operations that
+  carried no check at all (the repository catalog reads and the Skill Center
+  sync) are now checked; the skill README, which derives its actor from the
+  principal and publishes no `user_id`, is relabelled `REFUSED`, which is what
+  its handler always did. Gateway: `POST …/org/user/authorized-apps` requires
+  user + app; the README read requires a user. SDD:
+  `specs/2026-09-02-openapi-v1-user-app-grant/`.
 
 - **2026-08-23** — **The seam gets its adopters.** 60 `ServiceChecked` rows and
   8 `INHERITED` twins become `Check`, so `ServiceChecked` falls from 92 to 25

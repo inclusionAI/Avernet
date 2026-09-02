@@ -40,6 +40,9 @@ from agentclaw.community.core.repository.protocols.bot.startup_script import (
 from agentclaw.community.core.repository.protocols.bot.source_credential import (
     SourceCredentialRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot.user_app_grant import (
+    UserAppGrantRepositoryProtocol,
+)
 
 __all__ = [
     "BotAppGrantRepositoryProtocol",
@@ -56,5 +59,6 @@ __all__ = [
     "RenderScreenRepository",
     "SourceCredentialRepositoryProtocol",
     "TemplateRepository",
+    "UserAppGrantRepositoryProtocol",
     "UserMCPConfigRepository",
 ]

@@ -28,6 +28,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
     caller_owner_id,
+    refuse_app_only_caller,
     require_granted_addressed_bot,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
@@ -153,10 +154,13 @@ SkillIdPath = Annotated[
     ),
 ]
 
+#: The README read derives its actor from the verified principal and publishes
+#: no ``user_id``, so an application acting alone has no user to be resolved
+#: as — it is ``REFUSED`` (admission.py), and declares so here.
 readme_router = APIRouter(
     prefix="/openapi/v1/bots/skills",
     tags=["skills"],
-    dependencies=[Depends(require_principal)],
+    dependencies=[Depends(require_principal), Depends(refuse_app_only_caller)],
     route_class=PublicAPIRoute,
 )
 

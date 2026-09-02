@@ -66,6 +66,7 @@ def import_all_models() -> None:
     import agentclaw.community.core.economy.governance.orm  # noqa: F401  governance_*
     import agentclaw.community.core.caller_identity.models  # noqa: F401  caller identity tables
     import agentclaw.community.core.bot_app_grant.models  # noqa: F401  ac_bot_app_grant / ac_bot_app_grant_log
+    import agentclaw.community.core.user_app_grant.models  # noqa: F401  ac_user_app_grant / ac_user_app_grant_log
     import agentclaw.community.core.user_list.models  # noqa: F401  ac_entity_user_list
     import agentclaw.community.core.spaces.repository.models  # noqa: F401  ac_space / ac_space_member
     import agentclaw.community.core.market_favorites.repository.models  # noqa: F401  ac_market_favorite

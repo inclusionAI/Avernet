@@ -44,19 +44,29 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
     refuse_app_only_caller,
     require_granted_addressed_bot,
     require_granted_own_bot,
+    require_granted_user,
 )
 
-#: The modes whose contract is "a grant is checked for the addressed bot",
-#: each mapped to the one dependency that spells it. The declaration *is* the
-#: mode — the own-bot dependency never reads an owner off the wire, the
-#: addressed-bot one is the only thing entitled to — so a route carrying the
-#: wrong one is not a naming slip, it is the wrong check.
+#: The modes whose contract is "a grant is checked", each mapped to the one
+#: dependency that spells it. The declaration *is* the mode — the own-bot
+#: dependency never reads an owner off the wire, the addressed-bot one is the
+#: only thing entitled to, and the user-level one reads no bot at all — so a
+#: route carrying the wrong one is not a naming slip, it is the wrong check.
+#:
+#: ``USER_GATED`` joined this map when the user-level grant landed. Before it,
+#: the mode had no dependency for this test to hold a route to, and several
+#: ``USER_GATED`` operations carried no check at all.
 _GRANT_DEPENDENCY_BY_MODE = {
     AdmissionMode.GRANT_CHECKED_OWN_BOT: require_granted_own_bot,
     AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT: require_granted_addressed_bot,
+    AdmissionMode.USER_GATED: require_granted_user,
 }
 
-_GRANT_CHECKED_MODES = frozenset(_GRANT_DEPENDENCY_BY_MODE)
+#: The two bot-shaped grant modes — the ones the self-checking exemptions below
+#: are about. ``USER_GATED`` names no bot, so nothing can be self-checking there.
+_GRANT_CHECKED_MODES = frozenset(
+    {AdmissionMode.GRANT_CHECKED_OWN_BOT, AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT}
+)
 
 
 def _effective_routes():

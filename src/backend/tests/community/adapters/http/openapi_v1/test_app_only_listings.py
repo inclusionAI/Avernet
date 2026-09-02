@@ -5,7 +5,8 @@ against one. Each answers a different question about what that means:
 
 - **Mode B** — a listing of bots. Admitted, and narrowed to what was delegated.
 - **Mode C** — an answer about the named user's account. Admitted only while the
-  application holds some delegation from them.
+  application holds the user's **account-level** grant (``core/user_app_grant``);
+  a bot grant is consent on a bot and admits nothing here.
 - **OPEN** — an answer identical for every caller in the tenant. Admitted on
   authentication alone, because there is no user here to gate against.
 
@@ -45,6 +46,7 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders import (
 )
 from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+from agentclaw.community.api.user_app_grant_service import UserAppGrantServiceProtocol
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.cron_relay_service import (
     CronRelayServiceProtocol,
@@ -77,6 +79,7 @@ from agentclaw.community.api.work_order_service import (
     WorkOrderServiceProtocol,
 )
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
+from agentclaw.community.core.user_app_grant.models import UserAppGrantRecord
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
@@ -173,6 +176,26 @@ class _Grants:
         ]
 
 
+class _UserGrants:
+    """The account-level record: one live grant from ``USER`` to ``APP_ID``, or none."""
+
+    def __init__(self, live: bool) -> None:
+        self.live = live
+
+    def find(self, *, user_id: str, app_id: int):
+        if not self.live or user_id != USER or app_id != APP_ID:
+            return None
+        return UserAppGrantRecord(
+            id=1,
+            app_id=APP_ID,
+            app_name="partner",
+            user_id=USER,
+            avernet_tenant="teamclaw",
+            env="test",
+            gmt_create=datetime(2026, 9, 2),
+        )
+
+
 class _UnexpectedService:
     def __getattr__(self, name):
         if name.startswith("__"):
@@ -227,6 +250,7 @@ def make_client(bots):
     def _build(
         *grant_ids: str,
         with_user: bool = False,
+        user_grant: bool = False,
         inventory_service=None,
         local_service=None,
         space_context=None,
@@ -235,6 +259,7 @@ def make_client(bots):
             def configure(self, binder):
                 binder.bind(BotServiceProtocol, to=bots)
                 binder.bind(BotAppGrantServiceProtocol, to=_Grants(*grant_ids))
+                binder.bind(UserAppGrantServiceProtocol, to=_UserGrants(user_grant))
                 unexpected = _UnexpectedService()
                 binder.bind(CronRelayServiceProtocol, to=unexpected)
                 binder.bind(SpaceServiceProtocol, to=unexpected)
@@ -480,14 +505,14 @@ def test_local_listing_passes_owned_grants_before_pagination(make_client):
     assert local.list_bots.call_args.kwargs["page_size"] == 4
 
 
-def test_local_device_reads_are_user_gated_by_any_live_delegation(make_client):
+def test_local_device_reads_are_user_gated_by_the_account_level_grant(make_client):
     local = MagicMock()
     local.list_devices.return_value = (
         1,
         [{"machine_id": "m1", "machine_name": "Mac", "status": "ACTIVE"}],
     )
     local.list_device_files.return_value = {"name": "Desktop", "children": []}
-    client = make_client(SHARED, local_service=local)
+    client = make_client(user_grant=True, local_service=local)
 
     devices = _data(client.get("/openapi/v1/bots/local/devices"))
     files = _data(client.get("/openapi/v1/bots/local/devices/m1/files"))
@@ -495,6 +520,23 @@ def test_local_device_reads_are_user_gated_by_any_live_delegation(make_client):
     assert devices["total"] == 1
     assert devices["items"][0]["machine_id"] == "m1"
     assert files == {"name": "Desktop", "children": []}
+
+
+def test_a_bot_grant_alone_does_not_open_the_users_devices(make_client):
+    """Consent on a bot is not consent on the account.
+
+    This is the leak the account-level record exists to close: an application
+    delegated one bot used to be admitted to the user's device list and file
+    trees on the strength of it. The desktop service is a MagicMock here so a
+    regression that reaches it fails on the assertion, not silently.
+    """
+    local = MagicMock()
+    client = make_client(SHARED, GRANTED, local_service=local)
+
+    assert client.get("/openapi/v1/bots/local/devices").status_code == 404
+    assert client.get("/openapi/v1/bots/local/devices/m1/files").status_code == 404
+    local.list_devices.assert_not_called()
+    local.list_device_files.assert_not_called()
 
 
 def test_the_application_view_shows_a_bot_the_user_does_not_own(make_client):
@@ -626,8 +668,8 @@ def test_an_owner_scoped_listing_does_not_widen_through_a_shared_bot_id(
 # ── Mode C: an answer about the user's account ───────────────────────────────
 
 
-def test_the_ceiling_is_readable_with_a_delegation(make_client):
-    client = make_client(GRANTED)
+def test_the_ceiling_is_readable_with_an_account_level_grant(make_client):
+    client = make_client(user_grant=True)
 
     assert _data(client.get("/openapi/v1/bots/ceiling"))["ceiling"] == 5
 
@@ -637,6 +679,20 @@ def test_the_ceiling_is_refused_without_one(make_client):
     client = make_client()
 
     assert client.get("/openapi/v1/bots/ceiling").status_code == 404
+
+
+def test_a_bot_grant_alone_does_not_open_the_ceiling(make_client):
+    """The proxy this record replaced: any bot grant used to be enough."""
+    client = make_client(GRANTED, SHARED)
+
+    assert client.get("/openapi/v1/bots/ceiling").status_code == 404
+
+
+def test_a_human_caller_needs_no_grant_for_the_ceiling(make_client):
+    """The dependency is a no-op for a caller naming an end user."""
+    client = make_client(with_user=True)
+
+    assert _data(client.get("/openapi/v1/bots/ceiling"))["ceiling"] == 5
 
 
 # ── OPEN: identical for every caller in the tenant ───────────────────────────
@@ -659,15 +715,17 @@ def test_the_name_check_needs_no_delegation(make_client):
 
 # ── derived from the table: every filtered/gated operation is covered ────────
 #
-# The hand-written tests above pin the *behavior* of the three operations that
-# exist today. What they cannot do is notice a fourth: GRANT_FILTERED and
-# USER_GATED have no dependency a structural test could look for — the
-# narrowing is the handler's own work, through `granted_bot_ids` — so an
-# operation added tomorrow with a correct table entry and no narrowing in its
-# handler would fail nothing. These two tests parametrize over the table
-# itself: a new entry appears here automatically, and until someone writes it
-# an ungranted-app case in `_UNGRANTED_APP_CASES`, the test fails loudly
-# instead of silently covering nothing. That is the same ratchet
+# The hand-written tests above pin the *behavior* of the operations that
+# exist today. What they cannot do is notice a new one: GRANT_FILTERED has no
+# dependency a structural test could look for — the narrowing is the handler's
+# own work, through `granted_bot_ids` — so an operation added tomorrow with a
+# correct table entry and no narrowing in its handler would fail nothing.
+# USER_GATED now has one (`require_granted_user`, held to the table by
+# `test_admission_inventory.py`), but the *answer* an ungranted application
+# gets is still worth pinning by behaviour. These two tests parametrize over
+# the table itself: a new entry appears here automatically, and until someone
+# writes it an ungranted-app case in `_UNGRANTED_APP_CASES`, the test fails
+# loudly instead of silently covering nothing. That is the same ratchet
 # `test_self_checked_routes_refuse.py` uses for its BODIES map.
 
 #: How to call each filtered/gated operation as an application granted
@@ -684,10 +742,6 @@ _UNGRANTED_APP_CASES = {
     },
     ("GET", "/openapi/v1/bots/skills/repository/{skill_id}"): {
         "request": lambda client: client.get("/openapi/v1/bots/skills/repository/1"),
-        "assert_starved": lambda response: response.status_code == 404,
-    },
-    ("GET", "/openapi/v1/bots/skills/{skill_id}/readme"): {
-        "request": lambda client: client.get("/openapi/v1/bots/skills/1/readme"),
         "assert_starved": lambda response: response.status_code == 404,
     },
     ("POST", "/openapi/v1/bots/skills/repository/sync"): {
