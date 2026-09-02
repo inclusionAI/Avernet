@@ -272,12 +272,29 @@ class BotConfigManifestService(BotConfigManifestServiceProtocol):
             bot_type=bot_type,
         )
         scripts = self._scripts()
-        if resolved is None:
-            scripts.delete(entity_id=entity_id, bot_id=bot_id)
-        else:
-            scripts.put(
-                entity_id=entity_id, bot_id=bot_id, script=resolved, modifier=modifier
+        try:
+            if resolved is None:
+                scripts.delete(entity_id=entity_id, bot_id=bot_id)
+            else:
+                scripts.put(
+                    entity_id=entity_id, bot_id=bot_id, script=resolved, modifier=modifier
+                )
+        except Exception:
+            # The row write failed after the document was stored: put the
+            # previous document back, so a caller told the write failed is not
+            # left with a manifest a later apply would materialise anyway. The
+            # previous row passed validation when it was stored, so it goes
+            # back through the repository as it was.
+            self._repository.upsert(
+                env=get_current_env(),
+                entity_id=entity_id,
+                bot_id=bot_id,
+                document=record.document,
+                size_bytes=record.size_bytes,
+                schema_version=record.schema_version,
+                modifier=record.modifier[:MAX_MODIFIER_CHARS],
             )
+            raise
         return result
 
     def script_body(self, *, entity_id: str, bot_id: str) -> Optional[str]:

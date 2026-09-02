@@ -159,6 +159,7 @@ def build_create_job_payload(
     redirect_url: Optional[str],
     window_seconds: int,
     submitted_at: Optional[str] = None,
+    creation_sequence: Optional[str] = None,
 ) -> dict[str, Any]:
     """Everything the job needs, because nothing else will be available.
 
@@ -173,8 +174,13 @@ def build_create_job_payload(
 
     ``tenant`` is here because the queue has no tenant column and no request
     context survives to handler time.
+
+    ``creation_sequence`` (W8) is the order the creation runs in, frozen at
+    submission like the authorization window: a job that has already written
+    an unprovisioned record must keep provisioning it even if the deployment
+    switch that chose the sequence is flipped mid-creation.
     """
-    return {
+    payload = {
         "bot_id": bot_id,
         "entity_id": entity_id,
         "user_id": user_id,
@@ -204,6 +210,9 @@ def build_create_job_payload(
         # while a new setting still applies to every creation submitted after it.
         "window_seconds": window_seconds,
     }
+    if creation_sequence is not None:
+        payload["creation_sequence"] = creation_sequence
+    return payload
 
 
 def enqueue_create_job(
@@ -219,6 +228,7 @@ def enqueue_create_job(
     iframe_url: Optional[str],
     redirect_url: Optional[str],
     window_seconds: int,
+    creation_sequence: Optional[str] = None,
 ) -> None:
     """Hand a submitted creation to the queue. Everything after this is the job's.
 
@@ -252,6 +262,7 @@ def enqueue_create_job(
             iframe_url=iframe_url,
             redirect_url=redirect_url,
             window_seconds=window_seconds,
+            creation_sequence=creation_sequence,
         ),
         window_seconds + CREATE_QUEUE_DEADLINE_MARGIN_SECONDS,
         idempotency_key=create_job_idempotency_key(
@@ -344,6 +355,12 @@ class BotCreateWithManifestHandler:
         return self._after_the_bot_exists(payload, bot)
 
     def _sequence(self, payload: dict) -> CreationSequence:
+        # Frozen at submission (W8): the sequence the creation started under
+        # is the one it finishes under, whatever the switch says now. A
+        # payload from before the field existed asks the live strategy.
+        frozen = payload.get("creation_sequence")
+        if frozen:
+            return CreationSequence(str(frozen))
         return self._creation_sequence(payload["spec"].get("engine_type"))
 
     # ── before there is a bot ───────────────────────────────────────────────

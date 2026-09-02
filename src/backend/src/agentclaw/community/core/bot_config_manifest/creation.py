@@ -24,6 +24,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    CreationSequence,
+)
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     APPLY_ORDER,
     ApplyPhase,
@@ -191,6 +194,7 @@ class BotCreationManifestSeam:
         find_job: Callable[..., Optional[TaskRecord]],
         authorization_window_seconds: int,
         purge_managed_files: Optional[Callable[[str, str], int]] = None,
+        creation_sequence: Optional[Callable[[Optional[str]], CreationSequence]] = None,
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_service
@@ -201,6 +205,10 @@ class BotCreationManifestSeam:
         # purge, for a creation that ends without a bot after its pre-container
         # phase wrote platform state. None means no store is bound.
         self._purge_managed_files = purge_managed_files
+        # W8: the delivery strategy's sequence for an engine, frozen into the
+        # job's payload at submission. None (the pre-W8 wiring) freezes nothing
+        # and the job asks the live strategy on each run.
+        self._creation_sequence = creation_sequence
         # Read from configuration once, at construction, and handed to the
         # enqueue below. The job freezes it into its payload, so a creation
         # keeps the window it was submitted under even if the setting moves.
@@ -341,6 +349,11 @@ class BotCreationManifestSeam:
             iframe_url=iframe_url,
             redirect_url=redirect_url,
             window_seconds=self._authorization_window_seconds,
+            creation_sequence=(
+                self._creation_sequence(spec.get("engine_type")).value
+                if self._creation_sequence is not None
+                else None
+            ),
         )
 
     def find_job(self, *, entity_id: str, bot_id: str) -> Optional[TaskRecord]:

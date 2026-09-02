@@ -163,3 +163,19 @@ def test_a_non_encodable_body_is_the_validators_refusal_not_a_crash() -> None:
         _write(service, "\ud800")
     assert caught.value.violations[0].code == "invalid_script"
     assert repository.writes == [] and scripts.writes == 0
+
+
+def test_a_failed_row_write_puts_the_previous_document_back() -> None:
+    service, repository, scripts = _service(_DOCUMENT)
+
+    def refuse(**_kw):
+        raise RuntimeError("the startup-script store refused the write")
+
+    scripts.put = refuse  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        _write(service, "echo new\n")
+    # Stored, then restored: the document reads as it did, and the row is unchanged.
+    assert [w["document"] for w in repository.writes][-1] == _DOCUMENT
+    assert service.get(entity_id=_ENTITY, bot_id=_BOT).document == _DOCUMENT
+    assert service.get(entity_id=_ENTITY, bot_id=_BOT).modifier == "seed"
+    assert scripts.body == ""

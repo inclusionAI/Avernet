@@ -812,6 +812,7 @@ class BotManagementModule(Module):
             purge_managed_files=lambda owner_id, bot_id: injector.get(
                 ManagedFilesStore
             ).purge_owner_bot(owner_id, bot_id),
+            creation_sequence=lambda e: apply_service.delivery_for_engine(e).creation_sequence,
         )
 
     @singleton

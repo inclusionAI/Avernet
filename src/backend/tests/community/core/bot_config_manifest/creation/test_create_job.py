@@ -770,3 +770,27 @@ def test_record_first_a_provisioning_failure_is_terminal_even_when_the_discard_d
     outcome = handler.handle(p)
     assert isinstance(outcome, Fail) and outcome.error.startswith(BOT_COULD_NOT_BE_PROVISIONED)
     assert seam.discards == 1
+
+
+def test_a_frozen_sequence_in_the_payload_wins_over_the_live_switch():
+    """The sequence the creation started under is the one it finishes under."""
+    handler, applies, seam, bots, created, service = _record_first()
+    # A claude_code payload would route PRE_CREATE_ON live; the frozen field says otherwise.
+    p = {**_PAYLOAD, "creation_sequence": CreationSequence.RECORD_PRE_PROVISION.value}
+    handler.handle(p)
+    assert created and created[0][1] == {"provision": False}
+    assert seam.pre_container_calls == 0
+    # And the other way round: a teclaw payload frozen as PRE_CREATE_ON runs today's order.
+    handler, applies, seam, bots, created, service = _record_first()
+    p = {**_TECLAW_PAYLOAD, "creation_sequence": CreationSequence.PRE_CREATE_ON.value}
+    handler.handle(p)
+    assert seam.pre_container_calls == 1 and not created
+
+
+def test_the_payload_builder_freezes_the_sequence_only_when_given():
+    from agentclaw.community.core.bot_config_manifest.create_job import build_create_job_payload
+
+    base = dict(bot_id="b", entity_id="e", user_id="u", tenant="", env="dev", document_owner="u",
+                spec={}, iframe_url=None, redirect_url=None, window_seconds=60)
+    assert "creation_sequence" not in build_create_job_payload(**base)
+    assert build_create_job_payload(**base, creation_sequence="record_pre_provision")["creation_sequence"] == "record_pre_provision"
