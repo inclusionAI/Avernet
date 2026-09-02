@@ -288,7 +288,8 @@ def test_a_same_name_row_owned_by_someone_else_is_never_replaced() -> None:
     with pytest.raises(ManagedSkillOwnerConflict):
         _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ))
     assert skills.updates == [] and len(skills.creates) == 1
-    skills.rows.clear(); skills.creates.clear()
+    skills.rows.clear()
+    skills.creates.clear()
     skills.create({"name": "quality-check", "git_path": "local://skills-local/quality-check", "user_id": None, "bolt_id": "b_1"})
     with pytest.raises(ManagedSkillOwnerConflict):
         _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ))
