@@ -1,4 +1,5 @@
 """BAAS ws_info response 必须暴露 paas_device_id / baas_base_url / engine_port 供 invoke-http 链路使用。"""
+import threading
 from unittest.mock import MagicMock
 
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
@@ -39,6 +40,10 @@ def test_get_ws_info_returns_paas_device_id_baas_base_url_engine_port():
     svc._http = http
     svc._tenant = "team_claw"
     svc._device_binding_repo = fake_repo
+    # get_ws_info now consults the connection-info TTL cache; this __new__
+    # construction bypasses __init__, so seed the cache attrs by hand.
+    svc._ws_info_lock = threading.Lock()
+    svc._ws_info_cache = {}
 
     result = svc.get_ws_info(bind_id=42, port=20003)
 
