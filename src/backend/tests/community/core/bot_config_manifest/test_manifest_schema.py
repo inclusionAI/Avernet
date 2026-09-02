@@ -838,3 +838,37 @@ manifest:
       source: "{boundary}"
 """
     )
+
+
+def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
+    """The PUT-time predicate, pure, exposed for the apply-time belt.
+
+    The resources materialiser re-asks this rule at apply time (a stored
+    document can predate the validator); sharing one function is what
+    keeps the belt from being a weaker copy of the schema's rule.
+    """
+    from agentclaw.community.core.bot_config_manifest.schema._support import (
+        relative_path_refusal,
+    )
+
+    refused = [
+        ("/etc/passwd", "absolute_path"),
+        ("~/.ssh/id", "absolute_path"),
+        ("C:evil.md", "absolute_path"),
+        ("../../etc/passwd", "path_traversal"),
+        ("data/../../etc", "path_traversal"),
+        ("a\\b.md", "invalid_path"),
+        ("a b.md", "invalid_path"),
+        ("", "invalid_path"),
+    ]
+    for value, code in refused:
+        refusal = relative_path_refusal(value)
+        assert refusal is not None, value
+        assert refusal[0] == code, (value, refusal)
+        assert refusal[1]
+    # A non-string is the belt's own business (declared by the index) — the
+    # predicate refuses it as invalid rather than assuming str.
+    assert relative_path_refusal(123)[0] == "invalid_path"
+    # The legitimate shapes, including the per-segment '..' reading.
+    for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md"):
+        assert relative_path_refusal(value) is None, value

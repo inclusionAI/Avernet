@@ -23,22 +23,28 @@ Three invariants, all from the W6 work item:
   drifted tree would survive that. v1 takes the recommended option (1):
   every apply rewrites every member. ``plan`` therefore classifies for the
   report only (created / updated), never "unchanged", and the category is
-  never ``is_noop``.
+  never ``is_noop``. The declared-tree replacement rides the plan's
+  ``removals`` channel — the engine's "an overwrite removes something with
+  no declared entry to attach to" — so the dry-run projection and the real
+  write report one shape, and a dirs-only archive's destructive replace
+  still audits through ``removed``.
 
 Two v1 narrows, stated here rather than discovered:
 
-- **The write chain's admission rules are re-asked in ``resolve``**
-  (extension allow-list, size cap — the same constants the service
-  enforces), so an undeliverable member fails its category with the tree
-  still standing rather than one delete ago. What is *not* re-asked is the
-  HTTP surface's read-only policy (dotfiles, reserved roots): a manifest
-  declaring ``.env`` is the owner's declaration, deliberately broader than
-  the console router's guard — that is the platform's contract with apply,
-  not an oversight.
+- **The write chain's admission predicate is re-asked in ``resolve``**
+  — the same :func:`admission_refusal` ``upload_file`` raises (extension
+  allow-list, size cap), so an undeliverable member fails its category
+  with the tree still standing rather than one delete ago. What is *not*
+  re-asked is the HTTP surface's read-only policy (dotfiles, reserved
+  roots): a manifest declaring ``.env`` is the owner's declaration,
+  deliberately broader than the console router's guard — that is the
+  platform's contract with apply, not an oversight.
 - **``plan`` probes ``exists`` per member** for the report's label alone.
   A 5000-member tree therefore costs 5000 more device round trips than a
-  single probe would — accepted for v1's tree sizes, and the first place to
-  look if apply latency ever outruns the lock TTL on large archives.
+  single probe would (plus one re-probe per declared tree, on the rare
+  path where a tree delete answers ``False``) — accepted for v1's tree
+  sizes, and the first place to look if apply latency ever outruns the
+  lock TTL on large archives. Follow-up, not fixed here.
 """
 from __future__ import annotations
 
@@ -70,6 +76,13 @@ from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
     UnpackError,
     unpack_archive,
 )
+from agentclaw.community.core.bot_config_manifest.schema._support import (
+    relative_path_refusal,
+)
+from agentclaw.community.core.bot_config_manifest.schema.entries import (
+    VALID_UNPACK,
+)
+from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
 #: Schema §5 states the two resource forms' fetch widths separately —
 #: ``resources_file`` (100MB) and ``resources_archive`` (200MB) — and the
@@ -84,6 +97,24 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
 
 _FETCH_CATEGORY_FILE = FetchCategory.RESOURCES_FILE.value
 _FETCH_CATEGORY_ARCHIVE = FetchCategory.RESOURCES_ARCHIVE.value
+
+
+class _DeclaredTree:
+    """The declared-tree marker intent's value — an explicit object, never
+    ``None``.
+
+    ``None`` is ``Intent.value``'s dataclass *default*, so keying the tree
+    marker on it would let any future intent constructed without an
+    explicit value silently promise a whole-tree deletion at write time.
+    An instance of a module-private class cannot be produced by accident.
+    """
+
+    __slots__ = ()
+
+
+#: The single marker instance: ``Intent.value`` for a declared directory,
+#: identity the declared path with its trailing slash.
+_DECLARED_TREE = _DeclaredTree()
 
 
 class ResourcesMaterialiser(Materialiser):
@@ -109,15 +140,33 @@ class ResourcesMaterialiser(Materialiser):
         """
         intents: list[Intent] = []
         failures: list[ResolveFailure] = []
+        # The PUT layer refuses a duplicate resource path (one owner per
+        # path); the belt re-asks it — two entries at one path would
+        # otherwise converge to whatever wrote last, a no-rule answer.
+        seen: set[str] = set()
         for index, entry in enumerate(entries):
             path = entry.get("path") if isinstance(entry, dict) else None
             failed = self._entry_failure(entry, path, index)
             if failed is not None:
                 failures.append(failed)
                 continue
+            assert isinstance(path, str)  # _entry_failure passed it
+            if path in seen:
+                failures.append(
+                    ResolveFailure(
+                        path,
+                        "a resources path is declared more than once "
+                        "in this category",
+                    )
+                )
+                continue
+            seen.add(path)
             if isinstance(path, str) and path.endswith("/"):
                 unpack_kind = entry.get("unpack")
-                if unpack_kind not in ("zip", "tar.gz"):
+                # Str first: ``VALID_UNPACK`` is a frozenset, and an
+                # unhashable ``unpack`` (a YAML list) would raise on the
+                # membership test where the belt owes a clean refusal.
+                if not isinstance(unpack_kind, str) or unpack_kind not in VALID_UNPACK:
                     failures.append(
                         ResolveFailure(
                             path,
@@ -160,13 +209,12 @@ class ResourcesMaterialiser(Materialiser):
                 if isinstance(members, str):
                     failures.append(ResolveFailure(path, members))
                     continue
-                # The directory sentinel: identity=path, value=None. It rides
-                # first in the intent list so plan marks the tree for
-                # replacement and write deletes it before members upload.
-                # The gate on every member, before the sentinel that
-                # promises the tree: one undeliverable member must abort
-                # the category with the tree still standing, not delete it
-                # for a partial delivery that every re-apply would repeat.
+                # The declared-tree marker intent rides first so plan routes
+                # the tree into ``removals`` and write replaces it before
+                # members upload. The gate on every member comes before the
+                # marker that promises the tree: one undeliverable member
+                # must abort the category with the tree still standing, not
+                # delete it for a partial delivery every re-apply repeats.
                 bad = next(
                     (
                         (path + rel, refused)
@@ -177,11 +225,19 @@ class ResourcesMaterialiser(Materialiser):
                     None,
                 )
                 if bad is not None:
-                    failures.append(ResolveFailure(bad[0], bad[1]))
+                    # The failure keys to the *declared* entry's identity —
+                    # the orchestrator's abort mapping blames declared rows,
+                    # and a member-keyed failure would match nothing, sinking
+                    # the reason (which member, which admission rule) out of
+                    # the report. The member is named in the reason instead.
+                    failures.append(
+                        ResolveFailure(
+                            path,
+                            f"archive member {bad[0]!r}: {bad[1]}",
+                        )
+                    )
                     continue
-                intents.append(
-                    Intent(identity=path, value=None, note=fetched.fallback_reason)
-                )
+                intents.append(Intent(identity=path, value=_DECLARED_TREE))
                 for rel, data in members:
                     intents.append(
                         Intent(
@@ -299,14 +355,18 @@ class ResourcesMaterialiser(Materialiser):
         A stored document can predate a rule, or have skipped the validator
         (a hand-built apply in W8's lifecycle points) — this is the half the
         path-safety question needs answered at *apply* time, not only at
-        write time.
+        write time. The rule itself is the schema's own pure predicate
+        (:func:`relative_path_refusal`), not a re-derivation: the belt must
+        refuse exactly what the PUT layer refuses — "~", drive letters,
+        quoted characters and all — or it is a second, weaker rule.
         """
         if not isinstance(path, str) or not path:
             return ResolveFailure(
                 f"[{index}]", "a resources entry must declare a 'path'"
             )
-        if path.startswith("/") or ".." in path.split("/") or "\x00" in path:
-            return ResolveFailure(path, "path must be workspace-relative")
+        refusal = relative_path_refusal(path, what="path")
+        if refusal is not None:
+            return ResolveFailure(path, refusal[1])
         return None
 
     def _check_nesting(
@@ -345,19 +405,26 @@ class ResourcesMaterialiser(Materialiser):
         """Classify for the report. Never ``unchanged`` — v1 replaces on
         every apply (the work item's recommended option (1)), so classifying
         anything as unchanged would be a claim the write stage does not
-        honour. ``exists`` is consulted only for the created/updated label,
-        and the directory sentinels classify within the same vocabulary:
-        the orchestrator's dry-run projection feeds every planned outcome
-        through :class:`EntryOutcome`, which a bespoke label would crash.
+        honour. ``exists`` is consulted only for the members' created/updated
+        labels.
+
+        The declared trees do not classify at all — they go to the plan's
+        ``removals`` channel, the engine's own answer for "an overwrite
+        removes something with no declared entry to attach to". That is
+        what keeps the dry-run projection and the real write in one shape
+        (both take ``plan.removals`` verbatim), and what gives a
+        dirs-only archive's destructive replace its audit row.
         """
-        entity_type, entity_id = _coords(ctx)
+        entity_type, entity_id, engine = _coords(ctx)
         planned: list[PlannedEntry] = []
         for intent in intents:
+            if intent.value is _DECLARED_TREE:
+                continue
             present = await self._resources.exists(
                 entity_type=entity_type,
                 entity_id=entity_id,
                 bot_id=ctx.bot_id,
-                engine_type=ctx.engine_type,
+                engine_type=engine,
                 path=intent.identity,
             )
             planned.append(
@@ -366,7 +433,10 @@ class ResourcesMaterialiser(Materialiser):
                     outcome="updated" if present else "created",
                 )
             )
-        return CategoryPlan(entries=tuple(planned), removals=())
+        removals = tuple(
+            intent.identity for intent in intents if intent.value is _DECLARED_TREE
+        )
+        return CategoryPlan(entries=tuple(planned), removals=removals)
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
@@ -379,35 +449,59 @@ class ResourcesMaterialiser(Materialiser):
         the source of truth, no rollback is attempted. The platform-side
         unpack already kept a bad archive from reaching this far.
         """
-        entity_type, entity_id = _coords(ctx)
+        entity_type, entity_id, engine = _coords(ctx)
         results: list[EntryResult] = []
-        # 1) Directory sentinels first — one delete per declared tree. A
-        # tree's replace removes everything under ``path``, including files
-        # the new archive no longer ships and hand-added ones (the
-        # ownership rule). Sentinels produce no EntryResult: an ownership
+        # 1) Declared trees first — one delete per tree, from the plan's
+        # removals. A tree's replace removes everything under ``path``,
+        # including files the new archive no longer ships and hand-added
+        # ones (the ownership rule). Tree deletes are addressed at the path
+        # *minus* the declaring slash: the write chain branches file-vs-tree
+        # on the path's shape, and "wrap/" reads as a file named "" to that
+        # branch. Tree deletes produce no EntryResult: an ownership
         # action, not an entry — but a *failed* one fails its members, in
         # the stage's composed words (never the exception's: a transport
         # error can quote a header, a header can carry a token).
         failed_trees: list[str] = []
-        for planned in plan.entries:
-            if planned.intent.value is not None:
-                continue
+        for tree in plan.removals:
+            target = tree.rstrip("/")
             try:
-                await self._resources.delete(
+                ok = await self._resources.delete(
                     entity_type=entity_type,
                     entity_id=entity_id,
                     bot_id=ctx.bot_id,
-                    engine_type=ctx.engine_type,
-                    path=planned.intent.identity,
+                    engine_type=engine,
+                    path=target,
                 )
             except Exception:  # noqa: BLE001 — surfaced per member, not as text
-                failed_trees.append(planned.intent.identity)
-        # 2) then each member file, in declaration order
+                failed_trees.append(tree)
+                continue
+            if ok:
+                continue
+            # ``False`` is ambiguous in the write chain's own contract: it
+            # is both "nothing was deleted" (a first apply onto an absent
+            # tree — fine) and the transports' *only* failure signal (every
+            # device filesystem catches its own errors and returns False
+            # rather than raising). Presence re-probes tell them apart: a
+            # tree that is still there was not deleted and never will be,
+            # and delivery over an unreplaced tree would report success.
+            try:
+                still_present = await self._resources.exists(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    bot_id=ctx.bot_id,
+                    engine_type=engine,
+                    path=target,
+                )
+            except Exception:  # noqa: BLE001 — pessimistic default below
+                still_present = True
+            if still_present:
+                failed_trees.append(tree)
+        # 2) then each member file, in declaration order. Containment is
+        # matched against the *declared* form (with the slash) so a tree
+        # "wrap/" cannot claim "wrap-old/x.txt" as its member.
         for planned in plan.entries:
             identity = planned.intent.identity
             data = planned.intent.value
-            if data is None:
-                continue
             if any(identity.startswith(tree) for tree in failed_trees):
                 results.append(
                     EntryResult(
@@ -424,7 +518,7 @@ class ResourcesMaterialiser(Materialiser):
                     entity_type=entity_type,
                     entity_id=entity_id,
                     bot_id=ctx.bot_id,
-                    engine_type=ctx.engine_type,
+                    engine_type=engine,
                     target_dir=target_dir,
                     filename=filename,
                     data=data,
@@ -454,42 +548,29 @@ class ResourcesMaterialiser(Materialiser):
 
 
 def _delivery_refusal(identity: str, data: bytes) -> str | None:
-    """The write chain's own admission rules, asked before the first delete.
+    """The write chain's own admission predicate, asked before the first delete.
 
-    ``ResourceFileService.upload_file`` refuses extensions outside its
-    allow-list (no ``.sh``, no extensionless files) and content over its
-    size cap. A refusal that first lands on the write side would arrive
-    *after* the sentinel deleted the declared tree — a deterministically
-    half-written tree on every re-apply. So the materialiser re-asks the
-    same rules in ``resolve``, where failing costs nothing: the constants
-    are imported at call time so this module's importers still pull no
-    service graph, and the fake-driven tests cannot drift from the real
-    gate because both read the same constants.
+    ``admission_refusal`` (beside the constants in the file-service module)
+    is the one rule both surfaces ask: ``upload_file`` raises it, and this
+    gate asks it in ``resolve`` so a refusal that would first land on the
+    write side never does — write-side refusals arrive *after* the declared
+    tree is deleted, a deterministically half-written tree on every
+    re-apply. The import stays at call time so this module's importers pull
+    no service graph.
 
     Inline ``content`` is the other reason the gate lives here: it never
     goes through the fetch funnel's caps, so this is the only line an
     oversized inline entry meets.
     """
     from agentclaw.community.core.resources.services.file_service import (
-        ALLOWED_EXTENSIONS,
-        MAX_FILE_SIZE,
+        admission_refusal,
     )
 
-    if Path(identity.rpartition("/")[2]).suffix.lower() not in ALLOWED_EXTENSIONS:
-        return (
-            "the workspace file surface does not allow this file type; "
-            f"allowed extensions: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
-        )
-    if len(data) > MAX_FILE_SIZE:
-        return (
-            "content exceeds the workspace file surface's size cap "
-            f"({MAX_FILE_SIZE // (1024 * 1024)}MB)"
-        )
-    return None
+    return admission_refusal(identity.rpartition("/")[2], data)
 
 
-def _coords(ctx: ApplyContext) -> tuple[str, str]:
-    """The entity pair every resource write uses, the router's own way.
+def _coords(ctx: ApplyContext) -> tuple[str, str, str]:
+    """The entity pair — and the routed engine — every resource write uses.
 
     The entity is the bot's owner — the address the resources router's
     ``_resolve_params`` resolves and ``resource_coords_from_record`` derives
@@ -498,14 +579,28 @@ def _coords(ctx: ApplyContext) -> tuple[str, str]:
     happens to share the name. ``entity_type`` is ``"staff"``, the
     personal-bot surface's fixed type.
 
-    The engine halves of the address come from ``ctx.engine_type``, resolved
-    once per apply rather than re-resolved here (the context's own rule: a
-    single resolution cannot disagree with itself midway through an apply).
-    ``resource_coords_from_record`` is therefore not called — it would
+    The engine half routes the same way the router does before it composes
+    ``{bot_dir}/{engine}/workspace``: the runtime routing policy
+    (``claude_code`` + a non-``normalCC`` template ⇒ ``aicoding``) read
+    off the bot record. ``ctx.engine_type`` is the *raw* ``active_engine``
+    and the capability vocabulary — redefining it would silently change
+    script/`${BOT_ENGINE_TYPE}` substitution — so the routing is applied
+    here, over ``ctx.bot`` (carried on the context precisely so a
+    materialiser can read engine/template facts off it, its docstring
+    records). ``resolve_bot_engine`` is pure over that dict; the import
+    stays at call time for the same no-service-graph reason as the
+    admission constants (a module-scope import would pull the engine
+    registry's strategy graph into every importer). ``resource_coords_from_record``
+    is the twin derivation for repo-carrying callers; calling it here would
     re-resolve the engine through a bot repository this materialiser does
-    not carry, for a value the pipeline already holds.
+    not carry, for a value the carried record already answers.
     """
-    return "staff", ctx.owner_id
+    from agentclaw.community.core.bot_management.engines.registry import (
+        resolve_bot_engine,
+    )
+
+    engine = resolve_bot_engine(ctx.bot) or ctx.engine_type or DEFAULT_ENGINE_TYPE
+    return "staff", ctx.owner_id, engine
 
 
 __all__ = ["ResourcesMaterialiser"]
