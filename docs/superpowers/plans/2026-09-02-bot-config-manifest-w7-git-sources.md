@@ -2228,3 +2228,11 @@ git commit -m "docs(backend): mark W7 delivered in the work items"
 3. **提交 message 带任务号**,沿用本计划各 Task Step 5 的 message。
 4. **同文件冲突兜底**:本文件是唯一双写点,且约定 append-only;对方 claim 的任务 30 分钟无提交且会话确认死亡,方可在本文件留 takeover 记录后接管。
 
+### 执行日志(append-only)
+
+- 16:45 B claim Task 4 → `f031450b9` 交付 SourceSession(测试 5/5 绿)。
+- 17:46 B claim Tasks 6/7(Task 5 已由 A 落盘 `1cb77535e`)。
+- 18:1x B 交付 Task 6 identity git 路(`3a48f605e`,B 轨 4 用例绿)。
+- 18:18 A 落盘 Task 8(`2e1267dfc`)。
+- 18:4x **B 的跨轨前置修复** `3664a729c`:`fetch_declared` 的 no-session 门槛原先进门就抛,把纯内联 URL 路(W5 老,不经 W7)也拦了,导致 identity 套件 9 个存量用例与 engine 的 SKIPPED 邻居用例在 Task 6 重路由后转红。门槛改为只守真正读 session 的路(`from` 查找与 git 路)。entry_fetch.py 属 A 轨文件,B 仅在 A idle(Task 8 已提交、Task 9 未派发)时做了这个前置修复,在此留痕;Task 9 如有冲突以本日志为准。
+
