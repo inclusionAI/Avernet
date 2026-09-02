@@ -175,19 +175,21 @@ Conventions every task assumes:
         mutation on a non-ACTIVE bot; `project=True` unchanged.
 - **Depends on:** —
 
-## [~] Task 11: Store-backed skill package port
+## [x] Task 11: Store-backed skill package port
 - **Files:** `core/bot_config_manifest/managed_files/ports.py`,
   `tests/community/core/bot_config_manifest/managed_files/test_skill_port.py` (new)
 - **Done when:**
-  - [ ] `upload_local_skill` validates through the same package validator,
+  - [x] `upload_local_skill` validates through the same package validator,
         unpacks into the store under `workspace/skills-local/<name>/…`, indexes
         every file under category `skills` with the skill name, creates the
         skill row with a `local://` locator, and returns the shape the
         materialiser expects; `installed_package_digest` answers from the index.
-  - [ ] The collector's teclaw `skills` branch emits a `SkillRef` per indexed
-        skill (`scope="local"`, `store="bot-data"`, `path=<package prefix>`) in
-        addition to the files riding as resources refs.
-  - [ ] Driving the real `SkillsMaterialiser` with this port and the
+  - [x] The collector's teclaw `skills` branch emits a `SkillRef` per indexed
+        skill (`scope="user"` — the schema's word for a per-bot skill —,
+        `store="bot-data"`, `path=<package prefix>`) in addition to the files
+        riding as resources refs (`ManagedFilesComposeReader.skills`, Task 10;
+        the collector reads it in Task 6).
+  - [x] Driving the real `SkillsMaterialiser` with this port and the
         record-only activation converges a manifest skill with no device.
 - **Depends on:** Task 8, Task 10, Task 6
 

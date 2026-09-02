@@ -15,9 +15,11 @@ make the materialisers behave.
 
 **Paths.** Identity files live under the ``identity`` namespace by their
 file type (``identity/RULES.md``); resources under ``workspace`` by their
-declared path (``workspace/kb/faq.md``). A resource "directory" is the set of
-rows under its prefix — there is no directory object — so a tree delete is a
-prefix delete over the index.
+declared path (``workspace/kb/faq.md``); a local skill package's files under
+``workspace/skills-local/<name>/`` (``StoreSkillPackagePort``, the ``skills``
+materialiser's upload road). A resource "directory" is the set of rows under
+its prefix — there is no directory object — so a tree delete is a prefix
+delete over the index.
 
 Every method is ``async`` because the port protocols are; the store itself is
 synchronous (an object-store client plus a repository), so the work runs in a
@@ -26,16 +28,26 @@ thread, the way the promotion step drives its object writes.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, Optional
+import hashlib
+from typing import Any, Callable, Mapping, Optional
 
 from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     CATEGORY_IDENTITY,
     CATEGORY_RESOURCES,
+    CATEGORY_SKILLS,
     IDENTITY_NS,
+    OWNER_ENTITY_TYPE,
+    SKILLS_LOCAL_DIR,
     WORKSPACE_NS,
     ManagedFile,
     ManagedFileScope,
     ManagedFilesStore,
+)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageInvalidError,
+    SkillPackageTooLargeError,
+    SkillPackageValidator,
 )
 
 
@@ -201,6 +213,144 @@ class StoreResourcePort(_StorePort):
         return any(row.rel_path == rel or row.rel_path.startswith(rel + "/") for row in rows)
 
 
+class StoreSkillPackagePort(_StorePort):
+    """The ``skills`` materialiser's upload road, over the store.
+
+    The real road (``LocalSkillUploadService``) validates the zip, writes the
+    package to the bot's ``skills-local`` directory on the device and records
+    a skill row whose locator is ``local://skills-local/<name>`` — the minimal
+    logical path the teclaw layout already stores. This port keeps every
+    observable but the device: the same validator, one index row per package
+    file under ``workspace/skills-local/<name>/…`` (category ``skills``,
+    named by the skill), the same skill row with the same locator, and the
+    same return shape. Activation is not this port's: the materialiser calls
+    the activation service with the id this returns.
+
+    ``installed_package_digest`` answers the real service's question the
+    real service's way — the sha256 of the canonical repack of the files
+    actually indexed under the name — so an unchanged package plans
+    ``unchanged`` on the second apply and writes nothing.
+    """
+
+    def __init__(
+        self,
+        store: ManagedFilesStore,
+        *,
+        env: Callable[[], str],
+        apply_id: Callable[[], Optional[str]] = lambda: None,
+        validator: SkillPackageValidator,
+        skill_repository: SkillRepository,
+    ) -> None:
+        super().__init__(store, env=env, apply_id=apply_id)
+        self._validator = validator
+        self._skills = skill_repository
+
+    async def upload_local_skill(
+        self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
+    ) -> dict[str, Any]:
+        # The same gate the real service runs: the package's own SKILL.md
+        # names the skill, and an invalid zip is refused here, not indexed.
+        validated = self._validator.validate_zip(package)
+        return await asyncio.to_thread(
+            self._install, bot_id, owner_id, actor_id, validated.name, validated
+        )
+
+    def _install(self, bot_id: str, owner_id: str, actor_id: str, name: str, validated) -> dict:
+        scope = self._scope(OWNER_ENTITY_TYPE, owner_id, bot_id)
+        prefix = _skill_prefix(name)
+        wanted: set[str] = set()
+        for relative, content in validated.files:
+            rel_path = f"{prefix}/{relative}"
+            wanted.add(rel_path)
+            self._store.put(
+                scope,
+                category=CATEGORY_SKILLS,
+                name=name,
+                rel_path=rel_path,
+                content=content,
+                apply_id=self._apply_id(),
+            )
+        # New files first, stale ones after: the package is never missing a
+        # member between the two, and a replaced file was upserted in place.
+        for row in self._store.list(scope, category=CATEGORY_SKILLS):
+            if _under(row.rel_path, prefix) and row.rel_path not in wanted:
+                self._store.delete(scope, category=CATEGORY_SKILLS, rel_path=row.rel_path)
+
+        locator = f"local://{SKILLS_LOCAL_DIR}/{name}"
+        existing = _own_row(
+            self._skills.list_bot_local_by_name(bot_id=bot_id, name=name), owner_id
+        )
+        if existing is None:
+            skill = self._skills.create(
+                {
+                    "name": name,
+                    "description": validated.description,
+                    "git_path": locator,
+                    "category": "general",
+                    "tags": "[]",
+                    "is_public": False,
+                    "user_id": owner_id,
+                    "bolt_id": bot_id,
+                    "source_type": "upload",
+                }
+            )
+            operation = "created"
+        else:
+            skill = self._skills.update(
+                str(existing["id"]),
+                {"description": validated.description, "git_path": locator},
+            ) or existing
+            operation = "replaced"
+        return {
+            "operation": operation,
+            "skill": {**skill, "active": False},
+            "actor_id": actor_id,
+        }
+
+    async def installed_package_digest(
+        self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str, name: str
+    ) -> Optional[str]:
+        return await asyncio.to_thread(self._digest, bot_id, owner_id, name)
+
+    def _digest(self, bot_id: str, owner_id: str, name: str) -> Optional[str]:
+        scope = self._scope(OWNER_ENTITY_TYPE, owner_id, bot_id)
+        prefix = _skill_prefix(name)
+        files: list[tuple[str, bytes]] = []
+        for row in self._store.list(scope, category=CATEGORY_SKILLS):
+            if not _under(row.rel_path, prefix):
+                continue
+            content = self._store.read(row)
+            if content is None:
+                # A row whose object is gone: unknown, never equal — the
+                # write path restores the package while it is in hand.
+                return None
+            files.append((row.rel_path[len(prefix) + 1 :], content))
+        if not files:
+            return None
+        try:
+            canonical = self._validator.pack_directory(files)
+        except (SkillPackageInvalidError, SkillPackageTooLargeError):
+            return None
+        return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _skill_prefix(name: str) -> str:
+    return f"{WORKSPACE_NS}/{SKILLS_LOCAL_DIR}/{name}"
+
+
+def _under(rel_path: str, prefix: str) -> bool:
+    return rel_path.startswith(prefix + "/")
+
+
+def _own_row(rows: list[dict[str, Any]], owner_id: str) -> Optional[dict[str, Any]]:
+    """The bot's own same-name row: the owner's if there is one, else the
+    oldest — the real service's replacement target once it holds the lock."""
+    for row in rows:
+        if str(row.get("user_id") or "") == owner_id:
+            return row
+    return rows[0] if rows else None
+
+
 def _identity_path(file_type: str) -> str:
     return f"{IDENTITY_NS}/{file_type}"
 
@@ -209,4 +359,4 @@ def _workspace_path(declared: str) -> str:
     return f"{WORKSPACE_NS}/{declared.lstrip('/')}"
 
 
-__all__ = ["StoreIdentityPort", "StoreResourcePort"]
+__all__ = ["StoreIdentityPort", "StoreResourcePort", "StoreSkillPackagePort"]
