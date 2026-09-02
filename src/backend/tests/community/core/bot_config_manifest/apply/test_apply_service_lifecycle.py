@@ -465,3 +465,67 @@ def test_partially_written_survives_the_storage_round_trip(world):
     assert report.categories[0].partially_written is True, (
         "the poller was told the area is untouched when it may be half-written"
     )
+
+
+def test_a_thread_that_cannot_start_terminates_the_report_and_frees_the_lock(
+    world, monkeypatch
+):
+    """The launch-failure window the audit found: the RUNNING row was already
+    written when ``Thread.start`` raises — thread exhaustion under load is
+    exactly its trigger — leaving the bot locked for the 30-minute TTL while
+    a poller waits on an apply that never existed. The window must close the
+    same way ``_run``'s finally closes everything else: FAILED row, lock
+    released, caller hears the original error."""
+    import threading
+
+    # Captured BEFORE the patch: reading ``threading.Thread`` after it would
+    # return the patched class (the module alias sees the same global), and
+    # "restoring" ExplodingThread to itself is exactly the trap.
+    original_thread_cls = threading.Thread
+
+    service, applies, locks, scripts, _ = world
+
+    class _NoThreadsLeftError(RuntimeError):
+        pass
+
+    class ExplodingThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise _NoThreadsLeftError("can't start new thread")
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_config_manifest.services."
+        "config_manifest_apply_service.threading.Thread",
+        ExplodingThread,
+    )
+
+    with pytest.raises(_NoThreadsLeftError):
+        service.start_apply(
+            entity_id=_ENTITY,
+            bot_id=_BOT,
+            bot=_BOT_RECORD,
+            owner_id=_ENTITY,
+            actor_id=_ENTITY,
+        )
+
+    # The report is terminal, not stranded RUNNING.
+    report = service.last_apply(entity_id=_ENTITY, bot_id=_BOT)
+    assert report is not None
+    assert report.status is ApplyStatus.FAILED
+
+    # And the bot is immediately re-applyable — no TTL wait.
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_config_manifest.services."
+        "config_manifest_apply_service.threading.Thread",
+        original_thread_cls,
+    )
+    accepted = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+    )
+    assert accepted.status is ApplyStatus.RUNNING

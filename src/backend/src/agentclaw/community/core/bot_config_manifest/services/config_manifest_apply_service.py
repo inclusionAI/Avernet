@@ -223,43 +223,64 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             )
             raise
 
-        ctx = self._context(
-            bot_id=bot_id,
-            bot=bot,
-            owner_id=owner_id,
-            actor_id=actor_id,
-            entity_id=entity_id,
-            env=env,
-            # The id this context's fetch pipeline stamps into every receipt —
-            # minted above, so the linkage column answers "what did THIS
-            # apply fetch" as an indexed read.
-            apply_id=apply_id,
-        )
+        try:
+            ctx = self._context(
+                bot_id=bot_id,
+                bot=bot,
+                owner_id=owner_id,
+                actor_id=actor_id,
+                entity_id=entity_id,
+                env=env,
+                # The id this context's fetch pipeline stamps into every receipt —
+                # minted above, so the linkage column answers "what did THIS
+                # apply fetch" as an indexed read.
+                apply_id=apply_id,
+            )
 
-        # ``bind_current_avernet_tenant`` captures the tenant AT WRAP TIME —
-        # here, inside the request thread — and re-establishes it inside the new
-        # one. Wrapped inline at the construction site, never as an @decorator:
-        # it looks like one (it uses functools.wraps) but a decorator on a
-        # module-level function would capture at *import*, when there is no
-        # request, and bind the default tenant forever.
-        #
-        # This is an isolation control, not a nicety. A wrong tenant here
-        # substitutes the wrong ${BOT_TENANT} *and* reads and writes the
-        # manifest tables under the wrong tenant.
-        threading.Thread(
-            target=bind_current_avernet_tenant(self._run),
-            kwargs={
-                "ctx": ctx,
-                "parsed": parsed,
-                "apply_id": apply_id,
-                "trigger": trigger,
-                "started_at": started_at,
-                "phases": phases,
-                "lock_token": lock.lock_token,
-            },
-            daemon=True,
-            name=f"manifest-apply-{bot_id}",
-        ).start()
+            # ``bind_current_avernet_tenant`` captures the tenant AT WRAP TIME —
+            # here, inside the request thread — and re-establishes it inside the
+            # new one. Wrapped inline at the construction site, never as an
+            # @decorator: it looks like one (it uses functools.wraps) but a
+            # decorator on a module-level function would capture at *import*,
+            # when there is no request, and bind the default tenant forever.
+            #
+            # This is an isolation control, not a nicety. A wrong tenant here
+            # substitutes the wrong ${BOT_TENANT} *and* reads and writes the
+            # manifest tables under the wrong tenant.
+            threading.Thread(
+                target=bind_current_avernet_tenant(self._run),
+                kwargs={
+                    "ctx": ctx,
+                    "parsed": parsed,
+                    "apply_id": apply_id,
+                    "trigger": trigger,
+                    "started_at": started_at,
+                    "phases": phases,
+                    "lock_token": lock.lock_token,
+                },
+                daemon=True,
+                name=f"manifest-apply-{bot_id}",
+            ).start()
+        except BaseException as exc:
+            # The RUNNING row exists but the work never started — a thread
+            # that cannot be created (``Thread.start`` raises exactly when
+            # load would exhaust the process) leaves this state otherwise
+            # stuck until the *stale* lock derivation kicks in, which is 30
+            # minutes of ManifestApplyInProgressError for a bot whose apply
+            # never ran. So the apply is terminally FAILED here, the lock is
+            # released for the next attempt, and the caller hears the
+            # original failure rather than a later poll's mystery.
+            self._terminate_on_launch_failure(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                apply_id=apply_id,
+                trigger=trigger,
+                started_at=started_at,
+                lock_token=lock.lock_token,
+                exc=exc,
+            )
+            raise
 
         return ApplyAccepted(apply_id=apply_id, status=ApplyStatus.RUNNING)
 
@@ -326,6 +347,70 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                     bot_id=ctx.bot_id,
                     lock_token=lock_token,
                 )
+
+    def _terminate_on_launch_failure(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        apply_id: str,
+        trigger: str,
+        started_at: datetime,
+        lock_token: str,
+        exc: BaseException,
+    ) -> None:
+        """A RUNNING report whose thread could not start: finish it, free the bot.
+
+        The mirrored ``finally`` of ``_run`` for the one path that cannot run
+        it: a terminal ``FAILED`` record (the failure swims in the log, not
+        the stored report, same rule as ``_record_engine_failure``) written
+        *before* the lock is released, so a poller never observes a
+        lock-less RUNNING row and a re-apply never waits out the TTL for a
+        thread that never existed.
+        """
+        logger.error(
+            "[manifest_apply] launch failed before the worker thread could "
+            "start, apply_id=%s, bot_id=%s: %s",
+            apply_id,
+            bot_id,
+            exc,
+        )
+        try:
+            self._applies.finish(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                apply_id=apply_id,
+                status=ApplyStatus.FAILED.value,
+                report=json.dumps(
+                    ApplyReport(
+                        apply_id=apply_id,
+                        bot_id=bot_id,
+                        trigger=trigger,
+                        status=ApplyStatus.FAILED,
+                        started_at=started_at,
+                        finished_at=datetime.now(),
+                        categories=(),
+                    ).as_payload()
+                ),
+            )
+        except Exception:
+            # The lock release is the load-bearing half here; a record that
+            # could not be terminated is a stranded-RUNNING row, which the
+            # read-time abandonment derivation already answers for.
+            logger.exception(
+                "[manifest_apply] could not terminate a launch-failed report, "
+                "apply_id=%s",
+                apply_id,
+            )
+        finally:
+            self._locks.release(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                lock_token=lock_token,
+            )
 
     def _record_engine_failure(self, report: ApplyReport, exc: Exception) -> None:
         """Log the cause; the stored report says FAILED with no entries.
