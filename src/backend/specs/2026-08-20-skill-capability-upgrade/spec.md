@@ -1044,27 +1044,72 @@ Personal/Desktop 与 Service Draft binding 参与 Track Latest。Published Servi
 #### 14.2 文件型 Service Artifact
 
 本期采用简单方案 A，不新增 `ServiceCapabilitySnapshot`：Service build pre-stage 先经 Reader
-执行一次 `BotRuntimeProjector.project(ProjectionScope.everything())`，随后现有 Artifact Producer
-从已收敛的同一 Runtime 目录打包。接受 build 期间能力并发变化的有限窗口；未来可增加不可变
-Snapshot/fingerprint，但不阻塞本期。
+执行一次 `BotRuntimeProjector.project(ProjectionScope.everything())`，随后按 Artifact Producer
+能力决定是否读取当前 Runtime layout。ARCA/BaaS 文件型 Producer 在每次 build 执行一次 fresh
+`RuntimeLayoutProbeServiceProtocol.probe_bot()`，将 transport evidence 归一化为 typed
+`ServiceArtifactLayoutObservation`，并通过不可变 `ArtifactBuildRequest` 传给 Producer；Teclaw
+Config Artifact 不做文件系统 Probe。Artifact build 禁止读取
+`ac_bot_skill_layout_state.last_probe_evidence` 作为当前物理路径证据，该字段仅属于 Pool
+Reconcile/Recovery。Local/Repo 仍接受既有 build 并发窗口；Center exact capability 在 finalize
+前重新通过 Reader 读取并与 capture 完全比较，发生漂移时本次 build 失败、由既有发布 Retry 重做。
 
 Artifact 只复制 Bot 实际 active Slice：Local 内容随 Artifact 复制；完整 `skills-repo` 和
-`skill-center` corpus 必须排除，只保留实际 active Skill 的精确 symlink。Deploy 时把共享
-Repo/Center OSS 只读挂载到 physical runtime 的 `skills-pool/skills-repo` 与
-`skills-pool/skill-center`；logical Claude Code + coding template 必须由统一 layout resolver
-落到 physical AICoding 路径。
+`skill-center` corpus 必须排除，只保留实际 active Skill 的精确 symlink。Repo/Center 物理
+OSS mount 的唯一 Owner 是 OCB image entrypoint；Avernet 的 Managed BaaS deploy composer
+不得把 `shared_corpora` 或默认 Repo 再转换为 `mount_points`。`shared_corpora` 只承担 Snapshot
+exclusion、exact-link validation 与历史 Artifact 声明，不是运行时 mount 指令。logical
+Claude Code + coding template 必须由统一 layout resolver 落到 physical AICoding 路径。
 
-现有 `skills_manifest schema_version=1` 采用 additive optional `center_skills`，不升 v2：
+文件型 build 的顺序固定为：
+
+```text
+Runtime Project (best effort)
+→ resolve Artifact Producer
+→ ARCA/BaaS fresh Probe once
+→ ArtifactBuildRequest(bot, version, typed observation)
+→ capture exact Center refs + layout generation
+→ rsync Snapshot
+→ validate corpus exclusion + exact Center links
+→ re-read exact Center refs + layout generation
+→ finalize skills_manifest
+```
+
+Probe 总状态与 Center mount 瞬时状态分离：Pool 或包含 Center 的 Legacy build 需要总体
+`READY` 路径证据；无 Center 的 Legacy build 在 `NOT_CAPABLE/TRANSIENT_ERROR/INVALID` 时继续
+使用历史静态 BuildPlan。Center 需要 Engine 声明支持 mapping v3，无 Center 的 Pool 至少支持
+mapping v2。`center_mount=NOT_READY/UNAVAILABLE` 不单独阻止 Artifact，因为 OCB 会在每次启动
+重新 mount；但 Canonical Store exact Version、Snapshot exact links 和 exclusion 仍然 fail closed。
+
+现有 `skills_manifest schema_version=1` 采用 additive optional `center_skills` 与
+`shared_corpora`，不升 v2。兼容矩阵为：Legacy 无 Center 不写 shared；Legacy 有 Center 只写
+`[center]`；新 Pool Artifact 无论是否有 Center 都写有序 `[repo, center]`。历史无
+`skills_manifest`、Legacy 无 shared、以及 Pool 无 Center/无 shared Artifact 保持可读；有
+Center 却无 exact Center delivery、Legacy 声明 Repo delivery 或其它组合均 fail closed。
+
+Legacy + Center 示例：
 
 ```json
 {
   "schema_version": 1,
+  "engine": "openclaw",
+  "active_layout": "legacy",
+  "layout_contract_version": null,
   "center_skills": [
     {
       "runtime_name": "pdf",
       "skill_uuid": "uuid",
       "sc_version_number": "1.0.0",
-      "mcp_dependencies": ["mcp.a"]
+      "mcp_dependencies": [{"code": "mcp.a"}]
+    }
+  ],
+  "shared_corpora": [
+    {
+      "corpus": "center",
+      "runtime_path": "/engine/workspace/skills-pool/skill-center",
+      "store_prefix": "aidesktop/aidesktop_<env>/bolt_shared/skills-center",
+      "layout_contract_version": "skills-pool-p3-v1",
+      "permission": "read_only",
+      "snapshot_policy": "exclude"
     }
   ]
 }
@@ -1073,8 +1118,18 @@ Repo/Center OSS 只读挂载到 physical runtime 的 `skills-pool/skills-repo` �
 按 `runtime_name + skill_uuid + sc_version_number` 稳定排序。Manifest 只承担 exact-version 审计、
 物理 Artifact 校验、Offline 血缘和问题定位，不在 restart 时重新解析 latest 或重建软链。旧 Artifact
 没有 `center_skills` 时按无 Center 的原合同读取。Validator 必须保证：不携带完整共享 Corpus；
-Center link 与 manifest 一一对应并指向 exact version；共享 Store 中 `SKILL.md` 可读；不存在
-未声明/版本漂移/越界 link。
+Center link 与 manifest 一一对应、使用 canonical absolute target 并指向 exact version；共享 Store
+exact Version 可读；不存在未声明/版本漂移/越界 link；Probe 返回的 active/local/repo/center roots
+为当前 Engine、同一 contract 下的 canonical 绝对路径。
+
+构建失败沿用现有 `FAILED + source_status=building` 与 Retry 状态机，并在内部 ext 记录稳定错误码：
+`SERVICE_ARTIFACT_LAYOUT_EVIDENCE_UNAVAILABLE`、
+`SERVICE_ARTIFACT_LAYOUT_EVIDENCE_INVALID`、
+`SERVICE_ARTIFACT_CENTER_STORE_NOT_READY`、
+`SERVICE_ARTIFACT_SNAPSHOT_INVALID`、
+`SERVICE_ARTIFACT_CAPABILITY_CHANGED`。公开 OpenAPI Service Publication facade 继续返回脱敏失败提示；
+存量 BFF 保留已有的详细 `error_message` 兼容合同，Probe 原始 evidence 与异常栈仍只进入内部日志。
+成功重试必须清理旧的 build error 字段。
 
 #### 14.3 Teclaw v4
 

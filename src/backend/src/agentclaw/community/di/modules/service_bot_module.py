@@ -88,6 +88,9 @@ from agentclaw.community.api.bot_capability_state_reader import (
 from agentclaw.community.api.bot_runtime_projector import (
     BotRuntimeProjectorProtocol as ApiBotRuntimeProjectorProtocol,
 )
+from agentclaw.community.api.runtime_layout_probe_service import (
+    RuntimeLayoutProbeServiceProtocol,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_process import (
@@ -569,6 +572,7 @@ class ServiceBotModule(Module):
         task_queue_service: TaskQueueService,
         publish_operation_repo: PublishOperationRepository,
         runtime_projector: ApiBotRuntimeProjectorProtocol,
+        runtime_layout_probe: RuntimeLayoutProbeServiceProtocol,
     ) -> PublishFlowService:
         """Construct ``PublishFlowService``.
 
@@ -594,6 +598,7 @@ class ServiceBotModule(Module):
             task_queue_service=task_queue_service,
             publish_operation_repo=publish_operation_repo,
             runtime_projector=runtime_projector,
+            runtime_layout_probe=runtime_layout_probe,
         )
 
     @singleton

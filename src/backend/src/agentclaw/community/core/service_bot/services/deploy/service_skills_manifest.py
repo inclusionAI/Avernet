@@ -2,8 +2,8 @@
 
 This module deliberately owns only the service-publish contract. It never
 guesses an engine-specific filesystem path: exact shared-corpus delivery is
-strictly parsed from the versioned Engine Runtime probe evidence persisted with
-the editable draft's active layout, then frozen into the historical artifact.
+strictly parsed from the fresh Engine Runtime observation supplied by the build
+stage, then frozen into the historical artifact.
 """
 
 from __future__ import annotations
@@ -12,21 +12,32 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
-from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
-from agentclaw.community.core.skill_center.capability_state_contract import (
-    BotCapabilityStateReaderProtocol,
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ServiceArtifactBuildError,
+    ServiceArtifactBuildErrorCode,
+    ServiceArtifactLayoutObservation,
 )
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionIdentity,
     CanonicalCenterVersionRef,
     CanonicalCenterVersionStore,
 )
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
 from agentclaw.community.core.skill_center.mcp_dependency_scope import (
     mcp_dependency_codes,
 )
+from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol import (
+    RuntimeLayoutProbeStatus,
+)
 from agentclaw.community.core.skill_center.runtime_resolver import RuntimeNamePolicy
-from agentclaw.community.core.workspace.skill_layout import (
-    runtime_layout_engine_for_bot,
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    MAPPING_CONTRACT_VERSION,
+    MAPPING_V3_CONTRACT_VERSION,
 )
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -41,7 +52,6 @@ class CapturedServiceSkillsLayout:
     """The draft layout decision captured before physical snapshotting starts."""
 
     engine: str
-    runtime_engine: str
     scope: BotSkillLayoutScope
     active_layout: SkillLayout
     phase: SkillLayoutPhase
@@ -52,53 +62,22 @@ class CapturedServiceSkillsLayout:
     shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...]
 
 
-_SERVICE_MANIFEST_ENGINES = frozenset(
-    {"openclaw", "claude_code", "aicoding", "hermes"}
-)
+_SERVICE_MANIFEST_ENGINES = frozenset({"openclaw", "claude_code", "aicoding", "hermes"})
 SERVICE_SKILLS_POOL_CONTRACT_VERSION = "skills-pool-p3-v1"
 
 
-class ServiceSkillsManifestError(RuntimeError):
+class ServiceSkillsManifestError(ServiceArtifactBuildError):
     """The draft cannot be represented as a supported Skills manifest."""
 
-
-def _resolved_ready_layout(
-    *,
-    state,
-    bot: dict[str, Any],
-) -> dict[str, str]:
-    evidence = state.last_probe_evidence
-    resolved = evidence.get("resolved_layout") if isinstance(evidence, dict) else None
-    expected_engine = runtime_layout_engine_for_bot(bot)
-    required = {
-        "engine",
-        "layout_contract_version",
-        "active_root",
-        "local_root",
-        "repo_root",
-        "pool_center",
-    }
-    if (
-        state.last_probe_result != "READY"
-        or state.layout_contract_version != SERVICE_SKILLS_POOL_CONTRACT_VERSION
-        or not isinstance(resolved, dict)
-        or set(resolved) != required
-        or resolved.get("engine") != expected_engine
-        or resolved.get("layout_contract_version")
-        != SERVICE_SKILLS_POOL_CONTRACT_VERSION
-    ):
-        raise ServiceSkillsManifestError(
-            "service build requires matching READY Engine layout evidence"
-        )
-    normalized: dict[str, str] = {}
-    for field in required:
-        value = resolved.get(field)
-        if not isinstance(value, str) or not value:
-            raise ServiceSkillsManifestError(
-                "service build has invalid READY Engine layout evidence"
-            )
-        normalized[field] = value
-    return normalized
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: ServiceArtifactBuildErrorCode = (
+            ServiceArtifactBuildErrorCode.SNAPSHOT_INVALID
+        ),
+    ) -> None:
+        super().__init__(code, message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,52 +92,54 @@ class ResolvedSharedCorpusDelivery:
     snapshot_policy: str = "exclude"
 
     @classmethod
-    def center_from_state(
+    def center_from_observation(
         cls,
         *,
-        state,
-        bot: dict[str, Any],
+        observation: ServiceArtifactLayoutObservation,
         store_prefix: str,
     ) -> ResolvedSharedCorpusDelivery:
-        return cls._from_state(
-            state=state,
-            bot=bot,
+        return cls._from_observation(
+            observation=observation,
             corpus="center",
-            evidence_field="pool_center",
+            runtime_path=(
+                observation.resolved_layout.center_root
+                if observation.resolved_layout is not None
+                else None
+            ),
             store_prefix=store_prefix,
         )
 
     @classmethod
-    def repo_from_state(
+    def repo_from_observation(
         cls,
         *,
-        state,
-        bot: dict[str, Any],
+        observation: ServiceArtifactLayoutObservation,
         store_prefix: str,
     ) -> ResolvedSharedCorpusDelivery:
-        return cls._from_state(
-            state=state,
-            bot=bot,
+        return cls._from_observation(
+            observation=observation,
             corpus="repo",
-            evidence_field="repo_root",
+            runtime_path=(
+                observation.resolved_layout.repo_root
+                if observation.resolved_layout is not None
+                else None
+            ),
             store_prefix=store_prefix,
         )
 
     @classmethod
-    def _from_state(
+    def _from_observation(
         cls,
         *,
-        state,
-        bot: dict[str, Any],
+        observation: ServiceArtifactLayoutObservation,
         corpus: str,
-        evidence_field: str,
+        runtime_path: str | None,
         store_prefix: str,
     ) -> ResolvedSharedCorpusDelivery:
-        resolved = _resolved_ready_layout(state=state, bot=bot)
-        runtime_path = resolved.get(evidence_field)
         if not isinstance(runtime_path, str):
             raise ServiceSkillsManifestError(
-                f"{corpus} Engine layout evidence is missing {evidence_field}"
+                f"{corpus} Engine layout evidence is missing its runtime path",
+                code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_INVALID,
             )
         path = PurePosixPath(runtime_path)
         if (
@@ -167,7 +148,8 @@ class ResolvedSharedCorpusDelivery:
             or any(part in {"", ".", ".."} for part in path.parts)
         ):
             raise ServiceSkillsManifestError(
-                f"{corpus} Engine layout evidence has an invalid {evidence_field}"
+                f"{corpus} Engine layout evidence has an invalid runtime path",
+                code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_INVALID,
             )
         prefix = PurePosixPath(store_prefix)
         if (
@@ -177,13 +159,14 @@ class ResolvedSharedCorpusDelivery:
             or any(part in {"", ".", ".."} for part in prefix.parts)
         ):
             raise ServiceSkillsManifestError(
-                f"invalid {corpus} Store prefix"
+                f"invalid {corpus} Store prefix",
+                code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_INVALID,
             )
         return cls(
             corpus=corpus,
             runtime_path=runtime_path,
             store_prefix=store_prefix,
-            layout_contract_version=SERVICE_SKILLS_POOL_CONTRACT_VERSION,
+            layout_contract_version=observation.layout_contract_version,
         )
 
     def to_manifest(self) -> dict[str, str]:
@@ -218,6 +201,7 @@ class ServiceSkillsManifestBuilder:
         self,
         *,
         bot: dict[str, Any],
+        layout_observation: ServiceArtifactLayoutObservation | None,
     ) -> CapturedServiceSkillsLayout | None:
         engine = str(bot.get("active_engine") or "openclaw").strip().lower()
         scope = BotSkillLayoutScope(
@@ -254,71 +238,57 @@ class ServiceSkillsManifestBuilder:
         if is_pool and (
             not state.persisted
             or state.phase is not SkillLayoutPhase.POOL_ACTIVE
-            or not state.layout_contract_version
+            or state.layout_contract_version
+            != SERVICE_SKILLS_POOL_CONTRACT_VERSION
         ):
             raise ServiceSkillsManifestError(
                 "Pool service manifest requires a persisted POOL_ACTIVE draft"
             )
-        if engine == "hermes":
-            if not is_pool:
-                raise ServiceSkillsManifestError(
-                    "Hermes service build requires a READY Pool runtime"
-                )
-            _resolved_ready_layout(state=state, bot=bot)
-
-        try:
-            assets = self._capability_reader.active_skill_assets(
-                bot_id=str(bot.get("bot_id") or ""),
-                owner_id=str(bot.get("owner_id") or bot.get("entity_id") or ""),
-                bot=bot,
-            )
-            center_skills = tuple(
-                sorted(
-                    (
-                        self._center_skill(asset)
-                        for asset in assets
-                        if asset.git_path.startswith("center://")
-                    ),
-                    key=lambda item: (
-                        item["runtime_name"],
-                        item["skill_uuid"],
-                        item["sc_version_number"],
-                    ),
-                )
-            )
-        except Exception as exc:
-            raise ServiceSkillsManifestError(
-                "service build cannot freeze exact Center Skills"
-            ) from exc
+        center_skills = self._active_center_skills(bot)
 
         shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...] = ()
         active_runtime_path: str | None = None
+        ready_observation: ServiceArtifactLayoutObservation | None = None
+        requires_observation = is_pool or bool(center_skills)
+        if requires_observation:
+            required_mapping = (
+                MAPPING_V3_CONTRACT_VERSION
+                if center_skills
+                else MAPPING_CONTRACT_VERSION
+            )
+            ready_observation = self._require_layout_observation(
+                layout_observation,
+                required_mapping_contract=required_mapping,
+            )
+            assert ready_observation.resolved_layout is not None
+            active_runtime_path = ready_observation.resolved_layout.active_root
+
         if is_pool:
-            active_runtime_path = _resolved_ready_layout(
-                state=state, bot=bot
-            )["active_root"]
+            assert ready_observation is not None
             shared_corpora = (
-                ResolvedSharedCorpusDelivery.repo_from_state(
-                    state=state,
-                    bot=bot,
+                ResolvedSharedCorpusDelivery.repo_from_observation(
+                    observation=ready_observation,
                     store_prefix=self._repo_store_prefix,
                 ),
-                ResolvedSharedCorpusDelivery.center_from_state(
-                    state=state,
-                    bot=bot,
+                ResolvedSharedCorpusDelivery.center_from_observation(
+                    observation=ready_observation,
                     store_prefix=self._center_store_prefix,
                 ),
             )
+        elif center_skills:
+            assert ready_observation is not None
+            shared_corpora = (
+                ResolvedSharedCorpusDelivery.center_from_observation(
+                    observation=ready_observation,
+                    store_prefix=self._center_store_prefix,
+                ),
+            )
+
         if center_skills:
-            if state.active_layout is not SkillLayout.POOL:
-                raise ServiceSkillsManifestError(
-                    "Center service build requires the Pool runtime layout"
-                )
             self._verify_exact_store(center_skills)
 
         return CapturedServiceSkillsLayout(
             engine=engine,
-            runtime_engine=runtime_layout_engine_for_bot(bot),
             scope=scope,
             active_layout=state.active_layout,
             phase=state.phase,
@@ -336,6 +306,7 @@ class ServiceSkillsManifestBuilder:
         self,
         *,
         captured: CapturedServiceSkillsLayout,
+        bot: dict[str, Any],
     ) -> dict[str, Any]:
         engine = captured.engine
         current = self._layout_repository.get(captured.scope)
@@ -343,29 +314,19 @@ class ServiceSkillsManifestBuilder:
             current.active_layout is not captured.active_layout
             or current.phase is not captured.phase
             or current.migration_generation != captured.migration_generation
-            or current.layout_contract_version
-            != captured.layout_contract_version
+            or current.layout_contract_version != captured.layout_contract_version
         ):
             raise ServiceSkillsManifestError(
                 "draft Skills layout changed during service build"
             )
-        if captured.shared_corpora:
-            current_deliveries = (
-                ResolvedSharedCorpusDelivery.repo_from_state(
-                    state=current,
-                    bot={"active_engine": captured.runtime_engine},
-                    store_prefix=self._repo_store_prefix,
-                ),
-                ResolvedSharedCorpusDelivery.center_from_state(
-                    state=current,
-                    bot={"active_engine": captured.runtime_engine},
-                    store_prefix=self._center_store_prefix,
-                ),
+
+        current_center_skills = self._active_center_skills(bot)
+        if current_center_skills != captured.center_skills:
+            raise ServiceSkillsManifestError(
+                "active Center Skills changed during service build",
+                code=ServiceArtifactBuildErrorCode.CAPABILITY_CHANGED,
             )
-            if current_deliveries != captured.shared_corpora:
-                raise ServiceSkillsManifestError(
-                    "Engine shared corpus delivery changed during service build"
-                )
+        if captured.center_skills:
             self._verify_exact_store(captured.center_skills)
 
         manifest = {
@@ -379,14 +340,80 @@ class ServiceSkillsManifestBuilder:
             ),
         }
         if captured.center_skills:
-            manifest["center_skills"] = [
-                dict(item) for item in captured.center_skills
-            ]
+            manifest["center_skills"] = [dict(item) for item in captured.center_skills]
         if captured.shared_corpora:
             manifest["shared_corpora"] = [
                 delivery.to_manifest() for delivery in captured.shared_corpora
             ]
         return manifest
+
+    @staticmethod
+    def _require_layout_observation(
+        observation: ServiceArtifactLayoutObservation | None,
+        *,
+        required_mapping_contract: str,
+    ) -> ServiceArtifactLayoutObservation:
+        if observation is None:
+            raise ServiceSkillsManifestError(
+                "service build runtime layout evidence is unavailable",
+                code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_UNAVAILABLE,
+            )
+        if observation.status in {
+            RuntimeLayoutProbeStatus.NOT_CAPABLE,
+            RuntimeLayoutProbeStatus.TRANSIENT_ERROR,
+        }:
+            raise ServiceSkillsManifestError(
+                "service build runtime layout evidence is unavailable",
+                code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_UNAVAILABLE,
+            )
+        if (
+            observation.status is not RuntimeLayoutProbeStatus.READY
+            or observation.resolved_layout is None
+        ):
+            raise ServiceSkillsManifestError(
+                "service build runtime layout evidence is invalid",
+                code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_INVALID,
+            )
+        if (
+            required_mapping_contract
+            not in observation.supported_mapping_contract_versions
+        ):
+            raise ServiceSkillsManifestError(
+                "service build runtime mapping capability is unavailable",
+                code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_UNAVAILABLE,
+            )
+        return observation
+
+    def _active_center_skills(
+        self,
+        bot: dict[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
+        try:
+            assets = self._capability_reader.active_skill_assets(
+                bot_id=str(bot.get("bot_id") or ""),
+                owner_id=str(bot.get("owner_id") or bot.get("entity_id") or ""),
+                bot=bot,
+            )
+            return tuple(
+                sorted(
+                    (
+                        self._center_skill(asset)
+                        for asset in assets
+                        if asset.git_path.startswith("center://")
+                    ),
+                    key=lambda item: (
+                        item["runtime_name"],
+                        item["skill_uuid"],
+                        item["sc_version_number"],
+                    ),
+                )
+            )
+        except ServiceArtifactBuildError:
+            raise
+        except Exception as exc:
+            raise ServiceSkillsManifestError(
+                "service build cannot freeze exact Center Skills"
+            ) from exc
 
     @staticmethod
     def _center_skill(asset) -> dict[str, Any]:
@@ -420,13 +447,15 @@ class ServiceSkillsManifestBuilder:
                 )
                 if not ready:
                     raise ServiceSkillsManifestError(
-                        "Center service build requires every exact Store Version"
+                        "Center service build requires every exact Store Version",
+                        code=ServiceArtifactBuildErrorCode.CENTER_STORE_NOT_READY,
                     )
         except ServiceSkillsManifestError:
             raise
         except Exception as exc:
             raise ServiceSkillsManifestError(
-                "Center service build cannot verify every exact Store Version"
+                "Center service build cannot verify every exact Store Version",
+                code=ServiceArtifactBuildErrorCode.CENTER_STORE_NOT_READY,
             ) from exc
 
 
@@ -437,9 +466,7 @@ def validate_service_skills_manifest_for_release(
     """Fail closed when a live draft identity no longer matches its manifest."""
 
     if manifest.get("schema_version") != 1:
-        raise ServiceSkillsManifestError(
-            "unsupported service Skills manifest schema"
-        )
+        raise ServiceSkillsManifestError("unsupported service Skills manifest schema")
     manifest_engine = str(manifest.get("engine") or "").strip().lower()
     live_engine = str(bot.get("active_engine") or "openclaw").strip().lower()
     if manifest_engine != live_engine:
@@ -524,10 +551,22 @@ def validate_service_skills_manifest_for_release(
             raise ServiceSkillsManifestError(
                 "Pool shared corpora must contain ordered Repo and exact Center delivery"
             )
-    elif shared_corpora is not None:
-        raise ServiceSkillsManifestError(
-            "Legacy Skill manifest cannot carry shared corpora"
-        )
+    else:
+        if shared_corpora is None and not center_skills:
+            return
+        if not center_skills:
+            raise ServiceSkillsManifestError(
+                "Legacy Skill manifest cannot declare unused shared corpora"
+            )
+        if not isinstance(shared_corpora, list):
+            raise ServiceSkillsManifestError(
+                "Legacy Center Skill manifest requires frozen Center delivery"
+            )
+        deliveries = tuple(_parse_frozen_delivery(item) for item in shared_corpora)
+        if [delivery.corpus for delivery in deliveries] != ["center"]:
+            raise ServiceSkillsManifestError(
+                "Legacy Center Skill manifest requires exact Center delivery only"
+            )
 
 
 def _parse_frozen_delivery(value: object) -> ResolvedSharedCorpusDelivery:
@@ -543,9 +582,7 @@ def _parse_frozen_delivery(value: object) -> ResolvedSharedCorpusDelivery:
     try:
         delivery = ResolvedSharedCorpusDelivery(**value)
     except TypeError as exc:
-        raise ServiceSkillsManifestError(
-            "invalid shared corpus delivery"
-        ) from exc
+        raise ServiceSkillsManifestError("invalid shared corpus delivery") from exc
     if (
         delivery.corpus not in {"repo", "center"}
         or delivery.layout_contract_version != SERVICE_SKILLS_POOL_CONTRACT_VERSION

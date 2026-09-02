@@ -2,10 +2,10 @@
 
 The managed bot image lays four scripts under ``/home/admin/bin`` and expects
 them chained in order: bootstrap compensation, engine install, the start
-service, then the watchdog. Its NAS holds the system directory, the bot's data
-directory and the skills repo, and every bot gets a storage volume — the
-sessions directory, or the home directory for bots the ``nas_mount`` whitelist
-has moved.
+service, then the watchdog. Its NAS holds the system and bot-data directories;
+the image entrypoint is the sole owner of read-only Repo/Center corpus mounts.
+Every bot also gets a storage volume — the sessions directory, or the home
+directory for bots the ``nas_mount`` whitelist has moved.
 
 None of that is a platform invariant; all of it is this image's layout. The
 bodies below are the ones that lived on ``BaasService`` before the composer
@@ -42,9 +42,6 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     MountPointEntry,
     Storage,
     StorageType,
-)
-from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
-    frozen_shared_corpus_deliveries_from_ext,
 )
 from agentclaw.community.core.service_bot.types import PublishStage, is_editable_bot
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -399,20 +396,6 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         """
         sp = self._storage_path
         bolt_data = sp.get_bolt_data_path(entity_type=entity_type, entity_id=entity_id, bot_id=bot_id)
-        skill_repo = sp.get_skills_repo_path()
-
-        # 引擎感知：通过 EngineSandboxProvider 动态解析 skills 挂载本地路径
-        # （base_path/{skill_target_relpath}/skills-repo），避免硬编码 openclaw
-        provider = self._resolve_sandbox_provider(engine=engine_type)
-        base_path = provider.get_base_path()
-        build_plan = provider.get_build_plan()
-        skills_local_dir = f"{base_path}/{build_plan.skill_target_relpath}/skills-repo"
-        shared_corpora = frozen_shared_corpus_deliveries_from_ext(
-            ext_info, {"active_engine": engine_type or DEFAULT_ENGINE_TYPE}
-        )
-        has_frozen_repo = any(
-            delivery.corpus == "repo" for delivery in shared_corpora
-        )
 
         # OSS 挂载点必须位于 /home/admin/nfs/ 下；引擎专用目录
         # （/home/admin/.{engine}、/home/admin/.config/{engine}）由
@@ -427,8 +410,9 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             ),
         ]
 
-        # skill repo独立挂载
-        # bolt 配置数据独立挂载
+        # Repo/Center are mounted by the managed image entrypoint. BaaS only
+        # receives platform storage and explicit user mounts, avoiding two
+        # independent writers for the same engine paths.
         if mount_home_dir_storage:
             mount_points.append(
                 MountPointEntry(
@@ -445,24 +429,6 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
                     permission=MountPermission.READ_WRITE,
                 )
             )
-            if not has_frozen_repo:
-                mount_points.append(
-                    MountPointEntry(
-                        remote_dir=f"/{skill_repo}",
-                        local_dir=skills_local_dir,
-                        permission=MountPermission.READ_ONLY,
-                    )
-                )
-
-        for delivery in shared_corpora:
-            mount_points.append(
-                MountPointEntry(
-                    remote_dir=f"/{delivery.store_prefix}",
-                    local_dir=delivery.runtime_path,
-                    permission=MountPermission.READ_ONLY,
-                )
-            )
-
         # 用户自定义挂载路径
         if mount_path:
             mount_points.append(
