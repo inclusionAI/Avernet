@@ -132,10 +132,10 @@ def test_file_entry_from_url_resolves_to_intent_bytes():
     m = ResourcesMaterialiser(svc, stub)
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
-        m.resolve(ctx, [{"path": "data/a.bin", "source": "https://x/a.bin"}])
+        m.resolve(ctx, [{"path": "data/a.md", "source": "https://x/a.bin"}])
     )
     assert resolved.ok
-    assert [i.identity for i in resolved.intents] == ["data/a.bin"]
+    assert [i.identity for i in resolved.intents] == ["data/a.md"]
     assert resolved.intents[0].value == b"bytes-of-https://x/a.bin"
     # The funnel saw the entry's own identity under the file form's own
     # category — the W11 apply/entry linkage — with keep_last as the
@@ -147,7 +147,7 @@ def test_file_entry_from_url_resolves_to_intent_bytes():
             "auth": None,
             "category": "resources_file",
             "keep_last": True,
-            "entry_identity": "data/a.bin",
+            "entry_identity": "data/a.md",
         }
     ]
 
@@ -172,13 +172,13 @@ def test_fetch_failure_aborts_whole_category():
         m.resolve(
             ctx,
             [
-                {"path": "data/a.bin", "source": "https://x/a.bin"},
-                {"path": "data/gone.bin", "source": "https://x/gone"},
+                {"path": "data/a.md", "source": "https://x/a.bin"},
+                {"path": "data/gone.md", "source": "https://x/gone"},
             ],
         )
     )
     assert not resolved.ok
-    assert [f.identity for f in resolved.failures] == ["data/gone.bin"]
+    assert [f.identity for f in resolved.failures] == ["data/gone.md"]
 
 
 def test_bad_path_entry_is_a_resolve_failure():
@@ -274,15 +274,15 @@ def test_nested_paths_abort_category():
 
 
 def test_plan_classifies_present_as_updated_and_new_as_created():
-    svc = FakeResourceFileService(exists_paths={"data/a.bin"})
+    svc = FakeResourceFileService(exists_paths={"data/a.md"})
     m = ResourcesMaterialiser(svc, _StubEntryFetcher())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
             ctx,
             [
-                {"path": "data/a.bin", "source": "https://x/a.bin"},
-                {"path": "data/new.bin", "source": "https://x/new.bin"},
+                {"path": "data/a.md", "source": "https://x/a.bin"},
+                {"path": "data/new.md", "source": "https://x/new.bin"},
             ],
         )
     )
@@ -292,7 +292,7 @@ def test_plan_classifies_present_as_updated_and_new_as_created():
     # Never "unchanged": v1 replaces on every apply by design (the work
     # item's recommended option), and a plan that claimed otherwise would
     # be a promise the write stage does not honour.
-    assert by_id == {"data/a.bin": "updated", "data/new.bin": "created"}
+    assert by_id == {"data/a.md": "updated", "data/new.md": "created"}
     assert plan.removals == ()
     assert not plan.is_noop
 
@@ -315,7 +315,7 @@ def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
         engine_type="claude_code",
     )
     resolved = _run(
-        m.resolve(ctx, [{"path": "data/a.bin", "source": "https://x/a.bin"}])
+        m.resolve(ctx, [{"path": "data/a.md", "source": "https://x/a.bin"}])
     )
     assert resolved.ok, [f.reason for f in resolved.failures]
     _run(m.plan(ctx, resolved.intents))
@@ -325,7 +325,7 @@ def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
             "entity_id": "u_owner",
             "bot_id": "b_1",
             "engine_type": "claude_code",
-            "path": "data/a.bin",
+            "path": "data/a.md",
         }
     ]
 
@@ -443,10 +443,15 @@ def test_write_addresses_the_bot_owner():
 
 
 def test_write_is_player_setup_convergent():
-    """Applying N times equals applying once: same writes, same deletes, no growth."""
+    """Applying N times equals applying once: same writes, same deletes, no growth.
+
+    Both applies run against the SAME service state: the second pass is the
+    convergence claim (the tree from apply #1 is deleted and rewritten, no
+    duplicate rows, no stale entries), not a re-observation of apply #1.
+    """
     archive = _tgz({"a.txt": b"AAA"})
+    svc = FakeResourceFileService()
     for _ in range(2):
-        svc = FakeResourceFileService()
         m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
         ctx = make_context(engine_type="claude_code")
         _write_through(
@@ -454,8 +459,8 @@ def test_write_is_player_setup_convergent():
             ctx,
             [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
         )
-        assert svc.writes == {("wrap", "a.txt"): b"AAA"}
-        assert svc.deleted == ["wrap/"]
+    assert svc.writes == {("wrap", "a.txt"): b"AAA"}
+    assert svc.deleted == ["wrap/", "wrap/"]
 
 
 def test_write_failure_yields_failed_entry_per_member():
@@ -557,7 +562,7 @@ def test_each_form_fetches_under_its_own_category():
         m.resolve(
             ctx,
             [
-                {"path": "data/a.bin", "source": "https://x/a.bin"},
+                {"path": "data/a.md", "source": "https://x/a.bin"},
                 {
                     "path": "tools/",
                     "unpack": "tar.gz",
@@ -571,7 +576,7 @@ def test_each_form_fetches_under_its_own_category():
         "resources_file",
         "resources_archive",
     ]
-    assert [c["entry_identity"] for c in stub.calls] == ["data/a.bin", "tools/"]
+    assert [c["entry_identity"] for c in stub.calls] == ["data/a.md", "tools/"]
 
 
 def test_keep_last_fallback_surfaces_as_the_entries_note():
@@ -600,7 +605,7 @@ def test_keep_last_fallback_surfaces_as_the_entries_note():
     m = ResourcesMaterialiser(svc, _FallingBack())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
-        m.resolve(ctx, [{"path": "data/a.bin", "source": "https://x/a.bin"}])
+        m.resolve(ctx, [{"path": "data/a.md", "source": "https://x/a.bin"}])
     )
     assert resolved.ok, [f.reason for f in resolved.failures]
     assert (
@@ -628,6 +633,123 @@ def test_write_carries_the_note_onto_the_report_row():
     m = ResourcesMaterialiser(svc, _FallingBack())
     ctx = make_context(engine_type="claude_code")
     plan, results = _write_through(
-        m, ctx, [{"path": "data/a.bin", "source": "https://x/a.bin"}]
+        m, ctx, [{"path": "data/a.md", "source": "https://x/a.bin"}]
     )
     assert [r.note for r in results] == ["fell back (keep_last)"]
+
+
+# --- the write chain's admission rules, asked before the first delete (H1) ---
+
+
+def test_an_archive_member_the_chain_would_refuse_fails_at_resolve():
+    """``upload_file`` refuses extensions outside its allow-list (no ``.sh``,
+    no extensionless files). That refusal must land in ``resolve`` — before
+    the sentinel deletes the declared tree — or the category reaches write
+    with a member that deterministically fails *after* the destructive
+    delete, on every re-apply.
+    """
+    archive = _tgz({"a.md": b"ok", "run.sh": b"#!/bin/sh\n"})
+    svc = FakeResourceFileService(exists_paths={"tools/old.md"})
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [{"path": "tools/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
+        )
+    )
+    # The whole category aborts (§3.2): one undeliverable member means the
+    # tree is NOT deleted for a partial delivery.
+    assert not resolved.ok
+    assert resolved.failures[0].identity == "tools/run.sh"
+    assert "file type" in resolved.failures[0].reason.lower()
+
+
+def test_an_extensionless_inline_file_fails_at_resolve():
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(m.resolve(ctx, [{"path": "data/LICENSE", "content": "MIT"}]))
+    assert not resolved.ok
+    assert "file type" in resolved.failures[0].reason.lower()
+
+
+def test_inline_content_over_the_size_cap_fails_at_resolve(
+    monkeypatch,
+):
+    """Inline ``content`` never goes through the fetch funnel's caps, so the
+    delivery gate is the only line a 600MB inline entry meets — and it must
+    meet it in ``resolve``, not as a write-stage surprise."""
+    from agentclaw.community.core.resources.services import file_service as fs
+
+    monkeypatch.setattr(fs, "MAX_FILE_SIZE", 16)
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(ctx, [{"path": "data/big.md", "content": "x" * 32}])
+    )
+    assert not resolved.ok
+    assert "size cap" in resolved.failures[0].reason.lower()
+
+
+def test_strip_components_of_the_wrong_type_is_a_resolve_failure():
+    """A document from before the schema's type check: no raw ``TypeError``
+    may escape ``resolve`` — the orchestrator would abort the category with
+    the exception's text in it."""
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.md": b"x"})))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {
+                    "path": "tools/",
+                    "unpack": "tar.gz",
+                    "strip_components": "one",
+                    "source": "https://x/t.tgz",
+                }
+            ],
+        )
+    )
+    assert not resolved.ok
+    assert "strip_components" in resolved.failures[0].reason
+
+
+def test_a_failed_tree_replacement_fails_its_members_in_composed_words():
+    """M2: the sentinel delete is part of delivery — a raise there must not
+    escape as raw exception text (the orchestrator would abort the whole
+    category quoting it); the tree's members answer FAILED, in the stage's
+    own words, and other categories' entries in this one keep their shot.
+    """
+
+    class _BuggyTreeDelete(FakeResourceFileService):
+        async def delete(self, **kwargs):
+            if kwargs["path"] == "tools/":
+                raise RuntimeError("rmtree quoted a header with a token")
+            return await super().delete(**kwargs)
+
+    archive = _tgz({"a.md": b"A"})
+    svc = _BuggyTreeDelete(exists_paths=set())
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(engine_type="claude_code")
+    plan, results = _write_through(
+        m,
+        ctx,
+        [
+            {
+                "path": "tools/",
+                "unpack": "tar.gz",
+                "source": "https://x/t.tgz",
+            },
+            {"path": "notes/r.md", "content": "# rules"},
+        ],
+    )
+    by_id = {r.identity: r for r in results}
+    assert by_id["tools/a.md"].outcome.value == "failed"
+    assert by_id["tools/a.md"].reason == "directory tree replacement failed"
+    # the raw exception text never reached the report
+    assert all("token" not in (r.reason or "") for r in results)
+    # the sibling entry outside the failed tree was still delivered
+    assert by_id["notes/r.md"].outcome.value == "created"

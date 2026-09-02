@@ -451,7 +451,7 @@ def _tool_archive() -> bytes:
     """A real tar.gz: the W6 unpack path must run against true bytes."""
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
-        for name, data in {"top/a.sh": b"#!/bin/sh\n", "top/sub/b.sh": b"#!/bin/sh\n"}.items():
+        for name, data in {"top/a.py": b"x = 1\n", "top/sub/b.py": b"y = 2\n"}.items():
             info = tarfile.TarInfo(name)
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
@@ -561,16 +561,16 @@ def _resources_reached_the_write_chain(_response, world) -> None:
         (e["category"], e["name"]): e["action"] for e in report["entries"]
     }
     assert by_entry[("resources", "notes/r.md")] == "created"
-    assert by_entry[("resources", "tools/a.sh")] == "created"
-    assert by_entry[("resources", "tools/sub/b.sh")] == "created"
+    assert by_entry[("resources", "tools/a.py")] == "created"
+    assert by_entry[("resources", "tools/sub/b.py")] == "created"
 
     uploads = _seed_bot_with_resource_manifest.uploads
     assert sorted(u["target_dir"] for u in uploads) == ["notes", "tools", "tools/sub"]
     writes = {(u["target_dir"], u["filename"]): u["data"] for u in uploads}
     assert writes == {
         ("notes", "r.md"): b"# rules\n",
-        ("tools", "a.sh"): b"#!/bin/sh\n",
-        ("tools/sub", "b.sh"): b"#!/bin/sh\n",
+        ("tools", "a.py"): b"x = 1\n",
+        ("tools/sub", "b.py"): b"y = 2\n",
     }
     # The declared directory tree is replaced in full, delete first — the
     # ownership rule, including files the new archive no longer ships.

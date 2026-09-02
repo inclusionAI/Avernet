@@ -24,6 +24,21 @@ Three invariants, all from the W6 work item:
   every apply rewrites every member. ``plan`` therefore classifies for the
   report only (created / updated), never "unchanged", and the category is
   never ``is_noop``.
+
+Two v1 narrows, stated here rather than discovered:
+
+- **The write chain's admission rules are re-asked in ``resolve``**
+  (extension allow-list, size cap — the same constants the service
+  enforces), so an undeliverable member fails its category with the tree
+  still standing rather than one delete ago. What is *not* re-asked is the
+  HTTP surface's read-only policy (dotfiles, reserved roots): a manifest
+  declaring ``.env`` is the owner's declaration, deliberately broader than
+  the console router's guard — that is the platform's contract with apply,
+  not an oversight.
+- **``plan`` probes ``exists`` per member** for the report's label alone.
+  A 5000-member tree therefore costs 5000 more device round trips than a
+  single probe would — accepted for v1's tree sizes, and the first place to
+  look if apply latency ever outruns the lock TTL on large archives.
 """
 from __future__ import annotations
 
@@ -61,9 +76,14 @@ from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
 #: fetch funnel caps by these exact keys, so each form fetches under its own
 #: name. A shared "resources" would silently take the file width's fallback
 #: for archives, and the W11 linkage column would carry a category the
-#: vocabulary never defined.
-_FETCH_CATEGORY_FILE = "resources_file"
-_FETCH_CATEGORY_ARCHIVE = "resources_archive"
+#: vocabulary never defined. ``FetchCategory``'s members, not raw strings:
+#: a typo in a string would silently re-take the fallback cap.
+from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+    FetchCategory,
+)
+
+_FETCH_CATEGORY_FILE = FetchCategory.RESOURCES_FILE.value
+_FETCH_CATEGORY_ARCHIVE = FetchCategory.RESOURCES_ARCHIVE.value
 
 
 class ResourcesMaterialiser(Materialiser):
@@ -106,6 +126,15 @@ class ResourcesMaterialiser(Materialiser):
                         )
                     )
                     continue
+                strip = entry.get("strip_components", 0)
+                if not isinstance(strip, int) or isinstance(strip, bool) or strip < 0:
+                    failures.append(
+                        ResolveFailure(
+                            path,
+                            "'strip_components' must be a non-negative integer",
+                        )
+                    )
+                    continue
                 source_url = entry.get("source")
                 if not isinstance(source_url, str) or not source_url:
                     failures.append(
@@ -126,7 +155,7 @@ class ResourcesMaterialiser(Materialiser):
                     self._unpack_members,
                     archive,
                     unpack_kind,
-                    entry.get("strip_components", 0),
+                    strip,
                 )
                 if isinstance(members, str):
                     failures.append(ResolveFailure(path, members))
@@ -134,6 +163,22 @@ class ResourcesMaterialiser(Materialiser):
                 # The directory sentinel: identity=path, value=None. It rides
                 # first in the intent list so plan marks the tree for
                 # replacement and write deletes it before members upload.
+                # The gate on every member, before the sentinel that
+                # promises the tree: one undeliverable member must abort
+                # the category with the tree still standing, not delete it
+                # for a partial delivery that every re-apply would repeat.
+                bad = next(
+                    (
+                        (path + rel, refused)
+                        for rel, data in members
+                        if (refused := _delivery_refusal(path + rel, data))
+                        is not None
+                    ),
+                    None,
+                )
+                if bad is not None:
+                    failures.append(ResolveFailure(bad[0], bad[1]))
+                    continue
                 intents.append(
                     Intent(identity=path, value=None, note=fetched.fallback_reason)
                 )
@@ -148,7 +193,12 @@ class ResourcesMaterialiser(Materialiser):
                 continue
             inline = entry.get("content")
             if isinstance(inline, str):
-                intents.append(Intent(identity=path, value=inline.encode("utf-8")))
+                data = inline.encode("utf-8")
+                refused = _delivery_refusal(path, data)
+                if refused is not None:
+                    failures.append(ResolveFailure(path, refused))
+                    continue
+                intents.append(Intent(identity=path, value=data))
                 continue
             source_url = entry.get("source")
             if not isinstance(source_url, str) or not source_url:
@@ -165,6 +215,10 @@ class ResourcesMaterialiser(Materialiser):
                 )
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(str(path), exc.reason))
+                continue
+            refused = _delivery_refusal(path, fetched.content)
+            if refused is not None:
+                failures.append(ResolveFailure(path, refused))
                 continue
             intents.append(
                 Intent(
@@ -331,22 +385,38 @@ class ResourcesMaterialiser(Materialiser):
         # tree's replace removes everything under ``path``, including files
         # the new archive no longer ships and hand-added ones (the
         # ownership rule). Sentinels produce no EntryResult: an ownership
-        # action, not an entry.
+        # action, not an entry — but a *failed* one fails its members, in
+        # the stage's composed words (never the exception's: a transport
+        # error can quote a header, a header can carry a token).
+        failed_trees: list[str] = []
         for planned in plan.entries:
             if planned.intent.value is not None:
                 continue
-            await self._resources.delete(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                bot_id=ctx.bot_id,
-                engine_type=ctx.engine_type,
-                path=planned.intent.identity,
-            )
+            try:
+                await self._resources.delete(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    bot_id=ctx.bot_id,
+                    engine_type=ctx.engine_type,
+                    path=planned.intent.identity,
+                )
+            except Exception:  # noqa: BLE001 — surfaced per member, not as text
+                failed_trees.append(planned.intent.identity)
         # 2) then each member file, in declaration order
         for planned in plan.entries:
             identity = planned.intent.identity
             data = planned.intent.value
             if data is None:
+                continue
+            if any(identity.startswith(tree) for tree in failed_trees):
+                results.append(
+                    EntryResult(
+                        self.construct,
+                        identity,
+                        EntryOutcome.FAILED,
+                        "directory tree replacement failed",
+                    )
+                )
                 continue
             target_dir, _, filename = identity.rpartition("/")
             try:
@@ -381,6 +451,41 @@ class ResourcesMaterialiser(Materialiser):
                 )
             )
         return tuple(results)
+
+
+def _delivery_refusal(identity: str, data: bytes) -> str | None:
+    """The write chain's own admission rules, asked before the first delete.
+
+    ``ResourceFileService.upload_file`` refuses extensions outside its
+    allow-list (no ``.sh``, no extensionless files) and content over its
+    size cap. A refusal that first lands on the write side would arrive
+    *after* the sentinel deleted the declared tree — a deterministically
+    half-written tree on every re-apply. So the materialiser re-asks the
+    same rules in ``resolve``, where failing costs nothing: the constants
+    are imported at call time so this module's importers still pull no
+    service graph, and the fake-driven tests cannot drift from the real
+    gate because both read the same constants.
+
+    Inline ``content`` is the other reason the gate lives here: it never
+    goes through the fetch funnel's caps, so this is the only line an
+    oversized inline entry meets.
+    """
+    from agentclaw.community.core.resources.services.file_service import (
+        ALLOWED_EXTENSIONS,
+        MAX_FILE_SIZE,
+    )
+
+    if Path(identity.rpartition("/")[2]).suffix.lower() not in ALLOWED_EXTENSIONS:
+        return (
+            "the workspace file surface does not allow this file type; "
+            f"allowed extensions: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+        )
+    if len(data) > MAX_FILE_SIZE:
+        return (
+            "content exceeds the workspace file surface's size cap "
+            f"({MAX_FILE_SIZE // (1024 * 1024)}MB)"
+        )
+    return None
 
 
 def _coords(ctx: ApplyContext) -> tuple[str, str]:
