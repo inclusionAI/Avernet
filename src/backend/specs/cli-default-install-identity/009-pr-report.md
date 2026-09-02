@@ -64,4 +64,7 @@ Validation after the fix will rerun the 16 failing gates first, then the affecte
 - Scope: expose `PATCH /api/bots/{bot_id}/clis/{cli_code}/call-type` through the authenticated legacy frontend surface, add exact `ctoken` boundary sanitization, response schema, endpoint coverage, and frontend contract documentation.
 - Security boundary: the actor is derived only from the authenticated request context; Bot ownership, CLI authorization, collaboration-lock fencing, persistence, and AgentPass reconciliation remain in the existing Caller Identity service.
 - Local validation: the new route and compatibility middleware passed 9 tests; the related Caller Identity suite passed 64 tests; endpoint coverage gate, Ruff, bytecode compilation, and `git diff --check` passed.
-- Follow-up PR: not created yet. A new topic branch will replay only this follow-up commit onto the latest GitHub `dev` so the already-merged #1796 commits are not duplicated.
+- Rebase result: branch `rebase/legacy-cli-call-type-on-dev` contains only follow-up commit `c5226bf9b` above GitHub `dev@cb842b314`; the already-merged #1796 commits are not duplicated.
+- Follow-up PR: [#1812](https://github.com/inclusionAI/Avernet/pull/1812), title `feat(backend): expose legacy CLI call-type updates`, head `rebase/legacy-cli-call-type-on-dev`, base `dev`.
+- PR description sections: Problem / Solution / Validation / Compatibility and risk / Spec. Human comments mode: `auto`.
+- Initial remote state: OPEN, review required, no comments or reviews; eight CI checks are queued or in progress and therefore remain `PENDING`.
