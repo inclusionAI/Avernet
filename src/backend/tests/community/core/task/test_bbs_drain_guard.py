@@ -83,3 +83,23 @@ async def test_bbs_pending_node_not_auto_dispatched():
     assert not bbs_leaf.run_info.extend_props.get("dispatching")
     # side 应为空(bbs 叶被守卫跳过,无 run/group/miss/dispatch_fail 投递)
     assert side == []
+
+
+@pytest.mark.asyncio
+async def test_actual_bbs_override_is_not_auto_dispatched():
+    """actual_run_mode=bbs 覆盖 coop_group 时,task_dispatch 仍按 BBS 自驱协议跳过。"""
+    svc, tid = _seed_bbs_pending_graph()
+    graph = svc._require_graph(tid)
+    leaf = next(n for n in graph.tasks if n.node_id == "bbs-leaf-1")
+    leaf.run_info.run_mode = "coop_group"
+    leaf.run_info.extend_props["actual_run_mode"] = "bbs"
+
+    engine = ExecutionEngine(svc)
+    side: list[tuple] = []
+    await engine._prepare_into(tid, side)
+
+    assert leaf.status == Status.PENDING
+    assert leaf.run_info.run_mode == "coop_group"
+    assert leaf.run_info.extend_props["actual_run_mode"] == "bbs"
+    assert not leaf.run_info.extend_props.get("dispatching")
+    assert side == []
