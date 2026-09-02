@@ -212,18 +212,20 @@ Conventions every task assumes:
 
 ## Group D — Creation
 
-## [ ] Task 13: `create_bot(provision=False)` and `provision_bot`
+## [x] Task 13: `create_bot(provision=False)` and `provision_bot`
 - **Files:** `core/bot_management/services/bot_service.py`,
-  `core/bot_management/create_flow.py`, `api/bot_service.py`,
+  `core/bot_management/create_flow.py`,
+  `core/bot_management/bot_service_protocol.py` (`provision_bot`; `api/bot_service.py`
+  re-exports it),
   `tests/community/core/bot_management/services/test_create_bot_deferred_provision.py` (new)
 - **Done when:**
-  - [ ] `create_bot(..., provision: bool = True)`; `False` returns after
-        step 1 with status `PENDING`, no binding; `provision_bot(bot_id, user_id, nick_name)`
-        runs step 2 and the binding-dependent tail for such a record and is
+  - [x] `create_bot(..., provision: bool = True)`; `False` returns after
+        step 1 with status `PENDING`, no binding; `provision_bot(bot_id, user_id, nick_name, *, template_type=None,
+        template_config=None, cookie=None)` runs step 2 and the binding-dependent tail for such a record and is
         idempotent on a record that already has a binding.
-  - [ ] `complete_bot_authorization` / `complete_manifest_creation` take
+  - [x] `complete_bot_authorization` / `complete_manifest_creation` take
         `provision` and pass it through.
-  - [ ] A golden test: `create_bot()` equals `create_bot(provision=False)` +
+  - [x] A golden test: `create_bot()` equals `create_bot(provision=False)` +
         `provision_bot()` in the record written and the collaborator calls
         made, in order; the whole existing creation suite passes unedited.
 - **Depends on:** —
