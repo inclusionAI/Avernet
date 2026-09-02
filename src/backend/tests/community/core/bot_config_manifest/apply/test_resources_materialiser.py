@@ -137,14 +137,15 @@ def test_file_entry_from_url_resolves_to_intent_bytes():
     assert resolved.ok
     assert [i.identity for i in resolved.intents] == ["data/a.bin"]
     assert resolved.intents[0].value == b"bytes-of-https://x/a.bin"
-    # The funnel saw the entry's own identity under the resources category —
-    # the W11 apply/entry linkage — with keep_last as the declared default.
+    # The funnel saw the entry's own identity under the file form's own
+    # category — the W11 apply/entry linkage — with keep_last as the
+    # declared default.
     assert stub.calls == [
         {
             "source_url": "https://x/a.bin",
             "digest": None,
             "auth": None,
-            "category": "resources",
+            "category": "resources_file",
             "keep_last": True,
             "entry_identity": "data/a.bin",
         }
@@ -534,3 +535,99 @@ def test_build_materialisers_registers_five():
     )
     assert ManifestCategory.RESOURCES in registry
     assert len(registry) == 5
+
+
+# --- fetch categories and the keep_last contract (review findings) ---
+
+
+def test_each_form_fetches_under_its_own_category():
+    """Files fetch as ``resources_file``, archives as ``resources_archive``.
+
+    Schema §5 states the two widths separately (100MB vs 200MB); a shared
+    "resources" would leave the fetch funnel's cap lookup to its fallback,
+    silently halving what the archive form allows — and the W11 linkage
+    column would carry a category the vocabulary never defined.
+    """
+    archive = _tgz({"a.txt": b"x"})
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(archive)
+    m = ResourcesMaterialiser(svc, stub)
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {"path": "data/a.bin", "source": "https://x/a.bin"},
+                {
+                    "path": "tools/",
+                    "unpack": "tar.gz",
+                    "source": "https://x/t.tgz",
+                },
+            ],
+        )
+    )
+    assert resolved.ok, [f.reason for f in resolved.failures]
+    assert [c["category"] for c in stub.calls] == [
+        "resources_file",
+        "resources_archive",
+    ]
+    assert [c["entry_identity"] for c in stub.calls] == ["data/a.bin", "tools/"]
+
+
+def test_keep_last_fallback_surfaces_as_the_entries_note():
+    """§9.6: a keep_last row states the fallback.
+
+    The fetch pipeline hands the reason over as
+    ``FetchedEntry.fallback_reason``; the materialiser must carry it into the
+    intent's note — identity and skills already do, and a silent fallback is
+    the contract broken quietly.
+    """
+
+    class _FallingBack(_StubEntryFetcher):
+        def fetch(self, ctx, **kwargs):
+            entry = super().fetch(ctx, **kwargs)
+            return FetchedEntry(
+                content=entry.content,
+                digest=entry.digest,
+                from_store=True,
+                content_type=entry.content_type,
+                fallback_reason=(
+                    "delivered from the platform's stored copy (keep_last)"
+                ),
+            )
+
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _FallingBack())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(ctx, [{"path": "data/a.bin", "source": "https://x/a.bin"}])
+    )
+    assert resolved.ok, [f.reason for f in resolved.failures]
+    assert (
+        resolved.intents[0].note
+        == "delivered from the platform's stored copy (keep_last)"
+    )
+
+
+def test_write_carries_the_note_onto_the_report_row():
+    """The note reaches the report row — stating a keep_last fallback only in
+    the log is §9.6 broken quietly."""
+
+    class _FallingBack(_StubEntryFetcher):
+        def fetch(self, ctx, **kwargs):
+            entry = super().fetch(ctx, **kwargs)
+            return FetchedEntry(
+                content=entry.content,
+                digest=entry.digest,
+                from_store=True,
+                content_type=entry.content_type,
+                fallback_reason="fell back (keep_last)",
+            )
+
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _FallingBack())
+    ctx = make_context(engine_type="claude_code")
+    plan, results = _write_through(
+        m, ctx, [{"path": "data/a.bin", "source": "https://x/a.bin"}]
+    )
+    assert [r.note for r in results] == ["fell back (keep_last)"]

@@ -56,7 +56,14 @@ from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
     unpack_archive,
 )
 
-_FETCH_CATEGORY = "resources"
+#: Schema §5 states the two resource forms' fetch widths separately —
+#: ``resources_file`` (100MB) and ``resources_archive`` (200MB) — and the
+#: fetch funnel caps by these exact keys, so each form fetches under its own
+#: name. A shared "resources" would silently take the file width's fallback
+#: for archives, and the W11 linkage column would carry a category the
+#: vocabulary never defined.
+_FETCH_CATEGORY_FILE = "resources_file"
+_FETCH_CATEGORY_ARCHIVE = "resources_archive"
 
 
 class ResourcesMaterialiser(Materialiser):
@@ -108,7 +115,10 @@ class ResourcesMaterialiser(Materialiser):
                     )
                     continue
                 try:
-                    archive = await self._fetch_entry(ctx, source_url, entry, path)
+                    fetched = await self._fetch_entry(
+                        ctx, source_url, entry, path, _FETCH_CATEGORY_ARCHIVE
+                    )
+                    archive = fetched.content
                 except EntryFetchError as exc:
                     failures.append(ResolveFailure(path, exc.reason))
                     continue
@@ -124,9 +134,17 @@ class ResourcesMaterialiser(Materialiser):
                 # The directory sentinel: identity=path, value=None. It rides
                 # first in the intent list so plan marks the tree for
                 # replacement and write deletes it before members upload.
-                intents.append(Intent(identity=path, value=None))
+                intents.append(
+                    Intent(identity=path, value=None, note=fetched.fallback_reason)
+                )
                 for rel, data in members:
-                    intents.append(Intent(identity=path + rel, value=data))
+                    intents.append(
+                        Intent(
+                            identity=path + rel,
+                            value=data,
+                            note=fetched.fallback_reason,
+                        )
+                    )
                 continue
             inline = entry.get("content")
             if isinstance(inline, str):
@@ -142,11 +160,19 @@ class ResourcesMaterialiser(Materialiser):
                 )
                 continue
             try:
-                value = await self._fetch_entry(ctx, source_url, entry, path)
+                fetched = await self._fetch_entry(
+                    ctx, source_url, entry, path, _FETCH_CATEGORY_FILE
+                )
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(str(path), exc.reason))
                 continue
-            intents.append(Intent(identity=path, value=value))
+            intents.append(
+                Intent(
+                    identity=path,
+                    value=fetched.content,
+                    note=fetched.fallback_reason,
+                )
+            )
         self._check_nesting(entries, failures)
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
@@ -156,26 +182,29 @@ class ResourcesMaterialiser(Materialiser):
         source_url: str,
         entry: dict[str, Any],
         path: str,
-    ) -> bytes:
+        category: str,
+    ):
         """One entry's bytes (or archive) through the W2/W3/W11 funnel.
 
         Raises :class:`EntryFetchError` — the caller translates it into this
-        category's ``ResolveFailure`` currency. Blocking network + disk I/O
-        (W2's sync transport, W11's blob write) off the event loop — see the
-        identity materialiser's note; a dry run must not park the server on
-        a hung source.
+        category's ``ResolveFailure`` currency. Returns the whole
+        :class:`FetchedEntry` rather than just ``.content``: a keep_last
+        fallback's reason rides it (§9.6 — the report row must state the
+        fallback), and dropping it here would be the contract broken
+        quietly. Blocking network + disk I/O (W2's sync transport, W11's
+        blob write) off the event loop — see the identity materialiser's
+        note; a dry run must not park the server on a hung source.
         """
-        fetched = await asyncio.to_thread(
+        return await asyncio.to_thread(
             self._fetcher.fetch,
             ctx,
             source_url=source_url,
             digest=entry.get("digest"),
             auth=entry.get("auth"),
-            category=_FETCH_CATEGORY,
+            category=category,
             keep_last=(entry.get("on_fetch_failure", "keep_last") == "keep_last"),
             entry_identity=path,
         )
-        return fetched.content
 
     @staticmethod
     def _unpack_members(
@@ -345,7 +374,10 @@ class ResourcesMaterialiser(Materialiser):
                 continue
             results.append(
                 EntryResult(
-                    self.construct, identity, EntryOutcome(planned.outcome)
+                    self.construct,
+                    identity,
+                    EntryOutcome(planned.outcome),
+                    note=planned.intent.note,
                 )
             )
         return tuple(results)
