@@ -408,10 +408,6 @@ def test_complete_success_and_offline_overlap_converges(
                 space_id=space_id,
                 skill_id=skill_id,
                 actor_id="owner",
-                expected_version_id=version_id,
-                target_version=2,
-                new_locator=f"draft://offline-skill/v2/{uuid4()}",
-                new_description="Review risk",
                 env="test",
                 guard=lambda inspection: None,
             )

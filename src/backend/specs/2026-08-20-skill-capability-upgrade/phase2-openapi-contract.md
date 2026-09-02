@@ -172,7 +172,8 @@ Work Order 的列表、详情和审批复用既有 `/openapi/v1/bots/work-orders
 | P2-PUB-004 | GET | `.../publications/{attempt_id}` | 轮询/恢复 Attempt | 200 | 读取 | NEW |
 | P2-PUB-005 | POST | `.../publications/{attempt_id}/retry` | 恢复同一 Attempt | 202/200 | attempt_id | NEW |
 | P2-OFF-001 | GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact` | 下线前阻断检查 | 200 | 读取 | NEW |
-| P2-OFF-002 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline` | 本地 Offline 并创建 Vn+1 Draft | 200 | 是 | NEW |
+| P2-OFF-002 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline` | 本地 Offline，保留历史 Vn | 200 | 是 | NEW |
+| P2-OFF-003 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy` | 复制 Offline Skill 精确 Vn 为新 Skill V1 Draft | 201 | Header Key | NEW |
 
 ### 3.5 SC Public 异步 Reference
 
@@ -553,12 +554,12 @@ Blocker kind：`DRAFT | PUBLICATION | MEMBERSHIP | INSTALLATION | SERVICE_ARTIFA
 {
   "changed": true,
   "lifecycle_status": "OFFLINE",
-  "draft": {"target_version": 3, "status": "EDITING", "revision_id": "rev-3"}
+  "offline_at": "2026-09-02T12:00:00Z"
 }
 ```
 
-已有 Offline+Draft 时 `changed=false`。没有 force/管理员绕过；不调用 SC 下线。新 Version 发布成功
-后自动恢复 PUBLISHED。
+已 Offline 时 `changed=false`。没有 force/管理员绕过；不调用 SC 下线。原 Skill 不创建 Vn+1 Draft
+或恢复上线；复制精确 Vn 会创建新 UUID 的独立 V1 Draft，之后发布为新的 SC Skill。
 
 命令事务内重查发现 blocker 时返回 HTTP 409、`code=409313`，且 `data` 使用与 P2-OFF-001
 相同的最新 `OfflineImpact`；前端不得继续使用调用 POST 前缓存的 counts。

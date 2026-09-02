@@ -93,7 +93,7 @@ Attempt/Reference 这种持久异步资源会在 `data` 内返回自己的 `erro
 | Attempt `PREPARING/SC_SUBMITTING/WAITING_SC` | 发布中 |
 | Attempt `MATERIALIZING` | 物化中 |
 | Attempt `RESULT_UNKNOWN` | 发布结果确认中 |
-| `OFFLINE` | 已下线 · 可继续编辑 |
+| `OFFLINE` | 已下线 · 保留历史版本，可复制为新 Skill |
 
 `SUCCEEDED/FAILED` 是历史 Attempt 终态，详情页可展示；列表 `active_publication` 只内联非终态。
 
@@ -341,7 +341,8 @@ DELETE .../draft?expected_revision_id=rev-2&fencing_token=7
 - `deleted_scope=SKILL`：首次从未发布，且除终态 FAILED Attempt 外无外部事实，整个 Skill
   及其失败 Attempt 被删除。
 
-FROZEN 时不显示删除按钮。Offline Skill 放弃 Vn+1 Draft 后仍保持 Offline，可再次点击升级。
+FROZEN 时不显示删除按钮。Offline Skill 不再允许升级；产品显示“复制”，以最后 Published Vn
+创建独立新 Skill 的 V1 Draft。
 删除 Team Draft 会同时使当前 Lease/fencing token 失效，前端必须停止 Lease 轮询并退出编辑态。
 
 ### 7.3 查看历史版本
@@ -479,10 +480,9 @@ Backend 会重新检查，所以仍可能返回 `SKILL_OFFLINE_BLOCKED`。成功
 
 - 历史 Published Vn 保持不可变；
 - TeamClaw 市场和 consumable 隐藏；
-- 创建 Vn+1 EDITING Draft；
 - 不调用 SC 外部下线；
-- Owner/Manager 可继续编辑；
-- 发布 Vn+1 成功后恢复 PUBLISHED。
+- 原 Skill 不可继续编辑、升级或发布；
+- 产品可调用 Version Copy 创建独立新 Skill 的 V1 Draft。
 
 `data.warnings` 是不计入 `total`、`counts` 或 `items` 的诊断信息；产品可以提示“部分历史
 Artifact 无法读取，未发现明确引用，已继续下线”，但不得把 warning 当成 blocker。
@@ -490,7 +490,7 @@ Artifact 无法读取，未发现明确引用，已继续下线”，但不得�
 409 `code=409313` 的 `data` 会带回最新 OfflineImpact/counts，前端直接用它刷新阻断弹窗；这是
 普通错误 `data=null` 的 route-specific 例外。
 
-产品文案不能写成“Vn 变回草稿”；准确语义是“Skill Offline，同时创建 Vn+1 Draft”。
+产品文案不能写成“Vn 变回草稿”；准确语义是“Skill Offline，保留历史 Vn；复制后产生独立新 Skill”。
 
 ## 11. 添加 Skill 弹窗的四个产品来源
 

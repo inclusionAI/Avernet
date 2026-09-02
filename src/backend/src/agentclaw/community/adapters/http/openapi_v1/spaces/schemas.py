@@ -83,7 +83,11 @@ class SkillActorPermissions(BaseModel):
         description="Actor may request creation of an upgrade Draft."
     )
     offline_skill: bool = Field(
-        description="Actor may request recoverable Skill Offline."
+        description="Actor may request terminal local Skill Offline."
+    )
+    copy_offline_skill: bool = Field(
+        default=False,
+        description="Actor may copy an Offline Skill's exact Published Version."
     )
     manage_grants: bool = Field(description="Actor may add or remove MANAGER Grants.")
     transfer_owner: bool = Field(description="Actor may request OWNER transfer.")
@@ -379,7 +383,7 @@ class SkillLifecycleStatus(_DocumentedEnum):
     __descriptions__ = {
         "DRAFT_ONLY": "The Skill has a Draft but no Published Version.",
         "PUBLISHED": "The Skill has at least one Published Version and is online.",
-        "OFFLINE": "The Skill is recoverably offline but remains editable.",
+        "OFFLINE": "The Skill is offline, retains its Published history, and is not editable.",
     }
 
 
@@ -555,11 +559,11 @@ class SpaceSkillDetail(SpaceSkillSummary):
     draft: SkillDraftDetail | None = Field(
         default=None, description="Complete current Draft facts, or null."
     )
-    source: Literal["FOLDER", "GIT"] = Field(
+    source: Literal["FOLDER", "GIT", "COPY"] = Field(
         description="Original Space Skill creation source."
     )
     offline_at: datetime | None = Field(
-        default=None, description="UTC recoverable Offline time, or null."
+        default=None, description="UTC terminal local Offline time, or null."
     )
     offline_by: str | None = Field(
         default=None, description="Actor that placed the Skill Offline, or null."
@@ -620,7 +624,7 @@ class SkillOfflineImpact(BaseModel):
 
 
 class SkillOfflineResult(BaseModel):
-    """Recoverable Offline state and the editable next-version Draft."""
+    """Terminal local Offline result for the existing Skill."""
 
     changed: bool = Field(
         description="Whether this request newly moved the Skill Offline."
@@ -628,8 +632,8 @@ class SkillOfflineResult(BaseModel):
     lifecycle_status: Literal["OFFLINE"] = Field(
         description="Current recoverable lifecycle state."
     )
-    draft: SkillDraftSummary = Field(
-        description="Editable Vn+1 Draft retained for recovery publication."
+    offline_at: datetime | None = Field(
+        default=None, description="UTC time at which Offline was recorded."
     )
 
 
@@ -734,8 +738,6 @@ SpaceSkillFolderUpload = create_model(
         ),
     ),
 )
-
-
 class AddSpaceMemberRequest(BaseModel):
     """Request for adding a user to a Space."""
 

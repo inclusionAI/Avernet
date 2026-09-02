@@ -477,7 +477,7 @@ def test_materialization_publish_replay_requires_the_same_frozen_facts() -> None
     assert replay.status == "PUBLISHED"
 
 
-def test_new_space_publication_clears_offline_but_published_replay_never_does() -> None:
+def test_space_publication_never_reactivates_terminally_offline_skill() -> None:
     db = _Database()
     offline_at = datetime(2026, 8, 30, 10, 0)
     with db.orm_session() as session:
@@ -533,9 +533,8 @@ def test_new_space_publication_clears_offline_but_published_replay_never_does() 
     with db.orm_session() as session:
         skill = session.get(Skill, 10)
         assert skill is not None
-        assert skill.offline_at is None and skill.offline_by is None
-        skill.offline_at = offline_at
-        skill.offline_by = "owner"
+        assert skill.offline_at == offline_at
+        assert skill.offline_by == "owner"
 
     with avernet_tenant_scope("teamclaw"):
         repo.publish_materialized(

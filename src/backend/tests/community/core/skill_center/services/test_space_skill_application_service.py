@@ -231,6 +231,62 @@ def test_folder_creation_does_not_hide_cleanup_failure():
     store.delete_revision.assert_called_once()
 
 
+def test_copy_offline_published_version_creates_new_uuid_v1_draft():
+    service, _access, repository, drafts, store, _sources, versions, canonical, *_ = (
+        _service()
+    )
+    drafts.get_skill_for_upgrade.return_value = {
+        "skill_id": 51,
+        "skill_uuid": "11111111-1111-4111-8111-111111111111",
+        "name": "draft-skill",
+        "space_type": "TEAM",
+        "sc_team_id": 77,
+        "offline_at": object(),
+    }
+    versions.get_published_by_ordinal.return_value = {
+        "id": 91,
+        "skill_id": 51,
+        "version_ordinal": 2,
+        "status": "PUBLISHED",
+        "sc_version_number": "2.0.0",
+        "sc_skill_id": 123,
+        "sc_version_id": 456,
+        "name": "draft-skill",
+        "description": "Published description",
+        "metadata_json": "{}",
+        "published_at": None,
+    }
+    canonical.read_version.return_value = CanonicalCenterVersion.from_files(
+        CanonicalCenterVersionIdentity(
+            skill_uuid="11111111-1111-4111-8111-111111111111",
+            sc_version_number="2.0.0",
+        ),
+        {"SKILL.md": b"---\nname: draft-skill\ndescription: copied\n---\n"},
+    )
+
+    result = service.copy_published_version(
+        space_id=7,
+        skill_id=51,
+        version_ordinal=2,
+        actor_id="owner-1",
+        request_id="copy-1",
+    )
+
+    assert result.skill_id == 51
+    call = repository.create_space_skill.call_args.kwargs["skill_data"]
+    assert call["skill_uuid"] != "11111111-1111-4111-8111-111111111111"
+    assert call["draft_target_version"] == 1
+    assert call["draft_status"] == "EDITING"
+    assert call["draft_source_kind"] == "PUBLISHED_VERSION"
+    assert call["source_type"] == "COPY"
+    assert "sc_skill_id" not in call
+    assert "sc_version_id" not in call
+    ref = DraftRevisionRef.from_locator(
+        tenant="tenant-a", env="test", locator=call["zip_url"]
+    )
+    assert store.read_revision(ref).description == "copied"
+
+
 def test_git_creation_uses_the_same_package_and_persistence_pipeline():
     service, _access, repository, _drafts, store, sources, *_extra = _service()
     sources.fetch_git_snapshot.return_value = GitSkillSnapshot(
