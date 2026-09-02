@@ -59,13 +59,21 @@ from agentclaw.community.core.skill_center.skill_service_factory_protocol import
 from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import SkillSetServiceFactoryProtocol
 
 if TYPE_CHECKING:
-    # Runtime-keyed device dispatchers stay in the DI layer (they bridge
-    # to plugins). These factories are constructed via explicit
-    # @provider methods, so the injector never introspects this class's
-    # type hints — the string annotations below are never resolved at
-    # runtime, making the TYPE_CHECKING import sufficient and the
-    # core->di boundary intact.
-    pass
+    # Runtime-keyed device dispatchers and the workspace path factory are
+    # constructor *types* only. These factories are constructed via explicit
+    # @provider methods, so the injector never introspects this class's type
+    # hints at runtime — a TYPE_CHECKING import is sufficient for the tools
+    # that do resolve annotations, and no importable boundary is crossed.
+    from agentclaw.community.core.devices.services.device_context_resolver import (
+        DeviceContextResolver,
+    )
+    from agentclaw.community.core.devices.services.device_filesystem_dispatcher import (
+        DeviceFilesystemDispatcher,
+    )
+    from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+    from agentclaw.community.plugin_api.device_sync_dispatcher import (
+        DeviceSyncDispatcher,
+    )
 
 logger = get_logger()
 
