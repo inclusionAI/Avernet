@@ -1,7 +1,8 @@
-"""TaskExecutor:三模态派发(single_bot/coop_group/bbs)+ 旁路 poller 登记入口。
+"""TaskExecutor:三模态派发(single_bot/coop_group/bbs)+ poller 登记入口。
 
 dispatch(async):上游 start_run caller loop 上 gather+Semaphore await 端口 IO,拿到 run_id 即返回
-(不等待结果);bbs 仅记日志。form_coop_group(async):BCS 建群壳。poller 为独立 daemon sidecar(同 TaskHarness)。
+(不等待结果);BBS 也经统一 dispatch 入口启动。form_coop_group(async):BCS 建群壳。
+poller 为独立 daemon sidecar(同 TaskHarness)。
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
@@ -81,7 +83,7 @@ class TaskExecutor:
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
         self._task_settings = task_settings
-        self._on_bbs_report = on_bbs_report  # 引擎 on_bbs_report 收口回调(供 run_bbs→notify 走引擎收敛)
+        self._on_bbs_report = on_bbs_report  # 引擎 on_bbs_report 收口回调(供 BBS dispatch→notify 走引擎收敛)
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
@@ -98,12 +100,12 @@ class TaskExecutor:
             mode = node.run_info.run_mode
             if mode == "bbs":
                 logger.info(
-                    "[task][task_executor] bbs node dispatched (no-op): task=%s node=%s assignee=%s",
+                    "[task][task_executor] >>> 投递 bbs task=%s node=%s assignee=%s",
                     node.task_id,
                     node.node_id,
                     node.run_info.assignee,
                 )
-                return True
+                return await self._dispatch_bbs(node, sem)
             if mode == "single_bot":
                 logger.info(
                     "[task][task-executor] >>> 投递 single_bot task=%s node=%s bot=%s → send_message",
@@ -127,6 +129,53 @@ class TaskExecutor:
             return False
 
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
+
+    async def _dispatch_bbs(
+        self, node: TaskNode, sem: asyncio.Semaphore
+    ) -> bool:
+        """通过统一 dispatch seam 启动 BBS 接力。
+
+        Runner 只传入待执行节点；BBS adapter 在内部按 task_id 读取完整图，隐藏
+        roster、bid、claim 和 relay 等模态细节。返回值表示请求已被执行器接受，
+        最终任务结果仍经 ``on_bbs_report`` 回投编排核。
+        """
+        if self._graph is None:
+            logger.error(
+                "[task][bbs_mode] dispatch failed: graph missing task=%s node=%s",
+                node.task_id,
+                node.node_id,
+            )
+            return False
+        persisted_graph = self._graph.query_task_dashboard(node.task_id)
+        if not any(current.node_id == node.node_id for current in persisted_graph.tasks):
+            logger.error(
+                "[task][bbs_mode] dispatch failed: node missing task=%s node=%s",
+                node.task_id,
+                node.node_id,
+            )
+            return False
+        # start_run 的 TaskNode 是本次执行请求的权威输入。查询图只补齐 BBS 所需的
+        # 关系与其它节点快照，再以调用方传入节点覆盖同 id 的持久化快照。
+        execution_graph = replace(
+            persisted_graph,
+            tasks=[
+                node if current.node_id == node.node_id else current
+                for current in persisted_graph.tasks
+            ],
+        )
+        async with sem:
+            from agentclaw.community.core.task.task_runner.integration import bbs_runner
+
+            await bbs_runner.notify(
+                execution_graph=execution_graph,
+                bcn=self._bcn,
+                bot=self._bot,
+                graph=self._graph,
+                backend_url=self._api_base_url,
+                skill_name=bbs_runner._BBS_SKILL_NAME,
+                on_bbs_report=self._on_bbs_report,
+            )
+        return True
 
     def _single_bot_skill_report_enabled(self) -> bool:
         """single_bot 回收链路开关(默认 False=poller 拉消息回收)。
@@ -647,21 +696,6 @@ class TaskExecutor:
             detail = await self._bcs.get_group(group_id)
             sid = (detail or {}).get("latest_running_session_id")
         return sid
-
-    async def run_bbs(self, execution_graph) -> None:
-        """升 BBS 可恢复态后主动 bid→select→claim→dispatch(委托 bbs_runner)。
-        延迟导入 bbs_runner 避免顶层循环依赖;bbs_runner 自身 best-effort 不抛。"""
-        from agentclaw.community.core.task.task_runner.integration import bbs_runner
-
-        await bbs_runner.notify(
-            execution_graph=execution_graph,
-            bcn=self._bcn,
-            bot=self._bot,
-            graph=self._graph,
-            backend_url=self._api_base_url,
-            skill_name=bbs_runner._BBS_SKILL_NAME,
-            on_bbs_report=self._on_bbs_report,
-        )
 
     @staticmethod
     def _state_machine_bindings(gf: GroupFormation) -> dict[str, dict[str, Any]]:

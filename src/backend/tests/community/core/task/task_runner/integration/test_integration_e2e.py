@@ -15,7 +15,7 @@ def _run(coro):
 
 def _wire():
     """真实 TaskService(真 ExecutionEngine/TaskRunner)+ build_integration(double) 注入点。
-    示范 _execution_backend 在真 TaskRunner 上生效(bbs 走 executor no-op,不改节点状态)。"""
+    示范 _execution_backend 在真 TaskRunner 上生效。"""
     g = TaskGraphService()
     svc = TaskService(g)
     exe = build_integration(double=True, sink=svc.callback, runner=None, poller_thread=False)
@@ -23,7 +23,7 @@ def _wire():
     return svc, exe
 
 
-def test_bbs_dispatch_noop_does_not_change_node_status(caplog):
+def test_bbs_dispatch_without_graph_fails_without_changing_node_status(caplog):
     exe = _wire()[1]
     n = TaskNode(node_id="b1", task_id="t1", status=Status.RUNNING,
                  task_spec=TaskSpec(Metadata("t1", "T", "do"), Context("bg"),
@@ -32,5 +32,6 @@ def test_bbs_dispatch_noop_does_not_change_node_status(caplog):
                  node_run_graph=None)  # type: ignore[arg-type]
     with caplog.at_level(logging.INFO):
         ok = _run(exe.dispatch([n]))
-    assert ok == [True]
-    assert n.status == Status.RUNNING  # bbs 仅记日志,不改节点状态、不登记 poller
+    assert ok == [False]
+    assert n.status == Status.RUNNING
+    assert "dispatch failed: graph missing" in caplog.text
