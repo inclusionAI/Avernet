@@ -16,6 +16,7 @@ import { RunLogRepository } from "./repositories/run-log-repository.js";
 import { ExecutionStepLogRepository } from "./repositories/execution-step-log-repository.js";
 import { createEvolveRouter, type EvolveRouterDeps } from "./routes/evolve.js";
 import { createInternalEvolveRouter } from "./routes/internal/evolve.js";
+import { createInternalTaskGuardRouter } from "./routes/internal/task-guard.js";
 import { TaskSourceService, type FrozenEvidenceReader } from "./services/evolve/task-source-service.js";
 import { dispatchEvolveCommand } from "./services/evolve-dispatcher.js";
 import { InsightPlanStepService } from "./services/evolve/insight-plan-step-service.js";
@@ -43,6 +44,7 @@ export type ClawevolveModuleOptions = {
 export type ClawevolveModule = {
   publicRouter: Router;
   internalRouter: Router;
+  taskGuardRouter: Router;
   repositories: {
     evolve: EvolveRepository;
     taskSource: EvolveTaskSourceRepository;
@@ -117,6 +119,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     runLogRepo: new RunLogRepository(db),
     executionStepLogRepo: new ExecutionStepLogRepository(db),
   });
+  const taskGuardRouter = createInternalTaskGuardRouter(evolve);
 
   let runAnalysisTimeoutTimer: NodeJS.Timeout | null = null;
   let suggestionApplyTimeoutTimer: NodeJS.Timeout | null = null;
@@ -124,6 +127,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   return {
     publicRouter,
     internalRouter,
+    taskGuardRouter,
     repositories: { evolve, taskSource },
     async start() {
       if (runAnalysisTimeoutTimer || suggestionApplyTimeoutTimer) return;
