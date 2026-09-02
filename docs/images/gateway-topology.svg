@@ -1,0 +1,124 @@
+<svg viewBox="0 0 1160 660" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="调用方（前端/第三方App/Bot）只连接网关；网关内部按顺序经过CORS、Domain路由、身份提取、Principal签名、转发五个阶段，再分发到backend、bcs、baas、bcsfuse、engine proxy、clawweb六个上游服务">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5b6b66"/>
+    </marker>
+    <marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c8661c"/>
+    </marker>
+  </defs>
+
+  <style>
+    .sans { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+
+  <!-- card background -->
+  <rect x="10" y="10" width="1140" height="640" rx="18" fill="#f7f9f7" stroke="#d8ded9" stroke-width="1"/>
+
+  <!-- column headers -->
+  <text x="150" y="34" class="mono" font-size="12" fill="#6b7a74" text-anchor="middle" style="letter-spacing:1.5px">调用方</text>
+  <text x="470" y="34" class="mono" font-size="12" fill="#6b7a74" text-anchor="middle" style="letter-spacing:1.5px">AVERNET GATEWAY（同一进程）</text>
+  <text x="1020" y="34" class="mono" font-size="12" fill="#6b7a74" text-anchor="middle" style="letter-spacing:1.5px">上游服务</text>
+
+  <!-- ===== callers ===== -->
+  <g>
+    <rect x="40" y="55" width="220" height="90" rx="10" fill="#eaf3ef" stroke="#3c6e63" stroke-width="1.5"/>
+    <text x="150" y="94" class="sans" font-size="14" font-weight="600" fill="#1f3b34" text-anchor="middle">第一方前端</text>
+    <text x="150" y="114" class="sans" font-size="11" fill="#4b5652" text-anchor="middle">浏览器・会话 Cookie</text>
+  </g>
+  <g>
+    <rect x="40" y="280" width="220" height="90" rx="10" fill="#eaf3ef" stroke="#3c6e63" stroke-width="1.5"/>
+    <text x="150" y="319" class="sans" font-size="14" font-weight="600" fill="#1f3b34" text-anchor="middle">第三方 App</text>
+    <text x="150" y="339" class="sans" font-size="10.5" fill="#4b5652" text-anchor="middle">Bearer API Key ・ 租户令牌</text>
+  </g>
+  <g>
+    <rect x="40" y="505" width="220" height="90" rx="10" fill="#eaf3ef" stroke="#3c6e63" stroke-width="1.5"/>
+    <text x="150" y="544" class="sans" font-size="14" font-weight="600" fill="#1f3b34" text-anchor="middle">Bot / Agent</text>
+    <text x="150" y="564" class="sans" font-size="11" fill="#4b5652" text-anchor="middle">Bot 凭证</text>
+  </g>
+
+  <!-- caller -> gateway entry (all enter at CORS) -->
+  <line x1="260" y1="100" x2="350" y2="97" stroke="#5b6b66" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="260" y1="325" x2="350" y2="100" stroke="#5b6b66" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="260" y1="550" x2="350" y2="103" stroke="#5b6b66" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ===== gateway container ===== -->
+  <rect x="340" y="40" width="260" height="570" rx="14" fill="#f2f1ee" stroke="#cfd6d0" stroke-width="1.2"/>
+
+  <!-- stage 1: CORS -->
+  <rect x="352" y="55" width="236" height="80" rx="8" fill="#ffffff" stroke="#161b1a" stroke-width="1.2"/>
+  <text x="470" y="101" class="sans" font-size="13" font-weight="600" fill="#161b1a" text-anchor="middle">① CORS 边缘中间件</text>
+
+  <line x1="470" y1="135" x2="470" y2="170" stroke="#5b6b66" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- stage 2: routing -->
+  <rect x="352" y="170" width="236" height="80" rx="8" fill="#ffffff" stroke="#161b1a" stroke-width="1.2"/>
+  <text x="470" y="203" class="sans" font-size="13" font-weight="600" fill="#161b1a" text-anchor="middle">② Domain 路由解析</text>
+  <text x="470" y="223" class="mono" font-size="10.5" fill="#5b6b66" text-anchor="middle">match ＋ 具体度判定</text>
+
+  <line x1="470" y1="250" x2="470" y2="285" stroke="#5b6b66" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- stage 3: identity extraction -->
+  <rect x="352" y="285" width="236" height="80" rx="8" fill="#ffffff" stroke="#161b1a" stroke-width="1.2"/>
+  <text x="470" y="318" class="sans" font-size="13" font-weight="600" fill="#161b1a" text-anchor="middle">③ 身份提取</text>
+  <text x="470" y="338" class="mono" font-size="10" fill="#5b6b66" text-anchor="middle">user / app / bot / access_key</text>
+
+  <line x1="470" y1="365" x2="470" y2="400" stroke="#5b6b66" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- stage 4: principal signing (accented — the trust boundary) -->
+  <rect x="352" y="400" width="236" height="80" rx="8" fill="#fdf6ee" stroke="#c8661c" stroke-width="1.8"/>
+  <text x="470" y="433" class="sans" font-size="13" font-weight="600" fill="#8a4413" text-anchor="middle">④ Principal 签名</text>
+  <text x="470" y="453" class="sans" font-size="10.5" fill="#8a4413" text-anchor="middle">短时效信任令牌，下游只需验签</text>
+
+  <line x1="470" y1="480" x2="470" y2="515" stroke="#5b6b66" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- stage 5: forwarding -->
+  <rect x="352" y="515" width="236" height="80" rx="8" fill="#ffffff" stroke="#161b1a" stroke-width="1.2"/>
+  <text x="470" y="548" class="sans" font-size="13" font-weight="600" fill="#161b1a" text-anchor="middle">⑤ 转发 Forwarder</text>
+  <text x="470" y="568" class="mono" font-size="10" fill="#5b6b66" text-anchor="middle">流式・路径默认原样透传</text>
+
+  <!-- ===== upstreams ===== -->
+  <g>
+    <rect x="920" y="55" width="200" height="60" rx="10" fill="#eef2f5" stroke="#2f4858" stroke-width="1.5"/>
+    <text x="1020" y="82" class="sans" font-size="14" font-weight="600" fill="#1c2e39" text-anchor="middle">backend</text>
+    <text x="1020" y="99" class="sans" font-size="9.5" fill="#4b5652" text-anchor="middle">承接多个 domain</text>
+  </g>
+  <g>
+    <rect x="920" y="151" width="200" height="60" rx="10" fill="#eef2f5" stroke="#2f4858" stroke-width="1.5"/>
+    <text x="1020" y="186" class="sans" font-size="14" font-weight="600" fill="#1c2e39" text-anchor="middle">bcs</text>
+  </g>
+  <g>
+    <rect x="920" y="247" width="200" height="60" rx="10" fill="#eef2f5" stroke="#2f4858" stroke-width="1.5"/>
+    <text x="1020" y="282" class="sans" font-size="14" font-weight="600" fill="#1c2e39" text-anchor="middle">baas</text>
+  </g>
+  <g>
+    <rect x="920" y="343" width="200" height="60" rx="10" fill="#eef2f5" stroke="#2f4858" stroke-width="1.5"/>
+    <text x="1020" y="378" class="sans" font-size="14" font-weight="600" fill="#1c2e39" text-anchor="middle">bcsfuse</text>
+  </g>
+  <g>
+    <rect x="920" y="439" width="200" height="60" rx="10" fill="#eef2f5" stroke="#2f4858" stroke-width="1.5"/>
+    <text x="1020" y="474" class="sans" font-size="14" font-weight="600" fill="#1c2e39" text-anchor="middle">engine proxy</text>
+  </g>
+  <g>
+    <rect x="920" y="535" width="200" height="60" rx="10" fill="#eef2f5" stroke="#2f4858" stroke-width="1.5"/>
+    <text x="1020" y="570" class="sans" font-size="14" font-weight="600" fill="#1c2e39" text-anchor="middle">clawweb</text>
+  </g>
+
+  <!-- forwarder fan-out -->
+  <line x1="588" y1="555" x2="910" y2="85" stroke="#5b6b66" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="588" y1="555" x2="910" y2="181" stroke="#5b6b66" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="588" y1="555" x2="910" y2="277" stroke="#5b6b66" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="588" y1="555" x2="910" y2="373" stroke="#5b6b66" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="588" y1="555" x2="910" y2="469" stroke="#5b6b66" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <line x1="588" y1="555" x2="910" y2="565" stroke="#5b6b66" stroke-width="1.3" marker-end="url(#arrow)"/>
+
+  <!-- fan-out edge labels (path prefixes actually forwarded) -->
+  <text x="905" y="70" class="mono" font-size="9.5" fill="#5b6b66" text-anchor="end">/openapi/v1/bots/** 等</text>
+  <text x="905" y="166" class="mono" font-size="9.5" fill="#5b6b66" text-anchor="end">/openapi/v1/collaboration/**</text>
+  <text x="905" y="262" class="mono" font-size="9.5" fill="#5b6b66" text-anchor="end">/openapi/v1/chat/**</text>
+  <text x="905" y="358" class="mono" font-size="9.5" fill="#5b6b66" text-anchor="end">/openapi/v1/bcsfuse/**</text>
+  <text x="905" y="454" class="mono" font-size="9.5" fill="#5b6b66" text-anchor="end">WEBSOCKET .../bots/messages/ws/**</text>
+  <text x="905" y="550" class="mono" font-size="9.5" fill="#5b6b66" text-anchor="end">/openapi/v1/harnessflow/**</text>
+</svg>
