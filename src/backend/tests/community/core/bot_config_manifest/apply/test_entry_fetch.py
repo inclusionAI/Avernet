@@ -316,3 +316,133 @@ def test_a_refused_transport_becomes_the_same_entry_error(rig):
     with pytest.raises(EntryFetchError) as excinfo:
         pipeline.fetch(make_context(), source_url=URL, category="identity")
     assert "non-public address" in excinfo.value.reason
+
+
+# --- the P0-2 translation family: store faults are the ENTRY's failures ---
+
+
+def test_a_pinned_blob_that_went_missing_heals_via_the_network(rig):
+    """A pinned store-hit whose blob is gone (the store lost the file) is a
+    self-repairing cache miss, not a caller-visible failure: the pin is
+    byte-provable, the guarded fetch reacquires exactly those bytes, and the
+    re-file heals the address. The result reads as an ordinary (network)
+    fetch — from_store False, no fallback note: nothing FAILED."""
+    content, fetcher, _, pipeline = rig
+    _store_serving(content)
+    content.missing_blobs.add(DIGEST)
+
+    result = pipeline.fetch(
+        make_context(), source_url=URL, digest=DIGEST, category="identity"
+    )
+    assert fetcher.requests, "the missing blob must be reacquired"
+    assert result.content == BODY
+    assert result.digest == DIGEST
+    assert result.from_store is False
+    assert result.fallback_reason is None
+    # …and the address healed: the blob is readable again.
+    assert content.read(DIGEST) == BODY
+
+
+def test_a_pinned_blob_that_is_corrupt_loudly_fails_the_entry(rig):
+    """A blob that exists but fails its own digest is disk-side damage — a
+    hit a re-fetch CANNOT heal (the dedup write skips same-size files) — so
+    it stays the 500-family failure it is, on this entry, with its reason;
+    never a silent skip and never a wrapped whole-category abort."""
+    content, _, _, pipeline = rig
+    _store_serving(content)
+    content.corrupt_blobs.add(DIGEST)
+
+    with pytest.raises(EntryFetchError) as excinfo:
+        pipeline.fetch(
+            make_context(), source_url=URL, digest=DIGEST, category="identity"
+        )
+    assert "could not be read" in excinfo.value.reason
+    assert "fails its own digest" in excinfo.value.reason
+
+
+def test_a_store_side_refusal_of_the_lookup_is_the_entrys_error(rig):
+    content, _, _, pipeline = rig
+    from agentclaw.community.core.bot_config_manifest.content.errors import (
+        ContentStoreError,
+    )
+
+    content.lookup_fault = ContentStoreError(
+        "provenance fetched_url exceeds the 2048-char column: length 2200"
+    )
+    with pytest.raises(EntryFetchError) as excinfo:
+        pipeline.fetch(
+            make_context(), source_url=URL, digest="sha256:" + "0" * 64,
+            category="identity",
+        )
+    # The store's own message (never the URL), as this entry's failure.
+    assert "2048-char column" in excinfo.value.reason
+
+
+def test_a_store_side_refusal_of_the_filing_is_the_entrys_error(rig):
+    """The reachable shape the audit named: a redirect destination whose
+    sanitized form exceeds the column — admission cannot see a redirect's
+    Location, so the refusal lands here, AFTER the bytes were fetched. It
+    fails ONE entry with the store's words, not the whole category under a
+    wrapped 'resolve failed' surprise."""
+    content, _, _, pipeline = rig
+    from agentclaw.community.core.bot_config_manifest.content.errors import (
+        ContentStoreError,
+    )
+
+    content.store_fault = ContentStoreError(
+        "provenance fetched_url exceeds the 2048-char column: length 2200"
+    )
+    with pytest.raises(EntryFetchError) as excinfo:
+        pipeline.fetch(make_context(), source_url=URL, category="identity")
+    assert "could not be filed" in excinfo.value.reason
+    assert "2048-char column" in excinfo.value.reason
+
+
+def test_a_refusal_never_triggers_keep_last_even_when_a_receipt_exists(rig):
+    """The ruling, pinned: a refused fetch (non-public address, scheme,
+    hop budget, digest vocabulary) is a statement about the document's
+    configuration — it never left the wire. Falling back to stored bytes
+    would answer SUCCEEDED to a document the platform just refused, so the
+    refusal fails the entry even with keep_last declared and a receipt in
+    hand."""
+    content, _, credentials, _ = rig
+    _store_serving(content)
+    refusing = FakeGuardedFetcher(
+        failures={URL: FetchRefusedError("non-public address for host")}
+    )
+    pipeline = EntryFetcher(refusing, content, credentials)
+
+    with pytest.raises(EntryFetchError) as excinfo:
+        pipeline.fetch(
+            make_context(),
+            source_url=URL,
+            digest=None,
+            category="identity",
+            keep_last=True,
+        )
+    assert "non-public address" in excinfo.value.reason
+    # Nothing was served: the fallback did not fire.
+
+
+def test_a_keep_last_read_failure_names_both_halves(rig):
+    """The source failed, the fallback copy ALSO could not be read: the
+    entry's error carries both reasons — drop either and the caller fixes
+    the wrong thing (the audit called this swallowing)."""
+    content, _, credentials, _ = rig
+    _store_serving(content)
+    content.missing_blobs.add(DIGEST)
+    failing = FakeGuardedFetcher(
+        failures={URL: FetchFailedError("source transport failed")}
+    )
+    pipeline = EntryFetcher(failing, content, credentials)
+
+    with pytest.raises(EntryFetchError) as excinfo:
+        pipeline.fetch(
+            make_context(),
+            source_url=URL,
+            digest=DIGEST,
+            category="identity",
+            keep_last=True,
+        )
+    assert "source transport failed" in excinfo.value.reason
+    assert "keep_last fallback copy could not be read" in excinfo.value.reason

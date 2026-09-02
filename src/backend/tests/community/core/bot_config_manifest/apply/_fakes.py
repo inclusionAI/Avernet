@@ -51,6 +51,13 @@ class FakeManifestContent:
         self.receipts: list[Any] = []
         self.blobs: dict[str, bytes] = {}
         self.store_calls: list[dict[str, Any]] = []
+        # Fault-injection seams for the P0-2 policy tests: the real store's
+        # refusal and fault shapes, so the pipeline's translation of them is
+        # tested against the real taxonomy, not a stand-in exception.
+        self.missing_blobs: set[str] = set()
+        self.corrupt_blobs: set[str] = set()
+        self.store_fault: Exception | None = None
+        self.lookup_fault: Exception | None = None
 
     def store(
         self,
@@ -64,6 +71,13 @@ class FakeManifestContent:
         category=None,
         entry_identity=None,
     ):
+        if self.store_fault is not None:
+            raise self.store_fault
+        # Re-filing heals the address, the way the real store's write does:
+        # a blob restored on disk stops being missing (and a quarantined
+        # corruption mark cannot survive the fresh write).
+        self.missing_blobs.discard(fetched.sha256)
+        self.corrupt_blobs.discard(fetched.sha256)
         # Signed with the real W11 contract: the credential NAME, and the
         # apply/entry linkage the pipeline threads — no secret anywhere.
         record = SimpleNamespace(
@@ -90,11 +104,24 @@ class FakeManifestContent:
         return record
 
     def read(self, digest: str) -> bytes:
+        from agentclaw.community.core.bot_config_manifest.content.errors import (
+            ContentIntegrityError,
+            ContentMissingError,
+        )
+
+        if digest in self.missing_blobs:
+            # The real store's terminal 404 shape: no stored content.
+            raise ContentMissingError(f"no stored content for digest: {digest}")
+        if digest in self.corrupt_blobs:
+            # The real store's 500 shape: present, failing its own digest.
+            raise ContentIntegrityError("stored blob fails its own digest")
         if digest not in self.blobs:
             raise AssertionError(f"no blob for {digest}")
         return self.blobs[digest]
 
     def latest_receipt(self, scope, *, source_url: str):
+        if self.lookup_fault is not None:
+            raise self.lookup_fault
         for record in reversed(self.receipts):
             if record.source_url == source_url:
                 return record

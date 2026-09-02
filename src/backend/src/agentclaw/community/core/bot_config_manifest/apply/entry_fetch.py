@@ -31,12 +31,37 @@ are entitled to be reused when the declaration pinned nothing, and bytes that
 must match the pin when it did — a receipt that disagrees with a declared
 digest is not "last", it is stale, and supplying it would silently pin bytes
 the declaration never named.
+
+**Which failures may fall back is fixed by class, and the ruling is:**
+``FetchFailedError`` — the wire was reached and the source failed — may
+fall back; ``FetchRefusedError`` and credential errors may not. A refusal
+happens *before* any wire contact (non-public address, refused scheme, hop
+budget, declared-digest vocabulary): it is a statement about the document's
+configuration, while keep_last exists for statements about the *source's
+availability*. Masking a refusal with stored bytes would answer SUCCEEDED
+to a document the platform just refused on policy grounds; the same ruling
+keeps a deleted credential name loud — configuration drift is for the
+author to fix, not for the stored copy to absorb.
+
+**Every interaction with the content store — lookup, both reads, the
+re-file after a fetch — is translated here** into :class:`EntryFetchError`:
+a store-side fault answers as that ENTRY's failure with the store's own
+message, never as an unrelated exception escaping resolve to abort the
+whole category under a wrapped surprise. The one leniency: a pinned
+store-hit whose blob has gone missing falls through to the guarded fetch —
+the pin is byte-provable, so a re-fetch re-filed with the store heals the
+address and nobody upstream learns anything happened.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
+from agentclaw.community.core.bot_config_manifest.content.errors import (
+    ContentMissingError,
+    ContentStoreError,
+    ContentStoreFault,
+)
 from agentclaw.community.core.bot_config_manifest.content.models import (
     ContentScope,
 )
@@ -162,7 +187,14 @@ class EntryFetcher:
         """
         target = _substitute(ctx, source_url)
         scope = scope_of(ctx)
-        receipt = self._content.latest_receipt(scope, source_url=target)
+        try:
+            receipt = self._content.latest_receipt(scope, source_url=target)
+        except (ContentStoreError, ContentStoreFault) as exc:
+            # Even the lookup is the entry's own failure with the store's own
+            # message — the alternative is a raw exception escaping resolve,
+            # which the orchestrator answers by aborting the WHOLE category
+            # under a wrapped message nobody can act on.
+            raise EntryFetchError(str(exc)) from exc
 
         if digest is not None and receipt is not None and receipt.digest == digest:
             # Pinned and in the platform's copy: content addressing makes the
@@ -170,17 +202,45 @@ class EntryFetcher:
             # nicety — a re-fetch of a pin can only succeed by redownloading
             # the same bytes, or fail loudly, so the store is the strictly
             # more available source of the same truth.
-            return FetchedEntry(
-                content=self._content.read(digest),
-                digest=digest,
-                from_store=True,
-                content_type=receipt.content_type,
-            )
+            try:
+                return FetchedEntry(
+                    content=self._content.read(digest),
+                    digest=digest,
+                    from_store=True,
+                    content_type=receipt.content_type,
+                )
+            except ContentMissingError:
+                # The platform's copy of the pinned bytes is gone. Fall
+                # THROUGH to the guarded fetch: the pin is byte-provable, so
+                # the fetch re-acquires exactly these bytes and the re-file
+                # below heals the address — a self-repairing cache miss, not
+                # a caller-visible failure.
+                logger.warning(
+                    "[manifest.fetch] the pinned blob is missing; refetching "
+                    "to heal the platform's copy, digest=%s",
+                    digest,
+                )
+            except (ContentStoreError, ContentStoreFault) as exc:
+                # Present but unreadable — e.g. corrupted on disk. Not
+                # healable by re-fetching (the dedup write skips same-size
+                # files), so it stays what it is: platform-side damage,
+                # failed loudly on this entry with its reason.
+                raise EntryFetchError(
+                    "the platform's copy of the pinned content could not be "
+                    f"read: {exc}"
+                ) from exc
 
         try:
             fetched = self._fetch(ctx, target=target, digest=digest, auth=auth,
                                   category=category)
-        except (FetchFailedError, FetchRefusedError) as exc:
+        except FetchRefusedError as exc:
+            # A refusal never left the wire — see the module docstring's
+            # ruling. Policy and configuration are not availability, and
+            # keep_last must not mask them with stored bytes: a document the
+            # platform refuses on policy grounds answers today's failure,
+            # not a silent SUCCEEDED out of the store.
+            raise EntryFetchError(str(exc)) from exc
+        except FetchFailedError as exc:
             if (
                 keep_last
                 and receipt is not None
@@ -192,23 +252,36 @@ class EntryFetcher:
                     target.rpartition("//")[2].partition("/")[0],
                     receipt.digest,
                 )
-                return FetchedEntry(
-                    content=self._content.read(receipt.digest),
-                    digest=receipt.digest,
-                    from_store=True,
-                    content_type=receipt.content_type,
-                    # Visible in the report, not only in the log: the source
-                    # was tried and failed, and the stored bytes stood in.
-                    # The receipt's agreement with the pin (checked above) is
-                    # what makes standing in legitimate; the reason is what
-                    # makes it honest.
-                    fallback_reason=(
-                        "delivered from the platform's stored copy "
-                        "(keep_last): the source fetch failed — %s" % exc
-                    ),
-                )
+                try:
+                    return FetchedEntry(
+                        content=self._content.read(receipt.digest),
+                        digest=receipt.digest,
+                        from_store=True,
+                        content_type=receipt.content_type,
+                        # Visible in the report, not only in the log: the
+                        # source was tried and failed, and the stored bytes
+                        # stood in. The receipt's agreement with the pin
+                        # (checked above) is what makes standing in
+                        # legitimate; the reason is what makes it honest.
+                        fallback_reason=(
+                            "delivered from the platform's stored copy "
+                            "(keep_last): the source fetch failed — %s" % exc
+                        ),
+                    )
+                except (ContentStoreError, ContentStoreFault) as read_exc:
+                    # Both halves, named: why the source was tried, and why
+                    # the fallback could not be read either — dropping
+                    # either half would leave the caller fixing the wrong
+                    # thing.
+                    raise EntryFetchError(
+                        f"{exc}; the keep_last fallback copy could not be "
+                        f"read: {read_exc}"
+                    ) from read_exc
             raise EntryFetchError(str(exc)) from exc
         except CredentialError as exc:
+            # A deleted or unknown credential name is configuration drift —
+            # the same ruling as a policy refusal: loud, for the author to
+            # fix, not absorbed by the stored copy.
             raise EntryFetchError(str(exc)) from exc
         except PrefixAuthorizationError as exc:
             # Raised per hop by the W3 policy (the initial target and every
@@ -218,16 +291,27 @@ class EntryFetcher:
             # — the entry fails, exactly like a refused address.
             raise EntryFetchError(str(exc)) from exc
 
-        self._content.store(
-            fetched,
-            scope=scope,
-            source_url=target,
-            credential_name=auth,
-            modifier=ctx.actor_id,
-            apply_id=ctx.apply_id,
-            category=category,
-            entry_identity=entry_identity,
-        )
+        try:
+            self._content.store(
+                fetched,
+                scope=scope,
+                source_url=target,
+                credential_name=auth,
+                modifier=ctx.actor_id,
+                apply_id=ctx.apply_id,
+                category=category,
+                entry_identity=entry_identity,
+            )
+        except (ContentStoreError, ContentStoreFault) as exc:
+            # The bytes were fetched and verified but could not be filed —
+            # the reachable shape: a redirect destination whose sanitized
+            # form exceeds the provenance column, something admission could
+            # not see. THIS entry's failure, with the store's message (which
+            # never echoes the URL) — not the category's abort.
+            raise EntryFetchError(
+                "the fetched bytes could not be filed with the platform's "
+                f"store: {exc}"
+            ) from exc
         return FetchedEntry(
             content=fetched.bytes,
             digest=fetched.sha256,
