@@ -728,7 +728,7 @@ def test_create_application_coding_maps_template_to_internal_spec(
             json={
                 **_CREATE_BODY,
                 "engine": "claude_code",
-                "engine_properties": {"template": properties},
+                "engine_properties": {"template_config": properties},
             },
         )
 
@@ -771,7 +771,7 @@ def test_create_rejects_unknown_engine_properties_fields(client, svc):
         json={
             **_CREATE_BODY,
             "engine_properties": {
-                "template": {},
+                "template_config": {},
                 "template_uid": "caller-controlled",
             },
         },
@@ -791,11 +791,148 @@ def test_create_engine_properties_for_non_coding_engine_is_combination_error(
         "/openapi/v1/bots",
         json={
             **_CREATE_BODY,
-            "engine_properties": {"template": {"devflow_workflow": "x"}},
+            "engine_properties": {"template_config": {"devflow_workflow": "x"}},
         },
     )
     assert response.status_code == 409, response.json()
     assert response.json()["code"] == 409000
+    svc.create_bot.assert_not_called()
+
+
+_FACTORY_SNAPSHOT_BODY = {
+    "template_type": "applicationCoding",
+    "template_config": {
+        "template_key": "applicationCoding",
+        "template_uid": "aicoding_bot_template",
+        "template_version": "V1",
+        "template_version_id": 2800006,
+        "template_name": "应用 Bot",
+        "image": "reg.antgroup-inc.cn/aixcoding/arca:20260901140138",
+        "resource_spec": {"cpu": "4", "memory": "8g", "disk": "50"},
+        "envs": {"AIX_SKIP_DAEMON": "false"},
+        "capabilities": {"channel_management": False},
+        "bot_template_config": {"id": 2800006},
+        "custom_field_values": {"field_a": "value_a"},
+    },
+}
+
+
+def test_create_factory_snapshot_passthrough_persists_verbatim(
+    client, svc, passport
+):
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        response = client.post(
+            "/openapi/v1/bots",
+            json={
+                **_CREATE_BODY,
+                "engine": "claude_code",
+                "engine_properties": dict(_FACTORY_SNAPSHOT_BODY),
+            },
+        )
+    assert response.status_code == 201, response.json()
+    kwargs = svc.create_bot.call_args.kwargs
+    assert kwargs["template_type"] == "applicationCoding"
+    assert kwargs["template_config"] == _FACTORY_SNAPSHOT_BODY["template_config"]
+
+
+def test_create_factory_snapshot_missing_template_type_is_422(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "engine_properties": {
+                "template_config": _FACTORY_SNAPSHOT_BODY["template_config"]
+            },
+        },
+    )
+    assert response.status_code == 422, response.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_factory_snapshot_server_managed_field_is_422(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "engine_properties": {
+                **_FACTORY_SNAPSHOT_BODY,
+                "template_config": {
+                    **_FACTORY_SNAPSHOT_BODY["template_config"],
+                    "engine_form": "aicoding",
+                },
+            },
+        },
+    )
+    assert response.status_code == 422, response.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_factory_snapshot_mix_is_422(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "engine_properties": {
+                **_FACTORY_SNAPSHOT_BODY,
+                "template_config": {
+                    **_FACTORY_SNAPSHOT_BODY["template_config"],
+                    "devflow_workflow": "x",
+                },
+            },
+        },
+    )
+    assert response.status_code == 422, response.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_handcrafted_with_foreign_template_type_is_422(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "engine_properties": {
+                "template_type": "architect",
+                "template_config": {"devflow_workflow": "x"},
+            },
+        },
+    )
+    assert response.status_code == 422, response.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_rejects_legacy_template_key_name(client, svc):
+    # 改名反向回归:v1 契约的 "template" 键已不存在
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "engine_properties": {"template": {"devflow_workflow": "x"}},
+        },
+    )
+    assert response.status_code == 422, response.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_factory_snapshot_for_service_bot_is_409(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "bot_type": "service",
+            "engine_properties": dict(_FACTORY_SNAPSHOT_BODY),
+        },
+    )
+    assert response.status_code == 409, response.json()
     svc.create_bot.assert_not_called()
 
 
@@ -975,7 +1112,7 @@ def test_post_auth_status_maps_template_to_internal_spec(client, svc, passport):
         json={
             "engine": "claude_code",
             "cluster_name": "ACRA",
-            "engine_properties": {"template": properties},
+            "engine_properties": {"template_config": properties},
         },
     )
 
@@ -1389,7 +1526,7 @@ def test_create_schema_does_not_advertise_engine_options(client):
     assert "engine_options" not in schema["properties"]
 
 
-def test_create_schema_nests_template_under_engine_properties(client):
+def test_create_schema_nests_template_config_under_engine_properties(client):
     schemas = client.app.openapi()["components"]["schemas"]
     create_properties = schemas["BotCreate"]["properties"]
     poll_properties = schemas["BotAuthStatusPoll"]["properties"]
@@ -1403,7 +1540,8 @@ def test_create_schema_nests_template_under_engine_properties(client):
     assert "template_config" not in create_properties
     assert "template_type" not in poll_properties
     assert "template_config" not in poll_properties
-    assert set(engine_properties) == {"template"}
+    assert set(engine_properties) == {"template_type", "template_config"}
+    assert schemas["BotCreateEngineProperties"]["required"] == ["template_config"]
 
 
 def test_auth_status_validates_cluster_against_default_engine(client, svc, passport):

@@ -176,6 +176,10 @@ def test_the_copy_is_signed_with_the_shared_key_only():
 # ── nothing is signed that was not verified first ────────────────────────────
 
 
+# ``ids`` is pinned to the label on purpose: the token values are minted at
+# *collection* time (JWT iat/exp differ by the second), so the default
+# id-by-repr makes pytest-xdist's cross-worker collection check see different
+# test sets whenever workers finish collecting more than a second apart.
 @pytest.mark.parametrize(
     ("label", "token"),
     [
@@ -185,6 +189,14 @@ def test_the_copy_is_signed_with_the_shared_key_only():
         ("wrong issuer", mint([user_principal()], issuer="not-the-gateway")),
         ("no principals claim", mint([user_principal()], omit=("principals",))),
         ("empty", ""),
+    ],
+    ids=[
+        "forged-signature",
+        "expired",
+        "another-upstream",
+        "wrong-issuer",
+        "no-principals-claim",
+        "empty",
     ],
 )
 def test_a_token_that_does_not_verify_is_never_re_addressed(label: str, token: str):

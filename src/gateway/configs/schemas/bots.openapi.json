@@ -845,7 +845,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional engine-specific properties. Omit for a plain bot; provide template for an application-coding bot."
+            "description": "Optional engine-specific properties. Omit for a plain bot; provide template_config (hand-written application-coding or a template-factory snapshot) for a template-backed bot."
           },
           "space_id": {
             "anyOf": [
@@ -874,15 +874,28 @@
         "additionalProperties": false,
         "description": "Engine-specific properties used while creating a bot.",
         "properties": {
-          "template": {
+          "template_config": {
             "additionalProperties": true,
-            "description": "Application-coding template properties. Passed through unchanged to the template validator; platform-managed identity and lifecycle fields are not accepted.",
-            "title": "Template",
+            "description": "Template configuration. Either hand-written application-coding properties, or a template-factory snapshot (identified by template_key + template_uid) echoed verbatim from bot-templates/available-tc-list; platform-managed identity and lifecycle fields are not accepted.",
+            "title": "Template Config",
             "type": "object"
+          },
+          "template_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Template type declared with the config. Required for template-factory snapshots (any value, echoed from available-tc-list); for hand-written application-coding configs omit it or pass applicationCoding.",
+            "title": "Template Type"
           }
         },
         "required": [
-          "template"
+          "template_config"
         ],
         "title": "BotCreateEngineProperties",
         "type": "object"
@@ -51521,7 +51534,7 @@
     "/openapi/v1/bots/{bot_id}/auth-status": {
       "get": {
         "deprecated": true,
-        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.\n\nThis retired GET spelling is plain-bot only: it carries no template\nparameters, so an application-coding creation must be completed through the\nPOST at the same path, which accepts the nested 'engine_properties.template' object.\nPolling an application-coding creation here would complete it as a plain bot,\nwhich is not supported.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/auth-status instead.",
+        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.\n\nThis retired GET spelling is plain-bot only: it carries no template\nparameters, so an application-coding creation must be completed through the\nPOST at the same path, which accepts the nested 'engine_properties.template_config' object.\nPolling an application-coding creation here would complete it as a plain bot,\nwhich is not supported.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/auth-status instead.",
         "operationId": "get_bot_auth_status_openapi_v1_bots__bot_id__auth_status_get",
         "parameters": [
           {

@@ -34,6 +34,7 @@ from ..provisioning import (
     BotProvisioningContext,
     EngineProvisioningStrategy,
     PreparedBotCreate,
+    TEMPLATE_SERVER_RESERVED_FIELDS,
     to_internal_template_config,
 )
 
@@ -48,6 +49,30 @@ AICODING_ENGINE_TYPE = "aicoding"
 CLAUDE_CODE_ENGINE_TYPE = "claude_code"
 TEMPLATE_CONFIG_CONSUMING_ENGINES = frozenset(
     {AICODING_ENGINE_TYPE, CLAUDE_CODE_ENGINE_TYPE}
+)
+#: Public ``engine_properties`` envelope keys (v3 contract). The single
+#: implementation behind the hand-written application-coding shape and the
+#: template-factory snapshot passthrough shape.
+_ENGINE_PROPERTIES_KEYS = frozenset({"template_type", "template_config"})
+_HANDCRAFTED_MIX_REJECT_KEYS = (
+    "devflow_workflow",
+    "yuque_kb_repos",
+    "code_repos",
+)
+#: Template-factory identity keys allowed through the factory branch's PUBLIC
+#: server-managed-field check (design §5.5: the reserved list's concession for
+#: factory snapshots). A resolved snapshot legitimately carries its own
+#: identity/version markers, whereas the same key from a hand-written config
+#: is caller smuggling — ``template_uid`` sits in the shared reserved set for
+#: exactly that hand-written case, so the exemption lives here instead of in
+#: the shared helpers.
+_FACTORY_SNAPSHOT_IDENTITY_KEYS = frozenset(
+    {
+        "template_key",
+        "template_uid",
+        "template_version",
+        "template_version_id",
+    }
 )
 LEGACY_BOT_TYPE_ENV_MAP = {
     "personalCoding": "personal",
@@ -159,14 +184,16 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             BotCreateTemplateValidationMode.LEGACY
         ),
     ) -> PreparedBotCreate:
-        """Parse and validate application-coding create input (single owner).
+        """Parse and validate coding create input (single owner).
 
-        The one implementation behind both input shapes: the public
-        ``engine_properties.template`` contract and the legacy
-        ``template_type="applicationCoding"`` normalized by the create flow.
-        Combination gates keep their historical order, error types and messages
-        so the HTTP mappings answer identically; server-managed-field rejection
-        follows the caller's validation mode.
+        Two input shapes: the public ``engine_properties.template_config``
+        hand-written application-coding config, and the template-factory
+        snapshot passthrough (identified by full template identity:
+        ``template_key`` + ``template_uid``, aligned with
+        ``consumes_template_config``). Combination gates keep their
+        historical order, error types and messages so the HTTP mappings
+        answer identically; server-managed-field rejection follows the
+        caller's validation mode.
         """
         if not engine_properties:
             return PreparedBotCreate()
@@ -174,13 +201,16 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         # Envelope integrity for keys this engine owns. The public schema's
         # ``extra="forbid"`` cannot guard direct Core-level spec construction,
         # so unknown keys fail here instead of being silently ignored.
-        unknown_keys = set(engine_properties) - {"template"}
+        unknown_keys = set(engine_properties) - _ENGINE_PROPERTIES_KEYS
         if unknown_keys:
             raise BotTemplateInvalidError(
                 f"unsupported engine_properties fields: {sorted(unknown_keys)}"
             )
-        if "template" not in engine_properties:
-            raise BotTemplateInvalidError("engine_properties.template is required")
+        if "template_config" not in engine_properties:
+            raise BotTemplateInvalidError(
+                "engine_properties.template_config is required"
+            )
+        declarative_type = engine_properties.get("template_type")
 
         # Historical combination gates, in their historical order. The gate set
         # and messages are mirrored (production-dead) in
@@ -204,7 +234,21 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 "application coding is personal-space only"
             )
 
-        template = engine_properties["template"]
+        template = engine_properties["template_config"]
+        if self._is_factory_snapshot(template):
+            return self._prepare_factory_snapshot(
+                declarative_type=declarative_type,
+                template=template,
+                template_validation_mode=template_validation_mode,
+            )
+
+        if declarative_type is not None and declarative_type != "applicationCoding":
+            # Non-factory inputs may only declare the legacy type; anything
+            # else must come through a factory snapshot instead.
+            raise BotTemplateInvalidError(
+                "engine_properties.template_type must be applicationCoding "
+                "for non factory snapshots"
+            )
         if template is None:
             # Core-only legacy compatibility shape: the key's presence is the
             # application-coding intent, ``None`` the intentionally-omitted
@@ -214,15 +258,6 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 template_type="applicationCoding",
                 template_config=None,
                 requires_workspace_hosting=True,
-            )
-        if not template:
-            # Byte-identical to the historical ladder: only genuinely empty
-            # payloads are rejected. Truthy non-dict values (legacy internal
-            # callers forwarding raw JSON ``template_config``) keep the
-            # historical pass-through — the expected-type checks and
-            # reserved-field scan below treat them exactly as before.
-            raise BotTemplateInvalidError(
-                "applicationCoding template_config must not be empty"
             )
         sanitized = to_internal_template_config(
             template,
@@ -234,6 +269,73 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             template_type="applicationCoding",
             template_config=_validate_application_coding_config(sanitized),
             requires_workspace_hosting=True,
+        )
+
+    @staticmethod
+    def _is_factory_snapshot(template: Any) -> bool:
+        """Full template identity, matching ``consumes_template_config``.
+
+        ``template_key`` AND ``template_uid`` both non-empty: a snapshot with
+        only scattered factory keys stays on the hand-crafted path (factory
+        keys survive as unknown keys) so creation perception never diverges
+        from runtime consumption.
+        """
+        if not isinstance(template, Mapping):
+            return False
+        return bool(template.get("template_key") and template.get("template_uid"))
+
+    def _prepare_factory_snapshot(
+        self,
+        *,
+        declarative_type: Any,
+        template: Any,
+        template_validation_mode: BotCreateTemplateValidationMode,
+    ) -> PreparedBotCreate:
+        """Validate and pass through a template-factory snapshot verbatim.
+
+        Passthrough contract: the caller (available-tc-list consumer) owns
+        the snapshot semantics; we only enforce identity completeness, the
+        no-mix rule against hand-written keys, and (in PUBLIC mode) the
+        server-managed-field ownership rules. No ``template_type`` value
+        validation — the factory vocabulary is open.
+        """
+        if not isinstance(template, dict) or not template:
+            raise BotTemplateInvalidError(
+                "applicationCoding template_config must not be empty"
+            )
+        if not (isinstance(declarative_type, str) and declarative_type.strip()):
+            raise BotTemplateInvalidError(
+                "engine_properties.template_type is required for template "
+                "factory snapshots"
+            )
+        mixed = [key for key in _HANDCRAFTED_MIX_REJECT_KEYS if key in template]
+        if mixed:
+            raise BotTemplateInvalidError(
+                "template factory snapshot must not mix application-coding "
+                f"fields: {sorted(mixed)}"
+            )
+        if template_validation_mode is BotCreateTemplateValidationMode.PUBLIC:
+            # Design §5.5: the factory branch reuses the shared
+            # server-managed-field contract minus the factory identity keys.
+            # The shared helper cannot express that split — its reserved set
+            # governs the hand-written surface, where ``template_uid`` is
+            # caller smuggling — so the check lives here instead.
+            reserved = sorted(
+                (TEMPLATE_SERVER_RESERVED_FIELDS - _FACTORY_SNAPSHOT_IDENTITY_KEYS)
+                & set(template)
+            )
+            if reserved:
+                raise BotTemplateInvalidError(
+                    f"template_config contains server-managed fields: {reserved}"
+                )
+        return PreparedBotCreate(
+            template_type=declarative_type,
+            template_config=to_internal_template_config(
+                template, reject_server_managed_fields=False
+            ),
+            # No workspace-hosting gate: aligned with the legacy TC direct
+            # path (create_flow generic branch), NOT the applicationCoding
+            # DIMA hosting requirement.
         )
 
     def resolve_bot_engine(self, bot: dict[str, Any]) -> str | None:

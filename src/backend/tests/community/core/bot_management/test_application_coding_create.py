@@ -2,10 +2,10 @@
 
 The policy's single implementation is
 ``AicodingProvisioningStrategy.prepare_create``. ``create_flow._prepare_create``
-routes both input shapes into it — the public ``engine_properties`` bag and the
-legacy ``template_type="applicationCoding"`` pair normalized to
-``{"template": config}`` — so the tests below cover the strategy directly plus
-the flow's routing on top.
+routes both input shapes into it — the public ``engine_properties`` bag (v3 key
+domain: ``template_type`` / ``template_config``) and the legacy
+``template_type="applicationCoding"`` pair normalized into it — so the tests
+below cover the strategy directly plus the flow's routing on top.
 """
 
 from __future__ import annotations
@@ -100,11 +100,11 @@ def test_application_coding_engine_gate_reads_the_strategy_instance() -> None:
     # The aicoding strategy class is registered for both engine types, but
     # application-coding creation stays claude_code-only.
     prepared = _strategy_prepare(
-        "claude_code", {"template": {"devflow_workflow": "x"}}
+        "claude_code", {"template_config": {"devflow_workflow": "x"}}
     )
     assert prepared.template_type == "applicationCoding"
     with pytest.raises(BotCombinationUnsupportedError):
-        _strategy_prepare("aicoding", {"template": {"devflow_workflow": "x"}})
+        _strategy_prepare("aicoding", {"template_config": {"devflow_workflow": "x"}})
 
 
 def test_default_engine_rejects_application_coding_as_combination_error() -> None:
@@ -114,7 +114,7 @@ def test_default_engine_rejects_application_coding_as_combination_error() -> Non
     with pytest.raises(BotCombinationUnsupportedError):
         DefaultProvisioningStrategy("openclaw").prepare_create(
             engine_type="openclaw",
-            engine_properties={"template": {"devflow_workflow": "x"}},
+            engine_properties={"template_config": {"devflow_workflow": "x"}},
             bot_type="personal",
             deployment_mode="cloud",
             space_kind="personal",
@@ -128,7 +128,7 @@ def test_default_engine_answers_cloud_only_before_the_engine_gate() -> None:
     with pytest.raises(BotCombinationUnsupportedError, match="cloud-only"):
         DefaultProvisioningStrategy("openclaw").prepare_create(
             engine_type="openclaw",
-            engine_properties={"template": {"devflow_workflow": "x"}},
+            engine_properties={"template_config": {"devflow_workflow": "x"}},
             bot_type="personal",
             deployment_mode="local",
             space_kind="personal",
@@ -169,7 +169,7 @@ def test_unknown_engine_properties_keys_are_rejected_by_the_strategy() -> None:
     # Core-level invariant: the HTTP schema's extra="forbid" cannot guard
     # direct spec construction by internal callers.
     with pytest.raises(BotTemplateInvalidError, match="unsupported"):
-        _strategy_prepare("claude_code", {"template": {"a": 1}, "other": 2})
+        _strategy_prepare("claude_code", {"template_config": {"a": 1}, "other": 2})
 
 
 # ── strategy policy ────────────────────────────────────────────────────────
@@ -185,7 +185,7 @@ def test_prepare_plain_bot_has_no_hosting_requirement() -> None:
 @pytest.mark.parametrize(
     ("overrides", "error"),
     [
-        ({"engine_properties": {"template": {}}}, BotTemplateInvalidError),
+        ({"engine_properties": {"template_config": {}}}, BotTemplateInvalidError),
         ({"engine_type": "aicoding"}, BotCombinationUnsupportedError),
         ({"bot_type": "service"}, BotCombinationUnsupportedError),
         ({"space_kind": "team"}, BotCombinationUnsupportedError),
@@ -197,7 +197,7 @@ def test_prepare_rejects_invalid_application_coding_combinations(
 ) -> None:
     params = dict(
         engine_type="claude_code",
-        engine_properties={"template": {"devflow_workflow": "x"}},
+        engine_properties={"template_config": {"devflow_workflow": "x"}},
         bot_type="personal",
         deployment_mode="cloud",
         space_kind="personal",
@@ -208,9 +208,9 @@ def test_prepare_rejects_invalid_application_coding_combinations(
 
 
 def test_prepare_application_coding_without_config_preserves_legacy_default() -> None:
-    # ``{"template": None}`` is the Core-only legacy compatibility shape: key
-    # presence is the intent, None the intentionally-omitted config.
-    prepared = _strategy_prepare("claude_code", {"template": None})
+    # ``{"template_config": None}`` is the Core-only legacy compatibility shape:
+    # key presence is the intent, None the intentionally-omitted config.
+    prepared = _strategy_prepare("claude_code", {"template_config": None})
     assert prepared.template_type == "applicationCoding"
     assert prepared.template_config is None
     assert prepared.requires_workspace_hosting is True
@@ -218,17 +218,19 @@ def test_prepare_application_coding_without_config_preserves_legacy_default() ->
 
 def test_prepare_application_coding_rejects_supplied_empty_config() -> None:
     with pytest.raises(BotTemplateInvalidError, match="must not be empty"):
-        _strategy_prepare("claude_code", {"template": {}})
+        _strategy_prepare("claude_code", {"template_config": {}})
 
 
 def test_prepare_application_coding_rejects_known_field_with_wrong_type() -> None:
     with pytest.raises(BotTemplateInvalidError, match="code_repos"):
-        _strategy_prepare("claude_code", {"template": {"code_repos": "not-a-list"}})
+        _strategy_prepare(
+            "claude_code", {"template_config": {"code_repos": "not-a-list"}}
+        )
 
 
 def test_prepare_valid_application_coding_returns_detached_config() -> None:
     payload = {"devflow_workflow": "x"}
-    prepared = _strategy_prepare("claude_code", {"template": payload})
+    prepared = _strategy_prepare("claude_code", {"template_config": payload})
     assert prepared.template_config == payload
     assert prepared.template_config is not payload
     assert prepared.requires_workspace_hosting is True
@@ -238,7 +240,7 @@ def test_legacy_application_coding_preserves_template_uid() -> None:
     # Internal snapshots may carry platform-managed fields; the LEGACY mode
     # (the internal callers' default) must keep accepting them (#1442).
     payload = {"template_uid": "legacy-template", "devflow_workflow": "x"}
-    prepared = _strategy_prepare("claude_code", {"template": payload})
+    prepared = _strategy_prepare("claude_code", {"template_config": payload})
     assert prepared.template_config == payload
     assert prepared.template_config is not payload
     assert prepared.requires_workspace_hosting is True
@@ -249,7 +251,7 @@ def test_legacy_non_dict_template_config_keeps_historical_passthrough() -> None:
     # pre-strategy ladder let truthy non-dict values through (only genuinely
     # empty payloads were rejected). The strategy keeps that contract instead
     # of tightening it into a rejection.
-    prepared = _strategy_prepare("claude_code", {"template": "legacy-ref"})
+    prepared = _strategy_prepare("claude_code", {"template_config": "legacy-ref"})
     assert prepared.template_type == "applicationCoding"
     assert prepared.template_config == "legacy-ref"
     assert prepared.requires_workspace_hosting is True
@@ -262,7 +264,7 @@ def test_public_application_coding_rejects_template_uid() -> None:
     ):
         _strategy_prepare(
             "claude_code",
-            {"template": {"template_uid": "caller-value"}},
+            {"template_config": {"template_uid": "caller-value"}},
             template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
         )
 
@@ -286,7 +288,7 @@ def test_flow_routes_both_input_shapes_through_the_same_strategy() -> None:
             engine_type="claude_code",
             bot_type="personal",
             bot_name="Coding Bot",
-            engine_properties={"template": {"devflow_workflow": "x"}},
+            engine_properties={"template_config": {"devflow_workflow": "x"}},
         )
     )
     assert legacy.template_type == modern.template_type == "applicationCoding"
@@ -307,7 +309,7 @@ def test_flow_output_satisfies_its_own_mixed_source_invariant() -> None:
             engine_type="claude_code",
             bot_type="personal",
             bot_name="Coding Bot",
-            engine_properties={"template": {"devflow_workflow": "x"}},
+            engine_properties={"template_config": {"devflow_workflow": "x"}},
         )
     )
     assert prepared.template_type == "applicationCoding"
@@ -353,7 +355,7 @@ def test_flow_rejects_mixed_template_sources() -> None:
                 bot_name="Coding Bot",
                 template_type="applicationCoding",
                 template_config={"devflow_workflow": "x"},
-                engine_properties={"template": {"devflow_workflow": "x"}},
+                engine_properties={"template_config": {"devflow_workflow": "x"}},
             )
         )
 
@@ -600,7 +602,7 @@ def test_public_input_cannot_smuggle_the_form_marker() -> None:
     with pytest.raises(BotTemplateInvalidError) as excinfo:
         _strategy_prepare(
             engine_properties={
-                "template": {"devflow_workflow": "x", "engine_form": "aicoding"}
+                "template_config": {"devflow_workflow": "x", "engine_form": "aicoding"}
             },
             template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
         )
@@ -608,8 +610,140 @@ def test_public_input_cannot_smuggle_the_form_marker() -> None:
     # The legacy internal shape may carry it (platform-written snapshot).
     prepared = _strategy_prepare(
         engine_properties={
-            "template": {"devflow_workflow": "x", "engine_form": "aicoding"}
+            "template_config": {"devflow_workflow": "x", "engine_form": "aicoding"}
         },
         template_validation_mode=BotCreateTemplateValidationMode.LEGACY,
     )
     assert prepared.template_config["engine_form"] == "aicoding"
+
+
+# ── template-factory snapshot passthrough (v3 contract) ─────────────────────
+
+_FACTORY_SNAPSHOT = {
+    "template_key": "applicationCoding",
+    "template_uid": "aicoding_bot_template",
+    "template_version": "V1",
+    "template_version_id": 2800006,
+    "template_name": "应用 Bot",
+    "image": "reg.antgroup-inc.cn/aixcoding/aixcoding-arca:20260901140138",
+    "resource_spec": {"cpu": "4", "memory": "8g", "disk": "50"},
+    "envs": {"AIX_SKIP_DAEMON": "false"},
+    "capabilities": {"channel_management": False},
+    "bot_template_config": {"id": 2800006, "custom_field_config": {}},
+    "custom_field_values": {"field_a": "value_a"},
+}
+
+
+def test_factory_snapshot_passthrough_keeps_type_and_config_verbatim() -> None:
+    prepared = _strategy_prepare(
+        "claude_code",
+        {
+            "template_type": "applicationCoding",
+            "template_config": dict(_FACTORY_SNAPSHOT),
+        },
+    )
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config == _FACTORY_SNAPSHOT
+    # requires_workspace_hosting 与老 TC 直传链路一致:工厂模板不加 hosting 门槛
+    assert prepared.requires_workspace_hosting is not True
+
+
+def test_factory_snapshot_accepts_any_template_type_value() -> None:
+    snapshot = dict(_FACTORY_SNAPSHOT, template_key="userCustomTemplate")
+    prepared = _strategy_prepare(
+        "claude_code",
+        {"template_type": "custom_xxx", "template_config": snapshot},
+    )
+    assert prepared.template_type == "custom_xxx"
+    assert prepared.template_config == snapshot
+
+
+def test_factory_snapshot_requires_declared_template_type() -> None:
+    with pytest.raises(BotTemplateInvalidError) as excinfo:
+        _strategy_prepare(
+            "claude_code", {"template_config": dict(_FACTORY_SNAPSHOT)}
+        )
+    assert "template_type" in str(excinfo.value)
+
+
+def test_factory_snapshot_rejects_blank_template_type() -> None:
+    with pytest.raises(BotTemplateInvalidError):
+        _strategy_prepare(
+            "claude_code",
+            {
+                "template_type": " ",
+                "template_config": dict(_FACTORY_SNAPSHOT),
+            },
+        )
+
+
+def test_factory_snapshot_rejects_handcrafted_field_mix() -> None:
+    mixed = dict(_FACTORY_SNAPSHOT, devflow_workflow="app-flow")
+    with pytest.raises(BotTemplateInvalidError) as excinfo:
+        _strategy_prepare(
+            "claude_code",
+            {"template_type": "applicationCoding", "template_config": mixed},
+        )
+    assert "devflow_workflow" in str(excinfo.value)
+
+
+def test_factory_snapshot_public_mode_rejects_server_managed_fields() -> None:
+    polluted = dict(_FACTORY_SNAPSHOT, engine_form="aicoding")
+    with pytest.raises(BotTemplateInvalidError):
+        _strategy_prepare(
+            "claude_code",
+            {"template_type": "applicationCoding", "template_config": polluted},
+            template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+        )
+
+
+def test_factory_snapshot_keeps_factory_marker_keys_in_public_mode() -> None:
+    # template_key/template_uid/version 键不在 RESERVED 清单,PUBLIC 模式放行
+    prepared = _strategy_prepare(
+        "claude_code",
+        {"template_type": "applicationCoding", "template_config": dict(_FACTORY_SNAPSHOT)},
+        template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
+    )
+    assert prepared.template_config["template_uid"] == "aicoding_bot_template"
+
+
+def test_factory_snapshot_gates_match_application_coding() -> None:
+    props = {"template_type": "architect", "template_config": dict(_FACTORY_SNAPSHOT)}
+    with pytest.raises(BotCombinationUnsupportedError):
+        _strategy_prepare("claude_code", props, deployment_mode="local")
+    with pytest.raises(BotCombinationUnsupportedError):
+        _strategy_prepare("openclaw", props)
+    with pytest.raises(BotCombinationUnsupportedError):
+        _strategy_prepare("claude_code", props, bot_type="service")
+    with pytest.raises(BotCombinationUnsupportedError):
+        _strategy_prepare("claude_code", props, space_kind="team")
+
+
+def test_handcrafted_path_rejects_foreign_template_type() -> None:
+    with pytest.raises(BotTemplateInvalidError):
+        _strategy_prepare(
+            "claude_code",
+            {"template_type": "architect", "template_config": {"devflow_workflow": "x"}},
+        )
+
+
+def test_engine_properties_with_template_key_only_stays_handcrafted() -> None:
+    # 不完整快照(缺 template_uid)→ 走手填路径,工厂键按未知键存活(现状)
+    prepared = _strategy_prepare(
+        "claude_code",
+        {
+            "template_config": {
+                "template_key": "applicationCoding",
+                "devflow_workflow": "x",
+            }
+        },
+    )
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config["template_key"] == "applicationCoding"
+
+
+def test_legacy_application_coding_pair_is_wrapped_as_template_config() -> None:
+    prepared = _prepare_spec(_application_coding_spec())
+    # create_flow 把 legacy pair 归一成 strategy 的 v3 键域后消费
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config == {"devflow_workflow": "x"}
