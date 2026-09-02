@@ -84,11 +84,6 @@ export interface ChatInjectParams {
   attachments?: Array<Record<string, unknown>>;
 }
 
-export interface ChatAbortParams {
-  session_key: string;
-  run_id?: string;
-}
-
 export interface RouteSelector {
   type: 'name' | 'bot';
   value: string;
@@ -248,14 +243,6 @@ function parseChatParams(value: unknown, allowSendFields: boolean): ChatSendPara
       : {}),
     ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
   };
-}
-
-export function parseChatAbortParams(value: unknown): ChatAbortParams {
-  const record = asRecord(value);
-  const sessionKey = asNonEmptyString(record?.session_key);
-  if (!record || !sessionKey) throw new Error('chat.abort requires session_key');
-  const runId = asNonEmptyString(record.run_id);
-  return { session_key: sessionKey, ...(runId ? { run_id: runId } : {}) };
 }
 
 export function extractMessageText(message: MessageContent): string {

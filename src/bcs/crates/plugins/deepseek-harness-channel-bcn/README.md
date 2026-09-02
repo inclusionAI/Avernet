@@ -19,7 +19,7 @@ precedence without changing the rest of the bridge.
 
 - Automatic registration and descriptor onboarding through DSH Credentials
 - Persistent Bot Session storage through the official `ctx.credentials` seam
-- `chat.send`, `chat.inject`, and `chat.abort` downlink handling
+- `chat.send` and `chat.inject` downlink handling
 - Isolated DSH Agent/Session reuse for each BCN conversation, including
   multiple V2 sessions that share one group-level `session_key`
 - DSH Agent preset composition matching Web sessions; new BCN sessions use the
@@ -34,6 +34,10 @@ precedence without changing the rest of the bridge.
 
 The plugin does not create an OpenClaw-style `.bcs/session.json` file or any
 other private session directory.
+
+The initial release does not implement `chat.abort` or `chat.history`.
+Unsupported BCN requests receive the WebSocket client's standard `NOT_FOUND`
+response, and unsolicited unsupported events are ignored.
 
 BCN messages run in a dedicated in-process DSH Agent created through
 `ctx.agents.create` or restored through `ctx.agents.resume`; they do not reuse a

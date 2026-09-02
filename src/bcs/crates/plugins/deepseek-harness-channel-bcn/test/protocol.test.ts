@@ -22,10 +22,10 @@ test('accepts well-formed BCN response errors and rejects incomplete error frame
 });
 
 test('accepts BCN events with the protocol-optional sequence field', () => {
-  assert.deepEqual(parseFrame({ type: 'event', event: 'chat.abort', payload: { run_id: 'run-1' } }), {
+  assert.deepEqual(parseFrame({ type: 'event', event: 'bot.notice', payload: { message: 'ready' } }), {
     type: 'event',
-    event: 'chat.abort',
-    payload: { run_id: 'run-1' },
+    event: 'bot.notice',
+    payload: { message: 'ready' },
   });
-  assert.equal(parseFrame({ type: 'event', event: 'chat.abort', payload: {}, seq: -1 }), undefined);
+  assert.equal(parseFrame({ type: 'event', event: 'bot.notice', payload: {}, seq: -1 }), undefined);
 });

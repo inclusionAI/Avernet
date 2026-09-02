@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { test } from 'node:test';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { resolveEndpoint } from '../src/endpoint.js';
-import type { BotSession, RequestFrame } from '../src/protocol.js';
+import type { BotSession, RequestFrame, ResponseFrame } from '../src/protocol.js';
 import { BcnWsClient } from '../src/ws-client.js';
 import { testConfig, waitFor } from './fixtures.js';
 
@@ -106,6 +106,22 @@ test('negotiates BCN Bot WebSocket V2, dispatches requests, and sends canonical 
     () => server.frames.some(frame => frame.type === 'res' && frame.id === 'bcs-request-1'),
     'client did not respond to BCS request',
   );
+
+  socket.send(JSON.stringify({
+    type: 'req',
+    id: 'unsupported-abort',
+    method: 'chat.abort',
+    params: { session_key: 'session-1' },
+  }));
+  await waitFor(
+    () => server.frames.some(frame => frame.type === 'res' && frame.id === 'unsupported-abort'),
+    'client did not reject unsupported chat.abort',
+  );
+  const unsupported = server.frames.find(
+    frame => frame.type === 'res' && frame.id === 'unsupported-abort',
+  ) as ResponseFrame | undefined;
+  assert.equal(unsupported?.ok, false);
+  assert.equal(unsupported?.error?.code, 'NOT_FOUND');
 
   client.sendEvent('agent', {
     run_id: 'run-1',

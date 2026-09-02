@@ -341,15 +341,18 @@ test('isolates V2 sessions that share a group-level session_key and reuses each 
   await client.deliverRequest('chat.inject', 'inject-first', firstInject);
   assert.equal(firstState.injections.length, 1);
   assert.equal(secondState.injections.length, 0);
+  await bridge.dispose();
+});
 
-  await client.deliverRequest('chat.abort', 'abort-ambiguous', { session_key: sharedSessionKey });
-  assert.equal(client.responses.at(-1)?.payload?.aborted, false);
-  assert.deepEqual(firstState.cancels, []);
-  assert.deepEqual(secondState.cancels, []);
+test('does not register chat.abort or chat.history in the initial release', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
 
-  await client.deliverRequest('chat.abort', 'abort-first', { session_key: firstSessionId });
-  assert.deepEqual(firstState.cancels, ['user']);
-  assert.deepEqual(secondState.cancels, []);
+  assert.equal(client.requestHandlers.has('chat.abort'), false);
+  assert.equal(client.eventHandlers.has('chat.abort'), false);
+  assert.equal(client.requestHandlers.has('chat.history'), false);
   await bridge.dispose();
 });
 
@@ -703,7 +706,7 @@ test('fails closed when manager-worker recipient_role is absent and hides route 
   await bridge.dispose();
 });
 
-test('deduplicates inbound runs and emits exactly one aborted or error terminal', async () => {
+test('deduplicates inbound runs and emits exactly one DSH aborted or error terminal', async () => {
   const harness = new FakeHarness();
   const client = new FakeClient();
   const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
@@ -713,8 +716,6 @@ test('deduplicates inbound runs and emits exactly one aborted or error terminal'
   const state = harness.state('abort-session');
   assert.equal(state.followups.length, 1);
   emitClaim(harness, state, state.followups[0] as UserMessage);
-  await client.deliverRequest('chat.abort', 'abort-request', { session_key: 'abort-session', run_id: 'same-run' });
-  assert.deepEqual(state.cancels, ['user']);
   emitSession(harness, state, event({
     type: 'turn/end', seq: 1, time: 1,
     data: { turn: 1, reason: { kind: 'aborted', reason: { kind: 'user' } } },

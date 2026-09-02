@@ -13,10 +13,8 @@ import {
   asNonEmptyString,
   asRecord,
   extractMessageText,
-  parseChatAbortParams,
   parseChatInjectParams,
   parseChatSendParams,
-  type ChatAbortParams,
   type ChatEventRouting,
   type ChatInjectParams,
   type ChatSendParams,
@@ -71,8 +69,6 @@ interface ToolResultSnapshot {
 
 interface RunContext {
   runId: string;
-  sessionKey: string;
-  sessionIdentity: string;
   sessionId: SessionId;
   groupId: string;
   bcsSessionId?: string;
@@ -117,8 +113,6 @@ export class BcnBridge {
     this.disposers.push(
       this.client.onRequest('chat.send', frame => this.handleChatSend(frame)),
       this.client.onRequest('chat.inject', frame => this.handleChatInject(frame)),
-      this.client.onRequest('chat.abort', frame => this.handleChatAbortRequest(frame)),
-      this.client.onEvent('chat.abort', frame => this.handleChatAbortEvent(frame.payload)),
       this.ctx.on('agent/inbox/claimed', payload => this.handleInboxClaimed(payload)),
       this.ctx.on('agent/inbox/discarded', payload => this.handleInboxDiscarded(payload)),
       this.ctx.on('session/event', (session, event) => this.handleSessionEvent(session, event)),
@@ -306,8 +300,6 @@ export class BcnBridge {
     const toolProfile = resolveToolProfile(params.session_context);
     const run: RunContext = {
       runId,
-      sessionKey: params.session_key,
-      sessionIdentity,
       sessionId,
       groupId: params.bcs_group_id,
       ...(params.bcs_session_id ? { bcsSessionId: params.bcs_session_id } : {}),
@@ -367,50 +359,6 @@ export class BcnBridge {
         retryable: true,
       });
     }
-  }
-
-  private async handleChatAbortRequest(frame: RequestFrame): Promise<void> {
-    let params: ChatAbortParams;
-    try {
-      params = parseChatAbortParams(frame.params);
-    } catch (error) {
-      this.client.sendResponse(frame.id, false, undefined, invalidRequest(error));
-      return;
-    }
-    const aborted = this.abortRun(params);
-    this.client.sendResponse(frame.id, true, { aborted });
-  }
-
-  private async handleChatAbortEvent(payload: Record<string, unknown>): Promise<void> {
-    try {
-      this.abortRun(parseChatAbortParams(payload));
-    } catch {
-      this.log?.warn('Ignoring invalid BCN chat.abort event');
-    }
-  }
-
-  private abortRun(params: ChatAbortParams): boolean {
-    let run: RunContext | undefined;
-    if (params.run_id) {
-      run = this.runs.get(params.run_id);
-    } else {
-      const candidates = [...this.runs.values()].filter(
-        item => runMatchesSession(item, params.session_key) && !item.terminal,
-      );
-      // COSEC: a V2 group-level session_key may match multiple isolated
-      // conversations. Never cancel an arbitrary run when the scope is ambiguous.
-      if (candidates.length !== 1) return false;
-      run = candidates[0];
-    }
-    if (!run || run.terminal || !runMatchesSession(run, params.session_key)) return false;
-    const agent = this.ctx.agents.get(run.sessionId);
-    if (!agent) {
-      this.sendTerminal(run, 'aborted');
-      return true;
-    }
-    agent.cancel({ kind: 'user' });
-    this.sendTerminal(run, 'aborted');
-    return true;
   }
 
   private handleInboxClaimed(payload: { agent: Agent; message: { id: unknown }; turn: number }): void {
@@ -769,10 +717,6 @@ function visibleText(content: ContentBlock[]): string {
 
 function turnKey(sessionId: SessionId, turn: number): string {
   return `${String(sessionId)}:${turn}`;
-}
-
-function runMatchesSession(run: RunContext, value: string): boolean {
-  return run.sessionKey === value || run.sessionIdentity === value;
 }
 
 function invalidRequest(error: unknown): { code: string; message: string; retryable: boolean } {
