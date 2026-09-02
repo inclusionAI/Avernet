@@ -543,38 +543,25 @@ class ResourcesMaterialiser(Materialiser):
 
 
 def _delivery_refusal(identity: str, data: bytes) -> str | None:
-    """The write chain's own admission rules, asked before the first delete.
+    """The write chain's own admission predicate, asked before the first delete.
 
-    ``ResourceFileService.upload_file`` refuses extensions outside its
-    allow-list (no ``.sh``, no extensionless files) and content over its
-    size cap. A refusal that first lands on the write side would arrive
-    *after* the sentinel deleted the declared tree — a deterministically
-    half-written tree on every re-apply. So the materialiser re-asks the
-    same rules in ``resolve``, where failing costs nothing: the constants
-    are imported at call time so this module's importers still pull no
-    service graph, and the fake-driven tests cannot drift from the real
-    gate because both read the same constants.
+    ``admission_refusal`` (beside the constants in the file-service module)
+    is the one rule both surfaces ask: ``upload_file`` raises it, and this
+    gate asks it in ``resolve`` so a refusal that would first land on the
+    write side never does — write-side refusals arrive *after* the declared
+    tree is deleted, a deterministically half-written tree on every
+    re-apply. The import stays at call time so this module's importers pull
+    no service graph.
 
     Inline ``content`` is the other reason the gate lives here: it never
     goes through the fetch funnel's caps, so this is the only line an
     oversized inline entry meets.
     """
     from agentclaw.community.core.resources.services.file_service import (
-        ALLOWED_EXTENSIONS,
-        MAX_FILE_SIZE,
+        admission_refusal,
     )
 
-    if Path(identity.rpartition("/")[2]).suffix.lower() not in ALLOWED_EXTENSIONS:
-        return (
-            "the workspace file surface does not allow this file type; "
-            f"allowed extensions: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
-        )
-    if len(data) > MAX_FILE_SIZE:
-        return (
-            "content exceeds the workspace file surface's size cap "
-            f"({MAX_FILE_SIZE // (1024 * 1024)}MB)"
-        )
-    return None
+    return admission_refusal(identity.rpartition("/")[2], data)
 
 
 def _coords(ctx: ApplyContext) -> tuple[str, str, str]:
