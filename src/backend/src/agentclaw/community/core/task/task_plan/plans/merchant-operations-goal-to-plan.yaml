@@ -1,19 +1,18 @@
 template_id: merchant-operations-goal-to-plan
 entry_bot_id: 20260901_kcvvkqqs
 entry_name: 店主Bot
-# execute 会根据 task_spec 的经营语义自动补入 static_plan_id；调用方无需传模板 id。
+# 每个节点只描述本角色工作边界;上游正文由 StaticPlanRuntime 统一透传(接自/上游产出正文/本角色任务),
+# 不在 task 里替下游预写专业 checklist。输入=上一Bot输出(handoff 接力)。
 task_type: static_plan
 input_schema:
   okr:
     type: string
     required: true
 
-# 每个节点只描述本角色的工作边界；上游正文由 StaticPlanRuntime 统一透传，
-# 不在 input/task 中替下游预写专业 checklist。
 nodes:
-  - id: frame_goal
-    name: 明确经营目标
-    title: 明确经营目标与约束
+  - id: set_redlines
+    name: 定价格红线封任务单
+    title: 店主·定红线封任务单
     type: bot
     bot_id: 20260901_kcvvkqqs
     depends_on: []
@@ -22,87 +21,73 @@ nodes:
     output:
       handoff: $.result
     task: |
-      你是店主侧经营负责人。接收店主的原始经营目标，整理为目标卡：明确结果、周期、门店、客群、服务范围、已知约束，以及事实、假设和未知。只做目标澄清，不替营销、会员、产能、供应或风险角色预先完成专业判断。
+      你是店主侧经营负责人(第一次出场)。基于店主的经营目标与预算/备货上限,用自持单品成本账本算出价格红线(补贴率/最低折扣/最低价)与平台合规红线,封成一套公共约束任务单:活动窗口、营业时段、促销预算上限、备货现金占用上限、价格红线、平台合规红线、客流目标。单品成本/毛利底线/授权清单自持不下发,留给后续利润核算。只定红线封任务单,不替门店运营、营销、评审或实施角色做专业判断。
 
-  - id: design_marketing
-    name: 设计营销打法
-    title: 设计营销打法与公开承诺
-    type: bot
-    bot_id: 20260901_mylvdi1o
-    depends_on: [frame_goal]
-    input:
-      handoff: $.frame_goal.output.handoff
-    output:
-      handoff: $.result
-    task: |
-      你接店主Bot的目标卡。把经营目标转成可解释、可公开的营销打法，并标出关键假设、依赖和无法确认的问题。你的职责是营销机制与公开承诺，不替会员服务、客流产能、供应履约或风险角色下结论。
-
-  - id: design_membership_service
-    name: 设计会员与服务承接
-    title: 设计会员与服务承接
+  - id: ops_capacity
+    name: 测产能出画像
+    title: 门店运营·测产能出画像·带营销约束
     type: bot
     bot_id: 20260901_5r6cdh02
-    depends_on: [design_marketing]
+    depends_on: [set_redlines]
     input:
-      handoff: $.design_marketing.output.handoff
+      handoff: $.set_redlines.output.handoff
     output:
       handoff: $.result
     task: |
-      你接营销Bot的营销方向与公开机制。判断这些承诺如何由会员分层、服务组合、权益兑现和服务边界承接；自行决定需要核验的专业信息，不假定上游已经列全。无法确认的内容保留为条件或待决策，不替客流、供应或风险角色完成判断。
+      你接店主Bot的任务单(全套公共约束)。只用运营相关子集(活动窗口、营业时段、备货现金占用上限、客流目标)测算门店能力画像:工位/员工、服务时长、各时段空余产能、按服务类型可接上限、库存耗材现状与可补量、可扩选项、目标vs产能缺口。营销相关约束(促销预算、价格红线、平台合规红线、客流目标)原样透传附在产出里,不解读、不使用。产出能力画像+原样营销约束交营销出方案。
 
-  - id: assess_capacity
-    name: 核验客流产能与排班
-    title: 核验客流、产能与排班
+  - id: marketing_plan
+    name: 在能力内出方案
+    title: 营销·在能力内出方案
     type: bot
-    bot_id: 20260901_sesl8hmo
-    depends_on: [design_membership_service]
+    bot_id: 20260901_mylvdi1o
+    depends_on: [ops_capacity]
     input:
-      handoff: $.design_membership_service.output.handoff
+      handoff: $.ops_capacity.output.handoff
     output:
       handoff: $.result
     task: |
-      你接会员与服务Bot的服务承接方案。判断门店在目标周期内能否接住承诺，并提出必要的投放、预约、每日承接量或排班节奏调整。请自行拆解客流与产能侧所需事实；不要替供应履约确认资源，也不要替风险角色下最终结论。
+      你接门店运营Bot的能力画像与原样营销约束(预算/红线/平台合规/目标)。在能力画像约束内设计可公开的营销方案:新客引流券(补贴率/折扣/放量分批按产能)、老客护理套餐(价格不低于红线、按库存与产能限量、预约制)、会员机制、投放节奏(占用率阈值暂停)。不替评审、核算或实施下结论;无法确认的保留为条件或待决策。
 
-  - id: assess_fulfillment
-    name: 核验供应履约
-    title: 核验供应、品质与履约
-    type: bot
-    bot_id: 20260901_4tn4mnnj
-    depends_on: [assess_capacity]
-    input:
-      handoff: $.assess_capacity.output.handoff
-    output:
-      handoff: $.result
-    task: |
-      你接客流与产能Bot已经调整过的服务承诺、投放节奏或预约上限。判断当前方案能承诺到什么程度，哪些承诺需要条件、替代路径或延后确认。请自行决定供应履约侧的核验范围和专业方法，不接受上游替你列好的清单，也不能用猜测补齐未知事实。
-
-  - id: risk_review_group
-    name: 风险评审群
-    title: 风险评审群
+  - id: review_group
+    name: 评审群
+    title: 评审群·修订过审
     type: collaboration
-    depends_on: [assess_fulfillment]
+    depends_on: [marketing_plan]
     collaboration:
-      bot_ids: [20260901_rpc6nx1i, 20260901_5rjroor8]
-      bot_names: [业务风险Bot, 舆情Bot]
+      bot_ids: [20260901_sesl8hmo, 20260901_4tn4mnnj]
+      bot_names: [商场运营Bot, 线上平台Bot]
       mode: chat
       completion: report
     input:
-      handoff: $.assess_fulfillment.output.handoff
+      handoff: $.marketing_plan.output.handoff
     output:
       handoff: $.result
     task: |
-      你是风险评审群(driver 业务风险Bot + 舆情Bot):基于上游带条件的经营承诺,做18周年店庆业务/合规/舆情风险评审,逐项给成因/等级/约束。
-      处理不了的问题,按你的判断标明。
+      你是评审群(driver 商场运营企划 + 线上平台口碑风控):基于上游完整营销方案做商场与平台侧评审,逐项给修订条件——商场:展位报批、传单限入口、营业时段内执行;平台:券有效期与预约限制须活动页明示、禁止全城最低、设等待超时安抚、客诉超阈值暂停投放。默认给修订条件不打回。处理不了的标明。
 
-  - id: synthesize_plan
-    name: 汇总经营方案
-    title: 汇总经营方案与执行计划
+  - id: profit_accounting
+    name: 利润核算授权划界
+    title: 店主·利润核算·授权划界
     type: bot
     bot_id: 20260901_kcvvkqqs
-    depends_on: [risk_review_group]
+    depends_on: [review_group]
     input:
-      handoff: $.risk_review_group.output.handoff
+      handoff: $.review_group.output.handoff
     output:
       handoff: $.result
     task: |
-      你接风险评审群的评审结论。作为店主侧最终汇总者,形成经营方案和执行计划。明确已确认事实、条件通过项、阻断项和待店主决策事项。
+      你接评审群过审的完整方案(第二次出场)。用自持单品成本账本做利润核算:逐项算成本/售价/毛利是否达标,低于毛利底线标红。输出利润核算表、授权清单(哪些可自主、哪些需店主审批)、待取舍项。只给核算与授权划界,不替店主人决定取舍。
+
+  - id: launch
+    name: 投放实施
+    title: 投放实施·执行
+    type: bot
+    bot_id: 20260828_k9c2slro
+    depends_on: [profit_accounting]
+    input:
+      handoff: $.profit_accounting.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接店主Bot利润核算与授权划界后的方案。执行投放:发券/传单/展位/推送已执行并记实施记录。发现能力缺口(如到店核销防重复领工具)标明,不假装已完成无系统回执的操作。
