@@ -188,6 +188,20 @@ class TestPrepareDispatchStartTime:
 
 
 # ===== on_execute =====
+class TestDispatchStartTimeSemantics:
+    def test_retry_does_not_overwrite_first_dispatch_start_time(self, svc, graph):
+        planner = StubPlanner(lambda g: [_child("c1")])
+        eng = _engine(svc, planner=planner)
+        _run(eng.on_execute("t1"))
+        node = svc._get_node(graph, "c1")
+        first_start = node.run_info.start_time
+        assert first_start is not None
+
+        _run(eng.on_harness(_patch("t1", "c1", exec_error="external_harness")))
+        node = svc._get_node(graph, "c1")
+        assert node.run_info.start_time == first_start
+
+
 class TestOnExecute:
     def test_first_frame(self, svc, graph):
         planner = StubPlanner(lambda g: [_child("c1"), _child("c2")])

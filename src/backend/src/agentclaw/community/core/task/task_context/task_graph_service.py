@@ -493,7 +493,9 @@ class TaskGraphService:
             elif new_status in {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG}:
                 node.run_info.end_time = int(time.time() * 1000)
             elif new_status == Status.PENDING:
-                node.run_info.start_time = None
+                # Harness retries must not erase the node's first dispatch
+                # timestamp. Keep start_time for truthful total elapsed time;
+                # end_time is cleared until the next terminal transition.
                 node.run_info.end_time = None
             if new_status is not None:
                 node.status = new_status

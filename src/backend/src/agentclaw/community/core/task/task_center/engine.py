@@ -2395,13 +2395,17 @@ class ExecutionEngine:
             return
         dispatch_started_at = _now_ms()
         for node in pending:
-            self._graph.update_task_node_info(
-                TaskNodePatch(
-                    task_id=task_id,
-                    node_id=node.node_id,
-                    start_time=dispatch_started_at,
+            # start_time is the first dispatch lifecycle timestamp, not the
+            # beginning of each Harness retry attempt. Preserve it across
+            # RUNNING→PENDING→RUNNING retries so elapsed time stays truthful.
+            if node.run_info.start_time is None:
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        start_time=dispatch_started_at,
+                    )
                 )
-            )
         logger.info(
             "[task][prepare] task=%s 待派发节点=%s dispatch_started_at=%s",
             task_id,

@@ -348,14 +348,14 @@ class TestUpdateTaskNodeInfo:
         )
         assert svc._get_node(graph, "c1").run_info.end_time is not None
 
-    def test_reset_to_pending_clears_timestamps(self, svc, graph):
+    def test_reset_to_pending_preserves_start_time_and_clears_end_time(self, svc, graph):
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         assert svc._get_node(graph, "c1").run_info.start_time is not None
         svc.update_task_node_info(_patch("t1", "c1", status=Status.PENDING))
         node = svc._get_node(graph, "c1")
         assert node.status == Status.PENDING
-        assert node.run_info.start_time is None
+        assert node.run_info.start_time is not None
         assert node.run_info.end_time is None
 
     def test_planning_to_hung_writes_end_time_only(self, svc, graph):

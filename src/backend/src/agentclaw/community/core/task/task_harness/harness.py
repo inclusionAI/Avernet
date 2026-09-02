@@ -151,8 +151,12 @@ class TaskHarness:
                         )
                     )
         with self._lock:
-            # 淘汰已非 RUNNING 的记时项
+            # 淘汰已非 RUNNING 的记时项。对本轮触发的重试节点也必须清零
+            # 首次 RUNNING 计时,否则重试后的下一轮会沿用上一次尝试的 t0,
+            # 把多次尝试累计计时,导致刚重试约一个巡检周期就再次超时。
             self._dispatched_at = {k: v for k, v in self._dispatched_at.items() if k in seen}
+            for patch in resets:
+                self._dispatched_at.pop((patch.task_id, patch.node_id), None)
         # Scan②:扫描 status=FAILED(执行层失败:terminal_invalid/exec 报错等)真执行叶子 → harness
         # 重新派发执行重试。**验收不过(verdict FAILED)已由 on_report 记录为节点 DONE,不在此扫**——
         # 故此处 FAILED 仅执行层失败,与验收 gap(DONE,不重派)语义不同。FAILED 不走 SLA 计时,
@@ -208,6 +212,9 @@ class TaskHarness:
                     self._pending_seen_at[key] = now  # 重启 backoff:下次仍需等满 PENDING_TIMEOUT 才再重试
         with self._lock:
             self._pending_seen_at = {k: v for k, v in self._pending_seen_at.items() if k in pending_seen}
+        with self._lock:
+            for patch in (*failed_resets, *pending_resets):
+                self._dispatched_at.pop((patch.task_id, patch.node_id), None)
         for p in resets:
             res = self._on_harness_fn(p)
             if asyncio.iscoroutine(res):
