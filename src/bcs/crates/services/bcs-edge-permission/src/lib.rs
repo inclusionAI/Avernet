@@ -99,6 +99,24 @@ impl DbConnectService {
     pub fn env(&self) -> &str {
         &self.env
     }
+
+    fn log_request_lookup_miss(&self, operation: &str, request_id: &str, extra: Option<&str>) {
+        match extra {
+            Some(extra) => warn!(
+                env = %self.env,
+                operation = %operation,
+                request_id = %request_id,
+                extra = %extra,
+                "permission request lookup missed"
+            ),
+            None => warn!(
+                env = %self.env,
+                operation = %operation,
+                request_id = %request_id,
+                "permission request lookup missed"
+            ),
+        }
+    }
 }
 
 /// Id-by-prefix actor-kind discriminator (D11).
@@ -316,7 +334,10 @@ impl ConnectService for DbConnectService {
             .requests
             .get(request_id, &self.env)
             .await
-            .ok_or_else(|| ServiceError::FriendRequestNotFound(request_id.to_string()))?;
+            .ok_or_else(|| {
+                self.log_request_lookup_miss("approve", request_id, Some(decider));
+                ServiceError::FriendRequestNotFound(request_id.to_string())
+            })?;
 
         // Only pending requests can be approved.
         if req.status == RequestStatus::Approved {
@@ -401,7 +422,10 @@ impl ConnectService for DbConnectService {
             .requests
             .get(request_id, &self.env)
             .await
-            .ok_or_else(|| ServiceError::FriendRequestNotFound(request_id.to_string()))?;
+            .ok_or_else(|| {
+                self.log_request_lookup_miss("reject", request_id, Some(decider));
+                ServiceError::FriendRequestNotFound(request_id.to_string())
+            })?;
 
         if req.status == RequestStatus::Approved {
             return Err(ServiceError::CannotRejectAccepted);
@@ -449,7 +473,10 @@ impl ConnectService for DbConnectService {
             .requests
             .get(request_id, &self.env)
             .await
-            .ok_or_else(|| ServiceError::FriendRequestNotFound(request_id.to_string()))?;
+            .ok_or_else(|| {
+                self.log_request_lookup_miss("cancel", request_id, None);
+                ServiceError::FriendRequestNotFound(request_id.to_string())
+            })?;
 
         // Idempotent: an already-cancelled or rejected request is a no-op Ok
         // (spec: "已 rejected/cancelled 幂等"). Only pending requests can be
@@ -509,7 +536,10 @@ impl ConnectService for DbConnectService {
         self.requests
             .get(request_id, &self.env)
             .await
-            .ok_or_else(|| ServiceError::FriendRequestNotFound(request_id.to_string()))
+            .ok_or_else(|| {
+                self.log_request_lookup_miss("get_request", request_id, None);
+                ServiceError::FriendRequestNotFound(request_id.to_string())
+            })
     }
 
     async fn revoke_friend(&self, caller: &str, target: &str) -> ServiceResult<Vec<u64>> {
