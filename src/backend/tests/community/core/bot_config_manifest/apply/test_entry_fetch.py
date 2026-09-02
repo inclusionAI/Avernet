@@ -116,9 +116,18 @@ def test_an_unpinned_entry_refetches_even_when_a_receipt_exists(rig):
     assert result.from_store is False
 
 
-def test_keep_last_on_a_failed_fetch_reuses_the_receipt(rig):
+def test_a_pinned_entry_with_a_matching_receipt_survives_a_dead_source(rig):
+    """A pinned entry with a matching receipt never reaches the network at
+    all — so a source that is DOWN between applies costs nothing: content
+    addressing makes the stored bytes *the* declared bytes regardless of
+    availability. This is the store-hit fast path, NOT a keep_last fallback
+    (no fetch was attempted, none failed), and it carries no note: silence
+    here is legitimate — the pinned fast path is exactly what convergence
+    looks like, while a keep_last fallback is what "the source failed" looks
+    like and must be reported. The two are distinguished by the mark."""
     content, fetcher, _, pipeline = rig
     _store_serving(content)
+    # The source is unreachable — and it will never be asked.
     failing = FakeGuardedFetcher(failures={URL: FetchFailedError("source transport failed")})
     pipeline_failing = EntryFetcher(failing, content, FakeCredentials())
 
@@ -132,6 +141,8 @@ def test_keep_last_on_a_failed_fetch_reuses_the_receipt(rig):
     assert result.from_store is True
     assert result.content == BODY
     assert result.digest == DIGEST
+    assert failing.requests == []  # never reached the dead source
+    assert result.fallback_reason is None  # a fast path, not a fallback
 
 
 def test_keep_last_with_no_receipt_fails(rig):
@@ -164,6 +175,8 @@ def test_keep_last_with_an_unpinned_entry_falls_back_to_the_last_digest(rig):
     )
     assert result.from_store is True
     assert result.digest == DIGEST
+    # Marked here too: the mode is on the entry, not on the claim of a pin.
+    assert result.fallback_reason is not None
 
 
 def test_keep_last_never_supplies_bytes_that_disagree_with_a_pin(rig):

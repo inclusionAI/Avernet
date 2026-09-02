@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Protocol, Sequence, runtime_checkable
+from typing import Any, Optional, Protocol, Sequence, runtime_checkable
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
@@ -28,10 +28,17 @@ class Intent:
     materialiser needs to write, already substituted and validated. The
     orchestrator never inspects ``value`` — it is the materialiser's own
     currency — which is what keeps category knowledge out of the orchestrator.
+
+    ``note`` is a successful write's caveat, surfaced by the materialiser on
+    the entry's report row — today's only producer is a ``keep_last``
+    fallback, whose published contract is that the report states it. It rides
+    with the intent because the fetch resolved it and the write reports it,
+    and neither stage should reach into the other's currency.
     """
 
     identity: str
     value: Any = None
+    note: Optional[str] = None
 
 
 @dataclass(frozen=True)

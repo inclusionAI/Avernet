@@ -138,7 +138,7 @@ class IdentityMaterialiser(Materialiser):
                 # ``auth``/``digest``/``on_fetch_failure`` on ``content``, so
                 # reaching this branch with any of them means a document that
                 # skipped validation; the fields are simply not read.
-                intents.append(Intent(file_type, inline))
+                intents.append(Intent(file_type, inline, note=None))
                 continue
 
             source_url = entry.get("source")
@@ -179,7 +179,9 @@ class IdentityMaterialiser(Materialiser):
                     )
                 )
                 continue
-            intents.append(Intent(file_type, body))
+            intents.append(
+                Intent(file_type, body, note=fetched.fallback_reason)
+            )
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 
@@ -258,6 +260,10 @@ class IdentityMaterialiser(Materialiser):
                     self.construct,
                     planned.intent.identity,
                     EntryOutcome(planned.outcome),
+                    # A keep_last fallback is a fact the report must state:
+                    # the file's content says "what", this says "why it is
+                    # the platform's copy and not the source's".
+                    note=planned.intent.note,
                 )
             )
         for file_type in plan.removals:

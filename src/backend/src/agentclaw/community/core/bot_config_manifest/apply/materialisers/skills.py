@@ -111,7 +111,7 @@ class _PackageRefusal(Exception):
 class _SkillPackage:
     """One entry's validated, upload-ready package — the intent's value."""
 
-    __slots__ = ("name", "canonical_zip", "content_digest", "from_store")
+    __slots__ = ("name", "canonical_zip", "content_digest", "from_store", "note")
 
     def __init__(
         self,
@@ -119,9 +119,13 @@ class _SkillPackage:
         canonical_zip: bytes,
         *,
         from_store: bool,
+        note: "str | None" = None,
     ) -> None:
         self.name = name
         self.canonical_zip = canonical_zip
+        # A keep_last fallback's reason, surfaced on the report row — see
+        # Intent.note for why it travels inside the value.
+        self.note = note
         # sha256 of the canonical zip: THE identity of the content this
         # entry installs. ``plan`` compares it with the digest of the bytes
         # actually published under the skill's name — the only honest
@@ -372,6 +376,8 @@ class SkillsMaterialiser(Materialiser):
                     self.construct,
                     planned.intent.identity,
                     EntryOutcome(planned.outcome),
+                    # A keep_last fallback is a fact the report must state.
+                    note=package.note,
                 )
             )
 
@@ -409,7 +415,10 @@ class SkillsMaterialiser(Materialiser):
             # upload service itself runs, so limits and layout are one rule.
             validated = self._validate(self._validator.validate_zip, fetched.content)
             return _SkillPackage(
-                validated.name, validated.canonical_zip, from_store=fetched.from_store
+                validated.name,
+                validated.canonical_zip,
+                from_store=fetched.from_store,
+                note=fetched.fallback_reason,
             )
 
         files = self._extract_subtree(
@@ -417,7 +426,10 @@ class SkillsMaterialiser(Materialiser):
         )
         validated = self._validate(self._validator.validate_directory, files)
         return _SkillPackage(
-            validated.name, validated.canonical_zip, from_store=fetched.from_store
+            validated.name,
+            validated.canonical_zip,
+            from_store=fetched.from_store,
+            note=fetched.fallback_reason,
         )
 
     def _extract_subtree(

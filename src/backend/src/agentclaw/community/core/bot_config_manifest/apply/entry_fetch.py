@@ -94,6 +94,14 @@ class FetchedEntry:
     #: True when the platform's own copy answered — no network was touched.
     from_store: bool
     content_type: Optional[str] = None
+    #: Set only when the platform's copy answered as a ``keep_last``
+    #: FALLBACK — the source was fetched and failed, the stored bytes stood
+    #: in. The report must say so (schema §9.6's published contract: a
+    #: keep_last entry's report row states the fallback), so this carries
+    #: the human-readable reason for the materialiser to surface as the
+    #: entry's note. A plain store-hit (from_store, no note) is the
+    #: legitimate pinned fast path and stays silent.
+    fallback_reason: Optional[str] = None
 
 
 def scope_of(ctx: "ApplyContext") -> ContentScope:
@@ -189,6 +197,15 @@ class EntryFetcher:
                     digest=receipt.digest,
                     from_store=True,
                     content_type=receipt.content_type,
+                    # Visible in the report, not only in the log: the source
+                    # was tried and failed, and the stored bytes stood in.
+                    # The receipt's agreement with the pin (checked above) is
+                    # what makes standing in legitimate; the reason is what
+                    # makes it honest.
+                    fallback_reason=(
+                        "delivered from the platform's stored copy "
+                        "(keep_last): the source fetch failed — %s" % exc
+                    ),
                 )
             raise EntryFetchError(str(exc)) from exc
         except CredentialError as exc:
