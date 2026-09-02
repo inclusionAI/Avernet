@@ -140,11 +140,11 @@ class TestCoopGroupTimeout:
         clock = _Clock(0.0)
         rec = Recorder()
         h = TaskHarness(
-            svc, rec, clock=clock, default_sla_timeout=1200.0, interval=0
+            svc, rec, clock=clock, default_sla_timeout=600.0, interval=0
         )
         h.register("t1")
         h._poll_once()
-        clock.advance(719.0)
+        clock.advance(899.0)
         assert h._poll_once() == []
         clock.advance(2.0)
         resets = h._poll_once()
@@ -158,7 +158,7 @@ class TestCoopGroupTimeout:
         )
         clock = _Clock(0.0)
         rec = Recorder()
-        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=1200.0)
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=600.0)
         h.register("t1")
         h._poll_once()
         clock.advance(31.0)

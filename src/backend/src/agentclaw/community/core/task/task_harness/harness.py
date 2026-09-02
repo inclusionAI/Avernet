@@ -20,8 +20,8 @@ from agentclaw.community.core.task.domain.models import (
     effective_run_mode,
 )
 
-_DEFAULT_SLA_TIMEOUT = 1200.0  # single_bot/BBS RUNNING 卡死 backstop(>poller execute SLA 600s)
-_DEFAULT_COOP_GROUP_SLA_TIMEOUT = 720.0  # coop_group 超时 12 分钟,给群会话更长的收敛窗口
+_DEFAULT_SLA_TIMEOUT = 600.0  # single_bot/BBS RUNNING 卡死 backstop(>poller execute SLA 600s)
+_DEFAULT_COOP_GROUP_SLA_TIMEOUT = 900.0  # coop_group 超时 15 分钟,给群会话更长的收敛窗口
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
 _DEFAULT_INTERVAL = 120.0        # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已记录 DONE 不在此,external FAILED 由 on_harness 入口跳过)
 
@@ -73,7 +73,7 @@ class TaskHarness:
     def _sla_timeout(self, task_id: str, node=None) -> float:
         """读节点 RUNNING SLA。
 
-        execution_config.SLA_TIMEOUT 仍可统一覆盖;未配置时,协作群默认 12 分钟,
+        execution_config.SLA_TIMEOUT 仍可统一覆盖;未配置时,协作群默认 15 分钟,
         single_bot/BBS 继续使用原默认值。
         """
         try:
