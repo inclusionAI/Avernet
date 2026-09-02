@@ -22,6 +22,7 @@ class CallbackPayload:
     result: str | None = None
     error: str | None = None
     metadata: dict[str, Any] | None = None
+    session_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -31,6 +32,7 @@ class CallbackPayload:
             "result": self.result,
             "error": self.error,
             "metadata": self.metadata,
+            "session_id": self.session_id,
         }
 
 
