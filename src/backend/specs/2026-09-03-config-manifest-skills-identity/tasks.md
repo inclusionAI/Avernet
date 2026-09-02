@@ -106,3 +106,56 @@ Two invariants, as in W4's task list:
   `internal_dependencies` cover the W5 surface (three new declared imports);
   the flow-coverage exemption names the W5 machine parts; the spec/plan/task
   docs exist in this directory.
+
+---
+
+## 附录（2026-09-03 追加）：终审整改轮
+
+> 10 条终审 finding（4×P0、4×P1、P2 若干）全部落地于 #1795 的新提交；此处台账对应
+> 代码提交，便于复审对照。
+
+## [x] P0-1 skills 的 UNCHANGED 按「已安装内容」判定
+- 判据换血：receipt 只证取过、不证装过（干跑落收据、中止残留收据两个陷阱都可达）。
+  `LocalSkillUploadService.installed_package_digest(bot, bot, bot_id, owner_id, name)`
+  读 stable locator 上真实发布的包并给 canonical digest；plan 以
+  `installed_digest == package.content_digest` 判 UNCHANGED；读不回=未知=全量重写。
+- fake 按「只有完成的 upload 才发布」建模 installed；四个场景钉住（干跑收据陷阱、
+  中止残留、不可读未知、正常收敛零写入）。
+
+## [x] P0-2 store 异常穿透已翻译
+- lookup/read/store 四处交互全部译成 EntryFetchError（含 400/500 两族）；
+  pinned 缺 blob→落网络自愈；损坏→500 语义大声失败；redirect 超列宽→该条目失败
+  而非全类目；keep_last 读失败报双因（源失败+回退不可读）。
+
+## [x] P0-3 keep_last 回退可见
+- FetchedEntry.fallback_reason 携带原因；Intent.note 贯穿 resolve→write；
+  EntryResult.note 呈现（§9.6 承诺兑现）；钉住命中与回退被 fallback 标志区分。
+
+## [x] P0-4 start_apply 线程启动失败不再泄锁
+- ctx 构造与 Thread.start 收进守卫；launch 失败→FAILED 终态行 + 锁释放 +
+  原错误上抛；_terminate_on_launch_failure 是 _run finally 的镜像。生命周期测试
+  含爆炸线程→终态→立即重 apply（真线程）。
+
+## [x] P1-5 apply 级取数预算成真
+- apply/budget.ApplyFetchBudget（时间 deadline + 字节账本，每 apply 一个，
+  挂 ctx）；fetch 前查账、fetch 后计费；干跑同账本；两个测试钉两半；
+  limits.py 注释改为陈述已存在的接线（原先谎称 W4 thread 了它）。
+
+## [x] P1-6 dry_run 契据改真
+- orchestrator/协议/路由描述三处改口：不物化不激活不移除；可能真取源（同账本
+  封顶）；获取要落审计（§2.8 是「获取」的事实）。
+
+## [x] P1-7 回退资格按类分级
+- FetchRefusedError/CredentialError 不进 keep_last（配置类，非可用性）；
+  FetchFailedError 才可回退。模块 docstring 拍板 + 测试钉住。
+
+## [x] P1-8 两个类型收口
+- category/entry_identity 必填 keyword-only（调用点已全部在传，零成本）；
+  FetchCategory(StrEnum) ↔ FETCH_ENTRY_LIMITS 模块级 assert 绑死。
+
+## [x] P2 顺手项
+- _build_package 进 to_thread；ManifestIdentityPort 方法加 @abstractmethod +
+  DI 工厂运行时 isinstance 护栏 + 真服务反射测试；ManifestContentService 继承
+  自家 protocol；文档清了 8 处失实（含 README consumes 指 capability_state_contract）；
+  skills partially_written 角落测试；factories.py 的 TYPE_CHECKING 块补上它声称
+  的四个 import（预存债，因本 PR 触碰该文件而被 SAST 揭出）。
