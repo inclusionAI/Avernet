@@ -40,7 +40,7 @@ class EvalConsistencyCheckProtocol(Protocol):
 
 
 @runtime_checkable
-class EvalSessionLogProtocol(Protocol):
+class EvalSessionLog(Protocol):
     """评测会话日志 Protocol."""
 
     def log_eval_session(

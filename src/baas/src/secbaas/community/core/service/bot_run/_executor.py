@@ -38,6 +38,7 @@ from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotServicePlugin
+from secbaas.community.spi.eval_env import EvalSessionLog
 
 from ._bot_run_utils import (
     binding_data_to_info,
@@ -236,7 +237,7 @@ class BotRunRequestExecutor:
 
     入参是队列工作项 ``BotRunQueueRecord``；按其 ``run_id`` 读 ``baas_bot_run``
     取消息/metadata/api_key，重建 ``BotChatContext``，复用
-    ``BotBindingResolver`` 和 ``BotServiceSelector``（与 BotRunner 共享同一实例），
+    ``BotServiceSelector``（与 BotRunner 共享同一实例），
     执行 binding 解析 → 建会话 → 发/注入消息 → 写结果（落 ``baas_bot_run``）。
 
     设计约束：
@@ -255,6 +256,7 @@ class BotRunRequestExecutor:
         chunk_repository: BotRunQueueChunkRepository,
         cache_plugin: CachePlugin,
         api_key_repository: APIKeyRepository,
+        eval_session_log: EvalSessionLog,
         stream_flush_interval_seconds: float = 0.2,
         stream_flush_max_content_bytes: int = 65536,
     ) -> None:
@@ -264,9 +266,8 @@ class BotRunRequestExecutor:
         self._chunk_repository = chunk_repository
         self._cache_plugin = cache_plugin
         self._api_key_repository = api_key_repository
+        self._eval_session_log = eval_session_log
         self._stream_flush_interval = stream_flush_interval_seconds
-        # 单条 chunk content 的字节上界：超过阈值时提前 flush，避免在 ZDAS tracer
-        # 等非参数化内联 SQL 路径下因单条 payload 过大触发 1064 转义断裂。
         self._stream_flush_max_content_bytes = stream_flush_max_content_bytes
 
     async def execute(self, record: BotRunQueueRecord) -> None:
@@ -292,7 +293,9 @@ class BotRunRequestExecutor:
             if metadata.get("timeout")
             else queue_meta.get("timeout")
         )
-        chat_metadata = build_chat_metadata(metadata, run.run_id)
+        chat_metadata = build_chat_metadata(
+            metadata, run.run_id, self._eval_session_log
+        )
 
         context = _rebuild_context(
             run.api_key_prefix, self._api_key_repository, metadata
@@ -446,7 +449,7 @@ class BotRunRequestExecutor:
         delta_buffer: list[str] = []
         delta_engine_type: str | None = None
         delta_buffer_bytes: int = 0
-        agent_buffer: list[dict] = []
+        agent_buffer: list[dict[str, Any]] = []
         agent_engine_type: str | None = None
         agent_buffer_bytes: int = 0
         cache_key = f"run:{run.run_id}:seq"
@@ -580,8 +583,7 @@ class BotRunRequestExecutor:
                 chunk_type="error",
                 content="stream execution failed",
             )
-            if self._cache_plugin is not None:
-                self._cache_plugin.set(cache_key, f"{seq}:error", ttl_seconds=120)
+            self._cache_plugin.set(cache_key, f"{seq}:error", ttl_seconds=120)
             self._repo.update_error(run.run_id, "stream execution failed")
             return
 

@@ -22,7 +22,6 @@ from secbaas.community.core.service.bot_run import (
     AsyncChatClientPool,
     BaasBotService,
     BaasBotServiceConfig,
-    BotBindingResolver,
     BotConcurrencyManager,
     BotRequestWorker,
     BotRequestWorkerConfig,
@@ -204,7 +203,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     session_ticket_repository = providers.Dependency()
     device_callback_handler = providers.Dependency()
     # 评测环境 Plugin 依赖（由 ApplicationContainer 注入 real/stub 实现）
-    eval_binding_resolver = providers.Dependency()
     eval_consistency_check = providers.Dependency()
     eval_session_log = providers.Dependency()
 
@@ -391,14 +389,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         DefaultSessionFileSharingDispatcher,
         file_transfer_backend=file_transfer_backend,
         ticket_repo=session_ticket_repository,
-    )
-
-    bot_binding_resolver = providers.Singleton(
-        BotBindingResolver,
-        ac_bot_repo=ac_bot_repo,
-        publish_repo=ac_bot_publish_repo,
-        binding_repo=device_binding_repo,
-        eval_binding_resolver=eval_binding_resolver,
     )
 
     # Engine adapter registry — 按 config.plugins.engine_adapter 切 stub/real,
@@ -662,6 +652,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         chunk_repository=bot_run_queue_chunk_repository,
         cache_plugin=cache_plugin,
         api_key_repository=api_gateway_repo,
+        eval_session_log=eval_session_log,
     )
 
     serializing_executor = providers.Singleton(

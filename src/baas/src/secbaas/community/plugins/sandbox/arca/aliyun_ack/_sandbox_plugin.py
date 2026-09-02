@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -432,11 +433,11 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
 
 
 def aliyun_ack_plugin_factory(
-    _credentials=None,
+    _credentials: ArcaCredentials | None = None,
     *,
     default_images: dict[str, dict[str, str]] | None = None,
     arca_utils: ArcaUtils | None = None,
-):
+) -> Callable[[ArcaCredentials], AliyunAckSandboxPlugin]:
     """Return a callable that builds AliyunAckSandboxPlugin with config baked in.
 
     The leading ``_credentials`` arg absorbs any positional argument that
@@ -449,7 +450,7 @@ def aliyun_ack_plugin_factory(
     and ``app_name`` respectively).
     """
 
-    def _build(credentials=None):
+    def _build(credentials: ArcaCredentials | None = None) -> AliyunAckSandboxPlugin:
         return AliyunAckSandboxPlugin(
             config=credentials,
             default_images=default_images,

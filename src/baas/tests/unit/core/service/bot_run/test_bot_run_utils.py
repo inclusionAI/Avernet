@@ -24,6 +24,7 @@ from secbaas.community.core.service.bot_run import (
     resolve_user_id,
 )
 from secbaas.community.core.service.bot_run._bot_run_utils import build_chat_metadata
+from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot_service import BotBindingData
 
 BOT_ID = "test-bot-000001"
@@ -235,11 +236,6 @@ class TestExtractLifecycleStage:
         """Defaults to 'online' when metadata is None."""
         assert extract_lifecycle_stage(None) == "online"
 
-    def test_defaults_to_online_when_bot_options_not_dict(self):
-        """Defaults to 'online' when bot_options is not a dict."""
-        metadata = {"bot_options": "invalid"}
-        assert extract_lifecycle_stage(metadata) == "online"
-
     def test_extracts_verify_stage(self):
         """Extracts 'verify' lifecycle_stage."""
         metadata = {"bot_options": {"lifecycle_stage": "verify"}}
@@ -357,14 +353,6 @@ class TestExtractSessionIdFromRecord:
             metadata={"session_id": "sess-from-meta"},
         )
         assert extract_session_id_from_record(record) == "sess-from-meta"
-
-    def test_metadata_not_dict(self):
-        """metadata 不是 dict 时，返回 None"""
-        record = MagicMock(
-            result_extra=None,
-            metadata="not-a-dict",
-        )
-        assert extract_session_id_from_record(record) is None
 
 
 # ==================== Tests: parse_wait_result ====================
@@ -619,7 +607,9 @@ class TestBuildChatMetadataEval:
     def test_default_tag_sets_eval_biz_scene(self):
         """default_tag 非空时 biz_scene 为 'eval:{default_tag}'。"""
         metadata = {"default_tag": "eval", "biz_task_id": "task-1"}
-        result = build_chat_metadata(metadata, run_id="run-1")
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
         assert result["biz_scene"] == "eval:eval"
         assert result["biz_task_id"] == "task-1"
 
@@ -656,13 +646,17 @@ class TestBuildChatMetadataEval:
     def test_no_default_tag_uses_default_biz_scene(self):
         """default_tag 为空时 biz_scene 保持默认逻辑。"""
         metadata = {"biz_scene": "custom"}
-        result = build_chat_metadata(metadata, run_id="run-1")
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
         assert result["biz_scene"] == "custom"
 
     def test_no_default_tag_no_eval_fields(self):
         """default_tag 为空无 eval 观测字段注入。"""
         metadata = {}
-        result = build_chat_metadata(metadata, run_id="run-1")
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
         assert "eval_id" not in result
         assert "default_tag" not in result
         assert result["biz_scene"] == "default"

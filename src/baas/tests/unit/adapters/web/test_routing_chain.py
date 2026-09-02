@@ -98,6 +98,8 @@ def _make_runner(selector, run_repo, binding_data=None):
         run_repository=run_repo,
         bot_service_plugin=mock_plugin,
         dispatchers=[mock_dispatcher],
+        system_config_service=MagicMock(),
+        eval_session_log=MagicMock(),
     )
 
 

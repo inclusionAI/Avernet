@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from secbaas.community.spi.eval_env import EvalSessionLogProtocol
+from secbaas.community.spi.eval_env import EvalSessionLog
 
 
-class NoopEvalSessionLog(EvalSessionLogProtocol):
+class NoopEvalSessionLog(EvalSessionLog):
     """评测会话日志的 Stub 实现。
 
     所有方法为空操作，不记录日志也不注入观测字段。

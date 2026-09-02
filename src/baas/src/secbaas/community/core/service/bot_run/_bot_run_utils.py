@@ -5,14 +5,45 @@ from typing import TYPE_CHECKING, Any
 from secbaas.community.api.bot_runtime import BotBindingInfo
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotBindingData
-
-from ._bot_binding_resolver import _normalize_engine_type
+from secbaas.community.spi.eval_env import EvalSessionLog
 
 if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import BotChatContext
     from secbaas.community.core.repository.bot_run import BotRunRecord
 
 logger = get_logger("core-bot-run")
+
+_SUPPORTED_ENGINES = frozenset(
+    {"openclaw", "teclaw", "aicoding", "hermes", "claude_code"}
+)
+
+
+_AICODING_FAMILY_TEMPLATES = frozenset({"personalCoding", "applicationCoding"})
+
+
+def normalize_engine_type(
+    active_engine: str | None, template_type: str | None = None
+) -> str:
+    """解析 engine_type,先按 template_type+active_engine 的特定组合归一化,再校验白名单。
+
+    生产数据中存在 active_engine 与沙箱实际引擎不一致的脏数据:personalCoding/
+    applicationCoding 模板的沙箱实为 aicoding,但 active_engine 被写成 claude_code。
+    为兼容这类历史数据,仅当 ``template_type ∈ {personalCoding, applicationCoding}``
+    且 ``active_engine == "claude_code"`` 时,强制按 aicoding 处理。其余情况(含
+    template_type 为空)一律以 active_engine 为准,走白名单校验,空/未知回落 openclaw。
+    """
+    if template_type in _AICODING_FAMILY_TEMPLATES and active_engine == "claude_code":
+        return "aicoding"
+    if not active_engine:
+        return "openclaw"
+    if active_engine in _SUPPORTED_ENGINES:
+        return active_engine
+    logger.warning(
+        "engine_type.unknown: active_engine=%r not in whitelist %s, fallback to openclaw",
+        active_engine,
+        sorted(_SUPPORTED_ENGINES),
+    )
+    return "openclaw"
 
 
 def resolve_user_id(
@@ -85,12 +116,12 @@ def extract_lifecycle_stage(metadata: dict[str, Any] | None) -> str:
     """从 metadata 中提取 lifecycle_stage
 
     支持 "eval" 返回值：当 metadata["bot_options"]["lifecycle_stage"] == "eval"
-    时返回 "eval"，供 BotBindingResolver 走 eval binding 路由。
+    时返回 "eval"，供 binding 解析走 eval binding 路由。
     """
     if not metadata:
         return "online"
-    bot_options = metadata.get("bot_options")
-    if isinstance(bot_options, dict):
+    bot_options: dict[str, Any] | None = metadata.get("bot_options", {})
+    if bot_options:
         stage = bot_options.get("lifecycle_stage")
         if stage:
             return stage
@@ -104,10 +135,10 @@ def extract_session_id_from_record(
 
     优先从 result_extra JSON 中取，降级从 metadata 中取。
     """
-    if record.result_extra and isinstance(record.result_extra, dict):
+    if record.result_extra:
         if "session_id" in record.result_extra:
             return record.result_extra["session_id"]
-    if record.metadata and isinstance(record.metadata, dict):
+    if record.metadata:
         return record.metadata.get("session_id")
     return None
 
@@ -143,7 +174,7 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
     - owner_id → entity_id
     - sandbox_id: device_id when device_provider == "arca", else None
     - device_props: always {} (BotBindingData has no device_props)
-    - engine_type: normalized via _normalize_engine_type(active_engine, template_type);
+    - engine_type: normalized via normalize_engine_type(active_engine, template_type);
       empty active_engine → "openclaw"; claude_code + {personalCoding,applicationCoding}
       template → "aicoding"; unknown → "openclaw" (with WARN)
     - baas_session_id: always None (set at runtime by BaasBotService)
@@ -158,7 +189,7 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
         binding_id=data.binding_id,
         device_props={},
         bot_type=data.bot_type,
-        engine_type=_normalize_engine_type(data.engine_type, data.template_type),
+        engine_type=normalize_engine_type(data.engine_type, data.template_type),
         baas_session_id=None,
     )
 
@@ -166,7 +197,7 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
 def build_chat_metadata(
     metadata: dict[str, Any] | None,
     run_id: str,
-    eval_session_log: Any | None = None,
+    eval_session_log: EvalSessionLog,
 ) -> dict[str, str] | None:
     """从 metadata 中构造 chat_metadata，用于透传到 WS chat 请求。
 
@@ -195,17 +226,8 @@ def build_chat_metadata(
         "biz_scene": str(biz_scene),
     }
     # eval 观测字段注入 — 委托 Plugin
-    if eval_session_log is not None:
-        enriched = eval_session_log.enrich_chat_metadata(
-            metadata=chat_metadata,
-            run_id=run_id,
-        )
-        return enriched
-    # Plugin 未注入：记录告警，eval 观测字段不注入（生产环境应注入 Real Plugin）
-    if metadata.get("eval_id") or default_tag:
-        logger.warning(
-            "build_chat_metadata: eval_session_log not injected, "
-            "skipping eval metadata enrichment for run_id=%s",
-            run_id,
-        )
-    return chat_metadata
+    enriched = eval_session_log.enrich_chat_metadata(
+        metadata=chat_metadata,
+        run_id=run_id,
+    )
+    return enriched

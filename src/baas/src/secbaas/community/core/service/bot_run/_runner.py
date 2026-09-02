@@ -40,6 +40,7 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run import BotRunRecord, BotRunRepository
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotServicePlugin, LogRelationPayload
+from secbaas.community.spi.eval_env import EvalSessionLog
 
 from ..config import SystemConfigKey
 from ._bot_run_utils import (
@@ -88,9 +89,9 @@ class BotRunner:
         run_repository: BotRunRepository,
         bot_service_plugin: BotServicePlugin,
         dispatchers: list[MessageDispatcher],
-        system_config_service: SystemConfigManageService | None = None,
+        system_config_service: SystemConfigManageService,
+        eval_session_log: EvalSessionLog,
         default_request_timeout: float = 30.0,
-        eval_session_log: Any | None = None,
     ):
         self._bot_service_selector = bot_service_selector
         self._run_repository = run_repository
@@ -183,7 +184,9 @@ class BotRunner:
         )
 
         # 4. 委托 dispatcher 异步注入
-        await self._select_dispatcher(bot_id, metadata=metadata).dispatch_inject(
+        await self._select_dispatcher(
+            bot_id, engine_type=route.binding_info.engine_type, metadata=metadata
+        ).dispatch_inject(
             bot_service=route.bot_service,
             run_id=message_id,
             session_id=actual_session_id,
@@ -272,20 +275,19 @@ class BotRunner:
         route = await self._resolve_bot_route(bot_id, metadata)
 
         # eval 对话 session 日志与保护性校验 — 委托 Plugin
-        eval_id = metadata.get("eval_id")
+        eval_id: str | None = metadata.get("eval_id")
         if eval_id:
             logger.info(
                 "[runner.deliver_message] eval chat session: eval_id=%s, bot_id=%s",
                 eval_id,
                 bot_id,
             )
-            if self._eval_session_log is not None:
-                self._eval_session_log.log_eval_session(
-                    eval_id=eval_id,
-                    bot_id=bot_id,
-                    session_id=metadata.get("session_id", ""),
-                    method="deliver_message",
-                )
+            self._eval_session_log.log_eval_session(
+                eval_id=eval_id,
+                bot_id=bot_id,
+                session_id=metadata.get("session_id", ""),
+                method="deliver_message",
+            )
             # Session 保护：评测流量必须保留显式 session_id，
             # 不得中途退化成随机值（系分 3.3.3）
             session_id_from_metadata = metadata.get("session_id")
@@ -323,7 +325,9 @@ class BotRunner:
         chat_metadata = build_chat_metadata(
             metadata, run_id=message_id, eval_session_log=self._eval_session_log
         )
-        await self._select_dispatcher(bot_id, metadata=metadata).dispatch_send(
+        await self._select_dispatcher(
+            bot_id, engine_type=route.binding_info.engine_type, metadata=metadata
+        ).dispatch_send(
             bot_service=route.bot_service,
             run_id=message_id,
             session_id=actual_session_id,
@@ -395,20 +399,19 @@ class BotRunner:
         route = await self._resolve_bot_route(bot_id, metadata)
 
         # eval 对话 session 日志与保护性校验 — 委托 Plugin
-        eval_id = metadata.get("eval_id")
+        eval_id: str | None = metadata.get("eval_id")
         if eval_id:
             logger.info(
                 "[runner.deliver_message_stream] eval chat session: eval_id=%s, bot_id=%s",
                 eval_id,
                 bot_id,
             )
-            if self._eval_session_log is not None:
-                self._eval_session_log.log_eval_session(
-                    eval_id=eval_id,
-                    bot_id=bot_id,
-                    session_id=metadata.get("session_id", ""),
-                    method="deliver_message_stream",
-                )
+            self._eval_session_log.log_eval_session(
+                eval_id=eval_id,
+                bot_id=bot_id,
+                session_id=metadata.get("session_id", ""),
+                method="deliver_message_stream",
+            )
             # Session 保护：评测流量必须保留显式 session_id（系分 3.3.3）
             session_id_from_metadata = metadata.get("session_id")
             if not session_id_from_metadata:
@@ -453,7 +456,10 @@ class BotRunner:
 
         # 委托 dispatcher 流式发送
         stream_iter = self._select_dispatcher(
-            bot_id, method="stream", metadata=metadata
+            bot_id,
+            engine_type=route.binding_info.engine_type,
+            method="stream",
+            metadata=metadata,
         ).dispatch_send_stream(
             bot_service=route.bot_service,
             run_id=message_id,
@@ -660,9 +666,10 @@ class BotRunner:
     def _select_dispatcher(
         self,
         bot_id: str,
+        engine_type: str,
         *,
+        metadata: dict[str, Any],
         method: str | None = "chat",
-        metadata: dict[str, Any] | None = None,
     ) -> MessageDispatcher:
         """根据 system_config 选择 dispatcher。
 
@@ -673,45 +680,44 @@ class BotRunner:
         - 其他请求默认走 TaskMessageDispatcher
         """
         default_name = "TaskMessageDispatcher"
-        bot_options = (metadata or {}).get("bot_options")
-        if isinstance(bot_options, dict) and bot_options.get("from_bcn") == "true":
-            if self._system_config_service is not None:
-                try:
-                    flag = self._system_config_service.get_config(
-                        SystemConfigKey.BCN_QUEUE_DISPATCHER_ENABLED
-                    )
-                    if (
-                        flag is not None
-                        and (flag.conf_value or "").strip().lower() == "true"
-                    ):
-                        default_name = "QueueTaskMessageDispatcher"
-                except Exception:
-                    logger.warning(
-                        "[runner] failed to read bcn_queue_dispatcher_enabled",
-                        exc_info=True,
-                    )
+        bot_options: dict[str, Any] | None = metadata.get("bot_options")
+        if bot_options is not None and bot_options.get("from_bcn") == "true":
+            try:
+                flag = self._system_config_service.get_config(
+                    SystemConfigKey.BCN_QUEUE_DISPATCHER_ENABLED
+                )
+                if (
+                    flag is not None
+                    and (flag.conf_value or "").strip().lower() == "true"
+                ):
+                    default_name = "QueueTaskMessageDispatcher"
+            except Exception:
+                logger.warning(
+                    "[runner] failed to read bcn_queue_dispatcher_enabled",
+                    exc_info=True,
+                )
+
         name = default_name
-        if self._system_config_service is not None:
-            keys = []
-            if method:
-                keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}:{method}")
-            keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}")
-            keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.default")
-            for key in keys:
-                try:
-                    config = self._system_config_service.get_config(key)
-                except Exception:
-                    logger.warning(
-                        "[runner] failed to read dispatcher_route config for key=%s",
-                        key,
-                        exc_info=True,
-                    )
-                    continue
-                if config is not None:
-                    val = (config.conf_value or "").strip()
-                    if val:
-                        name = val
-                        break
+        keys: list[str] = []
+        if method:
+            keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}:{method}")
+        keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.{bot_id}")
+        keys.append(f"{SystemConfigKey.DISPATCHER_ROUTE}.default")
+        for key in keys:
+            try:
+                config = self._system_config_service.get_config(key)
+            except Exception:
+                logger.warning(
+                    "[runner] failed to read dispatcher_route config for key=%s",
+                    key,
+                    exc_info=True,
+                )
+                continue
+            if config is not None:
+                val = (config.conf_value or "").strip()
+                if val:
+                    name = val
+                    break
         return self._dispatcher_map.get(name, self._dispatchers[-1])
 
     async def _resolve_bot_route(
