@@ -238,8 +238,21 @@ run_real_singlebox() {
   flush_coverage_processes
   cleanup_real_singlebox
   trap - EXIT
-  combine_python_coverage "backend" "$repo_root/src/backend" "$coverage_root/raw/backend" || backend_coverage_status=$?
-  combine_python_coverage "baas" "$repo_root/src/baas" "$coverage_root/raw/baas" || baas_coverage_status=$?
+  # Backend and BaaS coverage are independent (separate project dirs, data
+  # files, and report paths), so render them concurrently. Each writes to its
+  # own log that is replayed afterwards so the output stays readable.
+  local backend_report_log="$coverage_root/backend-report.log"
+  local baas_report_log="$coverage_root/baas-report.log"
+  local backend_report_pid baas_report_pid
+  combine_python_coverage "backend" "$repo_root/src/backend" "$coverage_root/raw/backend" \
+    > "$backend_report_log" 2>&1 &
+  backend_report_pid=$!
+  combine_python_coverage "baas" "$repo_root/src/baas" "$coverage_root/raw/baas" \
+    > "$baas_report_log" 2>&1 &
+  baas_report_pid=$!
+  wait "$backend_report_pid" || backend_coverage_status=$?
+  wait "$baas_report_pid" || baas_coverage_status=$?
+  cat "$backend_report_log" "$baas_report_log"
   write_summary_artifacts "$acceptance_status" "$bcs_e2e_status" || summary_status=$?
   write_module_artifacts || module_status=$?
   verify_required_artifacts || artifact_status=$?
@@ -356,9 +369,31 @@ combine_python_coverage() {
   (
     cd "$component_dir"
     COVERAGE_FILE="$combined_file" uv run coverage combine "${coverage_files[@]}"
-    COVERAGE_FILE="$combined_file" uv run coverage json -i -o "$json_report"
-    COVERAGE_FILE="$combined_file" uv run coverage html -i -d "$html_dir"
-    COVERAGE_FILE="$combined_file" uv run coverage report -i > "$text_report"
+    # The JSON, HTML, and text reports only read the combined data file, so
+    # render them concurrently; the HTML report alone takes ~30s for backend.
+    local json_pid html_pid text_pid
+    local json_status=0 html_status=0 text_status=0
+    COVERAGE_FILE="$combined_file" uv run coverage json -i -o "$json_report" &
+    json_pid=$!
+    COVERAGE_FILE="$combined_file" uv run coverage html -i -d "$html_dir" &
+    html_pid=$!
+    COVERAGE_FILE="$combined_file" uv run coverage report -i > "$text_report" &
+    text_pid=$!
+    wait "$json_pid" || json_status=$?
+    wait "$html_pid" || html_status=$?
+    wait "$text_pid" || text_status=$?
+    if [ "$json_status" -ne 0 ]; then
+      echo "${component} coverage json report failed with exit code $json_status" >&2
+      exit "$json_status"
+    fi
+    if [ "$html_status" -ne 0 ]; then
+      echo "${component} coverage html report failed with exit code $html_status" >&2
+      exit "$html_status"
+    fi
+    if [ "$text_status" -ne 0 ]; then
+      echo "${component} coverage text report failed with exit code $text_status" >&2
+      exit "$text_status"
+    fi
   )
 }
 
