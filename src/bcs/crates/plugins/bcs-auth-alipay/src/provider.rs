@@ -11,6 +11,9 @@ use crate::config::{
 };
 use crate::sign::{parse_private_key, parse_public_key, sign_params, AlipaySignError};
 
+#[cfg(test)]
+static TEST_GATEWAY_BASE_URL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 /// Alipay OAuth token response (nested under `alipay_system_oauth_token_response`).
 #[derive(Debug, serde::Deserialize)]
 struct AlipayTokenData {
@@ -170,6 +173,11 @@ impl AlipayOAuthProvider {
 
     /// Build the gateway request URL with `charset` in the query string.
     fn gateway_url() -> String {
+        #[cfg(test)]
+        if let Some(base) = TEST_GATEWAY_BASE_URL.lock().expect("lock test gateway url").clone() {
+            return format!("{}?charset={}", base, urlencoding::encode(ALIPAY_CHARSET));
+        }
+
         format!("{}?charset={}", ALIPAY_GATEWAY_URL, urlencoding::encode(ALIPAY_CHARSET))
     }
 
@@ -412,18 +420,185 @@ impl OAuthProvider for AlipayOAuthProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    fn test_keys() -> (String, String) {
+        use rand::rngs::OsRng;
+        use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+        use rsa::RsaPrivateKey;
+
+        let mut rng = OsRng;
+        let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("generate RSA key");
+        let public_key = rsa::RsaPublicKey::from(&private_key);
+        let private_pem = private_key.to_pkcs8_pem(LineEnding::LF).expect("encode private PEM");
+        let public_pem = public_key.to_public_key_pem(LineEnding::LF).expect("encode public PEM");
+        (private_pem.to_string(), public_pem.to_string())
+    }
+
+    fn test_config() -> AlipayConfig {
+        let (private_pem, public_pem) = test_keys();
+        AlipayConfig {
+            app_id: "2021001234567890".to_string(),
+            private_key_pem: private_pem,
+            alipay_public_key_pem: public_pem,
+        }
+    }
+
+    fn set_test_gateway_url(url: String) {
+        *TEST_GATEWAY_BASE_URL.lock().expect("lock test gateway url") = Some(url);
+    }
+
+    async fn start_mock_gateway() -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock gateway");
+        let addr = listener.local_addr().expect("mock addr");
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            let mut request_index = 0usize;
+            loop {
+                let (mut stream, _) = match listener.accept().await {
+                    Ok(conn) => conn,
+                    Err(_) => break,
+                };
+                let tx = tx.clone();
+                let idx = request_index;
+                request_index += 1;
+                tokio::spawn(async move {
+                    let mut buffer = Vec::new();
+                    let mut header_buf = [0u8; 4096];
+                    loop {
+                        let n = match stream.read(&mut header_buf).await {
+                            Ok(n) => n,
+                            Err(_) => return,
+                        };
+                        if n == 0 {
+                            return;
+                        }
+                        buffer.extend_from_slice(&header_buf[..n]);
+                        if buffer.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+
+                    let header_end = buffer.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+                    let header_text = String::from_utf8_lossy(&buffer[..header_end]);
+                    let content_length = header_text
+                        .lines()
+                        .find_map(|line| line.strip_prefix("Content-Length: "))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    let mut body = buffer[header_end..].to_vec();
+                    while body.len() < content_length {
+                        let mut chunk = vec![0u8; content_length - body.len()];
+                        let n = match stream.read(&mut chunk).await {
+                            Ok(n) => n,
+                            Err(_) => return,
+                        };
+                        if n == 0 {
+                            break;
+                        }
+                        body.extend_from_slice(&chunk[..n]);
+                    }
+
+                    let body_text = String::from_utf8_lossy(&body).to_string();
+                    let request_line = header_text.lines().next().unwrap_or("").to_string();
+                    let captured = format!("{request_line}\n{body_text}");
+                    let _ = tx.send(captured);
+
+                    let response_body = match idx {
+                        0 => r#"{"alipay_system_oauth_token_response":{"access_token":"token-123","expires_in":1296000,"refresh_token":"refresh-123","open_id":"open-123","user_id":"user-123"}}"#,
+                        _ => r#"{"alipay_user_info_share_response":{"open_id":"open-123","nick_name":"Alice","avatar":"https://example.invalid/avatar.png"}}"#,
+                    };
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        response_body.len(),
+                        response_body,
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+
+        (format!("http://{}/gateway.do", addr), rx)
+    }
 
     #[test]
     fn gateway_request_url_places_charset_in_query_string() {
+        set_test_gateway_url("https://gateway.example.test/gateway.do".to_string());
         let url = AlipayOAuthProvider::gateway_url();
-        assert!(url.starts_with(ALIPAY_GATEWAY_URL));
+        assert!(url.starts_with("https://gateway.example.test/gateway.do"));
         assert!(url.contains("charset=utf-8"));
         assert!(url.contains('?'));
     }
 
     #[test]
-    fn token_response_without_code_can_still_be_success() {
-        let err = alipay_error_message(None, None, None, None);
-        assert!(err.is_none());
+    fn redaction_helpers_mask_secrets() {
+        let mut params = BTreeMap::new();
+        params.insert("app_id".to_string(), "2021001".to_string());
+        params.insert("code".to_string(), "secret-code".to_string());
+        params.insert("auth_token".to_string(), "token-xyz".to_string());
+        params.insert("sign".to_string(), "signature-value".to_string());
+
+        let redacted = redacted_params(&params);
+        assert!(redacted.contains("app_id=2021001"));
+        assert!(redacted.contains("code=<redacted>"));
+        assert!(redacted.contains("auth_token=<redacted>"));
+        assert!(redacted.contains("sign=<redacted>"));
+
+        let body = r#"{"outer":{"open_id":"open-123","items":[{"nick_name":"Alice"}]},"sign":"abc"}"#;
+        let redacted = redacted_body(body);
+        assert!(redacted.contains("<redacted>"));
+        assert!(!redacted.contains("open-123"));
+        assert!(!redacted.contains("Alice"));
+        assert_eq!(redacted_body("plain-text body"), "plain-text body");
+    }
+
+    #[test]
+    fn alipay_error_message_accepts_success_and_formats_errors() {
+        assert!(alipay_error_message(None, None, None, None).is_none());
+        assert!(alipay_error_message(Some(ALIPAY_SUCCESS_CODE), None, None, None).is_none());
+        let err = alipay_error_message(
+            Some("40004"),
+            Some("isv.invalid-signature"),
+            Some("Invalid Arguments"),
+            Some("bad sign"),
+        )
+        .expect("error message");
+        assert!(err.contains("40004"));
+        assert!(err.contains("isv.invalid-signature"));
+        assert!(err.contains("bad sign"));
+    }
+
+    #[tokio::test]
+    async fn exchange_code_and_user_info_happy_path_hits_gateway() {
+        let (base_url, mut rx) = start_mock_gateway().await;
+        set_test_gateway_url(base_url);
+        let provider = AlipayOAuthProvider::new(test_config()).expect("create provider");
+
+        let token = provider
+            .exchange_code("code-abc", "https://callback.example/test")
+            .await
+            .expect("exchange code");
+        assert_eq!(token.access_token, "token-123");
+        assert_eq!(token.refresh_token.as_deref(), Some("refresh-123"));
+        assert_eq!(token.extra.get("open_id").map(String::as_str), Some("open-123"));
+
+        let user = provider.get_user_info(&token).await.expect("userinfo");
+        assert_eq!(user.id, "open-123");
+        assert_eq!(user.name.as_deref(), Some("Alice"));
+        assert_eq!(user.avatar.as_deref(), Some("https://example.invalid/avatar.png"));
+
+        let first_request = rx.recv().await.expect("token request");
+        assert!(first_request.contains("POST /gateway.do?charset=utf-8 HTTP/1.1"));
+        assert!(first_request.contains("grant_type=authorization_code"));
+        assert!(first_request.contains("sign_type=RSA2"));
+        assert!(first_request.contains("code=code-abc"));
+
+        let second_request = rx.recv().await.expect("userinfo request");
+        assert!(second_request.contains("POST /gateway.do?charset=utf-8 HTTP/1.1"));
+        assert!(second_request.contains("auth_token=token-123"));
+        assert!(second_request.contains("sign_type=RSA2"));
     }
 }
