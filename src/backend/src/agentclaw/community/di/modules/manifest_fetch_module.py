@@ -35,6 +35,10 @@ from agentclaw.community.core.bot_config_manifest.content.service import (
 from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
     ManifestContentServiceProtocol,
 )
+from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
+    GitSourceClient,
+    SubprocessGitClient,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     GuardedFetcher,
 )
@@ -136,6 +140,17 @@ class ManifestFetchModule(Module):
         receipts and files the same provenance rows.
         """
         return EntryFetcher(fetcher, content, credentials)
+
+    @singleton
+    @provider
+    def manifest_git_source_client(self) -> GitSourceClient:
+        """W7's git transport: the CLI subprocess client.
+
+        Like ``GuardedFetcher``, everything about it except construction is
+        the shipped default — https-only scheme, hermetic env, header-only
+        credential injection — and not configurable from here.
+        """
+        return SubprocessGitClient()
 
     # ── the lazy factories the registry wiring asks for ────────────────────
 
@@ -251,3 +266,13 @@ class ManifestFetchModule(Module):
             return service
 
         return _resources
+
+    @singleton
+    @provider
+    @inject
+    def manifest_git_client_factory(
+        self, injector: Injector
+    ) -> Callable[[], GitSourceClient]:
+        """The lazy lookup the apply service builds each apply's source
+        session through — a fresh map and fresh checkouts every apply."""
+        return lambda: injector.get(GitSourceClient)

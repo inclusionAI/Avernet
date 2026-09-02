@@ -15,7 +15,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+    ApplyReport,
+    ApplyStatus,
+    SourceResolution,
+)
+from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+    SourceSession,
+)
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ManifestApplyInProgressError,
 )
@@ -48,6 +55,7 @@ from ._fakes import (
     FakeActivationService,
     FakeCapabilityReader,
     FakeCredentials,
+    FakeGitClient,
     FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
@@ -157,6 +165,10 @@ def world():
         # so the write chain is never reached — but it must exist for the
         # registry to register.
         resource_service_provider=lambda: FakeResourceFileService(),
+        # W7's git transport. This suite's document declares no ``sources``,
+        # so the client is never *used* — it is constructed per apply and
+        # must never be fetched through, which FakeGitClient enforces.
+        git_client_provider=lambda: FakeGitClient(),
     )
     return service, applies, locks, scripts, BotConfigManifestRepository(db)
 
@@ -195,6 +207,25 @@ def _drain(service):
             return report
         time.sleep(0.01)
     raise AssertionError("the apply never reached a terminal status")
+
+
+def _counting_session_closes(monkeypatch) -> list[SourceSession]:
+    """Wrap ``SourceSession.close`` so a test can assert it ran.
+
+    Delegates to the real close — the point is *that* the terminal path calls
+    it, not what it does (its own file tests the removal). Every terminal
+    path of an apply must close its session: the checkouts live in
+    ``mkdtemp`` trees and nothing outside the session ever names them again.
+    """
+    closed: list[SourceSession] = []
+    original = SourceSession.close
+
+    def _close(self) -> None:
+        closed.append(self)
+        original(self)
+
+    monkeypatch.setattr(SourceSession, "close", _close)
+    return closed
 
 
 def test_start_apply_returns_a_handle_and_the_work_finishes(world):
@@ -534,3 +565,132 @@ def test_a_thread_that_cannot_start_terminates_the_report_and_frees_the_lock(
         actor_id=_ENTITY,
     )
     assert accepted.status is ApplyStatus.RUNNING
+
+
+# ── W7: the per-apply source session ──────────────────────────────────────────
+
+
+def test_a_source_session_is_built_per_apply_and_closed(world, monkeypatch):
+    """The W7 wiring this suite can see without declaring git sources.
+
+    One session per apply, observed at its only seam: the git client the
+    provider builds for it. Two applies from one document therefore mean
+    two constructions — a session shared across applies would leave one
+    apply reading another's checkout cache, and a session built inside the
+    orchestrator would mean the report's baselines and resolutions live on
+    the wrong side of the work. And the session closes on the normal path:
+    its checkouts are ``mkdtemp`` trees nothing else will ever name.
+    """
+    service, _applies, _locks, _scripts, _manifests = world
+    closed = _counting_session_closes(monkeypatch)
+    before = FakeGitClient.constructed
+
+    _start(service)
+    first = _drain(service)
+    assert first.status is ApplyStatus.SUCCEEDED
+
+    _start(service)
+    second = _drain(service)
+    assert second.status is ApplyStatus.SUCCEEDED
+
+    assert FakeGitClient.constructed - before == 2, (
+        "each apply must build its own source session (one git client each)"
+    )
+    assert len(closed) == 2, "every finished apply must close its session"
+
+
+def test_a_strict_baseline_is_read_back_from_the_last_report(world, monkeypatch):
+    """``_last_resolutions``: the previous report IS the baseline table.
+
+    Strict mode reads "what did we resolve last time" out of
+    ``ApplyReport.sources`` rather than a second table, so the two cannot
+    drift. No report — and a report with no resolutions — yield no
+    opinions; a recorded resolution yields its SHA by name.
+    """
+    service, _applies, _locks, _scripts, _manifests = world
+
+    # Never applied: no report, no baselines.
+    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {}
+
+    # A real apply with no declared sources records no resolutions.
+    _start(service)
+    report = _drain(service)
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert report.sources == ()
+    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {}
+
+    # A last report that did resolve a source is read back by name.
+    crafted = ApplyReport(
+        apply_id="prior",
+        bot_id=_BOT,
+        trigger="explicit",
+        status=ApplyStatus.SUCCEEDED,
+        started_at=report.started_at,
+        sources=(
+            SourceResolution(
+                name="charts", ref="main", resolved_sha="f" * 40, auth="ci-token"
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        service, "last_apply", lambda *, entity_id, bot_id: crafted
+    )
+    assert service._last_resolutions(
+        entity_id=_ENTITY, bot_id=_BOT
+    ) == {"charts": "f" * 40}
+
+
+def test_a_launch_failure_closes_the_session_it_built(world, monkeypatch):
+    """The terminal path that never runs ``_run`` still closes the session.
+
+    ``Thread.start`` raising means ``_run``'s ``finally`` never exists for
+    this apply, so the launch-failure handler must close the session itself —
+    the same reason it terminates the report row: nothing else will.
+    """
+
+    class _NoThreadsLeftError(RuntimeError):
+        pass
+
+    class ExplodingThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise _NoThreadsLeftError("can't start new thread")
+
+    service, _applies, _locks, _scripts, _manifests = world
+    closed = _counting_session_closes(monkeypatch)
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_config_manifest.services."
+        "config_manifest_apply_service.threading.Thread",
+        ExplodingThread,
+    )
+
+    with pytest.raises(_NoThreadsLeftError):
+        _start(service)
+
+    assert len(closed) == 1, "a launch failure must close the session it built"
+
+
+def test_a_dry_run_closes_its_session(world, monkeypatch):
+    """The dry run builds a session too (it may fetch through it), and has
+    no background thread — its own ``finally`` is the only place the close
+    can live."""
+    import asyncio
+
+    service, _applies, _locks, _scripts, _manifests = world
+    closed = _counting_session_closes(monkeypatch)
+    before = FakeGitClient.constructed
+
+    report = asyncio.run(
+        service.dry_run(
+            entity_id=_ENTITY,
+            bot_id=_BOT,
+            bot=_BOT_RECORD,
+            owner_id=_ENTITY,
+            actor_id=_ENTITY,
+        )
+    )
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert FakeGitClient.constructed - before == 1
+    assert len(closed) == 1, "a dry run must close its session before returning"
