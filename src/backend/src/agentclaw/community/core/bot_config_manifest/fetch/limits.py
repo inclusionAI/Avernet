@@ -20,12 +20,30 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Callable, Mapping
 
 #: Address resolution seam: host → resolved IP string list. Real DNS via
 #: socket in production; tests inject deterministic answers (including the
 #: check-public/connect-private rebinding pair).
 Resolver = Callable[[str], list[str]]
+
+class FetchCategory(StrEnum):
+    """The closed vocabulary a fetch's category lives in — the keys of
+    :data:`FETCH_ENTRY_LIMITS` and nothing else, bound by the module-level
+    assertion below so the two cannot drift apart (the W3
+    no-drift-assertion precedent). A misspelled category would otherwise
+    silently take the per-entry default's cap, which is the wrong quiet
+    answer for a width the schema states per category.
+    """
+
+    SKILLS = "skills"
+    RESOURCES_FILE = "resources_file"
+    IDENTITY = "identity"
+    CLI_TOOLS = "cli_tools"
+    RESOURCES_ARCHIVE = "resources_archive"
+    RESOURCES_UNPACKED = "resources_unpacked"
+
 
 #: ``schema §5`` — per-entry fetch caps, in bytes, by category.
 FETCH_ENTRY_LIMITS: Mapping[str, int] = {
@@ -37,11 +55,19 @@ FETCH_ENTRY_LIMITS: Mapping[str, int] = {
     "resources_unpacked": 500 * 1024 * 1024,
 }
 
+assert set(FETCH_ENTRY_LIMITS) == {c.value for c in FetchCategory}, (
+    "FETCH_ENTRY_LIMITS and FetchCategory must name the same set of "
+    "categories — a drift between them silently mis-caps entries"
+)
+
 #: ``schema §5`` — one archive may not explode beyond this many members.
 ARCHIVE_MEMBER_LIMIT = 5000
 
-#: ``schema §5`` — totals for a single apply run (W4 threads one
-#: ``FetchBudget`` through every entry so these are shared).
+#: ``schema §5`` — totals for a single apply run, LEDGERED by W5's
+#: ``apply/budget.ApplyFetchBudget`` (carried on ``ApplyContext``,
+#: consulted before each entry's fetch and charged after): an apply that
+#: outruns these ends in bounded time rather than holding the per-bot apply
+#: lock past the TTL the stale-lock reaper trusts.
 APPLY_FETCH_TOTAL_LIMIT = 500 * 1024 * 1024
 APPLY_BUDGET_S = 300.0
 
@@ -124,12 +150,14 @@ def transport_allowlist_from_config(
 
 @dataclass(frozen=True)
 class FetchBudget:
-    """Transport budget for one fetch request as the orchestrator issues it.
+    """Transport budget for ONE request, as the guarded fetcher issues it.
 
-    Per-entry attributes only: the *apply-scope* ledger (shared totals,
-    remaining wall clock) is the W4 orchestrator's own state — it decides
-    whether to spend the budget, W2 enforces what a single request may
-    cost.
+    Per-entry caps and the per-hop timeout — the vocabulary a
+    ``FetchRequest`` names. The *apply-scope* ledger (shared wall clock and
+    byte total) is a different object at a different layer:
+    ``apply/budget.ApplyFetchBudget``, consulted per entry by the entry
+    fetch pipeline (W5). The two share this module's numbers and nothing
+    else.
     """
 
     category: str = "resources_file"

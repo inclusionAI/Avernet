@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import threading
 import uuid
 from datetime import datetime
@@ -21,7 +22,20 @@ from typing import Any, Callable, Optional
 
 from injector import inject
 
+from agentclaw.community.core.bot_config_manifest.apply.budget import (
+    ApplyFetchBudget,
+)
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    EntryFetcher,
+)
+from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
+    ManifestIdentityPort,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+    APPLY_BUDGET_S,
+    APPLY_FETCH_TOTAL_LIMIT,
+)
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     ApplyPhase,
 )
@@ -65,6 +79,15 @@ from agentclaw.community.core.repository.protocols.bot.config_manifest_apply imp
 from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
     DirectActivationServiceProtocol,
 )
+from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageValidator,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
@@ -99,6 +122,11 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
+        identity_service_provider: Callable[[], ManifestIdentityPort],
+        upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
+        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
+        package_validator_provider: Callable[[], SkillPackageValidator],
+        entry_fetcher_provider: Callable[[], EntryFetcher],
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_repository
@@ -110,6 +138,18 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         self._script_service_provider = script_service_provider
         self._activation_service_provider = activation_service_provider
         self._mcp_auth_service_provider = mcp_auth_service_provider
+        # W5's two fetch-consuming materialisers take their services the same
+        # way — each sits deeper in the bot-configuration graph, and holding
+        # one directly would close the same cycles. The identity service is
+        # named by its narrow apply-side key (``apply/identity_port.py``): the
+        # real service has no Protocol (one implementation, the waiver the
+        # identity router records), and the port exists to key a lazy
+        # provider without importing the device graph.
+        self._identity_service_provider = identity_service_provider
+        self._upload_service_provider = upload_service_provider
+        self._capability_reader_provider = capability_reader_provider
+        self._package_validator_provider = package_validator_provider
+        self._entry_fetcher_provider = entry_fetcher_provider
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -142,6 +182,14 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         caller with nothing to distinguish keeps the obvious behaviour.
         """
         env = get_current_env()
+        # The two apply-scope promises of fetch/limits.py, made real: one
+        # ledger per apply, consulted before each entry's fetch and charged
+        # after — bounded apply duration is what keeps the TTL-based lock
+        # reaper from ever being right about a live apply.
+        budget = ApplyFetchBudget(
+            deadline=time.monotonic() + APPLY_BUDGET_S,
+            total_bytes=APPLY_FETCH_TOTAL_LIMIT,
+        )
         lock = self._locks.acquire(
             env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id
         )
@@ -191,39 +239,65 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             )
             raise
 
-        ctx = self._context(
-            bot_id=bot_id,
-            bot=bot,
-            owner_id=owner_id,
-            actor_id=actor_id,
-            entity_id=entity_id,
-            env=env,
-        )
+        try:
+            ctx = self._context(
+                bot_id=bot_id,
+                bot=bot,
+                owner_id=owner_id,
+                actor_id=actor_id,
+                entity_id=entity_id,
+                env=env,
+                # The id this context's fetch pipeline stamps into every receipt —
+                # minted above, so the linkage column answers "what did THIS
+                # apply fetch" as an indexed read.
+                apply_id=apply_id,
+                budget=budget,
+            )
 
-        # ``bind_current_avernet_tenant`` captures the tenant AT WRAP TIME —
-        # here, inside the request thread — and re-establishes it inside the new
-        # one. Wrapped inline at the construction site, never as an @decorator:
-        # it looks like one (it uses functools.wraps) but a decorator on a
-        # module-level function would capture at *import*, when there is no
-        # request, and bind the default tenant forever.
-        #
-        # This is an isolation control, not a nicety. A wrong tenant here
-        # substitutes the wrong ${BOT_TENANT} *and* reads and writes the
-        # manifest tables under the wrong tenant.
-        threading.Thread(
-            target=bind_current_avernet_tenant(self._run),
-            kwargs={
-                "ctx": ctx,
-                "parsed": parsed,
-                "apply_id": apply_id,
-                "trigger": trigger,
-                "started_at": started_at,
-                "phases": phases,
-                "lock_token": lock.lock_token,
-            },
-            daemon=True,
-            name=f"manifest-apply-{bot_id}",
-        ).start()
+            # ``bind_current_avernet_tenant`` captures the tenant AT WRAP TIME —
+            # here, inside the request thread — and re-establishes it inside the
+            # new one. Wrapped inline at the construction site, never as an
+            # @decorator: it looks like one (it uses functools.wraps) but a
+            # decorator on a module-level function would capture at *import*,
+            # when there is no request, and bind the default tenant forever.
+            #
+            # This is an isolation control, not a nicety. A wrong tenant here
+            # substitutes the wrong ${BOT_TENANT} *and* reads and writes the
+            # manifest tables under the wrong tenant.
+            threading.Thread(
+                target=bind_current_avernet_tenant(self._run),
+                kwargs={
+                    "ctx": ctx,
+                    "parsed": parsed,
+                    "apply_id": apply_id,
+                    "trigger": trigger,
+                    "started_at": started_at,
+                    "phases": phases,
+                    "lock_token": lock.lock_token,
+                },
+                daemon=True,
+                name=f"manifest-apply-{bot_id}",
+            ).start()
+        except BaseException as exc:
+            # The RUNNING row exists but the work never started — a thread
+            # that cannot be created (``Thread.start`` raises exactly when
+            # load would exhaust the process) leaves this state otherwise
+            # stuck until the *stale* lock derivation kicks in, which is 30
+            # minutes of ManifestApplyInProgressError for a bot whose apply
+            # never ran. So the apply is terminally FAILED here, the lock is
+            # released for the next attempt, and the caller hears the
+            # original failure rather than a later poll's mystery.
+            self._terminate_on_launch_failure(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                apply_id=apply_id,
+                trigger=trigger,
+                started_at=started_at,
+                lock_token=lock.lock_token,
+                exc=exc,
+            )
+            raise
 
         return ApplyAccepted(apply_id=apply_id, status=ApplyStatus.RUNNING)
 
@@ -291,6 +365,70 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                     lock_token=lock_token,
                 )
 
+    def _terminate_on_launch_failure(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        apply_id: str,
+        trigger: str,
+        started_at: datetime,
+        lock_token: str,
+        exc: BaseException,
+    ) -> None:
+        """A RUNNING report whose thread could not start: finish it, free the bot.
+
+        The mirrored ``finally`` of ``_run`` for the one path that cannot run
+        it: a terminal ``FAILED`` record (the failure swims in the log, not
+        the stored report, same rule as ``_record_engine_failure``) written
+        *before* the lock is released, so a poller never observes a
+        lock-less RUNNING row and a re-apply never waits out the TTL for a
+        thread that never existed.
+        """
+        logger.error(
+            "[manifest_apply] launch failed before the worker thread could "
+            "start, apply_id=%s, bot_id=%s: %s",
+            apply_id,
+            bot_id,
+            exc,
+        )
+        try:
+            self._applies.finish(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                apply_id=apply_id,
+                status=ApplyStatus.FAILED.value,
+                report=json.dumps(
+                    ApplyReport(
+                        apply_id=apply_id,
+                        bot_id=bot_id,
+                        trigger=trigger,
+                        status=ApplyStatus.FAILED,
+                        started_at=started_at,
+                        finished_at=datetime.now(),
+                        categories=(),
+                    ).as_payload()
+                ),
+            )
+        except Exception:
+            # The lock release is the load-bearing half here; a record that
+            # could not be terminated is a stranded-RUNNING row, which the
+            # read-time abandonment derivation already answers for.
+            logger.exception(
+                "[manifest_apply] could not terminate a launch-failed report, "
+                "apply_id=%s",
+                apply_id,
+            )
+        finally:
+            self._locks.release(
+                env=env,
+                entity_id=entity_id,
+                bot_id=bot_id,
+                lock_token=lock_token,
+            )
+
     def _record_engine_failure(self, report: ApplyReport, exc: Exception) -> None:
         """Log the cause; the stored report says FAILED with no entries.
 
@@ -325,6 +463,13 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             actor_id=actor_id,
             entity_id=entity_id,
             env=env,
+            # A dry run may fetch, but bounded the same way: a preview that
+            # cannot cost an unbounded run of network time is part of what
+            # keeps it honest to answer synchronously.
+            budget=ApplyFetchBudget(
+                deadline=time.monotonic() + APPLY_BUDGET_S,
+                total_bytes=APPLY_FETCH_TOTAL_LIMIT,
+            ),
         )
         return await self._orchestrator().apply(
             ctx,
@@ -370,6 +515,11 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 script_service=self._script_service_provider(),
                 activation_service=self._activation_service_provider(),
                 mcp_auth_service=self._mcp_auth_service_provider(),
+                identity_service=self._identity_service_provider(),
+                upload_service=self._upload_service_provider(),
+                capability_reader=self._capability_reader_provider(),
+                package_validator=self._package_validator_provider(),
+                entry_fetcher=self._entry_fetcher_provider(),
             )
         )
 
@@ -382,6 +532,8 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         actor_id: str,
         entity_id: str,
         env: str,
+        apply_id: Optional[str] = None,
+        budget: Optional[ApplyFetchBudget] = None,
     ) -> ApplyContext:
         return ApplyContext(
             bot_id=bot_id,
@@ -394,6 +546,11 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             bot_type=str(bot.get("bot_type") or ""),
             bot=bot,
             capabilities=self._manifests.capabilities_for_bot(bot),
+            # A dry run mints no id (its own documented rule) and writes no
+            # report row; its fetches' receipts therefore carry NULL linkage
+            # rather than an id nothing joins to.
+            apply_id=apply_id,
+            budget=budget,
         )
 
     def _parsed_or_empty(

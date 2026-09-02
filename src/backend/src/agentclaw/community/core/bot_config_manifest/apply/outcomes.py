@@ -166,7 +166,8 @@ class CategoryResult:
 class SourceResolution:
     """A named source, and what its ref resolved to.
 
-    Empty in this wave — nothing is fetched — and filled by W5. Records the
+    Empty in v1's URL wave — sources are inline URLs only — and filled by
+    W7, the wave that resolves named and git sources. Records the
     credential's **name** and never its value: the report is what a support
     engineer reads, so this is a security property rather than tidiness.
     """
@@ -203,7 +204,7 @@ class ApplyReport:
     started_at: datetime
     finished_at: datetime | None = None
     categories: tuple[CategoryResult, ...] = ()
-    #: Resolved named sources. Empty in this wave; W5 fills it.
+    #: Resolved named sources. Empty in v1's URL wave; W7 fills it.
     sources: tuple[SourceResolution, ...] = field(default=())
 
     @property

@@ -15,8 +15,11 @@ six core packages and one of them reaches the DI container at import time.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
+from agentclaw.community.core.bot_config_manifest.apply.budget import (  # noqa: F401
+    ApplyFetchBudget,
+)
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
 )
@@ -57,6 +60,20 @@ class ApplyContext:
     #: the document: a bot's engine can change after a manifest is stored, and
     #: the construct that was appliable then may not be now.
     capabilities: ManifestCapabilities
+    #: The apply's own id, stamped into every receipt the fetch pipeline files
+    #: (W11's linkage column) — so "what did apply X fetch" is an indexed read,
+    #: which that table's own DDL says is why the column exists. ``None`` only
+    #: for a dry run, which mints no id by the same rule that makes it write
+    #: no report row; the entry identity half of the linkage is per fetch and
+    #: rides the materialisers' call instead.
+    apply_id: Optional[str] = None
+    #: One apply's fetch allowance — the ledger that makes the fetch-time
+    #: budget and byte cap of ``fetch/limits.py`` real (an audit caught them
+    #: defined but threaded by nothing, while W5's fetches could legitimately
+    #: outrun the 30-minute apply-lock TTL). Mutable by design inside the
+    #: frozen context: consult before each fetch, charge after. ``None`` for
+    #: callers that run no fetch pipeline (tests, hand-driven use).
+    budget: Optional["ApplyFetchBudget"] = None
 
 
 __all__ = ["ApplyContext"]

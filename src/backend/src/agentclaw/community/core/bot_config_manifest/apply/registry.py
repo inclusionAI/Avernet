@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Protocol, Sequence, runtime_checkable
+from typing import Any, Optional, Protocol, Sequence, runtime_checkable
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
@@ -28,10 +28,17 @@ class Intent:
     materialiser needs to write, already substituted and validated. The
     orchestrator never inspects ``value`` — it is the materialiser's own
     currency — which is what keeps category knowledge out of the orchestrator.
+
+    ``note`` is a successful write's caveat, surfaced by the materialiser on
+    the entry's report row — today's only producer is a ``keep_last``
+    fallback, whose published contract is that the report states it. It rides
+    with the intent because the fetch resolved it and the write reports it,
+    and neither stage should reach into the other's currency.
     """
 
     identity: str
     value: Any = None
+    note: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +168,11 @@ def build_materialisers(
     script_service: Any,
     activation_service: Any,
     mcp_auth_service: Any,
+    identity_service: Any,
+    upload_service: Any,
+    capability_reader: Any,
+    package_validator: Any,
+    entry_fetcher: Any,
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services.
 
@@ -170,23 +182,41 @@ def build_materialisers(
     exists for that class of thing) and pull the bot-configuration graph into
     anything that merely wants the ordering table.
 
-    **W4 registers two**, and the map is keyed by each materialiser's own
-    ``construct`` rather than by a name written here — so a materialiser cannot
-    be registered under the wrong key. ``skills`` and ``identity`` arrive with
-    W5, ``resources`` with W6, ``engine_config`` when X2/T3 lets it back in, and
-    ``cli_tools`` with W9. Until then a document declaring one of those takes the
-    orchestrator's no-materialiser path: an expected state, not a gap.
+    **W4 registered two; W5 registers four.** The map is keyed by each
+    materialiser's own ``construct`` rather than by a name written here — so
+    a materialiser cannot be registered under the wrong key. The fetch-side
+    dependencies (``package_validator``, ``entry_fetcher``) exist because the
+    two W5 categories materialise fetched bytes: the validator is the upload
+    path's own gate, the entry fetcher is the W2/W3/W11 funnel, and neither
+    belongs inside the engine. ``resources`` arrives with W6, ``engine_config``
+    when X2/T3 lets it back in, and ``cli_tools`` with W9. Until then a
+    document declaring one of those takes the orchestrator's no-materialiser
+    path: an expected state, not a gap.
     """
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
+        IdentityMaterialiser,
+    )
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.mcp import (
         McpMaterialiser,
     )
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.script import (
         ScriptMaterialiser,
     )
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.skills import (
+        SkillsMaterialiser,
+    )
 
     materialisers: tuple[Materialiser, ...] = (
         ScriptMaterialiser(script_service),
         McpMaterialiser(activation_service, mcp_auth_service),
+        IdentityMaterialiser(identity_service, entry_fetcher),
+        SkillsMaterialiser(
+            upload_service,
+            activation_service,
+            capability_reader,
+            package_validator,
+            entry_fetcher,
+        ),
     )
     return {m.construct: m for m in materialisers}
 

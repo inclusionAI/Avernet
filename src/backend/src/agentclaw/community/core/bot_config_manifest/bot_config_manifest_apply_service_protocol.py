@@ -127,12 +127,18 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         owner_id: str,
         actor_id: str,
     ) -> ApplyReport:
-        """Compute the plan and return it. Writes nothing; mints no id.
+        """Compute the plan and return it. Writes no bot state; mints no id.
 
         Synchronous, unlike :meth:`start_apply`, because a preview whose answer
-        arrives later by polling is not a preview. That is honest only while
-        nothing is fetched — W5 must revisit it the moment ``resolve`` makes a
-        network call.
+        arrives later by polling is not a preview. W5 revisited it, as the
+        old tripwire demanded, and the honest statement is narrower than
+        "writes nothing": fetch belongs to ``resolve``, so a declared source
+        **may really be fetched** (bounded by the same per-apply ledger a
+        real apply uses) — and the bytes the platform acquires on the bot's
+        behalf are filed as the platform's own copy, because §2.8's audit
+        trail is a fact about acquisition, not delivery. What a dry run
+        never touches: any write path — nothing is materialised, activated,
+        removed, or answered async.
         """
         ...
 

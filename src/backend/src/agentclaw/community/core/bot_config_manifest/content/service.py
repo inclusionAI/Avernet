@@ -5,8 +5,9 @@ behalf is kept as **the platform's own durable copy**, and every step after
 fetch reads that copy. This service is the one mechanism behind all three
 consumers of the requirement — audit (what did this bot receive, from
 where, when), delivery (a retried apply re-reads here, never re-fetches),
-and ``keep_last`` (W4's per-entry fallback is a digest the orchestrator
-remembers plus a read from here; one store, one addressing, no second copy).
+and ``keep_last`` (W5's entry-fetch pipeline reads this store's newest
+receipt for the entry's source and stands in with those bytes when the
+source is down; one store, one addressing, no second copy).
 
 Two halves:
 
@@ -45,6 +46,9 @@ from agentclaw.community.core.bot_config_manifest.content.errors import (
     ContentIntegrityError,
     ContentMissingError,
     ContentStoreError,
+)
+from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
+    ManifestContentServiceProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.content.models import (
     ContentScope,
@@ -182,7 +186,7 @@ def _advisory_content_type(value: Optional[str]) -> Optional[str]:
     return None
 
 
-class ManifestContentService:
+class ManifestContentService(ManifestContentServiceProtocol):
     """Store fetched bytes once, address them by digest, read them back provably."""
 
     def __init__(
@@ -344,6 +348,30 @@ class ManifestContentService:
             entity_id=scope.entity_id,
             bot_id=scope.bot_id,
             limit=DEFAULT_RECORD_LIMIT if limit is None else limit,
+        )
+
+    def latest_receipt(
+        self,
+        scope: ContentScope,
+        *,
+        source_url: str,
+    ) -> Optional[StoredContentRecord]:
+        """The bot's newest receipt for one source URL, or ``None``.
+
+        The fetch pipeline's lookup — "does this bot's newest receipt for
+        *this* URL hold these bytes?" — keying exactly as ``store`` keyed:
+        the input is sanitized by the same rule before the exact-equality
+        match, so a documented URL form the writer of a row can never store
+        (a query string, a fragment) still finds the row it filed. Without
+        this, signed-URL declarations would keep their platform copies but
+        never consult them — re-fetching every apply and losing ``keep_last``
+        for exactly the sources most likely to expire.
+        """
+        return self._repository.latest_for(
+            env=scope.env,
+            entity_id=scope.entity_id,
+            bot_id=scope.bot_id,
+            source_url=_sanitized_url(source_url),
         )
 
     # --- the blob tree ----------------------------------------------------
