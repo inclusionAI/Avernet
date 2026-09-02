@@ -2,6 +2,7 @@
 
 from agentclaw.community.core.skill_center.space_skill_offline_service_protocol import (
     OfflineBlockerKind,
+    OfflineDraft,
     OfflineImpact,
     OfflineImpactItem,
     SpaceSkillOfflineResult,
@@ -11,6 +12,7 @@ from agentclaw.community.core.skill_center.space_skill_offline_service_protocol 
 
 __all__ = [
     "OfflineBlockerKind",
+    "OfflineDraft",
     "OfflineImpact",
     "OfflineImpactItem",
     "SpaceSkillOfflineResult",

@@ -83,7 +83,7 @@ class SkillActorPermissions(BaseModel):
         description="Actor may request creation of an upgrade Draft."
     )
     offline_skill: bool = Field(
-        description="Actor may request terminal TeamClaw-local Skill Offline."
+        description="Actor may request terminal local Skill Offline."
     )
     copy_offline_skill: bool = Field(
         default=False,
@@ -563,7 +563,7 @@ class SpaceSkillDetail(SpaceSkillSummary):
         description="Original Space Skill creation source."
     )
     offline_at: datetime | None = Field(
-        default=None, description="UTC terminal TeamClaw-local Offline time, or null."
+        default=None, description="UTC terminal local Offline time, or null."
     )
     offline_by: str | None = Field(
         default=None, description="Actor that placed the Skill Offline, or null."
@@ -624,7 +624,7 @@ class SkillOfflineImpact(BaseModel):
 
 
 class SkillOfflineResult(BaseModel):
-    """Terminal TeamClaw-local Offline result for the existing Skill."""
+    """Terminal local Offline result for the existing Skill."""
 
     changed: bool = Field(
         description="Whether this request newly moved the Skill Offline."
@@ -632,7 +632,9 @@ class SkillOfflineResult(BaseModel):
     lifecycle_status: Literal["OFFLINE"] = Field(
         description="Current recoverable lifecycle state."
     )
-    offline_at: datetime = Field(description="UTC time at which Offline was recorded.")
+    offline_at: datetime | None = Field(
+        default=None, description="UTC time at which Offline was recorded."
+    )
 
 
 class ImportSpaceSkillFromGitRequest(BaseModel):

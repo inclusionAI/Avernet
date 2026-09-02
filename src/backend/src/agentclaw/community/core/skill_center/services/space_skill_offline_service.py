@@ -47,6 +47,8 @@ class SpaceSkillOfflineService(SpaceSkillOfflineServiceProtocol):
         repository: SpaceSkillOfflineRepositoryProtocol,
         lineage: ServiceArtifactLineageReaderProtocol,
         env_provider: Callable[[], str],
+        drafts=None,
+        tenant_provider: Callable[[], str] | None = None,
     ) -> None:
         self._access = access
         self._repository = repository

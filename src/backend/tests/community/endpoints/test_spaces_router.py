@@ -370,6 +370,20 @@ def _seed_space_skill_version_reads(world) -> None:
     )
 
 
+def _seed_space_skill_copy(world) -> None:
+    _seed_space_skill_version_reads(world)
+    _seed_space_skill_draft_commands(world)
+    bind_overrides(
+        world,
+        SpaceSkillApplicationServiceProtocol,
+        {
+            "copy_published_version": lambda _self, **_kwargs: SpaceSkillCreationOutcome(
+                skill_id=51, created=True
+            ),
+        },
+    )
+
+
 def _seed_space_skill_offline(world) -> None:
     _enable_public_auth(world)
     bind_overrides(
@@ -541,6 +555,17 @@ _SPACE_SKILL_LOOP_CASES = (
             headers=_principal_headers(),
         ),
         200,
+    ),
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy",
+        _seed_space_skill_copy,
+        CaseInput(
+            path_params={"space_id": 1, "skill_id": 51, "version": 1},
+            query_params={"user_id": _USER_ID},
+            headers={**_principal_headers(), "Idempotency-Key": "copy-1"},
+        ),
+        201,
     ),
     (
         "POST",

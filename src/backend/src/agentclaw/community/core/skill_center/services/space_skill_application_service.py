@@ -29,6 +29,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftNotFoundError,
     DraftSourceNotRefreshableError,
     SkillOfflineError,
+    SkillNotOfflineError,
     SkillNameChangedError,
     SpaceSkillIdempotencyConflictError,
 )
@@ -378,7 +379,7 @@ class SpaceSkillApplicationService(SpaceSkillApplicationServiceProtocol):
             env=self._env_provider(),
         )
         if identity.get("offline_at") is None:
-            raise SkillOfflineError("only an offline Skill can be copied")
+            raise SkillNotOfflineError("only an offline Skill can be copied")
         request_hash = hashlib.sha256(
             f"COPY\\0{space_id}\\0{skill_id}\\0{version_ordinal}".encode("ascii")
         ).hexdigest()

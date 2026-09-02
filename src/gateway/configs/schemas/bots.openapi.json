@@ -19104,7 +19104,7 @@
             "type": "boolean"
           },
           "offline_skill": {
-            "description": "Actor may request terminal TeamClaw-local Skill Offline.",
+            "description": "Actor may request terminal local Skill Offline.",
             "title": "Offline Skill",
             "type": "boolean"
           },
@@ -20199,7 +20199,7 @@
         "type": "object"
       },
       "SkillOfflineResult": {
-        "description": "Terminal TeamClaw-local Offline result for the existing Skill.",
+        "description": "Terminal local Offline result for the existing Skill.",
         "properties": {
           "changed": {
             "description": "Whether this request newly moved the Skill Offline.",
@@ -20213,16 +20213,22 @@
             "type": "string"
           },
           "offline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "UTC time at which Offline was recorded.",
-            "format": "date-time",
-            "title": "Offline At",
-            "type": "string"
+            "title": "Offline At"
           }
         },
         "required": [
           "changed",
-          "lifecycle_status",
-          "offline_at"
+          "lifecycle_status"
         ],
         "title": "SkillOfflineResult",
         "type": "object"
@@ -21457,7 +21463,7 @@
                 "type": "null"
               }
             ],
-            "description": "UTC terminal TeamClaw-local Offline time, or null.",
+            "description": "UTC terminal local Offline time, or null.",
             "title": "Offline At"
           },
           "offline_by": {

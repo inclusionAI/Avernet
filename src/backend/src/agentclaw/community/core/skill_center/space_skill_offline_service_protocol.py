@@ -35,10 +35,20 @@ class OfflineImpact:
 
 
 @dataclass(frozen=True, slots=True)
+class OfflineDraft:
+    """Deprecated in-process compatibility record; Offline no longer creates it."""
+
+    target_version: int
+    status: str
+    revision_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class SpaceSkillOfflineResult:
     changed: bool
     lifecycle_status: str
-    offline_at: datetime
+    offline_at: datetime | None = None
+    draft: OfflineDraft | None = None
 
 
 @runtime_checkable
@@ -62,6 +72,7 @@ class SpaceSkillOfflineServiceProtocol(Protocol):
 
 __all__ = [
     "OfflineBlockerKind",
+    "OfflineDraft",
     "OfflineImpact",
     "OfflineImpactItem",
     "SpaceSkillOfflineResult",

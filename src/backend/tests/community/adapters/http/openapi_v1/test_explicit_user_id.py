@@ -416,7 +416,7 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #:
 #: download-dir (openapi v1 resources) adds one more path-addressed operation:
 #: 146 → 147.
-_BOT_ID_PLACEMENT = {"path": 147, "query": 1, "none": 98}
+_BOT_ID_PLACEMENT = {"path": 147, "query": 1, "none": 99}
 
 
 def _schema() -> dict:
@@ -552,8 +552,8 @@ def test_the_pinned_number_of_operations_take_it():
     # bringing the combined surface to 218. The public static-template mirror
     # adds one more user-scoped operation, bringing the current surface to 219.
     # download-dir (openapi v1 resources) takes user_id like every other
-    # resources operation: 219 → 220.
-    assert len(taking) == 220
+    # resources operation and Space Skill Version Copy: 219 → 221.
+    assert len(taking) == 221
 
 
 def test_the_exempt_operations_take_none():
