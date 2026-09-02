@@ -28,6 +28,7 @@ import {
 import type { ObjectStore } from "./services/object-storage/oss-object-store.js";
 import { startRunAnalysisTimeoutSweeper } from "./services/evolve/run-analysis-timeout.js";
 import { startSuggestionApplyTimeoutSweeper } from "./services/evolve/suggestion-apply-timeout.js";
+import { configureClawWebPublicBaseUrl } from "./env.js";
 
 export type ClawevolveModuleOptions = {
   db: IDatabase;
@@ -36,6 +37,8 @@ export type ClawevolveModuleOptions = {
   cancelExecution?: EvolveRouterDeps["cancelExecution"];
   artifactStore?: ObjectStore;
   frozenEvidenceReader?: FrozenEvidenceReader;
+  publicBaseUrl?: string;
+  trustedPublicOrigins?: readonly string[];
   governance?: GovernanceRuleProviderOptions;
 };
 
@@ -59,6 +62,7 @@ export type ClawevolveModule = {
 export function createClawevolveModule(options: ClawevolveModuleOptions): ClawevolveModule {
   const { db } = options;
   if (db.dbType === "noop") throw new Error("Clawevolve requires an available database");
+  configureClawWebPublicBaseUrl(options.publicBaseUrl, options.trustedPublicOrigins);
 
   const evolve = new EvolveRepository(db);
   const taskSource = new EvolveTaskSourceRepository(db);

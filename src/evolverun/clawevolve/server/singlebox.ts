@@ -35,6 +35,7 @@ async function main(): Promise<void> {
   const module = createClawevolveModule({
     db,
     artifactStore,
+    publicBaseUrl: `http://127.0.0.1:${port}`,
     // Singlebox intentionally has no enterprise transport. Creating and
     // inspecting tasks remains available while dispatch is reported locally.
     dispatch: async (input) => ({
