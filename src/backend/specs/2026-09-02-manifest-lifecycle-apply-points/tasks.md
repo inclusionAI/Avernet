@@ -287,14 +287,17 @@ Conventions every task assumes:
 
 ## Group E — `PUT` takes effect
 
-## [ ] Task 17: `declares_script`, the `apply` field, the warnings
+## [x] Task 17: `declares_script`, the `apply` field, the warnings
 - **Files:** `bot_config_manifest_service_protocol.py`, `services/config_manifest_service.py`,
   `adapters/http/openapi_v1/bots/{config_manifest.py,config_manifest_support.py,schemas.py}`,
-  `tests/community/endpoints/test_openapi_config_manifest.py`
+  `tests/community/endpoints/test_openapi_config_manifest.py`,
+  `tests/community/core/bot_config_manifest/test_iteration1_ordering.py` (the
+  no-restart pin), `tests/community/endpoints/test_openapi_create_with_manifest.py`
+  (the old two-call path now sees the PUT's own apply first)
 - **Done when:**
-  - [ ] As revision 2's Tasks 3 and 4, with the not-ACTIVE warning emitted
+  - [x] As revision 2's Tasks 3 and 4, with the not-ACTIVE warning emitted
         only when the bot's strategy has `ON_CONTAINER` constructs.
-  - [ ] Endpoint tests: `RUNNING` with a readable id; lock held →
+  - [x] Endpoint tests: `RUNNING` with a readable id; lock held →
         `NOT_STARTED` and stored; `script` → delivery note; `PENDING` ARCA →
         not-ACTIVE note; `PENDING` teclaw with the switch on → no such note;
         `DELETE` unchanged.

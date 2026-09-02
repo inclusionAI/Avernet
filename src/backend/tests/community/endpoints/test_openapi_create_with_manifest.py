@@ -792,6 +792,17 @@ def test_the_old_two_call_path_still_works_unchanged(client, world):
         json={"document": _FLOW_DOCUMENT},
     )
     assert stored.status_code in (200, 201), stored.text
+    # W8 (§2.6): the PUT itself started an apply of what it stored. It runs on
+    # the same queue and reports under its own trigger; the explicit apply
+    # below still works exactly as it did once that one has run.
+    assert stored.json()["data"]["apply"]["result"] == "RUNNING"
+    _Worker(world).turn()
+    put_report = client.get(
+        f"/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
+        params=_QUERY,
+        headers=_HEADERS,
+    ).json()["data"]
+    assert put_report["trigger"] == "put" and put_report["result"] == "SUCCEEDED", put_report
 
     accepted = client.post(
         f"/openapi/v1/bots/{bot_id}/config-manifest/apply",

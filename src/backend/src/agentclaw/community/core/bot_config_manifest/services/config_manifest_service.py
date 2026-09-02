@@ -177,7 +177,11 @@ class BotConfigManifestService(BotConfigManifestServiceProtocol):
             # The front is kept because that is where the acting identity is.
             modifier=modifier[:MAX_MODIFIER_CHARS],
         )
-        return ManifestWriteResult(record=record, warnings=result.warnings)
+        return ManifestWriteResult(
+            record=record,
+            warnings=result.warnings,
+            declares_script=result.parsed.get("script") is not None,
+        )
 
     def delete(self, *, entity_id: str, bot_id: str) -> bool:
         """Remove the stored manifest. Idempotent — absent is success.

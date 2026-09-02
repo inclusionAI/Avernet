@@ -104,7 +104,8 @@ _MEMBER_QUERY = {"user_id": _MEMBER, "owner_id": _OWNER}
 
 
 def _insert_bot(
-    world, *, bot_id: str, engine: str = "openclaw", bot_type: str = "personal"
+    world, *, bot_id: str, engine: str = "openclaw", bot_type: str = "personal",
+    status: str = "ACTIVE",
 ) -> None:
     """A bot with **no** binding — PENDING between create and first start.
 
@@ -121,7 +122,7 @@ def _insert_bot(
             "entity_id": _OWNER,
             "entity_type": "staff",
             "creator_id": _OWNER,
-            "status": "ACTIVE",
+            "status": status,
             "active_engine": engine,
             "bot_type": bot_type,
         }
@@ -473,3 +474,169 @@ def put_config_manifest_as_member_is_refused():
     ADMIN. The refusal is a masked 404, byte-identical to a bot that does not
     exist — anything finer would confirm the bot to a caller who may not reach
     it."""
+
+
+# ── PUT starts an apply (W8, §2.6) ─────────────────────────────────────────
+
+from agentclaw.community.adapters.http.openapi_v1.bots.config_manifest_support import (  # noqa: E402
+    SCRIPT_DELIVERY_NOTE,
+)
+from agentclaw.community.api.bot_config_manifest_apply_service import (  # noqa: E402
+    BotConfigManifestApplyServiceProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot import (  # noqa: E402
+    BotConfigManifestApplyLockRepositoryProtocol,
+    BotConfigManifestApplyRepositoryProtocol,
+)
+from tests.community.framework import bind_overrides  # noqa: E402
+
+#: A document teclaw can carry: identity only, no script.
+_IDENTITY_DOCUMENT = (
+    "schema_version: 1\nmanifest:\n  identity:\n"
+    "    - type: SOUL.md\n      content: '# Who I am'\n"
+)
+
+
+def _the_apply_is_running_and_readable(response, world) -> None:
+    data = response.json()["data"]
+    assert data["apply"]["result"] == "RUNNING" and data["apply"]["reason"] is None
+    apply_id = data["apply"]["apply_id"]
+    assert apply_id
+    # The id names a real RUNNING record, under the ``put`` trigger.
+    latest = world.get(BotConfigManifestApplyRepositoryProtocol).latest(
+        env=get_current_env(), entity_id=_OWNER, bot_id=_BOT_ID
+    )
+    assert latest is not None and latest.apply_id == apply_id
+    assert latest.status == "RUNNING" and latest.trigger == "put"
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/{bot_id}/config-manifest",
+    scenario="starts_an_apply_and_notes_the_script",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS,
+        json_body={"document": _DOCUMENT},
+    ),
+    seed=_seed_bot,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": {"warnings": [SCRIPT_DELIVERY_NOTE]}},
+    ),
+    extra_assertions=(_the_apply_is_running_and_readable,),
+)
+def put_config_manifest_starts_an_apply():
+    """Storing starts an apply of the stored document, trigger ``put``, and the
+    response carries its id. The document declares a script, so the response
+    also says the script takes effect on the next start."""
+
+
+def _seed_bot_with_the_lock_held(world) -> None:
+    _seed_bot(world)
+    assert world.get(BotConfigManifestApplyLockRepositoryProtocol).acquire(
+        env=get_current_env(), entity_id=_OWNER, bot_id=_BOT_ID, holder_user_id="someone-else"
+    ) is not None
+
+
+def _stored_anyway(response, world) -> None:
+    record = world.get(BotConfigManifestRepositoryProtocol).get(
+        env=get_current_env(), entity_id=_OWNER, bot_id=_BOT_ID
+    )
+    assert record is not None and record.document == _DOCUMENT
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/{bot_id}/config-manifest",
+    scenario="a_held_lock_is_not_started_and_the_document_is_still_stored",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS,
+        json_body={"document": _DOCUMENT},
+    ),
+    seed=_seed_bot_with_the_lock_held,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"apply": {"apply_id": "", "result": "NOT_STARTED", "reason": "apply_in_progress"}},
+        },
+    ),
+    extra_assertions=(_stored_anyway,),
+)
+def put_config_manifest_while_another_apply_runs():
+    """D-8: a PUT that could not start an apply still stores, and says why."""
+
+
+def _seed_pending_arca_bot(world) -> None:
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_BOT_ID, status="PENDING")
+
+
+def _warns_about_the_container(response, _world) -> None:
+    warnings = response.json()["data"]["warnings"]
+    assert any(w.startswith("the bot is PENDING") for w in warnings), warnings
+    assert any(f"/openapi/v1/bots/{_BOT_ID}/config-manifest/apply" in w for w in warnings)
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/{bot_id}/config-manifest",
+    scenario="a_pending_arca_bot_is_warned_about_container_bound_categories",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS,
+        json_body={"document": _IDENTITY_DOCUMENT},
+    ),
+    seed=_seed_pending_arca_bot,
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"apply": {"result": "RUNNING"}}}),
+    extra_assertions=(_warns_about_the_container,),
+)
+def put_config_manifest_on_a_pending_arca_bot():
+    """D-2: the apply starts anyway; the caller is told what will fail and
+    which call to make once the bot is up."""
+
+
+def _seed_pending_teclaw_platform_managed(world) -> None:
+    """A PENDING teclaw bot, with the apply service's strategy switched on."""
+    from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+        DeliveryStrategyFactory,
+        TeclawPlatformBindings,
+    )
+    from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
+        BotConfigManifestApplyService,
+    )
+
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_TECLAW_BOT_ID, engine="teclaw", status="PENDING")
+    applies = bind_overrides(
+        world, BotConfigManifestApplyServiceProtocol, {}, also_bind=(BotConfigManifestApplyService,)
+    )
+    bindings = world.get(TeclawPlatformBindings)
+    applies._strategies = DeliveryStrategyFactory(
+        is_teclaw=lambda engine: engine == "teclaw",
+        teclaw_platform_managed=True,
+        arca_ports=applies._arca_ports,
+        teclaw_platform_ports=bindings.platform_ports,
+        redeliver=bindings.redeliver,
+    )
+
+
+def _no_container_note(response, _world) -> None:
+    assert response.json()["data"]["warnings"] == []
+
+
+@endpoint_test(
+    method="PUT",
+    path="/openapi/v1/bots/{bot_id}/config-manifest",
+    scenario="a_pending_teclaw_bot_on_the_platform_path_is_not_warned",
+    input=CaseInput(
+        path_params={"bot_id": _TECLAW_BOT_ID}, query_params=_QUERY, headers=_HEADERS,
+        json_body={"document": _IDENTITY_DOCUMENT},
+    ),
+    seed=_seed_pending_teclaw_platform_managed,
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"apply": {"result": "RUNNING"}}}),
+    extra_assertions=(_no_container_note,),
+)
+def put_config_manifest_on_a_pending_teclaw_bot():
+    """Nothing needs the container on the platform-managed path, so there is
+    nothing to warn about: the apply writes platform state and provisioning
+    composes from it."""

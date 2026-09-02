@@ -65,3 +65,21 @@ def test_on_teclaw_with_the_switch_on_there_is_no_first_boot_ordering() -> None:
 def test_every_trigger_fits_the_record_column() -> None:
     assert ALL_TRIGGERS == ("explicit", "put", "create:pre_container", "create:on_container")
     assert all(len(t) <= TRIGGER_COLUMN_WIDTH for t in ALL_TRIGGERS)
+
+
+def test_the_manifest_layer_names_no_restart_republish_or_payload_rebuild() -> None:
+    """§2.6 / D-1: a PUT takes effect without a restart on either family, and
+    the manifest layer reaches for no restart, republish or start-command
+    rebuild to make that so. Pinned on the sources: the words never appear."""
+    import pathlib
+
+    import agentclaw.community.core.bot_config_manifest as package
+
+    root = pathlib.Path(package.__file__).parent
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        for needle in ("restart_bot(", "republish(", "_build_create_bot_payload(", "rebuild_payload("):
+            if needle in text:
+                offenders.append(f"{path.relative_to(root)}: {needle}")
+    assert offenders == [], offenders
