@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "insight-governance-rules/v1",
+  "environment": "pre",
+  "version": 1,
+  "updatedAt": "2026-09-02T00:00:00Z",
+  "rules": [
+    {
+      "ruleId": "tool.unsupported-proxy",
+      "version": 1,
+      "enabled": true,
+      "scope": { "environment": "pre", "botId": "*" },
+      "matcher": { "failureClass": ["TOOL_FAILURE"], "signals": ["UNSUPPORTED_PROXY"] },
+      "actionType": "DIRECT_EVOLUTION",
+      "allowedTargets": ["tools.md"],
+      "risk": "low",
+      "adminPolicy": { "mode": "REVIEW", "trustedAfterApprovals": 2 }
+    }
+  ]
+}

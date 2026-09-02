@@ -1,0 +1,71 @@
+{
+  "name": "@avernet/clawevolve",
+  "version": "0.2.0",
+  "description": "Provider-neutral ClawEvolve module extracted from ClawWeb",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./server/routes/evolve": {
+      "types": "./dist/server/routes/evolve.d.ts",
+      "import": "./dist/server/routes/evolve.js"
+    },
+    "./server/routes/evolve-knowledge": {
+      "types": "./dist/server/routes/evolve-knowledge.d.ts",
+      "import": "./dist/server/routes/evolve-knowledge.js"
+    },
+    "./server/routes/internal/evolve": {
+      "types": "./dist/server/routes/internal/evolve.d.ts",
+      "import": "./dist/server/routes/internal/evolve.js"
+    },
+    "./web": {
+      "types": "./dist/web/index.d.ts",
+      "import": "./dist/web/clawevolve.js"
+    },
+    "./server/create-module": {
+      "types": "./dist/server/create-module.d.ts",
+      "import": "./dist/server/create-module.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "COPY_MANIFEST.tsv"
+  ],
+  "scripts": {
+    "check": "bash scripts/check-public-boundary.sh && tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json && vite build && cp web/index.d.ts dist/web/index.d.ts",
+    "test": "vitest run",
+    "prepack": "npm run check && npm test && npm run build"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.9.1",
+    "express": "^5.2.1",
+    "mysql2": "^3.12.0",
+    "yaml": "^2.9.0",
+    "@tanstack/react-query": "^5.100.10",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.12.3",
+    "typescript": "~6.0.2",
+    "vitest": "^3.2.4",
+    "@types/react": "^19.2.14",
+    "react": "^19.2.0",
+    "react-router-dom": "^7.15.1",
+    "vite": "^6.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-router-dom": "^7.0.0"
+  }
+}
