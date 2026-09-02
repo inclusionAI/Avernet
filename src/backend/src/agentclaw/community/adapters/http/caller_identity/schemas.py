@@ -66,6 +66,7 @@ class CallerContextResponse(BaseModel):
     publish_id: int | None
     bot_call_type: McpCallType
     mcp_call_types: dict[str, McpCallType]
+    cli_call_types: dict[str, McpCallType]
     editable: bool
 
 

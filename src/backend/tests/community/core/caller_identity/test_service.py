@@ -2,21 +2,24 @@ from __future__ import annotations
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agentclaw.community.core.caller_identity.contracts import (
     CallerCallTypeInvalidError,
+    CallerCliNotFoundError,
     CallerIdentityAmbiguousError,
     CallerIdentityIrreversibleError,
     CallerIdentityPermissionError,
     CallerIdentityStage,
     CallerIdentityReadOnlyError,
     CallerLockEpochError,
+    CallerCliSyncError,
     CallerMcpNotFoundError,
     CallerMcpSyncError,
     DraftCallTypeMutationResult,
+    CliCallTypeMutationResult,
     McpCallType,
 )
 from agentclaw.community.core.caller_identity import service as caller_identity_service
@@ -24,6 +27,9 @@ from agentclaw.community.core.caller_identity.credential import CallerToken
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityEngineChangedError, CallerIdentityLockMismatchError
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.core.mcp.services.cli_passport_scope import (
+    CliPassportScopeReconciler,
+)
 
 
 def _bot(*, call_type: str = "owner") -> dict[str, object]:
@@ -41,16 +47,31 @@ def _bot(*, call_type: str = "owner") -> dict[str, object]:
     }
 
 
-def _service(*, bot: dict[str, object]):
+def _service(
+    *,
+    bot: dict[str, object],
+    cli_scope_reconciler=None,
+    repository=None,
+    passport_plugin=None,
+    without_cli_scope_reconciler: bool = False,
+):
     bot_repository = MagicMock()
     bot_repository.get_by_id.return_value = bot
     bot_repository.get_unique_by_id.return_value = bot
     bot_repository.get_by_id_and_owner.return_value = bot
+    bot_repository.get_by_id_and_entity.return_value = bot
     collaborator_repository = MagicMock()
     lock_repository = MagicMock()
+    lock_repository.get_by_key.return_value = None
     mcp_provider = MagicMock()
-    repository = MagicMock()
+    repository = repository or MagicMock()
     mcp_sync_service = AsyncMock()
+    passport_plugin = None if without_cli_scope_reconciler else passport_plugin or MagicMock()
+    cli_scope_reconciler = (
+        None
+        if without_cli_scope_reconciler
+        else cli_scope_reconciler or MagicMock()
+    )
     service = CallerIdentityService(
         bot_repository=bot_repository,
         collaborator_repository=collaborator_repository,
@@ -58,6 +79,8 @@ def _service(*, bot: dict[str, object]):
         mcp_provider=mcp_provider,
         repository=repository,
         mcp_sync_service=mcp_sync_service,
+        passport_plugin=passport_plugin,
+        cli_scope_reconciler=cli_scope_reconciler,
     )
     return service, SimpleNamespace(
         bot_repository=bot_repository,
@@ -65,6 +88,8 @@ def _service(*, bot: dict[str, object]):
         mcp_provider=mcp_provider,
         repository=repository,
         mcp_sync_service=mcp_sync_service,
+        passport_plugin=passport_plugin,
+        cli_scope_reconciler=cli_scope_reconciler,
     )
 
 
@@ -83,6 +108,306 @@ def test_iam_context_reads_only_bot_aggregate_call_type() -> None:
     assert context.binding_id == 9
     deps.repository.list_draft_call_types.assert_not_called()
     deps.mcp_provider.collect_bot_active_mcps.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cli_caller_updates_full_scope_and_returns_bot_aggregate() -> None:
+    """A successful CLI caller update must expose the resulting Bot aggregate."""
+    bot = _bot(call_type="owner")
+    service, deps = _service(bot=bot)
+    deps.repository.replace_draft_cli_call_type.return_value = CliCallTypeMutationResult(
+        previous_explicit_call_type=None,
+        revision=1,
+        bot_call_type=McpCallType.CALLER,
+        caller_config_revision=1,
+    )
+    deps.cli_scope_reconciler.current_passport_cli_items.return_value = [
+        {"cli_code": "dataphin", "identity_mode": "owner"},
+        {"cli_code": "deepinsight-cli", "identity_mode": "owner"},
+    ]
+    deps.mcp_provider.collect_bot_active_mcps.return_value = []
+
+    with patch(
+        "agentclaw.community.core.caller_identity.service.logger"
+    ) as logger:
+        result = await service.update_cli_call_type(
+            bot_id="bot-1",
+            cli_code="dataphin",
+            call_type=McpCallType.CALLER,
+            actor_id="owner-1",
+            entity_id="entity-1",
+        )
+
+    assert result.cli_code == "dataphin"
+    assert result.call_type is McpCallType.CALLER
+    assert result.bot_call_type is McpCallType.CALLER
+    deps.repository.replace_draft_call_type.assert_not_called()
+    deps.cli_scope_reconciler.reconcile.assert_called_once_with(
+        bot=bot, force_update=True,
+    )
+    logged = " ".join(str(call) for call in logger.method_calls)
+    assert "cli_call_type_update_requested" in logged
+    assert "cli_call_type_update_succeeded" in logged
+    assert "actor_id" in logged
+    assert "lock_epoch_supplied" in logged
+    assert "duration_ms" in logged
+
+
+@pytest.mark.asyncio
+async def test_cli_caller_preserves_agentpass_only_mcp_caller_identity() -> None:
+    """CLI mutation must use the same full AgentPass snapshot as Bootstrap."""
+    bot = _bot()
+    passport = MagicMock()
+    passport.query_agent_passport.return_value = {
+        "clis": [
+            {"cli_code": "dataphin", "identity_mode": "owner"},
+            {"cli_code": "deepinsight-cli", "identity_mode": "owner"},
+        ],
+        "mcps": [
+            {"mcp_code": "agentpass-only", "identity_mode": "caller"},
+            {"mcp_code": "local-mcp", "identity_mode": "owner"},
+        ],
+    }
+    repository = MagicMock()
+    repository.list_draft_call_types.return_value = {}
+    repository.list_draft_cli_call_types.return_value = {"dataphin": McpCallType.CALLER}
+    reconciler = CliPassportScopeReconciler(
+        passport_plugin=passport,  # type: ignore[arg-type]
+        identity_repository=repository,  # type: ignore[arg-type]
+    )
+    service, deps = _service(
+        bot=bot,
+        cli_scope_reconciler=reconciler,
+        repository=repository,
+        passport_plugin=passport,
+    )
+    repository.replace_draft_cli_call_type.return_value = CliCallTypeMutationResult(
+        previous_explicit_call_type=None,
+        revision=1,
+        bot_call_type=McpCallType.CALLER,
+        caller_config_revision=1,
+    )
+
+    await service.update_cli_call_type(
+        bot_id="bot-1",
+        cli_code="dataphin",
+        call_type=McpCallType.CALLER,
+        actor_id="owner-1",
+        entity_id="entity-1",
+    )
+
+    assert passport.update_passport.call_args.kwargs["resource_scope"]["mcp_items"] == [
+        {"mcp_code": "agentpass-only", "identity_mode": "caller"},
+        {"mcp_code": "local-mcp", "identity_mode": "owner"},
+    ]
+    deps.mcp_provider.collect_bot_active_mcps.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cli_scope_failure_compensates_the_sparse_override() -> None:
+    bot = _bot()
+    service, deps = _service(bot=bot)
+    deps.repository.replace_draft_cli_call_type.return_value = CliCallTypeMutationResult(
+        previous_explicit_call_type=None,
+        revision=1,
+        bot_call_type=McpCallType.CALLER,
+        caller_config_revision=1,
+    )
+    deps.cli_scope_reconciler.current_passport_cli_items.return_value = [
+        {"cli_code": "dataphin", "identity_mode": "owner"},
+    ]
+    deps.cli_scope_reconciler.reconcile.side_effect = RuntimeError(
+        "scope-token-secret"
+    )
+    deps.mcp_provider.collect_bot_active_mcps.return_value = []
+
+    with patch(
+        "agentclaw.community.core.caller_identity.service.logger"
+    ) as logger:
+        with pytest.raises(CallerCliSyncError):
+            await service.update_cli_call_type(
+                bot_id="bot-1",
+                cli_code="dataphin",
+                call_type=McpCallType.CALLER,
+                actor_id="owner-1",
+                entity_id="entity-1",
+            )
+
+    deps.repository.compensate_draft_cli_call_type.assert_called_once_with(
+        bot_pk=1,
+        engine_type="openclaw",
+        cli_code="dataphin",
+        previous_explicit_call_type=None,
+        modifier_id="owner-1",
+        expected_revision=1,
+        expected_caller_config_revision=1,
+        lock_key="bot-1:owner-1",
+        lock_holder_user_id="owner-1",
+        lock_epoch=None,
+        effective_server_codes=set(),
+        effective_cli_codes={"dataphin"},
+    )
+    compensation_log = next(
+        call
+        for call in logger.warning.call_args_list
+        if "cli_call_type_update_compensated" in call.args[0]
+    )
+    assert "actor_id" in compensation_log.args[0]
+    assert "lock_epoch_supplied" in compensation_log.args[0]
+    assert "duration_ms" in compensation_log.args[0]
+    logged = " ".join(str(call) for call in logger.method_calls)
+    assert "scope-token-secret" not in logged
+
+
+@pytest.mark.asyncio
+async def test_cli_scope_query_failure_logs_requested_failed_without_secret() -> None:
+    """Passport failures must be diagnosable without logging its credentials."""
+    service, deps = _service(bot=_bot())
+    deps.cli_scope_reconciler.current_passport_cli_items.side_effect = RuntimeError(
+        "passport-token-secret"
+    )
+
+    with patch(
+        "agentclaw.community.core.caller_identity.service.logger"
+    ) as logger:
+        with pytest.raises(CallerCliSyncError):
+            await service.update_cli_call_type(
+                bot_id="bot-1",
+                cli_code="dataphin",
+                call_type=McpCallType.CALLER,
+                actor_id="owner-1",
+                entity_id="entity-1",
+            )
+
+    logged = " ".join(str(call) for call in logger.method_calls)
+    assert "cli_call_type_update_requested" in logged
+    assert "cli_call_type_update_failed" in logged
+    assert "query_scope" in logged
+    assert "actor_id" in logged
+    assert "duration_ms" in logged
+    assert "passport-token-secret" not in logged
+
+
+@pytest.mark.asyncio
+async def test_cli_update_rejects_code_missing_from_agentpass_snapshot() -> None:
+    """A typo must not create an override that AgentPass has never authorized."""
+    service, deps = _service(bot=_bot())
+    deps.cli_scope_reconciler.current_passport_cli_items.return_value = []
+
+    with pytest.raises(CallerCliNotFoundError):
+        await service.update_cli_call_type(
+            bot_id="bot-1",
+            cli_code="unknown-cli",
+            call_type=McpCallType.CALLER,
+            actor_id="owner-1",
+            entity_id="entity-1",
+        )
+
+    deps.repository.replace_draft_cli_call_type.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("engine_type", "template_type"),
+    [
+        ("aicoding", None),
+        ("claude_code", "normalCC"),
+    ],
+)
+async def test_cli_update_rejects_profiles_outside_phase_one(
+    engine_type: str, template_type: str | None
+) -> None:
+    """CLI caller overrides are limited to the manifest's phase-one profiles."""
+    bot = _bot()
+    bot["active_engine"] = engine_type
+    bot["template_type"] = template_type
+    service, deps = _service(bot=bot)
+    deps.cli_scope_reconciler.supports_profile.return_value = False
+
+    with pytest.raises(CallerIdentityReadOnlyError):
+        await service.update_cli_call_type(
+            bot_id="bot-1",
+            cli_code="dataphin",
+            call_type=McpCallType.CALLER,
+            actor_id="owner-1",
+            entity_id="entity-1",
+        )
+
+    deps.cli_scope_reconciler.current_passport_cli_items.assert_not_called()
+    deps.repository.replace_draft_cli_call_type.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cli_update_rejects_when_scope_reconciler_is_unavailable() -> None:
+    """A caller override may not be persisted without scope compensation."""
+    service, deps = _service(
+        bot=_bot(),
+        passport_plugin=None,
+        without_cli_scope_reconciler=True,
+    )
+
+    with pytest.raises(CallerCliSyncError):
+        await service.update_cli_call_type(
+            bot_id="bot-1",
+            cli_code="dataphin",
+            call_type=McpCallType.CALLER,
+            actor_id="owner-1",
+            entity_id="entity-1",
+        )
+
+    deps.repository.replace_draft_cli_call_type.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cli_update_rejects_mismatched_collaboration_lock() -> None:
+    """A concurrent editor's lock must fence an otherwise valid CLI mutation."""
+    service, deps = _service(bot=_bot())
+    deps.cli_scope_reconciler.current_passport_cli_items.return_value = [
+        {"cli_code": "dataphin", "identity_mode": "owner"},
+    ]
+    deps.lock_repository.get_by_key.return_value = SimpleNamespace(
+        holder_user_id="another-owner", id=9
+    )
+
+    with pytest.raises(CallerLockEpochError):
+        await service.update_cli_call_type(
+            bot_id="bot-1",
+            cli_code="dataphin",
+            call_type=McpCallType.CALLER,
+            actor_id="owner-1",
+            lock_epoch=9,
+            entity_id="entity-1",
+        )
+
+    deps.repository.replace_draft_cli_call_type.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("repository_error", "expected_error"),
+    [
+        (CallerIdentityLockMismatchError(), CallerLockEpochError),
+        (CallerIdentityEngineChangedError(), CallerIdentityReadOnlyError),
+    ],
+)
+async def test_cli_update_maps_persistence_fencing_errors(
+    repository_error: Exception, expected_error: type[Exception]
+) -> None:
+    """The API keeps the established lock/engine error contract for CLI rows."""
+    service, deps = _service(bot=_bot())
+    deps.cli_scope_reconciler.current_passport_cli_items.return_value = [
+        {"cli_code": "dataphin", "identity_mode": "owner"},
+    ]
+    deps.repository.replace_draft_cli_call_type.side_effect = repository_error
+
+    with pytest.raises(expected_error):
+        await service.update_cli_call_type(
+            bot_id="bot-1",
+            cli_code="dataphin",
+            call_type=McpCallType.CALLER,
+            actor_id="owner-1",
+            entity_id="entity-1",
+        )
 
 
 def test_iam_context_should_not_exchange_when_call_type_not_caller() -> None:
@@ -518,6 +843,30 @@ def test_caller_context_is_editable_for_unlocked_owner() -> None:
     )
 
     assert context.editable is True
+
+
+def test_caller_context_returns_mcp_and_cli_sparse_caller_overrides() -> None:
+    """The unified read must expose both resource kinds without an AgentPass call."""
+    service, deps = _service(bot=_bot())
+    deps.lock_repository.get_by_key.return_value = None
+    deps.repository.list_draft_call_types.return_value = {
+        "mcp.calendar": McpCallType.CALLER,
+    }
+    deps.repository.list_draft_cli_call_types.return_value = {
+        "dataphin": McpCallType.CALLER,
+    }
+
+    context = service.get_context(
+        bot_id="bot-1",
+        actor_id="owner-1",
+        stage=CallerIdentityStage.DRAFT,
+    )
+
+    assert context.mcp_call_types == {"mcp.calendar": McpCallType.CALLER}
+    assert context.cli_call_types == {"dataphin": McpCallType.CALLER}
+    deps.repository.list_draft_call_types.assert_called_once_with(1, "openclaw")
+    deps.repository.list_draft_cli_call_types.assert_called_once_with(1, "openclaw")
+    deps.cli_scope_reconciler.current_passport_cli_items.assert_not_called()
 
 
 @pytest.mark.asyncio

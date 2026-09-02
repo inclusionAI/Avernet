@@ -793,6 +793,13 @@ class _RuntimePassport:
         # engine's static list.
         return [{"cli_code": "kept-cli", "cli_name": "Kept"}]
 
+    def query_agent_passport(self, bot_id: str, owner_id: str) -> dict:
+        assert (bot_id, owner_id) == ("bot-1", "true-owner")
+        return {
+            "mcps": [],
+            "clis": [{"cli_code": "kept-cli", "cli_name": "Kept", "identity_mode": "owner"}],
+        }
+
 
 class _RuntimeCallerIdentity:
     """Caller-identity source for the Passport MCP scope.
@@ -2086,7 +2093,7 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
                     {"mcp_code": "mcp.template-preset", "identity_mode": "owner"},
                     {"mcp_code": "mcp.weather", "identity_mode": "owner"},
                 ],
-                "cli_items": [{"cli_code": "kept-cli", "cli_name": "Kept"}],
+                "cli_items": [{"cli_code": "kept-cli", "cli_name": "Kept", "cli_desc": None, "identity_mode": "owner"}],
             },
         }
     ]
@@ -2131,6 +2138,146 @@ async def test_projection_preserves_caller_identity_for_configured_mcp():
     ]
     # Looked up by the Bot's primary key and the engine it actually runs.
     assert identity.calls == [(42, "openclaw")]
+
+
+@pytest.mark.asyncio
+async def test_projection_preserves_agentpass_only_caller_identity_without_sparse_row():
+    """A full AgentPass snapshot colours desired MCP membership before overwrite."""
+
+    class _HistoricalCallerPassport(_RuntimePassport):
+        def query_agent_passport(self, bot_id: str, owner_id: str) -> dict:
+            assert (bot_id, owner_id) == ("bot-1", "true-owner")
+            return {
+                "mcps": [
+                    {"mcp_code": "mcp.weather", "identity_mode": "caller"},
+                ],
+                "clis": [{"cli_code": "kept-cli", "cli_name": "Kept", "identity_mode": "owner"}],
+            }
+
+    passport = _HistoricalCallerPassport()
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
+        passport=passport,
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
+
+    assert _passport_mcp_items(passport) == [
+        {"mcp_code": "mcp.template-preset", "identity_mode": "owner"},
+        {"mcp_code": "mcp.weather", "identity_mode": "caller"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_projection_logs_agentpass_scope_success_without_snapshot_secret(caplog):
+    """AgentPass projection observability exposes scope counts, not its raw snapshot."""
+
+    class _TokenBearingPassport(_RuntimePassport):
+        def query_agent_passport(self, bot_id: str, owner_id: str) -> dict:
+            snapshot = super().query_agent_passport(bot_id, owner_id)
+            return {**snapshot, "token": "passport-token-secret"}
+
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
+        passport=_TokenBearingPassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    with caplog.at_level("INFO", logger="start"):
+        await runtime.project(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            scope=ProjectionScope.everything(),
+        )
+
+    logged = caplog.text
+    assert "agentpass_runtime_scope_update_requested" in logged
+    assert "agentpass_runtime_scope_update_succeeded" in logged
+    assert "status=succeeded" in logged
+    assert "duration_ms" in logged
+    assert "passport-token-secret" not in logged
+
+
+@pytest.mark.asyncio
+async def test_projection_logs_agentpass_snapshot_failure_without_secret(caplog):
+    """The snapshot failure event records exception type only before wrapping."""
+
+    class _FailingPassport(_RuntimePassport):
+        def query_agent_passport(self, bot_id: str, owner_id: str) -> dict:
+            raise RuntimeError("passport-token-secret")
+
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
+        passport=_FailingPassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    with caplog.at_level("INFO", logger="start"):
+        with pytest.raises(SkillSetRuntimeReconcileError):
+            await runtime.project(
+                bot_id="bot-1",
+                owner_id="true-owner",
+                scope=ProjectionScope.everything(),
+            )
+
+    logged = caplog.text
+    assert "agentpass_runtime_scope_update_requested" in logged
+    assert "agentpass_runtime_scope_update_failed" in logged
+    assert "stage=snapshot" in logged
+    assert "error_type=RuntimeError" in logged
+    assert "duration_ms" in logged
+    assert "passport-token-secret" not in logged
+
+
+@pytest.mark.asyncio
+async def test_projection_logs_agentpass_update_failure_without_secret(caplog):
+    """The overwrite failure has the same low-sensitive event contract."""
+
+    class _FailingPassport(_RuntimePassport):
+        def update_passport(self, **kwargs) -> None:
+            raise RuntimeError("passport-token-secret")
+
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills()),
+        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
+        passport=_FailingPassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    with caplog.at_level("INFO", logger="start"):
+        with pytest.raises(SkillSetRuntimeReconcileError):
+            await runtime.project(
+                bot_id="bot-1",
+                owner_id="true-owner",
+                scope=ProjectionScope.everything(),
+            )
+
+    assert "agentpass_runtime_scope_update_requested" in caplog.text
+    assert "agentpass_runtime_scope_update_failed" in caplog.text
+    assert "stage=update" in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
+    assert "duration_ms=" in caplog.text
+    assert "passport-token-secret" not in caplog.text
 
 
 @pytest.mark.asyncio

@@ -85,10 +85,18 @@ def _bind_deps(world, *, default_set: bool = True) -> PassportPlugin:
     assert skill_set_id == _SKILL_SET_ID
 
     passport = world.get(PassportPlugin)
-    passport.set_response("query_passport_clis", [
+    cli_items = [
         {"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept"},
         {"cli_code": "cli.delete", "cli_name": "Delete CLI", "cli_desc": "removed"},
-    ])
+    ]
+    passport.set_response("query_passport_clis", cli_items)
+    passport.set_response("query_agent_passport", {
+        "mcps": [{"mcp_code": "web-search", "identity_mode": "caller"}],
+        "clis": [
+            {**item, "identity_mode": "owner"}
+            for item in cli_items
+        ],
+    })
     return passport
 
 
@@ -125,6 +133,7 @@ def _seed_delete_cli_not_found(world) -> None:
 def _seed_delete_cli_query_failure(world) -> None:
     passport = _bind_deps(world)
     passport.set_override("query_passport_clis", _tcauth_down)
+    passport.set_override("query_agent_passport", _tcauth_down)
 
 
 def _assert_delete_updates_remaining_cli(response, world) -> None:
@@ -135,12 +144,21 @@ def _assert_delete_updates_remaining_cli(response, world) -> None:
     assert kwargs["bot_id"] == "bot_skillset_cli"
     assert kwargs["user_id"] == "u_skillset_cli"
     assert kwargs["resource_scope"]["cli_items"] == [
-        {"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept"},
+        {
+            "cli_code": "cli.keep",
+            "cli_name": "Keep CLI",
+            "cli_desc": "kept",
+            "identity_mode": "owner",
+        },
     ]
     mcp_codes = kwargs["resource_scope"]["mcp_codes"]
     assert mcp_codes
     assert all(isinstance(code, str) for code in mcp_codes)
     assert "hitl" not in mcp_codes
+    assert {
+        "mcp_code": "web-search",
+        "identity_mode": "caller",
+    } in kwargs["resource_scope"]["mcp_items"]
 
 
 @endpoint_test(

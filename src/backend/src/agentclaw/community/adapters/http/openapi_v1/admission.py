@@ -217,6 +217,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
+        "PATCH",
+        "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
         "POST",
         "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,

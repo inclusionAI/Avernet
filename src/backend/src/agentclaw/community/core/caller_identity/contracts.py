@@ -53,9 +53,19 @@ class CallerMcpNotFoundError(NotFound):
         super().__init__("CALLER_MCP_NOT_FOUND")
 
 
+class CallerCliNotFoundError(NotFound):
+    def __init__(self) -> None:
+        super().__init__("CALLER_CLI_NOT_FOUND")
+
+
 class CallerMcpSyncError(InternalError):
     def __init__(self) -> None:
         super().__init__("CALLER_MCP_SYNC_FAILED")
+
+
+class CallerCliSyncError(InternalError):
+    def __init__(self) -> None:
+        super().__init__("CALLER_CLI_SYNC_FAILED")
 
 
 class CallerCallTypeInvalidError(InternalError):
@@ -78,8 +88,23 @@ class DraftCallTypeCompensationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CliCallTypeMutationResult:
+    previous_explicit_call_type: McpCallType | None
+    revision: int
+    bot_call_type: McpCallType
+    caller_config_revision: int
+
+
+@dataclass(frozen=True, slots=True)
 class McpCallTypeUpdateResult:
     server_code: str
+    call_type: McpCallType
+    bot_call_type: McpCallType
+
+
+@dataclass(frozen=True, slots=True)
+class CliCallTypeUpdateResult:
+    cli_code: str
     call_type: McpCallType
     bot_call_type: McpCallType
 
@@ -110,12 +135,15 @@ class CallerContext:
     publish_id: int | None
     bot_call_type: McpCallType
     mcp_call_types: dict[str, McpCallType]
+    cli_call_types: dict[str, McpCallType]
     editable: bool
 
 
 __all__ = [
     "CALLER_IDENTITY_CAPABILITY",
     "CallerCallTypeInvalidError",
+    "CallerCliNotFoundError",
+    "CallerCliSyncError",
     "CallerContext",
     "CallerIamTokenContext",
     "CallerIdentityAmbiguousError",
@@ -127,6 +155,8 @@ __all__ = [
     "CallerLockEpochError",
     "CallerMcpNotFoundError",
     "CallerMcpSyncError",
+    "CliCallTypeMutationResult",
+    "CliCallTypeUpdateResult",
     "DraftCallTypeCompensationResult",
     "DraftCallTypeMutationResult",
     "McpCallType",
