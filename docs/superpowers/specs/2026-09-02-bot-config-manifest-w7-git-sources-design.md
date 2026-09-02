@@ -115,13 +115,20 @@ fetch 天然不执行仓库 hook；不加 `--filter`；此外对 checkout 强制
 2. 源上的 `auth` 归属源，不由条目携带（W7 验收标准）；
 3. URL 源走既有 `fetch()`；git 源走 §2 的客户端。
 
-### 3.2 单 apply 拉取缓存
+### 3.2 单 apply 拉取缓存：`SourceSession` 挂在 `ApplyContext` 上
 
-`EntryFetcher` 本就 "composed once per apply"——缓存放这里：
+取证修正：`EntryFetcher` 在 DI 里是 **@singleton**（`manifest_fetch_module.py`
+`manifest_entry_fetcher`），不是"每次 apply 新建"——per-apply 状态放它实例上会跨
+apply 泄漏。正确位置有现成先例：`ApplyContext.budget`（"mutable by design inside
+the frozen context"）。W7 新增 `apply/source_session.py` 的 `SourceSession`：
 
-- `dict[(git_url, ref), GitCheckout]`：同一 `{git, ref}` 拉一次，全体引用条目复用；
-- SHA 解析同样只做一次；
-- 缓存生命周期 = apply 生命周期，apply 结束临时 checkout 随之清理。
+- 持有：文档的 `sources` 声明、strict 基线（来自上次 apply 报告）、git 客户端；
+- 可变状态（per-apply）：`dict[(git_url, ref), GitCheckout]`——同一 `{git, ref}`
+  拉一次，全体引用条目复用；SHA 解析同样只做一次；
+- 记录 `SourceResolution`，apply 结束时 orchestrator 把它填进 `ApplyReport.sources`；
+- `close()` 在 apply 结束（含启动失败路径）清理临时 checkout，幂等；
+- 由 apply service 在 `start_apply`/`dry_run` 构造，经 `ApplyContext.source_session`
+  下发（测试/手工路径为 `None`，`fetch_declared` 拒绝无 session 的 `from`/git 条目）。
 
 ## 4. strict 模式与 SHA 记录（零迁移）
 
