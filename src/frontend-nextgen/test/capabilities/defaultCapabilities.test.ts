@@ -74,6 +74,31 @@ describe('Open Core default capabilities', () => {
     expect(typeof r.value.loginWordmark).toBe('function');
   });
 
+  test('getPersonalSpaceInitOptions 默认 skipSC:true（阿里云部署 body 契约）', () => {
+    const r = defaultCapabilities.getPersonalSpaceInitOptions();
+    expect(r.status).toBe('available');
+    expect(r.value).toEqual({ skipSC: true });
+  });
+
+  test('getShellVisibility 默认三项全 false（Open Core 隐藏管理后台入口/空间切换器/通知中心）', () => {
+    const r = defaultCapabilities.getShellVisibility();
+    expect(r.status).toBe('available');
+    expect(r.value).toEqual({ adminEntry: false, spaceSwitcher: false, notificationBell: false });
+  });
+
+  test('getRuntimeRouteRedirect 对 /admin 系直访重定向 /manage（open 形态基线路由不可达）', () => {
+    expect(defaultCapabilities.getRuntimeRouteRedirect({ pathname: '/admin' }).value).toBe('/manage');
+    expect(defaultCapabilities.getRuntimeRouteRedirect({ pathname: '/admin/spaces' }).value).toBe('/manage');
+    expect(defaultCapabilities.getRuntimeRouteRedirect({ pathname: '/admin/work-orders' }).value).toBe('/manage');
+    expect(defaultCapabilities.getRuntimeRouteRedirect({ pathname: '/admin' }).status).toBe('available');
+  });
+
+  test('getRuntimeRouteRedirect 非 /admin 路径维持 null（含前缀误伤防护）', () => {
+    for (const pathname of ['/workspace', '/bot-workshop', '/manage', '/administrator', '/adminx', '/']) {
+      expect(defaultCapabilities.getRuntimeRouteRedirect({ pathname }).value).toBeNull();
+    }
+  });
+
   test('getHumanIdentity：externalAuthStore.user 已登录 → 返回 oauth 外部身份（oauth-provider 策略）', () => {
     useExternalAuthStore.getState().reset();
     useExternalAuthStore

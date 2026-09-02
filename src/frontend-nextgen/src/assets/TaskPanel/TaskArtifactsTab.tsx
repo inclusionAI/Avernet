@@ -1,5 +1,5 @@
 // @asset-migrated: teamclaw 自研资产
-/** 产物 Tab（U5）：展示 mapper 选定的任务产出内容（存在已完成的「投放实施」节点时优先使用该节点，否则使用根节点）。
+/** 产物 Tab（U5）：展示根节点（data.tasks[0].run_info）的任务产出内容。
  *  渲染逻辑与节点详情「输出摘要」一致：剥 HTTP 信封后按 markdown 渲染，长内容可折叠/展开。
  *  当节点 output 为空时，若仍有文件类 artifacts，则回退展示 artifacts 卡片列表。 */
 import React from 'react';
@@ -103,58 +103,33 @@ const ArtifactCard: React.FC<{ a: TaskView['artifacts'][number] }> = ({ a }) => 
   </div>
 );
 
-const OutputDimensionCard: React.FC<{ dimension: NonNullable<TaskView['rootOutputDimensions']>[number] }> = ({
-  dimension,
-}) => (
-  <div style={{ marginBottom: 12 }}>
-    <div style={{ fontSize: 14, fontWeight: 650, color: C.textPrimary, marginBottom: 5 }}>{dimension.key}</div>
-    <div
-      style={{
-        border: `1px solid ${C.border}`,
-        borderRadius: 8,
-        padding: 12,
-        background: C.surfaceRaised,
-      }}
-    >
-      <MarkdownCell content={dimension.content} fontSize={13} />
-    </div>
-  </div>
-);
-
 export const TaskArtifactsTab: React.FC<{ task: TaskView }> = ({ task }) => {
-  const dimensions = task.rootOutputDimensions ?? [];
-  const hasDimensions = dimensions.length > 0;
-  const hasOutput = !hasDimensions && !!task.rootOutputRender && task.rootOutputRender.trim().length > 0;
+  const hasOutput = !!task.rootOutputRender && task.rootOutputRender.trim().length > 0;
   const hasArtifacts = task.artifacts.length > 0;
 
-  if (!hasDimensions && !hasOutput && !hasArtifacts) {
+  if (!hasOutput && !hasArtifacts) {
     return <Empty description="暂无产物" />;
   }
 
   return (
     <div style={{ padding: 16 }}>
-      {(hasDimensions || hasOutput) && (
-        <div style={{ marginBottom: hasArtifacts ? 16 : 0 }}>
-          {hasDimensions ? (
-            dimensions.map((dimension) => <OutputDimensionCard key={dimension.key} dimension={dimension} />)
-          ) : (
-            <div
-              style={{
-                background: C.surface,
-                border: `1px solid ${C.border}`,
-                borderRadius: 8,
-                padding: 14,
-              }}
-            >
-              <div style={{ fontSize: 12, fontWeight: 650, color: C.textPrimary, marginBottom: 4 }}>产出内容</div>
-              <MarkdownCell content={task.rootOutputRender} fontSize={13} />
-            </div>
-          )}
+      {hasOutput && (
+        <div
+          style={{
+            background: C.surface,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            padding: 14,
+            marginBottom: hasArtifacts ? 16 : 0,
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 650, color: C.textPrimary, marginBottom: 4 }}>产出内容</div>
+          <MarkdownCell content={task.rootOutputRender} />
         </div>
       )}
       {hasArtifacts && (
         <div>
-          {(hasOutput || hasDimensions) && (
+          {hasOutput && (
             <div style={{ fontSize: 12, fontWeight: 650, color: C.textSecondary, margin: '4px 0 8px' }}>产物文件</div>
           )}
           {task.artifacts.map((a) => (

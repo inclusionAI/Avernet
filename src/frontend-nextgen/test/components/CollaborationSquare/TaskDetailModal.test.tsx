@@ -98,6 +98,38 @@ describe('TaskDetailModal', () => {
     expect(screen.getAllByText('已完成').length).toBeGreaterThanOrEqual(1);
   });
 
+  test('有 output 时展示「输出内容」区与产出文本', () => {
+    const task: PublicTask = { ...completedTask, output: '最终产出文档内容' };
+    render(<TaskDetailModal open task={task} loading={false} onClose={jest.fn()} />);
+    expect(screen.getByText('输出内容')).toBeInTheDocument();
+    expect(screen.getByText('最终产出文档内容')).toBeInTheDocument();
+  });
+
+  test('有 publisher 与 publisherName 时发布者展示为「publisher（publisherName）」', () => {
+    const task: PublicTask = { ...completedTask, publisher: '20260825_bohtfhe6', publisherName: '自动研发Bot' };
+    render(<TaskDetailModal open task={task} loading={false} onClose={jest.fn()} />);
+    expect(screen.getByText('20260825_bohtfhe6（自动研发Bot）')).toBeInTheDocument();
+  });
+
+  test('有 publisher 但无 publisherName 时发布者只展示 publisher ID', () => {
+    const task: PublicTask = { ...completedTask, publisher: '20260825_bohtfhe6' };
+    render(<TaskDetailModal open task={task} loading={false} onClose={jest.fn()} />);
+    expect(screen.getByText('20260825_bohtfhe6')).toBeInTheDocument();
+  });
+
+  test('输出内容位于当前状态之后（长文本放末尾，不挤占中段布局）', () => {
+    const task: PublicTask = { ...completedTask, output: '产出内容' };
+    render(<TaskDetailModal open task={task} loading={false} onClose={jest.fn()} />);
+    const statusLabel = screen.getByText('当前状态');
+    const outputLabel = screen.getByText('输出内容');
+    expect(statusLabel.compareDocumentPosition(outputLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('无 output 时不渲染「输出内容」区', () => {
+    render(<TaskDetailModal open task={pendingTask} loading={false} onClose={jest.fn()} />);
+    expect(screen.queryByText('输出内容')).not.toBeInTheDocument();
+  });
+
   test('loading=true 时内容区显示骨架占位，不显示任务正文', () => {
     render(<TaskDetailModal open task={null} loading onClose={jest.fn()} />);
     expect(screen.getByLabelText('正在加载任务详情')).toBeInTheDocument();

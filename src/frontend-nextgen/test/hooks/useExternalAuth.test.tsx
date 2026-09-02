@@ -59,6 +59,47 @@ describe('useExternalAuth', () => {
     expect(mockedNotifyError).not.toHaveBeenCalled();
   });
 
+  it('checkAuth 401 携带 BCS 40100 信封体 → unauthenticated(status 判定不受信封影响)', async () => {
+    mockedRequest.mockRejectedValue({
+      response: {
+        status: 401,
+        data: { code: 40100, message: 'Authentication is required', data: { error_code: 'unauthenticated' }, request_id: 'r' },
+      },
+    });
+    const { result } = renderHook(() => useExternalAuth());
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.checkAuth();
+    });
+
+    expect(ok).toBe(false);
+    expect(useExternalAuthStore.getState().status).toBe('unauthenticated');
+  });
+
+  it('checkAuth 成功(BCS 20000 信封)→ 解包 data 后 authenticated', async () => {
+    mockedRequest.mockResolvedValue({
+      code: 20000,
+      message: 'OK',
+      data: { user_id: 'u-1', name: 'Alice', provider: 'alipay', avatar: 'https://a' },
+      request_id: 'r',
+    });
+    const { result } = renderHook(() => useExternalAuth());
+
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.checkAuth();
+    });
+
+    expect(ok).toBe(true);
+    expect(useExternalAuthStore.getState().user).toEqual({
+      userId: 'u-1',
+      displayName: 'Alice',
+      provider: 'alipay',
+      avatarUrl: 'https://a',
+    });
+  });
+
   it('checkAuth 非 401 错误 → error + notifyError', async () => {
     mockedRequest.mockRejectedValue({ response: { status: 500, data: { message: 'boom' } } });
     const { result } = renderHook(() => useExternalAuth());
@@ -121,7 +162,7 @@ describe('useExternalAuth', () => {
       await result.current.login();
     });
 
-    expect(mockedRequest).toHaveBeenCalledWith('/auth/url', expect.objectContaining({ method: 'GET' }));
+    expect(mockedRequest).toHaveBeenCalledWith('/openapi/v1/auth/url', expect.objectContaining({ method: 'GET' }));
     expect(mockedNavigateToUrl).toHaveBeenCalledWith('https://login.example/fetched');
   });
 
@@ -134,6 +175,6 @@ describe('useExternalAuth', () => {
     });
 
     await waitFor(() => expect(mockedReloadCurrentTab).toHaveBeenCalled());
-    expect(mockedRequest).toHaveBeenCalledWith('/auth/logout', expect.objectContaining({ method: 'POST' }));
+    expect(mockedRequest).toHaveBeenCalledWith('/openapi/v1/auth/logout', expect.objectContaining({ method: 'POST' }));
   });
 });

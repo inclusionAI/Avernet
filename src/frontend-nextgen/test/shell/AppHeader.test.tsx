@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { extendCapabilities } from '@/capabilities';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -51,5 +52,37 @@ describe('AppHeader product area switcher', () => {
     fireEvent.click(screen.getByRole('button', { name: '管理' }));
 
     expect(onAreaChange).toHaveBeenCalledWith('manage');
+  });
+});
+
+describe('AppHeader 通知中心门控（getShellVisibility.notificationBell）', () => {
+  const renderHeader = () =>
+    render(
+      <AppHeader
+        area="work"
+        sidebarCollapsed={false}
+        onAreaChange={jest.fn()}
+        onToggleSidebar={jest.fn()}
+        onOpenMobileNav={jest.fn()}
+      />,
+    );
+
+  it('Open Core 默认（notificationBell=false）：不渲染通知铃铛，HelpMenu/AccountBadge 保留', () => {
+    renderHeader();
+    expect(screen.queryByTestId('notification-bell')).not.toBeInTheDocument();
+    expect(screen.getByTestId('help-menu')).toBeInTheDocument();
+    expect(screen.getByTestId('account-badge')).toBeInTheDocument();
+  });
+
+  // extendCapabilities 合并后无法恢复，capability override 用例置于文件末尾（沿用 WelcomePage 测试约定）。
+  it('internal overlay（notificationBell=true）：渲染通知铃铛', () => {
+    extendCapabilities({
+      getShellVisibility: () => ({
+        status: 'available',
+        value: { adminEntry: true, spaceSwitcher: true, notificationBell: true },
+      }),
+    });
+    renderHeader();
+    expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
   });
 });

@@ -8,19 +8,9 @@
  */
 import { normalizeTaskStatus } from '@/shared/taskStatus';
 import type { TaskDashboardResponse, TaskNodeDto, TaskStatusCode, TaskType } from './contract';
-import { OKR_OUTPUT_DIMENSIONS } from './okrOutput';
 import { renderableSource, unwrapHttpEnvelope } from './outputEnvelope';
 import { ARTIFACT_TYPE_LABELS, SOURCE_LABELS, TASK_STATUS_TONES, TASK_TYPE_LABELS } from './tokens';
-import type {
-  DagEdgeView,
-  DagNodeView,
-  NodeStatus,
-  StepTraceView,
-  TaskNodeView,
-  TaskOutputDimension,
-  TaskStatus,
-  TaskView,
-} from './types';
+import type { DagEdgeView, DagNodeView, NodeStatus, StepTraceView, TaskNodeView, TaskStatus, TaskView } from './types';
 
 /** 执行模态 → 头像底色 */
 function executorColor(runMode?: string | null): string | null {
@@ -84,38 +74,6 @@ function resolveOutputRender(output: unknown, outputSummary: string | null | und
   return renderableSource(output);
 }
 
-/** 将实施节点 output 的顶层对象拆成多个产出维度，优先读取每个维度下的 summary。 */
-function resolveOutputDimensions(output: unknown): TaskOutputDimension[] {
-  let payload: unknown = output;
-  if (typeof payload === 'string') {
-    try {
-      payload = JSON.parse(payload);
-    } catch {
-      return [];
-    }
-  }
-  payload = unwrapHttpEnvelope(payload);
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
-
-  return Object.entries(payload as Record<string, unknown>)
-    .map(([key, value]) => {
-      const summary =
-        value && typeof value === 'object' && !Array.isArray(value)
-          ? (value as Record<string, unknown>).summary
-          : undefined;
-      const content = typeof summary === 'string' && summary.trim() ? summary : renderableSource(value);
-      return content?.trim() ? { key, content } : null;
-    })
-    .filter((item): item is TaskOutputDimension => item !== null);
-}
-
-function isOkrTask(taskId: string, spec: TaskDashboardResponse['task_spec'], nodes: TaskNodeDto[]): boolean {
-  const taskText = [taskId, JSON.stringify(spec), ...nodes.map((node) => JSON.stringify(node.task_spec ?? {}))].join(
-    ' ',
-  );
-  return /(?:\bokr\b|目标与关键结果)/i.test(taskText);
-}
-
 function getExtendString(extendProps: Record<string, unknown> | undefined, ...keys: string[]): string | null {
   for (const key of keys) {
     const value = extendProps?.[key];
@@ -142,23 +100,13 @@ function hasNonEmptyValue(value: unknown): boolean {
   return value !== null && value !== undefined;
 }
 
-const BOT_NAME_OVERRIDES: Record<string, string> = {
-  自动研发bot: '安全架构师',
-};
-
-function resolveBotDisplayName(name: string | null | undefined): string | null {
-  if (!name) return null;
-  const normalizedName = name.trim();
-  return BOT_NAME_OVERRIDES[normalizedName.toLocaleLowerCase()] ?? normalizedName;
-}
-
 function resolveNodeExecutor(runInfo: TaskNodeDto['run_info']): string | null {
   if (!runInfo) return null;
   const extendProps = runInfo.extend_props;
   const assigneeName = runInfo.assignee_name ?? getExtendString(extendProps, 'assignee_name');
 
   // 单 Bot 节点的 assignee 可能只是 Bot ID，优先使用 extend_props.assignee_name 展示可读名称。
-  if (runInfo.run_mode === 'single_bot' && assigneeName) return resolveBotDisplayName(assigneeName);
+  if (runInfo.run_mode === 'single_bot' && assigneeName) return assigneeName;
 
   const namedExecutor =
     assigneeName ??
@@ -170,7 +118,7 @@ function resolveNodeExecutor(runInfo: TaskNodeDto['run_info']): string | null {
       'initiator_bot_name',
       'bot_name',
     );
-  if (runInfo.run_mode === 'coop_group') return resolveBotDisplayName(namedExecutor);
+  if (runInfo.run_mode === 'coop_group') return namedExecutor;
 
   const assigneeBotId = getExtendString(extendProps, 'assignee_bot_id');
   const binding =
@@ -178,19 +126,7 @@ function resolveNodeExecutor(runInfo: TaskNodeDto['run_info']): string | null {
       ? (runInfo.assignee as { binding?: string }).binding ?? null
       : null;
   const assigneeStr = typeof runInfo.assignee === 'string' ? runInfo.assignee : null;
-  return resolveBotDisplayName(
-    namedExecutor ?? assigneeBotId ?? binding ?? assigneeStr ?? getExtendString(extendProps, 'bot_id'),
-  );
-}
-
-const NODE_TITLE_OVERRIDES: Record<string, string> = {
-  无人任务研发承接: '舆情监控方案分析',
-  营销策略进一步讨论: '圈人和选品策略讨论',
-  风险评审: '业务/技术风险评审',
-};
-
-function resolveNodeTitle(title: string | undefined, fallback: string): string {
-  return (title && NODE_TITLE_OVERRIDES[title]) ?? title ?? fallback;
+  return namedExecutor ?? assigneeBotId ?? binding ?? assigneeStr ?? getExtendString(extendProps, 'bot_id');
 }
 
 function mapNodeTaskSpec(spec: TaskNodeDto['task_spec']): TaskNodeView['taskSpec'] {
@@ -393,7 +329,7 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
   const taskList = d.tasks ?? [];
   const rootNode = taskList[0];
   // 优先使用根节点 task_spec；根节点字段不完整时，使用 dashboard 顶层 task_spec 补齐。
-  // 部分 OKR 任务只在顶层下发背景/目标，不能因为根节点存在就丢失这些字段。
+  // 部分任务只在顶层下发背景/目标，不能因为根节点存在就丢失这些字段。
   const rootSpec = rootNode?.task_spec;
   const topLevelSpec = d.task_spec;
   const spec = {
@@ -434,7 +370,6 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
   };
   const graphTasks = graphSource.tasks ?? [];
   const graphRelations = graphSource.relations ?? [];
-  const okrTask = isOkrTask(d.task_id ?? '', spec, graphTasks);
   // workflow/yaml 的 execution_graph 可能只返回内部节点，未复用顶层 tasks[0] 的 node_id。
   // 此时将 execution_graph 的 task_id 节点（缺失时首节点）视为展示根节点，确保 graph 级兜底生效。
   const graphRootNode = useExecGraph
@@ -463,7 +398,7 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
     .map((n) => {
       const ri = n.run_info ?? {};
-      const title = resolveNodeTitle(n.task_spec?.metadata?.title, n.node_id);
+      const title = n.task_spec?.metadata?.title ?? n.node_id;
       const isRootNode = n.node_id === graphRootNode?.node_id || n.node_id === d.task_id;
       // 根节点的运行信息可能没有完整落在 run_info 中：用 graph 级 extend_props 做只读兜底，
       // 不覆盖节点自身已有值。子节点仍保持原有节点级字段解析逻辑。
@@ -500,14 +435,11 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
       const groupName = isGroupNode
         ? getExtendString(effectiveRunInfo.extend_props, 'group_name') ?? rootGroupName ?? 'BCS协作群'
         : null;
-      // OKR 任务为演示流程提供前端状态兜底：根节点出现后续节点后，视为根节点已完成。
-      const hasSubsequentNode = graphTasks.some((candidate) => (candidate.sequence ?? 0) > (n.sequence ?? 0));
-      const nodeStatus = isRootNode && okrTask && hasSubsequentNode ? 'done' : mapNodeStatus(n.status);
       return {
         id: n.node_id,
         name: title,
         sequence: n.sequence ?? 0,
-        status: nodeStatus,
+        status: mapNodeStatus(n.status),
         executor: resolveNodeExecutor(effectiveRunInfo),
         executorColor: executorColor(effectiveRunMode),
         runMode: effectiveRunMode ?? null,
@@ -547,23 +479,14 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     });
 
   const { dagNodes, dagEdges } = layoutDag(nodes, graphRelations);
-  const implementationNode = nodes.find((node) => node.name.includes('投放实施') || node.name.includes('实施投放'));
-  // 只要节点视图存在已完成的投放实施节点，产物 Tab 就展示该节点的 output；否则保持普通任务的根节点输出逻辑。
-  const selectedOutputNode = implementationNode?.status === 'done' ? implementationNode : undefined;
-  const rootOutputRender = selectedOutputNode?.outputRender ?? defaultRootOutputRender;
-  const rootOutputDimensions = selectedOutputNode
-    ? okrTask
-      ? OKR_OUTPUT_DIMENSIONS
-      : resolveOutputDimensions(selectedOutputNode.output)
-    : undefined;
+  // 产物 Tab 展示根节点（data.tasks[0].run_info）的 output，统一按 markdown 渲染。
+  const rootOutputRender = defaultRootOutputRender;
 
   const graphOwnerBotId = getExtendString(graphExtProps, 'owner_bot_id') ?? d.owner_bot_id ?? '';
   const graphSourceType =
     (getExtendString(graphExtProps, 'source_type') as TaskDashboardResponse['source_type'] | null) ?? d.source_type;
   const graphOwnerBotName =
-    resolveBotDisplayName(
-      getExtendString(graphExtProps, 'owner_bot_name', 'bot_name') ?? d.owner_bot?.name ?? graphOwnerBotId,
-    ) ?? graphOwnerBotId;
+    getExtendString(graphExtProps, 'owner_bot_name', 'bot_name') ?? d.owner_bot?.name ?? graphOwnerBotId;
   const graphCreateTime =
     d.create_time ??
     getExtendString(graphExtProps, 'create_time', 'gmt_create') ??
@@ -601,7 +524,6 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     mainSessionName: d.main_session?.name ?? (execCfg.main_session_name as string) ?? tcCtx?.main_session_name ?? null,
     progress: computeProgress(d, nodes),
     rootOutputRender,
-    rootOutputDimensions,
     artifacts: mapArtifacts(d.artifacts),
     nodes,
     dagNodes,

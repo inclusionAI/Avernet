@@ -1,9 +1,19 @@
 import { getWorkerConfig, updateWorkerConfig } from '@/services/backendApi/bcsfuse/bcsfuseController';
-import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 const response = (data: unknown = null) =>
   Promise.resolve({
     ok: true,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: async () => data,
+  } as Response);
+
+const failingResponse = (status: number, data: unknown = {}) =>
+  Promise.resolve({
+    ok: false,
+    status,
     headers: new Headers({ 'content-type': 'application/json' }),
     json: async () => data,
   } as Response);
@@ -91,5 +101,39 @@ describe('bcsfuse worker config controller', () => {
         body: JSON.stringify({ fusion_enable: false }),
       }),
     );
+  });
+});
+
+describe('getWorkerConfig — 404 抑制协议层默认 toast(无配置 ≠ 用户可见异常)', () => {
+  // 协作权限查询接口 GET .../workers/{id}/config 返回 404 语义为「该 Worker 尚未配置画像公开」,
+  // 属可降级态:调用方(collaborationPrivacyRuntimeAdapter → profilePublicStatus 'unavailable' 置灰开关;
+  // bcsfuseService → fusionEnable false)已据此降级。协议层 httpClient 对任意非 2xx 已 enqueue 默认 toast,
+  // controller 须就 status===404 显式 cancel 该 toastKey,使开关置灰同时不弹异常;其余状态码维持默认提示。
+  beforeEach(() => {
+    useErrorNotifyStore.getState().reset();
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    useErrorNotifyStore.getState().reset();
+  });
+
+  it('404 → 仍抛 BackendRequestError 供降级,但默认提示 toast 被 cancel(开关置灰不弹异常)', async () => {
+    jest.spyOn(globalThis, 'fetch').mockImplementation(() => failingResponse(404));
+
+    await expect(getWorkerConfig('bot-1')).rejects.toBeInstanceOf(BackendRequestError);
+
+    const items = useErrorNotifyStore.getState().drain();
+    expect(items).toHaveLength(1);
+    expect(items[0].cancelled).toBe(true);
+  });
+
+  it('非 404(500) → 不抑制默认提示(维持现状),圈定仅 404 静默语义', async () => {
+    jest.spyOn(globalThis, 'fetch').mockImplementation(() => failingResponse(500));
+
+    await expect(getWorkerConfig('bot-1')).rejects.toBeInstanceOf(BackendRequestError);
+
+    const items = useErrorNotifyStore.getState().drain();
+    expect(items).toHaveLength(1);
+    expect(items[0].cancelled).toBeFalsy();
   });
 });

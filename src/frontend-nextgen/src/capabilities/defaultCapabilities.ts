@@ -10,8 +10,10 @@ import type {
   HumanIdentity,
   LoginStrategy,
   MetricsDashboardSpec,
+  PersonalSpaceInitOptions,
   ProductBrand,
   ReleaseNotesCapability,
+  ShellVisibility,
   UserSearchCapability,
 } from './types';
 
@@ -19,12 +21,25 @@ function unsupported<T>(value: T, reason: string): CapabilityResult<T> {
   return { status: 'unsupported', value, reason };
 }
 
+/**
+ * Open Core 默认路由重定向：/admin 系（/admin、/admin/spaces、/admin/work-orders 及一切
+ * /admin/** 深链）不可直访，经 app.tsx onRouteChange 重定向至 /manage（其自带 route
+ * redirect 落 /bot-workshop）。前缀判定用 `pathname === '/admin' || startsWith('/admin/')`，
+ * 避免误伤 /administrator 之类路径。internal overlay 必须显式 override 返回 null
+ * （src/extensions/internal.ts），否则本默认值经 spread 继承会误伤内部形态的 /admin 访问。
+ */
+function getOpenCoreRouteRedirect(pathname: string): string | null {
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) return '/manage';
+  return null;
+}
+
 export const defaultCapabilities: AppCapabilities = {
   // Open Core 默认不暴露内部帮助链接，避免内部 URL 泄漏。
   getHelpLinks: () => ({ status: 'available', value: [] }),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
-  // Open Core 默认不做内部域名路由跳转，内部规则由 capability 注入。
-  getRuntimeRouteRedirect: () => ({ status: 'available', value: null }),
+  // Open Core 默认路由重定向：收敛【管理后台】入口后 /admin 系不可直访（见 getOpenCoreRouteRedirect）；
+  // internal overlay 经 extensions/internal.ts 显式覆盖为 null，保持内部 /admin 可达。
+  getRuntimeRouteRedirect: (context) => ({ status: 'available', value: getOpenCoreRouteRedirect(context.pathname) }),
   getBotHealthCapability: () => ({
     status: 'available',
     value: {
@@ -132,5 +147,18 @@ export const defaultCapabilities: AppCapabilities = {
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
     status: 'available',
     value: { name: 'Avernet', Logo: AvernetWordmarkLogo, loginWordmark: AvernetMarkLogo },
+  }),
+  // Open Core（阿里云部署）初始化个人空间需在 body 携带 skipSC:true；internal overlay 覆盖为 {}
+  // （内部后端不消费该字段，保持历史空 body 契约）。
+  getPersonalSpaceInitOptions: (): CapabilityResult<PersonalSpaceInitOptions> => ({
+    status: 'available',
+    value: { skipSC: true },
+  }),
+  // Open Core（阿里云部署）壳层收敛：不展示【管理后台】导航项、空间切换器与通知中心；
+  // 空间数据链路（initSpaceContext / 默认个人空间）与此开关无关，不受本默认值影响。
+  // internal overlay 覆盖为三项全 true（extensions/internal.ts），内部形态零变化。
+  getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
+    status: 'available',
+    value: { adminEntry: false, spaceSwitcher: false, notificationBell: false },
   }),
 };

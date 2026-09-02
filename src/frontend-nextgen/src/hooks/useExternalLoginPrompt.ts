@@ -5,10 +5,15 @@ import { useCallback, useEffect, useState } from 'react';
 /**
  * 外部登录提示弹窗编排（仅 `loginStrategy==='oauth-provider'`）。
  * 订阅 `loginRedirectStore.pendingLogin{mode:'prompt'}`（来源：`useExternalAuthGuard` 主动 checkAuth 401，
- * 或 `httpClient` oauth 策略下反应式 ACE 体 → `triggerLoginPrompt`）。单飞保证页面生命周期内只弹一次。
+ * `httpClient` oauth 策略下反应式 ACE 体 → `triggerLoginPrompt`，或业务 401 `error_code=unauthenticated` 反应口）。
+ * 单飞保证页面生命周期内只弹一次。
+ *
+ * 弹窗为**不可关闭**设计（add-external-oauth-login 8.8）：`onDismiss`/`dismissed` 分支已无消费方
+ * （组件只读 `{open,onLogin,loadingLoginUrl}`），逻辑保留以兼容 store 单飞与信号重置语义，
+ * 勿据此恢复「稍后再说」类出路。
  *
  * 副作用（navigate）由 `useExternalAuth.login` → `navigateToUrl` 接缝承担；组件 (`ExternalLoginPromptModal`) 仅消费
- * 本 hook 返回的 `{open,onDismiss,onLogin,loadingLoginUrl}`，不直接 import Store（守 Component 禁 import Store）。
+ * 本 hook 返回值，不直接 import Store（守 Component 禁 import Store）。
  */
 export interface UseExternalLoginPromptResult {
   open: boolean;

@@ -39,6 +39,18 @@ export function formatAbsoluteTime(iso?: string): string {
 }
 
 /**
+ * Skill 时间格式化（YYYY-MM-DD HH:mm:ss，含秒）。供详情「发布时间」/ 编辑器「更新时间」
+ * （published_at / gmt_modified）展示。与 formatAbsoluteTime 的关键区别：**不做时区转换（不 +8）**，
+ * 时区若有偏移是后端接口问题、由后端修；前端只取后端字面日期时间（剥离 T / Z / +offset 后缀）。
+ * 入参为空或非预期格式 → 原样返回，避免吞数据。
+ */
+export function formatAbsoluteTimeWithSeconds(iso?: string): string {
+  if (!iso) return '';
+  const m = iso.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
+  return m ? `${m[1]} ${m[2]}` : iso;
+}
+
+/**
  * 聊天消息时间格式化：当天显示 HH:mm，非当天显示 MM-dd HH:mm。
  * 接受时间戳（number | string）或已格式化的 displayTime 字符串。
  * displayTime 形如 "14:30" 或 "08-19 14:30"，直接透传不重新格式化。

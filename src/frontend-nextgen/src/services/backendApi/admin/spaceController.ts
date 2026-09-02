@@ -80,11 +80,19 @@ export function createSpace(body: { space_name: string }, params: SpaceUserIdPar
 }
 
 // 初始化个人空间（幂等：已存在则返回已有）。POST /openapi/v1/bots/spaces/personal/initialize?user_id=。
-// 请求体为空；返回 SpaceDto（含 created 标识本次是否新建）。
-export function initializePersonalSpace(params: SpaceUserIdParams) {
+// 请求体默认为空（内部版契约不变）；阿里云部署形态由 Service 经 capability
+// getPersonalSpaceInitOptions 注入 body（skipSC:true），Controller 不感知形态。
+// 返回 SpaceDto（含 created 标识本次是否新建）。
+export interface InitializePersonalSpaceBody {
+  /** 阿里云部署形态后端要求的标志位（capability 按形态注入）；内部版不传。 */
+  skipSC?: boolean;
+}
+
+export function initializePersonalSpace(params: SpaceUserIdParams, body?: InitializePersonalSpaceBody) {
   return backendRequest<BackendApiEnvelope<SpaceDto>>(SPACE_ENDPOINTS.personalInitialize, {
     method: 'POST',
     params,
+    ...(body && Object.keys(body).length > 0 ? { data: body } : {}),
   });
 }
 

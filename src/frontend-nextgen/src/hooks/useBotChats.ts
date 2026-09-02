@@ -39,7 +39,8 @@ export function useBotChats() {
     void (async () => {
       let userId: string;
       try {
-        userId = params.get('user_id')?.trim() || (await resolveActingUser());
+        // user_id 恒取当前登录用户，禁止通过 URL 参数指定他人身份（否则可越权查看全局日志）。
+        userId = await resolveActingUser();
       } catch (error) {
         if (disposed) return;
         const message = error instanceof Error ? error.message : '日志加载失败';

@@ -78,11 +78,6 @@ export interface DagEdgeView {
   label?: string;
 }
 
-export interface TaskOutputDimension {
-  key: string;
-  content: string;
-}
-
 export interface TaskView {
   id: string;
   name: string;
@@ -106,8 +101,6 @@ export interface TaskView {
   mainSessionName?: string | null;
   /** 任务根节点(data.tasks[0].run_info)产物的渲染源：剥 HTTP 信封后按 markdown 渲染，用于「产物」Tab。 */
   rootOutputRender?: string | null;
-  /** 选定产出节点 output 中按顶层维度拆分的可读内容。 */
-  rootOutputDimensions?: TaskOutputDimension[];
   progress: {
     total: number;
     pending: number;

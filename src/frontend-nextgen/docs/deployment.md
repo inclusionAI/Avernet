@@ -10,15 +10,16 @@ The public `@tc-chat/ui@2.0.0` package and its `@ant-design/x` dependency requir
 
 The container refuses to start until all variables are provided:
 
-| Variable                           | Existing frontend route responsibility                             |
-| ---------------------------------- | ------------------------------------------------------------------ |
-| `BCS_AUTH_UPSTREAM`                | BCS `/auth/*` OAuth routes                                         |
-| `TEAMCLAW_GATEWAY_UPSTREAM`        | `/openapi/*` and `/api/v1/collaboration/*`                         |
-| `TEAMCLAW_ADMIN_UPSTREAM`          | Reserved for the separately deployed admin service; see note below |
-| `PRIVATE_CHAT_MANAGEMENT_UPSTREAM` | `/api/*` private-chat management                                   |
-| `PRIVATE_CHAT_SESSION_UPSTREAM`    | `/proxypass/*` and WebSocket                                       |
-| `CLAWWEB_UPSTREAM`                 | `/api/workflows*`                                                  |
-| `AIXCORE_UPSTREAM`                 | `/aixcore/*`                                                       |
+| Variable                           | Existing frontend route responsibility                                   |
+| ---------------------------------- | ------------------------------------------------------------------------ |
+| `BCS_AUTH_UPSTREAM`                | BCS `/auth/*` OAuth routes                                               |
+| `TASK_ENGINE_UPSTREAM`             | `/api/v1/collaboration/tasks/*` task execute/dashboard/list/grant/revoke |
+| `TEAMCLAW_GATEWAY_UPSTREAM`        | `/openapi/*` and non-task `/api/v1/collaboration/*`                      |
+| `TEAMCLAW_ADMIN_UPSTREAM`          | Reserved for the separately deployed admin service; see note below       |
+| `PRIVATE_CHAT_MANAGEMENT_UPSTREAM` | `/api/*` private-chat management                                         |
+| `PRIVATE_CHAT_SESSION_UPSTREAM`    | `/proxypass/*` and WebSocket                                             |
+| `CLAWWEB_UPSTREAM`                 | `/api/workflows*`                                                        |
+| `AIXCORE_UPSTREAM`                 | `/aixcore/*`                                                             |
 
 Values must be absolute upstream origins understood by Nginx, for example an internal service-discovery URL. Repository examples deliberately do not provide real domains or credentials.
 
@@ -67,7 +68,7 @@ docker push <ACR_REGISTRY>/<NAMESPACE>/avernet-frontend-nextgen:<VERSION>
 - Public domain and TLS certificate ownership.
 - ACR instance, namespace, image retention and vulnerability policy.
 - ECS or ACK selection and resource sizing.
-- Concrete upstream service-discovery origins.
+- Concrete upstream service-discovery origins, including the task engine origin for `TASK_ENGINE_UPSTREAM` (it may equal the Gateway when the Gateway owns the task routes).
 - Confirmation of whether admin space/work-order routes remain separate after the future Gateway consolidation.
 - Alipay App ID, callback registration, RSA keys and BCS JWT secret delivery.
 - Logging, metrics, alerting, rollout and rollback policy.

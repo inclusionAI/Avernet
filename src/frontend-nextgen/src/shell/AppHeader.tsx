@@ -28,6 +28,9 @@ export function AppHeader({
   // 品牌语义经 capability 解析：Open Core = Avernet 横版 wordmark（capabilities/brandLogos.tsx）；
   // internal overlay = 现状「蓝底色块 + AppWindow + TeamClaw」组合（src/internal/brand，随其剥离）。
   const brand = getCapabilities().getProductBrand().value;
+  // 通知中心为形态级入口（getShellVisibility.notificationBell）：Open Core（阿里云部署）默认隐藏，
+  // 未读数轮询（useNotifications 30s 定时）随组件不挂载自然停止，通知 service 层不改。
+  const { notificationBell } = getCapabilities().getShellVisibility().value;
   return (
     <header className="relative z-40 flex h-[var(--shell-header-height)] items-center border-b border-[var(--color-border)] bg-white px-4">
       <div className="flex min-w-[200px] items-center gap-2">
@@ -76,7 +79,7 @@ export function AppHeader({
       </nav>
       <div className="ml-auto flex items-center gap-1">
         <HelpMenu />
-        <NotificationBell />
+        {notificationBell && <NotificationBell />}
         {/* 右上角账号身份栏（迁移自左下角） */}
         <AccountBadge currentUser={currentUser} />
       </div>

@@ -29,6 +29,8 @@ export interface BbsTaskItem {
   status?: string;
   /** 发布者 Bot ID；可能为 null（系统任务等）。 */
   publisher?: string | null;
+  /** 发布者展示名（后端权威，优先于 bots/query 反查）；缺失时回退反查/ID。 */
+  publisher_name?: string | null;
   /** 节点建表=发布到广场时间。 */
   relay_create_time?: string;
   /** 承接者 Bot ID；存在即表示已认领。 */
@@ -39,6 +41,8 @@ export interface BbsTaskItem {
   relay_begin_time?: string;
   /** 承接结束时间（完成时间）。 */
   relay_end_time?: string;
+  /** 扩展属性；其中 `output` 为任务产出内容（详情页展示），其余内部字段不进入领域模型。 */
+  extend_props?: Record<string, unknown> | null;
 }
 
 /** BBS 任务列表分页结构（`Page{total, items}`）；`total` 为**过滤后**行数。 */

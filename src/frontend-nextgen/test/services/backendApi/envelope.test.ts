@@ -1,5 +1,17 @@
-import { isEnvelopeFailure, isEnvelopeSuccess } from '@/services/backendApi/types';
+import { isEnvelopeFailure, isEnvelopeSuccess, isEnvelopeSuccessAnyDialect } from '@/services/backendApi/types';
 import { describe, expect, it } from '@jest/globals';
+
+/**
+ * 双方言零冲突论证（design 决策 1）以测试常量固化：
+ * 6 位方言（python backend，HTTP×1000+子码）成功段 [200000, 300000)；
+ * 5 位方言（BCS，HTTP×100+子码）成功段 [20000, 30000)。二者无交集。
+ */
+const SIX_DIGIT_SUCCESS_MIN = 200000;
+const SIX_DIGIT_SUCCESS_MAX_EXCLUSIVE = 300000;
+const FIVE_DIGIT_SUCCESS_MIN = 20000;
+const FIVE_DIGIT_SUCCESS_MAX_EXCLUSIVE = 30000;
+/** BCS error.rs 全量错误码映射（含 5 位方言错误域下限），均不得落入任一成功段。 */
+const BCS_ERROR_CODES = [40000, 40100, 40300, 40400, 40900, 41000, 41300, 42200, 42900, 50000, 50200] as const;
 
 describe('backendApi envelope 成败判定', () => {
   it('code === 200000 视为成功', () => {
@@ -43,5 +55,57 @@ describe('backendApi envelope 成败判定', () => {
     expect(isEnvelopeFailure(null)).toBe(false);
     expect(isEnvelopeSuccess(undefined)).toBe(false);
     expect(isEnvelopeFailure(undefined)).toBe(false);
+  });
+});
+
+describe('backendApi envelope 双方言判定(6 位全局紧致 / 6∪5 位并集专供 BCS 域消费方)', () => {
+  // 全局谓词保持 python 6 位方言:BCS 5 位成功码属跨域误码,python 域必须拒绝
+  // (catalog / 私有 Session 紧致性锁定测试依赖此语义,见 change design 决策 1 修正)。
+  it('isEnvelopeSuccess(全局)拒绝 BCS 5 位成功码(20000/20100/20200)', () => {
+    for (const code of [20000, 20100, 20200]) {
+      expect(isEnvelopeSuccess({ code, message: 'OK', data: null })).toBe(false);
+      expect(isEnvelopeFailure({ code, message: 'OK', data: null })).toBe(true);
+    }
+  });
+
+  // 并集谓词仅供同时服务两种部署的消费方(auth 协议边界)使用。
+  it('isEnvelopeSuccessAnyDialect 接受 BCS 5 位 2xx 段(20000=OK/20100=Created/20200=Accepted)', () => {
+    expect(isEnvelopeSuccessAnyDialect({ code: 20000, message: 'OK', data: { providers: [] }, request_id: 'r' })).toBe(
+      true,
+    );
+    expect(isEnvelopeSuccessAnyDialect({ code: '20000', message: 'OK', data: null })).toBe(true);
+    expect(isEnvelopeSuccessAnyDialect({ code: 20100, message: 'Created', data: { session_id: 's' } })).toBe(true);
+    expect(isEnvelopeSuccessAnyDialect({ code: 20200, message: 'Accepted', data: null })).toBe(true);
+  });
+
+  it('isEnvelopeSuccessAnyDialect 沿用 6 位成功段(200000 系)', () => {
+    expect(isEnvelopeSuccessAnyDialect({ code: 200000, message: 'OK', data: null })).toBe(true);
+    expect(isEnvelopeSuccessAnyDialect({ code: 201000, message: 'Created', data: null })).toBe(true);
+  });
+
+  it('isEnvelopeSuccessAnyDialect 仍拒绝双方言全部错误码与非 2xx 段', () => {
+    // BCS error.rs 全量错误码 + 5 位 1xx/3xx/9xx 边界 + 6 位错误段。
+    for (const code of [...BCS_ERROR_CODES, 19999, 30000, 99999, 400000, 502201]) {
+      expect(isEnvelopeSuccessAnyDialect({ code, message: 'x', data: null })).toBe(false);
+    }
+    expect(isEnvelopeSuccessAnyDialect(null)).toBe(false);
+    expect(isEnvelopeSuccessAnyDialect(undefined)).toBe(false);
+  });
+
+  it('6 位方言全局判定不受并集谓词影响(既有 python 域回归)', () => {
+    expect(isEnvelopeSuccess({ code: 200000, message: 'OK', data: null })).toBe(true);
+    expect(isEnvelopeFailure({ code: 502201, message: 'x', data: null })).toBe(true);
+  });
+
+  // 零冲突论证固化:改码表/扩段时此用例必须同步复审(见 change design 决策 1)。
+  it('两方言成功段无交集,且全部已知错误码不落任一成功段', () => {
+    expect(FIVE_DIGIT_SUCCESS_MAX_EXCLUSIVE).toBeLessThanOrEqual(SIX_DIGIT_SUCCESS_MIN);
+    expect(FIVE_DIGIT_SUCCESS_MIN).toBeGreaterThanOrEqual(10000);
+    for (const code of BCS_ERROR_CODES) {
+      const inFive = code >= FIVE_DIGIT_SUCCESS_MIN && code < FIVE_DIGIT_SUCCESS_MAX_EXCLUSIVE;
+      const inSix = code >= SIX_DIGIT_SUCCESS_MIN && code < SIX_DIGIT_SUCCESS_MAX_EXCLUSIVE;
+      expect(inFive).toBe(false);
+      expect(inSix).toBe(false);
+    }
   });
 });

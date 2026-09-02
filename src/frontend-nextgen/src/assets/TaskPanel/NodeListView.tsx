@@ -1,6 +1,6 @@
 // @asset-migrated: teamclaw 自研资产
 /** 节点视图：垂直执行时间线 + 可点击节点卡片 + 子任务下钻入口。 */
-import { getCollaborationBotConversationUrl } from '@/utils/collaborationSquare';
+import { getCollaborationBotConversationUrl, getCollaborationGroupConversationUrl } from '@/utils/collaborationSquare';
 import React from 'react';
 import { ChevronRight, ExternalLink, Info, NodeStatusIcon } from './icons';
 import { Empty } from './theme';
@@ -25,15 +25,6 @@ const RUN_MODE_LABELS: Record<string, string> = {
   bbs: 'BBS接力',
 };
 
-const BOT_DISPLAY_NAME_OVERRIDES: Record<string, string> = {
-  自动研发bot: '安全架构师',
-};
-
-function resolveBotDisplayName(name?: string | null): string | null {
-  if (!name) return null;
-  const normalizedName = name.trim();
-  return BOT_DISPLAY_NAME_OVERRIDES[normalizedName.toLocaleLowerCase()] ?? normalizedName;
-}
 const subTaskBadgeStyle: React.CSSProperties = {
   padding: '2px 5px',
   borderRadius: 4,
@@ -95,11 +86,19 @@ export const NodeListView: React.FC<{
         // 即使没有 executor/groupName，只要存在 sessionId 也要渲染可点击的下钻入口。
         // 只有明确的 coop_group 才按群名称展示，避免 BBS 节点携带 groupId 时误走群展示分支。
         const isGroupNode = node.runMode === 'coop_group' || (!node.runMode && Boolean(node.groupId));
-        const executorLabel = resolveBotDisplayName(
-          isGroupNode
-            ? node.groupName ?? node.executor ?? node.assignee ?? ownerBotId ?? 'BCS协作群'
-            : node.executor ?? node.assignee ?? ownerBotId,
-        );
+        const executorLabel = isGroupNode
+          ? node.groupName ?? node.executor ?? node.assignee ?? ownerBotId ?? 'BCS协作群'
+          : node.executor ?? node.assignee ?? ownerBotId;
+        // 会话跳转链接：协作群走 tab=group，单 bot 走 tab=chat。
+        // 群节点不依赖 assignee（查看身份由 workspace 按用户自有 bot 决定）；
+        // 单 bot 需 assignee/ownerBotId 解析出 bot_id:user_id。
+        const conversationHref = node.sessionId
+          ? isGroupNode
+            ? getCollaborationGroupConversationUrl(node.groupId, node.sessionId)
+            : getConversationBotId(node)
+            ? getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)
+            : null
+          : null;
         const actionLabel = canOpenSub ? `打开子任务 ${node.name}` : `查看节点详情 ${node.name}`;
         const openNode = () => {
           if (canOpenSub && node.subTaskId) {
@@ -219,9 +218,9 @@ export const NodeListView: React.FC<{
                     {node.timeConsuming && <span>· 耗时 {node.timeConsuming}</span>}
                   </div>
                 </div>
-                {node.sessionId && getConversationBotId(node) && (
+                {conversationHref && (
                   <a
-                    href={getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)}
+                    href={conversationHref}
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={`新开会话 ${node.name}`}

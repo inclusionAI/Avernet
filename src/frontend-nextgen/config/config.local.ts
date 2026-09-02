@@ -6,6 +6,9 @@ const preset = PRESETS[presetName];
 if (!preset) throw new Error(`Unknown PRESET: ${presetName}`);
 
 const gateway = process.env.TEAMCLAW_GW_BASE || preset.servers.TEAMCLAW_GW;
+// Task APIs may be deployed as a dedicated service. Default to Gateway so a single-upstream
+// Open Core deployment remains runnable; operators can split it with TASK_ENGINE_UPSTREAM.
+const taskEngine = process.env.TASK_ENGINE_UPSTREAM || gateway;
 const admin = process.env.TEAMCLAW_ADMIN_BASE || preset.servers.TEAMCLAW_ADMIN;
 const privateChatManagement =
   process.env.TEAMCLAW_PRIVATE_CHAT_MANAGEMENT_BASE || preset.servers.PRIVATE_CHAT_MANAGEMENT;
@@ -23,6 +26,7 @@ export default defineConfig({
     '/openapi/v1/bots/work-orders': proxy(admin),
     '/openapi/v1/bots/spaces': proxy(admin),
     '/openapi': proxy(gateway, true),
+    '/api/v1/collaboration/tasks': proxy(taskEngine, true),
     '/api/v1/collaboration': proxy(gateway, true),
     '/api/workflows': proxy(clawweb),
     '/api': proxy(privateChatManagement),

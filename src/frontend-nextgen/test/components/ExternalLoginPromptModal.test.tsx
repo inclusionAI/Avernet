@@ -39,7 +39,7 @@ describe('ExternalLoginPromptModal', () => {
     expect(screen.queryByRole('heading', { name: '登录后继续使用 Avernet' })).toBeNull();
   });
 
-  it('点击「立即登录」→ login() 拉 /auth/url 并 navigateToUrl(providerUrl)', async () => {
+  it('点击「立即登录」→ login() 拉 /openapi/v1/auth/url 并 navigateToUrl(providerUrl)', async () => {
     mockedRequest.mockResolvedValue({ providers: [{ name: 'alipay', url: 'https://login.example/a' }] });
     useLoginRedirectStore.getState().requestPrompt();
     render(<ExternalLoginPromptModal />);
@@ -48,14 +48,32 @@ describe('ExternalLoginPromptModal', () => {
       fireEvent.click(screen.getByRole('button', { name: '立即登录' }));
     });
 
-    expect(mockedRequest).toHaveBeenCalledWith('/auth/url', expect.objectContaining({ method: 'GET' }));
+    expect(mockedRequest).toHaveBeenCalledWith('/openapi/v1/auth/url', expect.objectContaining({ method: 'GET' }));
     expect(mockedNavigateToUrl).toHaveBeenCalledWith('https://login.example/a');
   });
 
-  it('点击「稍后再说」→ 关闭弹窗', () => {
+  // 不可关闭(add-external-oauth-login 8.8,spec「未登录时以不可关闭提示弹窗处置」):
+  // 无关闭按钮、无「稍后再说」类退出路径,「立即登录」是唯一出路。
+  it('弹窗不可关闭:无关闭按钮与退出按钮,唯一出路是「立即登录」', () => {
     useLoginRedirectStore.getState().requestPrompt();
     render(<ExternalLoginPromptModal />);
-    fireEvent.click(screen.getByRole('button', { name: '稍后再说' }));
-    expect(screen.queryByRole('heading', { name: '登录后继续使用 Avernet' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '稍后再说' })).toBeNull();
+    expect(screen.queryByLabelText('关闭弹窗')).toBeNull();
+    expect(screen.getByRole('button', { name: '立即登录' })).toBeTruthy();
+  });
+
+  it('ESC 关闭意图不生效(弹窗保持打开)', () => {
+    useLoginRedirectStore.getState().requestPrompt();
+    render(<ExternalLoginPromptModal />);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('heading', { name: '登录后继续使用 Avernet' })).toBeTruthy();
+  });
+
+  it('遮罩/外部点击关闭意图不生效(弹窗保持打开)', () => {
+    useLoginRedirectStore.getState().requestPrompt();
+    render(<ExternalLoginPromptModal />);
+    fireEvent.pointerDown(document.body);
+    fireEvent.click(document.body);
+    expect(screen.getByRole('heading', { name: '登录后继续使用 Avernet' })).toBeTruthy();
   });
 });

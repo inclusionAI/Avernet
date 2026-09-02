@@ -20,10 +20,16 @@ export interface PublicTask {
   status: PlazaTaskStatus;
   /** 发布者展示名。BBS 端点 publisher 为 null（系统任务等）时为 undefined。 */
   publisherBotName?: string;
+  /** 发布者原始 Bot ID（详情页用于「id（name）」展示）。 */
+  publisher?: string;
+  /** 发布者展示名（来自后端 `publisher_name`，优先于 bots/query 反查）；缺失时为 undefined。 */
+  publisherName?: string;
   publishedAt: string;
   claimedBotName?: string;
   claimedAt?: string;
   completedAt?: string;
+  /** 任务输出内容（来自 BBS `extend_props.output`）；无输出时为 undefined。 */
+  output?: string;
 }
 
 export interface PublicTaskSearchQuery {

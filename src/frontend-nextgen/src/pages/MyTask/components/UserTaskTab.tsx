@@ -8,9 +8,7 @@ import { Spin } from '@/components/ui/Spin';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { TaskListItem } from '@/domain/tasks/models';
 import { cn } from '@/utils/cn';
-import { getCollaborationBotConversationUrl } from '@/utils/collaborationSquare';
-import { history } from '@umijs/max';
-import { Eye, MessageCircle, Search } from 'lucide-react';
+import { Eye, Search } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import {
   formatDateTime,
@@ -24,6 +22,7 @@ import {
   userTaskStatusOptions,
 } from '../userTaskUtils';
 import { UserTaskGoalMeta } from './UserTaskGoalMeta';
+import { ViewSessionButton } from './ViewSessionButton';
 
 function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
   return <th className={cn('h-10 px-4 py-3 text-xs font-medium text-muted-foreground', className)} {...props} />;
@@ -36,25 +35,6 @@ function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement
 function formatTaskTitle(title: string): string {
   const chars = Array.from(title);
   return chars.length > 8 ? `${chars.slice(0, 8).join('')}...` : title;
-}
-
-function ViewSessionButton({ record }: { record: TaskListItem }) {
-  const sessionId =
-    record.execution_config?.main_session_id?.trim() ||
-    record.task_spec?.context?.extend_props?.teamclaw_context?.main_session_id?.trim();
-  if (!record.owner_bot_id || !record.owner_user_id || !sessionId) return null;
-  return (
-    <Button
-      variant="secondary"
-      size="sm"
-      leftIcon={<MessageCircle className="size-4" />}
-      onClick={() =>
-        history.push(getCollaborationBotConversationUrl(`${record.owner_bot_id}:${record.owner_user_id}`, sessionId))
-      }
-    >
-      查看会话
-    </Button>
-  );
 }
 
 export interface UserTaskTabProps {

@@ -107,6 +107,12 @@ describe('mapPublicTaskDto', () => {
     );
   });
 
+  it('output 直传（去空白），缺失时不填', () => {
+    const task = mapPublicTaskDto({ ...validDto, output: '  产出文本  ' });
+    expect(task?.output).toBe('产出文本');
+    expect(mapPublicTaskDto({ ...validDto, output: undefined })?.output).toBeUndefined();
+  });
+
   it('丢弃内部字段：节点 / DAG / 日志 / 颜色 hex 不泄漏到领域对象', () => {
     const task = mapPublicTaskDto({
       ...validDto,
@@ -206,9 +212,27 @@ describe('mapBbsTaskItemDto', () => {
       goal: '输出路线图',
       acceptanceCriteria: ['覆盖方向', '标注风险'],
       status: 'pending_claim',
+      publisher: 'bot-publisher-1',
       publisherBotName: '产品协作助手',
       publishedAt: '2026-09-01T09:00:00Z',
     });
+  });
+
+  it('publisher_name 映射为 publisherName（后端权威），publisher 原始 ID 直传；缺失/null 不填', () => {
+    const withName = mapBbsTaskItemDto(
+      { ...baseDto, status: 'PENDING', publisher_name: '  自动研发Bot  ' },
+      publisherNameMap,
+    );
+    expect(withName?.publisher).toBe('bot-publisher-1');
+    expect(withName?.publisherName).toBe('自动研发Bot');
+    // publisher_name 缺失 → publisherName 不填，publisher 仍直传
+    const noName = mapBbsTaskItemDto({ ...baseDto, status: 'PENDING' }, publisherNameMap);
+    expect(noName?.publisher).toBe('bot-publisher-1');
+    expect(noName?.publisherName).toBeUndefined();
+    // publisher 为 null → publisher / publisherName 均不填
+    const nullPub = mapBbsTaskItemDto({ ...baseDto, status: 'PENDING', publisher: null }, publisherNameMap);
+    expect(nullPub?.publisher).toBeUndefined();
+    expect(nullPub?.publisherName).toBeUndefined();
   });
 
   it('RUNNING 状态映射为 claimed，并填承接者与承接时间', () => {
@@ -261,6 +285,41 @@ describe('mapBbsTaskItemDto', () => {
       { 'bot-assignee-1:2088': '反查名' },
     );
     expect(task?.claimedBotName).toBe('后端名');
+  });
+
+  it('extend_props.output：有 string 型 content 取 content，否则用整个 output（字符串直用/对象 JSON），缺失/null 不填', () => {
+    // 字符串型 output → 直接用（去空白）
+    const str = mapBbsTaskItemDto(
+      { ...baseDto, status: 'DONE', extend_props: { output: '  最终产出内容  ' } },
+      publisherNameMap,
+    );
+    expect(str?.output).toBe('最终产出内容');
+    // 对象且有 string content → 取 content（不取 extra）
+    const withContent = mapBbsTaskItemDto(
+      { ...baseDto, status: 'DONE', extend_props: { output: { content: '  报告内容  ', extra: { usage: null } } } },
+      publisherNameMap,
+    );
+    expect(withContent?.output).toBe('报告内容');
+    // 对象但无 content 字段 → 用整个 output 的 JSON 文本
+    const noContent = mapBbsTaskItemDto(
+      { ...baseDto, status: 'DONE', extend_props: { output: { text: 'x', n: 1 } } },
+      publisherNameMap,
+    );
+    expect(noContent?.output).toBe(JSON.stringify({ text: 'x', n: 1 }, null, 2));
+    // content 非字符串（数字）→ 不取 content，用整个 output
+    const nonStrContent = mapBbsTaskItemDto(
+      { ...baseDto, status: 'DONE', extend_props: { output: { content: 123 } } },
+      publisherNameMap,
+    );
+    expect(nonStrContent?.output).toBe(JSON.stringify({ content: 123 }, null, 2));
+    // 缺失 extend_props / 无 output 键 / output 为 null → 不填
+    expect(mapBbsTaskItemDto({ ...baseDto, status: 'PENDING' }, publisherNameMap)?.output).toBeUndefined();
+    expect(
+      mapBbsTaskItemDto({ ...baseDto, status: 'PENDING', extend_props: { foo: 1 } }, publisherNameMap)?.output,
+    ).toBeUndefined();
+    expect(
+      mapBbsTaskItemDto({ ...baseDto, status: 'DONE', extend_props: { output: null } }, publisherNameMap)?.output,
+    ).toBeUndefined();
   });
 
   it('DONE 状态映射为 completed，并填完成时间，保留承接者信息', () => {

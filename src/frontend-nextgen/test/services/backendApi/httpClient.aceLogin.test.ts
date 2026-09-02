@@ -1,4 +1,5 @@
 import { backendRequest } from '@/services/backendApi/httpClient';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useLoginRedirectStore } from '@/stores/loginRedirectStore';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -126,5 +127,58 @@ describe('httpClient ACE 登录拦截探测', () => {
     // prompt 模式：不登记硬跳转 url，只置 prompt 信号。
     expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
     expect(useLoginRedirectStore.getState().pendingLoginUrl).toBeUndefined();
+  });
+});
+
+// 会话过期反应口(add-external-oauth-login 8.9):oauth 策略下业务 401 + BCS unauthenticated 体 → 登录弹窗信号,
+// 不投递通用错误 toast;ace-gateway 行为不变(spec「登录处置信号统一出口与单飞」外部模式弹窗 Scenario)。
+describe('httpClient 业务 401 unauthenticated 反应口', () => {
+  const bcsUnauthBody = {
+    code: 40100,
+    message: 'Authentication is required',
+    data: { error_code: 'unauthenticated' },
+    request_id: 'r',
+  };
+
+  beforeEach(() => {
+    useLoginRedirectStore.getState().reset();
+    useErrorNotifyStore.setState({ queue: [] });
+  });
+
+  it('oauth-provider + 401 + unauthenticated 体 → prompt 信号 + 抛 AceLoginRedirectError,不入错误提示队列', async () => {
+    useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonStatus(401, bcsUnauthBody));
+
+    await expect(backendRequest('/openapi/v1/collaboration/sessions', { injectUserId: false })).rejects.toMatchObject({
+      name: 'AceLoginRedirectError',
+    });
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
+  });
+
+  it('oauth-provider + 401 + 其他错误体 → 既有 BackendRequestError 路径(不动)', async () => {
+    useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonStatus(401, { code: 40300, data: { error_code: 'forbidden' } }));
+
+    await expect(backendRequest('/openapi/v1/collaboration/sessions', { injectUserId: false })).rejects.toMatchObject({
+      name: 'BackendRequestError',
+      status: 401,
+    });
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(1);
+  });
+
+  it('ace-gateway + 401 + unauthenticated 体 → 行为不变(BackendRequestError,无弹窗信号)', async () => {
+    useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonStatus(401, bcsUnauthBody));
+
+    await expect(backendRequest('/openapi/v1/admin/spaces', { injectUserId: false })).rejects.toMatchObject({
+      name: 'BackendRequestError',
+      status: 401,
+    });
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
   });
 });

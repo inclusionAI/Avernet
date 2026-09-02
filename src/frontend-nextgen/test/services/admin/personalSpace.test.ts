@@ -14,11 +14,14 @@ describe('adminService.ensurePersonalSpace', () => {
     jest.clearAllMocks();
   });
 
-  it('成功 → data:true（调 initializePersonalSpace 注入 user_id + user_name(花名)）', async () => {
+  it('成功 → data:true（调 initializePersonalSpace 注入 user_id + user_name(花名) + 形态 body 选项）', async () => {
     (wc.initializePersonalSpace as jest.Mock).mockResolvedValue({ code: 200000, data: {} });
     const r = await adminService.ensurePersonalSpace();
     expect(r.data).toBe(true);
-    expect(wc.initializePersonalSpace).toHaveBeenCalledWith({ user_id: '146836', user_name: '我' });
+    // 第二参来自 capability getPersonalSpaceInitOptions：Open Core（阿里云）默认 skipSC:true；
+    // internal overlay 覆盖为 {}（Controller 层空对象不落 body）。语义断言分见
+    // test/capabilities/defaultCapabilities.test.ts 与 test/internal/brandAndEngineCapabilities.test.ts。
+    expect(wc.initializePersonalSpace).toHaveBeenCalledWith({ user_id: '146836', user_name: '我' }, { skipSC: true });
   });
 
   it('后端失败 → error 不抛出、不阻断', async () => {

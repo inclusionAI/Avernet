@@ -156,6 +156,30 @@ export interface ProductBrand {
   loginWordmark?: ComponentType<{ className?: string }>;
 }
 
+/**
+ * 个人空间初始化接口的附加 body 选项（部署形态差异收口）。后端
+ * /openapi/v1/bots/spaces/personal/initialize 的 body 契约随部署形态不同：
+ * - Open Core（阿里云部署）：后端要求 body 携带 skipSC:true 才能完成初始化；
+ * - 内部版：后端不消费该字段，不追加（保持历史「请求体为空」契约）。
+ * Open Core 默认 { skipSC: true }（defaultCapabilities）；internal overlay 覆盖为 {}。
+ */
+export interface PersonalSpaceInitOptions {
+  /** 阿里云部署形态后端要求的标志位；内部版不传。 */
+  skipSC?: boolean;
+}
+
+/**
+ * 壳层入口形态级可见性（见 `getShellVisibility` capability）。
+ * - `adminEntry`：侧栏【管理后台】导航项与 /admin 路由可达性（直访经 getRuntimeRouteRedirect 收敛）
+ * - `spaceSwitcher`：侧栏管理区域底部的空间切换器（隐藏不影响 initSpaceContext 空间数据链路）
+ * - `notificationBell`：页头右上角通知中心（未读轮询随组件不挂载自然停止）
+ */
+export interface ShellVisibility {
+  adminEntry: boolean;
+  spaceSwitcher: boolean;
+  notificationBell: boolean;
+}
+
 export interface AppCapabilities {
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
@@ -234,4 +258,17 @@ export interface AppCapabilities {
    * 现状蓝底 AppWindow 视觉（样式块随 overlay 剥离，Open Core 产物不背内部样式）。
    */
   getProductBrand: () => CapabilityResult<ProductBrand>;
+  /**
+   * 初始化个人空间接口的附加 body 选项（见 `PersonalSpaceInitOptions`；部署形态差异收口点）。
+   * 统一由 adminService.ensurePersonalSpace 消费注入 Controller，Controller 不感知形态。
+   * 同步签名，不发请求。
+   */
+  getPersonalSpaceInitOptions: () => CapabilityResult<PersonalSpaceInitOptions>;
+  /**
+   * 壳层入口可见性（管理后台导航 / 空间切换器 / 通知中心，见 `ShellVisibility`）。
+   * Open Core（阿里云部署）默认三项全 false（defaultCapabilities）；
+   * internal overlay 经 `src/extensions/internal.ts` 覆盖为全 true——内部形态渲染结果与改造前一致。
+   * 同步签名，不发请求。消费方（navigation / SidebarNavList / AppHeader）不得以 `if (isInternal)` 替代。
+   */
+  getShellVisibility: () => CapabilityResult<ShellVisibility>;
 }

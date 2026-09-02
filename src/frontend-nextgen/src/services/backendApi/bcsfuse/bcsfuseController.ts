@@ -1,4 +1,5 @@
-import { backendRequest } from '../httpClient';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { backendRequest, BackendRequestError } from '../httpClient';
 import { isEnvelopeFailure, type BackendApiEnvelope } from '../types';
 
 /** Bot 智能融合 Worker 配置 DTO。 */
@@ -67,16 +68,28 @@ export interface FuseResponseData {
   error?: string;
 }
 
-/** 获取 Worker 配置：GET /openapi/v1/bcsfuse/workers/{worker_id}/config。 */
+/** 获取 Worker 配置：GET /openapi/v1/bcsfuse/workers/{worker_id}/config。
+ *
+ * 404 语义为该 Worker 尚未配置画像公开(Bot 未开启允许其他 Bot 可添加好友),属可降级态而非用户可见异常:
+ * 协议层 httpClient 已为任意非 2xx enqueue 默认 toast,此处仅就 status===404 cancel 该 toastKey 静默,
+ * 仍照常上抛 BackendRequestError 供调用方降级(collaborationPrivacyRuntimeAdapter → profilePublicStatus
+ * 'unavailable' 置灰开关;bcsfuseService → fusionEnable false)。其余状态码维持默认提示。*/
 export async function getWorkerConfig(worker_id: string, signal?: AbortSignal) {
-  const response = await backendRequest<BcsfuseWorkerConfigResponse>(
-    `/openapi/v1/bcsfuse/workers/${worker_id}/config`,
-    {
-      method: 'GET',
-      signal,
-    },
-  );
-  return unwrapWorkerConfigResponse(response);
+  try {
+    const response = await backendRequest<BcsfuseWorkerConfigResponse>(
+      `/openapi/v1/bcsfuse/workers/${worker_id}/config`,
+      {
+        method: 'GET',
+        signal,
+      },
+    );
+    return unwrapWorkerConfigResponse(response);
+  } catch (error) {
+    if (error instanceof BackendRequestError && error.status === 404 && error.toastKey) {
+      useErrorNotifyStore.getState().cancel(error.toastKey);
+    }
+    throw error;
+  }
 }
 
 /** 修改 Worker 的 Bot 画像公开配置：PUT /openapi/v1/bcsfuse/workers/{worker_id}/config。 */

@@ -6,6 +6,9 @@ import { cn } from '@/utils/cn';
 import { FileUp, FolderOpen, ImageDown, Plus, Search, Sparkles, Workflow, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
+/** 工作流任务功能暂未开放：前端屏蔽点击（始终展示该项、不可点）；开放时 flip 为 true 恢复能力。 */
+const WORKFLOW_TASK_ENABLED = false;
+
 export interface ComposerCapabilitiesMenuProps {
   execution: UseTaskExecutionResult;
   onUpload?: () => void;
@@ -112,6 +115,7 @@ function MenuBody({
   onManageFiles,
   onDynamic,
   onPickWorkflow,
+  workflowEnabled,
   disabled,
   workflows,
   workflowsLoading,
@@ -123,6 +127,8 @@ function MenuBody({
   onManageFiles?: () => void;
   onDynamic?: () => void;
   onPickWorkflow?: (w: { workflowId: string; title: string }) => void;
+  /** 工作流任务是否可点(功能开关 × enableWorkflow)。false 时只展示、屏蔽点击，不展开二级列表。 */
+  workflowEnabled: boolean;
   disabled?: boolean;
   workflows: { workflowId: string; title: string }[];
   workflowsLoading: boolean;
@@ -130,9 +136,16 @@ function MenuBody({
 }) {
   const [wfOpen, setWfOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 功能未开放或整体不可用时屏蔽：行禁用且 hover 不展开二级工作流列表。
+  const workflowDisabled = disabled || !workflowEnabled;
+  const workflowDesc = !workflowEnabled
+    ? '功能暂未开放'
+    : workflowsLoading
+    ? '加载工作流列表…'
+    : '指定 workflow 编排执行';
   const enter = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    if (!disabled) {
+    if (!workflowDisabled) {
       setWfOpen(true);
       onWorkflowHover?.();
     }
@@ -179,37 +192,35 @@ function MenuBody({
         onClick={onDynamic}
         disabled={disabled}
       />
-      {onPickWorkflow && (
-        <Popover open={wfOpen} onOpenChange={setWfOpen}>
-          <PopoverTrigger asChild>
-            <MenuRow
-              icon={<Workflow className="h-4 w-4" />}
-              label="工作流任务"
-              desc={workflowsLoading ? '加载工作流列表…' : '指定 workflow 编排执行'}
-              disabled={disabled}
-              onMouseEnter={enter}
-              onMouseLeave={leave}
-            />
-          </PopoverTrigger>
-          <PopoverContent
-            side="right"
-            align="end"
-            sideOffset={4}
-            className="w-[220px] p-2"
+      <Popover open={workflowDisabled ? false : wfOpen} onOpenChange={setWfOpen}>
+        <PopoverTrigger asChild>
+          <MenuRow
+            icon={<Workflow className="h-4 w-4" />}
+            label="工作流任务"
+            desc={workflowDesc}
+            disabled={workflowDisabled}
             onMouseEnter={enter}
             onMouseLeave={leave}
-          >
-            <WorkflowListView
-              workflows={workflows}
-              loading={workflowsLoading}
-              onPick={(w) => {
-                setWfOpen(false);
-                onPickWorkflow(w);
-              }}
-            />
-          </PopoverContent>
-        </Popover>
-      )}
+          />
+        </PopoverTrigger>
+        <PopoverContent
+          side="right"
+          align="end"
+          sideOffset={4}
+          className="w-[220px] p-2"
+          onMouseEnter={enter}
+          onMouseLeave={leave}
+        >
+          <WorkflowListView
+            workflows={workflows}
+            loading={workflowsLoading}
+            onPick={(w) => {
+              setWfOpen(false);
+              onPickWorkflow?.(w);
+            }}
+          />
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -266,7 +277,8 @@ export function ComposerCapabilitiesMenu({
               onDynamicSelected?.();
               close();
             }}
-            onPickWorkflow={enableWorkflow ? pickWorkflow : undefined}
+            onPickWorkflow={enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
+            workflowEnabled={enableWorkflow && WORKFLOW_TASK_ENABLED}
             disabled={disabled}
             workflows={execution.workflows}
             workflowsLoading={execution.workflowsLoading}

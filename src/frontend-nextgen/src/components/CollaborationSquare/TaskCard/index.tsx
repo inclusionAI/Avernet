@@ -83,7 +83,9 @@ export default function TaskCard({ task, onOpenDetail }: TaskCardProps) {
             <CardTitle className="truncate" title={task.name}>
               {task.name}
             </CardTitle>
-            <p className="m-0 mt-1 truncate text-xs text-muted-foreground">发布者：{task.publisherBotName}</p>
+            <p className="m-0 mt-1 truncate text-xs text-muted-foreground">
+              发布者：{task.publisherName || task.publisherBotName}
+            </p>
           </div>
         </div>
         <TaskStatusBadge status={task.status} />

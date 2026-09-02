@@ -30,7 +30,8 @@ export const PRODUCT_STATUS_TO_RUNTIME_STATUSES: Record<string, string[]> = {
   DEFINED: ['PENDING'],
   EXECUTING: ['PLANNING', 'RUNNING'],
   REVIEWING: ['HUNG'],
-  DONE: ['DONE'],
+  // 后端 DONE 表示执行结束但未必验收成功，SUCCESS 表示执行完成且验收通过；前端产品态统一展示为已完成。
+  DONE: ['DONE', 'SUCCESS'],
   FAILED: ['FAILED'],
   CANCELLED: ['CANCELLED'],
 };

@@ -74,19 +74,28 @@ export const navigationItems: NavigationItem[] = [
  * 合并策略：在「基线 manage 分区末项」之前 splice 插入内部项，
  * 保持原版菜单业务序「bot-workshop → 能力工坊 → 能力市场 → 管理后台」。
  * Open Core 形态下 capability 返回 []，结果 = Open Core 基线项。
+ *
+ * 形态级入口收敛：getShellVisibility().adminEntry=false（Open Core / 阿里云部署）时
+ * 从合并结果剔除【管理后台】项。过滤单点在此处完成，基线 navigationItems 数组与
+ * routeMeta 字面量保留不删（/admin 直访由 getRuntimeRouteRedirect 重定向兜底）。见
+ * openspec open-core-shell-visibility-capability D3/D4。
  */
 export function getMergedNavigationItems(): NavigationItem[] {
   const internal = getCapabilities().getInternalNavigationItems();
-  if (internal.status !== 'available' || !internal.value.length) return navigationItems;
-  // 自尾向前找基线 manage 分区末项作为 anchor 位，internal 项插在其前。
-  let insertAt = navigationItems.length;
-  for (let i = navigationItems.length - 1; i >= 0; i--) {
-    if (navigationItems[i].area === 'manage') {
-      insertAt = i;
-      break;
+  let merged = navigationItems;
+  if (internal.status === 'available' && internal.value.length) {
+    // 自尾向前找基线 manage 分区末项作为 anchor 位，internal 项插在其前。
+    let insertAt = navigationItems.length;
+    for (let i = navigationItems.length - 1; i >= 0; i--) {
+      if (navigationItems[i].area === 'manage') {
+        insertAt = i;
+        break;
+      }
     }
+    merged = [...navigationItems.slice(0, insertAt), ...internal.value, ...navigationItems.slice(insertAt)];
   }
-  return [...navigationItems.slice(0, insertAt), ...internal.value, ...navigationItems.slice(insertAt)];
+  const { adminEntry } = getCapabilities().getShellVisibility().value;
+  return adminEntry ? merged : merged.filter((item) => item.id !== 'admin');
 }
 
 export function getNavigationItem(pathname: string) {

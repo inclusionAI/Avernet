@@ -42,7 +42,9 @@ export function TaskDetailModal({ open, task, loading, onClose }: TaskDetailModa
             <ModalTitle>{task ? task.name : '任务详情'}</ModalTitle>
             {task && <TaskStatusBadge status={task.status} />}
           </div>
-          <ModalDescription>只读详情，展示任务目标、验收标准与发布认领时间线，不提供任何写操作。</ModalDescription>
+          <ModalDescription>
+            只读详情，展示任务目标、验收标准、发布认领时间线、当前状态与输出内容，不提供任何写操作。
+          </ModalDescription>
         </ModalHeader>
 
         {loading ? (
@@ -73,7 +75,11 @@ export function TaskDetailModal({ open, task, loading, onClose }: TaskDetailModa
               <div className="flex items-center gap-2.5">
                 <TaskAvatar size="md" />
                 <div className="min-w-0">
-                  <p className="m-0 font-medium text-foreground">{task.publisherBotName}</p>
+                  <p className="m-0 break-words font-medium text-foreground">
+                    {task.publisher
+                      ? `${task.publisher}${task.publisherName ? `（${task.publisherName}）` : ''}`
+                      : task.publisherBotName ?? '未公开'}
+                  </p>
                   <p className="m-0 mt-0.5 text-xs text-muted-foreground">发布于 {formatTaskDate(task.publishedAt)}</p>
                 </div>
               </div>
@@ -101,6 +107,11 @@ export function TaskDetailModal({ open, task, loading, onClose }: TaskDetailModa
             <DetailRow label="当前状态">
               <p className="m-0 text-foreground">{statusLabel}</p>
             </DetailRow>
+            {task.output && (
+              <DetailRow label="输出内容">
+                <p className="m-0 break-words whitespace-pre-wrap leading-6 text-foreground">{task.output}</p>
+              </DetailRow>
+            )}
           </div>
         ) : (
           <p className="m-0 text-sm text-muted-foreground">任务详情暂不可用。</p>

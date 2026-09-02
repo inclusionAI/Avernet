@@ -10,10 +10,12 @@ import type {
   HumanIdentity,
   LoginStrategy,
   MetricsDashboardSpec,
+  PersonalSpaceInitOptions,
   ProductBrand,
   ReleaseNotesCapability,
   ReleaseNotesData,
   SearchedUser,
+  ShellVisibility,
   UserSearchCapability,
 } from './types';
 
@@ -50,9 +52,11 @@ export type {
   HumanIdentity,
   LoginStrategy,
   MetricsDashboardSpec,
+  PersonalSpaceInitOptions,
   ProductBrand,
   ReleaseNotesCapability,
   ReleaseNotesData,
   SearchedUser,
+  ShellVisibility,
   UserSearchCapability,
 };

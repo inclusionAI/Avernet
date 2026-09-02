@@ -139,6 +139,19 @@ async function readResponseData(
   return response.text();
 }
 
+/**
+ * BCS(阿里云)未鉴权错误体判定:`{code:40100,...,data:{error_code:'unauthenticated'}}`。
+ * 仅用于 oauth-provider 策略的会话过期反应口(add-external-oauth-login 8.9);
+ * ace-gateway 不认此形状(内部以 ACE 替换登录体探测,见 `isAceLoginResponse`)。
+ */
+function isUnauthenticatedErrorBody(data: unknown): boolean {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as { data?: { error_code?: unknown } }).data?.error_code === 'unauthenticated'
+  );
+}
+
 async function executeBackendRequest<T>(url: string, options: BackendRequestOptions): Promise<T> {
   const resolvedUrl = resolveBackendUrl(url);
   const finalParams =
@@ -158,6 +171,17 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
   const responseData = await readResponseData(response, options.responseType);
 
   if (!response.ok) {
+    // 会话过期反应口(add-external-oauth-login 8.9):外部 oauth 策略下业务 401 + BCS unauthenticated 体
+    // → 登记弹窗信号(单飞)并抛 AceLoginRedirectError 阻止 stale 渲染;不投递通用错误 toast
+    // (会话过期后的失败请求统一导向登录弹窗,而非逐条报错)。ace-gateway 维持既有 BackendRequestError 路径。
+    if (
+      response.status === 401 &&
+      isUnauthenticatedErrorBody(responseData) &&
+      useLoginStrategyStore.getState().loginStrategy === 'oauth-provider'
+    ) {
+      triggerLoginPrompt();
+      throw new AceLoginRedirectError();
+    }
     const apiPath = formatApiPath(requestUrl);
     const message = extractFriendlyErrorMessage({ response: { status: response.status, data: responseData } });
     const operation = options.operation;

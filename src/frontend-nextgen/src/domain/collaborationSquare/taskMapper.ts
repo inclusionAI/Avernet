@@ -12,10 +12,13 @@ export interface PublicTaskTransport {
   acceptance_criteria?: string[];
   status?: string;
   publisher_bot_name?: string;
+  publisher?: string;
+  publisher_name?: string;
   published_at?: string;
   claimed_bot_name?: string;
   claimed_at?: string;
   completed_at?: string;
+  output?: string;
   [key: string]: unknown;
 }
 
@@ -40,6 +43,9 @@ export function mapPublicTaskDto(dto: PublicTaskTransport): PublicTask | null {
   const claimedBotName = dto.claimed_bot_name?.trim();
   const claimedAt = dto.claimed_at?.trim();
   const completedAt = dto.completed_at?.trim();
+  const output = dto.output?.trim();
+  const publisher = dto.publisher?.trim();
+  const publisherName = dto.publisher_name?.trim();
 
   return {
     id,
@@ -52,6 +58,9 @@ export function mapPublicTaskDto(dto: PublicTaskTransport): PublicTask | null {
     ...(claimedBotName ? { claimedBotName } : {}),
     ...(claimedAt ? { claimedAt } : {}),
     ...(completedAt ? { completedAt } : {}),
+    ...(output ? { output } : {}),
+    ...(publisher ? { publisher } : {}),
+    ...(publisherName ? { publisherName } : {}),
   };
 }
 
@@ -103,6 +112,26 @@ export function mapPlazaStatusToBbsStatus(status: TaskStatusFilter): string | un
 }
 
 /**
+ * 将 `extend_props.output` 提取为详情页展示文本：
+ * - 字符串 → 去空白直用；
+ * - 对象且有 string 型 `content` → 取 `content`（后端常见包装 `{content, extra}`，只展示内容文本）；
+ * - 对象但无可用 content → 用整个 output 的 JSON 文本（不臆造其它字段名，原样序列化）；
+ * - null / undefined / 其它原始值 → `undefined`（不展示）。
+ *
+ * 详情页以纯文本展示（`whitespace-pre-wrap`），不做 markdown 渲染。
+ */
+function toTaskOutputText(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw.trim() || undefined;
+  if (raw !== null && typeof raw === 'object') {
+    const content = (raw as Record<string, unknown>).content;
+    if (typeof content === 'string') return content.trim() || undefined;
+    const json = JSON.stringify(raw, null, 2);
+    return json || undefined;
+  }
+  return undefined;
+}
+
+/**
  * 将 BBS 任务列表项（{@link BbsTaskItem}，GET /api/v1/collaboration/tasks/bbs/list 的 data 元素）
  * 映射为只读 {@link PublicTask}。
  *
@@ -114,12 +143,15 @@ export function mapPlazaStatusToBbsStatus(status: TaskStatusFilter): string | un
  * - `status` ← {@link mapBbsTaskStatus}；未知态 → `null`（不入列）。
  * - `publisherBotName` ← `publisherNameMap[publisher]`（adapter 预先经 `resolveBotNames` 反查）；
  *   未命中兜底用 `publisher`（Bot ID）；`publisher` 为 null/空白 → `undefined`。
+ * - `publisher` ← `publisher`（原始 Bot ID，详情页用于「id（name）」展示）；`publisher` 为 null/空白 → 不填。
+ * - `publisherName` ← `publisher_name`（后端权威展示名，优先于反查，卡片优先用它）；缺失/空白 → 不填。
  * - `publishedAt` ← `relay_create_time`（节点建表=发布到广场时间）；缺失回退空串。
  * - `claimedBotName` ← `assignee_name`（后端权威）→ `assigneeNameMap[assignee_id]`（adapter 预先经
  *   `resolveBotNames` 反查；复合 `bot_id:owner` 已在 `resolveBotNames` 内拆 realBotId 并按原始 id 回填）
  *   → `assignee_id`（兜底）；仅当有承接者（`assignee_id` 存在）时填。
  * - `claimedAt` ← `relay_begin_time`；仅当有承接者时填。
  * - `completedAt` ← `relay_end_time`；仅当 `status` 映射为 `completed`（即 DONE）时填。
+ * - `output` ← `extend_props.output` 经 {@link toTaskOutputText} 提取为文本（有 string `content` 取 `content`，否则字符串直用/对象 JSON）；缺失/null → 不填。
  */
 export function mapBbsTaskItemDto(
   dto: BbsTaskItem,
@@ -141,6 +173,8 @@ export function mapBbsTaskItemDto(
     : undefined;
   const claimedAt = hasAssignee ? dto.relay_begin_time?.trim() : undefined;
   const completedAt = status === 'completed' ? dto.relay_end_time?.trim() : undefined;
+  const output = toTaskOutputText(dto.extend_props?.output);
+  const publisherName = dto.publisher_name?.trim() || undefined;
 
   return {
     id,
@@ -152,11 +186,14 @@ export function mapBbsTaskItemDto(
           .filter((desc): desc is string => desc !== '')
       : [],
     status,
+    ...(publisherId ? { publisher: publisherId } : {}),
+    ...(publisherName ? { publisherName } : {}),
     ...(publisherBotName ? { publisherBotName } : {}),
     publishedAt: dto.relay_create_time?.trim() ?? '',
     ...(claimedBotName ? { claimedBotName } : {}),
     ...(claimedAt ? { claimedAt } : {}),
     ...(completedAt ? { completedAt } : {}),
+    ...(output ? { output } : {}),
   };
 }
 

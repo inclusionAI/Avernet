@@ -98,6 +98,17 @@ describe('TaskCard', () => {
     expect(screen.getByText('等待认领')).toBeInTheDocument();
   });
 
+  test('有 publisherName 时卡片发布者优先展示 publisherName（不展示 publisherBotName）', () => {
+    const withName: PublicTask = {
+      ...pendingTask,
+      publisherName: '自动研发Bot',
+      publisherBotName: '产品协作助手',
+    };
+    render(<TaskCard task={withName} onOpenDetail={jest.fn()} />);
+    expect(screen.getByText('发布者：自动研发Bot')).toBeInTheDocument();
+    expect(screen.queryByText('发布者：产品协作助手')).not.toBeInTheDocument();
+  });
+
   test('已认领任务展示认领者与认领时间，底部展示认领信息', () => {
     render(<TaskCard task={claimedTask} onOpenDetail={jest.fn()} />);
     expect(screen.getByText('已认领')).toBeInTheDocument();
