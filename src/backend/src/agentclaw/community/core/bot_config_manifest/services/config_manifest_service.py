@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+import yaml
 from injector import inject
 
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
@@ -35,7 +36,14 @@ from agentclaw.community.core.bot_config_manifest.repository.models import (
 )
 from agentclaw.community.core.bot_config_manifest.schema import (
     ValidationResult,
+    placeholders,
     validate_document,
+)
+from agentclaw.community.core.bot_config_manifest.schema.splice import (
+    splice_script_section,
+)
+from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
+    BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.core.bot_startup_script.protocols import (
     TeclawEngineTestProtocol,
@@ -44,6 +52,7 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
@@ -69,8 +78,16 @@ class BotConfigManifestService(BotConfigManifestServiceProtocol):
         self,
         repository: BotConfigManifestRepositoryProtocol,
         teclaw_engine_test_provider: Callable[[], TeclawEngineTestProtocol],
+        script_service_provider: Optional[
+            Callable[[], BotStartupScriptServiceProtocol]
+        ] = None,
     ) -> None:
         self._repository = repository
+        # W8: the startup-script row the legacy endpoints write through this
+        # service. Lazy for the cycle reason the creation seam holds it the
+        # same way; optional so the read-and-validate surface needs no row
+        # store at all.
+        self._script_service_provider = script_service_provider
         # Lazy *and* narrow, for the reason ``BotStartupScriptService`` holds it
         # the same way: teclaw provisioning pulls in BaasService, whose graph
         # reaches back here, and importing the concrete class closes an import
@@ -182,6 +199,77 @@ class BotConfigManifestService(BotConfigManifestServiceProtocol):
             warnings=result.warnings,
             declares_script=result.parsed.get("script") is not None,
         )
+
+    # ── the startup-script alias (W8, §2.2) ─────────────────────────────────
+
+    def write_through_script(
+        self,
+        *,
+        entity_id: str,
+        bot_id: str,
+        body: Optional[str],
+        modifier: str,
+        active_engine: Optional[str],
+        bot_type: Optional[str],
+    ) -> Optional[ManifestWriteResult]:
+        """See the protocol. Splice, store, then write the row.
+
+        The row is written *after* the document is stored, with the same
+        placeholder substitution the script materialiser applies, so the next
+        apply compares equal and plans the script ``unchanged``. The document
+        keeps the caller's bytes; only the ``script`` section changes (D-10).
+        """
+        record = self.get(entity_id=entity_id, bot_id=bot_id)
+        if record is None:
+            return None
+        document = splice_script_section(record.document, body)
+        result = self.put(
+            entity_id=entity_id,
+            bot_id=bot_id,
+            document=document,
+            modifier=modifier,
+            active_engine=active_engine,
+            bot_type=bot_type,
+        )
+        scripts = self._scripts()
+        if body is None:
+            scripts.delete(entity_id=entity_id, bot_id=bot_id)
+        else:
+            scripts.put(
+                entity_id=entity_id,
+                bot_id=bot_id,
+                script=placeholders.resolve(
+                    body,
+                    engine_type=active_engine or "",
+                    env=get_current_env(),
+                    tenant=get_current_avernet_tenant(),
+                ),
+                modifier=modifier,
+            )
+        return result
+
+    def script_body(self, *, entity_id: str, bot_id: str) -> Optional[str]:
+        """See the protocol. The stored document's ``script.body``, if any."""
+        record = self.get(entity_id=entity_id, bot_id=bot_id)
+        if record is None:
+            return None
+        try:
+            parsed = yaml.safe_load(record.document)
+        except yaml.YAMLError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        section = parsed.get("script")
+        body = section.get("body") if isinstance(section, dict) else None
+        return body if isinstance(body, str) else None
+
+    def _scripts(self) -> BotStartupScriptServiceProtocol:
+        if self._script_service_provider is None:
+            raise RuntimeError(
+                "BotConfigManifestService has no startup-script service bound; "
+                "write_through_script needs one"
+            )
+        return self._script_service_provider()
 
     def delete(self, *, entity_id: str, bot_id: str) -> bool:
         """Remove the stored manifest. Idempotent — absent is success.

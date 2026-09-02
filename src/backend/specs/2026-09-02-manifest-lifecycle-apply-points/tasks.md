@@ -307,14 +307,18 @@ Conventions every task assumes:
 
 ## Group F — The alias view
 
-## [ ] Task 18: The splice helper
+## [x] Task 18: The splice helper
 - **Files:** `schema/splice.py` (new), `tests/community/core/bot_config_manifest/test_script_splice.py` (new)
-- **Done when:** as revision 2's Task 6.
+- **Done when:** as revision 2's Task 6 — with one deviation: `|+` is never
+  rendered (its trailing blank lines are indistinguishable from the document's
+  own spacing); a body with more than one trailing newline, an empty body and
+  a CRLF body take the JSON-quoted form, which reads back identically.
 - **Depends on:** —
 
-## [ ] Task 19: `write_through_script` and `script_body`
-- **Files:** `services/config_manifest_service.py`, its protocol, `api/`,
-  `di/modules/bot_management_module.py`,
+## [x] Task 19: `write_through_script` and `script_body`
+- **Files:** `services/config_manifest_service.py`, its protocol (`api/` re-exports
+  the protocol unchanged; DI resolves the lazy script-service provider the
+  bot-management module already binds),
   `tests/community/core/bot_config_manifest/test_write_through_script.py` (new)
 - **Done when:** as revision 2's Task 7.
 - **Depends on:** Task 18
