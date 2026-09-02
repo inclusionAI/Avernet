@@ -52,8 +52,7 @@ import {
   uploadArtifactLocation,
   taskLogArchiveLocation,
 } from "../services/evolve/artifact-url.js";
-import { createClawWebOssObjectStore, DEFAULT_CLAWWEB_EVOLVE_ARCA_OSS_ENDPOINT, resolveClawWebOssEnvironment } from "../services/object-storage/clawweb-oss-runtime.js";
-import type { MistOssObjectStore } from "../services/object-storage/oss-object-store.js";
+import { UnavailableObjectStore, type ObjectStore } from "../services/object-storage/oss-object-store.js";
 import {
   InsightTaskCreationError,
   InsightTaskService,
@@ -77,7 +76,7 @@ import {
 type Dispatch = typeof dispatchEvolveCommand;
 type DispatchTaskLogArchive = typeof dispatchEvolveTaskLogArchive;
 type CancelExecution = typeof cancelEvolveExecution;
-type EvolveRouterDeps = {
+export type EvolveRouterDeps = {
   db?: IDatabase;
   dispatch?: Dispatch;
   dispatchTaskLogArchive?: DispatchTaskLogArchive;
@@ -91,7 +90,9 @@ type EvolveRouterDeps = {
   benchDomainRepo?: BenchDomainRepository | null;
   benchTemplateRepo?: BenchTemplateRepository | null;
   benchRunRepo?: BenchRunRepository | null;
-  artifactUrlStore?: Pick<MistOssObjectStore, "createSignedUrl">;
+  artifactStore?: ObjectStore;
+  /** Backward-compatible signing-only dependency used by an embedding host. */
+  artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   botWorkflowPermissionRepo?: BotWorkflowPermissionRepository | null;
 };
 type BenchDomains = { trainBenchDomainId: string; testBenchDomainId: string };
@@ -974,13 +975,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const benchDomainRepo = deps.benchDomainRepo ?? null;
   const benchTemplateRepo = deps.benchTemplateRepo ?? null;
   const benchRunRepo = deps.benchRunRepo ?? null;
-  const artifactUrlStore = deps.artifactUrlStore ?? createClawWebOssObjectStore(
-    resolveClawWebOssEnvironment(), process.env, {
-      strictEnvironment: true,
-      endpoint: process.env.CLAWWEB_EVOLVE_ARCA_OSS_ENDPOINT ?? DEFAULT_CLAWWEB_EVOLVE_ARCA_OSS_ENDPOINT,
-      signedUrlVersion: "v1",
-    },
-  );
+  const unavailableArtifactStore = new UnavailableObjectStore();
+  const artifactStore = deps.artifactStore ?? unavailableArtifactStore;
+  const artifactUrlStore = deps.artifactUrlStore ?? deps.artifactStore ?? unavailableArtifactStore;
   const botWorkflowPermissionRepo = deps.botWorkflowPermissionRepo ?? null;
 
   router.get("/task-definitions", (_req, res) => {
@@ -2872,8 +2869,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     } catch (error) {
       res.status(422).json({ error: error instanceof Error ? error.message : String(error) }); return;
     }
-    const store = createClawWebOssObjectStore(resolveClawWebOssEnvironment(), process.env, { strictEnvironment: true });
-    const object = await store.getObject(parsed.objectKey);
+    const object = await artifactStore.getObject(parsed.objectKey);
     if (object.content.byteLength > 2 * 1024 * 1024) { res.status(413).json({ error: "Diff 超过 2 MiB 展示上限" }); return; }
     if (object.content.byteLength !== parsed.artifact.size
       || (await import("node:crypto")).createHash("sha256").update(object.content).digest("hex") !== parsed.artifact.sha256) {

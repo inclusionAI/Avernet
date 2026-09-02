@@ -23,6 +23,7 @@ import { InsightTaskService } from "./services/evolve/insight-task-service.js";
 import { GovernanceRuleProvider } from "./services/insight/governance-rule-provider.js";
 import type { ObjectStore } from "./services/object-storage/oss-object-store.js";
 import { startRunAnalysisTimeoutSweeper } from "./services/evolve/run-analysis-timeout.js";
+import { startSuggestionApplyTimeoutSweeper } from "./services/evolve/suggestion-apply-timeout.js";
 
 export type ClawevolveModuleOptions = {
   db: IDatabase;
@@ -118,19 +119,22 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   });
 
   let runAnalysisTimeoutTimer: NodeJS.Timeout | null = null;
+  let suggestionApplyTimeoutTimer: NodeJS.Timeout | null = null;
 
   return {
     publicRouter,
     internalRouter,
     repositories: { evolve, taskSource },
     async start() {
-      if (runAnalysisTimeoutTimer) return;
+      if (runAnalysisTimeoutTimer || suggestionApplyTimeoutTimer) return;
       runAnalysisTimeoutTimer = startRunAnalysisTimeoutSweeper(evolve);
+      suggestionApplyTimeoutTimer = startSuggestionApplyTimeoutSweeper(evolve);
     },
     async stop() {
-      if (!runAnalysisTimeoutTimer) return;
-      clearInterval(runAnalysisTimeoutTimer);
+      if (runAnalysisTimeoutTimer) clearInterval(runAnalysisTimeoutTimer);
+      if (suggestionApplyTimeoutTimer) clearInterval(suggestionApplyTimeoutTimer);
       runAnalysisTimeoutTimer = null;
+      suggestionApplyTimeoutTimer = null;
     },
   };
 }
