@@ -1470,6 +1470,9 @@ async fn register_provider_returns_coordination_metadata() {
     assert_eq!(body["coordination"]["mode"], "mcporter_mcp");
     assert_eq!(body["coordination"]["mcp_server"], "bcs");
     assert_eq!(body["coordination"]["mcporter_command"], "mcporter");
+    assert!(body["coordination"]
+        .get("worker_send_task_message_enabled")
+        .is_none());
 }
 
 #[tokio::test]
@@ -1494,6 +1497,7 @@ async fn register_provider_round_trips_native_mcp_tool_name_mapping() {
                         },
                         "coordination": {
                             "mode": "native_mcp",
+                            "worker_send_task_message_enabled": false,
                             "mcp_server": "mcp.ant.agentclawscs.bcs",
                             "tool_name_mapping": {
                                 (assign_tool): "bcs_assign_task",
@@ -1534,6 +1538,10 @@ async fn register_provider_round_trips_native_mcp_tool_name_mapping() {
     assert_eq!(
         body["coordination"]["tool_name_mapping"][send_message_tool],
         "bcs_send_task_message"
+    );
+    assert_eq!(
+        body["coordination"]["worker_send_task_message_enabled"],
+        false
     );
 }
 

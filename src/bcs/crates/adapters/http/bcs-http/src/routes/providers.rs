@@ -575,6 +575,7 @@ fn coordination_from_wire(config: ProviderCoordinationConfigDto) -> ProviderCoor
             ProviderCoordinationModeDto::NativeTool => CoordinationMode::NativeTool,
             ProviderCoordinationModeDto::Disabled => CoordinationMode::Disabled,
         },
+        worker_send_task_message_enabled: config.worker_send_task_message_enabled,
         mcp_server: config.mcp_server,
         mcporter_command: config.mcporter_command,
         tool_name_mapping: config.tool_name_mapping,

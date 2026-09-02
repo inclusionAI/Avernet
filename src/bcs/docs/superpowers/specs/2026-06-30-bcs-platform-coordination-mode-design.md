@@ -70,7 +70,8 @@ Provider 的 `config` 增加 `coordination` 节点：
   "coordination": {
     "mode": "mcporter_mcp",
     "mcp_server": "bcs",
-    "mcporter_command": "mcporter"
+    "mcporter_command": "mcporter",
+    "worker_send_task_message_enabled": true
   }
 }
 ```
@@ -83,6 +84,9 @@ Provider 的 `config` 增加 `coordination` 节点：
 - `tool_name_mapping`：Provider 原生 MCP tool result 中的精确工具名到 BCS canonical coordination tool
   的映射，只对 `native_mcp` 有意义。canonical tool 仅允许 `bcs_assign_task`、
   `bcs_send_task_message`、`bcs_task_complete`。
+- `worker_send_task_message_enabled`：是否在 manager-worker 群的 worker 上下文中说明可调用
+  `bcs_send_task_message`。缺省为 `true`，用于保持已有 Provider 的行为；设置为 `false` 时仅隐藏这段
+  worker 提示文案，不注销工具、不改变权限校验、不改变事件回传，也不改变 `task.message` 协议。
 
 校验规则：
 
@@ -96,6 +100,7 @@ Provider 的 `config` 增加 `coordination` 节点：
 缺省策略：
 
 - Provider 未配置 `coordination` 时，等同 `disabled`。
+- `worker_send_task_message_enabled` 未配置时按 `true` 处理；序列化 `true` 时可以省略该字段，`false` 时必须保留。
 - BCS 不从 ProviderBotBinding 或 Bot metadata 补任何 coordination override。
 
 ## 5. Plugin / WebSocket 派生规则
@@ -151,6 +156,10 @@ Worker：
 不要在普通回复中伪造工具结果。
 ```
 
+当 `worker_send_task_message_enabled = false` 时，worker 上下文不包含上述
+`bcs_send_task_message` 调用说明，改为提示“收到 manager 派发的任务后直接处理”，其余
+`mcporter call` 原始输出约束和 manager 汇总约束保持不变。
+
 ### 6.2 `native_mcp`
 
 Manager：
@@ -174,6 +183,9 @@ Worker：
 不要使用 mcporter、exec、bash。
 不要直接面向用户输出最终答案。
 ```
+
+当 `worker_send_task_message_enabled = false` 时，仅移除 worker 对
+`bcs_send_task_message` 的调用说明，保留 MCP 平台及其他安全约束文案。
 
 ### 6.3 `native_tool`
 
@@ -201,9 +213,14 @@ Worker：
 不要直接面向用户输出最终答案。
 ```
 
+当 `worker_send_task_message_enabled = false` 时，仅移除 worker 对原生
+`bcs_send_task_message` 的调用说明，保留原生 tool 平台及其他安全约束文案。
+
 ### 6.4 `legacy_upstream`
 
 保持现有上行兼容上下文，不注入 `mcporter`、MCP server 或 native tool 的新文案。
+若运行时 surface 显式携带 `worker_send_task_message_enabled = false`，同时移除旧兼容文案中
+worker 的 `bcs_send_task_message(message)` 阶段性同步说明；manager 文案不受影响。
 
 ## 7. Provider 协同回传
 
@@ -335,6 +352,7 @@ Provider coordination callback 拒绝时返回 `400 invalid_coordination_mode`�
 3. 上下文注入：
    - 同一主从群内，mcporter provider、native MCP provider、native tool plugin、legacy WS bot 收到不同文案。
    - Manager 和 worker 角色模板不同。
+   - `worker_send_task_message_enabled = false` 时仅 worker 隐藏 `bcs_send_task_message` 说明，manager 仍保留现有工具说明。
 4. Provider 回传：
    - `mcporter_mcp` 接受 `tool_result` 并执行现有 task flow。
    - `native_mcp` 接受 matching `coordination_intent`。

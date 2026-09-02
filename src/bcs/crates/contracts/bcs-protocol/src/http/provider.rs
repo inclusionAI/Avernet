@@ -5,6 +5,14 @@ use serde_json::{Map, Value};
 
 use crate::{Attachment, Skill, deserialize_skills};
 
+fn default_worker_send_task_message_enabled() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
 pub const BCN_PROTOCOL_VERSION_HEADER: &str = "X-BCN-Protocol-Version";
 pub const BCN_TRANSPORT_HEADER: &str = "X-BCN-Transport";
 pub const BCN_MESSAGE_ID_HEADER: &str = "X-BCN-Message-Id";
@@ -56,6 +64,13 @@ impl Default for ProviderBotConnectionModeDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderCoordinationConfigDto {
     pub mode: ProviderCoordinationModeDto,
+    /// Whether manager-worker worker contexts should explain the optional
+    /// `bcs_send_task_message` tool. Omitted values default to `true`.
+    #[serde(
+        default = "default_worker_send_task_message_enabled",
+        skip_serializing_if = "is_true"
+    )]
+    pub worker_send_task_message_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_server: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
