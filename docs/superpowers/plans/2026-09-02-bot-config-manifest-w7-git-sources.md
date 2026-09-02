@@ -2243,5 +2243,8 @@ git commit -m "docs(backend): mark W7 delivered in the work items"
 - 18:45 B 落盘 Task 7 skills git 路(`28f7f921e`)。A 续任会话独立复核中发现的同一批转红与 B 的修复相互印证(门槛下移方向一致),无需返工。
 - 18:48 **A 续任会话 claim Task 9**(收尾:全套回归、架构守卫、coverage gate、work-items 标记、PR)。开工前 `git log` 核对:Task 1–8 全部已有提交,工作区干净。
 - 19:0x A 的跨轨 lint 清理(Task 9 收尾项,ruff 对全部 W7 改动文件 6 处告警全消):`test_git_source.py` 导入上提(E402)+ 删未用名,`source_session.py`/`test_source_session.py` 删未用 import(后两文件属 B 轨 Task 4 已交付面,均为行为无关的机械清理,照 B 的留痕先例在此备案)。全量门禁 `ci_test.sh` 于清理前已跑过(16661 passed / 行 88.36% / **改动行 83.46%** ≥80%;source_session 的行号表受本次清理轻微错位影响,真实值更高)。
+- 19:2x **W6 已合入 dev(#1821,3e2b4c024)→ W7 rebase 上新 dev**:三个 keep-both 冲突(apply service 构造参数/DI 模块 provider 区/lifecycle fixture——W6 的 resource provider 与 W7 的 git provider 两侧都保留),其余 14 个提交零冲突自动重放。rebase 后受影响面复验:manifest 463 passed(比 rebase 前多 26 个=W6 随 dev 进来的 resources 测试)+ 架构 258 passed + openapi bars 8 + endpoint apply 场景 12。
+- 19:2x **work-items 标记修正后交付**:计划原文「W6 资源目录条目对 git 源的消费随 W6 分支合入」经核对失实——W6 从 W5 分支切出、早于 W7 合入,`resources` 物化器只认字符串 URL 源(`resources.py:138/203` 的 isinstance(str) 检查)。标记已改为如实陈述:resources 接 git 路是后续工作。**PR [#1829](https://github.com/inclusionAI/Avernet/pull/1829) 已开**(base=dev),CI 运行中。
+
 
 
