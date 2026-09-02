@@ -484,3 +484,53 @@ def test_write_failure_yields_failed_entry_per_member():
         if r.outcome.value == "failed"
     )
     assert svc.writes == {("wrap", "a.txt"): b"A"}
+
+
+# --- registration: the fifth materialiser, and the artifact contract (Task 6) ---
+
+
+def test_module_never_imports_the_artifact_contract():
+    """W6 acceptance: ``BotConfigArtifact`` stays untouched.
+
+    The whole module is AST-walked (not just top-level imports) so a lazy
+    import inside a function cannot slip the contract in either.
+    """
+    import ast
+    from pathlib import Path
+
+    import agentclaw.community.core.bot_config_manifest.apply.materialisers.resources as _res
+
+    tree = ast.parse(Path(_res.__file__).read_text())
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names.append(node.module or "")
+    for name in names:
+        assert "kernel.bot_config" not in name, (
+            "the resources materialiser must not reach the artifact contract"
+        )
+
+
+def test_build_materialisers_registers_five():
+    from agentclaw.community.core.bot_config_manifest.apply.registry import (
+        build_materialisers,
+    )
+    from agentclaw.community.core.bot_config_manifest.capabilities import (
+        ManifestCategory,
+    )
+
+    registry = build_materialisers(
+        script_service=object(),
+        activation_service=object(),
+        mcp_auth_service=object(),
+        identity_service=object(),
+        upload_service=object(),
+        capability_reader=object(),
+        package_validator=object(),
+        entry_fetcher=object(),
+        resource_service=object(),
+    )
+    assert ManifestCategory.RESOURCES in registry
+    assert len(registry) == 5

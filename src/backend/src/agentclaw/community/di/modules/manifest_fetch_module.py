@@ -2,7 +2,7 @@
 
 The apply wiring W11's repository binding comment reserved: the guarded
 fetcher (W2), the content store (W11), and the one entry-fetcher funnel over
-W2/W3/W11, plus the five lazy service factories the registry's two W5
+W2/W3/W11, plus the lazy service factories the registry's fetch-consuming
 materialisers take their collaborators through. One module because one
 feature wave owns them — the same reason the apply service and its
 repositories bind in ``bot_management_module``, where they landed with W4.
@@ -25,6 +25,9 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
     ManifestIdentityPort,
+)
+from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
+    ManifestResourcePort,
 )
 from agentclaw.community.core.bot_config_manifest.content.service import (
     ManifestContentService,
@@ -218,3 +221,33 @@ class ManifestFetchModule(Module):
     ) -> Callable[[], EntryFetcher]:
         """The lazy lookup the apply service's registry wiring asks for."""
         return lambda: injector.get(EntryFetcher)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_resource_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], ManifestResourcePort]:
+        """The write chain the ``resources`` materialiser delivers through.
+
+        Lazy with a function-level import for the reason the identity
+        factory above records: the resource file service module reaches the
+        device dispatcher graph at import time, and this module's import
+        must not trigger that chain. Structural check at wiring time for
+        the same reason as there — the port has no implementation
+        relationship to the service, so nothing else would notice a rename
+        until mid-apply.
+        """
+        from agentclaw.community.core.services.resource_file_service import (
+            ResourceFileService,
+        )
+
+        def _resources() -> ManifestResourcePort:
+            service = injector.get(ResourceFileService)
+            if not isinstance(service, ManifestResourcePort):
+                raise TypeError(
+                    "ResourceFileService no longer satisfies ManifestResourcePort"
+                )
+            return service
+
+        return _resources
