@@ -163,7 +163,10 @@ class ResourcesMaterialiser(Materialiser):
             seen.add(path)
             if isinstance(path, str) and path.endswith("/"):
                 unpack_kind = entry.get("unpack")
-                if unpack_kind not in VALID_UNPACK:
+                # Str first: ``VALID_UNPACK`` is a frozenset, and an
+                # unhashable ``unpack`` (a YAML list) would raise on the
+                # membership test where the belt owes a clean refusal.
+                if not isinstance(unpack_kind, str) or unpack_kind not in VALID_UNPACK:
                     failures.append(
                         ResolveFailure(
                             path,

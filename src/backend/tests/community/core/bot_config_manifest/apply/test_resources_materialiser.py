@@ -1248,3 +1248,29 @@ def test_the_port_mirrors_the_apply_side_call_surface():
         # The one divergence the apply side must not reintroduce: ``exists``
         # is addressed like ``delete`` and ``upload_file``, entity and all.
         assert "entity_type" in _kwparams(ManifestResourcePort.exists)
+
+
+def test_an_unhashable_unpack_kind_is_refused_not_raised():
+    """The membership check is against a frozenset (``VALID_UNPACK``); an
+    unhashable ``unpack`` (a YAML list, from a validator-bypassing document)
+    must still get the belt's clean refusal — a raw ``TypeError`` would
+    leave the category's failure text to the orchestrator's exception
+    path instead of the stage's own words.
+    """
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.md": b"x"})))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {
+                    "path": "wrap/",
+                    "unpack": ["zip"],
+                    "source": "https://x/t.tgz",
+                }
+            ],
+        )
+    )
+    assert not resolved.ok
+    assert "zip|tar.gz" in resolved.failures[0].reason

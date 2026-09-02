@@ -516,7 +516,8 @@ consumes:
   - "MAX_SCRIPT_BYTES (core.bot_startup_script) — script.body IS the #926 startup script, so it takes that cap rather than a second one"
   - "TokenVault (core.bot_management) — enc:v1: AES-GCM reversible encryption for the credential secret; the master key comes from the SecretResolver, and the fail-closed profiles refuse writes without one"
   - "SourceCredentialRepositoryProtocol (core.repository) — persistence for the credential table"
-  - "ALLOWED_EXTENSIONS / MAX_FILE_SIZE (core.resources.services.file_service) — the workspace file surface's admission rules, re-asked in the `resources` materialiser's resolve so an undeliverable entry fails with the tree still standing (W6)"
+  - "ALLOWED_EXTENSIONS / MAX_FILE_SIZE (core.resources.services.file_service) — the workspace file surface's admission rule, re-asked in the `resources` materialiser's resolve by delegating to the one `admission_refusal` predicate so an undeliverable entry fails with the tree still standing (W6)"
+  - "resolve_bot_engine (core.bot_management.engines.registry) — the pure runtime-engine routing policy (claude_code + a non-normalCC template ⇒ aicoding) the `resources` materialiser applies when addressing a bot's workspace, the same rule the resources router resolves through before it composes {bot_dir}/{engine}/workspace (W6)"
 consumed_by:
   - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface"
   - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py constructor-injects the transport_allowlist and the content store root (read via the W2/W11 pure parsers over config_module's seam) and holds the one EntryFetcher over the fetcher, the store, and W3's credentials"
@@ -524,6 +525,7 @@ consumed_by:
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_startup_script
+  - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)
   - agentclaw.community.core.bot_management.token_vault
   - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults
   - agentclaw.community.core.repository
