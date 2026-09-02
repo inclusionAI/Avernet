@@ -60,7 +60,21 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
 )
 from agentclaw.community.core.task_queue.types import Complete
 
-from ._fakes import FakeActivationService, FakeMcpAuth, FakeStartupScriptService
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    EntryFetcher,
+)
+from ._fakes import (
+    FakeActivationService,
+    FakeCapabilityReader,
+    FakeCredentials,
+    FakeGuardedFetcher,
+    FakeIdentityService,
+    FakeManifestContent,
+    FakeMcpAuth,
+    FakeSkillUploadService,
+    FakeStartupScriptService,
+    real_validator,
+)
 
 _ENTITY = "u_owner"
 _BOT = "b_task"
@@ -155,6 +169,16 @@ def _service(db, *, scripts, manifests=None, queue=None):
         script_service_provider=lambda: scripts,
         activation_service_provider=lambda: FakeActivationService(),
         mcp_auth_service_provider=lambda: FakeMcpAuth(),
+        # W5's materialisers. This suite's document declares only script, so the
+        # fetch-consuming categories are never reached — but they must exist for
+        # the registry to register.
+        identity_service_provider=lambda: FakeIdentityService(),
+        upload_service_provider=lambda: FakeSkillUploadService(),
+        capability_reader_provider=lambda: FakeCapabilityReader(),
+        package_validator_provider=lambda: real_validator(),
+        entry_fetcher_provider=lambda: EntryFetcher(
+            FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
+        ),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
     )

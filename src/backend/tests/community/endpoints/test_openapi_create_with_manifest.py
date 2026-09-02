@@ -393,12 +393,14 @@ _FLOW_DOCUMENT = f'schema_version: 1\nscript:\n  body: "{_SCRIPT}"\n'
 #: manifest" — the field is required, so an empty document is how a caller says
 #: they want the bot and no configuration.
 _EMPTY_DOCUMENT = "schema_version: 1\n"
-#: ``identity`` has no materialiser in this build. A category nothing can apply
-#: is refused *here* rather than stored inert, because accepting it would mean
-#: authorizing, creating the bot, and only then failing to configure it.
+#: ``resources`` has no materialiser in this build — it arrives with W6, while
+#: W4 and W5 between them landed script, mcp, identity and skills. A category
+#: nothing can apply is refused *here* rather than stored inert, because
+#: accepting it would mean authorizing, creating the bot, and only then failing
+#: to configure it.
 _UNBACKED_DOCUMENT = (
-    "schema_version: 1\nmanifest:\n  identity:\n"
-    '    - type: "CLAUDE.md"\n      content: "hello"\n'
+    "schema_version: 1\nmanifest:\n  resources:\n"
+    '    - path: "docs/a.md"\n      source: "https://example.com/a.md"\n'
 )
 
 
@@ -621,7 +623,7 @@ def test_a_construct_with_no_materialiser_is_refused_at_submission(client, world
     refused = _submit(client, _UNBACKED_DOCUMENT)
 
     assert refused.status_code == 422, refused.text
-    assert "identity" in refused.text, (
+    assert "resources" in refused.text, (
         "the refusal must name the category, or a caller cannot tell which "
         "part of their document to remove"
     )

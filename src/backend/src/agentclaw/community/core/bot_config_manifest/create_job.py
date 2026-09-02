@@ -325,7 +325,6 @@ class BotCreateWithManifestHandler:
     def _run(self, payload: dict) -> TaskOutcome:
         bot_id = str(payload["bot_id"])
         entity_id = str(payload["entity_id"])
-        user_id = str(payload["user_id"])
 
         bot = self._bots_provider().get_by_id_and_entity(bot_id, entity_id)
         if bot is None:

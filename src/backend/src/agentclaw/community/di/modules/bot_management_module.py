@@ -102,6 +102,21 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
     BotConfigManifestApplyService,
 )
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    EntryFetcher,
+)
+from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
+    ManifestIdentityPort,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageValidator,
+)
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
 )
@@ -700,6 +715,14 @@ class BotManagementModule(Module):
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
+        # What W5's two fetch-consuming materialisers need, all supplied by
+        # manifest_fetch_module as lazy factories for the same cycle reason the
+        # three above are.
+        identity_service_provider: Callable[[], ManifestIdentityPort],
+        upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
+        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
+        package_validator_provider: Callable[[], SkillPackageValidator],
+        entry_fetcher_provider: Callable[[], EntryFetcher],
         task_queue_provider: Callable[[], TaskQueueService],
         bot_repository: BotRepository,
     ) -> BotConfigManifestApplyService:
@@ -710,6 +733,11 @@ class BotManagementModule(Module):
             script_service_provider,
             activation_service_provider,
             mcp_auth_service_provider,
+            identity_service_provider,
+            upload_service_provider,
+            capability_reader_provider,
+            package_validator_provider,
+            entry_fetcher_provider,
             task_queue_provider,
             bot_repository,
         )

@@ -173,14 +173,15 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
 
         **Derived from the registry, never a list written by hand.** The
         implementation returns the keys of the same registry the orchestrator
-        builds, so the two cannot disagree — and W5 or W6 widen every caller of
-        this by registering a materialiser, with no edit anywhere else.
+        builds, so the two cannot disagree — W5 widened this from two constructs
+        to four by registering materialisers and editing nothing else, and W6
+        widens it the same way.
 
-        The alternative was a constant naming ``{script, mcp}``. It would drift,
-        and the drift is invisible until the worst moment: a creation endpoint
-        that gates on it would accept a category nothing can apply, spend a
-        Passport application, take a user through authorization, create the bot,
-        and only then fail the apply.
+        The alternative was a hand-written constant. It would drift, and the
+        drift is invisible until the worst moment: a creation endpoint that
+        gates on it would accept a category nothing can apply, spend a Passport
+        application, take a user through authorization, create the bot, and only
+        then fail the apply.
         """
         ...
 

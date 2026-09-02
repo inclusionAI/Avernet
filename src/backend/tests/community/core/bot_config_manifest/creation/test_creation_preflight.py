@@ -27,7 +27,25 @@ from agentclaw.community.core.bot_config_manifest.schema.validator import (
     validate_document,
 )
 
-_LANDED = frozenset({ManifestSection.SCRIPT, ManifestCategory.MCP})
+# What the registry actually holds today: W4's two plus W5's two. Written out
+# rather than read from the service so this suite tests the gate, not the wiring
+# — the derivation itself is pinned in the apply service's own tests.
+_LANDED = frozenset(
+    {
+        ManifestSection.SCRIPT,
+        ManifestCategory.MCP,
+        ManifestCategory.IDENTITY,
+        ManifestCategory.SKILLS,
+    }
+)
+
+#: A category the schema accepts and nothing can yet materialise — `resources`
+#: arrives with W6. It is the example throughout this suite because it is the
+#: real one; using a landed category would test the fixture, not the gate.
+_UNMATERIALISED = (
+    'schema_version: 1\nmanifest:\n  resources:\n'
+    '    - path: "docs/a.md"\n      source: "https://example.com/a.md"\n'
+)
 
 
 def _validate(*, document, active_engine, bot_type):
@@ -60,39 +78,32 @@ def test_a_document_declaring_only_landed_constructs_is_accepted():
 
 def test_a_construct_with_no_materialiser_is_refused_at_submission():
     with pytest.raises(ManifestValidationError) as caught:
-        _preflight(
-            "schema_version: 1\nmanifest:\n  identity:\n"
-            '    - type: "CLAUDE.md"\n      content: "hello"\n'
-        )
+        _preflight(_UNMATERIALISED)
     codes = {v.code for v in caught.value.violations}
     assert "construct_not_appliable_at_creation" in codes
     named = " ".join(v.message for v in caught.value.violations)
-    assert "identity" in named, "the refusal must name the construct"
+    assert "resources" in named, "the refusal must name the construct"
 
 
 def test_a_declared_empty_category_still_needs_a_materialiser():
-    """`identity: []` is not "nothing to do".
+    """`resources: []` is not "nothing to do".
 
     Under §3.2's category overwrite it *empties* the category, which is a write,
     and a write needs something able to make it.
     """
     with pytest.raises(ManifestValidationError) as caught:
-        _preflight("schema_version: 1\nmanifest:\n  identity: []\n")
+        _preflight("schema_version: 1\nmanifest:\n  resources: []\n")
     assert "construct_not_appliable_at_creation" in {
         v.code for v in caught.value.violations
     }
 
 
 def test_registering_the_materialiser_makes_the_same_document_acceptable():
-    """The gate is derived, so W5/W6 widen it by landing."""
-    document = (
-        "schema_version: 1\nmanifest:\n  identity:\n"
-        '    - type: "CLAUDE.md"\n      content: "hello"\n'
-    )
+    """The gate is derived, so W6 widens it by landing — as W5 already did."""
     with pytest.raises(ManifestValidationError):
-        _preflight(document)
+        _preflight(_UNMATERIALISED)
     parsed = _preflight(
-        document, materialised=_LANDED | {ManifestCategory.IDENTITY}
+        _UNMATERIALISED, materialised=_LANDED | {ManifestCategory.RESOURCES}
     )
     assert parsed
 
@@ -110,11 +121,7 @@ def test_a_teclaw_engine_is_refused_and_the_refusal_names_w8():
 def test_every_reason_is_reported_in_one_pass():
     """All-or-nothing, like ``PUT``: fixing a document is one pass, not a queue."""
     with pytest.raises(ManifestValidationError) as caught:
-        _preflight(
-            "schema_version: 1\nmanifest:\n  identity:\n"
-            '    - type: "CLAUDE.md"\n      content: "hi"\n',
-            engine="teclaw",
-        )
+        _preflight(_UNMATERIALISED, engine="teclaw")
     codes = {v.code for v in caught.value.violations}
     assert "engine_not_supported_for_creation" in codes
     assert "construct_not_appliable_at_creation" in codes

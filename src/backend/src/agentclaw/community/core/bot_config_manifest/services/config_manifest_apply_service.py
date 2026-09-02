@@ -67,10 +67,6 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyConstruct,
     ApplyReport,
     ApplyStatus,
-    CategoryResult,
-    EntryOutcome,
-    EntryResult,
-    SourceResolution,
     derive_status,
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
@@ -78,6 +74,9 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
+)
+from agentclaw.community.core.bot_config_manifest.services.apply_report_codec import (
+    report_from_payload,
 )
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ApplyAccepted,
@@ -89,11 +88,6 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_pr
 )
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
     BotStartupScriptServiceProtocol,
-)
-from agentclaw.community.core.bot_config_manifest.capabilities import (
-    ManifestCategory,
-    ManifestSection,
-    parse_category,
 )
 from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
     MCPAuthServiceProtocol,
@@ -1022,7 +1016,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             entity_id=entity_id, bot_id=bot_id
         ):
             status = ApplyStatus.FAILED
-        return _report_from_payload(payload, record=record, status=status)
+        return report_from_payload(payload, record=record, status=status)
 
     def _is_abandoned(self, *, entity_id: str, bot_id: str) -> bool:
         """True when no live lock backs a ``RUNNING`` report.
@@ -1066,81 +1060,6 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             bot_id=bot_id,
             lock_token=stale.lock_token,
         )
-
-
-def _report_from_payload(
-    payload: dict, *, record: Any, status: ApplyStatus
-) -> ApplyReport:
-    """Rebuild the in-memory report from what was stored.
-
-    The stored JSON is the wire shape, so this is its inverse. Entry outcomes
-    round-trip through the enum rather than being carried as raw strings: a
-    value the enum does not know is a corrupted row, and failing here is better
-    than serving it onward as if it meant something.
-    """
-    categories: list[CategoryResult] = []
-    by_category: dict[str, list[EntryResult]] = {}
-    for entry in payload.get("entries") or []:
-        construct = _construct_of(entry.get("category"))
-        if construct is None:
-            continue
-        by_category.setdefault(entry["category"], []).append(
-            EntryResult(
-                construct=construct,
-                identity=entry.get("name") or "",
-                outcome=EntryOutcome(entry["action"]),
-                reason=entry.get("error"),
-                note=entry.get("note"),
-            )
-        )
-    for category in payload.get("categories") or []:
-        construct = _construct_of(category.get("category"))
-        if construct is None:
-            continue
-        categories.append(
-            CategoryResult(
-                construct=construct,
-                entries=tuple(by_category.get(category["category"], ())),
-                removals=tuple(category.get("removed") or ()),
-                aborted=bool(category.get("aborted")),
-                # Load-bearing, and easy to leave out: POST returns only a
-                # handle, so every caller reads its report through here. A
-                # field written by ``as_dict`` but not read back is a field
-                # that does not exist as far as the API is concerned — and this
-                # one is the only signal that an aborted category may already
-                # have changed the bot.
-                partially_written=bool(category.get("partially_written")),
-            )
-        )
-    return ApplyReport(
-        apply_id=record.apply_id,
-        bot_id=record.bot_id,
-        trigger=record.trigger,
-        status=status,
-        started_at=record.started_at,
-        finished_at=record.finished_at,
-        categories=tuple(categories),
-        sources=tuple(
-            SourceResolution(
-                name=source.get("name", ""),
-                ref=source.get("ref"),
-                resolved_sha=source.get("resolved_sha"),
-                auth=source.get("auth"),
-            )
-            for source in payload.get("sources") or []
-        ),
-    )
-
-
-def _construct_of(name: Any) -> ManifestCategory | ManifestSection | None:
-    """A stored category name back into its construct, or ``None`` if unknown."""
-    category = parse_category(name)
-    if category is not None:
-        return category
-    try:
-        return ManifestSection(name)
-    except ValueError:
-        return None
 
 
 __all__ = ["APPLY_LOCK_TTL_SECONDS", "BotConfigManifestApplyService"]
