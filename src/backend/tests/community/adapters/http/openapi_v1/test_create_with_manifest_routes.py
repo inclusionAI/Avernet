@@ -28,6 +28,9 @@ from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION
 from agentclaw.community.adapters.http.openapi_v1.admission_modes import AdmissionMode
 from agentclaw.community.adapters.http.openapi_v1.bots import create_with_manifest
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    refuse_app_only_caller,
+)
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
@@ -384,22 +387,37 @@ def test_the_poll_and_the_job_agree_on_what_never_comes_up():
     assert create_with_manifest._PROVISIONING_FAILED == _CONTAINER_FAILED_STATUSES
 
 
-def test_both_routes_admit_an_application_caller():
-    """This pair exists for one, so refusing it would make it unusable.
+def test_both_routes_refuse_an_app_only_caller():
+    """Not a preference — without it an application can create a bot as anyone.
 
-    An integration creates a bot with its configuration in one submission and
-    polls until it is ready; there is no human on that wire by design. Neither
-    operation can be grant-checked — a grant covers a bot, and for most of a
-    creation there is no bot, which is what AWAITING_AUTHORIZATION *means* — so
-    what scopes them is the ``entity_id`` resolved server-side from the caller's
-    own principal. Another caller's ``bot_id`` finds no rows and answers 404.
+    Both routes take their owner from ``UserIdDep``. For a caller that names an
+    application and no user, ``require_user_id`` returns the ``user_id`` **query
+    parameter verbatim**, explicitly deferring "may this app act for that user?"
+    to whichever grant dependency the route declares. These routes can declare
+    none: a grant covers a bot, and at submission there is no bot yet.
 
-    Pinned as an equality rather than "not REFUSED" so that a later change to a
-    grant-checked mode fails here, where the reason lives, instead of at the
-    first poll a caller makes before their bot exists.
+    So the refusal is the only check standing between an app credential and
+    ``POST …/with-manifest?user_id=<someone else>`` — which would spend that
+    user's quota and run a caller-supplied startup script under their identity.
+    The poll is the same mechanism and leaks the authorization handles.
+
+    Pinned in both places because either alone is insufficient: the table entry
+    is what ``require_principal`` enforces centrally, and the route dependency
+    is what holds if the table entry were ever mislabelled to an admitting mode.
     """
-    assert ADMISSION[_SUBMIT] is AdmissionMode.OPEN
-    assert ADMISSION[_POLL] is AdmissionMode.OPEN
+    assert ADMISSION[_SUBMIT] is AdmissionMode.REFUSED
+    assert ADMISSION[_POLL] is AdmissionMode.REFUSED
+
+    declared = {
+        route.endpoint.__name__: route
+        for route in create_with_manifest.router.routes
+        if isinstance(route, APIRoute)
+    }
+    for name in ("create_bot_with_manifest", "get_bot_create_with_manifest_status"):
+        route = declared[name]
+        assert any(
+            dep.call is refuse_app_only_caller for dep in route.dependant.dependencies
+        ), f"{name} must declare the refusal, not only be listed in the table"
 
 
 def test_the_poll_takes_nothing_but_its_path():

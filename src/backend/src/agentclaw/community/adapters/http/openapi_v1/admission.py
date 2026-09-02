@@ -604,33 +604,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # (a human principal is admitted regardless); `list` still scopes its answer
     # by the `user_id` it receives. OPEN is the contract label — at the
     # require_principal gate it behaves the same as USER_GATED.
-    # ── Creating a bot with its manifest (W13, #1696) — OPEN, app-operated ──
-    # This pair exists **for** application callers: an integration creates a bot
-    # with its configuration in one submission and polls until it is ready. Both
-    # operations therefore admit an app principal, and neither can be
-    # grant-checked, for a reason that is structural rather than a relaxation:
-    # a grant covers a bot, and for most of a creation there is no bot. The
-    # states a caller spends its time in — AWAITING_AUTHORIZATION, CREATING —
-    # exist precisely because the record has not been written yet.
-    #
-    # What scopes them instead is the same thing throughout: every row either
-    # operation touches is keyed by the ``entity_id`` resolved **server-side**
-    # from the caller's own principal (``resolve_manifest_entity_id``), which
-    # is never a request parameter. Another caller's ``bot_id`` resolves to no
-    # manifest, no apply record and no job, so the poll answers 404 — the same
-    # answer a ``bot_id`` that never existed gets, and the same shape
-    # ``GrantNotResolvableError`` produces for the grant-checked operations.
-    # The authorization still happens; it is Passport's, and the creation does
-    # not complete without a human granting it.
-    #
-    # Same reasoning, and the same label, as the collaboration-task operations
-    # below: not bot-scoped, so no grant, and the answer scoped by the
-    # principal it was resolved from.
-    ("POST", "/openapi/v1/bots/with-manifest"): AdmissionMode.OPEN,
-    (
-        "GET",
-        "/openapi/v1/bots/{bot_id}/with-manifest/status",
-    ): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/execute"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,
@@ -867,6 +840,33 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # No bot exists yet for a grant to cover, and creation spends the user's
     # quota. Auto-granting the new bot would invent consent nobody gave.
     ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,
+    # Creating a bot with its manifest is the same creation, so it carries the
+    # same refusal — and the reason is sharper here than "no grant to check".
+    #
+    # These routes take their owner from ``UserIdDep``. For an app-only caller
+    # ``require_user_id`` returns the ``user_id`` **query parameter verbatim**,
+    # deferring the question of whether the app may act for that user to
+    # "whichever grant dependency the route declares". There is no grant
+    # dependency these routes *can* declare: a grant covers a bot, and at
+    # submission there is no bot. So admitting an app here would mean any
+    # application credential could create a bot as any user — spending that
+    # user's quota and running a caller-supplied startup script under their
+    # identity — with nothing anywhere proving the user ever authorized it.
+    #
+    # W13's reviewer asked for these to admit applications, and they should:
+    # this pair exists for unattended integration. But "admit" needs a check
+    # that can run *before* a bot exists, and the surface has none today. That
+    # is the user-level admission mode the review names as future work, not
+    # something ``OPEN`` provides — ``OPEN`` here would be no check at all.
+    #
+    # The poll carries the same refusal for the same mechanism: its ``user_id``
+    # is equally unchecked for an app-only caller, and what it returns includes
+    # the authorization handles.
+    ("POST", "/openapi/v1/bots/with-manifest"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/with-manifest/status",
+    ): AdmissionMode.REFUSED,
     # Delegation is a human act. An application must not be able to widen its
     # own access, withdraw a competitor's, or enumerate what else reaches a bot.
     ("POST", "/openapi/v1/bots/{bot_id}/authorized-apps"): AdmissionMode.REFUSED,

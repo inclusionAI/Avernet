@@ -28,15 +28,17 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    USER_SCOPED_403,
     BotIdPath,
     Envelope,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     UserIdDep,
+    refuse_app_only_caller,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
@@ -119,9 +121,13 @@ router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicA
     "/with-manifest",
     status_code=202,
     response_model=Envelope[BotCreateWithManifestAccepted],
-    # OPEN to a machine caller — this pair exists for one. See ``admission.py``
-    # for why neither operation can be grant-checked (a grant covers a bot, and
-    # for most of a creation there is no bot) and what scopes them instead.
+    # Refused to an app-only caller, and the mechanism matters: this route's
+    # owner comes from ``UserIdDep``, which hands an application the ``user_id``
+    # it asked for and leaves the authorization to a grant dependency. There is
+    # no grant to check before the bot exists, so without this an application
+    # could create a bot as any user. See ``admission.py``.
+    dependencies=[Depends(refuse_app_only_caller)],
+    responses=USER_SCOPED_403,
     operation_id="create_bot_with_manifest",
 )
 @envelope_errors
@@ -226,6 +232,8 @@ async def create_bot_with_manifest(
 @router.get(
     "/{bot_id}/with-manifest/status",
     response_model=Envelope[BotCreateWithManifestStatus],
+    dependencies=[Depends(refuse_app_only_caller)],
+    responses=USER_SCOPED_403,
     operation_id="get_bot_create_with_manifest_status",
 )
 @envelope_errors
