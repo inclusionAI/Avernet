@@ -88,6 +88,27 @@ class Recorder:
         self.patches.append(patch)
 
 
+class TestHarnessOnlyPollsExecutionLeaves:
+    def test_running_parent_with_children_is_not_reset(self, svc, graph):
+        svc.add_task_nodes([_child("c1")], parent_node_id="t1")
+        root = svc._get_node(graph, "t1")
+        # 构造历史遗留的“结构父节点仍为单 Bot RUNNING”状态。
+        root.status = Status.RUNNING
+        root.run_info.run_mode = "single_bot"
+        root.run_info.assignee = "bot1"
+
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=5.0)
+        h.register("t1")
+        assert h._poll_once() == []
+        clock.advance(10.0)
+
+        assert h._poll_once() == []
+        assert root.status == Status.RUNNING
+        assert rec.patches == []
+
+
 class TestBbsActualRunMode:
     def test_actual_bbs_override_uses_bbs_lease_expiry_path(self, svc, graph):
         svc.add_task_nodes([_child("c1")], parent_node_id="t1")

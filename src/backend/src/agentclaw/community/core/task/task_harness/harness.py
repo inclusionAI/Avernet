@@ -99,7 +99,8 @@ class TaskHarness:
         for task_id in task_ids:
             try:
                 nodes = self._graph.query_task_nodes(
-                    task_id, TaskNodeQueryCriteria(status=Status.RUNNING)
+                    task_id,
+                    TaskNodeQueryCriteria(status=Status.RUNNING, has_child_tasks=True),
                 )
             except Exception:  # noqa: BLE001 - task 已删 → 跳过
                 continue
@@ -150,7 +151,8 @@ class TaskHarness:
         for task_id in task_ids:
             try:
                 failed = self._graph.query_task_nodes(
-                    task_id, TaskNodeQueryCriteria(status=Status.FAILED)
+                    task_id,
+                    TaskNodeQueryCriteria(status=Status.FAILED, has_child_tasks=True),
                 )
             except Exception:  # noqa: BLE001
                 continue
