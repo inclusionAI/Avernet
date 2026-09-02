@@ -2,7 +2,7 @@
 
 独立 TestClient + 小型 test injector(TaskModule + stub discover),不拉起 singlebox 全栈,
 不依赖 SINGLEBOX_TASK_E2E=1。验证:
-- claim 持有者 report PASS → 200,scoped 节点 DONE + claim 释放(根收口由框架经 owner 复核,单测无 owner bot
+- claim 持有者 report PASS → 200,scoped 节点 SUCCESS + claim 释放(根收口由框架经 owner 复核,单测无 owner bot
   则不收 DONE,见 live e2e)。
 - 非 claim 持有者 report → 409(TaskStateError)。
 """
@@ -145,7 +145,7 @@ def bbs_task_with_claimed_node(client):
 
 
 def test_result_route_pass_marks_scoped_done_and_releases_claim(bbs_task_with_claimed_node):
-    """claim 持有者 report PASS → 200,scoped 节点 DONE + claim 释放。根收口由框架经 owner 复核(单测无
+    """claim 持有者 report PASS → 200,scoped 节点 SUCCESS + claim 释放。根收口由框架经 owner 复核(单测无
     owner bot → 不收 DONE,见 live e2e)。"""
     c, task_id, node_id, bot = bbs_task_with_claimed_node
     r = c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(task_id, node_id, bot))
@@ -153,10 +153,10 @@ def test_result_route_pass_marks_scoped_done_and_releases_claim(bbs_task_with_cl
     body = r.json()
     assert body["code"] == 200000
     assert body["data"] == {"ok": True}
-    # scoped DONE + claim 释放
+    # scoped SUCCESS + claim 释放
     d = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": task_id}).json()["data"]
     nodes = {t["node_id"]: t for t in d["tasks"]}
-    assert nodes[node_id]["status"] == "DONE"
+    assert nodes[node_id]["status"] == "SUCCESS"
     root = nodes[task_id]
     assert (root["run_info"]["extend_props"] or {}).get("bbs_owner") is None
 

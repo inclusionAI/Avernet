@@ -1,6 +1,6 @@
 """BBS 接力步⑤ on_bbs_report / report_bbs_result 回投单测。
 
-对齐 task-7 brief。BBS scoped 节点回投表示执行完成，统一置为 ``DONE``，不承载验收通过/失败结论，
+对齐 task-7 brief。BBS scoped 节点回投表示执行完成，统一置为 ``SUCCESS``，不承载验收通过/失败结论，
 不删除节点，仅释放 bbs_owner claim。根目标是否满足由框架经 owner 复核(``plan(root)``→``_maybe_finish_graph``)
 判定。
 """
@@ -73,9 +73,9 @@ def task_service_with_bbs_node():
 
 @pytest.mark.asyncio
 async def test_report_pass_marks_scoped_done_and_releases_claim(task_service_with_bbs_node):
-    """步⑤ PASS:scoped 节点 DONE + claim 释放。根收口由框架经 owner 复核(live 有 planner):``on_bbs_report``
+    """步⑤ PASS:scoped 节点 SUCCESS + claim 释放。根收口由框架经 owner 复核(live 有 planner):``on_bbs_report``
     →``_on_pass_collect``→``plan(root)``→``has_gap=False``→``_maybe_finish_graph``。单测无 owner bot,
-    ``plan(root)`` 返 ``no_planning_port``→``gap_no_progress``→根 HUNG,故此处只断 mechanics(scoped DONE +
+    ``plan(root)`` 返 ``no_planning_port``→``gap_no_progress``→根 HUNG,故此处只断 mechanics(scoped SUCCESS +
     claim 释放),不断言图 DONE(收口见 live e2e ``test_bbs_relay_e2e_natual``)。"""
     svc, task_id, node_id, bot = task_service_with_bbs_node
     r = await svc.report_bbs_result(
@@ -84,7 +84,7 @@ async def test_report_pass_marks_scoped_done_and_releases_claim(task_service_wit
     )
     assert r.success is True
     scoped = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == node_id)
-    assert scoped.status == Status.DONE
+    assert scoped.status == Status.SUCCESS
     root = next(n for n in svc.get_task_dashboard(task_id).tasks if n.node_id == task_id)
     assert root.run_info.extend_props.get("bbs_owner") is None  # claim 已释放
 
@@ -100,7 +100,7 @@ async def test_report_does_not_delete_node_and_marks_execution_done(task_service
     )
     tasks = svc.get_task_dashboard(task_id).tasks
     scoped = next(n for n in tasks if n.node_id == node_id)
-    assert scoped.status == Status.DONE
+    assert scoped.status == Status.SUCCESS
     assert scoped.run_info.output["progress"] == 30
     root = next(n for n in tasks if n.node_id == task_id)
     assert root.run_info.extend_props.get("bbs_owner") is None
@@ -118,10 +118,10 @@ async def test_report_rejects_non_owner(task_service_with_bbs_node):
 
 @pytest.mark.asyncio
 async def test_report_clears_owner_even_if_scoped_flip_raises(task_service_with_bbs_node):
-    """scoped 翻态抛错(如对已 DONE 的 scoped 节点再报 PASS:DONE→DONE 非法)时,``finally`` 仍须清根
+    """scoped 翻态抛错(如对已 SUCCESS 的 scoped 节点再报 PASS:SUCCESS→SUCCESS 非法)时,``finally`` 仍须清根
     ``bbs_owner``,避免持卡者死锁(他 bot claim 被 CAS 拒)。owner 校验在 ``try`` 之外,非持有者抛错不清他卡。"""
     svc, task_id, node_id, bot = task_service_with_bbs_node
-    # 先正常回投 PASS 一次 → scoped DONE + claim 释放
+    # 先正常回投 PASS 一次 → scoped SUCCESS + claim 释放
     await svc.report_bbs_result(
         task_id, node_id, bot,
         acceptance_result=AcceptanceResult(AcceptanceVerdict.DONE),

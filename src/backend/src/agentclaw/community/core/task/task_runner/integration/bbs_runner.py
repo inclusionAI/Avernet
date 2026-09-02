@@ -128,7 +128,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         _scoped_patch = TaskNodePatch(
             task_id=task_id,
             node_id=bbs_task_node.node_id,
-            status=Status.DONE,
+            status=Status.SUCCESS,
             # assignee=持有者身份:on_bbs_report 持有者校验要求 bbs_owner==patch.assignee
             # (claim_bbs_owner 已置根 bbs_owner=winner_bot_id;此处同源补齐,校验才放行)。
             assignee=winner_bot_id,
@@ -141,7 +141,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             },
         )
         if on_bbs_report is not None:
-            # 收口走引擎:记录 scoped DONE → finally 释放 bbs_owner → 继续既有图收敛
+            # 收口走引擎:记录 scoped SUCCESS → finally 释放 bbs_owner → 继续既有图收敛
             # (plan(root)→_maybe_finish_graph/HUNG)。不再直写根 status=PLANNING(收敛自驱根态),
             # 也不再裸写 scoped —— 全部由 on_bbs_report 一次落入 SSOT 并触发收敛。
             await on_bbs_report(_scoped_patch)

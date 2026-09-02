@@ -4,13 +4,13 @@
 → ``TaskService._run_bbs``:根直接置 HUNG("创建BBS接力任务") + fire-and-forget 派发
   ``bbs_runner.notify(bid→select→claim_bbs_owner→把任务发给胜出 dream bot)``;
 → 胜者回投 ``POST /api/v1/collaboration/tasks/bbs/attach``(在根下挂 bbs-<8hex> scoped 子节点)
-  + ``/bbs/result``(验收回投)→ ``on_bbs_report`` 收口(PASS→scoped DONE→_on_pass_collect→plan(root)
-  →has_gap=False→_maybe_finish_graph→图 DONE)。
+  + ``/bbs/result``(验收回投)→ ``on_bbs_report`` 收口(PASS→scoped SUCCESS→_on_pass_collect→plan(root)
+  →has_gap=False→_maybe_finish_graph→图 SUCCESS)。
 → 用例只做:提交 + 轮询 dashboard 观察 + 校验 BBS 接力产物(bbs- 子节点 / run_mode==bbs / 接力收敛)。
 
 与 yaml 协同(state_machine)是两条完全不同的链路:本测**不**校验 ``coop_group``/``grp_`` assignee
-(那是 yaml 路径),改校验 BBS:出现 ``bbs-`` 子节点、该子节点 ``run_mode=="bbs"``、图收敛 ``DONE`` 且
-该 bbs 子节点 ``DONE/PASS``。
+(那是 yaml 路径),改校验 BBS:出现 ``bbs-`` 子节点、该子节点 ``run_mode=="bbs"``、图收敛 ``SUCCESS`` 且
+该 bbs 子节点 ``SUCCESS/PASS``。
 
 gated by ``AVERNET_PRE_TASK_E2E=1``;无需起 singlebox,直接打预发:
 
@@ -136,7 +136,7 @@ class TestWritingQcStateMachinePreE2E(unittest.TestCase):
             # 1) POST /execute → TaskService._run_bbs(task_type=bbs):根直接 HUNG("创建BBS接力任务")→
             #    后台 bbs_runner.notify 主动 bid→select→claim_bbs_owner→把任务发给胜出 dream bot;
             #    dream 胜者回投 /bbs/attach(挂 bbs-<8hex> scoped 子节点)+ /bbs/result(验收回投)
-            #    → on_bbs_report 收口(PASS→scoped DONE→_on_pass_collect→plan(root)→图 DONE)。
+            #    → on_bbs_report 收口(PASS→scoped SUCCESS→_on_pass_collect→plan(root)→图 SUCCESS)。
             r = await cli.post(
                 f"{_BACKEND}/api/v1/collaboration/tasks/execute",
                 json=_execute_body(_WRITER_ID, _EDITOR_ID),
@@ -214,11 +214,11 @@ class TestWritingQcStateMachinePreE2E(unittest.TestCase):
             f"接力子节点 run_mode 非 bbs: {bbs_ri} node={bbs.get('node_id')}",
         )
 
-        # ③ 接力收敛(成功):图 DONE + bbs- 子节点 DONE/PASS + 有最终输出。
-        # (on_bbs_report PASS→scoped DONE→_on_pass_collect→plan(root)→has_gap=False→图 DONE)
-        # graph=HUNG / bbs- 非 DONE / 无 PASS:接力未成功(无有效胜者 / 验收 FAIL→on_bbs_report 删 scoped 节点)。
-        self.assertEqual(g.get("status"), "DONE", f"接力未成功收敛 DONE: graph={g.get('status')}")
-        self.assertEqual(bbs.get("status"), "DONE", f"接力子节点未 DONE: status={bbs.get('status')}")
+        # ③ 接力收敛(成功):图 SUCCESS + bbs- 子节点 SUCCESS/PASS + 有最终输出。
+        # (on_bbs_report PASS→scoped SUCCESS→_on_pass_collect→plan(root)→has_gap=False→图 SUCCESS)
+        # graph=HUNG / bbs- 非 SUCCESS / 无 PASS:接力未成功(无有效胜者 / 验收 FAIL→on_bbs_report 删 scoped 节点)。
+        self.assertEqual(g.get("status"), "SUCCESS", f"接力未成功收敛 DONE: graph={g.get('status')}")
+        self.assertEqual(bbs.get("status"), "SUCCESS", f"接力子节点未 SUCCESS: status={bbs.get('status')}")
         bbs_acceptance = bbs_ri.get("acceptance_result") or {}
         self.assertEqual(
             bbs_acceptance.get("verdict"), "PASS",

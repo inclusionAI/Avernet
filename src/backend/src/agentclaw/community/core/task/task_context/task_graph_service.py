@@ -51,7 +51,8 @@ _ACCEPTANCE_TRANSITIONS: dict[Status, set[Status]] = {
     Status.RUNNING: {Status.SUCCESS, Status.DONE, Status.HUNG, Status.FAILED},
 }
 # status 直驱(框架内部:派发/复位/传播/HUNG)。DONE 只表示执行完成,
-# SUCCESS 只表示验收通过。框架在 gap 闭合时使用 SUCCESS,执行实体/BBS 仅能写 DONE。
+# SUCCESS 表示验收通过；BBS 经 engine.on_bbs_report 收口时由框架将 scoped
+# 节点记为 SUCCESS,无 on_bbs_report 的轻量回退路径仍只写 DONE。
 #   PENDING->PLANNING(初始根/MISS 叶进入规划) / PENDING->RUNNING(叶子派发执行) /
 #   RUNNING->PENDING(harness 复位重投) / RUNNING->DONE(执行完成但未验收) / RUNNING->SUCCESS(框架确认验收通过) / RUNNING->HUNG
 #   PLANNING->DONE(仅执行完成直驱) / PLANNING->SUCCESS(gap 闭合验收通过) / PLANNING->HUNG(depth>=MAX 拆不动)
@@ -61,6 +62,7 @@ _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
     Status.PLANNING: {Status.DONE, Status.SUCCESS, Status.HUNG},
     Status.RUNNING: {Status.PENDING, Status.DONE, Status.SUCCESS, Status.HUNG},
     Status.FAILED: {Status.PENDING, Status.HUNG},
+    Status.HUNG: {Status.PLANNING},
 }
 # 可委托(add_task_nodes 时 parent 允许的态):PENDING(初始/根)/FAILED(补救)/PLANNING(前向重规划)
 _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNING, Status.HUNG}
@@ -311,14 +313,16 @@ class TaskGraphService:
             return graph
 
     def add_task_nodes(
-        self, tasks: list[TaskNode], parent_node_id: str, *, attach_dependency: bool = True
+        self, tasks: list[TaskNode], parent_node_id: str, *,
+        attach_dependency: bool = True, mark_parent_planning: bool = True,
     ) -> TaskExecutionGraph:
         """并子图(单写 relations 分解树)。触发条件 a/b/c 由编排核判后调,本方法双检:
         a. 只有一个根节点且 status=PENDING(初始规划);
         b. 存在 FAILED 节点且 acceptance_result.gaps 非空的叶子(补救);
         c. 存在 PLANNING 节点 且 无 RUNNING(下一层规划)。
         登记分解树:每新子挂 ``parent_node_id`` 下写入 DEPENDENCY 边(src=parent,dst=新子,单入);
-        parent 进/维持 PLANNING(委托态)。单层同构护栏:本批 node_id 不重复、不与已存重复、本批内不互父子。
+        默认将 parent 置为 PLANNING(委托态)。BBS attach 可关闭该行为,待 scoped 节点
+        SUCCESS 回投后再由编排核将根节点置为 PLANNING。单层同构护栏:本批 node_id 不重复、不与已存重复、本批内不互父子。
         """
         if not tasks:
             raise GraphIntegrityError("add_task_nodes: tasks 不能为空")
@@ -347,7 +351,7 @@ class TaskGraphService:
                     graph.relations.append(
                         Relation(src_id=parent_node_id, dst_id=t.node_id, type=RelationType.DEPENDENCY)
                     )
-            if parent.status != Status.PLANNING:
+            if mark_parent_planning and parent.status != Status.PLANNING:
                 parent.status = Status.PLANNING
             return graph, None, True
 
@@ -679,7 +683,9 @@ class TaskGraphService:
                 run_info=RuntimeInfo(run_mode="bbs", assignee=bot_id, start_time=int(time.time() * 1000)),
                 node_run_graph=graph,
             )
-            self.add_task_nodes([node], parent_node_id=parent_node_id)  # a/b/c/d 校验 + 父→PLANNING
+            self.add_task_nodes(
+                [node], parent_node_id=parent_node_id, mark_parent_planning=False
+            )  # BBS 挂载只建 scoped 节点,根在 SUCCESS 回投后再→PLANNING
             self.update_task_node_info(
                 TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.RUNNING)
             )  # create+start:PENDING→RUNNING 是 _DIRECT_TRANSITIONS 合法翻

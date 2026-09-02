@@ -1072,7 +1072,7 @@ class TaskService:
     ) -> NodeOpResult:
         """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim(经 ``on_bbs_report``);收口由框架自行判定(非 bot 声明)。
 
-        供 bbs 接力执行实体(FR-PICK-05)回投:``acceptance_result``(PASS→SUCCESS / FAIL+gaps→DONE)/
+        供 bbs 接力执行实体(FR-PICK-05)回投:``acceptance_result``(BBS 完成后 scoped 节点置 SUCCESS)/
         ``output_patch``(checkpoint fold)/``exec_error``(执行报错 fold)。根目标是否满足由框架经 owner
         复核(``on_bbs_report``→``_on_pass_collect``→``plan(root)``→``_maybe_finish_graph``)判定,
         **非 bot 自报**(故无 ``root_verified``)。``bot_id`` 须为当前 ``bbs_owner``(经 on_bbs_report 持有者校验),

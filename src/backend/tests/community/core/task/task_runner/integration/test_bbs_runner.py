@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, AcceptanceVerdict, Context, Goal, Metadata, RuntimeInfo, Status,
+    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
     TaskExecutionGraph, TaskNode, TaskNodePatch, TaskSpec,
 )
 from agentclaw.community.core.task.task_runner.integration.bbs_runner import (
@@ -187,7 +187,7 @@ _GOAL = "整理基础架构方向架构师名册"
 
 def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     """bid→select→claim→dispatch→收口走引擎:选最高 completion_rate 的 bot、claim 根,经 on_bbs_report 收口
-    (翻 scoped DONE + finally 释放 claim)而非裸写根/ scoped 节点。"""
+    (翻 scoped SUCCESS + finally 释放 claim)而非裸写根/ scoped 节点。"""
     roster = _roster("A", "B", "C")
     bot = _FakeBot(rates={"A": 50, "B": 90, "C": 70})
     bcn = _FakeBcn(roster)
@@ -202,12 +202,12 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert len(bot.sent_messages) == 1           # 只给胜出 bot dispatch 一次
     msg_bot, msg_text, msg_meta = bot.sent_messages[0]
     assert msg_bot == "B"
-    # 收口走引擎:on_bbs_report 被调一次,patch 带 assignee(通过持有者校验)、scoped DONE、verdict DONE
+    # 收口走引擎:on_bbs_report 被调一次,patch 带 assignee(通过持有者校验)、scoped SUCCESS、无验收结果
     assert len(on_bbs_report.calls) == 1
     patch = on_bbs_report.calls[0]
     assert patch.node_id.startswith("bbs-")
-    assert patch.status == Status.DONE
-    assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
+    assert patch.status == Status.SUCCESS
+    assert patch.acceptance_result is None
     assert patch.assignee == "B"
     assert graph.cleared          # 收口 finally 释放了 claim(bbs_owner=None)
     # bid prompt + dispatch msg 均内联任务态快照(goal objective 嵌入),而非只发 task_id

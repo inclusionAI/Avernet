@@ -512,8 +512,8 @@ class ExecutionEngine:
         叶子派发执行时由 _prepare_into 覆写为 single_bot/coop_group/bbs+worker。"""
         graph = self._graph.query_task_dashboard(task_id)
         node = next((n for n in graph.tasks if n.node_id == node_id), None)
-        if node is None or node.status != Status.PENDING:
-            return  # 已 PLANNING / 已终态 → 幂等不翻
+        if node is None or node.status not in {Status.PENDING, Status.HUNG}:
+            return  # 已 PLANNING / 其他终态 → 幂等不翻
         self._graph.update_task_node_info(
             TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.PLANNING)
         )
@@ -1607,8 +1607,7 @@ class ExecutionEngine:
         """BBS 接力步⑤回投:翻 scoped 节点终态 + 释放 claim,**收口交给 engine 既有路径(非 bot 声明)**。
 
         不再有 ``root_verified``:根目标是否满足由框架经 owner 复核(``_on_pass_collect``→``plan(root)``→
-        ``has_gap=False``→``_maybe_finish_graph``)判定,**不由接力 bot 自报**。BBS 回投只表示本次接力
-        执行已完成,统一将 scoped 节点置为 DONE；验收通过后的 SUCCESS 由后续验收路径产生。BBS 回投
+        ``has_gap=False``→``_maybe_finish_graph``)判定,**不由接力 bot 自报**。BBS 回投表示本次接力执行与验收已完成,统一将 scoped 节点置为 SUCCESS。BBS 回投
         不删除节点、不根据回投内容判定 FAILED。
         最后清根 ``bbs_owner`` 释放 claim。
 
@@ -1620,7 +1619,7 @@ class ExecutionEngine:
         释放 claim,避免持卡者死锁(他 bot claim 被 CAS 拒)。owner 校验在 ``try`` 之前,非持有者抛错不清他卡。
 
         无 owner bot 时(单测)``plan(root)`` 返 ``has_gap=True``(no_planning_port)→ ``gap_no_progress`` → 父
-        HUNG;故收口需 owner planner(live 有),单测只验 mechanics(scoped DONE + claim 释放)。"""
+        HUNG;故收口需 owner planner(live 有),单测只验 mechanics(scoped SUCCESS + claim 释放)。"""
         if self._is_external_managed_task(patch.task_id):
             logger.info("[task][on_bbs_report] task=%s external-managed, graph update only", patch.task_id)
             return self._graph.update_task_node_info(patch)
@@ -1635,12 +1634,14 @@ class ExecutionEngine:
                 raise TaskStateError(
                     f"on_bbs_report: 非claim持有者 task={patch.task_id}"
                 )
-            # BBS 回投只记录执行完成，不承载验收结论。即使兼容调用方传入
-            # acceptance_result=FAILED，也不能把 BBS 执行误判为失败或删除节点。
+            # BBS 回投成功后将 scoped 节点置为 SUCCESS,使根节点进入正常
+            # owner 复核/重新规划路径;不删除节点。
             completion_patch = TaskNodePatch(
                 task_id=patch.task_id,
                 node_id=patch.node_id,
-                status=Status.DONE,
+                # A completed BBS relay is the successful execution/acceptance
+                # handoff that unlocks the normal parent/root planning path.
+                status=Status.SUCCESS,
                 assignee=patch.assignee,
                 output_patch=patch.output_patch,
                 extend_props_patch=patch.extend_props_patch,
@@ -1656,8 +1657,10 @@ class ExecutionEngine:
                         extend_props_patch={"bbs_owner": None},
                     )
                 )
-            # BBS scoped DONE 仅记录执行完成,不进入验收通过收敛;SUCCESS 由后续验收回投产生。
-            if self._is_graph_terminal(patch.task_id):
+            # BBS scoped SUCCESS 进入统一通过收敛,由 owner 复核根 gap 并继续规划。
+            # HUNG 是 BBS 可恢复态:attach 阶段保持根 HUNG,必须允许本次 SUCCESS
+            # 回投进入 _on_pass_collect,再由其将根置为 PLANNING。
+            if self._graph.query_task_dashboard(patch.task_id).status in {Status.DONE, Status.SUCCESS}:
                 logger.info(
                     "[task][on_bbs_report] task=%s 图已终态,不再驱动", patch.task_id
                 )
@@ -1681,7 +1684,7 @@ class ExecutionEngine:
         self, task_id: str, node_id: str, side: list[tuple]
     ) -> None:
         """PASS→SUCCESS 后:查结构父 P。v4 父恒 PLANNING(委托态),无需翻态:
-        兄弟仍有未终态(RUNNING/PLANNING/PENDING)→等待;兄弟全 DONE(plan-ready)→ plan(target=parent):
+        兄弟仍有未终态(RUNNING/PLANNING/PENDING)→等待;兄弟全 SUCCESS(plan-ready)→ plan(target=parent):
           有子→节点级 plan_round++(达 MAX_PLAN_ROUND→父 HUNG)+add+dispatch;
           空+has_gap=F→gap 闭:非根传播 DONE 上行/根→图 DONE;空+has_gap=T→HUNG 升 BBS。
         兄弟全终态含 HUNG/FAILED→终态传播。
@@ -1691,25 +1694,38 @@ class ExecutionEngine:
             side.append(("finish", task_id))
             return
         siblings = self._graph.get_child_tasks(task_id, parent.node_id)
+        triggering = next(
+            (n for n in siblings if n.node_id == node_id),
+            None,
+        )
+        root = self._root(task_id)
+        is_root_parent = parent.node_id == (root.node_id if root else None)
+        is_bbs_recovery = (
+            is_root_parent
+            and triggering is not None
+            and (triggering.run_info.run_mode or "") == "bbs"
+        )
         logger.info(
-            "[task][on_pass] task=%s node=%s 父=%s 父态=%s 兄弟=%s",
+            "[task][on_pass] task=%s node=%s 父=%s 父态=%s 兄弟=%s bbs_recovery=%s",
             task_id,
             node_id,
             parent.node_id,
             parent.status,
             [(s2.node_id, s2.status.value) for s2 in siblings],
+            is_bbs_recovery,
         )
-        if any(
-            st.status in {Status.RUNNING, Status.PLANNING, Status.PENDING}
-            for st in siblings
-        ):
-            logger.info("[task][on_pass] task=%s 兄弟未全终态,等待", task_id)
-            return
-        if not all(st.status == Status.SUCCESS for st in siblings):
-            self._propagate_terminal(task_id, parent, siblings, side)
-            return
-        root = self._root(task_id)
-        is_root_parent = parent.node_id == (root.node_id if root else None)
+        # BBS scoped 节点是对根下 HUNG 占位节点的恢复交付。原 HUNG 节点
+        # 仍保留用于审计，不能阻断本次 BBS 成功后的根重新规划。
+        if not is_bbs_recovery:
+            if any(
+                st.status in {Status.RUNNING, Status.PLANNING, Status.PENDING}
+                for st in siblings
+            ):
+                logger.info("[task][on_pass] task=%s 兄弟未全终态,等待", task_id)
+                return
+            if not all(st.status == Status.SUCCESS for st in siblings):
+                self._propagate_terminal(task_id, parent, siblings, side)
+                return
         # BBS 可恢复态守卫:图已升 BBS(bbs_mode=true)且根未被 BBS 接力持有(bbs_owner=None)。
         # 走到此守卫前 step①②已保证兄弟全终态且全 DONE;"停手等 BBS 接力"此时是死锁(无在途接力,
         # root 非 HUNG 不重升 BBS → 无人收口)。故无论触发叶是否 bbs scoped,一律放行 owner 复核根 gap:
@@ -1717,27 +1733,16 @@ class ExecutionEngine:
         if is_root_parent:
             g_ext = self._graph.query_task_dashboard(task_id).extend_props
             if g_ext.get("bbs_mode") and not g_ext.get("bbs_owner"):
-                triggering = next(
-                    (
-                        n
-                        for n in self._graph.query_task_dashboard(task_id).tasks
-                        if n.node_id == node_id
-                    ),
-                    None,
-                )
-                if (
-                    triggering is not None
-                    and (triggering.run_info.run_mode or "") == "bbs"
-                ):
+                if is_bbs_recovery:
                     logger.info(
-                        "[task][on_pass] task=%s bbs scoped 节点 DONE→放行 owner 复核根 gap 收口",
+                        "[task][on_pass] task=%s bbs scoped 节点 SUCCESS→放行 owner 复核根 gap 收口",
                         task_id,
                     )
                 else:
-                    # step①② 已保证兄弟全 DONE 且 bbs_owner=None(无在途接力):停手会死锁
+                    # step①② 已保证兄弟全 SUCCESS 且 bbs_owner=None(无在途接力):停手会死锁
                     # (无在途接力,root 非 HUNG 不重升 BBS → 无人收口)。普通叶最后 DONE 亦放行 owner 复核根 gap。
                     logger.info(
-                        "[task][on_pass] task=%s 图 bbs_mode 未 claim,普通叶最后 DONE→放行 owner 复核根 gap(避免死锁)",
+                        "[task][on_pass] task=%s 图 bbs_mode 未 claim,普通叶最后 SUCCESS→放行 owner 复核根 gap(避免死锁)",
                         task_id,
                     )
         self._mark_planning(task_id, parent.node_id)
