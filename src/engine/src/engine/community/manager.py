@@ -243,6 +243,59 @@ class EngineManager:
             )
         return out
 
+    async def active_sessions_query(
+        self,
+        *,
+        session_id: str | None = None,
+        agent_id: str | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Read-only Active Session query over the active engine.
+
+        Delegates to the active engine's ``active_sessions`` method when it
+        exposes one (OpenClaw does, via its own run registry). Engines without
+        that surface — or no active engine — get a uniform
+        ``query_status=unsupported, verdict=unknown`` result so callers always
+        receive the dual-axis model and never a hard 500 for the capability
+        gap.
+
+        ``timeout`` is seconds (query_status=timeout → unknown).
+        """
+        from datetime import UTC, datetime
+
+        engine = self._active_engine
+        active_sessions = getattr(engine, "active_sessions", None)
+        if engine is None or not callable(active_sessions):
+            return {
+                "query_status": "unsupported",
+                "verdict": "unknown",
+                "engine": self._engine,
+                "checked_at": datetime.now(UTC).isoformat(),
+                "count": 0,
+                "sessions": [],
+                "reason": "active engine does not support active_session query",
+            }
+        try:
+            result = await active_sessions(
+                session_id=session_id,
+                agent_id=agent_id,
+                timeout=timeout,
+            )
+        except Exception as e:
+            log.warning("active_sessions query raised: %s", e)
+            return {
+                "query_status": "error",
+                "verdict": "unknown",
+                "engine": self._engine,
+                "checked_at": datetime.now(UTC).isoformat(),
+                "count": 0,
+                "sessions": [],
+                "reason": str(e),
+            }
+        # ActiveSessionQueryResult is a pydantic model — return its dict form
+        # so the FastAPI route can return it directly.
+        return result.model_dump(mode="json") if hasattr(result, "model_dump") else dict(result)
+
     @property
     def session(self) -> SessionService:
         """Active engine's SessionService."""

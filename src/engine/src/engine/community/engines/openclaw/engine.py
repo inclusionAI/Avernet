@@ -21,6 +21,10 @@ import logging
 from typing import TYPE_CHECKING
 
 from engine.community.core.adapters.openclaw.approval import OpenClawApprovalAdapter
+from engine.community.core.adapters.openclaw.active_run_registry import (
+    ActiveRunRegistry,
+    ActiveSessionQueryResult,
+)
 from engine.community.core.adapters.openclaw.chat import OpenClawChatAdapter
 from engine.community.core.adapters.openclaw.cron import OpenClawCronAdapter
 from engine.community.core.adapters.openclaw.default_config import OpenClawDefaultConfigAdapter
@@ -69,6 +73,7 @@ class OpenClawEngine(BaseEngine):
             Capability.SESSION_DELETE,
             Capability.SESSION_UPDATE,
             Capability.SESSION_HISTORY,
+            Capability.SESSION_ACTIVE_QUERY,
             # Chat
             Capability.CHAT_STREAM,
             Capability.CHAT_COMPLETE,
@@ -154,12 +159,19 @@ class OpenClawEngine(BaseEngine):
         self._injected_client = client  # None in production; set only by tests
         self._injected_pool = pool  # None in production
 
+        # OpenClaw's own process-local active-run registry, fed as a side
+        # channel by the chat adapter and read by the read-only Active Session
+        # query API (`active_sessions` / `GET /api/engine/active-sessions`).
+        self._active_run_registry = ActiveRunRegistry()
+
         # The single production transport impl shared by every adapter.
         self._port = OpenClawPluginImpl(client=client, pool=pool)
 
         # ACL adapters implementing the core *Service protocols.
         self._session = OpenClawSessionAdapter(self._port)
-        self._chat = OpenClawChatAdapter(self._port)
+        self._chat = OpenClawChatAdapter(
+            self._port, active_run_registry=self._active_run_registry
+        )
         self._cron = OpenClawCronAdapter(self._port)
         self._relay = OpenClawRelayAdapter(self._port)
         self._approval = OpenClawApprovalAdapter(self._port)
@@ -182,6 +194,34 @@ class OpenClawEngine(BaseEngine):
         """Expose the pool so the (still-OpenClaw-specific) WS server can call
         `register` / `release` on handshake / disconnect."""
         return self._port.pool
+
+    @property
+    def active_run_registry(self) -> ActiveRunRegistry:
+        """OpenClaw's own process-local active-run registry (side channel of
+        the chat stream; read by `active_sessions`)."""
+        return self._active_run_registry
+
+    async def active_sessions(
+        self,
+        *,
+        session_id: str | None = None,
+        agent_id: str | None = None,
+        timeout: float | None = None,
+    ) -> ActiveSessionQueryResult:
+        """Read-only Active Session query over OpenClaw's own run registry.
+
+        Implements the dual-axis model (``query_status`` / ``verdict``) for
+        the Active Session query. ``session_id`` matches the OpenClaw session key;
+        ``agent_id`` is exact-match (the OpenClaw chat path does not populate
+        it, so filtering by agent yields ``clear`` — the documented safe
+        semantics). ``timeout`` is seconds; query_status=timeout → unknown.
+        """
+        return await self._active_run_registry.query(
+            session_id=session_id,
+            agent_id=agent_id,
+            timeout=timeout,
+            engine=self.name,
+        )
 
     async def initialize(self) -> None:
         """Best-effort eager connect of the shared gateway client + start the
