@@ -84,16 +84,16 @@ Conventions every task assumes:
         existing guard test is unedited.
 - **Depends on:** —
 
-## [~] Task 5: The contract addendum
+## [x] Task 5: The contract addendum
 - **Files:** `docs/bot-config-manifest/engine-convergence-contract.zh-CN.md`
 - **Done when:**
-  - [ ] A new §9 "平台管理的类目：`ownership`" with: the map and its three
+  - [x] A new §9 "平台管理的类目：`ownership`" with: the map and its three
         states; the per-category area it applies to (pointing at §5); file
         refs in a redeliver to a running container; the store-backed local
         `SkillRef` (files under the local-skills layout plus a `SkillRef`
         naming the package prefix); one example artifact; an acceptance
         checklist; and the statement that `schema_version` stays 4 under A5.
-  - [ ] §7's status table gains a row for the map, marked pending the teclaw
+  - [x] §7's status table gains a row for the map, marked pending the teclaw
         owner.
 - **Depends on:** Task 4
 
