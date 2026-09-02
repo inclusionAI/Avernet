@@ -30,6 +30,7 @@ class OfflineImpact:
     total: int
     counts: dict[str, int]
     items: tuple[OfflineImpactItem, ...]
+    warnings: tuple[OfflineImpactItem, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

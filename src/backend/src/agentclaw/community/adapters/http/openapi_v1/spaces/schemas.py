@@ -567,7 +567,7 @@ class SpaceSkillDetail(SpaceSkillSummary):
 
 
 class SkillOfflineBlockerKind(_DocumentedEnum):
-    """Reason a Space Skill cannot safely enter recoverable Offline."""
+    """Category for an Offline blocker or a diagnostic warning."""
 
     DRAFT = "DRAFT"
     PUBLICATION = "PUBLICATION"
@@ -582,12 +582,15 @@ class SkillOfflineBlockerKind(_DocumentedEnum):
         "MEMBERSHIP": "An ordinary or Default SkillSet still contains the Skill.",
         "INSTALLATION": "A Bot still has an effective Skill Installation.",
         "SERVICE_ARTIFACT": "A live Service Bot can replay this exact Skill Version.",
-        "UNKNOWN_ARTIFACT": "Artifact lineage could not be proved complete and valid.",
+        "UNKNOWN_ARTIFACT": (
+            "Artifact lineage could not be proved complete and valid; "
+            "returned only as a non-blocking diagnostic warning."
+        ),
     }
 
 
 class SkillOfflineImpactItem(BaseModel):
-    """One live fact that prevents recoverable Offline."""
+    """One explicit blocker or diagnostic warning for recoverable Offline."""
 
     kind: SkillOfflineBlockerKind = Field(
         description="Category of the blocking reference or lifecycle fact."
@@ -597,15 +600,22 @@ class SkillOfflineImpactItem(BaseModel):
 
 
 class SkillOfflineImpact(BaseModel):
-    """Complete blocker counts plus one requested page of blocker details."""
+    """Complete explicit blockers plus diagnostic warnings for recoverable Offline."""
 
     blocked: bool = Field(description="Whether at least one blocker exists.")
-    total: int = Field(ge=0, description="Total blockers across all categories.")
+    total: int = Field(ge=0, description="Total explicit blockers across all categories.")
     counts: dict[str, int] = Field(
-        description="Non-zero blocker totals keyed by blocker category."
+        description="Non-zero explicit blocker totals keyed by blocker category."
     )
     items: list[SkillOfflineImpactItem] = Field(
         description="Requested page of blockers in deterministic order."
+    )
+    warnings: list[SkillOfflineImpactItem] = Field(
+        default_factory=list,
+        description=(
+            "Diagnostic findings that did not prove a live reference and therefore "
+            "do not block Offline."
+        ),
     )
 
 

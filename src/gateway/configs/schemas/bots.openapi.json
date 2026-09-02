@@ -20064,7 +20064,7 @@
         "type": "object"
       },
       "SkillOfflineBlockerKind": {
-        "description": "Reason a Space Skill cannot safely enter recoverable Offline.",
+        "description": "Category for an Offline blocker or a diagnostic warning.",
         "enum": [
           "DRAFT",
           "PUBLICATION",
@@ -20081,7 +20081,7 @@
           "An ordinary or Default SkillSet still contains the Skill.",
           "A Bot still has an effective Skill Installation.",
           "A live Service Bot can replay this exact Skill Version.",
-          "Artifact lineage could not be proved complete and valid."
+          "Artifact lineage could not be proved complete and valid; returned only as a non-blocking diagnostic warning."
         ],
         "x-enum-varnames": [
           "DRAFT",
@@ -20101,7 +20101,7 @@
         ]
       },
       "SkillOfflineImpact": {
-        "description": "Complete blocker counts plus one requested page of blocker details.",
+        "description": "Complete explicit blockers plus diagnostic warnings for recoverable Offline.",
         "properties": {
           "blocked": {
             "description": "Whether at least one blocker exists.",
@@ -20112,7 +20112,7 @@
             "additionalProperties": {
               "type": "integer"
             },
-            "description": "Non-zero blocker totals keyed by blocker category.",
+            "description": "Non-zero explicit blocker totals keyed by blocker category.",
             "title": "Counts",
             "type": "object"
           },
@@ -20125,10 +20125,18 @@
             "type": "array"
           },
           "total": {
-            "description": "Total blockers across all categories.",
+            "description": "Total explicit blockers across all categories.",
             "minimum": 0.0,
             "title": "Total",
             "type": "integer"
+          },
+          "warnings": {
+            "description": "Diagnostic findings that did not prove a live reference and therefore do not block Offline.",
+            "items": {
+              "$ref": "#/components/schemas/SkillOfflineImpactItem"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -20141,7 +20149,7 @@
         "type": "object"
       },
       "SkillOfflineImpactItem": {
-        "description": "One live fact that prevents recoverable Offline.",
+        "description": "One explicit blocker or diagnostic warning for recoverable Offline.",
         "properties": {
           "display_name": {
             "description": "Human-readable blocker label.",

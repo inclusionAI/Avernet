@@ -453,8 +453,10 @@ Attempt。普通 FAILED 需要修改 Draft 后新建 Attempt。RESULT_UNKNOWN �
 GET .../offline-impact?page=1&page_size=20
 ```
 
-与 publication-impact 不同，下线是硬门禁。存在 Membership、Installation、Draft/Attempt、
-可重放 Service Artifact 或 UNKNOWN_ARTIFACT 时不能继续。
+与 publication-impact 不同，下线对已明确证明的引用是硬门禁：存在 Membership、Installation、
+Draft/Attempt 或可重放 Service Artifact 时不能继续。无法读取、解析或完整扫描 Artifact
+只作为诊断 warning 返回，不阻塞下线；因此历史 offloaded Artifact 的偶发不可读不会让所有
+Skill 永久无法下线。
 
 `data.items[].kind` 的稳定枚举及前端建议文案：
 
@@ -465,7 +467,7 @@ GET .../offline-impact?page=1&page_size=20
 | `MEMBERSHIP` | 普通或 Default SkillSet 仍引用该 Skill |
 | `INSTALLATION` | Bot Effective Installation 仍存在 |
 | `SERVICE_ARTIFACT` | 可重放的 Service Artifact 仍冻结该精确 Version |
-| `UNKNOWN_ARTIFACT` | Artifact 血缘无法完整证明，按安全策略阻断 |
+| `UNKNOWN_ARTIFACT` | Artifact 血缘无法完整证明；只在 `data.warnings` 返回，不阻断 |
 
 `blocked=false` 才启用：
 
@@ -481,6 +483,9 @@ Backend 会重新检查，所以仍可能返回 `SKILL_OFFLINE_BLOCKED`。成功
 - 不调用 SC 外部下线；
 - Owner/Manager 可继续编辑；
 - 发布 Vn+1 成功后恢复 PUBLISHED。
+
+`data.warnings` 是不计入 `total`、`counts` 或 `items` 的诊断信息；产品可以提示“部分历史
+Artifact 无法读取，未发现明确引用，已继续下线”，但不得把 warning 当成 blocker。
 
 409 `code=409313` 的 `data` 会带回最新 OfflineImpact/counts，前端直接用它刷新阻断弹窗；这是
 普通错误 `data=null` 的 route-specific 例外。
