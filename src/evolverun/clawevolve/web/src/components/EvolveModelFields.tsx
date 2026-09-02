@@ -1,9 +1,9 @@
 export const EVOLVE_MODEL_OPTIONS = [
   'Kimi-K2.5',
   'Kimi-K2.6',
-  'gpt-4o-mini',
-  'gpt-4o-mini',
-  'gpt-4.1-mini',
+  'GLM-5',
+  'GLM-5.1',
+  'GLM-5.2',
 ] as const
 
 export const EVOLVE_CUSTOM_MODEL = '__custom__'

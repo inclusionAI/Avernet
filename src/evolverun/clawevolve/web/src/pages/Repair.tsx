@@ -254,7 +254,7 @@ function AisContainersDrawer({
               {execution.decisionWindowExpired && <DetailRow label="用户确认窗口" value="已结束" />}
               {!execution.decisionWindowExpired && execution.decisionDeadlineAt != null && <DetailRow label="等待用户确认至" value={formatTime(execution.decisionDeadlineAt)} />}
             </dl>}
-            <a aria-label={`在 AIS Studio 查看 AIS Job ${container.jobId}`} className="mt-4 inline-flex text-xs font-medium text-blue-600 hover:text-blue-700" href={`https://studio.example.com/project/job/detail/${encodeURIComponent(container.jobId)}`} target="_blank" rel="noreferrer">在 AIS Studio 查看 ↗</a>
+            <a aria-label={`在 AIS Studio 查看 AIS Job ${container.jobId}`} className="mt-4 inline-flex text-xs font-medium text-blue-600 hover:text-blue-700" href={`https://aistudio.alipay.com/project/job/detail/${encodeURIComponent(container.jobId)}`} target="_blank" rel="noreferrer">在 AIS Studio 查看 ↗</a>
           </article>
         })}
       </div>

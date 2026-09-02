@@ -1,7 +1,7 @@
 /**
  * Environment utilities — single source of truth for environment detection.
  *
- * Reads SERVER_ENV / APP_ENV (standard Ant Group env vars).
+ * Reads SERVER_ENV / ALIPAY_APP_ENV (standard Ant Group env vars).
  * Falls back to DATABASE_MODE for local detection.
  *
  * Env values:
@@ -10,11 +10,8 @@
  *   - "prod"  — production or gray
  */
 
-const ENV_PRIORITY = ["SERVER_ENV", "REAL_SERVER_ENV", "APP_ENV"] as const;
-const DEFAULT_TRUSTED_REMOTE_ORIGINS = new Set([
-  "https://pre.clawevolve.example.com",
-  "https://clawevolve.example.com",
-]);
+const ENV_PRIORITY = ["SERVER_ENV", "REAL_SERVER_ENV", "ALIPAY_APP_ENV"] as const;
+const DEFAULT_TRUSTED_REMOTE_ORIGINS = new Set<string>();
 let configuredPublicBaseUrl: string | undefined;
 
 function getRawEnv(): string {
@@ -99,7 +96,8 @@ export function getClawWebPublicBaseUrl(): string {
     || process.env.CLAWWEB_URL?.trim();
   if (override) return normalizeClawWebPublicBaseUrl(override);
   const environment = getCurrentEnv();
-  if (environment === "pre") return normalizeClawWebPublicBaseUrl("https://pre.clawevolve.example.com");
-  if (environment === "prod") return normalizeClawWebPublicBaseUrl("https://clawevolve.example.com");
+  if (environment !== "dev") {
+    throw new Error("CLAWWEB_PUBLIC_BASE_URL is required outside dev");
+  }
   return normalizeClawWebPublicBaseUrl("http://localhost:3001");
 }

@@ -1,4 +1,4 @@
-import { DEFAULT_ARTIFACT_BUCKET } from "../object-storage/oss-object-store.js";
+import { getArtifactBucket } from "../object-storage/oss-object-store.js";
 
 export const EVOLVE_ARTIFACT_URL_TTL_SECONDS = 86_400;
 
@@ -27,6 +27,7 @@ function safeRound(round: unknown): number {
 }
 
 export function uploadArtifactLocation(taskId: string, kind: unknown, roundInput?: unknown): ArtifactLocation {
+  const artifactBucket = getArtifactBucket();
   const task = safeTaskId(taskId);
   const name = String(kind ?? "") as UploadArtifactKind;
   const prefix = `evolution/${task}`;
@@ -54,10 +55,11 @@ export function uploadArtifactLocation(taskId: string, kind: unknown, roundInput
     [suffix, artifactKind, contentType] = [`${roundPrefix}/${selected[0]}`, selected[1], selected[2]];
   }
   const objectKey = `${prefix}/${suffix}`;
-  return { objectKey, ref: `oss://${DEFAULT_ARTIFACT_BUCKET}/${objectKey}`, artifactKind, contentType };
+  return { objectKey, ref: `oss://${artifactBucket}/${objectKey}`, artifactKind, contentType };
 }
 
 export function restoreManifestLocation(sourceTaskId: string, sourceKind: unknown, sourceRound: unknown): ArtifactLocation {
+  const artifactBucket = getArtifactBucket();
   const task = safeTaskId(sourceTaskId);
   const kind = String(sourceKind ?? "");
   let suffix: string;
@@ -66,23 +68,25 @@ export function restoreManifestLocation(sourceTaskId: string, sourceKind: unknow
   else if (kind === "round") suffix = `rounds/round-${String(safeRound(sourceRound)).padStart(3, "0")}/round-manifest.json`;
   else throw new Error("恢复来源类型不合法");
   const objectKey = `evolution/${task}/${suffix}`;
-  return { objectKey, ref: `oss://${DEFAULT_ARTIFACT_BUCKET}/${objectKey}`, artifactKind: "manifest", contentType: "application/json" };
+  return { objectKey, ref: `oss://${artifactBucket}/${objectKey}`, artifactKind: "manifest", contentType: "application/json" };
 }
 
 export function objectKeyFromFrozenPack(ref: unknown, sourceTaskId: string): string {
+  const artifactBucket = getArtifactBucket();
   const uri = String(ref ?? "");
-  const prefix = `oss://${DEFAULT_ARTIFACT_BUCKET}/evolution/${safeTaskId(sourceTaskId)}/`;
+  const prefix = `oss://${artifactBucket}/evolution/${safeTaskId(sourceTaskId)}/`;
   if (!uri.startsWith(prefix) || /\s|[\u0000-\u001f\u007f?#]/.test(uri)) throw new Error("冻结 Pack 引用不合法");
-  return uri.slice(`oss://${DEFAULT_ARTIFACT_BUCKET}/`.length);
+  return uri.slice(`oss://${artifactBucket}/`.length);
 }
 
 export function taskLogArchiveLocation(taskId: string, archiveId: string): ArtifactLocation {
+  const artifactBucket = getArtifactBucket();
   const task = safeTaskId(taskId);
   if (!/^[A-Za-z0-9._:-]{1,128}$/.test(archiveId)) throw new Error("Archive ID 不合法");
   const objectKey = `evolution/${task}/support/log-archives/${archiveId}.tar.gz`;
   return {
     objectKey,
-    ref: `oss://${DEFAULT_ARTIFACT_BUCKET}/${objectKey}`,
+    ref: `oss://${artifactBucket}/${objectKey}`,
     artifactKind: "task_log_archive",
     contentType: "application/gzip",
   };

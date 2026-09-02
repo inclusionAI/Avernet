@@ -52,7 +52,7 @@ import {
   uploadArtifactLocation,
   taskLogArchiveLocation,
 } from "../services/evolve/artifact-url.js";
-import { UnavailableObjectStore, type ObjectStore } from "../services/object-storage/oss-object-store.js";
+import { getArtifactBucket, UnavailableObjectStore, type ObjectStore } from "../services/object-storage/oss-object-store.js";
 import {
   InsightTaskCreationError,
   InsightTaskService,
@@ -96,7 +96,7 @@ export type EvolveRouterDeps = {
   botWorkflowPermissionRepo?: BotWorkflowPermissionRepository | null;
 };
 type BenchDomains = { trainBenchDomainId: string; testBenchDomainId: string };
-const DIAGNOSE_MODELS = new Set(["gpt-4o-mini", "gpt-4.1-mini"]);
+const DIAGNOSE_MODELS = new Set(["GLM-5.1", "GLM-5.2"]);
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "canceled"]);
 const ALLOWED_STATUSES = new Set(["running", ...TERMINAL_STATUSES]);
@@ -999,7 +999,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const {
       taskName, remark, userId, botId, botEnv, benchDomainId, templateName = "", templateVersion = null,
-      model = "openai/gpt-4o-mini", suite = "all", scene = "claw-evolve-bench", judge,
+      model = "antchat/GLM-5.1", suite = "all", scene = "claw-evolve-bench", judge,
       openclawExecutionMode: rawOpenClawExecutionMode,
       nodeCommandYamls, forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
     } = req.body ?? {};
@@ -1054,7 +1054,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "judge credential 由服务端环境配置，不能从请求传入" }); return;
     }
     const defaultBenchCommand = `${defaultNodeCommand("bench")}`
-      .replace("openai/gpt-4o-mini", safeBenchCommandValue("model", model))
+      .replace("antchat/GLM-5.1", safeBenchCommandValue("model", model))
       .replace("--suite all", `--suite ${safeBenchCommandValue("suite", suite)}`);
     const benchCommand = nodeCommands.bench ?? defaultBenchCommand;
     const commandModel = readNodeCommandOption(benchCommand, "model") ?? String(model);
@@ -1183,7 +1183,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const {
       taskType: requestedTaskType, taskName, remark, userId, botId, botEnv,
       apiKey: rawApiKey, judgeBackend: rawJudgeBackend,
-      model = "gpt-4o-mini", diagnoseIntent: rawDiagnoseIntent, maxSessions: rawMaxSessions = 10, maxRounds = 3,
+      model = "GLM-5.1", diagnoseIntent: rawDiagnoseIntent, maxSessions: rawMaxSessions = 10, maxRounds = 3,
       startDate, endDate, goal: rawGoal, inputMode: rawInputMode, nodeCommandYamls,
       sessionSource: rawSessionSource,
       forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
@@ -1240,7 +1240,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "model 必须是 1 到 128 字符且不能包含空白字符" }); return;
     }
     if (requiresDiagnose && judgeBackend === "api" && !DIAGNOSE_MODELS.has(diagnoseModel)) {
-      res.status(400).json({ error: "API Judge 的 model 必须是 gpt-4o-mini 或 gpt-4.1-mini" }); return;
+      res.status(400).json({ error: "API Judge 的 model 必须是 GLM-5.1 或 GLM-5.2" }); return;
     }
     const rounds = Number(maxRounds);
     const maxSessions = Number(rawMaxSessions);
@@ -2333,7 +2333,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           );
         }
         const commonValues = {
-          model: config.model ?? "gpt-4o-mini",
+          model: config.model ?? "GLM-5.1",
           diagnose_intent: config.diagnoseIntent
             ? quoteCommandArgument(normalizeDiagnoseIntent(config.diagnoseIntent))
             : "",
@@ -2910,7 +2910,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         : sourceKind === "snapshot"
           ? "/snapshots/artifact.zip"
           : `/rounds/round-${String(round).padStart(3, "0")}/artifacts/artifact_v${round}.zip`;
-      if (artifact.ref !== `oss://clawevolve-artifacts/evolution/${taskId}${expectedSuffix}`) {
+      if (artifact.ref !== `oss://${getArtifactBucket()}/evolution/${taskId}${expectedSuffix}`) {
         throw new Error("Pack 引用与来源不一致");
       }
     } catch (error) {
@@ -2963,7 +2963,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         }
         const artifact = validatePackArtifact(baseline.artifact);
         if (artifact.kind !== "baseline_pack"
-          || artifact.ref !== `oss://clawevolve-artifacts/evolution/${step.task_id}/baseline/artifact_v0.zip`) {
+          || artifact.ref !== `oss://${getArtifactBucket()}/evolution/${step.task_id}/baseline/artifact_v0.zip`) {
           throw new Error("Optimize 初始 Pack 路径与当前 Task 不一致");
         }
         const packTask = await repo.findTask(step.task_id);
@@ -3020,7 +3020,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       if (pack.status !== "available" || !isRecord(pack.artifact)) { res.status(422).json({ error: "Pack 必须为 available" }); return; }
       try {
         const artifact = validatePackArtifact(pack.artifact);
-        if (artifact.ref !== `oss://clawevolve-artifacts/evolution/${step.task_id}/snapshots/artifact.zip`) throw new Error("Pack 路径与当前 Task 不一致");
+        if (artifact.ref !== `oss://${getArtifactBucket()}/evolution/${step.task_id}/snapshots/artifact.zip`) throw new Error("Pack 路径与当前 Task 不一致");
       } catch (packError) { res.status(422).json({ error: packError instanceof Error ? packError.message : String(packError) }); return; }
     }
     if (status === "succeeded" && step.step_type === "restore") {

@@ -12,6 +12,7 @@ export interface ClientUser {
 }
 
 export type BotPermission = {
+  id: number
   botId: string | null
   botOwnerId: string
   canView: number

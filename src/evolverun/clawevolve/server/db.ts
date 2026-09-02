@@ -723,11 +723,10 @@ function resolveClawWebPublicBaseUrl(): string {
         : "dev"
     : getCurrentEnv();
 
-  return runtimeMode === "pre"
-    ? "https://pre.clawevolve.example.com"
-    : runtimeMode === "prod"
-      ? "https://clawevolve.example.com"
-      : "http://localhost:5173";
+  if (runtimeMode !== "dev") {
+    throw new Error("CLAWWEB_PUBLIC_BASE_URL is required outside dev");
+  }
+  return "http://localhost:5173";
 }
 
 function firstNonBlank(...values: Array<string | undefined>): string {
@@ -807,10 +806,7 @@ export function resolveBaasConfig(configPath?: string): ResolvedBaasConfig {
   const environments: Record<"pre" | "prod", ResolvedBaasEnvironmentConfig> = {
     pre: {
       apiKey: yaml.baas?.environments?.pre?.apiKey ?? "",
-      baseUrl: firstNonBlank(
-        yaml.baas?.environments?.pre?.baseUrl,
-        "https://baas-pre.example.com",
-      ).replace(/\/$/, ""),
+      baseUrl: firstNonBlank(yaml.baas?.environments?.pre?.baseUrl).replace(/\/$/, ""),
     },
     prod: {
       apiKey: firstNonBlank(yaml.baas?.environments?.prod?.apiKey, legacyApiKey),

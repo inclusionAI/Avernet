@@ -1,4 +1,4 @@
-import { DEFAULT_ARTIFACT_BUCKET } from "../object-storage/oss-object-store.js";
+import { getArtifactBucket } from "../object-storage/oss-object-store.js";
 
 export type EvolveArtifactRef = {
   kind?: string;
@@ -19,7 +19,7 @@ export function parseEvolveArtifactRef(
   if (expected.kind !== "manifest" && (!Number.isSafeInteger(artifact.size) || Number(artifact.size) < 0)) throw new Error("产物 size 必须是非负整数");
   if (expected.kind !== "manifest" && !/^[0-9a-f]{64}$/.test(String(artifact.sha256 ?? ""))) throw new Error("产物 sha256 必须是 64 位小写十六进制");
   const match = /^oss:\/\/([^/]+)\/(.+)$/.exec(uri);
-  if (!match || match[1] !== DEFAULT_ARTIFACT_BUCKET) throw new Error("产物必须位于固定 OSS Bucket");
+  if (!match || match[1] !== getArtifactBucket()) throw new Error("产物必须位于固定 OSS Bucket");
   const prefix = `evolution/${expected.taskId}/rounds/round-${String(expected.round).padStart(3, "0")}/`;
   const suffix = expected.kind === "diff" ? "diff.patch"
     : expected.kind === "manifest" ? "round-manifest.json"
@@ -36,7 +36,9 @@ export function validatePackArtifact(value: unknown): EvolveArtifactRef {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Pack 产物必须是对象");
   const artifact = value as EvolveArtifactRef;
   const uri = String(artifact.ref ?? "");
-  if (!/^oss:\/\/clawevolve-artifacts\/evolution\/[A-Za-z0-9._:-]+\/(?:baseline\/artifact_v0\.zip|snapshots\/artifact\.zip|rounds\/round-\d{3}\/artifacts\/artifact_v\d+\.zip)$/.test(uri)) throw new Error("Pack OSS 路径不合法");
+  if (/\s|[\u0000-\u001f\u007f?#]/.test(uri)) throw new Error("Pack OSS 路径不合法");
+  const match = /^oss:\/\/([^/]+)\/(evolution\/[A-Za-z0-9._:-]+\/(?:baseline\/artifact_v0\.zip|snapshots\/artifact\.zip|rounds\/round-\d{3}\/artifacts\/artifact_v\d+\.zip))$/.exec(uri);
+  if (!match || match[1] !== getArtifactBucket()) throw new Error("Pack OSS 路径不合法");
   if (artifact.kind !== "pack" && artifact.kind !== "baseline_pack") throw new Error("Pack kind 不合法");
   if (artifact.contentType !== "application/zip") throw new Error("Pack Content-Type 不合法");
   if (!Number.isSafeInteger(artifact.size) || Number(artifact.size) < 0) throw new Error("Pack size 不合法");

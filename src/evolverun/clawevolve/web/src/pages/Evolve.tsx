@@ -312,7 +312,7 @@ function StartEvolution() {
   const [apiKey, setApiKey] = useState('')
   const [judgeBackend, setJudgeBackend] = useState<'subagent' | 'api'>('subagent')
   const [diagnoseSessionSource, setDiagnoseSessionSource] = useState<'local' | 'service_export'>('local')
-  const [diagnoseModel, setDiagnoseModel] = useState('gpt-4o-mini')
+  const [diagnoseModel, setDiagnoseModel] = useState('GLM-5.1')
   const [lookbackDays, setLookbackDays] = useState('3')
   const [maxDiagnoseSessions, setMaxDiagnoseSessions] = useState('10')
   const [badCaseCount, setBadCaseCount] = useState('4')
@@ -839,7 +839,7 @@ function StartEvolution() {
             onJudgeBackendChange={(value) => {
               setJudgeBackend(value)
               if (value === 'subagent') setApiKey('')
-              if (value === 'api' && !diagnoseModel.trim()) setDiagnoseModel('gpt-4o-mini')
+              if (value === 'api' && !diagnoseModel.trim()) setDiagnoseModel('GLM-5.1')
             }}
             apiKey={apiKey}
             onApiKeyChange={setApiKey}
@@ -967,7 +967,7 @@ function StartEvolution() {
                 : taskType === 'optimize'
                 ? await api.evolve.createOptimization({ ...taskInfo, userId: evolveUserId, botId, botEnv, sourceDiagnosisTaskIds, maxRounds: parsedMaxRounds, nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
                 : taskType === 'bench'
-                ? await api.evolve.createBench({ ...taskInfo, userId: evolveUserId, botId, botEnv, benchDomainId, model: 'openai/gpt-4o-mini', suite: 'all', scene: 'claw-evolve-bench', nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
+                ? await api.evolve.createBench({ ...taskInfo, userId: evolveUserId, botId, botEnv, benchDomainId, model: 'antchat/GLM-5.1', suite: 'all', scene: 'claw-evolve-bench', nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
                 : taskType === 'bench_optimize'
                 ? await api.evolve.createBenchOptimization({ ...taskInfo, userId: evolveUserId, botId, botEnv, objective: benchObjective.trim(), trainBenchDomainId, testBenchDomainId, maxRounds: parsedMaxRounds, nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
                 : taskType === 'full'

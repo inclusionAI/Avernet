@@ -63,7 +63,7 @@ afterEach(async () => {
   await db.close();
 });
 
-async function createDiagnosis(model = "gpt-4o-mini") {
+async function createDiagnosis(model = "GLM-5.1") {
   const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
@@ -231,7 +231,7 @@ async function createDiagnosisFromImprovement(input: Partial<Record<string, unkn
       userId: owner,
       botId: "bot-1",
       apiKey: "temporary-secret",
-      model: "gpt-4o-mini",
+      model: "GLM-5.1",
       diagnoseIntent: "扫描最近3天的历史 session；抽取4个 bad case 和1个 good case；重点关注影响任务完成率的主要问题。",
       improvementId: seededImprovementId,
       improvementRequestId: "insight-evolve-request-1",
@@ -249,7 +249,7 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
       body: JSON.stringify({
         taskName: "ARCA API Judge", userId: "user-1", botId: "bot-arca", botEnv: "pre",
-        judgeBackend: "api", apiKey: "must-not-enter-message", model: "gpt-4o-mini",
+        judgeBackend: "api", apiKey: "must-not-enter-message", model: "GLM-5.1",
         diagnoseIntent: "扫描最近3天，抽取1个 bad case。",
       }),
     });
@@ -265,7 +265,7 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
       body: JSON.stringify({
         taskName: "ARCA Agent Judge", userId: "user-1", botId: "bot-arca", botEnv: "pre",
-        judgeBackend: "subagent", model: "gpt-4o-mini",
+        judgeBackend: "subagent", model: "GLM-5.1",
         diagnoseIntent: "扫描最近3天，抽取1个 bad case。",
       }),
     });
@@ -327,7 +327,7 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
       body: JSON.stringify({
         taskName: "ARCA Direct Callback Failure", userId: "user-1", botId: "bot-arca", botEnv: "pre",
-        judgeBackend: "subagent", model: "gpt-4o-mini", diagnoseIntent: "扫描最近3天，抽取1个 bad case。",
+        judgeBackend: "subagent", model: "GLM-5.1", diagnoseIntent: "扫描最近3天，抽取1个 bad case。",
       }),
     });
     const task = await createdResponse.json() as Record<string, unknown>;
@@ -354,7 +354,7 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
       body: JSON.stringify({
         taskName: "ARCA Runner Receipt", userId: "user-1", botId: "bot-arca", botEnv: "pre",
-        judgeBackend: "subagent", model: "gpt-4o-mini", diagnoseIntent: "扫描最近3天，抽取1个 bad case。",
+        judgeBackend: "subagent", model: "GLM-5.1", diagnoseIntent: "扫描最近3天，抽取1个 bad case。",
       }),
     });
     const task = await createdResponse.json() as Record<string, unknown>;
@@ -470,7 +470,7 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
       body: JSON.stringify({
         taskName: "Blog Bench", userId: "user-1", botId: "bot-1",
-        benchDomainId: "blog-writing", model: "openai/gpt-4o-mini", suite: "all",
+        benchDomainId: "blog-writing", model: "antchat/GLM-5", suite: "all",
       }),
     });
     const body = await response.json() as Record<string, unknown>;
@@ -480,7 +480,7 @@ describe("ClawEvolve step protocol", () => {
     expect(steps[0]).toEqual(expect.objectContaining({ stepType: "bench" }));
     expect(steps[0].command).toContain("--domain-id blog-writing");
     expect(steps[0].command).toContain("--owner-id user-1");
-    expect(steps[0].command).toContain("--model openai/gpt-4o-mini");
+    expect(steps[0].command).toContain("--model antchat/GLM-5");
     expect(steps[0].command).toContain("--suite all");
     expect(steps[0].command).toContain("--scene claw-evolve-bench");
     expect(steps[0].command).toContain("--template-version 1");
@@ -721,13 +721,13 @@ describe("ClawEvolve step protocol", () => {
       body: JSON.stringify({
         taskName: "Custom Bench", userId: "user-1", botId: "bot-1", benchDomainId: "custom-bench",
         model: "ignored/model", suite: "ignored-suite",
-        nodeCommandYamls: { bench: `version: "1.0"\ncommand: /clawevolve-bench --model openai/Custom --suite smoke --judge openai/Judge\n` },
+        nodeCommandYamls: { bench: `version: "1.0"\ncommand: /clawevolve-bench --model antchat/Custom --suite smoke --judge antchat/Judge\n` },
       }),
     });
     expect(response.status).toBe(201);
     const body = await response.json() as { config: { bench: { model: string; suite: string; judge: { model: string } } }; steps: Array<{ command: string }> };
     expect(body.config.bench).toEqual(expect.objectContaining({
-      model: "openai/Custom", suite: "smoke", judge: expect.objectContaining({ model: "openai/Judge" }),
+      model: "antchat/Custom", suite: "smoke", judge: expect.objectContaining({ model: "antchat/Judge" }),
     }));
     expect(body.steps[0].command.match(/--judge/g)).toHaveLength(1);
   });
@@ -756,7 +756,7 @@ describe("ClawEvolve step protocol", () => {
       callbackUrl: expect.stringMatching(/\/api\/evolve\/internal\/tasks\/EV-.+\/steps\/STEP-.+\/bot-callback$/),
       command: expect.stringContaining(`--task-id ${String(body.task_id)} --step-id ${steps[0].stepId}`),
     }));
-    expect(dispatch.mock.calls[0]?.[0].command).toContain("--model gpt-4o-mini");
+    expect(dispatch.mock.calls[0]?.[0].command).toContain("--model GLM-5.1");
     expect(JSON.stringify(body)).not.toContain("temporary-secret");
   });
 
@@ -769,7 +769,7 @@ describe("ClawEvolve step protocol", () => {
         userId: "user-1",
         botId: "bot-1",
         judgeBackend: "subagent",
-        model: "gpt-4o-mini",
+        model: "GLM-5.1",
         maxSessions: 12,
         diagnoseIntent: "扫描最近3天的历史 session；抽取1个 bad case；重点关注任务未完成。",
       }),
@@ -797,7 +797,7 @@ describe("ClawEvolve step protocol", () => {
         botEnv: "prod",
         sessionSource: "service_export",
         judgeBackend: "subagent",
-        model: "gpt-4o-mini",
+        model: "GLM-5.1",
         maxSessions: 10,
         diagnoseIntent: "扫描服务态历史 session；抽取1个 bad case；重点关注任务未完成。",
       }),
@@ -831,7 +831,7 @@ describe("ClawEvolve step protocol", () => {
         botEnv: "prod",
         sessionSource: "service_export",
         judgeBackend: "subagent",
-        model: "gpt-4o-mini",
+        model: "GLM-5.1",
         maxSessions: 10,
         maxRounds: 3,
         diagnoseIntent: "扫描服务态历史 session；抽取1个 bad case。",
@@ -869,7 +869,7 @@ describe("ClawEvolve step protocol", () => {
         botEnv: "prod",
         sessionSource: "local",
         judgeBackend: "subagent",
-        model: "gpt-4o-mini",
+        model: "GLM-5.1",
         maxSessions: 10,
         diagnoseIntent: "扫描服务态历史 session；抽取1个 bad case。",
       }),
@@ -902,7 +902,7 @@ describe("ClawEvolve step protocol", () => {
         sessionSource: "service_export",
         judgeBackend: "api",
         apiKey: "temporary-secret",
-        model: "gpt-4o-mini",
+        model: "GLM-5.1",
         maxSessions: 10,
         diagnoseIntent: "扫描服务态历史 session；抽取1个 bad case。",
       }),
@@ -925,7 +925,7 @@ describe("ClawEvolve step protocol", () => {
         userId: "user-1",
         botId: "bot-1",
         apiKey: "temporary-secret",
-        model: "gpt-4.1-mini",
+        model: "GLM-5.2",
         diagnoseIntent,
       }),
     });
@@ -956,7 +956,7 @@ describe("ClawEvolve step protocol", () => {
         userId: "user-1",
         botId: "bot-1",
         apiKey: "temporary-secret",
-        model: "gpt-4o-mini",
+        model: "GLM-5.1",
         diagnoseIntent: "   ",
       }),
     });
@@ -1041,16 +1041,16 @@ describe("ClawEvolve step protocol", () => {
     expect((await improvementRepo.getDetail("owner-1", improvementId))?.version).toBe(detail?.version);
   });
 
-  it("accepts gpt-4.1-mini and rejects unsupported diagnose models", async () => {
-    const accepted = await createDiagnosis("gpt-4.1-mini");
+  it("accepts GLM-5.2 and rejects unsupported diagnose models", async () => {
+    const accepted = await createDiagnosis("GLM-5.2");
     expect(accepted.response.status).toBe(201);
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
-      command: expect.stringContaining("--model gpt-4.1-mini"),
+      command: expect.stringContaining("--model GLM-5.2"),
     }));
 
-    const rejected = await createDiagnosis("gpt-4o-mini");
+    const rejected = await createDiagnosis("GLM-5");
     expect(rejected.response.status).toBe(400);
-    expect(rejected.body.error).toBe("API Judge 的 model 必须是 gpt-4o-mini 或 gpt-4.1-mini");
+    expect(rejected.body.error).toBe("API Judge 的 model 必须是 GLM-5.1 或 GLM-5.2");
   });
 
   it("links a diagnosis task to the owned improvement item", async () => {
@@ -1299,7 +1299,7 @@ describe("ClawEvolve step protocol", () => {
         userId: "user-1",
         botId: "bot-1",
         apiKey: "temporary-secret",
-        model: "gpt-4o-mini",
+        model: "GLM-5.1",
         diagnoseIntent: "扫描最近3天的历史 session；抽取4个 bad case 和1个 good case；重点关注影响任务完成率的主要问题。",
         goal: "  将任务完成率提升到 90%\n以上  ",
       }),
@@ -1375,7 +1375,7 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
         taskType: "full", taskName: "Agent 全流程", userId: "user-1", botId: "bot-1",
-        judgeBackend: "subagent", model: "openai/Custom-Judge",
+        judgeBackend: "subagent", model: "antchat/Custom-Judge",
         diagnoseIntent: "扫描最近3天的历史 session；抽取1个 bad case；重点关注任务未完成。",
         goal: "提升任务完成率",
       }),
@@ -1383,14 +1383,14 @@ describe("ClawEvolve step protocol", () => {
     expect(response.status).toBe(201);
     const body = await response.json() as { steps: Array<{ command: string }> };
     expect(body.steps[0].command).toContain("--judge-backend subagent");
-    expect(body.steps[0].command).toContain("--model openai/Custom-Judge");
+    expect(body.steps[0].command).toContain("--model antchat/Custom-Judge");
     expect(body.steps[0].command).not.toContain("--api-key");
   });
 
   it("freezes YAML command templates and renders dates without persisting the API key", async () => {
     const goal = `优先修复工具调用失败的 '高频' 根因，完成率达到 90%，不要执行 $(whoami)`;
     const nodeCommandYamls = {
-      diagnose: `version: "1.0"\ncommand: /clawevolve-diagnose --api-key {{api_key}} --model gpt-4o-mini --range {{start_date}}..{{end_date}}\n`,
+      diagnose: `version: "1.0"\ncommand: /clawevolve-diagnose --api-key {{api_key}} --model GLM-5 --range {{start_date}}..{{end_date}}\n`,
       plan: `version: "1.0"\ncommand: /clawevolve-plan --strategy conservative\n`,
     };
     const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
@@ -1399,7 +1399,7 @@ describe("ClawEvolve step protocol", () => {
       body: JSON.stringify({
         taskType: "full", taskName: "自定义命令任务",
         userId: "user-1", botId: "bot-1", apiKey: "temporary-secret",
-        model: "gpt-4o-mini", diagnoseIntent: "扫描指定日期的历史 session；抽取4个 bad case 和1个 good case；重点关注工具调用失败。",
+        model: "GLM-5.1", diagnoseIntent: "扫描指定日期的历史 session；抽取4个 bad case 和1个 good case；重点关注工具调用失败。",
         startDate: "2026-07-28", endDate: "2026-07-31", goal, nodeCommandYamls,
       }),
     });
@@ -1609,7 +1609,7 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
         taskType: "full", taskName: "全流程优化测试", userId: "user-1", botId: "bot-1",
-        apiKey: "temporary-secret", model: "gpt-4o-mini",
+        apiKey: "temporary-secret", model: "GLM-5.1",
         diagnoseIntent: "扫描最近3天的历史 session；抽取4个 bad case 和1个 good case；重点关注影响任务完成率的主要问题。", maxRounds: 3,
         goal: "优先解决诊断阶段识别出的高频根因",
       }),
@@ -1800,7 +1800,7 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
         taskName: "Agent 重试", userId: "user-1", botId: "bot-1",
-        judgeBackend: "subagent", model: "gpt-4o-mini",
+        judgeBackend: "subagent", model: "GLM-5.1",
         diagnoseIntent: "扫描最近3天的历史 session；抽取1个 bad case；重点关注任务未完成。",
       }),
     });

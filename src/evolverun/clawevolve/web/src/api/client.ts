@@ -1480,10 +1480,9 @@ export const api = {
         })
       },
 
-      delete(workflowId: string, botId: string | null, botOwnerId: string): Promise<{ ok: boolean }> {
+      delete(workflowId: string, permissionId: number): Promise<{ ok: boolean }> {
         const params = new URLSearchParams()
-        if (botId) params.set('botId', botId)
-        params.set('botOwnerId', botOwnerId)
+        params.set('permissionId', String(permissionId))
         return fetchJson(`${BASE}/workflows/${encodeURIComponent(workflowId)}/bot-permissions?${params.toString()}`, {
           method: 'DELETE',
         })

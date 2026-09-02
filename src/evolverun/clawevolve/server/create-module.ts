@@ -18,7 +18,7 @@ import { TaskSourceService } from "./services/evolve/task-source-service.js";
 import { dispatchEvolveCommand } from "./services/evolve-dispatcher.js";
 import { InsightPlanStepService } from "./services/evolve/insight-plan-step-service.js";
 import { InsightTaskService } from "./services/evolve/insight-task-service.js";
-import type { ObjectStore } from "./services/object-storage/oss-object-store.js";
+import { configureArtifactBucket, type ObjectStore } from "./services/object-storage/oss-object-store.js";
 import { startRunAnalysisTimeoutSweeper } from "./services/evolve/run-analysis-timeout.js";
 import { startSuggestionApplyTimeoutSweeper } from "./services/evolve/suggestion-apply-timeout.js";
 import { configureClawWebPublicBaseUrl } from "./env.js";
@@ -30,6 +30,7 @@ export type ClawevolveModuleOptions = {
   dispatchTaskLogArchive?: EvolveRouterDeps["dispatchTaskLogArchive"];
   cancelExecution?: EvolveRouterDeps["cancelExecution"];
   artifactStore?: ObjectStore;
+  artifactBucket?: string;
   clawInsight?: ClawInsightInternalApi;
   publicBaseUrl?: string;
   trustedPublicOrigins?: readonly string[];
@@ -57,6 +58,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const { db } = options;
   if (db.dbType === "noop") throw new Error("Clawevolve requires an available database");
   configureClawWebPublicBaseUrl(options.publicBaseUrl, options.trustedPublicOrigins);
+  configureArtifactBucket(options.artifactBucket);
 
   const evolve = new EvolveRepository(db);
   const taskSource = new EvolveTaskSourceRepository(db);

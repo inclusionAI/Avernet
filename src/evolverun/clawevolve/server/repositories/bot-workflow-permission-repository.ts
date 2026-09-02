@@ -92,6 +92,14 @@ export class BotWorkflowPermissionRepository {
     return result.affectedRows > 0;
   }
 
+  async deleteById(id: number, workflowId: string): Promise<boolean> {
+    const result = await this.db.exec(
+      "DELETE FROM bot_workflow_permissions WHERE id = ? AND workflow_id = ?",
+      [id, workflowId],
+    );
+    return result.affectedRows > 0;
+  }
+
   async checkPermission(
     botId: string,
     botOwnerId: string,

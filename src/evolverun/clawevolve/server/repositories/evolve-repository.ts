@@ -624,18 +624,8 @@ export class EvolveRepository {
 
 
   async listEligibleBotsForSuggestion(userId: string, workflowId: string): Promise<{ botId: string; botName: string | null; env: string | null; accessType: string; ownerId: string | null }[]> {
-    // Collect all bot IDs that have edit permission for this workflow under this user.
-    // Two sources: owner-level (bot_id IS NULL) and bot-level grants.
-    const ownerRows = await this.db.query<{ bot_owner_id: string }>(
-      `SELECT bot_owner_id FROM bot_workflow_permissions
-       WHERE workflow_id = ? AND can_edit = 1 AND (bot_id IS NULL OR bot_id = '')
-         AND (bot_owner_id = ? OR bot_owner_id = '*')
-       GROUP BY bot_owner_id`,
-      [workflowId, userId],
-    );
-    const ownerSet = new Set(ownerRows.map((r) => r.bot_owner_id));
-    const hasOwnerEdit = ownerSet.has(userId) || ownerSet.has('*');
-
+    // Suggestion application executes on one concrete Bot. Owner/global grants
+    // authorize the web user, but never make every owned Bot an execution target.
     const botRows = await this.db.query<{ bot_id: string; bot_owner_id: string }>(
       `SELECT bot_id, bot_owner_id FROM bot_workflow_permissions
        WHERE workflow_id = ? AND can_edit = 1 AND bot_id IS NOT NULL AND bot_id <> ''
@@ -648,30 +638,8 @@ export class EvolveRepository {
       [workflowId, userId, workflowId, userId],
     );
 
-    const allowedBotIds = new Set<string>();
-    for (const r of botRows) allowedBotIds.add(r.bot_id);
-
     const result: { botId: string; botName: string | null; env: string | null; accessType: string; ownerId: string | null }[] = [];
     const seen = new Set<string>();
-
-    // 1. Owner-level grants -> all bots of this user in ac_bots.
-    if (hasOwnerEdit) {
-      const allBots = await this.db.query<{ bot_id: string; bot_name: string | null; env: string | null }>(
-        `SELECT bot_id, bot_name, env FROM ac_bots
-         WHERE (owner_id = ? OR entity_id = ?) AND is_delete = 0
-           AND bot_id IS NOT NULL AND bot_id <> ''
-         ORDER BY id DESC`,
-        [userId, userId],
-      );
-      for (const b of allBots) {
-        const key = `${b.bot_id}\u0000${b.env ?? ""}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        result.push({ botId: b.bot_id, botName: b.bot_name, env: b.env, accessType: "owner", ownerId: userId });
-      }
-    }
-
-    // 2. Bot-level grants -> explicit bot IDs; skip if already added from owner-level.
     for (const r of botRows) {
       const info = await this.db.query<{ bot_id: string; bot_name: string | null; env: string | null }>(
         `SELECT bot_id, bot_name, env FROM ac_bots

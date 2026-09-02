@@ -38,9 +38,9 @@ export const EVOLVE_NODE_REGISTRY: Record<NodeCommandKey, EvolveNodeDefinition> 
     defaultCommand: "/clawevolve-diagnose --api-key {{api_key}} --model {{model}} --intent {{diagnose_intent}}",
   },
   plan: { key: "plan", label: "进化规划", defaultCommand: "/clawevolve-plan" },
-  bench: { key: "bench", label: "Bench 评测", defaultCommand: "/clawevolve-bench --model openai/gpt-4o-mini --suite all" },
-  bench_plan: { key: "bench_plan", label: "Baseline 与 Spec v0", defaultCommand: "/clawevolve-workflow --stage bench-plan --model openai/gpt-4o-mini --suite all" },
-  optimize: { key: "optimize", label: "每轮优化", defaultCommand: "/clawevolve-workflow --stage optimize --model openai/gpt-4o-mini --suite all" },
+  bench: { key: "bench", label: "Bench 评测", defaultCommand: "/clawevolve-bench --model antchat/GLM-5.1 --suite all" },
+  bench_plan: { key: "bench_plan", label: "Baseline 与 Spec v0", defaultCommand: "/clawevolve-workflow --stage bench-plan --model antchat/GLM-5.1 --suite all" },
+  optimize: { key: "optimize", label: "每轮优化", defaultCommand: "/clawevolve-workflow --stage optimize --model antchat/GLM-5.1 --suite all" },
 };
 
 export const EVOLVE_TASK_REGISTRY: Record<EvolveTaskType, EvolveTaskDefinition> = {

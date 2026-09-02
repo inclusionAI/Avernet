@@ -56,7 +56,7 @@ beforeEach(async () => {
      VALUES (1, 'bot-1', '修复 Bot', 'owner-1', 'owner-1', 0, 'openclaw', 'personal', 'active', 1, 'dev')`,
   );
   await permissionRepo.upsert({
-    bot_id: null,
+    bot_id: "bot-1",
     bot_owner_id: "owner-1",
     workflow_id: "wf-1",
     can_view: 1,
@@ -89,6 +89,36 @@ afterEach(async () => {
 });
 
 describe("suggestion batch application", () => {
+  it("lists only bots with an explicit bot-level edit grant", async () => {
+    await db.exec(
+      `INSERT INTO ac_bots
+        (id, bot_id, bot_name, owner_id, entity_id, is_delete, active_engine, bot_type, status, binding_id, env)
+       VALUES (2, 'bot-owner-only', 'Owner 权限 Bot', 'owner-1', 'owner-1', 0, 'openclaw', 'personal', 'active', 1, 'dev')`,
+    );
+    await db.exec(
+      `INSERT INTO bot_workflow_permissions
+        (bot_id, bot_owner_id, workflow_id, env, can_view, can_execute, can_edit, gmt_create, gmt_modified)
+       VALUES (NULL, 'owner-1', 'wf-1', 'dev', 1, 1, 1, 1, 1)`,
+    );
+    const suggestion = await repo.createSuggestion({
+      workflowId: "wf-1",
+      nodeId: "report",
+      failureSignature: "output-contract:report",
+      failureMode: "output-contract",
+      fixKind: "workflow_patch",
+      fixSpec: "修复输出契约",
+    });
+
+    const response = await fetch(`${baseUrl}/api/evolve/suggestions/${suggestion.id}/eligible-bots`, {
+      headers: { "X-User-Id": "owner-1" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      bots: [expect.objectContaining({ botId: "bot-1", accessType: "granted" })],
+    });
+  });
+
   it("returns the requested run analysis with only its cited evidence", async () => {
     const flowId = "flow-analysis-result";
     const analysisId = "AN-RESULT-1";

@@ -313,7 +313,7 @@ describe("evolve knowledge endpoints", () => {
         userId: "user-1",
         botId: "bot-1",
         apiKey: "secret",
-        model: "gpt-4o-mini",
+        model: "GLM-5.1",
         diagnoseIntent: "test",
         maxSessions: 1,
       }),

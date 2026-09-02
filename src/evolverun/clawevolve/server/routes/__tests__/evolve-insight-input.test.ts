@@ -323,7 +323,7 @@ describe("Evolve Insight Improvement input", () => {
         userId: "owner-1",
         botId: "bot-1",
         apiKey: "temporary-secret",
-        model: "gpt-4o-mini",
+        model: "GLM-5.1",
         goal: "根据诊断结果提升工具执行成功率",
         diagnoseIntent: "扫描最近3天，抽取1个 bad case，关注工具执行失败。",
       }),
@@ -591,14 +591,14 @@ describe("Evolve Insight Improvement input", () => {
     const result = await createInsightTask(improvementId, {
       nodeCommandYamls: {
         plan: `version: "1.0"\ncommand: /clawevolve-plan --strategy conservative\n`,
-        optimize: `version: "1.0"\ncommand: /clawevolve-workflow --stage optimize --model openai/Custom --suite smoke\n`,
+        optimize: `version: "1.0"\ncommand: /clawevolve-workflow --stage optimize --model antchat/Custom --suite smoke\n`,
       },
     });
     expect(result.response.status).toBe(201);
     expect(result.body.config).toEqual(expect.objectContaining({
       nodeCommands: expect.objectContaining({
         plan: expect.stringContaining("--strategy conservative"),
-        optimize: expect.stringContaining("openai/Custom"),
+        optimize: expect.stringContaining("antchat/Custom"),
       }),
     }));
   });
