@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import Any
 from agentclaw.community.core.task.domain.models import (
@@ -25,9 +26,37 @@ _ROSTER_MAX_RETRIES = 3
 _ROSTER_RETRY_DELAY = 1.0
 
 
+def _singlebot_2_group_switch(graph, task_id: str) -> bool:
+    """镜像 ``TaskExecutor._singlebot_2_group_enabled`` 默认 True 语义:从 graph 级
+    ``extend_props.execution_config.singlebot_2_group`` 读;graph 异常/缺键 → True(默认走旁路)。
+    ``execution_config`` 经 BBS 升级保留(task_graph_service 初始化写入 graph.extend_props)。"""
+    try:
+        snapshot = graph.query_task_dashboard(task_id)
+    except Exception:  # noqa: BLE101 graph 不可用 → 默认 True(走旁路)
+        logger.info("[task][bbs_mode] singlebot_2_group 开关:graph 查询失败 → 默认 True task=%s", task_id)
+        return True
+    cfg = (getattr(snapshot, "extend_props", None) or {}).get("execution_config") or {}
+    if not isinstance(cfg, dict):
+        return True
+    val = cfg.get("singlebot_2_group", True)
+    return val if isinstance(val, bool) else str(val).lower() not in ("false", "0", "no", "none", "")
+
+
+def _resolve_owner_user_id_from_graph(graph, task_id: str) -> str:
+    """BBS 任务 owner(graph 级 ``owner_user_id``,task_graph_service 初始化写入、query_task_dashboard 返回);
+    缺则空串 → ``form_coop_group`` 不拉人类观察者(经理 bot 自身执行)。"""
+    try:
+        snapshot = graph.query_task_dashboard(task_id)
+    except Exception:  # noqa: BLE101 graph 不可用 → 不拉观察者
+        logger.info("[task][bbs_mode] resolve owner 查询失败 task=%s → 不拉人类观察者", task_id)
+        return ""
+    owner = (getattr(snapshot, "extend_props", None) or {}).get("owner_user_id")
+    return str(owner) if owner else ""
+
+
 async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                  skill_name: str = _BBS_SKILL_NAME,
-                 on_bbs_report=None) -> None:
+                 on_bbs_report=None, group_executor=None) -> None:
     """查询开启 claim 的 provider Bot,再执行 bid→select→claim→dispatch。
 
     ``bcn``: :class:`BcnService`(由 DI 注入的任务模块普通消费依赖),复用 register/switch provider-bot 同源
@@ -117,11 +146,41 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     # 执行bbs，执行完后再更新
     try:
         logger.info("[task][bbs_mode] begin_rely_task, task_id=%s", task_id)
-        task_result = await bot.send_and_wait_async(
-            bot_id=winner_bot_id, message=msg, metadata={"biz_task_id": task_id},
-            timeout=_OVERALL_TIMEOUT
-        )
-        logger.info("[task][bbs_mode] send_and_wait, task_id=%s, result_msg=%s", task_id, task_result)
+        _group_enabled = _singlebot_2_group_switch(graph, task_id)
+        if _group_enabled and group_executor is not None:
+            _owner_user_id = _resolve_owner_user_id_from_graph(graph, task_id)
+            logger.info(
+                "[task][bbs_mode] manager_worker 群执行 task=%s node=%s winner=%s owner=%s",
+                task_id, bbs_task_node.node_id, winner_bot_id, _owner_user_id,
+            )
+            try:
+                task_result = await group_executor(
+                    task_id=task_id,
+                    node_id=bbs_task_node.node_id,
+                    winner_bot_id=winner_bot_id,
+                    owner_user_id=_owner_user_id,
+                    task_instruction=msg,
+                    deadline_monotonic=time.monotonic() + _OVERALL_TIMEOUT,
+                )
+            except Exception as exc:  # noqa: BLE101 建群/轮询失败 → 回退 send_and_wait(不阻断 single bot 投递)
+                logger.warning(
+                    "[task][bbs_mode] manager_worker 群执行失败 → 回退 send_and_wait task=%s: %s",
+                    task_id, exc,
+                )
+                task_result = await bot.send_and_wait_async(
+                    bot_id=winner_bot_id, message=msg, metadata={"biz_task_id": task_id},
+                    timeout=_OVERALL_TIMEOUT,
+                )
+        else:
+            logger.info(
+                "[task][bbs_mode] send_and_wait 直发 task=%s node=%s winner=%s group_enabled=%s has_group_executor=%s",
+                task_id, bbs_task_node.node_id, winner_bot_id, _group_enabled, group_executor is not None,
+            )
+            task_result = await bot.send_and_wait_async(
+                bot_id=winner_bot_id, message=msg, metadata={"biz_task_id": task_id},
+                timeout=_OVERALL_TIMEOUT,
+            )
+        logger.info("[task][bbs_mode] exec_done, task_id=%s, result=%s", task_id, task_result)
 
         _bbs_output = task_result.get("result") if isinstance(task_result, dict) else task_result
         _bbs_session = task_result.get("session_id") if isinstance(task_result, dict) else ""

@@ -389,18 +389,21 @@ def _exe2(*, execution_config=None):
 
 
 def test_dispatch_single_bot_2_group_bypass_creates_two_person_group():
-    """默认 true + owner 在场 + bcs 已接 → 建二人群(driver bot + 人类观察者),走 BcsGroupHandle 收敛,
-    不发 send_message;run_mode 落库 single_bot→coop_group 且 extend_props.actual_run_mode=single_bot。"""
+    """默认 true + owner 在场 + bcs 已接 → 建 manager_worker 群(single bot 作 manager,人类 owner 作
+    观察者 participant),走 BcsGroupHandle 收敛,不发 send_message;originator 不设人类(BCS 拒人类
+    建群 → 403);run_mode 落库 single_bot→coop_group 且 extend_props.actual_run_mode=single_bot。"""
     exe, bot, bcs, poller, graph = _exe2()  # execution_config={} → singlebot_2_group 默认 true
     ok = _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983"})]))
     assert ok == [True]
     assert bot.sent == []  # 旁路:不直发
     assert len(bcs.created) == 1
     req = bcs.created[0]
+    assert req.group_strategy == "manager_worker"
+    assert {"bot_uuid": "drv:double-owner", "role": "manager"} in req.participants
     assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
     assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
-    assert req.originator is None
-    assert poller.registered == []  # 默认 Push，不注册 Pull poller
+    assert req.originator is None  # manager 作建群 caller,不设人类 originator(BCS 拒人类建群)
+    assert poller.registered == []  # 默认 Push(skill_report),singlebot_2_group 不注册 Pull poller
     flip = [p for p in graph.patches if p.run_mode == "coop_group"]
     assert flip and flip[0].extend_props_patch.get("actual_run_mode") == "single_bot"
 
