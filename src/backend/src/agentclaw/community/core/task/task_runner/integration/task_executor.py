@@ -577,6 +577,9 @@ class TaskExecutor:
             mgr = str(manager_bot_id or bot_ids[0])
             req_kwargs["group_strategy"] = "manager_worker"
             req_kwargs["driver_bot"] = bcs_uuid(mgr)
+            # master_bot 与 ocb 拉群接口对齐(manager_worker 群的 master 即 driver/manager bot,
+            # 与 driver_bot 同值);chat/state_machine 不设,BCS 仍按 driver_bot 推断 master。
+            req_kwargs["master_bot"] = bcs_uuid(mgr)
             req_kwargs["participants"] = [
                 {"bot_uuid": bcs_uuid(mgr), "role": "manager"}
             ] + [
@@ -798,11 +801,12 @@ class TaskExecutor:
                 ]
                 req_kwargs["routing_policy"] = dict(_HUMAN_OBSERVER_ROUTING_POLICY)
                 req_kwargs.setdefault("label", gf.group_name or "")
-                # 拉人接口示例:originator=human_<owner>(setdefault——已有显式 bot originator 时不覆盖)。
-                req_kwargs.setdefault("originator", f"human_{_owner_user_id}")
+                # originator 须为 Bot Actor(BCS 拒 human,400 invalid_originator);人类观察者以 participant
+                # 身份入群,不作 originator。originator 维持既有逻辑(originator_bot_id→bot 或 None,
+                # BCS 经 driver Bearer 解析 caller)。
                 logger.info(
-                    "[task][task_executor] form_coop_group 追加人类观察者(不发言) mode=%s owner=%s → routing_policy=inject_observers originator=human_%s",
-                    mode, _owner_user_id, _owner_user_id,
+                    "[task][task_executor] form_coop_group 追加人类观察者(不发言) mode=%s owner=%s → routing_policy=inject_observers",
+                    mode, _owner_user_id,
                 )
             else:
                 logger.info("[task][task_executor] form_coop_group 无 owner_user_id → 不拉人类观察者 mode=%s", mode)

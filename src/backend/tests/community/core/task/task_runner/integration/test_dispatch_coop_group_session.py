@@ -67,6 +67,7 @@ def test_form_coop_group_chat_stores_meta_and_returns_gid():
     assert exe._group_meta["g1"]["collab_mode"] == "chat"
     assert bcs.created[0].group_strategy is None  # chat 省略
     assert bcs.created[0].driver_bot == "drv:double-owner"
+    assert bcs.created[0].master_bot is None  # master_bot 仅 manager_worker 设置
     assert [p["bot_uuid"] for p in bcs.created[0].participants] == [
         "drv:double-owner", "w1:double-owner"
     ]
@@ -80,6 +81,7 @@ def test_form_coop_group_manager_worker_sets_strategy():
                                             extend_props={"manager_bot_id": "mgr"})))
     assert bcs.created[0].group_strategy == "manager_worker"
     assert bcs.created[0].driver_bot == "mgr:double-owner"
+    assert bcs.created[0].master_bot == "mgr:double-owner"  # master 即 driver/manager
 
 
 def test_dispatch_coop_group_session_mode_registers_session_handle():
@@ -108,7 +110,7 @@ def test_form_coop_group_appends_human_observer_when_owner_present():
     req = bcs.created[0]
     assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
     assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
-    assert req.originator == "human_35983"
+    assert req.originator is None  # originator 须为 Bot Actor(BCS 拒 human);人类仅作 participant 观察者
 
 
 def test_form_coop_group_no_human_observer_when_owner_absent():
@@ -158,5 +160,5 @@ def test_form_coop_group_recovers_owner_via_task_id_for_run_yaml_path():
     req = bcs.created[0]
     assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
     assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
-    assert req.originator == "human_35983"
+    assert req.originator is None  # originator 须为 Bot Actor(BCS 拒 human);人类仅作 participant 观察者
 
