@@ -738,8 +738,6 @@ SpaceSkillFolderUpload = create_model(
         ),
     ),
 )
-
-
 class AddSpaceMemberRequest(BaseModel):
     """Request for adding a user to a Space."""
 

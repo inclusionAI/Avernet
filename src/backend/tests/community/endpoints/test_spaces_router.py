@@ -184,6 +184,7 @@ def _seed_space_skills(world) -> None:
                         "delete_draft": True,
                         "create_upgrade_draft": True,
                         "offline_skill": True,
+                        "copy_offline_skill": True,
                         "manage_grants": True,
                         "transfer_owner": True,
                         "request_edit_access": False,
@@ -239,6 +240,7 @@ def _space_skill_detail_record() -> dict:
                 "delete_draft": True,
                 "create_upgrade_draft": True,
                 "offline_skill": True,
+                "copy_offline_skill": True,
                 "manage_grants": True,
                 "transfer_owner": True,
                 "request_edit_access": False,
@@ -373,6 +375,7 @@ def _seed_space_skill_version_reads(world) -> None:
 def _seed_space_skill_copy(world) -> None:
     _seed_space_skill_version_reads(world)
     _seed_space_skill_draft_commands(world)
+    _seed_space_skill_creation_and_detail(world)
     bind_overrides(
         world,
         SpaceSkillApplicationServiceProtocol,
