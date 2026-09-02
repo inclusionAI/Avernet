@@ -137,19 +137,19 @@ Conventions every task assumes:
   - [x] Repository tests on SQLite; the tenant column is in the unique key.
 - **Depends on:** —
 
-## [ ] Task 8: `ManagedFilesStore` and the reader
+## [x] Task 8: `ManagedFilesStore` and the reader
 - **Files:** `core/bot_config_manifest/managed_files/{__init__,store,reader}.py` (new),
   `core/bot_config_manifest/managed_files/README.md` (new),
   `di/modules/manifest_fetch_module.py`,
   `tests/community/core/bot_config_manifest/managed_files/test_store.py` (new)
 - **Done when:**
-  - [ ] `put` writes the object then the row and returns the ref; `delete`
+  - [x] `put` writes the object then the row and returns the ref; `delete`
         removes both; `list`; `purge` removes every row and object for a bot.
-  - [ ] Keys follow the promotion layout with a `_manifest` segment.
-  - [ ] The reader implements `ManagedFilesReader` and
+  - [x] Keys follow the promotion layout with a `_manifest` segment.
+  - [x] The reader implements `ManagedFilesReader` and
         `PlatformManagedCategoriesReader` (declared categories when the switch
         is on, else empty).
-  - [ ] Tests against a fake `ObjectStoragePlugin` and SQLite.
+  - [x] Tests against a fake `ObjectStoragePlugin` and SQLite.
 - **Depends on:** Task 7
 
 ## [ ] Task 9: Store-backed identity and resource ports

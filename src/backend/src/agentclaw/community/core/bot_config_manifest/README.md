@@ -593,6 +593,8 @@ consumed_by:
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base
+  - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer (W8)
+  - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store writes a teclaw bot's manifest-delivered files into (W8)
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)
   - agentclaw.community.core.bot_management.token_vault

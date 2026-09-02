@@ -58,7 +58,22 @@ from agentclaw.community.core.bot_config_manifest.credentials.service_protocol i
     SourceCredentialServiceProtocol,
 )
 from agentclaw.community.di import config as cfg
+from agentclaw.community.core.bot_config_manifest.managed_files import (
+    ManagedFilesComposeReader,
+    ManagedFilesStore,
+)
+from agentclaw.community.core.repository.implementations.bot.managed_files import (
+    BotConfigManagedFilesRepository,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManagedFilesRepositoryProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
+    BotConfigManifestServiceProtocol,
+)
 from agentclaw.community.di.modules.config_module import read_user_config
+from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 
 
 class ManifestFetchModule(Module):
@@ -100,6 +115,59 @@ class ManifestFetchModule(Module):
         )
 
     # ── the machine parts ──────────────────────────────────────────────────
+
+    @singleton
+    @provider
+    @inject
+    def manifest_managed_files_repository(
+        self, db: DatabasePlugin
+    ) -> BotConfigManagedFilesRepositoryProtocol:
+        """W8: the index behind the managed-files store — bound here, beside
+        the store that is its only writer, rather than in the bot-management
+        module with the other manifest tables (which is at its size cap)."""
+        return BotConfigManagedFilesRepository(db)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_managed_files_store(
+        self,
+        object_storage: ObjectStoragePlugin,
+        repository: BotConfigManagedFilesRepositoryProtocol,
+    ) -> ManagedFilesStore:
+        """W8: the platform's own copy of a teclaw bot's manifest-delivered files.
+
+        Bytes in the same OSS bucket the teclaw promotion stages into, under the
+        same ``bot-data`` base, so the composer's store coordinates resolve a
+        manifest-delivered ref exactly as they resolve a promoted one.
+        """
+        from agentclaw.community.core.storage.path import get_teclaw_bolt_data_prefix
+
+        return ManagedFilesStore(
+            object_storage=object_storage,
+            repository=repository,
+            store_base=get_teclaw_bolt_data_prefix,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def manifest_managed_files_reader(
+        self,
+        store: ManagedFilesStore,
+        injector: Injector,
+        manifest_config: cfg.BotConfigManifestConfig,
+    ) -> ManagedFilesComposeReader:
+        """W8: what the teclaw composer reads — which categories the platform
+        asserts, and the refs it holds for them. The manifest service is lazy
+        for the cycle reason every other manifest collaborator is."""
+        return ManagedFilesComposeReader(
+            store=store,
+            manifest_service_provider=lambda: injector.get(
+                BotConfigManifestServiceProtocol
+            ),
+            platform_managed=lambda: manifest_config.teclaw_platform_managed,
+        )
 
     @singleton
     @provider

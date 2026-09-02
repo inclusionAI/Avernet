@@ -21,7 +21,42 @@ from agentclaw.community.core.config_compose.models import (
 )
 
 
-__all__ = ["ComposeInputCollector"]
+__all__ = [
+    "ComposeInputCollector",
+    "ManagedFilesReader",
+    "PlatformManagedCategoriesReader",
+]
+
+
+@runtime_checkable
+class PlatformManagedCategoriesReader(Protocol):
+    """Which artifact categories the platform asserts for a bot (W8).
+
+    Answered from the bot's stored manifest and the platform-managed switch:
+    the categories the manifest declares, as artifact field names
+    (``identity_files``, ``resources``, ``skills``), or the empty set when the
+    switch is off or the bot has no manifest. The composer turns the answer
+    into the artifact's ``ownership`` map and into which source it reads the
+    file categories from.
+    """
+
+    def platform_managed(self, req: ComposeRequest) -> frozenset[str]: ...
+
+
+@runtime_checkable
+class ManagedFilesReader(Protocol):
+    """The platform's own copy of a teclaw bot's manifest-delivered files (W8).
+
+    Store-relative refs, in the shape the collector already yields, read from
+    the managed-files index rather than from the running container. The
+    composer consults it only for a category the platform asserts.
+    """
+
+    def identity_files(self, req: ComposeRequest) -> list[CollectedFile]: ...
+
+    def resources(self, req: ComposeRequest) -> list[CollectedFile]: ...
+
+    def skills(self, req: ComposeRequest) -> list[CollectedSkill]: ...
 
 
 @runtime_checkable

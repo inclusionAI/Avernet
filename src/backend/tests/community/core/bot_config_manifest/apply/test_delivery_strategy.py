@@ -185,6 +185,7 @@ def test_factory_reads_the_switch_once_and_refuses_an_unbound_platform_path() ->
         ({"bot_config_manifest": {"teclaw_platform_managed": "off"}}, False),
         ({"bot_config_manifest": {"teclaw_platform_managed": 0}}, False),
         ({"bot_config_manifest": {"teclaw_platform_managed": 1}}, True),
+        ({"bot_config_manifest": {"teclaw_platform_managed": None}}, False),
         ({"bot_config_manifest": "not-a-mapping"}, False),
     ],
 )

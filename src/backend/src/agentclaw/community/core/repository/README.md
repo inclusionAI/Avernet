@@ -99,7 +99,9 @@ provides:
   - BotRestartLockRepositoryProtocol
   - BotStartupScriptRepositoryProtocol
   - CollaboratorRepositoryProtocol
+  - BotConfigManagedFilesRepositoryProtocol
   - ManifestContentRepositoryProtocol
+  - BotConfigManagedFilesRepository
   - ManifestContentRepository
   - RenderScreenRepository
   - TemplateRepository

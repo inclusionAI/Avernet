@@ -270,7 +270,7 @@ W8 之后平台是 manifest 所应用内容的**真相源**（两个引擎系一
   "identity_files": [],
   "resources": [{ "name": "kb/faq.md", "store": "bot-data",
                   "path": "staff_u1/bot7_manifest/teclaw/workspace/kb/faq.md" }],
-  "skills": [{ "name": "order-lookup", "scope": "local", "store": "bot-data",
+  "skills": [{ "name": "order-lookup", "scope": "user", "store": "bot-data",
                "path": "staff_u1/bot7_manifest/teclaw/workspace/skills-local/order-lookup" }],
   "...": "..."
 }
@@ -296,7 +296,7 @@ manifest 的 bot 拿到的 artifact 与今天逐字节相同，只多这一个�
   （多的删、少的拉），且仍满足 A3（重复投递无副作用）。
 - [ ] **R-O3 store 后端的本地 skill。**一个 manifest 安装的本地 skill 以两种形态同时
   出现：其文件以 `resources` 引用出现在 `workspace/skills-local/<name>/…` 下，**并且**
-  `skills` 里有一条 `SkillRef{scope: "local", store: "bot-data", path: <包目录前缀>}`。
+  `skills` 里有一条 `SkillRef{scope: "user", store: "bot-data", path: <包目录前缀>}`（`scope` 沿用 artifact 既有的 `shared | user` 词汇；新的是它有了 store 地址）。
   引擎按 `path` 前缀从 store 拉整个包目录；`skills` 区域（active skill set）的
   A1 替换同样适用于它。
 
@@ -315,7 +315,7 @@ teclaw 的 manifest 走 W8 之前的逐文件通道，artifact 与今天逐字�
   效果**，容器里的工作区文件一个不少。
 - [ ] 缺少 `ownership` 的 artifact 行为与 W8 之前**完全一致**。
 - [ ] 向运行中的容器重投带文件引用的 artifact，文件按区域落地并收敛（R-O2）。
-- [ ] `skills` 里 `scope: "local"` 的 store 引用被拉取为完整包目录并激活（R-O3）。
+- [ ] `skills` 里 `scope: "user"` 且带 `store` 地址的引用被拉取为完整包目录并激活（R-O3）。
 
 ---
 

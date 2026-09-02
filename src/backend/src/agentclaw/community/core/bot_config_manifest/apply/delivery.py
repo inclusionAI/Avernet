@@ -265,6 +265,10 @@ def teclaw_platform_managed_from_config(tree: Mapping[str, Any] | None) -> bool:
     if not isinstance(block, Mapping) or TECLAW_PLATFORM_MANAGED_KEY not in block:
         return False
     raw = block[TECLAW_PLATFORM_MANAGED_KEY]
+    if raw is None:
+        # ``teclaw_platform_managed:`` with nothing after it — the likeliest
+        # spelling of "not set" — reads as absent, not as a malformed value.
+        return False
     if isinstance(raw, bool):
         return raw
     if isinstance(raw, str):
