@@ -287,9 +287,7 @@ class BotRequestWorker:
 
     # ----------------------------- chat.abort 接入面 -----------------------------
 
-    async def abort_runs_by_session(
-        self, session_id: str, bot_id: str
-    ) -> AbortOutcome:
+    async def abort_runs_by_session(self, session_id: str, bot_id: str) -> AbortOutcome:
         """按 (bot_id, session_id) 维度取消目标 bot 的 RUNNING run。
 
         复用 ``_timeout_scan_once`` 的 cancel+force_done 模板，顺序：

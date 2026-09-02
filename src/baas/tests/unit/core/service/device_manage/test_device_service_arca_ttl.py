@@ -408,7 +408,11 @@ class TestStopDeviceHook:
 
         assert result is destroy_response
         mock_schedule_repo.set_status.assert_called_once_with(
-            "test", source_table="baas_device", source_id=7, status="STOPPED"
+            "test",
+            source_table="baas_device",
+            source_id=7,
+            status="STOPPED",
+            stop_reason="lifecycle",
         )
 
     @pytest.mark.asyncio
@@ -567,7 +571,11 @@ class TestDestroyDeviceHook:
 
         assert result is destroy_response
         mock_schedule_repo.set_status.assert_called_once_with(
-            "test", source_table="baas_device", source_id=7, status="STOPPED"
+            "test",
+            source_table="baas_device",
+            source_id=7,
+            status="STOPPED",
+            stop_reason="lifecycle",
         )
 
     @pytest.mark.asyncio

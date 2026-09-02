@@ -65,8 +65,9 @@ def _rows() -> list[TtlRenewalScheduleModel]:
         return session.query(TtlRenewalScheduleModel).all()
 
 
-def _flip_stopped_with_failures() -> None:
-    """Mark the registered row STOPPED with failure history and an old mtime."""
+def _flip_stopped_with_failures(*, stop_reason: str | None = None) -> None:
+    """Mark the registered row STOPPED with failure history, an optional
+    stop_reason stamp, and an old mtime."""
     with db_manager.orm_session() as session:
         session.query(TtlRenewalScheduleModel).filter(
             TtlRenewalScheduleModel.env == ENV,
@@ -76,6 +77,7 @@ def _flip_stopped_with_failures() -> None:
             {
                 "status": "STOPPED",
                 "renew_fail_count": 7,
+                "stop_reason": stop_reason,
                 "gmt_modified": datetime(2020, 1, 1, 0, 0, 0),
             },
             synchronize_session=False,
@@ -124,7 +126,7 @@ class TestRegister:
             source_id=SOURCE_ID,
             next_renew_at=FIRST_RENEW,
         )
-        _flip_stopped_with_failures()
+        _flip_stopped_with_failures(stop_reason="threshold_gone")
 
         repo.register(
             ENV,
@@ -141,6 +143,8 @@ class TestRegister:
         assert row.next_renew_at == NEW_RENEW
         assert row.status == "ACTIVE"
         assert row.renew_fail_count == 0
+        # Resurrection clears the stale STOPPED origin along with the status.
+        assert row.stop_reason is None
         # Pitfall 2 guard: dialect upsert does NOT apply Column.onupdate, so
         # the SET must carry gmt_modified explicitly — without it the value
         # stays at 2020-01-01 and this assertion fails.
@@ -206,19 +210,21 @@ def _seed_cold(
     next_renew_at: datetime,
     status: str = "ACTIVE",
     renew_fail_count: int = 0,
+    stop_reason: str | None = None,
 ) -> None:
+    record = TtlRenewalScheduleModel(
+        env=env,
+        sandbox_id=sandbox_id,
+        source_table=source_table,
+        source_id=source_id,
+        next_renew_at=next_renew_at,
+        status=status,
+        renew_fail_count=renew_fail_count,
+    )
+    if stop_reason is not None:
+        record.stop_reason = stop_reason
     with db_manager.orm_session() as session:
-        session.add(
-            TtlRenewalScheduleModel(
-                env=env,
-                sandbox_id=sandbox_id,
-                source_table=source_table,
-                source_id=source_id,
-                next_renew_at=next_renew_at,
-                status=status,
-                renew_fail_count=renew_fail_count,
-            )
-        )
+        session.add(record)
 
 
 def _seed_hot_device(
@@ -541,6 +547,22 @@ class TestRowUpdates:
         assert row.gmt_modified > datetime(2020, 1, 1)
         assert self._foreign_row().status == "ACTIVE"
 
+    def test_set_status_with_stop_reason_persists_and_env_scopes(self, repo):
+        self._seed()
+
+        repo.set_status(
+            ENV, "baas_device", self.SOURCE_ID, "STOPPED", stop_reason="threshold_gone"
+        )
+
+        row = _cold_row(self.SOURCE_ID)
+        assert row.status == "STOPPED"
+        assert row.stop_reason == "threshold_gone"
+        assert row.gmt_modified > datetime(2020, 1, 1)
+        # env scoping: the foreign-env twin stays ACTIVE with no reason.
+        foreign = self._foreign_row()
+        assert foreign.status == "ACTIVE"
+        assert foreign.stop_reason is None
+
 
 # ==================== find_unregistered anti-join ====================
 
@@ -605,6 +627,62 @@ class TestFindUnregistered:
             (12, "sb-12", "baas_device", 1788192000000),
         ]
 
+    def test_stopped_cold_row_same_sandbox_suppresses_hot(self, repo):
+        """D-85-AJ1 row-level pin (device side): a STOPPED cold row matching
+        (env, source_table, source_id, sandbox_id) suppresses the hot row —
+        threshold-STOPPED is terminal, no resurrection loop from discovery."""
+        _seed_hot_device(
+            id_val=40,
+            env=ENV,
+            provider_device_id="sb-40",
+            provider_device_props=(
+                '{"ttl_expiration_time":"2026-09-01T00:00:00",'
+                '"ttl_expiration_timestamp":1788192000000}'
+            ),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=40,
+            sandbox_id="sb-40",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        rows = repo.find_unregistered(ENV, "baas_device", 500)
+
+        assert rows == []
+
+    def test_stopped_cold_row_stale_sandbox_does_not_suppress_hot(self, repo):
+        """D-85-AJ1 row-level pin (device side): a STOPPED cold row for an
+        OLD sandbox (destroy+create swap) does not match the anti-join —
+        the swapped-in hot row stays discoverable as the safety net."""
+        _seed_hot_device(
+            id_val=41,
+            env=ENV,
+            provider_device_id="sb-41",
+            provider_device_props=(
+                '{"ttl_expiration_time":"2026-09-01T00:00:00",'
+                '"ttl_expiration_timestamp":1788192000000}'
+            ),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=41,
+            sandbox_id="sb-old",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        rows = repo.find_unregistered(ENV, "baas_device", 500)
+
+        assert [
+            (r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows
+        ] == [
+            (41, "sb-41", "baas_device", 1788192000000),
+        ]
+
     def test_binding_side_anti_join_json_equality(self, repo):
         # Found: 20 (unregistered), 22 (stale cold sandbox).
         _seed_hot_binding(
@@ -657,6 +735,59 @@ class TestFindUnregistered:
         ] == [
             (20, "sb-b-20", "ac_entity_device_binding", 1788969600000),
             (22, "sb-b-22", "ac_entity_device_binding", 1788969600000),
+        ]
+        # Four-key contract (Pitfall 4).
+        assert sorted(rows[0].keys()) == ["id", "sandbox_id", "source_table", "ttl"]
+
+    def test_stopped_cold_row_same_sandbox_suppresses_hot_binding(self, repo):
+        """IN-01 row-level pin (binding side): a STOPPED binding cold row
+        matching (env, source_table, source_id, sandbox_id) suppresses the
+        hot binding row — threshold-STOPPED is terminal, no resurrection
+        loop from discovery. Closes the R5 gap: binding suppression was
+        provable only via mocked compiled-SQL asserts (13b/13c); this pins
+        the real-SQLite row-level truth."""
+        _seed_hot_binding(
+            id_val=50,
+            env=ENV,
+            device_props=('{"sandbox_id": "sb-b-50", ' + PROPS_TTL + "}"),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=50,
+            sandbox_id="sb-b-50",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        rows = repo.find_unregistered(ENV, "ac_entity_device_binding", 500)
+
+        assert rows == []
+
+    def test_stopped_cold_row_stale_sandbox_does_not_suppress_hot_binding(self, repo):
+        """IN-01 row-level pin (binding side): a STOPPED cold row for an
+        OLD sandbox (destroy+create swap) does not match the anti-join —
+        the swapped-in hot binding row stays discoverable as the safety net."""
+        _seed_hot_binding(
+            id_val=51,
+            env=ENV,
+            device_props=('{"sandbox_id": "sb-b-51", ' + PROPS_TTL + "}"),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=51,
+            sandbox_id="sb-b-old",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        rows = repo.find_unregistered(ENV, "ac_entity_device_binding", 500)
+
+        assert [
+            (r["id"], r["sandbox_id"], r["source_table"], r["ttl"]) for r in rows
+        ] == [
+            (51, "sb-b-51", "ac_entity_device_binding", 1788969600000),
         ]
         # Four-key contract (Pitfall 4).
         assert sorted(rows[0].keys()) == ["id", "sandbox_id", "source_table", "ttl"]
@@ -756,3 +887,119 @@ class TestCounts:
         _seed_hot_binding(id_val=6, env=ENV, device_props='{"other": 1}')
 
         assert repo.count_hot_arca_bindings(ENV) == 2
+
+    def test_count_hot_covered_any_status_coverage(self, repo):
+        """86-02 (WR-01): a hot device covered by a STOPPED cold row counts
+        as covered; an uncovered hot device does not; an ACTIVE-covered hot
+        device also counts — coverage is any-status, the STOPPED-only
+        variant is the suppressed-terminal population."""
+        # Covered by a STOPPED cold row (terminal suppression).
+        _seed_hot_device(id_val=101, env=ENV, provider_device_id="sb-101")
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=101,
+            sandbox_id="sb-101",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+        # Uncovered hot device (no cold row at all).
+        _seed_hot_device(id_val=102, env=ENV, provider_device_id="sb-102")
+
+        assert repo.count_hot_covered(ENV) == 1
+        assert repo.count_suppressed_terminal(ENV) == 1
+
+        # Extra hot device covered by an ACTIVE cold row: covered rises to
+        # 2 while the STOPPED-only count stays 1 (any-status vs stopped-only).
+        _seed_hot_device(id_val=103, env=ENV, provider_device_id="sb-103")
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=103,
+            sandbox_id="sb-103",
+            next_renew_at=datetime(2020, 1, 1),
+            status="ACTIVE",
+        )
+
+        assert repo.count_hot_covered(ENV) == 2
+        assert repo.count_suppressed_terminal(ENV) == 1
+
+    def test_count_covered_binding_side_through_json_sandbox(self, repo):
+        """86-02: the binding-side covered counts INNER JOIN on the JSON
+        sandbox equality — a STOPPED binding cold row covers its hot row,
+        a stale cold sandbox does not."""
+        _seed_hot_binding(
+            id_val=201, env=ENV, device_props='{"sandbox_id": "sb-b-201"}'
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=201,
+            sandbox_id="sb-b-201",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+        _seed_hot_binding(
+            id_val=202, env=ENV, device_props='{"sandbox_id": "sb-b-202"}'
+        )
+        # Stale cold row for an OLD sandbox must NOT cover 202.
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=202,
+            sandbox_id="sb-old",
+            next_renew_at=datetime(2020, 1, 1),
+            status="STOPPED",
+        )
+
+        assert repo.count_hot_covered(ENV) == 1
+        assert repo.count_suppressed_terminal(ENV) == 1
+
+    def test_count_hot_covered_env_scoped_on_both_join_sides(self, repo):
+        """86-02: the coverage join is env-guarded — a prod-env hot row
+        matching a pre-env cold row is NOT counted as covered."""
+        _seed_hot_device(id_val=301, env="prod", provider_device_id="sb-301")
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=301,
+            sandbox_id="sb-301",
+            next_renew_at=datetime(2020, 1, 1),
+        )
+
+        # pre-env count: join env misses the prod hot row.
+        assert repo.count_hot_covered(ENV) == 0
+        # prod-env count: the cold row is pre-env, so the join still misses.
+        assert repo.count_hot_covered("prod") == 0
+
+
+class TestHotRowExists:
+    """86-02 (WR-02): the orphan-recheck existence probe — mirrors the due
+    JOIN conditions (soft-deleted device reads absent; binding side carries
+    no is_deleted, D-16')."""
+
+    def test_soft_deleted_device_reads_absent(self, repo):
+        _seed_hot_device(id_val=401, env=ENV, provider_device_id="sb-401", is_deleted=1)
+
+        assert repo.hot_row_exists(ENV, "baas_device", 401) is False
+
+    def test_live_device_and_binding_rows_exist(self, repo):
+        _seed_hot_device(id_val=402, env=ENV, provider_device_id="sb-402")
+        _seed_hot_binding(
+            id_val=403, env=ENV, device_props='{"sandbox_id": "sb-b-403"}'
+        )
+
+        assert repo.hot_row_exists(ENV, "baas_device", 402) is True
+        assert repo.hot_row_exists(ENV, "ac_entity_device_binding", 403) is True
+
+    def test_absent_id_and_foreign_env_read_absent(self, repo):
+        _seed_hot_device(id_val=404, env="prod", provider_device_id="sb-404")
+
+        assert repo.hot_row_exists(ENV, "baas_device", 999) is False
+        # Env-scoped: the prod row is invisible to a pre-env recheck.
+        assert repo.hot_row_exists(ENV, "baas_device", 404) is False
+        assert repo.hot_row_exists("prod", "baas_device", 404) is True
+
+    def test_unsupported_source_table_raises(self, repo):
+        with pytest.raises(ValueError, match="Unsupported source_table"):
+            repo.hot_row_exists(ENV, "bogus", 1)

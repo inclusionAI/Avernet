@@ -17,7 +17,6 @@ from secbaas.community.core.service.bot_runtime.dispatcher._base_dispatcher impo
 )
 from secbaas.community.core.service.paas import PaasServiceFacade
 
-
 # ==================== Fixtures ====================
 
 
