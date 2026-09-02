@@ -3,7 +3,8 @@
 
 Feeds controlled frame sequences through the adapter and asserts OpenClaw's own
 `ActiveRunRegistry` reflects the lifecycle correctly:
-  - register on first non-`inject-` runId frame
+  - register before the first upstream event and reconcile non-`inject-`
+    runId frames
   - terminal on final/error/aborted
   - finally safety net for transport errors / disconnect
   - `inject-` frames are never tracked
@@ -110,6 +111,43 @@ class TestRegisterAndTerminal:
             pass
         assert reg.snapshot() == []
         assert reg.all_runs()[0].state == "completed"
+
+
+class TestRunRegistrationBeforeFirstEvent:
+    async def test_run_is_active_before_upstream_emits_event(self):
+        """A successful chat start must be visible before the first event.
+
+        OpenClaw can acknowledge ``chat.send`` and then pause before emitting
+        its first event. The active-run query must not report clear during that
+        interval.
+        """
+        import asyncio
+
+        reg = ActiveRunRegistry()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        class _AckedButSilentPort:
+            async def chat_stream(self, *args, **kwargs):
+                started.set()
+                await release.wait()
+                if False:
+                    yield _frame("delta", "never")
+
+        adapter = OpenClawChatAdapter(
+            _AckedButSilentPort(), active_run_registry=reg
+        )  # type: ignore[arg-type]
+        task = asyncio.create_task(_drain(adapter, _req()))
+        await started.wait()
+        await asyncio.sleep(0)
+
+        result = await reg.query()
+        assert result.verdict == "active"
+        assert result.count == 1
+
+        release.set()
+        await task
+        assert reg.snapshot() == []
 
 
 class TestSafetyNet:

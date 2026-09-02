@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -148,6 +149,17 @@ class OpenClawChatAdapter(ChatService):
         seen_run_ids: set[str] = set()
         pending_terminal_state: str = "aborted"
 
+        # The gateway acknowledges chat.send with the run id before it may
+        # emit the first event. Use the idempotency key as the provisional run
+        # id (the gateway uses the same value as its expected_run_id), and
+        # register it before entering the port stream so a silent/stalled
+        # upstream run is still visible to active-session queries.
+        tracking_run_id = idempotency_key or uuid.uuid4().hex
+        idempotency_key = tracking_run_id
+        if registry is not None:
+            registry.register_run(tracking_run_id, session_key)
+            seen_run_ids.add(tracking_run_id)
+
         try:
             async for frame in self._port.chat_stream(
                 session_key=session_key,
@@ -207,8 +219,9 @@ class OpenClawChatAdapter(ChatService):
     ) -> None:
         """OpenClaw's own active-run side channel.
 
-        Registers a run on the first frame carrying a non-``inject-`` ``runId``
-        and marks it terminal on the matching ``final`` / ``error`` /
+        The adapter registers a provisional run before entering the port
+        stream; this method reconciles any non-``inject-`` run id observed in
+        frames and marks it terminal on the matching ``final`` / ``error`` /
         ``aborted`` frame. Records every distinct run id in ``seen_run_ids`` so
         the caller's ``finally`` can apply a residual terminal state to any
         still-running run (handles the multi-run-per-stream edge).
