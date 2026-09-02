@@ -651,6 +651,7 @@ publish_draft
 delete_draft
 create_upgrade_draft
 offline_skill
+copy_offline_skill
 manage_grants
 transfer_owner
 request_edit_access
@@ -805,7 +806,7 @@ Owner 审批，旧 Owner 不得继续审批。
 | GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}` | Attempt 详情 |
 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}/retry` | 恢复同一 Attempt；按最新阶段分流，不要求新幂等键 |
 | GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact` | 下线影响检查 |
-| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline` | 本地隐藏 Published Skill，并创建下一版 Draft |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline` | 本地终态隐藏 Published Skill，保留历史 Version，不创建 Draft |
 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy` | 复制已下线 Skill 的精确 Vn 为独立新 Skill V1 Draft |
 
 发布事务：
@@ -863,7 +864,7 @@ Latest 是发布成功后的 Best-Effort 异步刷新，不参与发布成功门
 acknowledgement token。预览到 PUBLISHED 之间事实可能变化，Track Latest 必须在发布成功后按
 最新 Installation/迁移期候选重新发现并由 Reader 复核，禁止信任前端预览列表。
 
-#### 12.1 Offline、重新发布与血缘
+#### 12.1 Offline、Version Copy 与血缘
 
 产品“下线”是 TeamClaw-local 的终态 Offline，不是永久 Retirement，也不把历史 Published
 Version 改回 Draft。无 blocker 时，Offline 仅写 `offline_at/offline_by`，保留不可变 Published
@@ -871,7 +872,7 @@ Vn；原 Skill 不再创建 Draft、升级或重新发布。用户需要继续�
 独立新 Skill 的 V1 Draft；发布新副本会在同一 SC Team 创建独立 SC Skill，绝不复用原 SC 身份。
 
 Offline 期间从 TeamClaw 市场和 consumable 列表隐藏，禁止新的 Direct activation、Membership
-和其他 Bot 消费；Owner/Manager 仍可查看历史、编辑 Draft 和发布。它不调用 Skill Center
+和其他 Bot 消费；Owner/Manager 仍可查看历史并复制精确 Published Version，但原 Skill 不可编辑、升级或发布。它不调用 Skill Center
 删除/关闭/下线，因此 SC 外部页面可能持续可见。永久 Retirement、SC 全局下线和单 Version
 offline 均不在本期范围。
 

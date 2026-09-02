@@ -409,7 +409,7 @@ class SkillDraftSourceKind(_DocumentedEnum):
     __descriptions__ = {
         "FOLDER": "Created from a browser folder upload.",
         "GIT": "Created or refreshed from a frozen Git snapshot.",
-        "PUBLISHED_VERSION": "Copied from the latest exact Published Version.",
+        "PUBLISHED_VERSION": "Copied from a selected exact Published Version.",
     }
 
 

@@ -19792,7 +19792,7 @@
         "x-enum-descriptions": [
           "Created from a browser folder upload.",
           "Created or refreshed from a frozen Git snapshot.",
-          "Copied from the latest exact Published Version."
+          "Copied from a selected exact Published Version."
         ],
         "x-enum-varnames": [
           "FOLDER",
