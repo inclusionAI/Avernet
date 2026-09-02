@@ -15,7 +15,7 @@ use bcs_service_api::application::v1::{
     PatchBotInternalAttributes, UserVisibility,
 };
 use bcs_service_api::{
-    BotUseCaseError, CoordinationMode, DeleteProviderBotCommand, ProviderAuthMode,
+    ActorKind, BotUseCaseError, CoordinationMode, DeleteProviderBotCommand, ProviderAuthMode,
     ProviderBotBinding, ProviderBotConnectionMode, ProviderBotRosterItem,
     ProviderBotTaskModesFilter, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
     ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
@@ -27,7 +27,7 @@ use serde_json::{Map, Value, json};
 use tracing::{info, warn};
 
 use crate::mapping::capabilities::{to_core_skill, to_wire_skill};
-use crate::state::HttpAppState;
+use crate::state::{HttpAppState, VisibilitySyncRequest};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -217,6 +217,27 @@ pub async fn register_provider_bot(
         })
         .await
         .map_err(provider_error)?;
+
+    if allowed_switch_provider && outcome.created && outcome.actor_kind == ActorKind::Bot {
+        match outcome.capabilities.clone() {
+            Some(capabilities) => {
+                state.dispatch_visibility_sync(VisibilitySyncRequest {
+                    bot_uuid: outcome.bot_uuid.clone(),
+                    visibility: capabilities.visibility.clone(),
+                    capabilities,
+                    actor_kind: outcome.actor_kind,
+                });
+            }
+            None => {
+                warn!(
+                    provider_id = %outcome.provider_id,
+                    bot_uuid = %outcome.bot_uuid,
+                    "register_provider_bot: allowlisted provider but capabilities missing; \
+                     skipping bcs-fuse sync"
+                );
+            }
+        }
+    }
 
     Ok(Json(RegisterProviderBotResponse {
         bot_uuid: outcome.bot_uuid,
