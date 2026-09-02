@@ -26,7 +26,7 @@ composes them and shapes the answer.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends, Request
 
@@ -52,7 +52,10 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+    ApplyReport,
+    ApplyStatus,
+)
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
 )
@@ -75,7 +78,11 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     generate_bot_id,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.task_queue.types import TERMINAL_STATUSES, TaskStatus
+from agentclaw.community.core.task_queue.types import (
+    TERMINAL_STATUSES,
+    TaskRecord,
+    TaskStatus,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -313,7 +320,12 @@ async def get_bot_create_with_manifest_status(
 # ── the state table (plan.md §K-8) ─────────────────────────────────────────
 
 
-def _creation_state(*, bot, report, job) -> Optional[tuple[CreationState, Any]]:
+def _creation_state(
+    *,
+    bot: Optional[dict],
+    report: Optional[ApplyReport],
+    job: Callable[[], Optional[TaskRecord]],
+) -> Optional[tuple[CreationState, Optional[TaskRecord]]]:
     """Map durable rows to a state. ``None`` means there is nothing here (404).
 
     ``job`` is a *callable* rather than a record, and that is the read's cost

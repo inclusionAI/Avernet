@@ -30,6 +30,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
+    DEFAULT_CREATE_DEADLINE_SECONDS,
     BotCreateWithManifestHandler,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
@@ -230,22 +231,23 @@ def _build(db, *, scripts=None):
         is_teclaw=lambda engine: engine == "teclaw",
         start_job=lambda **_kwargs: None,
         find_job=lambda **_kwargs: None,
+        authorization_window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS,
     )
 
     bots = _Bots()
     order: list[str] = []
     seen_at_creation: dict[str, str] = {}
 
-    # ``phase_a`` is the seam's, unwrapped, with one recording line around it:
+    # ``apply_pre_container`` is the seam's, unwrapped, with one recording line:
     # what is being proved is that the *real* one has already finished when
     # creation is called.
-    real_phase_a = seam.phase_a
+    real_pre_container = seam.apply_pre_container
 
-    def recording_phase_a(**kwargs):
-        order.append("phase_a")
-        return real_phase_a(**kwargs)
+    def recording_pre_container(**kwargs):
+        order.append("pre_container")
+        return real_pre_container(**kwargs)
 
-    seam.phase_a = recording_phase_a  # type: ignore[method-assign]
+    seam.apply_pre_container = recording_pre_container  # type: ignore[method-assign]
 
     def create(_payload):
         order.append("create")
@@ -296,7 +298,7 @@ def test_the_pre_container_phase_finishes_before_creation_is_called(world):
 
     _drive(handler)
 
-    assert order[:2] == ["phase_a", "create"], order
+    assert order[:2] == ["pre_container", "create"], order
     assert order.count("create") == 1, "creation ran more than once"
 
 
@@ -333,7 +335,7 @@ def test_a_failed_pre_container_phase_still_creates_the_bot(world):
     _drive(handler)
 
     assert "create" in order, "a failed phase A stopped the bot being created"
-    assert order.index("phase_a") < order.index("create")
+    assert order.index("pre_container") < order.index("create")
 
     # Read inside the job's own tenant scope, because that is where the record
     # was written. Outside it ``get_current_avernet_tenant()`` answers the

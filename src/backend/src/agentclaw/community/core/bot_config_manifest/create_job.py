@@ -25,9 +25,8 @@ it and finishes, and the poll observes it the way it observes any apply.
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
@@ -44,10 +43,16 @@ from agentclaw.community.core.task_queue.types import (
     Fail,
     Reschedule,
     TaskOutcome,
+    TaskRecord,
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+
+if TYPE_CHECKING:  # pragma: no cover - import-time cycle, see ``enqueue_create_job``
+    from agentclaw.community.core.task_queue.services.task_queue_service import (
+        TaskQueueService,
+    )
 
 logger = get_logger()
 
@@ -55,11 +60,15 @@ logger = get_logger()
 CREATE_JOB_TASK_TYPE = "config_manifest.create_bot"
 
 #: How long a user has to follow the authorization link before the creation is
-#: retired. Configurable; this is the default the design settled on.
+#: retired.
+#:
+#: **The default, not the setting.** The live value is
+#: ``BotCreateWithManifestConfig.authorization_window_seconds``, read from
+#: ``user_config.bot_create_with_manifest`` and handed to ``enqueue_create_job``
+#: by the caller — this module reaches for no configuration of its own. It is
+#: still needed here as the fallback for a payload enqueued before
+#: ``window_seconds`` was written into it.
 DEFAULT_CREATE_DEADLINE_SECONDS = 10 * 60
-
-#: Environment override for the above.
-CREATE_DEADLINE_ENV = "BOT_CREATE_WITH_MANIFEST_DEADLINE_SECONDS"
 
 #: How much longer the queue's own deadline is than the authorization window.
 #:
@@ -74,38 +83,6 @@ CREATE_DEADLINE_ENV = "BOT_CREATE_WITH_MANIFEST_DEADLINE_SECONDS"
 #: and cleans up, and the queue's deadline stays what it was meant to be — the
 #: outer backstop for a job that somehow stops making progress.
 CREATE_QUEUE_DEADLINE_MARGIN_SECONDS = 5 * 60
-
-
-def create_deadline_seconds() -> int:
-    """The window a user has to authorize, in seconds.
-
-    Read per call rather than at import so a deployment can change it without a
-    rebuild, and clamped to something positive: a zero or negative deadline would
-    expire every creation the instant it was submitted.
-    """
-    raw = os.environ.get(CREATE_DEADLINE_ENV)
-    if not raw:
-        return DEFAULT_CREATE_DEADLINE_SECONDS
-    try:
-        parsed = int(raw)
-    except ValueError:
-        logger.warning(
-            "[manifest_create] %s=%r is not an integer; using %ss",
-            CREATE_DEADLINE_ENV,
-            raw,
-            DEFAULT_CREATE_DEADLINE_SECONDS,
-        )
-        return DEFAULT_CREATE_DEADLINE_SECONDS
-    if parsed <= 0:
-        logger.warning(
-            "[manifest_create] %s=%s would expire every creation immediately; "
-            "using %ss",
-            CREATE_DEADLINE_ENV,
-            parsed,
-            DEFAULT_CREATE_DEADLINE_SECONDS,
-        )
-        return DEFAULT_CREATE_DEADLINE_SECONDS
-    return parsed
 
 #: The ``Fail`` reason a creation carries when its authorization window elapsed
 #: rather than being declined.
@@ -215,7 +192,7 @@ def build_create_job_payload(
 
 
 def enqueue_create_job(
-    task_queue: Any,
+    task_queue: "TaskQueueService",
     *,
     bot_id: str,
     entity_id: str,
@@ -226,6 +203,7 @@ def enqueue_create_job(
     spec: dict[str, Any],
     iframe_url: Optional[str],
     redirect_url: Optional[str],
+    window_seconds: int,
 ) -> None:
     """Hand a submitted creation to the queue. Everything after this is the job's.
 
@@ -242,9 +220,10 @@ def enqueue_create_job(
     retired in the claim scan never runs again and so would never delete the rows
     submission wrote. The queue's deadline is the backstop behind that.
     """
-    # Read once, then used for both horizons. Reading it twice would let a
-    # setting that changed in between hand one task two inconsistent deadlines.
-    window = create_deadline_seconds()
+    # ``window_seconds`` is taken rather than read here, and that is what makes
+    # the two horizons below consistent: the caller reads the setting once, so a
+    # value that changes mid-flight cannot hand one task two deadlines computed
+    # from different numbers.
     task_queue.enqueue(
         CREATE_JOB_TASK_TYPE,
         build_create_job_payload(
@@ -257,9 +236,9 @@ def enqueue_create_job(
             spec=spec,
             iframe_url=iframe_url,
             redirect_url=redirect_url,
-            window_seconds=window,
+            window_seconds=window_seconds,
         ),
-        window + CREATE_QUEUE_DEADLINE_MARGIN_SECONDS,
+        window_seconds + CREATE_QUEUE_DEADLINE_MARGIN_SECONDS,
         idempotency_key=create_job_idempotency_key(
             tenant=tenant, entity_id=entity_id, bot_id=bot_id
         ),
@@ -267,8 +246,8 @@ def enqueue_create_job(
 
 
 def find_create_job(
-    task_queue: Any, *, tenant: str, entity_id: str, bot_id: str
-) -> Optional[Any]:
+    task_queue: "TaskQueueService", *, tenant: str, entity_id: str, bot_id: str
+) -> Optional[TaskRecord]:
     """This creation's task row, live or terminal, or ``None`` if there is none.
 
     ``None`` is a real answer and the poll depends on it twice over: no creation
@@ -375,9 +354,11 @@ class BotCreateWithManifestHandler:
         # Authorized. The pre-container phase must land before creation, because
         # `_build_create_bot_payload` reads the startup-script row while
         # composing the start command.
-        phase_a = self._phase_a_record(entity_id=entity_id, bot_id=bot_id)
-        if phase_a is None:
-            self._seam_provider().phase_a(
+        pre_container = self._pre_container_record(
+            entity_id=entity_id, bot_id=bot_id
+        )
+        if pre_container is None:
+            self._seam_provider().apply_pre_container(
                 entity_id=entity_id,
                 bot_id=bot_id,
                 owner_id=user_id,
@@ -386,7 +367,7 @@ class BotCreateWithManifestHandler:
                 bot_type=payload["spec"].get("bot_type"),
             )
             return Reschedule(POLL_DELAY_SECONDS)
-        if phase_a.status is ApplyStatus.RUNNING:
+        if pre_container.status is ApplyStatus.RUNNING:
             return Reschedule(POLL_DELAY_SECONDS)
 
         # Terminal either way: a failed pre-container phase does not stop
@@ -400,7 +381,7 @@ class BotCreateWithManifestHandler:
         bot_id = str(payload["bot_id"])
         entity_id = str(payload["entity_id"])
 
-        if self._phase_b_record(entity_id=entity_id, bot_id=bot_id) is not None:
+        if self._on_container_record(entity_id=entity_id, bot_id=bot_id) is not None:
             # Already started. The job's work is done — it does not wait for the
             # post-container phase, because nothing depends on it.
             return Complete()
@@ -444,7 +425,7 @@ class BotCreateWithManifestHandler:
                 actor_id=str(payload["user_id"]),
                 trigger=CREATE_ON_CONTAINER_TRIGGER,
                 phases=frozenset({ApplyPhase.ON_CONTAINER}),
-                carry_from_apply_id=self._phase_a_apply_id(
+                carry_from_apply_id=self._pre_container_apply_id(
                     entity_id=entity_id, bot_id=bot_id
                 ),
             )
@@ -572,7 +553,7 @@ class BotCreateWithManifestHandler:
         # environment says now — see ``window_seconds`` in the payload builder.
         # A payload written before that field existed falls back to the current
         # setting, which is what it was enqueued under anyway.
-        window = payload.get("window_seconds") or create_deadline_seconds()
+        window = payload.get("window_seconds") or DEFAULT_CREATE_DEADLINE_SECONDS
         submitted = payload.get("submitted_at")
         if not submitted:
             # A payload from before this field existed. Treat it as fresh rather
@@ -604,7 +585,7 @@ class BotCreateWithManifestHandler:
             return None
         return str(answer.get("status") or "")
 
-    def _phase_a_record(self, *, entity_id: str, bot_id: str):
+    def _pre_container_record(self, *, entity_id: str, bot_id: str):
         """The pre-container phase's record, recognised by its trigger.
 
         ``last_apply`` plus the trigger, which is the same read the poll makes —
@@ -616,7 +597,7 @@ class BotCreateWithManifestHandler:
             trigger=CREATE_PRE_CONTAINER_TRIGGER,
         )
 
-    def _phase_b_record(self, *, entity_id: str, bot_id: str):
+    def _on_container_record(self, *, entity_id: str, bot_id: str):
         return self._record_with_trigger(
             entity_id=entity_id,
             bot_id=bot_id,
@@ -631,8 +612,8 @@ class BotCreateWithManifestHandler:
             return None
         return report
 
-    def _phase_a_apply_id(self, *, entity_id: str, bot_id: str) -> Optional[str]:
-        record = self._phase_a_record(entity_id=entity_id, bot_id=bot_id)
+    def _pre_container_apply_id(self, *, entity_id: str, bot_id: str) -> Optional[str]:
+        record = self._pre_container_record(entity_id=entity_id, bot_id=bot_id)
         return record.apply_id if record is not None else None
 
     def _create_the_bot(self, payload: dict) -> None:
@@ -667,7 +648,6 @@ class CreateJobLifecycle(LifecycleBase):
 
 __all__ = [
     "AUTHORIZATION_WINDOW_ELAPSED",
-    "CREATE_DEADLINE_ENV",
     "CREATE_JOB_TASK_TYPE",
     "CREATE_QUEUE_DEADLINE_MARGIN_SECONDS",
     "DEFAULT_CREATE_DEADLINE_SECONDS",
@@ -675,7 +655,6 @@ __all__ = [
     "BotCreateWithManifestHandler",
     "CreateJobLifecycle",
     "build_create_job_payload",
-    "create_deadline_seconds",
     "create_job_idempotency_key",
     "enqueue_create_job",
     "find_create_job",

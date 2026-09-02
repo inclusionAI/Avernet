@@ -1,6 +1,9 @@
 """The four operations bot creation asks of the manifest layer."""
 from __future__ import annotations
 
+from agentclaw.community.core.bot_config_manifest.create_job import (
+    DEFAULT_CREATE_DEADLINE_SECONDS,
+)
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_PRE_CONTAINER_TRIGGER,
     BotCreationManifestSeam,
@@ -81,14 +84,15 @@ def _seam(applies=None, manifests=None, scripts=None, jobs=None):
         is_teclaw=lambda engine: engine == "teclaw",
         start_job=jobs.start,
         find_job=jobs.find,
+        authorization_window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS,
     )
 
 
-def test_phase_a_applies_only_the_pre_container_phase_without_a_bot_record():
+def test_the_pre_container_apply_needs_no_bot_record():
     applies = _Applies()
     seam = _seam(applies=applies)
 
-    apply_id = seam.phase_a(
+    apply_id = seam.apply_pre_container(
         entity_id="e",
         bot_id="b",
         owner_id="o",
@@ -108,11 +112,11 @@ def test_phase_a_applies_only_the_pre_container_phase_without_a_bot_record():
     assert [p.value for p in call["phases"]] == ["pre_container"]
 
 
-def test_phase_a_never_raises_so_a_manifest_failure_cannot_abort_creation():
+def test_the_pre_container_apply_never_raises_so_it_cannot_abort_creation():
     """§2.7: a manifest-layer failure never mutates or prevents the bot."""
     seam = _seam(applies=_Applies(fail=True))
     assert (
-        seam.phase_a(
+        seam.apply_pre_container(
             entity_id="e",
             bot_id="b",
             owner_id="o",

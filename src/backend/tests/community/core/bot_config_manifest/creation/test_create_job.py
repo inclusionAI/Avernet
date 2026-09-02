@@ -13,12 +13,11 @@ from typing import Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
-    CREATE_DEADLINE_ENV,
     CREATE_JOB_TASK_TYPE,
     CREATE_QUEUE_DEADLINE_MARGIN_SECONDS,
+    DEFAULT_CREATE_DEADLINE_SECONDS,
     POLL_DELAY_SECONDS,
     BotCreateWithManifestHandler,
-    create_deadline_seconds,
     create_job_idempotency_key,
     enqueue_create_job,
 )
@@ -86,12 +85,12 @@ class _Applies:
 class _Seam:
     def __init__(self, applies: _Applies, *, discard_succeeds: bool = True) -> None:
         self._applies = applies
-        self.phase_a_calls = 0
+        self.pre_container_calls = 0
         self.discards = 0
         self.discard_succeeds = discard_succeeds
 
-    def phase_a(self, **_kwargs):
-        self.phase_a_calls += 1
+    def apply_pre_container(self, **_kwargs):
+        self.pre_container_calls += 1
         self._applies.latest = _Report(
             CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.RUNNING
         )
@@ -158,7 +157,7 @@ def _handler(
 def test_it_waits_while_authorization_is_pending():
     handler, _applies, seam, created = _handler(passport_status="PENDING")
     assert isinstance(handler.handle(dict(_PAYLOAD)), Reschedule)
-    assert seam.phase_a_calls == 0 and not created
+    assert seam.pre_container_calls == 0 and not created
 
 
 def test_a_passport_outage_is_a_wait_not_a_verdict():
@@ -181,7 +180,7 @@ def test_a_declined_authorization_is_terminal_and_cleans_up():
 def test_the_pre_container_phase_runs_before_the_bot_is_created():
     handler, _applies, seam, created = _handler(passport_status="ISSUED")
     handler.handle(dict(_PAYLOAD))
-    assert seam.phase_a_calls == 1
+    assert seam.pre_container_calls == 1
     assert not created, (
         "creation must not start until the startup-script row exists, or the "
         "first boot cannot carry the script"
@@ -247,13 +246,13 @@ def test_every_step_is_safe_to_run_twice():
     handler, _applies, seam, created = _handler(passport_status="PENDING")
     handler.handle(dict(_PAYLOAD))
     handler.handle(dict(_PAYLOAD))
-    assert seam.phase_a_calls == 0 and not created
+    assert seam.pre_container_calls == 0 and not created
 
     # Issued, no phase A yet: the second invocation must not start a second one.
     handler, applies, seam, created = _handler(passport_status="ISSUED")
     handler.handle(dict(_PAYLOAD))
     handler.handle(dict(_PAYLOAD))
-    assert seam.phase_a_calls == 1, "a re-claimed task started a second apply"
+    assert seam.pre_container_calls == 1, "a re-claimed task started a second apply"
 
     # Container up: the second invocation must not start a second phase B.
     applies = _Applies(_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED))
@@ -319,19 +318,27 @@ def test_expiry_is_not_checked_once_the_bot_exists():
     assert applies.started, "the post-container phase must still start"
 
 
-def test_the_deadline_is_configurable(monkeypatch):
-    from agentclaw.community.core.bot_config_manifest.create_job import (
-        CREATE_DEADLINE_ENV,
-        create_deadline_seconds,
+def test_the_window_comes_from_configuration_not_the_environment():
+    """The window is the caller's to supply, and this module reads no settings.
+
+    It used to come from ``os.environ`` here. Configuration belongs in
+    ``user_config`` (``bot_create_with_manifest.authorization_window_seconds``),
+    read once by the DI-constructed seam and handed down — so both horizons the
+    enqueue computes come from a single reading, and a value that changes
+    mid-flight cannot give one task two deadlines derived from different numbers.
+    """
+    from agentclaw.community.core.bot_config_manifest import create_job
+
+    assert "os" not in vars(create_job), (
+        "create_job must not reach for the environment; the window is a parameter"
     )
 
-    monkeypatch.setenv(CREATE_DEADLINE_ENV, "42")
-    assert create_deadline_seconds() == 42
-    # A value that would expire everything immediately is refused, not obeyed.
-    monkeypatch.setenv(CREATE_DEADLINE_ENV, "0")
-    assert create_deadline_seconds() == 600
-    monkeypatch.setenv(CREATE_DEADLINE_ENV, "not-a-number")
-    assert create_deadline_seconds() == 600
+    queue = _RecordingQueue()
+    _enqueue(queue, window_seconds=42)
+    assert queue.calls[0]["payload"]["window_seconds"] == 42
+    assert (
+        queue.calls[0]["deadline_seconds"] == 42 + CREATE_QUEUE_DEADLINE_MARGIN_SECONDS
+    )
 
 
 class _RecordingQueue:
@@ -350,7 +357,7 @@ class _RecordingQueue:
         return (None, True)
 
 
-def _enqueue(queue):
+def _enqueue(queue, *, window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS):
     enqueue_create_job(
         queue,
         bot_id="b_1",
@@ -362,6 +369,7 @@ def _enqueue(queue):
         spec={"engine_type": "claude_code", "bot_type": "personal"},
         iframe_url=None,
         redirect_url=None,
+        window_seconds=window_seconds,
     )
 
 
@@ -384,9 +392,9 @@ def test_the_queues_deadline_is_longer_than_the_authorization_window():
     _enqueue(queue)
 
     handed_to_the_queue = queue.calls[0]["deadline_seconds"]
-    assert handed_to_the_queue > create_deadline_seconds()
+    assert handed_to_the_queue > DEFAULT_CREATE_DEADLINE_SECONDS
     assert (
-        handed_to_the_queue - create_deadline_seconds()
+        handed_to_the_queue - DEFAULT_CREATE_DEADLINE_SECONDS
         == CREATE_QUEUE_DEADLINE_MARGIN_SECONDS
     )
     assert CREATE_QUEUE_DEADLINE_MARGIN_SECONDS > POLL_DELAY_SECONDS
@@ -436,13 +444,11 @@ def test_a_cleanup_that_did_not_land_keeps_the_task_retryable():
     assert isinstance(handler.handle(dict(_PAYLOAD)), Fail)
 
 
-def test_the_window_is_the_one_frozen_at_enqueue_not_the_current_setting(
-    monkeypatch,
-):
+def test_the_window_is_the_one_frozen_at_enqueue_not_the_current_setting():
     """A setting changed mid-flight must not desynchronise a task's two horizons.
 
     The queue's deadline is computed from the window once, at enqueue. If the
-    handler re-read the environment it could enforce a *longer* window than the
+    handler re-read the setting it could enforce a *longer* window than the
     deadline the database is holding — and the database would then retire the
     task before the handler ever ran its cleanup, which is precisely the race
     the margin exists to prevent.
@@ -454,23 +460,17 @@ def test_the_window_is_the_one_frozen_at_enqueue_not_the_current_setting(
     payload["window_seconds"] = 1
     payload["submitted_at"] = "2020-01-01T00:00:00"
 
-    # The environment now says something far larger. It must not apply here.
-    monkeypatch.setenv(CREATE_DEADLINE_ENV, "86400")
-
     assert isinstance(handler.handle(payload), Fail)
     assert seam.discards == 1
 
 
-def test_a_payload_without_a_frozen_window_falls_back_rather_than_expiring(
-    monkeypatch,
-):
+def test_a_payload_without_a_frozen_window_falls_back_rather_than_expiring():
     """A payload enqueued before the field existed is not instantly expired."""
     handler, _applies, seam, _created = _handler(passport_status="PENDING")
 
     payload = dict(_PAYLOAD)
     payload.pop("window_seconds", None)
     payload["submitted_at"] = datetime.now().isoformat()
-    monkeypatch.setenv(CREATE_DEADLINE_ENV, "600")
 
     assert isinstance(handler.handle(payload), Reschedule)
     assert seam.discards == 0

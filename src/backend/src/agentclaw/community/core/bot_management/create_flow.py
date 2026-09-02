@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from agentclaw.community.core.bot_management.engines.provisioning import (
     BotCreateTemplateValidationMode,
@@ -658,6 +658,61 @@ class ManifestCreationSubmitted:
     context: BotCreateContext
 
 
+
+class ManifestCreationSeam(Protocol):
+    """What creation needs from the manifest package, named without importing it.
+
+    A ``Protocol`` rather than the concrete
+    ``BotCreationManifestSeam``: this module must not import
+    ``core/bot_config_manifest`` — that closes a cycle, since the manifest
+    package reaches back into the creation graph — and structural typing states
+    the contract with no import at all. The real seam satisfies it by shape; a
+    test double satisfies it by shape too, which is the second reason.
+
+    Only the four operations submission calls are here. The pre-container apply
+    and the job's own steps belong to the creation job, which holds the seam
+    directly and needs no stand-in for it.
+    """
+
+    def preflight(
+        self, *, document: str, engine_type: str | None, bot_type: str | None
+    ) -> dict[str, Any]:
+        """Refuse an unusable manifest now. Raises ``ManifestValidationError``."""
+        ...
+
+    def persist(
+        self,
+        *,
+        spec_entity_id: str | None,
+        user_id: str,
+        bot_id: str,
+        document: str,
+        modifier: str,
+        engine_type: str | None,
+        bot_type: str | None,
+    ) -> str:
+        """Store the document and return the ``entity_id`` it was keyed by."""
+        ...
+
+    def start_job(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str,
+        user_id: str,
+        document_owner: str,
+        spec: dict[str, Any],
+        iframe_url: str | None,
+        redirect_url: str | None,
+    ) -> None:
+        """Hand the creation to its durable job."""
+        ...
+
+    def discard(self, *, entity_id: str, bot_id: str) -> bool:
+        """Undo what submission wrote. Never raises; reports whether it landed."""
+        ...
+
+
 def submit_bot_creation_with_manifest(
     *,
     user_id: str,
@@ -669,7 +724,7 @@ def submit_bot_creation_with_manifest(
     bot_service: BotService,
     passport_plugin: PassportPlugin,
     skill_set_factory: SkillSetServiceFactory,
-    manifest_seam: Any,
+    manifest_seam: ManifestCreationSeam,
 ) -> ManifestCreationSubmitted:
     """Validate, store the manifest, apply for a Passport — and stop.
 
@@ -764,7 +819,7 @@ def submit_bot_creation_with_manifest(
 
 def _apply_and_hand_off(
     *,
-    manifest_seam: Any,
+    manifest_seam: ManifestCreationSeam,
     passport_plugin: PassportPlugin,
     skill_set_factory: SkillSetServiceFactory,
     user_id: str,

@@ -761,6 +761,7 @@ class BotManagementModule(Module):
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
         task_queue_provider: Callable[[], TaskQueueService],
+        create_with_manifest_config: cfg.BotCreateWithManifestConfig,
     ) -> BotCreationManifestSeam:
         """The operations bot creation asks of the manifest layer.
 
@@ -783,6 +784,9 @@ class BotManagementModule(Module):
             ),
             find_job=lambda **fields: find_create_job(
                 task_queue_provider(), **fields
+            ),
+            authorization_window_seconds=(
+                create_with_manifest_config.authorization_window_seconds
             ),
         )
 

@@ -362,8 +362,6 @@ def a_bot_id_with_no_creation_is_a_404():
 # deterministic: no poll interval, no lease, nothing racing the fixture's engine
 # disposal.
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -379,8 +377,10 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_TYPE,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
-    CREATE_DEADLINE_ENV,
     BotCreateWithManifestHandler,
+)
+from agentclaw.community.core.bot_config_manifest.creation import (
+    BotCreationManifestSeam,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
@@ -675,11 +675,11 @@ def test_an_abandoned_creation_expires_rather_than_reading_as_declined(
     retired in the claim scan never runs again — so nothing would delete the
     rows submission wrote.
 
-    The window is shortened through **the knob a deployment turns**, not by
-    patching a clock: `create_deadline_seconds()` reads its environment variable
-    on every call, deliberately, so that a deployment can change it without a
-    rebuild. Setting it here configures the system rather than substituting part
-    of it, which is what keeps this case on the real path — and it costs one real
+    The window is shortened through **the value a deployment configures**, not by
+    patching a clock. It reaches the system in exactly one place — the seam reads
+    ``bot_create_with_manifest.authorization_window_seconds`` once and hands it to
+    the enqueue, which freezes it into the payload — so a one-second window set
+    there is the same path a deployment's setting takes. It costs one real
     second, because the window is wall-clock and nothing about it is fake.
     """
     _seed_verifier(world)
@@ -690,17 +690,17 @@ def test_an_abandoned_creation_expires_rather_than_reading_as_declined(
 
     bind_overrides(world, PassportPlugin, {"query_auth_status": _never_answers})
 
-    previous = os.environ.get(CREATE_DEADLINE_ENV)
-    os.environ[CREATE_DEADLINE_ENV] = "1"
-    try:
-        bot_id = _submit(client).json()["data"]["bot_id"]
-        time.sleep(1.2)
-        outcome = _Worker(world).run_to_the_end()
-    finally:
-        if previous is None:
-            del os.environ[CREATE_DEADLINE_ENV]
-        else:
-            os.environ[CREATE_DEADLINE_ENV] = previous
+    def _one_second_window(self, **kwargs):
+        # The configured value, applied where configuration enters: the seam
+        # hands its window to the enqueue, which freezes it into the payload.
+        self._authorization_window_seconds = 1
+        return BotCreationManifestSeam.start_job(self, **kwargs)
+
+    bind_overrides(world, BotCreationManifestSeam, {"start_job": _one_second_window})
+
+    bot_id = _submit(client).json()["data"]["bot_id"]
+    time.sleep(1.2)
+    outcome = _Worker(world).run_to_the_end()
 
     assert isinstance(outcome, Fail), outcome
 

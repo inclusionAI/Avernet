@@ -203,6 +203,7 @@ class BotCreationManifestSeam:
         is_teclaw: Callable[[Optional[str]], bool],
         start_job: Callable[..., None],
         find_job: Callable[..., Any],
+        authorization_window_seconds: int,
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_service
@@ -210,6 +211,10 @@ class BotCreationManifestSeam:
         self._is_teclaw = is_teclaw
         self._start_job = start_job
         self._find_job = find_job
+        # Read from configuration once, at construction, and handed to the
+        # enqueue below. The job freezes it into its payload, so a creation
+        # keeps the window it was submitted under even if the setting moves.
+        self._authorization_window_seconds = authorization_window_seconds
 
     def preflight(
         self, *, document: str, engine_type: Optional[str], bot_type: Optional[str]
@@ -269,7 +274,7 @@ class BotCreationManifestSeam:
         )
         return entity_id
 
-    def phase_a(
+    def apply_pre_container(
         self,
         *,
         entity_id: str,
@@ -344,6 +349,7 @@ class BotCreationManifestSeam:
             spec=spec,
             iframe_url=iframe_url,
             redirect_url=redirect_url,
+            window_seconds=self._authorization_window_seconds,
         )
 
     def find_job(self, *, entity_id: str, bot_id: str) -> Optional[Any]:
