@@ -31,18 +31,20 @@ Three invariants, all from the W6 work item:
 
 Two v1 narrows, stated here rather than discovered:
 
-- **The write chain's admission rules are re-asked in ``resolve``**
-  (extension allow-list, size cap — the same constants the service
-  enforces), so an undeliverable member fails its category with the tree
-  still standing rather than one delete ago. What is *not* re-asked is the
-  HTTP surface's read-only policy (dotfiles, reserved roots): a manifest
-  declaring ``.env`` is the owner's declaration, deliberately broader than
-  the console router's guard — that is the platform's contract with apply,
-  not an oversight.
+- **The write chain's admission predicate is re-asked in ``resolve``**
+  — the same :func:`admission_refusal` ``upload_file`` raises (extension
+  allow-list, size cap), so an undeliverable member fails its category
+  with the tree still standing rather than one delete ago. What is *not*
+  re-asked is the HTTP surface's read-only policy (dotfiles, reserved
+  roots): a manifest declaring ``.env`` is the owner's declaration,
+  deliberately broader than the console router's guard — that is the
+  platform's contract with apply, not an oversight.
 - **``plan`` probes ``exists`` per member** for the report's label alone.
   A 5000-member tree therefore costs 5000 more device round trips than a
-  single probe would — accepted for v1's tree sizes, and the first place to
-  look if apply latency ever outruns the lock TTL on large archives.
+  single probe would (plus one re-probe per declared tree, on the rare
+  path where a tree delete answers ``False``) — accepted for v1's tree
+  sizes, and the first place to look if apply latency ever outruns the
+  lock TTL on large archives. Follow-up, not fixed here.
 """
 from __future__ import annotations
 
