@@ -796,7 +796,9 @@ def test_inline_content_over_the_size_cap_fails_at_resolve(
         m.resolve(ctx, [{"path": "data/big.md", "content": "x" * 32}])
     )
     assert not resolved.ok
-    assert "size cap" in resolved.failures[0].reason.lower()
+    # The write chain's own words — the gate delegates to the same
+    # predicate ``upload_file`` enforces, so the refusal texts agree.
+    assert "too large" in resolved.failures[0].reason.lower()
 
 
 def test_strip_components_of_the_wrong_type_is_a_resolve_failure():
@@ -1185,3 +1187,18 @@ def test_an_unknown_unpack_kind_is_refused():
     )
     assert not resolved.ok
     assert "zip|tar.gz" in resolved.failures[0].reason
+
+
+def test_refusals_quote_the_write_chains_own_words():
+    """The resolve gate's verdict is the write chain's own text`` —`
+
+    delegated to the one predicate (``file_service.admission_refusal``)
+    rather than restated, the two surfaces cannot drift into disagreeing
+    about what they admit.
+    """
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(m.resolve(ctx, [{"path": "data/run.sh", "content": "#"}]))
+    assert not resolved.ok
+    assert resolved.failures[0].reason.startswith("File type not allowed")

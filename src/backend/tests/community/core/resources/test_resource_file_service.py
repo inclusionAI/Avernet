@@ -412,21 +412,24 @@ async def test_upload_empty_filename_raises():
 @pytest.mark.asyncio
 async def test_upload_too_large_raises(monkeypatch):
     # The real ceiling is 500MB. Materialising ``b"x" * (500MB + 1)`` to trip the
-    # ``len(data) > MAX_FILE_SIZE`` check cost ~11.6s of allocation alone — the
-    # single slowest non-retry test in the suite. Shrink the ceiling instead: the
-    # guard being asserted compares a length against this module global, so a
-    # 16-byte limit exercises exactly the same branch.
-    # ``resource_file_service`` binds the constant into its own namespace with
-    # ``from ... import MAX_FILE_SIZE``, so that is the name the guard reads.
-    from agentclaw.community.core.services import resource_file_service
+    # size check cost ~11.6s of allocation alone — the single slowest
+    # non-retry test in the suite. Shrink the ceiling instead: the predicate
+    # compares a length against this module global, so a 16-byte bound
+    # exercises exactly the same branch.
+    # The admission rule now lives in ``file_service.admission_refusal`` and
+    # reads *its own* module's globals at call time — patching
+    # ``resource_file_service.MAX_FILE_SIZE`` (the old from-import binding)
+    # gated nothing once the service delegated, which is how this test
+    # proved the move: it went red first, then the target moved here.
+    from agentclaw.community.core.resources.services import file_service
 
-    monkeypatch.setattr(resource_file_service, "MAX_FILE_SIZE", 16)
+    monkeypatch.setattr(file_service, "MAX_FILE_SIZE", 16)
 
     svc, _ = _svc(provider="arca", device_fs=MagicMock())
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="File too large"):
         await svc.upload_file(
             **_COORDS, target_dir="", filename="big.csv",
-            data=b"x" * (resource_file_service.MAX_FILE_SIZE + 1),
+            data=b"x" * (file_service.MAX_FILE_SIZE + 1),
         )
 
 
