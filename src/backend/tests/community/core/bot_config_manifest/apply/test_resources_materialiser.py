@@ -25,7 +25,7 @@ from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources 
     ResourcesMaterialiser,
 )
 
-from ._fakes import FakeResourceFileService, make_context
+from ._fakes import FakeResourceFileService, build_skill_tgz, make_context
 
 
 def _run(coro):
@@ -33,17 +33,20 @@ def _run(coro):
 
 
 class _StubEntryFetcher:
-    """``EntryFetcher``'s test double: fixed bytes per URL, every call recorded.
+    """``EntryFetcher``'s test double, every call recorded.
 
-    URLs ending in ``gone`` stand in for unreachable sources. It answers in
-    the pipeline's own currency — a real :class:`FetchedEntry` — because the
-    materialiser consumes ``.content``; a stub answering in the transport's
+    URLs ending in ``gone`` stand in for unreachable sources. With
+    ``fixed_body``, every URL serves the same bytes (an archive); without it,
+    the URL's own ``bytes-of-<url>``. It answers in the pipeline's own
+    currency — a real :class:`FetchedEntry` — because the materialiser
+    consumes ``.content``; a stub answering in the transport's
     ``FetchedObject`` shape would pass collection and fail on the first real
     resolve.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, fixed_body: bytes | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
+        self._fixed_body = fixed_body
 
     def fetch(
         self,
@@ -68,8 +71,17 @@ class _StubEntryFetcher:
         )
         if source_url.endswith("gone"):
             raise EntryFetchError("source unreachable")
-        body = b"bytes-of-" + source_url.encode()
+        body = (
+            self._fixed_body
+            if self._fixed_body is not None
+            else b"bytes-of-" + source_url.encode()
+        )
         return FetchedEntry(content=body, digest="sha256:stub", from_store=False)
+
+
+def _tgz(member: dict[str, bytes]) -> bytes:
+    """A real tar.gz carrying ``member`` — true bytes, not synthetic objects."""
+    return build_skill_tgz(list(member.items()))
 
 
 def test_fake_resource_service_records_uploads_and_deletes():
@@ -174,3 +186,84 @@ def test_bad_path_entry_is_a_resolve_failure():
     ctx = make_context(engine_type="claude_code")
     resolved = _run(m.resolve(ctx, [{"path": 123}]))
     assert not resolved.ok
+
+
+# --- directory entries: platform-side unpack (Task 3) ---
+
+
+def test_dir_entry_expands_members_under_path():
+    archive = _tgz({"top/a.txt": b"AAA", "top/sub/b.txt": b"BBB"})
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {
+                    "path": "wrap/",
+                    "unpack": "tar.gz",
+                    "strip_components": 1,
+                    "source": "https://x/tree.tgz",
+                }
+            ],
+        )
+    )
+    assert resolved.ok, [f.reason for f in resolved.failures]
+    got = {i.identity: i.value for i in resolved.intents}
+    # The "wrap/" entry is the directory sentinel (value=None, the
+    # tree-replacement marker), riding first so write deletes the tree
+    # before any member uploads.
+    assert got == {
+        "wrap/": None,
+        "wrap/a.txt": b"AAA",
+        "wrap/sub/b.txt": b"BBB",
+    }
+    assert resolved.intents[0].identity == "wrap/"
+
+
+def test_bad_archive_is_a_resolve_failure_and_nothing_reaches_the_bot():
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(b"not-an-archive"))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/tree.tgz"}],
+        )
+    )
+    assert not resolved.ok
+    assert resolved.failures[0].identity == "wrap/"
+    assert svc.writes == {} and svc.deleted == []
+
+
+def test_dir_unpack_missing_is_rejected_at_resolve():
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.txt": b"x"})))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(ctx, [{"path": "wrap/", "source": "https://x/tree.tgz"}])
+    )
+    assert not resolved.ok
+    assert "unpack" in resolved.failures[0].reason
+
+
+def test_nested_paths_abort_category():
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.txt": b"x"})))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {
+                    "path": "wrap/",
+                    "unpack": "tar.gz",
+                    "source": "https://x/t.tgz",
+                },
+                {"path": "wrap/inner.txt", "source": "https://x/i.txt"},
+            ],
+        )
+    )
+    assert not resolved.ok
+    assert any("nest" in f.reason for f in resolved.failures)

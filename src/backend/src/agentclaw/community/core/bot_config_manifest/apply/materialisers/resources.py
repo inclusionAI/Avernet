@@ -28,6 +28,8 @@ Three invariants, all from the W6 work item:
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 from typing import Any, Sequence
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
@@ -46,6 +48,10 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
+    UnpackError,
+    unpack_archive,
 )
 
 _FETCH_CATEGORY = "resources"
@@ -81,13 +87,44 @@ class ResourcesMaterialiser(Materialiser):
                 failures.append(failed)
                 continue
             if isinstance(path, str) and path.endswith("/"):
-                # Directory entries arrive with Task 3.
-                failures.append(
-                    ResolveFailure(
-                        str(path),
-                        "directory resource entries are not materialised yet",
+                unpack_kind = entry.get("unpack")
+                if unpack_kind not in ("zip", "tar.gz"):
+                    failures.append(
+                        ResolveFailure(
+                            path,
+                            "a directory entry fetched from a URL must declare "
+                            "'unpack: zip|tar.gz'",
+                        )
                     )
+                    continue
+                source_url = entry.get("source")
+                if not isinstance(source_url, str) or not source_url:
+                    failures.append(
+                        ResolveFailure(
+                            path, "a directory entry must declare 'source'"
+                        )
+                    )
+                    continue
+                try:
+                    archive = await self._fetch_entry(ctx, source_url, entry, path)
+                except EntryFetchError as exc:
+                    failures.append(ResolveFailure(path, exc.reason))
+                    continue
+                members = await asyncio.to_thread(
+                    self._unpack_members,
+                    archive,
+                    unpack_kind,
+                    entry.get("strip_components", 0),
                 )
+                if isinstance(members, str):
+                    failures.append(ResolveFailure(path, members))
+                    continue
+                # The directory sentinel: identity=path, value=None. It rides
+                # first in the intent list so plan marks the tree for
+                # replacement and write deletes it before members upload.
+                intents.append(Intent(identity=path, value=None))
+                for rel, data in members:
+                    intents.append(Intent(identity=path + rel, value=data))
                 continue
             inline = entry.get("content")
             if isinstance(inline, str):
@@ -103,27 +140,71 @@ class ResourcesMaterialiser(Materialiser):
                 )
                 continue
             try:
-                # Blocking network + disk I/O (W2's sync transport, W11's blob
-                # write) off the event loop — see the identity materialiser's
-                # note; a dry run must not park the server on a hung source.
-                fetched = await asyncio.to_thread(
-                    self._fetcher.fetch,
-                    ctx,
-                    source_url=source_url,
-                    digest=entry.get("digest"),
-                    auth=entry.get("auth"),
-                    category=_FETCH_CATEGORY,
-                    keep_last=(
-                        entry.get("on_fetch_failure", "keep_last") == "keep_last"
-                    ),
-                    entry_identity=path,
-                )
+                value = await self._fetch_entry(ctx, source_url, entry, path)
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(str(path), exc.reason))
                 continue
-            intents.append(Intent(identity=path, value=fetched.content))
+            intents.append(Intent(identity=path, value=value))
         self._check_nesting(entries, failures)
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
+
+    async def _fetch_entry(
+        self,
+        ctx: ApplyContext,
+        source_url: str,
+        entry: dict[str, Any],
+        path: str,
+    ) -> bytes:
+        """One entry's bytes (or archive) through the W2/W3/W11 funnel.
+
+        Raises :class:`EntryFetchError` — the caller translates it into this
+        category's ``ResolveFailure`` currency. Blocking network + disk I/O
+        (W2's sync transport, W11's blob write) off the event loop — see the
+        identity materialiser's note; a dry run must not park the server on
+        a hung source.
+        """
+        fetched = await asyncio.to_thread(
+            self._fetcher.fetch,
+            ctx,
+            source_url=source_url,
+            digest=entry.get("digest"),
+            auth=entry.get("auth"),
+            category=_FETCH_CATEGORY,
+            keep_last=(entry.get("on_fetch_failure", "keep_last") == "keep_last"),
+            entry_identity=path,
+        )
+        return fetched.content
+
+    @staticmethod
+    def _unpack_members(
+        archive: bytes, kind: str, strip_components: int
+    ) -> list[tuple[str, bytes]] | str:
+        """The guarded unpack, platform-side, into a throwaway directory.
+
+        The bot is never a scratch space: ``unpack_archive`` writes only into
+        a fresh temporary directory, so a bad or oversized archive (W1's
+        member / unpacked-size limits live inside it) fails before anything
+        is delivered. Returned members are ``(relative path, bytes)`` with
+        ``strip_components`` already applied — the bytes are read back
+        before the throwaway dir goes away; a refusal comes back as its
+        reason string rather than an exception, keeping every failure in
+        ``resolve``'s currency and the bot's tree untouched.
+        """
+        try:
+            with tempfile.TemporaryDirectory(prefix="manifest-resources-") as tmp:
+                tree = unpack_archive(
+                    archive,
+                    kind,
+                    Path(tmp) / "tree",
+                    strip_components=strip_components,
+                )
+                # ``UnpackedTree.members`` are the tree's files only —
+                # directories are structural — relative to ``root``.
+                return [
+                    (name, (tree.root / name).read_bytes()) for name in tree.members
+                ]
+        except UnpackError as exc:
+            return str(exc)
 
     def _entry_failure(
         self, entry: dict[str, Any], path: Any, index: int
