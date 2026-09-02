@@ -96,14 +96,14 @@ def test_listing_is_scoped_and_ordered(repo) -> None:
     ]
 
 
-def test_delete_and_purge(repo) -> None:
+def test_delete_removes_one_row(repo) -> None:
     _put(repo, category="identity", rel_path="identity/SOUL.md")
     _put(repo, category="resources", rel_path="workspace/a.md")
     assert repo.delete(**_KEY, category="identity", rel_path="identity/SOUL.md")
     assert not repo.delete(**_KEY, category="identity", rel_path="identity/SOUL.md")
-    assert repo.purge_bot(**_KEY) == 1
+    assert [r.rel_path for r in repo.list_all(**_KEY)] == ["workspace/a.md"]
+    assert repo.delete(**_KEY, category="resources", rel_path="workspace/a.md")
     assert repo.list_all(**_KEY) == []
-    assert repo.purge_bot(**_KEY) == 0
 
 
 def test_rows_are_confined_to_the_tenant(repo) -> None:

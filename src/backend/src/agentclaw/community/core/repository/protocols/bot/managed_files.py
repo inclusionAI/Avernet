@@ -65,8 +65,3 @@ class BotConfigManagedFilesRepositoryProtocol(Protocol):
     ) -> list["ManagedFileRecord"]:
         """Every row of the bot, category then path order."""
         ...
-
-    @abstractmethod
-    def purge_bot(self, *, env: str, entity_id: str, bot_id: str) -> int:
-        """Remove every row of the bot. Returns the count removed."""
-        ...

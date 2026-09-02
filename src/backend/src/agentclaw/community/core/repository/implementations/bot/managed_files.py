@@ -188,19 +188,3 @@ class BotConfigManagedFilesRepository(BotConfigManagedFilesRepositoryProtocol):
                 .all()
             )
             return [row.to_record() for row in rows]
-
-    def purge_bot(self, *, env: str, entity_id: str, bot_id: str) -> int:
-        with self._db.orm_session() as db:
-            deleted = (
-                db.query(self._Model)
-                .filter(*self._bot(env=env, entity_id=entity_id, bot_id=bot_id))
-                .delete(synchronize_session=False)
-            )
-            logger.info(
-                "[managed_files.purge_bot] env=%s entity_id=%s bot_id=%s deleted=%s",
-                env,
-                entity_id,
-                bot_id,
-                deleted,
-            )
-            return int(deleted)
