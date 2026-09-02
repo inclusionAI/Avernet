@@ -36,6 +36,18 @@
       "types": "./dist/server/services/evolve/command.d.ts",
       "import": "./dist/server/services/evolve/command.js"
     },
+    "./server/services/evolve/artifact-ref": {
+      "types": "./dist/server/services/evolve/artifact-ref.d.ts",
+      "import": "./dist/server/services/evolve/artifact-ref.js"
+    },
+    "./server/services/evolve/artifact-storage": {
+      "types": "./dist/server/services/evolve/artifact-storage.d.ts",
+      "import": "./dist/server/services/evolve/artifact-storage.js"
+    },
+    "./server/services/evolve/artifact-url": {
+      "types": "./dist/server/services/evolve/artifact-url.d.ts",
+      "import": "./dist/server/services/evolve/artifact-url.js"
+    },
     "./server/services/evolve/plan-source-contract": {
       "types": "./dist/server/services/evolve/plan-source-contract.d.ts",
       "import": "./dist/server/services/evolve/plan-source-contract.js"
