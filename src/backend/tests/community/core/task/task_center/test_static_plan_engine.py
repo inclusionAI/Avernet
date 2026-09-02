@@ -2,7 +2,7 @@ import asyncio
 
 from agentclaw.community.core.task.domain.models import (
     Context, Goal, Metadata, RuntimeInfo, Status, TaskExecutionGraph, TaskInfo,
-    TaskNodePatch, TaskSpec, AcceptanceResult, AcceptanceVerdict,
+    TaskNode, TaskNodePatch, TaskSpec, AcceptanceResult, AcceptanceVerdict,
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
@@ -49,10 +49,12 @@ def _run(coro):
 class _Runner:
     def __init__(self):
         self.started = []
+        self.started_nodes = []
         self.groups = []
 
     async def start_run(self, nodes):
         self.started.append([n.node_id for n in nodes])
+        self.started_nodes.append(list(nodes))
         return [True] * len(nodes)
 
     async def form_coop_group(self, group):
@@ -192,3 +194,45 @@ def test_static_plan_status_filter_ignores_empty_tokens():
     )
 
     assert parse_status_filter(", ,") is None
+
+
+def test_bbs_handoff_uses_single_bot_delivery_without_changing_bbs_origin():
+    graph_service = TaskGraphService()
+    task_info = _task_info()
+    task_info.execution_config["bbs_handoff_claim_delay"] = 0
+    graph_service.initialize_graph(task_info)
+    handoff = TaskNode(
+        node_id="handoff",
+        task_id="t1",
+        status=Status.PENDING,
+        task_spec=TaskSpec(
+            Metadata("t1", "handoff", "implement unavailable items"),
+            Context("", {"static_input": {"unhandled_tasks": [{"id": "u1"}]}}),
+            Goal("implement", []),
+        ),
+        run_info=RuntimeInfo(run_mode="bbs"),
+        node_run_graph=None,  # type: ignore[arg-type]
+    )
+    graph_service.add_task_nodes([handoff], parent_node_id="t1")
+    runner = _Runner()
+    engine = _engine(graph_service, runner)
+
+    async def claim():
+        await engine._bbs_handoff_claim("t1", "handoff", "rnd-bot", [{"id": "u1"}])
+        pending = list(engine._bg_tasks)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    _run(claim())
+
+    delivered = runner.started_nodes[-1][0]
+    persisted = next(
+        node
+        for node in graph_service.query_task_dashboard("t1").tasks
+        if node.node_id == "handoff"
+    )
+    assert delivered.run_info.run_mode == "single_bot"
+    assert delivered.run_info.assignee == "rnd-bot"
+    assert persisted.run_info.run_mode == "bbs"
+    assert persisted.run_info.extend_props["bbs_status"] == "claimed_by_rnd"
