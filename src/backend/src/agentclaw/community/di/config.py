@@ -843,7 +843,14 @@ class BotConfigManifestConfig:
             stable resolution order).
         content_store_dir: The content store's blob root — relative paths
             resolve against the process working directory, ``~`` expands.
+        teclaw_platform_managed: The W8 switch (see the field comment).
     """
 
     fetch_transport_allowlist: tuple[str, ...] = ()
     content_store_dir: str = "./data/manifest_content"
+    #: W8: whether teclaw bots take the platform-managed delivery path
+    #: (materialise into the bot-data store + index, deliver by artifact with
+    #: the ``ownership`` map). Off until the teclaw engine supports the map;
+    #: off means the pre-W8 per-file shape. Read only by the delivery
+    #: strategy factory.
+    teclaw_platform_managed: bool = False

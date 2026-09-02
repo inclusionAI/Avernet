@@ -1,0 +1,311 @@
+"""How a manifest reaches a bot, per engine family (W8, #1476).
+
+Two engine families deliver a bot's configuration by opposite mechanisms, and
+the apply engine must not know which it is running for:
+
+* **ARCA** boots from a start command and takes everything else as writes into
+  a live container. ``script`` is baked into the start command, so it is the
+  one construct that must exist *before* the container; every other construct
+  resolves a device and can only land *after* it.
+* **teclaw** boots from a composed artifact and applies it in full before it
+  reports ready (W12 contract, A4). The platform is the source of truth for
+  what a manifest applies (spec D-3): every construct is materialised into
+  platform state — database rows, and the bot-data object store for files —
+  and the artifact is the delivery. Nothing needs the container, so nothing
+  waits for it. ``script`` is unsupported on teclaw.
+
+A :class:`DeliveryStrategy` owns exactly the four things that differ: the phase
+each construct belongs to, the write ports the materialisers are handed, the
+creation sequence the W13 job runs, and the step that closes an apply. The
+orchestrator sees phases and the materialisers see ports; neither learns the
+family. Adding a family is a strategy, not a fork of five materialisers.
+
+**The switch.** Until the teclaw engine supports the artifact's ``ownership``
+map, the platform-managed path is behind
+``user_config.bot_config_manifest.teclaw_platform_managed`` (default off). Off,
+teclaw runs the shape it ran before W8: every non-script construct after the
+container, through the same device-backed ports ARCA uses. The switch is read
+here, by the factory, and nowhere else.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
+
+from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.order import (
+    ALL_PHASES,
+    APPLY_ORDER,
+    ApplyPhase,
+    ApplyStep,
+)
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport
+from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
+
+#: The yaml key under ``user_config.bot_config_manifest``.
+TECLAW_PLATFORM_MANAGED_KEY = "teclaw_platform_managed"
+
+
+class CreationSequence(StrEnum):
+    """The order a W13 creation runs its steps in, per family.
+
+    ``PRE_CREATE_ON`` — the pre-container phase, then create and provision,
+    then wait for ``ACTIVE``, then the post-container phase. ARCA's sequence,
+    and teclaw's while the switch is off.
+
+    ``RECORD_PRE_PROVISION`` — create the bot **record** without provisioning,
+    run the single pre-container phase against it, then provision (which
+    composes the first artifact from the platform state just written), then
+    wait for ``ACTIVE``. There is no post-container phase. teclaw with the
+    switch on.
+    """
+
+    PRE_CREATE_ON = "pre_create_on"
+    RECORD_PRE_PROVISION = "record_pre_provision"
+
+
+@dataclass(frozen=True)
+class MaterialiserPorts:
+    """The write targets a strategy hands ``build_materialisers``.
+
+    Field for field the keyword arguments that function takes; a strategy
+    differs from another by which objects sit behind these names, never by
+    which materialisers exist.
+    """
+
+    script_service: Any
+    activation_service: Any
+    mcp_auth_service: Any
+    identity_service: Any
+    upload_service: Any
+    capability_reader: Any
+    package_validator: Any
+    entry_fetcher: Any
+    resource_service: Any
+
+    def as_kwargs(self) -> dict[str, Any]:
+        return {
+            "script_service": self.script_service,
+            "activation_service": self.activation_service,
+            "mcp_auth_service": self.mcp_auth_service,
+            "identity_service": self.identity_service,
+            "upload_service": self.upload_service,
+            "capability_reader": self.capability_reader,
+            "package_validator": self.package_validator,
+            "entry_fetcher": self.entry_fetcher,
+            "resource_service": self.resource_service,
+        }
+
+
+class DeliveryStrategy(Protocol):
+    """What differs between engine families, and nothing else."""
+
+    @property
+    def family(self) -> str: ...
+
+    @property
+    def creation_sequence(self) -> CreationSequence: ...
+
+    def phase_of(self, step: ApplyStep) -> ApplyPhase:
+        """Which phase this family delivers the step's construct in."""
+        ...
+
+    def steps_for(
+        self, phases: frozenset[ApplyPhase] | None = None
+    ) -> tuple[ApplyStep, ...]:
+        """The steps in the requested phases, in position order."""
+        ...
+
+    def needs_container(self) -> bool:
+        """Whether any construct of this family lands only after the container."""
+        ...
+
+    def ports(self) -> MaterialiserPorts:
+        """The write targets for this family's materialisers."""
+        ...
+
+    async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
+        """Close an apply after every category is written.
+
+        Returns a note for the report (a failure that must not raise — §2.7),
+        or ``None`` when there is nothing to say.
+        """
+        ...
+
+
+def _steps(
+    phase_of: Callable[[ApplyStep], ApplyPhase],
+    phases: frozenset[ApplyPhase] | None,
+) -> tuple[ApplyStep, ...]:
+    wanted = ALL_PHASES if phases is None else phases
+    return tuple(
+        step
+        for step in sorted(APPLY_ORDER, key=lambda s: s.position)
+        if phase_of(step) in wanted
+    )
+
+
+class ArcaDelivery:
+    """Today's behaviour, named: the phase table is ``APPLY_ORDER``'s own."""
+
+    family = "arca"
+    creation_sequence = CreationSequence.PRE_CREATE_ON
+
+    def __init__(self, ports: Callable[[], MaterialiserPorts]) -> None:
+        self._ports = ports
+
+    def phase_of(self, step: ApplyStep) -> ApplyPhase:
+        return step.phase
+
+    def steps_for(
+        self, phases: frozenset[ApplyPhase] | None = None
+    ) -> tuple[ApplyStep, ...]:
+        return _steps(self.phase_of, phases)
+
+    def needs_container(self) -> bool:
+        return True
+
+    def ports(self) -> MaterialiserPorts:
+        return self._ports()
+
+    async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
+        # The owning services project as they write (device writes land,
+        # activation reconciles); there is nothing left to close.
+        return None
+
+
+#: The closing step for a platform-managed teclaw apply: one whole-artifact
+#: redeliver to the running container, or nothing when the bot has no live
+#: binding (provisioning composes the first artifact instead). Returns a note
+#: on failure.
+Redeliver = Callable[[ApplyContext], Awaitable[Optional[str]]]
+
+
+class TeclawDelivery:
+    """The artifact family.
+
+    With ``platform_managed`` on, every non-script construct is
+    ``PRE_CONTAINER``: it writes platform state and needs no container. The
+    apply is closed by one redeliver. Off, the strategy reproduces the shape
+    teclaw ran before W8 — every non-script construct ``ON_CONTAINER`` through
+    the device-backed ports — so nothing regresses while the engine catches up.
+    """
+
+    family = "teclaw"
+
+    def __init__(
+        self,
+        *,
+        platform_managed: bool,
+        platform_ports: Callable[[], MaterialiserPorts],
+        device_ports: Callable[[], MaterialiserPorts],
+        redeliver: Optional[Redeliver] = None,
+    ) -> None:
+        self._platform_managed = platform_managed
+        self._platform_ports = platform_ports
+        self._device_ports = device_ports
+        self._redeliver = redeliver
+
+    @property
+    def platform_managed(self) -> bool:
+        return self._platform_managed
+
+    @property
+    def creation_sequence(self) -> CreationSequence:
+        if self._platform_managed:
+            return CreationSequence.RECORD_PRE_PROVISION
+        return CreationSequence.PRE_CREATE_ON
+
+    def phase_of(self, step: ApplyStep) -> ApplyPhase:
+        if step.construct == ManifestSection.SCRIPT:
+            # Unsupported on teclaw (the capability resolver refuses it); the
+            # phase is kept as the table says so a declared script still walks
+            # the orchestrator's no-support path and is reported, not skipped.
+            return step.phase
+        if self._platform_managed:
+            return ApplyPhase.PRE_CONTAINER
+        return ApplyPhase.ON_CONTAINER
+
+    def steps_for(
+        self, phases: frozenset[ApplyPhase] | None = None
+    ) -> tuple[ApplyStep, ...]:
+        return _steps(self.phase_of, phases)
+
+    def needs_container(self) -> bool:
+        return not self._platform_managed
+
+    def ports(self) -> MaterialiserPorts:
+        if self._platform_managed:
+            return self._platform_ports()
+        return self._device_ports()
+
+    async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
+        if not self._platform_managed or self._redeliver is None:
+            return None
+        return await self._redeliver(ctx)
+
+
+def teclaw_platform_managed_from_config(tree: Mapping[str, Any] | None) -> bool:
+    """The switch, read from the ``user_config`` tree. Absent is off."""
+    block = (tree or {}).get("bot_config_manifest") or {}
+    if not isinstance(block, Mapping):
+        return False
+    return bool(block.get(TECLAW_PLATFORM_MANAGED_KEY, False))
+
+
+class DeliveryStrategyFactory:
+    """Pick the strategy for a bot. The one reader of the switch."""
+
+    def __init__(
+        self,
+        *,
+        is_teclaw: Callable[[Optional[str]], bool],
+        teclaw_platform_managed: bool,
+        arca_ports: Callable[[], MaterialiserPorts],
+        teclaw_platform_ports: Optional[Callable[[], MaterialiserPorts]] = None,
+        redeliver: Optional[Redeliver] = None,
+    ) -> None:
+        self._is_teclaw = is_teclaw
+        self._platform_managed = teclaw_platform_managed
+        self._arca_ports = arca_ports
+        # Until Task 12 binds them, the platform ports fall back to the device
+        # ports; the factory refuses to run the platform-managed path without
+        # them rather than silently writing into a container.
+        self._teclaw_platform_ports = teclaw_platform_ports
+        self._redeliver = redeliver
+
+    @property
+    def teclaw_platform_managed(self) -> bool:
+        return self._platform_managed
+
+    def for_engine(self, engine_type: Optional[str]) -> DeliveryStrategy:
+        if not self._is_teclaw(engine_type):
+            return ArcaDelivery(self._arca_ports)
+        platform_managed = self._platform_managed
+        if platform_managed and self._teclaw_platform_ports is None:
+            raise RuntimeError(
+                "teclaw_platform_managed is on but no platform ports are bound"
+            )
+        return TeclawDelivery(
+            platform_managed=platform_managed,
+            platform_ports=self._teclaw_platform_ports or self._arca_ports,
+            device_ports=self._arca_ports,
+            redeliver=self._redeliver,
+        )
+
+    def for_bot(self, bot: Mapping[str, Any]) -> DeliveryStrategy:
+        return self.for_engine(bot.get("active_engine"))
+
+
+__all__ = [
+    "ArcaDelivery",
+    "CreationSequence",
+    "DeliveryStrategy",
+    "DeliveryStrategyFactory",
+    "MaterialiserPorts",
+    "Redeliver",
+    "TECLAW_PLATFORM_MANAGED_KEY",
+    "TeclawDelivery",
+    "teclaw_platform_managed_from_config",
+]

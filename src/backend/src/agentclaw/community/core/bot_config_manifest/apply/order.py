@@ -82,6 +82,13 @@ APPLY_ORDER: tuple[ApplyStep, ...] = (
 #: Both phases — what the HTTP route passes, and the default everywhere.
 ALL_PHASES: frozenset[ApplyPhase] = frozenset(ApplyPhase)
 
+# The ``phase`` column above is the **ARCA** family's table. teclaw delivers by
+# artifact and needs no container for any construct, so its strategy
+# (``apply/delivery.py``, W8) re-phases every non-script step to
+# ``PRE_CONTAINER`` when the platform-managed switch is on. The position column
+# is shared; the phase is the family's. ``steps_for`` below stays the ARCA
+# reading for callers that predate the seam.
+
 
 def steps_for(phases: frozenset[ApplyPhase] | None = None) -> tuple[ApplyStep, ...]:
     """The steps in the requested phases, in position order.

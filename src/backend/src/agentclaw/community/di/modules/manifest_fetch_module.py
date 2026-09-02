@@ -78,6 +78,9 @@ class ManifestFetchModule(Module):
         consumers stay defined together. This provider is only the one sofa
         read, through config_module's public seam.
         """
+        from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+            teclaw_platform_managed_from_config,
+        )
         from agentclaw.community.core.bot_config_manifest.content.settings import (
             content_store_root_from_config,
         )
@@ -91,6 +94,9 @@ class ManifestFetchModule(Module):
                 sorted(transport_allowlist_from_config(tree))
             ),
             content_store_dir=str(content_store_root_from_config(tree)),
+            # W8's switch, parsed by the delivery seam's own reader so the yaml
+            # key and its consumer stay defined together.
+            teclaw_platform_managed=teclaw_platform_managed_from_config(tree),
         )
 
     # ── the machine parts ──────────────────────────────────────────────────

@@ -21,7 +21,7 @@ Conventions every task assumes:
 
 ## Group A — The seam
 
-## [ ] Task 1: Trigger constants and the §2.12 pin
+## [~] Task 1: Trigger constants and the §2.12 pin
 - **Files:** `apply/triggers.py` (new), `apply/outcomes.py`,
   `tests/community/core/bot_config_manifest/test_iteration1_ordering.py` (new)
 - **Done when:**
@@ -32,23 +32,23 @@ Conventions every task assumes:
         non-script construct in `PRE_CONTAINER`.
 - **Depends on:** Task 2 (for the teclaw case)
 
-## [ ] Task 2: `DeliveryStrategy`, both strategies, the factory, the switch
+## [x] Task 2: `DeliveryStrategy`, both strategies, the factory, the switch
 - **Files:** `apply/delivery.py` (new), `apply/order.py`,
   `core/bot_config_manifest/config.py` or wherever `BotConfigManifestConfig`
   lives, `di/modules/manifest_fetch_module.py`,
   `tests/community/core/bot_config_manifest/apply/test_delivery_strategy.py` (new)
 - **Done when:**
-  - [ ] Protocol per plan K-1; `ArcaDelivery` reproduces `APPLY_ORDER`'s phases
+  - [x] Protocol per plan K-1; `ArcaDelivery` reproduces `APPLY_ORDER`'s phases
         and `steps_for`; `TeclawDelivery(platform_managed=True)` maps every
         non-script step to `PRE_CONTAINER`, `(False)` to `ON_CONTAINER`.
-  - [ ] `CreationSequence.PRE_CREATE_ON` for ARCA and teclaw-off,
+  - [x] `CreationSequence.PRE_CREATE_ON` for ARCA and teclaw-off,
         `RECORD_PRE_PROVISION` for teclaw-on.
-  - [ ] `BotConfigManifestConfig.teclaw_platform_managed: bool = False` read
+  - [x] `BotConfigManifestConfig.teclaw_platform_managed: bool = False` read
         from `user_config.bot_config_manifest`; the factory takes it and
         `is_teclaw`.
-  - [ ] `order.steps_for` delegates to `ArcaDelivery` so existing callers are
+  - [x] `order.steps_for` delegates to `ArcaDelivery` so existing callers are
         unchanged.
-  - [ ] Tests cover the three phase tables, the sequence, and the factory's
+  - [x] Tests cover the three phase tables, the sequence, and the factory's
         selection.
 - **Depends on:** —
 
