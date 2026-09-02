@@ -295,11 +295,14 @@ class TaskExecutor:
             "backend": self._api_base_url,
         })
         message = self._formatter.format_execute(ctx, node)
+        # BCS driver_bot/participant 用纯 bot_id(去 :owner 透传,见 e2e docstring 契约),
+        # 否则 BCS resolve_group_create_caller 解析不出 caller → 401 caller is required。
+        driver_bot = openapi_bot_id.partition(":")[0]
         gf = GroupFormation(
-            bot_ids=[openapi_bot_id],
+            bot_ids=[driver_bot],
             collab_mode="chat",
             group_name=node.run_info.extend_props.get("group_name") or f"{node.task_id}-{node.node_id}",
-            members_info=[{"bot_id": openapi_bot_id, "role": "driver"}],
+            members_info=[{"bot_id": driver_bot, "role": "driver"}],
             extend_props={
                 "owner_user_id": owner_user_id,
                 "loop_task_id": loop_task_id,
@@ -801,9 +804,6 @@ class TaskExecutor:
                 ]
                 req_kwargs["routing_policy"] = dict(_HUMAN_OBSERVER_ROUTING_POLICY)
                 req_kwargs.setdefault("label", gf.group_name or "")
-                # originator 须为 Bot Actor(BCS 拒 human,400 invalid_originator);人类观察者以 participant
-                # 身份入群,不作 originator。originator 维持既有逻辑(originator_bot_id→bot 或 None,
-                # BCS 经 driver Bearer 解析 caller)。
                 logger.info(
                     "[task][task_executor] form_coop_group 追加人类观察者(不发言) mode=%s owner=%s → routing_policy=inject_observers",
                     mode, _owner_user_id,
