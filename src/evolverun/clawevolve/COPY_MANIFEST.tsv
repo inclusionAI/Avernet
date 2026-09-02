@@ -119,7 +119,7 @@ source_sha	source_path	source_blob	target_path	target_sha256	status
 074db8c008d5f75ac26b03cf6c59b896d71572b1	src/types.ts	a4ae69a0f77a05093c9b95e5abc36a6f040ef56a	web/src/types.ts	7ca5b7ed24a7abd5fd9ec06937cabe9803325f9c2f30f935cdeb6164265d796b	copied
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/services/object-storage/clawweb-oss-runtime.ts	a78ba94bbd9d4ee4050d066e1dda9b0d66e0b69c	-	-	host-only-excluded
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/services/object-storage/mist-credential-provider.ts	19d426d5c74558954dbe2162045cbb24e4b5a525	-	-	host-only-excluded
--	-	-	server/singlebox.ts	4518d5257647de0de9d6012f86d87282d505a8ab646f2df54c73206d1eec8181	module-scaffold
+-	-	-	server/singlebox.ts	51ae2288f8f099ffe36e5caec65a200b9ed73f723610da6d873547846c5aad2a	module-scaffold
 -	-	-	vite.singlebox.config.ts	5b33cbc9d860c3a4edc76185f7b630cfae117c67e1bb20ba471d49fd4b95a85f	module-scaffold
 -	-	-	web/singlebox.html	068b2ab6dccbfae646e3d5e7811eebc08565a4a5b825dbdb49330a7bd68d512b	module-scaffold
 -	-	-	web/src/singlebox.css	6b219bdc66d96e4cf85c8b9cfb9e85be28c615f05aaec27b7302aa89a7e56125	module-scaffold

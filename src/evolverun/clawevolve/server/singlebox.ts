@@ -77,6 +77,23 @@ async function main(): Promise<void> {
     }
   });
   app.use(express.json({ limit: "10mb" }));
+  app.use((request, _response, next) => {
+    // Singlebox binds only to loopback and uses one explicit local identity.
+    request.headers["x-user-id"] ??= "singlebox";
+    request.isAdmin = true;
+    next();
+  });
+  app.get("/api/auth/me", (_request, response) => {
+    response.json({
+      userId: "singlebox",
+      nickName: "Singlebox User",
+      userName: "singlebox",
+      displayName: "Singlebox User",
+      avatarUrl: "",
+      isAdmin: true,
+      isClawEvolveAdmin: true,
+    });
+  });
   app.get("/health", (_request, response) => {
     response.json({ status: "ok", db: db.dbType, mode: "singlebox" });
   });
