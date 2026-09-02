@@ -142,12 +142,12 @@ def test_friend_handler_logs_bcn_response_details_without_credentials(caplog) ->
     request_log = next(
         record
         for record in caplog.records
-        if record.message.startswith("friend work-order BCN callback request:")
+        if record.message == "friend work-order BCN callback request"
     )
     response_log = next(
         record
         for record in caplog.records
-        if record.message.startswith("friend work-order BCN callback response:")
+        if record.message == "friend work-order BCN callback response"
     )
     assert request_log.request_body is None
     assert request_log.has_authorization is True
@@ -155,30 +155,24 @@ def test_friend_handler_logs_bcn_response_details_without_credentials(caplog) ->
     auth_log = next(
         record
         for record in caplog.records
-        if record.message.startswith("BCN callback auth headers:")
+        if record.message == "BCN callback auth headers"
     )
-    assert "has_principal=True" in auth_log.message
-    assert "principal_header_count=1" in auth_log.message
-    assert "principal_length=16" in auth_log.message
-    assert auth_log.message.endswith("has_authorization=True")
+    assert auth_log.has_principal is True
+    assert auth_log.principal_header_count == 1
+    assert auth_log.principal_length == len("secret-principal")
+    assert auth_log.has_authorization is True
     assert request_log.principal_header_count == 1
     assert request_log.principal_length == len("secret-principal")
     assert len(request_log.principal_fingerprint) == 16
     assert "secret-principal" not in request_log.message
-    assert "http_status=403" in response_log.message
-    assert "response_code=403201" in response_log.message
-    assert "response_message=Forbidden" in response_log.message
-    assert "response_request_id=bcn-request-1" in response_log.message
-    assert "response_body_raw=" in response_log.message
-    assert "duration_ms=" in response_log.message
     assert response_log.http_status == 403
     assert response_log.response_code == 403201
     assert response_log.response_message == "Forbidden"
     assert response_log.response_request_id == "bcn-request-1"
     assert response_log.response_body_raw == (
-        '{"code":403201,"message":"Forbidden","data":null,'
-        '"request_id":"bcn-request-1"}'
+        '{"code":403201,"message":"Forbidden","data":null,"request_id":"bcn-request-1"}'
     )
+    assert response_log.duration_ms >= 0
     assert "secret-auth" not in caplog.text
     assert "secret-principal" not in caplog.text
 
@@ -205,8 +199,6 @@ def test_friend_handler_accepts_openapi_success_envelope() -> None:
     )
 
 
-
-
 def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
     caplog.set_level("INFO", logger="start")
     http = MagicMock(spec=HttpClient)
@@ -228,7 +220,7 @@ def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
     response_log = next(
         record
         for record in caplog.records
-        if record.message.startswith("friend work-order BCN callback response:")
+        if record.message == "friend work-order BCN callback response"
     )
     assert response_log.http_status == 502
     assert response_log.response_code is None
@@ -236,14 +228,13 @@ def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
     failure_log = next(
         record
         for record in caplog.records
-        if record.message.startswith("friend work-order decision callback failed:")
+        if record.message == "friend work-order decision callback failed"
     )
-    assert "exception_type=HTTPStatusError" in failure_log.message
-    assert "response_body_raw=Bad Gateway" in failure_log.message
+    assert failure_log.exception_type == "HTTPStatusError"
+    assert failure_log.response_body_raw == "Bad Gateway"
     assert failure_log.principal_header_count == 0
     assert failure_log.principal_fingerprint is None
     assert failure_log.principal_length is None
-
 
 
 def test_friend_handler_truncates_large_response_body_in_logs(caplog) -> None:
@@ -268,7 +259,7 @@ def test_friend_handler_truncates_large_response_body_in_logs(caplog) -> None:
     response_log = next(
         record
         for record in caplog.records
-        if record.message.startswith("friend work-order BCN callback response:")
+        if record.message == "friend work-order BCN callback response"
     )
     assert response_log.response_body_raw.endswith("...<truncated>")
     assert len(response_log.response_body_raw) == 16 * 1024 + len("...<truncated>")

@@ -10,6 +10,7 @@ pub mod event_recording;
 pub mod friend_connect_notification;
 pub mod group_context;
 pub mod group_session_token;
+pub mod human_notify;
 pub mod interaction;
 pub mod judge;
 pub mod leader_election;
@@ -43,6 +44,9 @@ pub use delivery::{
 pub use friend_connect_notification::{
     FriendConnectNotificationCommand, FriendConnectNotificationKind,
     FriendConnectNotificationPort, NoopFriendConnectNotificationPort,
+};
+pub use human_notify::{
+    HumanMentionNotifyPort, MentionNotification, MentionedHuman, NoopHumanMentionNotifyPort,
 };
 pub use event_delivery::*;
 pub use event_metrics::*;

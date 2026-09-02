@@ -2015,6 +2015,9 @@ def test_a_default_set_member_cannot_join_an_ordinary_set():
                 SkillSetSkill(
                     skill_set_id=default_set.id, skill_id=excluded.id, env="dev"
                 ),
+                BotSkillInstallation(
+                    bot_id="bot", owner_id="owner", skill_id=member.id, env="dev"
+                ),
                 DefaultSkillsetSkillExclusion(
                     user_id="owner",
                     bot_id="bot",
@@ -2111,6 +2114,11 @@ def test_a_default_set_mcp_member_cannot_join_an_ordinary_set():
                 server_code="mcp.default-member",
                 name="mcp.default-member",
                 env="dev",
+            )
+        )
+        session.add(
+            BotMCPInstallation(
+                bot_id="bot", owner_id="owner", server_code="mcp.default-member", env="dev"
             )
         )
 

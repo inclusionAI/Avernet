@@ -244,6 +244,12 @@ class RenewalSchedulerConfigSchema(ConfigSchema):
 
     config_section = "renewal_scheduler"
     engine: str = Field(default="legacy", pattern=r"^(legacy|deadline)$")
+    # WR-02 (86-REVIEW, option 1): grace margin for the threshold_expired
+    # verdict. Optional — the default 5 covers every deployment without
+    # touching either YAML tree (the dual-track sync contract stays
+    # unchanged); only non-negative integers are accepted (0 disables the
+    # margin).
+    clock_tol_minutes: int = Field(default=5, ge=0)
 
 
 class FileTransferOssConfigSchema(ConfigSchema):

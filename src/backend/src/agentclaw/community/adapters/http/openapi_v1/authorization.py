@@ -225,6 +225,20 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "DELETE",
         "/openapi/v1/bots/{bot_id}/config-manifest",
     ): Check(PermissionLevel.ADMIN),
+    # Apply takes its own bar rather than the document group's: it rewrites a
+    # bot's whole configuration, which is owner-level on its own terms, and it
+    # is a broad mutation so it carries the lock. Decided on apply's shape, not
+    # derived from the categories it touches. Three of the six are owner-only
+    # through their own endpoints and a manifest must not be the way around
+    # them — held per category by the dominance test in
+    # ``test_config_manifest_apply_bars.py``, which is also where the full
+    # reasoning lives (W10's spec, *Apply Declares Its Own Bars*).
+    ("POST", "/openapi/v1/bots/{bot_id}/config-manifest/apply"):
+        Check(PermissionLevel.OWNER, EDIT_LOCK),
+    # The reads sit at MEMBER beside GET .../config-manifest: reading how a bot
+    # is configured is part of working on it, and a report carries no secret.
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/config-manifest/last-apply"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
@@ -294,6 +308,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(PermissionLevel.MEMBER),
     ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"): Check(PermissionLevel.OWNER, EDIT_LOCK),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"): Check(PermissionLevel.OWNER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/models"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/models/{model_id:path}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/nodes"): Check(PermissionLevel.MEMBER),
@@ -398,10 +413,24 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 
     # ── Operations that address no bot ────────────────────────────────────
     ("GET", "/openapi/v1/org/user"): NoCheck("the caller's own verified identity"),
-    ("GET", "/openapi/v1/org/dept"):
-        NoCheck("the caller's own directory record"),
+    # Source credentials (W3, #1471): tenant-scoped by the request's
+    # tenant guard, no bot to address and no collaborator scenario to
+    # check — the callers this surface admits are applications (the edge
+    # requires an app credential), and applications are not a grant
+    # relationship. The one identity that matters, the owning
+    # application, is checked by the service against the stored row for
+    # exactly the two operations that mutate it.
+    ("PUT", "/openapi/v1/bots/source-credentials/{name}"):
+        NoCheck("tenant-guarded credential write; the owner-app check is the service's"),
+    ("GET", "/openapi/v1/bots/source-credentials/{name}"): NoCheck("tenant-guarded masked metadata; every tenant app may read"),
+    ("GET", "/openapi/v1/bots/source-credentials"): NoCheck("tenant-guarded inventory; every tenant app may read"),
+    ("DELETE", "/openapi/v1/bots/source-credentials/{name}"):
+        NoCheck("tenant-guarded credential delete; the owner-app check is the service's"),
+    ("GET", "/openapi/v1/org/dept"): NoCheck("the caller's own directory record"),
     ("GET", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
     ("POST", "/openapi/v1/bots"): NoCheck("a collection, not one addressed bot"),
+    ("POST", "/openapi/v1/bots/with-manifest"): NoCheck("a creation, not one addressed bot — as POST /openapi/v1/bots"),
+    ("GET", "/openapi/v1/bots/{bot_id}/with-manifest/status"): NoCheck("the caller's own creation: for most of one there is no bot record to check against, so what scopes it is that every row it reads — the job's idempotency key included — is keyed by the entity_id the caller's principal resolves to. That holds ONLY BECAUSE admission REFUSES an app-only caller here: for one of those require_user_id returns the user_id QUERY PARAMETER, and the entity_id would be request-supplied. Lifting that refusal without a check able to authorize an app→user pair before a bot exists invalidates this reason — see admission.py"),
     ("GET", "/openapi/v1/bots/all"): NoCheck("a collection, not one addressed bot"),
     ("GET", "/openapi/v1/bots/authorized"):
         NoCheck("a collection, not one addressed bot"),

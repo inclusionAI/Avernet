@@ -8,9 +8,7 @@ import sys
 from logging.handlers import TimedRotatingFileHandler
 from typing import Any
 
-_FILE_FORMAT = (
-    "%(asctime)s %(levelname)s %(name)s %(message)s"
-)
+_FILE_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
 
 
 class BareLoggerPlugin:

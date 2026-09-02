@@ -1,0 +1,235 @@
+AuthProviderUrl:
+  type: object
+  additionalProperties: false
+  required: [name, url]
+  properties:
+    name:
+      type: string
+      minLength: 1
+    url:
+      type: string
+      minLength: 1
+
+AuthProviderUrlList:
+  type: object
+  additionalProperties: false
+  required: [providers]
+  properties:
+    providers:
+      type: array
+      items:
+        $ref: "#/AuthProviderUrl"
+
+AuthProviderUrlListEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/AuthProviderUrlList"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+AuthUserInfo:
+  type: object
+  additionalProperties: false
+  required: [user_id, provider]
+  properties:
+    user_id:
+      type: string
+      minLength: 1
+    name:
+      type: [string, "null"]
+    provider:
+      type: string
+      minLength: 1
+    avatar:
+      type: [string, "null"]
+
+AuthUserInfoEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/AuthUserInfo"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+AuthSessionMutationData:
+  type: object
+  additionalProperties: false
+
+AuthSessionMutationEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: "#/AuthSessionMutationData"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+ProviderPath:
+  name: provider
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+AuthCodeQuery:
+  name: code
+  in: query
+  required: false
+  schema:
+    type: string
+    minLength: 1
+
+AuthAuthCodeQuery:
+  name: auth_code
+  in: query
+  required: false
+  schema:
+    type: string
+    minLength: 1
+
+AuthStateQuery:
+  name: state
+  in: query
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+AuthUrlPath:
+  get:
+    operationId: get_auth_login_urls
+    tags: ["Authentication"]
+    summary: Return configured OAuth login URLs for the OpenAPI auth facade.
+    x-avernet-security: {}
+    responses:
+      "200":
+        description: Login URLs returned for each configured OAuth provider.
+        content:
+          application/json:
+            schema:
+              $ref: "#/AuthProviderUrlListEnvelope"
+      "404":
+        description: OAuth providers are not configured.
+        x-error-codes: [auth_not_configured]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AuthCallbackPath:
+  get:
+    operationId: complete_auth_login
+    tags: ["Authentication"]
+    summary: Complete the OAuth login redirect for the OpenAPI auth facade.
+    x-avernet-security: {}
+    x-avernet-raw-response: true
+    parameters:
+      - $ref: "#/ProviderPath"
+      - $ref: "#/AuthCodeQuery"
+      - $ref: "#/AuthAuthCodeQuery"
+      - $ref: "#/AuthStateQuery"
+    responses:
+      "302":
+        description: Login completed successfully and a session cookie was issued.
+      "400":
+        description: Invalid or mismatched OAuth callback state.
+        x-error-codes:
+          - invalid_state
+          - provider_mismatch
+          - missing_code
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Unknown OAuth provider.
+        x-error-codes: [provider_not_found]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AuthUserPath:
+  get:
+    operationId: get_auth_user
+    tags: ["Authentication"]
+    summary: Return the current authenticated OpenAPI human identity.
+    x-avernet-security: {}
+    responses:
+      "200":
+        description: The current user identity resolved from the session.
+        content:
+          application/json:
+            schema:
+              $ref: "#/AuthUserInfoEnvelope"
+      "401":
+        description: Session is missing or does not resolve to a human identity.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AuthRefreshPath:
+  post:
+    operationId: refresh_auth_session
+    tags: ["Authentication"]
+    summary: Renew the bound OpenAPI auth session cookie.
+    x-avernet-security: {}
+    responses:
+      "200":
+        description: The session was renewed and a fresh cookie was issued.
+        content:
+          application/json:
+            schema:
+              $ref: "#/AuthSessionMutationEnvelope"
+      "401":
+        description: Session is missing, malformed, expired, or unbound.
+        x-error-codes: [unauthenticated]
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AuthLogoutPath:
+  post:
+    operationId: logout_auth_session
+    tags: ["Authentication"]
+    summary: Clear the bound OpenAPI auth session cookie.
+    x-avernet-security: {}
+    responses:
+      "200":
+        description: The session was cleared and the cookie removal header was issued.
+        content:
+          application/json:
+            schema:
+              $ref: "#/AuthSessionMutationEnvelope"
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

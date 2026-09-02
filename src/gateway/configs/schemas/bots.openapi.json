@@ -23290,6 +23290,250 @@
         },
         "title": "UpdateSkillSetRequest",
         "type": "object"
+      },
+      "Envelope_SourceCredentialDetail_": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceCredentialDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SourceCredentialDetail]",
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support."
+      },
+      "SourceCredentialDetail": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Identifier of the credential, tenant-scoped. Nothing about it is derived — the name is caller-chosen and referenced from a manifest by that name alone."
+          },
+          "has_secret": {
+            "type": "boolean",
+            "title": "Has Secret",
+            "description": "Whether a secret is stored under this name.",
+            "default": true
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last write, server clock."
+          },
+          "type": {
+            "$ref": "#/components/schemas/CredentialType",
+            "description": "Authentication mechanism."
+          },
+          "header_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Header Name",
+            "description": "Header the secret presents under; null if the mechanism does not use one."
+          },
+          "allowed_prefixes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Prefixes",
+            "description": "Absolute HTTPS prefixes this credential's presentation is scoped to."
+          },
+          "owner_app_id": {
+            "type": "integer",
+            "title": "Owner App Id",
+            "description": "The owning application (registry id): the one whose PUT created this name. Rotation and delete are its calls alone; every application of the tenant may read this metadata."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "updated_at",
+          "type",
+          "header_name",
+          "allowed_prefixes",
+          "owner_app_id"
+        ],
+        "title": "SourceCredentialDetail",
+        "description": "Resolve-time shape for a named credential."
+      },
+      "SourceCredential": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Identifier of the credential, tenant-scoped. Nothing about it is derived — the name is caller-chosen and referenced from a manifest by that name alone."
+          },
+          "has_secret": {
+            "type": "boolean",
+            "title": "Has Secret",
+            "description": "Whether a secret is stored under this name.",
+            "default": true
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "Last write, server clock."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "updated_at"
+        ],
+        "title": "SourceCredential",
+        "description": "Masked metadata for one named credential.\n\nThe secret never appears: read paths answer whether one is stored,\nunder which header it would be presented, and where it may be\npresented — never the value."
+      },
+      "Envelope_list_SourceCredential__": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SourceCredential"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[list[SourceCredential]]",
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support."
+      },
+      "CredentialType": {
+        "type": "string",
+        "enum": [
+          "header",
+          "oss_aksk",
+          "basic"
+        ],
+        "title": "CredentialType",
+        "description": "The mechanism that presents this credential's secret.",
+        "x-enum-descriptions": [
+          "The platform presents the secret in an HTTP header (header_name) while fetching — the only implemented mechanism.",
+          "Reserved for a future OSS AK/SK mechanism; refused at write today so the stored type is real from day one.",
+          "Reserved for a future HTTP Basic mechanism; refused at write today so the stored type is real from day one."
+        ],
+        "x-enum-varnames": [
+          "HEADER",
+          "OSS_AKSK",
+          "BASIC"
+        ],
+        "x-enumNames": [
+          "HEADER",
+          "OSS_AKSK",
+          "BASIC"
+        ]
+      },
+      "SourceCredentialWrite": {
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/CredentialType",
+            "description": "Authentication mechanism for presenting the secret. 'header' is the only implemented mechanism; 'oss_aksk' and 'basic' are reserved for future support and are refused at write.",
+            "default": "header"
+          },
+          "header_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Header Name",
+            "description": "Header the secret is presented under, required when type is 'header' (e.g. PRIVATE-TOKEN for a git host token, Authorization for bearer-style tokens)."
+          },
+          "secret": {
+            "type": "string",
+            "title": "Secret",
+            "description": "The secret value itself — stored encrypted, never readable back through the API, never shown in logs or apply reports (only the credential name appears there)."
+          },
+          "allowed_prefixes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Prefixes",
+            "description": "Authorized presentation scopes: absolute HTTPS prefixes this credential may be presented to, matched on whole path segments (https://host/team/content authorizes that tree, not .../team/content-secret). At least one; empty list is a refusal."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "secret",
+          "allowed_prefixes"
+        ],
+        "title": "SourceCredentialWrite",
+        "description": "Register or rotate one named credential.\n\nOne body schema for every mechanism the endpoint will ever carry: the\ndiscriminating key is the authentication mechanism (type), and the\nstorage type is not the source type (git/oss/url is a *source* axis).\nRotation is the same request under the same name — no apply runs and\nthe next fetch uses the new value. Fails (422) when the type is a\nreserved future mechanism or the input is invalid."
       }
     }
   },
@@ -84382,6 +84626,619 @@
         "tags": [
           "org"
         ]
+      }
+    },
+    "/openapi/v1/bots/source-credentials": {
+      "get": {
+        "tags": [
+          "source-credentials"
+        ],
+        "summary": "List Source Credentials",
+        "description": "Every credential in the caller's tenant, masked metadata only.\n\nSorted by name. The response never contains a secret or ciphertext —\nit is the metadata a calling application needs to rotate or reference:\nname, presence, last write.",
+        "operationId": "list_source_credentials_openapi_v1_bots_source_credentials_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_list_SourceCredential__"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — also returned when the resource exists but does not belong to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request failed validation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream service error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi/v1/bots/source-credentials/{name}": {
+      "get": {
+        "tags": [
+          "source-credentials"
+        ],
+        "summary": "Get Source Credential",
+        "description": "One credential by name: masked metadata including its scopes.\n\n404 when no credential is registered under this name in the caller's\ntenant.",
+        "operationId": "get_source_credential_openapi_v1_bots_source_credentials__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Identifier of the credential, tenant-scoped. Nothing about it is derived — the name is caller-chosen and referenced from a manifest by that name alone.",
+              "title": "Name"
+            },
+            "description": "Identifier of the credential, tenant-scoped. Nothing about it is derived — the name is caller-chosen and referenced from a manifest by that name alone."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SourceCredentialDetail_"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — also returned when the resource exists but does not belong to the caller",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with current state",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request failed validation",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream service error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "source-credentials"
+        ],
+        "summary": "Put Source Credential",
+        "description": "Register or rotate the named credential. Takes effect on the next\nfetch that references it — no apply runs, ever.\n\nThe body validates before any persistence: HTTPS-pinned prefixes,\npath-segment scopes, reserved mechanism types refused, and — under a\nfail-closed deployment (production profile) — writes refused entirely\nwhen the platform's master key is not resolvable, so a misconfigured\nkey store surfaces as a loud 503 rather than plaintext tenant secrets\nat rest.\n\nRegistering a free name makes the calling application its owner;\nrotating an existing one is the owner's call alone (403 for any other\napplication of the tenant), because a rotation replaces the whole row\nevery manifest citation of that name depends on.",
+        "operationId": "put_source_credential_openapi_v1_bots_source_credentials__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Identifier of the credential, tenant-scoped. Nothing about it is derived — the name is caller-chosen and referenced from a manifest by that name alone.",
+              "title": "Name"
+            },
+            "description": "Identifier of the credential, tenant-scoped. Nothing about it is derived — the name is caller-chosen and referenced from a manifest by that name alone."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceCredentialWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SourceCredentialDetail_"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — also returned when the resource exists but does not belong to the caller",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with current state",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request failed validation",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream service error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "source-credentials"
+        ],
+        "summary": "Delete Source Credential",
+        "description": "Remove the named credential. Idempotent succeeds on re-delete.\n\nThe delete is the owning application's alone (403 for any other\napplication of the tenant). Manifests referencing the deleted name\nfail their next fetch with the credential's name — removal does not\ntranslate into silent unauthenticated fetches. Storage never guesses\nthe reference graph.",
+        "operationId": "delete_source_credential_openapi_v1_bots_source_credentials__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Identifier of the credential, tenant-scoped. Nothing about it is derived — the name is caller-chosen and referenced from a manifest by that name alone.",
+              "title": "Name"
+            },
+            "description": "Identifier of the credential, tenant-scoped. Nothing about it is derived — the name is caller-chosen and referenced from a manifest by that name alone."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Deleted_"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found — also returned when the resource exists but does not belong to the caller",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicts with current state",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request failed validation",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream service error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporarily unavailable",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

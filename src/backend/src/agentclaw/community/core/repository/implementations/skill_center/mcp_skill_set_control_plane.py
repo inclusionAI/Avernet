@@ -83,29 +83,43 @@ class McpSkillSetControlPlaneCommands:
                 return DesiredStateMutation(self._as_item(row), False, old)
             # R3 covers ANY of the Bot's Sets — the Default included, its
             # members excluded or not.
-            reachable_ids = {
-                int(candidate.id)
-                for candidate in self._bot_sets(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    engine_type=engine_type,
-                    default_engine_types=default_engine_types,
-                )
-            } - {int(row.id)}
-            membership = (
+            bot_sets = self._bot_sets(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
+            reachable_ids = {int(candidate.id) for candidate in bot_sets} - {
+                int(row.id)
+            }
+            memberships = (
                 self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)
                 .filter(
                     SkillSetMCPServer.skill_set_id.in_(reachable_ids),
                     SkillSetMCPServer.server_code == server_code,
                 )
-                .first()
+                .all()
                 if reachable_ids
-                else None
+                else []
+            )
+            # Keep MCP ownership aligned with Skill ownership: an active Set
+            # may have materialized this Installation, which is not Direct
+            # control merely because the Installation row exists.
+            active_set_claim = self._has_active_mcp_set_claim(
+                session,
+                bot_sets=bot_sets,
+                membership_set_ids={int(item.skill_set_id) for item in memberships},
+                server_code=server_code,
+                bot_id=bot_id,
+                owner_id=owner_id,
             )
             require_can_join_set(
-                is_directly_active=server_code in old.mcp_installations,
-                is_in_another_set=membership is not None,
+                is_directly_active=(
+                    server_code in old.mcp_installations
+                    and not active_set_claim
+                ),
+                is_in_another_set=bool(memberships),
             )
             session.add(SkillSetMCPServer(
                 skill_set_id=row.id, server_code=server_code, name=name,

@@ -7,8 +7,8 @@ the raw request body and maps the public response.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
@@ -90,6 +90,59 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         self._device_context_resolver_provider = device_context_resolver_provider
         self._runtime_reconciler = runtime_reconciler
         self._package_validator = package_validator
+
+    async def installed_package_digest(
+        self,
+        *,
+        bot: Mapping[str, Any],
+        bot_id: str,
+        owner_id: str,
+        name: str,
+    ) -> Optional[str]:
+        """The installed package's canonical digest, or ``None`` if absent.
+
+        Reads the bytes actually published under the skill's stable
+        layout-owned locator — the same storage read ``verify``/``copy_to``
+        perform, no locator knowledge of the caller's own — and answers the
+        sha256 of their canonical repack, so a caller holding the same
+        package can ask "is what is installed *this* content?".
+
+        Unreadable is *unknown* (``None``), not *equal*: storage that cannot
+        be read back must not license an unchanged verdict — the caller
+        classes the entry for a full write and the write path restores the
+        package while it is in hand.
+        """
+        import hashlib
+
+        try:
+            _, storage = self._skill_service_factory.local_skill_package_storage(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=self._is_teclaw(bot_id=bot_id, owner_id=owner_id),
+                name=name,
+            )
+            if not await storage.exists():
+                return None
+            files = await storage.read_package_files()
+        except (LocalSkillStorageError, OSError):
+            # A locator that cannot be reached, or a package that cannot be
+            # walked — ``_is_teclaw`` resolves the device context, so its
+            # failure is the same class here: unknown, per the docstring —
+            # never a crash of the caller's apply, and never a silent
+            # "unchanged" either.
+            return None
+        try:
+            canonical = self._package_validator.pack_directory(list(files))
+        except (SkillPackageInvalidError, SkillPackageTooLargeError):
+            # Bytes on disk that no longer form a valid package: the installed
+            # state has drifted from anything this service would publish.
+            # Unknown, not equal — the write path replaces it.
+            return None
+        return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes

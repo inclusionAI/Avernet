@@ -13,9 +13,8 @@ as a change to the mapping itself.
 
 from __future__ import annotations
 
-from fastapi import FastAPI
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.contracts import ERROR_RESPONSES
 
 _ERROR_REF = "#/components/schemas/ErrorEnvelope"
@@ -31,9 +30,7 @@ _DOCUMENTED_DATA_BEARING_ERRORS = {
 
 
 def _schema() -> dict:
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _json_ref(operation: dict, status: str) -> str | None:

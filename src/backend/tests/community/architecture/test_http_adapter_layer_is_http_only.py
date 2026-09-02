@@ -246,6 +246,7 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # module-level functions over a repository handle the router already holds
     # via Injected(...), not service instances.
     "resolve_mcp_identity_modes", "passport_mcp_items_from_codes",
+    "build_passport_resource_scope",
     # Pure functions in core/mcp/services/_defaults that build the passport
     # resource scope (default MCP server codes / default CLI items) from
     # engine-scoped module constants. Read-only helpers, not service instances;

@@ -50,44 +50,51 @@ class TestIsFirstPersonalBot:
         assert svc.is_first_personal_bot("user001") is False
 
 
-class TestApplyRpcTenantBranch:
-    """发证 RPC 按租户分流:默认租户按首个个人 Bot 分,其他租户一律 applyFirst。"""
+class TestApplyRpcSelection:
+    """发证 RPC 只看 ``use_first_passport``,与租户无关。
 
+    This class used to be ``TestApplyRpcTenantBranch`` and asserted the
+    opposite for non-default tenants: they took applyFirst unconditionally
+    (#556). The branch is gone — ``use_first_passport`` is now the only input —
+    so the parametrization keeps both tenants and asserts the *same* answer for
+    each, which is the property that would break if the branch came back.
+    """
+
+    @pytest.mark.parametrize("tenant", ["teamclaw", "tenantB"])
     @pytest.mark.parametrize(
-        "tenant,use_first_passport,expect_first_rpc",
+        "use_first_passport,expect_first_rpc",
         [
-            ("teamclaw", True, True),    # 默认租户首 bot → applyFirst
-            ("teamclaw", False, False),  # 默认租户非首 → applyAgent
-            ("tenantB", True, True),     # 其他租户 → 一律 applyFirst
-            ("tenantB", False, True),    # 其他租户非首 → 仍 applyFirst
+            (True, True),    # 首个 bot → applyFirst(跳过审批)
+            (False, False),  # 非首 → applyAgent(走审批)
         ],
     )
-    def test_rpc_selection(
-        self, tenant, use_first_passport, expect_first_rpc, monkeypatch
-    ):
+    def test_rpc_selection(self, tenant, use_first_passport, expect_first_rpc):
         from agentclaw.community.core.bot_management import create_flow
-        from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
+        from agentclaw.community.utils.avernet_tenant import (
+            DEFAULT_AVERNET_TENANT,
+            avernet_tenant_scope,
+        )
 
-        # 确认 parametrize 行的默认租户与真实常量一致(否则断言无意义)。
+        # 一行是默认租户、一行不是 —— 否则「与租户无关」无从断言。
         assert DEFAULT_AVERNET_TENANT == "teamclaw"
 
-        monkeypatch.setattr(
-            create_flow, "get_current_avernet_tenant", lambda: tenant
-        )
         plugin = MagicMock()
         plugin.apply_first_agent_passport.return_value = {"token": "t"}
         plugin.apply_agent_passport.return_value = {"token": "t"}
 
-        create_flow._apply_passport(
-            plugin,
-            bot_id="20260731_abcd1234",
-            user_id="user001",
-            bot_name=None,
-            spec=MagicMock(),
-            mcp_codes=[],
-            cli_items=[],
-            use_first_passport=use_first_passport,
-        )
+        # A real scope rather than a patched reader: the point is that the
+        # tenant genuinely differs between the two rows and the answer does not.
+        with avernet_tenant_scope(tenant):
+            create_flow._apply_passport(
+                plugin,
+                bot_id="20260731_abcd1234",
+                user_id="user001",
+                bot_name=None,
+                spec=MagicMock(),
+                mcp_codes=[],
+                cli_items=[],
+                use_first_passport=use_first_passport,
+            )
 
         if expect_first_rpc:
             plugin.apply_first_agent_passport.assert_called_once()

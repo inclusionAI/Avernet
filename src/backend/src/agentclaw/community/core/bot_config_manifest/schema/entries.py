@@ -66,7 +66,24 @@ CATEGORY_ENTRY_KEYS: dict[ManifestCategory, frozenset[str]] = {
     ManifestCategory.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
     ManifestCategory.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
     # A registry reference, not a fetch: no source-side field applies.
-    ManifestCategory.MCP: frozenset({"server_code", "config"}),
+    #
+    # ``config`` was here and is deliberately gone. manifest-schema §3.1 defined
+    # it as per-bot configuration "the same shape as the existing MCP config
+    # API" — but that API writes ``ac_user_mcp_config``, keyed
+    # ``(user_id, server_code)``, and its write calls
+    # ``sync_mcp_detail_to_all_bots``. Materialising a declared ``config`` would
+    # therefore make applying ONE bot's manifest change MCP configuration for
+    # EVERY bot its owner has: a blast radius no other category has, and one
+    # §3.2's per-category area rule does not sanction. Its payload is also
+    # ``api_key`` and ``custom_headers``, which design §4.5 forbids a manifest
+    # from carrying at all.
+    #
+    # What is genuinely per-bot is the enabled-server set
+    # (``ac_bot_mcp_installation``) — exactly what §3.2 names as this category's
+    # area, and exactly what apply converges. So a v1 entry is a bare
+    # ``server_code``, and ``config`` is refused by the ``unknown_field`` path
+    # below the same way the retired ``cli_tools.entrypoints`` is.
+    ManifestCategory.MCP: frozenset({"server_code"}),
 }
 
 #: The four mutually exclusive ways an entry can name its content (schema §2).
@@ -428,12 +445,6 @@ def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> No
             "missing_server_code",
             "an mcp entry must name a registry 'server_code'",
         )
-    if "config" in entry and not isinstance(entry["config"], dict):
-        ctx.add(
-            f"{location}.config",
-            "invalid_config",
-            "'config' must be a mapping",
-        )
 
 
 def validate_resource_entry(
@@ -470,6 +481,19 @@ def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> 
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
     form = resolve_source(ctx, location, entry)
     check_unpack(ctx, location, entry, archive_expected=True)
+    if form.form is SourceForm.CONTENT:
+        # A skill is a package — SKILL.md plus the files it names — and a body
+        # of inline text cannot be one. Identity keeps both source forms: an
+        # identity file IS one text body. W1's rule applies to the mismatch:
+        # the surface never accepts a construct nothing can apply, and W5 (the
+        # wave that materialises skills) has no inline form to give it.
+        ctx.add(
+            f"{location}.content",
+            "content_not_a_skill_package",
+            "a skills entry is a package (SKILL.md + the files it names) — "
+            "inline content cannot be one; declare 'source' (or 'from' once "
+            "named sources land)",
+        )
     # A skill contains scripts the agent loads and runs — code, not data — so
     # every non-git form must be pinned. A git ref has a commit SHA doing the
     # same job; a URL without a digest is a blind fetch of the latest at every

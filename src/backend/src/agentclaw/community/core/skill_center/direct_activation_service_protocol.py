@@ -37,3 +37,21 @@ class DirectActivationServiceProtocol(Protocol):
         """The Bot's active MCP server codes — the query twin of the commands
         above, answered by the capability state reader (which flushes first)."""
         ...
+
+    def platform_default_mcp_codes(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> frozenset[str]:
+        """The codes this Bot's engine/template policy owns.
+
+        The query twin of the *refusal* above: ``activate_mcp`` and
+        ``deactivate_mcp`` raise ``SkillSetControlPlaneConflictError`` on exactly
+        these codes, and a caller that wants to know before it starts writing
+        has no other way to ask.
+
+        It exists so a desired-state caller can honour this class's opening rule
+        — direct control is "legal only when no Set or platform Default policy
+        governs the capability" — *before* the first write rather than by
+        catching the conflict from the middle of a loop. Answered from the same
+        policy object the commands consult, so the two answers cannot diverge.
+        """
+        ...

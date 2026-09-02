@@ -5,6 +5,7 @@ SkillSet router for managing capability sets and their skills.
 """
 
 from pathlib import Path
+import time
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 
@@ -67,6 +68,9 @@ from agentclaw.community.core.mcp.services.passport_scope import (
     passport_mcp_items_from_codes,
     resolve_mcp_identity_modes,
 )
+from agentclaw.community.core.mcp.services.cli_passport_scope import (
+    build_passport_resource_scope,
+)
 from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
@@ -87,7 +91,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.plugin_api.device_sync_dispatcher import DeviceSyncDispatcher
-from agentclaw.community.plugin_api.passport import PassportPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin, extract_cli_items
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -99,6 +103,12 @@ _LEGACY_SKILL_SET_BATCH_PARTIAL_CONFLICTS = frozenset(
         "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
     }
 )
+_LEGACY_SKILL_SET_BATCH_ERROR_MESSAGES = {
+    "RESOURCE_DIRECT_ACTIVE": "该 Skill 已单独激活，请先停用后再加入能力集。",
+    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET": (
+        "该 Skill 已由其他能力集管理，不能重复添加。"
+    ),
+}
 
 
 # ==================== Helper Functions ====================
@@ -112,6 +122,20 @@ def _is_legacy_skill_set_batch_partial_failure(error: Exception) -> bool:
         isinstance(error, SkillSetControlPlaneConflictError)
         and str(error) in _LEGACY_SKILL_SET_BATCH_PARTIAL_CONFLICTS
     )
+
+
+def _legacy_skill_set_batch_failure(skill_id: str, error: Exception) -> dict[str, str]:
+    """Preserve the legacy error code while providing display-safe text."""
+    error_code = str(error)
+    return {
+        "skill_id": skill_id,
+        "error": error_code,
+        "error_code": error_code,
+        "message": _LEGACY_SKILL_SET_BATCH_ERROR_MESSAGES.get(
+            error_code,
+            "暂时无法添加该 Skill，请刷新后重试。",
+        ),
+    }
 
 
 def _legacy_actor(ctx: RequestContext, requested_user_id: str | None) -> str:
@@ -812,7 +836,9 @@ async def add_skills_to_set(
         ) as exc:
             if not _is_legacy_skill_set_batch_partial_failure(exc):
                 raise
-            results["failed"].append({"skill_id": skill_id, "error": str(exc)})
+            results["failed"].append(
+                _legacy_skill_set_batch_failure(str(skill_id), exc)
+            )
     if resolved:
         outcomes = await control_plane.add_skills(
             bot_id=effective_bot_id,
@@ -830,7 +856,7 @@ async def add_skills_to_set(
             assert outcome.error is not None
             if _is_legacy_skill_set_batch_partial_failure(outcome.error):
                 results["failed"].append(
-                    {"skill_id": legacy_skill_id, "error": str(outcome.error)}
+                    _legacy_skill_set_batch_failure(legacy_skill_id, outcome.error)
                 )
                 continue
             raise outcome.error
@@ -2039,16 +2065,42 @@ async def remove_cli_from_default_skill_set(
             status_code=400, detail="CLI can only be removed from the default skill set"
         )
 
+    scope_started = time.monotonic()
+    stage = "snapshot"
+    logger.info(
+        "agentpass_default_cli_scope_update_requested bot_id=%s engine_type=%s "
+        "branch=remove_default_cli stage=%s target_cli_code=%s mcp_count=%s cli_count=%s duration_ms=%s",
+        effective_bot_id,
+        effective_engine,
+        stage,
+        resource_code,
+        "unknown",
+        "unknown",
+        0,
+    )
     try:
-        clis = passport_plugin.query_passport_clis(
+        passport = passport_plugin.query_agent_passport(
             effective_bot_id, effective_entity_id
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to query CLI scope") from e
+        clis = extract_cli_items(passport)
+    except Exception as exc:
+        logger.warning(
+            "agentpass_default_cli_scope_update_failed bot_id=%s engine_type=%s "
+            "branch=remove_default_cli stage=%s target_cli_code=%s status=failed "
+            "error_type=%s duration_ms=%s",
+            effective_bot_id,
+            effective_engine,
+            stage,
+            resource_code,
+            type(exc).__name__,
+            int((time.monotonic() - scope_started) * 1000),
+        )
+        raise HTTPException(status_code=500, detail="Failed to query CLI scope") from None
     if not any(cli.get("cli_code") == resource_code for cli in clis):
         raise HTTPException(status_code=404, detail="CLI not found in passport scope")
     remaining = [cli for cli in clis if cli.get("cli_code") != resource_code]
     # 删除 CLI 也是覆盖式更新；先补齐当前 MCP，避免只传 CLI 时覆盖掉 MCP 范围。
+    stage = "collect_mcp"
     try:
         mcp_codes = service.get_bot_mcp_codes(
             entity_id=effective_entity_id,
@@ -2058,20 +2110,26 @@ async def remove_cli_from_default_skill_set(
             engine_type=effective_engine,
         )
         passport_mcp_codes = filter_passport_mcp_codes(mcp_codes)
-    except Exception as e:
+    except Exception as exc:
         logger.warning(
-            "[remove_cli_from_default_skill_set] collect MCP scope failed: bot_id=%s, cli=%s, error=%s",
+            "agentpass_default_cli_scope_update_failed bot_id=%s engine_type=%s "
+            "branch=remove_default_cli stage=%s target_cli_code=%s status=failed "
+            "error_type=%s duration_ms=%s",
             effective_bot_id,
+            effective_engine,
+            stage,
             resource_code,
-            e,
+            type(exc).__name__,
+            int((time.monotonic() - scope_started) * 1000),
         )
         raise HTTPException(
             status_code=500, detail="Failed to collect MCP scope"
-        ) from e
+        ) from None
 
     # 覆盖式更新连 identityMode 一起替换：只传 code 等于把每个 MCP 断言成
     # owner，会静默抹掉 caller 授权。删 CLI 不该动 MCP 身份，所以这里必须
     # 把当前身份原样带上；查不到身份就整体失败，不猜默认值。
+    stage = "build"
     try:
         bot = bot_repo.get_by_id_and_owner(effective_bot_id, effective_entity_id)
         identity_modes = resolve_mcp_identity_modes(
@@ -2080,42 +2138,66 @@ async def remove_cli_from_default_skill_set(
             engine_type=effective_engine,
             bot_id=effective_bot_id,
         )
-        mcp_items = passport_mcp_items_from_codes(
+        desired_mcp_items = passport_mcp_items_from_codes(
             passport_mcp_codes, identity_modes=identity_modes
         )
-    except (McpIdentityUnresolvedError, ValueError) as e:
+        resource_scope = build_passport_resource_scope(
+            passport,
+            desired_mcp_items=desired_mcp_items,
+            mcp_identity_modes=identity_modes,
+            additional_cli_items=remaining,
+            removed_cli_codes={resource_code},
+        )
+    except (McpIdentityUnresolvedError, ValueError) as exc:
         logger.warning(
-            "[remove_cli_from_default_skill_set] resolve MCP identity failed: "
-            "bot_id=%s, cli=%s, error=%s",
+            "agentpass_default_cli_scope_update_failed bot_id=%s engine_type=%s "
+            "branch=remove_default_cli stage=%s target_cli_code=%s status=failed "
+            "error_type=%s duration_ms=%s",
             effective_bot_id,
+            effective_engine,
+            stage,
             resource_code,
-            e,
+            type(exc).__name__,
+            int((time.monotonic() - scope_started) * 1000),
         )
         raise HTTPException(
             status_code=500, detail="Failed to resolve MCP execution identity"
-        ) from e
+        ) from None
 
+    stage = "update"
     try:
         # resource_scope 成套提交 MCP+CLI；不涉及 Skill，Skill 由 AgentPass 侧自行订正。
         passport_plugin.update_passport(
             bot_id=effective_bot_id,
             user_id=effective_entity_id,
-            resource_scope={
-                # mcp_codes 由 mcp_items 派生：unpack_resource_scope 在有
-                # mcp_items 时忽略 mcp_codes，两份独立列表只会悄悄分叉。
-                "mcp_codes": [item["mcp_code"] for item in mcp_items],
-                "mcp_items": mcp_items,
-                "cli_items": remaining,
-            },
+            resource_scope=resource_scope,
         )
-    except Exception as e:
+    except Exception as exc:
         logger.warning(
-            "[remove_cli_from_default_skill_set] updatePassport CLI scope failed: bot_id=%s, cli=%s, error=%s",
+            "agentpass_default_cli_scope_update_failed bot_id=%s engine_type=%s "
+            "branch=remove_default_cli stage=%s target_cli_code=%s status=failed "
+            "error_type=%s duration_ms=%s",
             effective_bot_id,
+            effective_engine,
+            stage,
             resource_code,
-            e,
+            type(exc).__name__,
+            int((time.monotonic() - scope_started) * 1000),
         )
-        raise HTTPException(status_code=500, detail="Failed to update CLI scope") from e
+        raise HTTPException(status_code=500, detail="Failed to update CLI scope") from None
+
+    logger.info(
+        "agentpass_default_cli_scope_update_succeeded bot_id=%s engine_type=%s "
+        "branch=remove_default_cli stage=%s target_cli_code=%s status=succeeded "
+        "mcp_count=%s cli_count=%s duration_ms=%s",
+        effective_bot_id,
+        effective_engine,
+        stage,
+        resource_code,
+        len(resource_scope["mcp_items"]),
+        len(resource_scope["cli_items"]),
+        int((time.monotonic() - scope_started) * 1000),
+    )
 
     return MessageResponse(
         success=True, message="CLI removed from passport scope successfully"

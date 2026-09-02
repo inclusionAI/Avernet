@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use bcs_domain::{
-    ActorStatus, ProviderAuthMode, ProviderBotBinding, ProviderBotConnectionMode,
-    ProviderCoordinationConfig, ProviderOrganizationManagementConfig, ProviderRecord, Skill,
+    ActorKind, ActorStatus, BotCapabilities, ProviderAuthMode, ProviderBotBinding,
+    ProviderBotConnectionMode, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
+    ProviderRecord, Skill,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -97,6 +98,13 @@ pub struct RegisterProviderBotOutcome {
     pub provider_bot_ref: String,
     pub bot_runtime_token: Option<String>,
     pub message: Option<String>,
+    /// `true` 仅当本次实际写入了 bot/binding（非 Gateway 短路）。allowlisted
+    /// provider 据此决定是否 dispatch bcs-fuse 同步。
+    pub created: bool,
+    /// 新建成功时回填的 worker 级 capabilities；短路或读取失败时为 `None`。
+    pub capabilities: Option<BotCapabilities>,
+    /// Provider bot 恒为 `ActorKind::Bot`；与 onboard 路径一致的同步门控字段。
+    pub actor_kind: ActorKind,
 }
 
 #[derive(Debug, Clone)]

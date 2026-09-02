@@ -313,7 +313,6 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         resource_names = {
             "Deployment": deployment_name,
             "ConfigMap": f"envoy-header-rules-{uid}",
-            "NetworkPolicy": f"avernet-agent-netpol-{uid}",
             "container_name": "avernet-agent",
         }
         device = AliyunAckSandbox(
@@ -376,7 +375,6 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             resource_names={
                 "Deployment": deployment_name,
                 "ConfigMap": f"envoy-header-rules-{uid}",
-                "NetworkPolicy": f"avernet-agent-netpol-{uid}",
                 "container_name": container_name,
             },
         )
@@ -395,7 +393,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         token = self._arca_utils._get_proxypass_token(
             paas_device_id, port=port, template_id=template_id, ttl=120
         )
-        url = self._arca_utils.build_proxypass_url(target, norm_path, scheme="wss")
+        url = self._arca_utils.build_proxypass_url(target, norm_path, scheme="ws")
         return WsConnectionInfo(
             ws_url=url,
             token=token,

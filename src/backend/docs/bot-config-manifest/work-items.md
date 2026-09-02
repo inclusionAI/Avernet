@@ -417,12 +417,15 @@ that bounds every other creation path does not apply here either. Innocent
 retries — a user starting creation three times and finishing none — grow the
 table with no ceiling and no reclaim path.
 
-So #1698 is a **precondition for taking this endpoint out from behind the feature
-flag**, not an optional second-phase tidy-up. Either mechanism closes it: expiry
-(a phase-1 manifest unclaimed after N hours is deleted) or terminal-state cleanup
-(delete on `AUTHORIZATION_REJECTED`). Expiry is the one to build, because
-abandonment is the common case and rejection is the rare one. It stays outside
-W13 because it is a small independent job, not because it can wait indefinitely.
+**Superseded by PR #1791 — there is no feature flag, and #1698 no longer gates
+this endpoint.** The reasoning above was right about the hazard and wrong about
+the only available answer. The creation job carries a configurable wall-clock
+deadline (default 10 minutes), which gives every creation a terminal moment; the
+job deletes the manifest **and any startup-script row phase A wrote** whenever a
+creation ends without a bot — declined or expired alike. So the rows this endpoint
+creates are bounded by their own jobs, which is what the flag was standing in for.
+#1698's general sweeper remains worth having for rows no job can account for, but
+it is no longer a precondition for shipping this.
 
 **A fixed constraint, not a design choice: creation always requires a human.**
 The Passport authorization link is an AgentPass limitation, outside our control.
@@ -1252,6 +1255,13 @@ calendar time is the other team's review of the CLI addition.
 
 **Owner.** `totalfrank` · 0.5 d · day 3 · design (§7)
 
+> **Design settled on PR #1791** — see
+> `specs/2026-09-01-create-bot-with-manifest/`. Four things below are superseded
+> by it and are corrected in place: the endpoint is **ARCA-only** (teclaw creation
+> is W8's, see there); a **task-queue job** carries the creation rather than the
+> caller's polling; **applying itself became a task** on every path, replacing
+> W4's daemon thread; and the terminal states name *what* failed. There is no
+> feature flag.
 
 **Goal.** A public, asynchronous API that creates a bot from a manifest plus the
 ordinary creation parameters, so the bot's **first** container already carries its
@@ -1265,7 +1275,18 @@ preflight, take the user through Passport authorization, provision a bot, and
 *then* fail apply — the worst place to discover it, because the bot now exists.
 Either W5 and W6 are dependencies too, or this endpoint's accepted vocabulary is
 gated to what has landed (W1's gating rule). Do not let it accept a category whose
-materialiser is not there · **Blocked by.** —
+materialiser is not there. **Settled: the gate is derived from the materialiser
+registry**, so W5/W6 widen the endpoint by landing rather than by an edit here ·
+**Blocked by.** —
+
+**Engine scope: ARCA only.** This item's whole pre/post-container split exists
+because `BaasService._build_create_bot_payload` reads the startup-script row while
+composing a start command. teclaw has no analogue — `TeclawProvisionService`
+composes a config artifact at provision time — so teclaw creation is **W8's**,
+which already claims it in scope ("apply at bot creation … teclaw before the first
+artifact is assembled") and whose first acceptance criterion is the first-artifact
+guarantee. This endpoint refuses a teclaw engine; **W8 owns lifting that refusal**
+along with the teclaw creation mechanism.
 
 **Why it is its own item rather than part of W1.** W1 is deliberately scoped to
 never touch `create_flow`; that coupling is the one this plan most wants to
@@ -1278,39 +1299,65 @@ and integration with the two-phase Passport flow.
 phase-1 manifest persistence keyed by the allocated `bot_id`; the poll/status
 endpoint and its states; invoking apply as part of creation.
 
-**Out of scope.** Orphan-manifest cleanup (#1698, deferred to a second phase by
-decision — but see §2.11: it gates lifting the feature flag on this endpoint,
-because nothing else bounds phase-1 rows) and creation idempotency (#1697 — a pre-existing gap: `generate_bot_id`
+**Out of scope.** #1698's general orphan sweeper (still worth having, but **no
+longer a gate on this endpoint** — the creation job's deadline bounds the rows it
+writes, and the job deletes its own manifest and startup-script rows when a
+creation ends without a bot) and creation idempotency (#1697 — a pre-existing gap: `generate_bot_id`
 mints the id platform-side with no idempotency key, so a retried create makes a
 second bot regardless of manifests).
 
-**Poll states.** Three terminal states, so a caller's loop stays simple:
+**Poll states.** Addressed by `bot_id` alone — the poll never takes the manifest
+or the creation parameters, and makes no external call.
 
 ```text
 AWAITING_AUTHORIZATION   waiting for the user to follow the Passport link
-        │                (response carries iframe_url / redirect_url)
-        ├──► AUTHORIZATION_REJECTED    terminal
+        │
+        ├──► AUTHORIZATION_REJECTED   terminal — the user declined
+        ├──► AUTHORIZATION_EXPIRED    terminal — Passport expired, or the job's
+        │                             deadline elapsed unclicked
         ▼
 CREATING                 authorized; bot record written, container provisioning
+        ├──► CREATE_FAILED   terminal — no usable bot. Nothing to do with the
+        │                    manifest
         ▼
-APPLYING                 manifest apply running (fetch → materialise → deliver)
-        ├──► READY       terminal — succeeded; response carries the apply report
-        └──► FAILED      terminal — response names which entries failed
+APPLYING                 the post-container apply is running
+        ├──► READY         terminal — bot up, manifest landed
+        └──► APPLY_FAILED  terminal — bot up, part of the manifest did not land
 ```
 
 - **`PARTIAL` means some category was not overwritten** (§3.2 all-or-nothing), so
-  it reports as **`FAILED`**, not `READY`. An earlier revision mapped `PARTIAL` to
+  it reports as a failure, not `READY`. An earlier revision mapped `PARTIAL` to
   `READY` on the grounds that the skips were author-sanctioned; that rested on
-  `on_fetch_failure: skip`, which no longer exists. A category the manifest
-  declared and we did not write is not a success, and the per-entry records say
-  which.
-- `FAILED` is a **manifest-level** terminal state (§2.7). The bot record is not
-  touched — a caller that polls to `FAILED` has a running bot whose manifest did
-  not fully apply, and the per-entry records say exactly which entries were not
-  delivered.
+  `on_fetch_failure: skip`, which no longer exists.
+- **Three failure modes, three answers, none needing prose to tell apart:** an
+  invalid manifest is a `422` at submission with no bot and no state; a bot that
+  could not be created or never came up is `CREATE_FAILED`; a running bot with an
+  incomplete manifest is `APPLY_FAILED`. A single `FAILED` covering the last two
+  was the real source of the "did I get a bot or not?" ambiguity.
+- `APPLY_FAILED` is a **manifest-level** terminal state (§2.7). The bot record is
+  not touched, and the name says so, so the response does not have to argue it.
+  The apply record itself still reads `PARTIAL` — only this poll's one-word
+  summary maps it, and `POST …/config-manifest/apply` on a running bot is
+  unaffected.
 - **`APPLYING` turns D4's interim cost into a visible state.** Post-start delivery
   (§3.4) leaves a window where the bot is ACTIVE but unconfigured; a caller that
   waits for `READY` never observes it. The window stops being an invisible trap.
+- **A `bot_id` this endpoint did not create is a `404`, not a state.** A bot made
+  the ordinary way and given a manifest by `PUT` has a bot record and an apply
+  record and no creation job — which is exactly the shape of `CREATING`, so
+  without the job the poll would report a creation that never happened. The job
+  is found by an idempotency key derived from `(tenant, entity_id, bot_id)`,
+  which also keeps one owner's `bot_id` from finding another's pending
+  authorization URL.
+
+**Operational precondition (PR #1791).** Applying — and therefore creating a bot
+with a manifest — only progresses where `task_queue_worker.enabled=true` and
+`ac_task_queue` is provisioned. That flag gated an optimisation before this item;
+it now gates the feature, and the failure mode is not slowness. With the worker
+off, submission still answers `202` and the poll sits at
+`AWAITING_AUTHORIZATION` until the deadline retires it as
+`AUTHORIZATION_EXPIRED`; an explicit apply still answers `202` and its report
+stays `RUNNING` until the lock's TTL expires. Neither ever completes.
 
 **Done when.**
 
@@ -1344,6 +1391,20 @@ APPLYING                 manifest apply running (fetch → materialise → deliv
       orchestrator has that shape: **phase A** (`script`) runs before
       `_build_create_bot_payload` composes the start command, **phase B**
       (everything else) after the container is up.
+- [ ] **Settled: phase A runs before the bot record is created at all**, not via a
+      hook inside `create_bot`. It needs nothing from the record — the
+      startup-script row is keyed by `(entity_id, bot_id)`, both known at
+      submission, and the placeholder whitelist is exactly `BOT_ENGINE_TYPE`,
+      `BOT_ENV`, `BOT_TENANT`, `BOT_ARCH` (no `BOT_ID`, no `BOT_NAME`). Ordering
+      it ahead of creation makes the guarantee true by construction, and leaves
+      `bot_service.py` untouched.
+- [ ] **Settled: the creation is carried by a durable task-queue job**, not by the
+      caller's polling, with a configurable deadline (default 10 minutes). The job
+      waits for authorization, runs phase A, creates the bot, waits for the
+      container, starts phase B and finishes — it does **not** wait for phase B,
+      because nothing in the platform is blocked on it. A caller who stops polling
+      still gets a configured bot; a caller who never authorizes gets a bounded,
+      terminal expiry.
 - [ ] **`script` is written before the create payload is built**, not with the
       rest of apply. It is the one category that needs no container (§2.12), and
       `_build_create_bot_payload` reads the row while composing the start
@@ -1358,12 +1419,26 @@ solved:
 | Mechanism | Does tenant survive? |
 | --- | --- |
 | A thread spawned during the request | **Yes — already solved.** `threading.Thread(target=bind_current_avernet_tenant(fn), daemon=True)` is the established pattern: `bot_publish_service.py:1267` (`_do_restart`, itself an apply point), `baas_publish_poller.py:57` (`_poll`, the natural home of `CREATING → APPLYING`), `bot_service.py:1979`. The wrapper reads the tenant at **bind** time, inside the request thread, and re-establishes it inside the new thread. Follow the pattern and there is nothing to do |
-| The task queue | **No** — but **not a scenario today**, so this is a note for later rather than a requirement. `core/task_queue`'s model carries `env` and `idempotency_key` but nothing tenant-shaped, and the module has no tenant handling at all. A task is enqueued now and run later by a worker, so no request context remains to capture and `bind_current_avernet_tenant` cannot help; the tenant would have to ride in the task `payload` and be re-scoped in the handler |
+| The task queue | **No, and this is now the live case.** `core/task_queue`'s model carries `env`, `app` and `idempotency_key` but nothing tenant-shaped, and the module has no tenant handling at all. A task is enqueued now and run later by a worker, so no request context remains to capture and `bind_current_avernet_tenant` cannot help. The tenant rides in the task `payload` and the handler opens `avernet_tenant_scope(...)` around its body. **This gets a test, not a comment**, because the failure is silent: `get_current_avernet_tenant()` is a *total* function that returns the **default** tenant outside a request rather than raising, so a handler that drops it does not crash — it quietly reads and writes the manifest tables under the wrong tenant |
 
-Recorded only so that whoever *does* reach for the task queue later knows the
-difference — `skills_pool` already uses it (`skills_pool.reconcile`,
-`skills_pool.quarantine.cleanup`), so it is an easy thing to reach for. **No
-current apply path uses it**, and W13 does not need to solve it.
+**Superseded by PR #1791: every apply path now uses the task queue.** When this
+note was written no apply path did, and W13 was told it need not solve the tenant
+question. It does: W13 puts the creation on a job *and* moves apply execution
+itself off W4's daemon thread onto a task, for all three cases — the
+pre-container phase, the post-container phase, and the explicit apply on a running
+bot. The queue's own README names the daemon-thread pattern as the one it exists
+to replace ("loses work on restart and double-runs across pods"), and creation
+*depends* on an apply completing, so a thread that dies would boot a bot without
+its script. `skills_pool` was the only adopter before this (`skills_pool.reconcile`,
+`skills_pool.quarantine.cleanup`).
+
+Two consequences to carry forward. **The worker becomes load-bearing**: applying,
+and therefore bot creation, only progresses where `task_queue_worker.enabled=true`
+and `ac_task_queue` is provisioned — with the worker off, creations do not run
+slower, they never complete. And **re-runs are safe by convergence, never by
+"retry is off"**: at-least-once is structural, since a crashed worker's task is
+re-claimed once its lease expires whether or not a handler ever asks for a retry;
+safety comes from apply re-planning against current state, plus the apply lock.
 
 A smaller footgun worth knowing: `bind_current_avernet_tenant` *looks* like a
 decorator (it uses `functools.wraps`) but captures the tenant when the wrapping
@@ -1710,8 +1785,17 @@ categories that need no fetching.
 - `POST .../config-manifest/apply`, including `dry_run=true` returning the plan
   without acting.
 - Materialisers for the two no-fetch categories in iteration 1: `mcp` (registry
-  reference → the existing enable + configure service) and `script` (→
-  `BotStartupScriptService`).
+  reference → the existing **per-bot** activation service,
+  `DirectActivationService`, converging the enabled-server set that §3.2 names as
+  this category's area) and `script` (→ `BotStartupScriptService`).
+  **`mcp[].config` is removed from schema v1** (W4 review; see manifest-schema
+  §3.1). It was defined as per-bot configuration "the same shape as the existing
+  MCP config API", and those two halves cannot both be true: that API writes
+  `ac_user_mcp_config`, keyed `(user_id, server_code)`, and its write calls
+  `sync_mcp_detail_to_all_bots` — **fanning out to every bot the owner has**. Its
+  payload is also `api_key` and `custom_headers`, which design §4.5 keeps out of
+  a manifest. Account-scoped configuration stays on the existing
+  `/openapi/v1/bots/mcp/servers/{server_code}/config`.
 
 **Out of scope.** Fetching. Lifecycle triggers (W8) — explicit apply is the only
 entry point in this item. **`engine_config` is out of iteration 1** by the X2/T3
@@ -1939,6 +2023,17 @@ directory-level ownership semantics; teclaw per-file expansion.
 
 **Owner.** `lucas-xzp` · 0.25 d · day 4 · build (§7)
 
+> **✅ Delivered (2026-09-02).** Named sources and git sources are in:
+> subprocess git CLI shallow single-ref fetch (W2's refusal semantics and
+> caps, containment checks before W11), `from`/`sources` resolution in
+> `EntryFetcher.fetch_declared`, the per-apply `SourceSession` (one
+> `{git, ref}` fetch reused), `SourceResolution` in the apply report, and
+> strict baselines read back from the last apply's report. v1 narrowing:
+> git sources take no `digest` (pin by writing the commit SHA as the
+> source's ref); `resources` entries still accept URL sources only —
+> wiring W6's materialiser to the git road is follow-up work (W6 merged
+> before W7 and carries no git consumption).
+
 
 **Goal.** One `ref` change resolves a whole configuration to one commit, and
 content hosted in the company's git service is a first-class source.
@@ -2046,7 +2141,24 @@ manifest level, so there is no de-activation for W8 to place.)
 **Done when.**
 
 - [ ] On teclaw, the **first** artifact already contains the manifest result.
-- [ ] Bots created through W13 get their manifest applied inside creation, so
+- [ ] **teclaw creation belongs to this item, including lifting W13's refusal.**
+      W13 shipped **ARCA-only** (PR #1791): its pre/post-container split exists
+      because `_build_create_bot_payload` reads the startup-script row while
+      composing a start command, and teclaw has no analogue — it composes a config
+      artifact at provision time, which is this item's first criterion above. So
+      W13's creation endpoint refuses a teclaw engine, and **this item owns
+      removing that refusal** and giving the creation job a teclaw-shaped
+      sequence, alongside the artifact work. The endpoint, the job and the poll
+      all exist by then; what is missing is the engine gate and a different step
+      order. Without this bullet the piece falls between the two items, because
+      the criterion below assumes W13 covered creation for both engine families.
+      *Worth checking early:* the teclaw artifact is produced as a snapshot of
+      platform state, so materialising a manifest into platform state **before**
+      `provision()` would make the first artifact carry it with no artifact-side
+      work — but today's `ON_CONTAINER` materialisers resolve a device and raise if
+      unbound, so that may land on W5/W6's materialiser design rather than here.
+- [ ] Bots created through W13 — **on ARCA** — get their manifest applied inside
+      creation, so
       this item covers the *other* apply points — republish and rebuild-restart —
       plus making a `PUT` effective per §2.6.
 - [ ] **The ACTIVE-but-unconfigured window is accepted, not gated.** An earlier
@@ -2306,7 +2418,9 @@ verify.
 
 **W13 is what actually delivers "a bot comes up configured on its very first
 boot."** W8 covers every *other* apply point; W13 covers creation, which is the
-one the business asked for. It needs W1 and W4 and nothing external.
+one the business asked for. It needs W1 and W4 and nothing external. **One scope
+qualifier (PR #1791): W13 covers ARCA creation only; teclaw creation goes through
+artifact assembly and belongs to W8.**
 
 **Why lifecycle wiring is last.** Explicit `POST .../apply` exercises the whole
 engine from W4 onward, so W8 touches the create and publish flows only after the

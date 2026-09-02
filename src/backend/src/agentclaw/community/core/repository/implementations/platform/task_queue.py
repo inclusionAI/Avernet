@@ -24,7 +24,8 @@ UPDATE``. The same CAS shape guards ``complete`` / ``reschedule`` / ``fail`` on
 **App scoping.** The table is shared with a second, independently deployed
 backend, so every row names its owning ``app`` and every statement that *selects
 work* matches it: the claim scan and its CAS, the deadline retirement inside that
-scan, the enqueue dedup lookups, and ``list_by_status``. Callers pass ``app``
+scan, the enqueue dedup lookups, ``list_by_status`` and
+``find_by_idempotency_key``. Callers pass ``app``
 alongside ``env`` and take both from deployment config, never from a per-call
 argument. Without it each fleet claims the other's rows and fails them for a
 ``task_type`` its registry never saw. ``get_by_id`` is deliberately unscoped —
@@ -783,6 +784,33 @@ class TaskQueueRepository(
             row = (
                 db.query(self.Model)
                 .filter(self.Model.id == task_id)
+                .first()
+            )
+            return row.to_record() if row else None
+
+    def find_by_idempotency_key(
+        self, *, task_type: str, idempotency_key: str, env: str, app: str
+    ) -> Optional[TaskRecord]:
+        # Live first, through the unique index; see the protocol docstring for
+        # why that ordering is the point rather than an optimisation.
+        live = self._find_active_by_key(
+            env=env, app=app, task_type=task_type, idempotency_key=idempotency_key
+        )
+        if live is not None:
+            return live
+        # The audit column. Ordered by id rather than by a timestamp: ids are
+        # monotonic per row and need no tie-break, while two rows enqueued in
+        # the same second share a ``gmt_create``.
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.env == env,
+                    self.Model.app == app,
+                    self.Model.task_type == task_type,
+                    self.Model.idempotency_key == idempotency_key,
+                )
+                .order_by(self.Model.id.desc())
                 .first()
             )
             return row.to_record() if row else None

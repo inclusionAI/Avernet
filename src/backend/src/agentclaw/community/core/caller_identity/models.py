@@ -85,4 +85,47 @@ class BotMcpCallConfigModel(Base):
 register_avernet_tenant_guard(BotMcpCallConfigModel)
 
 
-__all__ = ["BotMcpCallConfigModel", "McpCallType"]
+class BotCliCallConfigModel(Base):
+    """Sparse CLI Caller overrides; an Owner CLI has no row."""
+
+    __tablename__ = "ac_bot_cli_call_config"
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    bot_pk = Column(BigInteger, nullable=False, comment="ac_bots.id")
+    cli_code = Column(String(256), nullable=False)
+    engine_type = Column(String(64), nullable=False)
+    call_type = Column(String(16), nullable=False)
+    modifier_id = Column(String(1024), nullable=False)
+    revision = Column(BigInteger, nullable=False, default=1)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "bot_pk",
+            "cli_code",
+            "engine_type",
+            "env",
+            name="uk_bot_cli_call_config_scope",
+        ),
+        Index(
+            "idx_bot_cli_call_config_scope",
+            "bot_pk",
+            "engine_type",
+            "env",
+            "call_type",
+        ),
+    )
+
+
+register_avernet_tenant_guard(BotCliCallConfigModel)
+
+
+__all__ = ["BotCliCallConfigModel", "BotMcpCallConfigModel", "McpCallType"]

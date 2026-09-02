@@ -391,9 +391,7 @@ class BotRunAbortSurface(Protocol):
     bot 共享同一 ``session_id`` 时，仅取消目标 bot 的 RUNNING run，不影响其它 bot。
     """
 
-    async def abort_runs_by_session(
-        self, session_id: str, bot_id: str
-    ) -> AbortOutcome:
+    async def abort_runs_by_session(self, session_id: str, bot_id: str) -> AbortOutcome:
         """取消目标 bot 在该 session 下所有 RUNNING 的 run。
 
         维度收窄到 ``(bot_id, session_id)``，PENDING 不动（由 ``_timeout_scan_once``

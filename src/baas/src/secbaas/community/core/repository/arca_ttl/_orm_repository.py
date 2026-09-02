@@ -43,7 +43,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         The SET clauses mirror the enterprise ON DUPLICATE KEY UPDATE
         semantics item for item: ``sandbox_id = VALUES(sandbox_id),
         next_renew_at = VALUES(next_renew_at), status = 'ACTIVE',
-        renew_fail_count = 0, gmt_modified = NOW()``.
+        renew_fail_count = 0, stop_reason = NULL, gmt_modified = NOW()``.
 
         Dialect upserts do NOT apply ``Column.onupdate``, so
         ``gmt_modified`` must be set explicitly in both branches
@@ -60,6 +60,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     "status": "ACTIVE",
                     "renew_fail_count": 0,
                     "gmt_modified": func.now(),
+                    "stop_reason": None,
                 },
             )
         stmt = mysql_insert(TtlRenewalScheduleModel).values(**values)
@@ -69,6 +70,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
             status="ACTIVE",
             renew_fail_count=0,
             gmt_modified=func.now(),
+            stop_reason=literal(None),
         )
 
     def _json_unquote(self, col, path: str):
@@ -84,6 +86,107 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         if self._session.bind.dialect.name == "sqlite":
             return expr
         return func.json_unquote(expr)
+
+    def _count_hot_with_cold(
+        self,
+        env: str,
+        hot_side: str,
+        *,
+        cold_status: str | None = None,
+    ) -> int:
+        """Count hot-table ACTIVE ARCA rows for one side joined to a
+        matching cold schedule row.
+
+        The INNER JOIN expresses the covered predicate: a hot row with no
+        matching cold row falls out of the join. ``uk_source`` guarantees
+        at most one cold row per (env, source_table, source_id) hot row,
+        so no fan-out can inflate the count (the same reasoning the
+        anti-join null-test relies on). ``cold_status`` restricts the
+        covering cold row's status (the suppressed-terminal variant);
+        None means any-status coverage.
+        """
+        if hot_side == "baas_device":
+            join_cond = and_(
+                TtlRenewalScheduleModel.source_table == "baas_device",
+                TtlRenewalScheduleModel.source_id == DeviceModel.id,
+                TtlRenewalScheduleModel.env == env,
+                TtlRenewalScheduleModel.sandbox_id == DeviceModel.provider_device_id,
+            )
+            if cold_status is not None:
+                join_cond = and_(
+                    join_cond, TtlRenewalScheduleModel.status == cold_status
+                )
+            stmt = (
+                select(func.count())
+                .select_from(DeviceModel)
+                .join(TtlRenewalScheduleModel, join_cond)
+                .where(
+                    DeviceModel.provider_type == "ARCA",
+                    DeviceModel.status == "ACTIVE",
+                    DeviceModel.is_deleted == 0,
+                    DeviceModel.env == env,
+                    DeviceModel.provider_device_id.isnot(None),
+                )
+            )
+        elif hot_side == "ac_entity_device_binding":
+            binding_sandbox = self._json_unquote(
+                DeviceBindingModel.device_props, "$.sandbox_id"
+            )
+            join_cond = and_(
+                TtlRenewalScheduleModel.source_table == "ac_entity_device_binding",
+                TtlRenewalScheduleModel.source_id == DeviceBindingModel.id,
+                TtlRenewalScheduleModel.env == env,
+                TtlRenewalScheduleModel.sandbox_id == binding_sandbox,
+            )
+            if cold_status is not None:
+                join_cond = and_(
+                    join_cond, TtlRenewalScheduleModel.status == cold_status
+                )
+            stmt = (
+                select(func.count())
+                .select_from(DeviceBindingModel)
+                .join(TtlRenewalScheduleModel, join_cond)
+                .where(
+                    DeviceBindingModel.device_provider.in_(("arca", "ARCA")),
+                    DeviceBindingModel.status == "ACTIVE",
+                    DeviceBindingModel.env == env,
+                    self._json_unquote(
+                        DeviceBindingModel.device_props, "$.sandbox_id"
+                    ).isnot(None),
+                )
+            )
+        else:
+            raise ValueError(f"Unsupported hot_side: {hot_side}")
+        return self._session.execute(stmt).scalar()
+
+    def _hot_row_exists(
+        self,
+        env: str,
+        source_table: str,
+        source_id: int,
+    ) -> bool:
+        """Whether a renewably-alive hot row exists for the schedule source.
+
+        Mirrors list_due_for_renewal's JOIN conditions per side: the
+        device side requires is_deleted == 0 (a soft-deleted device reads
+        as absent); the binding side carries no is_deleted filter because
+        production ac_entity_device_binding has no such column (D-16').
+        Both sides are env-scoped.
+        """
+        if source_table == "baas_device":
+            stmt = select(DeviceModel.id).where(
+                DeviceModel.id == source_id,
+                DeviceModel.env == env,
+                DeviceModel.is_deleted == 0,
+            )
+        elif source_table == "ac_entity_device_binding":
+            stmt = select(DeviceBindingModel.id).where(
+                DeviceBindingModel.id == source_id,
+                DeviceBindingModel.env == env,
+            )
+        else:
+            raise ValueError(f"Unsupported source_table: {source_table}")
+        return self._session.execute(stmt).scalar() is not None
 
     @with_orm_session
     def register(
@@ -410,10 +513,21 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
           - "ac_entity_device_binding" -> anti-join against
             ac_entity_device_binding
 
-        The ON clause also matches s.sandbox_id against the hot row's
-        current sandbox, so a stale ACTIVE cold row for an OLD sandbox
-        (after a destroy+create swap) no longer suppresses the hot row,
-        while a matching ACTIVE row still suppresses it. Both sides are
+        The ON clause deliberately omits cold-table status (existence
+        semantics per D-85-AJ1): any cold-table row — ACTIVE or STOPPED —
+        matching (env, source_table, source_id, sandbox_id) suppresses the
+        hot row, so threshold-STOPPED is terminal for the matched sandbox.
+        Revival channels are per side: the device side (baas_device) has
+        the lifecycle register() upsert (restart / destroy+create);
+        ac_entity_device_binding cold rows have NO lifecycle writer — their
+        only automatic revival is via the device-side baas_device row for
+        the same container, and a binding row whose device row also went
+        terminal recovers via a new binding record id (re-bind) or a
+        device-side restart. As a shared safety net, discovery recovers a
+        stale cold row for an OLD sandbox after a swap, which this ON
+        clause still permits: it matches s.sandbox_id against the hot row's
+        current sandbox, so a stale cold row for an OLD sandbox (after a
+        destroy+create swap) does NOT suppress the hot row. Both sides are
         env-scoped.
 
         Note: the binding side carries no is_deleted filter — production
@@ -455,7 +569,11 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                     and_(
                         TtlRenewalScheduleModel.source_table == "baas_device",
                         TtlRenewalScheduleModel.source_id == DeviceModel.id,
-                        TtlRenewalScheduleModel.status == "ACTIVE",
+                        # D-85-AJ1: status term deliberately absent — ANY
+                        # cold-table row (ACTIVE or STOPPED) on this sandbox
+                        # suppresses the hot row, making threshold-STOPPED
+                        # terminal; the sandbox equality stays so destroy+create
+                        # swaps remain discoverable at the anti-join level.
                         TtlRenewalScheduleModel.env == env,
                         TtlRenewalScheduleModel.sandbox_id
                         == DeviceModel.provider_device_id,
@@ -500,7 +618,6 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                         TtlRenewalScheduleModel.source_table
                         == "ac_entity_device_binding",
                         TtlRenewalScheduleModel.source_id == DeviceBindingModel.id,
-                        TtlRenewalScheduleModel.status == "ACTIVE",
                         TtlRenewalScheduleModel.env == env,
                         TtlRenewalScheduleModel.sandbox_id == binding_sandbox,
                     ),
@@ -532,19 +649,32 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         source_table: str,
         source_id: int,
         status: str,
+        stop_reason: str | None = None,
     ) -> None:
         """Update the status of a schedule record.
+
+        A STOPPED write may stamp its origin via ``stop_reason``
+        (vocabulary: lifecycle | orphan | threshold_gone |
+        threshold_expired). The column is only added to the UPDATE when a
+        reason is provided — a bare None would render a stop_reason = NULL
+        bind on both dialects — so the legacy no-reason call shape renders
+        byte-identical SQL.
 
         Called from stop / destroy hooks to mark STOPPED, and from the
         scheduler for orphan cleanup or max-fail threshold.
         """
         log.info(
-            "set_status: env=%s, source_table=%s, source_id=%s, status=%s",
+            "set_status: env=%s, source_table=%s, source_id=%s, status=%s, "
+            "stop_reason=%s",
             env,
             source_table,
             source_id,
             status,
+            stop_reason,
         )
+        values: dict = {"status": status, "gmt_modified": func.now()}
+        if stop_reason is not None:
+            values["stop_reason"] = stop_reason
         stmt = (
             update(TtlRenewalScheduleModel)
             .where(
@@ -552,7 +682,7 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
                 TtlRenewalScheduleModel.source_table == source_table,
                 TtlRenewalScheduleModel.source_id == source_id,
             )
-            .values(status=status, gmt_modified=func.now())
+            .values(**values)
         )
         self._session.execute(stmt)
         log.info("[arca_ttl:set_status] result: done")
@@ -605,4 +735,67 @@ class OrmTtlRenewalScheduleRepository(OrmConnectionMixin, TtlRenewalScheduleRepo
         )
         result = self._session.execute(stmt).scalar()
         log.info("[arca_ttl:count_hot_arca_bindings] result: %s", result)
+        return result
+
+    @with_orm_session
+    def count_hot_covered(self, env: str) -> int:
+        """Count hot-table ARCA rows covered by ANY cold schedule row
+        (ACTIVE or STOPPED), both source tables (WR-01 gap semantics).
+
+        An INNER JOIN expresses the covered predicate: a hot row with no
+        matching cold row — whatever the cold status — falls out of the
+        join. This is the coverage numerator for the status-aware gap
+        (gap = hot - covered), so terminal STOPPED rows keep covering
+        their hot rows instead of latching the gap. Env-scoped on both
+        sides of the join.
+        """
+        log.info("count_hot_covered: env=%s", env)
+        result = self._count_hot_with_cold(
+            env, "baas_device"
+        ) + self._count_hot_with_cold(env, "ac_entity_device_binding")
+        log.info("[arca_ttl:count_hot_covered] result: %s", result)
+        return result
+
+    @with_orm_session
+    def count_suppressed_terminal(self, env: str) -> int:
+        """Count hot-table ACTIVE ARCA rows covered by a STOPPED cold row,
+        both source tables (R3 suppressed-but-hot-ACTIVE population).
+
+        The cold-status-restricted variant of count_hot_covered — the
+        standalone alertable counter for hot rows whose renewal was
+        terminal-suppressed. Env-scoped on both sides; the binding side
+        carries no is_deleted filter (D-16').
+        """
+        log.info("count_suppressed_terminal: env=%s", env)
+        result = self._count_hot_with_cold(
+            env, "baas_device", cold_status="STOPPED"
+        ) + self._count_hot_with_cold(
+            env, "ac_entity_device_binding", cold_status="STOPPED"
+        )
+        log.info("[arca_ttl:count_suppressed_terminal] result: %s", result)
+        return result
+
+    @with_orm_session
+    def hot_row_exists(
+        self,
+        env: str,
+        source_table: str,
+        source_id: int,
+    ) -> bool:
+        """Whether a renewably-alive hot row exists for the schedule
+        source (WR-02 orphan recheck probe).
+
+        Mirrors list_due_for_renewal's JOIN conditions: the device side
+        requires is_deleted == 0 so a soft-deleted device reads as
+        absent; the binding side has no is_deleted filter (D-16').
+        Env-scoped on the hot row.
+        """
+        log.info(
+            "hot_row_exists: env=%s, source_table=%s, source_id=%s",
+            env,
+            source_table,
+            source_id,
+        )
+        result = self._hot_row_exists(env, source_table, source_id)
+        log.info("[arca_ttl:hot_row_exists] result: %s", result)
         return result

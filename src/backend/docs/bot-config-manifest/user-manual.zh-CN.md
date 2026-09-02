@@ -115,15 +115,14 @@ manifest:
 **第 3 步：点开返回的 Passport 授权链接。**每个 bot 一次，这是 AgentPass 的
 固有限制，不是本特性引入的（所以「一份清单批量创建 N 个 bot」= N 次点击）。
 
-**第 4 步：轮询到终态**（状态机见 §4.5）。`READY` 与 `FAILED` **都**带 apply
-报告，逐条告诉你哪些条目下发了、哪些没有。
+**第 4 步：轮询到终态**（状态机见 §4.5）。`READY` 与 `APPLY_FAILED` **都**带
+apply 报告和 `bot`，逐条告诉你哪些条目下发了、哪些没有——`APPLY_FAILED` 意味着
+**bot 在跑**，只是配置缺了一块。拿不到 bot 的失败叫 `CREATE_FAILED`，是另一件事。
 
 **第 5 步：以后要改**，不必重建 bot——改清单 `PUT` 上去即可，走路径 B 的第 3
 步起，**立即生效、不需要重启**。
 
-> **端点路径以实现为准**（附录 B）。**如果这个创建接口还没对你开放**：先用你
-> 今天建 bot 的方式把 bot 建出来，再走路径 B——差别只有首启那一次不带配置，
-> `PUT` 之后立即收敛到声明的状态。
+> **端点路径以实现为准**（附录 B）。
 
 ### 2.3 路径 B：已经有 bot
 
@@ -162,13 +161,25 @@ GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply
 ### 2.4 想手工触发一次 / 先看看会发生什么
 
 ```text
-POST /openapi/v1/bots/{bot_id}/config-manifest/apply
-POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true   ← 只返回计划，不动手
+POST /openapi/v1/bots/{bot_id}/config-manifest/apply              ← 202 + apply_id，后台执行
+POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true ← 同步返回计划，不动手
+GET  /openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id} ← 轮询这一次
+GET  /openapi/v1/bots/{bot_id}/config-manifest/last-apply         ← 最近一次
 ```
 
-`dry_run` 什么都不写，连报告都不写。**上线前先 dry_run** 是推荐动作，尤其是第一次
-声明 `skills` 或 `resources` 的时候（原因见 §8）。两者都需要 bot 已存在——**路径 A
-的人在创建请求里就完成了同样的校验**（第 2 步）。
+**apply 不阻塞。**它立刻返回 `202` 和一个 `apply_id`，真正的下发在后台进行——因为
+apply 要写设备，将来（W5）还要走网络取源，让调用方举着一条 HTTP 连接等它是不行的。
+拿 `apply_id` 去轮询；`result` 在做完之前是 `RUNNING`，之后才是
+`SUCCEEDED` / `PARTIAL` / `FAILED`。丢了 id 也不要紧，`last-apply` 给你最近的一次。
+
+**能立刻回答的都立刻回答，而且在发 id 之前**：这个 bot 已经有 apply 在跑 → `409`；
+存下来的文档对这个 bot 已经不合法（比如引擎换了）→ `422`。**你永远不会拿到一个
+「其实没跑起来」的 id。**
+
+`dry_run` 是**同步**的，计划直接在响应体里——一个要靠轮询才知道结果的预览不叫预览。
+它什么都不写，连报告行都不写，所以也不发 `apply_id`、不出现在历史里。**上线前先
+dry_run** 是推荐动作，尤其是第一次声明 `skills` 或 `resources` 的时候（原因见 §8）。
+这几个都需要 bot 已存在——**路径 A 的人在创建请求里就完成了同样的校验**（第 2 步）。
 
 ---
 
@@ -283,7 +294,7 @@ team/content.git   ← tag: v1.2.0
 一次注册、所有 bot 的所有清单都能引用。
 
 ```text
-PUT /openapi/v1/source-credentials/corp-git-content
+PUT /openapi/v1/bots/source-credentials/corp-git-content
 {
   "type": "header",
   "header_name": "Authorization",
@@ -411,6 +422,10 @@ POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true
 替代品**：创建请求会在申请授权之前对清单跑同一套校验（§4.5），写错不会浪费一次
 授权；只是「取源会取到什么」要等创建流程里的那次 apply 才知道，看它返回的报告。
 
+**dry_run 是同步的**，和真正的 apply 不一样：计划就在响应体里，不需要轮询。它也
+不写任何东西——不改配置，也不写 apply 记录，所以不发 `apply_id`、不出现在
+`last-apply` 里。
+
 ### 4.5 路径 A：用清单创建 bot（还没有 bot 时）
 
 只靠 `PUT` 补不上一个洞：bot 还不存在时，你没法往 `/bots/{bot_id}/config-manifest`
@@ -423,30 +438,47 @@ POST /openapi/v1/bots/{bot_id}/config-manifest/apply?dry_run=true
 ```text
 AWAITING_AUTHORIZATION   等用户点开 Passport 授权链接
         │                （响应携带 iframe_url / redirect_url）
-        ├──► AUTHORIZATION_REJECTED    终态
+        ├──► AUTHORIZATION_REJECTED   终态——用户拒绝了
+        ├──► AUTHORIZATION_EXPIRED    终态——窗口内没人点（默认 10 分钟）
         ▼
 CREATING                 已授权；bot 记录已写入，容器正在开通
+        ├──► CREATE_FAILED   终态——**没拿到可用的 bot**，与清单无关
         ▼
 APPLYING                 清单 apply 进行中（取源 → 物化 → 下发）
-        ├──► READY       终态——成功，响应携带 apply 报告
-        └──► FAILED      终态——响应指明哪些条目失败
+        ├──► READY          终态——bot 起来了，清单完整生效
+        └──► APPLY_FAILED   终态——**bot 起来了**，部分配置没下发
 ```
+
+**这套状态词表只出现在轮询响应里**：提交那一次的响应只给 `bot_id` 和授权链接，
+不带任何状态——刚提交的创建按定义就是「等授权」，一个能装下终态的字段只会诱导
+调用方去判断一个不可能出现的值。
 
 用之前先知道这几件事：
 
+- **三种失败是分开的，不用读文案就能分辨**：清单不合法 = 提交时 `422`（连
+  `bot_id` 都没有）；`CREATE_FAILED` = **没有可用的 bot**；`APPLY_FAILED` =
+  **bot 正在运行**，只是配置缺了一块。别把后两个当成一件事。
+- **`APPLY_FAILED` 不需要重建 bot**：bot 记录从头到尾没被触碰，响应里**带着
+  `bot`**，改完清单 `POST …/apply` 收敛即可。
+- **某个类目没被覆盖（`PARTIAL`）汇报为 `APPLY_FAILED`，不是 `READY`。**按 §3.3
+  的类目覆盖语义，一个半途失败的类目可能已经**删掉**了旧条目却没写进新的——这是
+  要处理的状态，不是带脚注的成功。
 - **清单在申请 Passport 之前就被校验**——不会让你点完授权才被告知清单写错了。
-- **被校验的清单就是被应用的清单**：它在第一段落库，轮询时不重新提交。
-- **`FAILED` 是 manifest 层的终态**：bot 记录不被触碰。轮到 `FAILED` 说明你拿到
-  的是一个**正在运行、但清单没完整生效**的 bot，逐条记录说明是哪些条目。
-- **某个类目没被覆盖（`PARTIAL`）汇报为 `FAILED`，不是 `READY`。**声明了却没写
-  进去的类目不算成功。
+- **提交时比 `PUT` 多一条拒绝**：本期没有物化器的类目（如 `resources`）在这里**被
+  拒**，而不是像 `PUT` 那样先存着。原因是这条路径上「先接受」的代价是一次授权、
+  一个已创建的 bot，然后才失败。
+- **被校验的清单就是被应用的清单**：它在第一段落库，轮询时不重新提交——轮询端点
+  不接受清单，也不接受任何创建参数。
+- **轮询是纯读**：它不查 AgentPass、不触发任何工作、不写任何东西。轮得快一点不会
+  让创建变快，停止轮询也不会让创建停下。
+- **超时会自己收尾**：窗口过了没人授权，创建转 `AUTHORIZATION_EXPIRED`，落库的
+  清单和已经写下的启动脚本行一并删掉——不会留下一份挂在永远不会存在的 `bot_id`
+  上的清单。
 - **创建永远需要人点一次授权链接**，这是 AgentPass 的限制，不在平台控制范围内。
   所以「用一份清单批量创建 N 个 bot」是 N 次点击——不要按相反的假设做方案。把
   **一份清单应用到多个已有 bot** 则完全不涉及授权。
 
-> **端点路径以实现为准**（附录 B）。**如果这个接口还没对你开放**：先用你今天
-> 建 bot 的方式把 bot 建出来，再走 §4.6 的 `PUT`——差别只有首启那一次不带配置，
-> `PUT` 之后立即收敛到声明的状态。
+> **端点路径以实现为准**（附录 B）。
 
 对照表：
 
@@ -495,10 +527,18 @@ APPLYING                 清单 apply 进行中（取源 → 物化 → 下发�
 | `sources[].resolved_sha` | **「这批 bot 线上跑的到底是哪一版内容」**——声明的 `ref` 与解析出的 commit 都记着 |
 | `entries[].action` | 逐条：`created` / `updated` / `unchanged` / `skipped` / `failed` |
 | `entries[].error` | 这一条为什么没成 |
-| `result` | 从逐条结果推导出来的摘要，**给人看的**——没有任何东西读它然后据此行动 |
+| `result` | `RUNNING` 表示还在做；三个终态是从逐条结果推导出来的摘要，**给人看的**——没有任何东西读它然后据此行动 |
+| `categories[].removed` | **覆盖删掉了什么。**它不在 `entries` 里，因为被删的东西根本没有对应的声明条目 |
+
+**`result` 的四个值**：`RUNNING` 是「还没做完」——apply 是启动式的，所以轮询时先
+看到它；然后才是 `SUCCEEDED` / `PARTIAL` / `FAILED`。
 
 **`skipped` 的含义**：「因为所在类目被中止（§3.4）而没写」。它不再来自任何你能
-声明的策略。
+声明的策略。同一个类目里，**把类目搞挂的那一条记 `failed`，其余无辜的记
+`skipped`**——这样你一眼能看出该去改哪一行。
+
+**`note` 字段**：给成功条目用的、你本来得自己推断的事实。今天只有一处：`script`
+用它说明什么时候真正执行（见 §5.5）。
 
 **两条要记住的边界**：
 
@@ -634,15 +674,21 @@ resources:
 
 ```yaml
 mcp:
-  - server_code: mcp.ant.homistudio.meetmcp
-    config: { … }                # 可选，per-bot 配置，形状同现有 MCP config API
+  - server_code: mcp.ant.homistudio.meetmcp   # 就这一个字段
 ```
 
 - **只接受平台 MCP 注册表引用**，不接受任意 URL。
-- **凭证永不进清单**：需要 `api_key` 的 server，配置照旧走现有统一配置存储。必需
-  配置缺失时该条目记 `failed` 并给出明确错误（「server X 需要先配置 api_key」）。
-- apply = 校验注册表存在 + 租户有权限（复用现有权限检查）→ 确保它在这个 bot 的
-  MCP 集合里。
+- **一个条目只有 `server_code`。**早先的草案有一个可选的 `config`，已经删掉并在
+  写入时按名拒绝：它被定义成「per-bot 配置，形状同现有 MCP config API」，而那个
+  API 是**账号级**的（键 `(user_id, server_code)`，写入还会扇出到你名下所有
+  bot），装的又正好是 `api_key` / headers 这类凭证。详见
+  `manifest-schema.zh-CN.md` §3.1。
+- **凭证永不进清单**：需要 `api_key` 的 server，配置照旧走现有统一配置存储——
+  `GET`/`PUT /openapi/v1/bots/mcp/servers/{server_code}/config`，它本来就是账号级的。
+  必需配置缺失时该条目记 `failed` 并给出明确错误。
+- apply = 校验注册表存在 + 租户有权限（复用现有权限检查）→ **把这个 bot 的已启用
+  server 集合收敛到声明**：声明了没启用的启用，启用了不再声明的**停用**（包括你
+  在界面上手工开的），已经一致的记 `unchanged`。
 
 ### 5.5 `script` — 命令式长尾（仅 ARCA 系）
 
@@ -673,8 +719,16 @@ script:
 2. ⚠️ **第一期：`script` 不得依赖同一份清单声明的任何内容。**脚本是被烤进启动
    命令的，而 identity / skills / resources 在容器**起来之后**才下发——所以**首启
    时脚本跑在它们之前**。别在脚本里假定 `data/kb/` 或某个 skill 已经存在。
-   这条限制是临时的，等所有类目能在启动前下发时会被删除（届时顺序反转，设计文档
-   §3.4 承诺的「脚本可以假定实体已就位」才成立）。
+   这条限制**只在第一期成立**，等所有类目能在启动前下发（#1508）时会被删除
+   ——届时顺序反转，设计文档 §3.4 承诺的「脚本可以假定实体已就位」才成立。用
+   清单创建 bot 时同样适用：那条路径上脚本也是烤进启动命令的。
+
+**什么时候真的会执行**（这是最容易误解的一点）：apply **只负责把脚本写进
+`ac_bot_startup_script` 那一行，绝不触发它执行**——不重启、不重新发布、不重建
+payload。那一行会在这个 bot **下一次开设备**时被执行：创建、重启、重新发布。
+`_build_create_bot_payload` 每次拼装 payload 都会重新读这一行，所以**后来改的
+脚本不会丢**，只是要等下一次开设备。它**不会**在一个已经跑着的容器里被重新执行。
+报告里那一条的 `note` 就是这么说的。
 
 **老端点还能用**：`GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` 继续
 工作。对**有清单**的 bot，它是清单 `script` 字段的**别名视图**（write-through）
@@ -783,10 +837,11 @@ digest 不匹配按 fetch 失败处理，不是「损坏的成功」。
 
 同一个 bot 的 apply 是**串行**的，所以显式 apply 撞上 republish 也不会互相踩。
 
-⚠️ **首启存在一个「bot 已 ACTIVE、但配置还在下发」的窗口**：第一期的下发发生在
-容器起来之后。用创建 API 的调用方会看到 `APPLYING` 状态，等到 `READY` 就跨过了
-这个窗口；**重新发布和重建式重启这两条路径上没有轮询循环**，窗口不是实时可观测
-的，事后读 `last-apply`。这个窗口会在启动前下发落地后从根上关掉。
+⚠️ **首启存在一个「bot 已 ACTIVE、但配置还在下发」的窗口**：第一期只有 `script`
+在容器起来**之前**下发，其余类目在之后。用创建 API 的调用方会看到 `APPLYING`
+状态，等到 `READY` 就跨过了这个窗口；**重新发布和重建式重启这两条路径上没有轮询
+循环**，窗口不是实时可观测的，事后读 `last-apply`。这个窗口会在启动前下发（#1508）
+落地后从根上关掉。
 
 ---
 
@@ -883,7 +938,23 @@ teclaw 收下整包 artifact 并替换，ARCA 现在对被声明的类目做同�
 | 不知道跑没跑 | 看容器内 `/home/admin/logs/startup_script.log`；apply 报告只记「已写入」 |
 | 脚本失败但 bot 照样起来了 | 设计如此：退出码不影响就绪判定 |
 
-### 9.6 内容更新了，但 bot 还是旧的
+### 9.6 创建卡在 `AWAITING_AUTHORIZATION` / apply 一直不动
+
+**先查这一条，它不是清单的问题。**apply 现在跑在平台的任务队列上，用清单创建
+bot 也是队列上的一个任务。所以部署里必须满足两个前提：
+
+- `task_queue_worker.enabled=true`；
+- `ac_task_queue` 表已经开好。
+
+**任一条不满足，创建不是变慢，而是永远不会完成**：提交会照常返回 `202`，轮询会
+一直停在 `AWAITING_AUTHORIZATION`（或授权后停在 `CREATING`），直到窗口超时被判为
+`AUTHORIZATION_EXPIRED`。`PUT` 之后的 apply 同理：`POST …/apply` 照常给你
+`apply_id`，报告则永远停在 `RUNNING`，直到 apply 锁的 TTL 到期。
+
+这在过去只是一个「优化开关」，从本期开始它决定功能是否可用——排查「创建卡住」时
+第一个要确认的就是它。
+
+### 9.7 内容更新了，但 bot 还是旧的
 
 - 用的是 **tag 且没动**？那就是没变——改 `ref`（§4.8）。
 - 用的是 **branch 且 `mode: strict`**？SHA 变了会让该条目**失败**，这是你要的钉扎
@@ -1034,7 +1105,7 @@ script:                                      # 仅 ARCA 系；不得依赖上面
 配套的两次凭证注册（一次性）：
 
 ```text
-PUT /openapi/v1/source-credentials/corp-git-content
+PUT /openapi/v1/bots/source-credentials/corp-git-content
 {
   "type": "header",
   "header_name": "Authorization",
@@ -1042,7 +1113,7 @@ PUT /openapi/v1/source-credentials/corp-git-content
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
 }
 
-PUT /openapi/v1/source-credentials/oss-artifacts
+PUT /openapi/v1/bots/source-credentials/oss-artifacts
 {
   "type": "header",
   "header_name": "Authorization",
@@ -1063,9 +1134,9 @@ PUT /openapi/v1/source-credentials/oss-artifacts
 | `GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities` | 该 bot 的逐类目支持表；与 `PUT` 判定同源 |
 | `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` | 显式 apply；`?dry_run=true` 只返回计划 |
 | `GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply` | 最近一次 apply 报告——**「生效了吗」的权威答案** |
-| `PUT /openapi/v1/source-credentials/{name}` | 注册/轮换租户级凭证 |
-| `GET /openapi/v1/source-credentials[/{name}]` | 列表/单个，**仅掩码元数据** |
-| `DELETE /openapi/v1/source-credentials/{name}` | 删除；仍被引用时下次 apply 该条目 `failed` |
+| `PUT /openapi/v1/bots/source-credentials/{name}` | 注册/轮换租户级凭证 |
+| `GET /openapi/v1/bots/source-credentials[/{name}]` | 列表/单个，**仅掩码元数据** |
+| `DELETE /openapi/v1/bots/source-credentials/{name}` | 删除；仍被引用时下次 apply 该条目 `failed` |
 | `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` | #935 老端点；对有清单的 bot 是 `script` 的别名视图 |
 | 用清单创建 bot | 异步创建 API，见 §4.5（端点路径以实现为准） |
 
@@ -1154,7 +1225,7 @@ PUT /openapi/v1/source-credentials/oss-artifacts
 | `identity` | `type` | 白名单枚举；claude_code 仅 `CLAUDE.md`；**`MEMORY.md` / `IDENTITY.md` 写入即拒** | identity 文件集合（减保留名单） |
 | `skills` | `name` | 标识符，不含位置信息 | active skill set |
 | `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套 | **仅被声明的 `path` 子树** |
-| `mcp` | `server_code` | 平台注册表引用（可选 `config`） | 已启用的 server 集合 |
+| `mcp` | `server_code` | 平台注册表引用；**条目只有这一个字段** | 已启用的 server 集合 |
 | `engine_config` | `config` 对象 | **第一期未开放** | 被声明的顶层键 |
 | `cli_tools` | `name` | 命令名，同 bot 内唯一；**第一期未开放** | 清单下发的工具集合 |
 | `script` | `body` | 仅 ARCA 系 | —— |

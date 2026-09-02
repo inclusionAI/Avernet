@@ -32,7 +32,7 @@ use bcs_service_api::{
     },
     message_log_json,
     port::repo::{AppendMessageWithEvent, MessageRepoPort},
-    port::{EventRecordFactoryPort, EventRecorderPort, NewEvent},
+    port::{EventRecordFactoryPort, EventRecorderPort, HumanMentionNotifyPort, NewEvent},
     types::{EVENT_SCHEMA_VERSION_V1, EventActor, EventActorType, EventScope, EventSubject},
 };
 use chrono::{SecondsFormat, TimeZone, Utc};
@@ -66,6 +66,7 @@ pub struct BcsMessageFlow {
     pub provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
     pub channel: Arc<OnceLock<Arc<dyn ChannelService>>>,
     pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
+    pub human_mention_notify: Option<Arc<dyn HumanMentionNotifyPort>>,
 }
 
 impl BcsMessageFlow {
@@ -96,6 +97,7 @@ impl BcsMessageFlow {
             provider_stream_gray_list: None,
             channel: Arc::new(OnceLock::new()),
             bot_terminal_observer: Arc::new(NoopBotTerminalObserver),
+            human_mention_notify: None,
         }
     }
 
@@ -127,6 +129,14 @@ impl BcsMessageFlow {
 
     pub fn with_system_message(mut self, system_message: Arc<dyn SystemMessageService>) -> Self {
         self.system_message = Some(system_message);
+        self
+    }
+
+    pub fn with_human_mention_notify(
+        mut self,
+        human_mention_notify: Arc<dyn HumanMentionNotifyPort>,
+    ) -> Self {
+        self.human_mention_notify = Some(human_mention_notify);
         self
     }
 
@@ -738,6 +748,15 @@ pub async fn handle_web_send(
 
     let sender_display_name = preferred_sender_display_name(flow, &cmd).await;
     let from_bot_owner = from_bot_owner(flow, &cmd.from_actor_id).await;
+    let (mention_source, mention_message_text): (Option<&[String]>, String) =
+        if group.group_kind == GroupKind::Dm {
+            (None, String::new())
+        } else if !cmd.mentions.is_empty() {
+            // 显式 mention 路径：使用人类发送者看到的原始消息文本。
+            (Some(cmd.mentions.as_slice()), cmd.message.clone())
+        } else {
+            (Some(decision.mentions.as_slice()), decision.cleaned_message.clone())
+        };
     let sender_type = if cmd.from_actor_id.starts_with("human_") {
         SenderType::Human
     } else {
@@ -756,6 +775,34 @@ pub async fn handle_web_send(
         "", // run_id: user messages don't associate with bot runs
     )
     .await?;
+    // Notify @-mentioned humans only after the message is accepted and
+    // persisted, and only if the content passes the outbound policy that
+    // governs bot deliveries of the same message.
+    if let Some(mention_actor_ids) = mention_source {
+        if let Some(notify_text) = apply_notify_outbound_policy(
+            flow,
+            &cmd.group_id,
+            &cmd.from_actor_id,
+            &mention_message_text,
+            &decision.targets,
+        )
+        .await
+        {
+            crate::human_notify_hook::spawn_human_mention_notify(
+                &flow.human_mention_notify,
+                Some(mention_actor_ids),
+                &overlay,
+                crate::human_notify_hook::MentionNotifyContext {
+                    session_id: cmd.session_id.clone().unwrap_or_default(),
+                    group_id: cmd.group_id.clone(),
+                    sender_actor_id: cmd.from_actor_id.clone(),
+                    sender_label: sender_display_name.clone(),
+                    message_text: notify_text,
+                    timestamp_ms: now_ms(),
+                },
+            );
+        }
+    }
     let mut active_run_ids = Vec::new();
     let mut bot_deliveries = Vec::new();
     let mut delivery_results = Vec::new();
@@ -1251,8 +1298,8 @@ pub async fn handle_persistent_group_send(
     )
     .await?;
 
+    let overlay = build_route_overlay(flow, &group).await;
     let decision = if group.group_kind == GroupKind::Dm {
-        let overlay = build_route_overlay(flow, &group).await;
         flow.routing
             .route_dm_with_overlay(&group, &message.content, message.sender.as_str(), &overlay)
             .await
@@ -1262,9 +1309,37 @@ pub async fn handle_persistent_group_send(
             .await
     };
 
-    let mut routed_to = Vec::new();
     let sender_display_name = sender_display_name(flow, &cmd.sender).await;
     let from_bot_owner = from_bot_owner(flow, &cmd.sender).await;
+    // Notify @-mentioned humans (non-DM only) once the message is persisted
+    // and the content passes the same outbound policy as bot deliveries.
+    if group.group_kind != GroupKind::Dm {
+        if let Some(notify_text) = apply_notify_outbound_policy(
+            flow,
+            &cmd.group_id,
+            &cmd.sender,
+            &decision.cleaned_message,
+            &decision.targets,
+        )
+        .await
+        {
+            crate::human_notify_hook::spawn_human_mention_notify(
+                &flow.human_mention_notify,
+                Some(decision.mentions.as_slice()),
+                &overlay,
+                crate::human_notify_hook::MentionNotifyContext {
+                    session_id: String::new(),
+                    group_id: cmd.group_id.clone(),
+                    sender_actor_id: cmd.sender.clone(),
+                    sender_label: sender_display_name.clone(),
+                    message_text: notify_text,
+                    timestamp_ms: now_ms(),
+                },
+            );
+        }
+    }
+
+    let mut routed_to = Vec::new();
     let synthetic_send = WebSendCommand {
         caller: cmd.caller.clone(),
         group_id: cmd.group_id.clone(),
@@ -1446,6 +1521,57 @@ pub(crate) async fn apply_outbound_interceptors(
     }
 }
 
+/// Run the outbound interceptor chain once for a human-mention notification
+/// before it leaves the process, using the first non-sender delivery target
+/// as the policy receiver. Returns the (possibly rewritten) text to notify
+/// with, or `None` when the chain blocks the content: what policy forbids for
+/// bot deliveries must not reach humans through the notification channel.
+///
+/// The chain is credential-gated (see [`apply_outbound_interceptors`]):
+/// senders without AgentPass credentials skip evaluation, matching what bot
+/// deliveries receive under the same posture. With no bot receiver at all
+/// there is nothing to evaluate, and the notification proceeds unmodified.
+pub(crate) async fn apply_notify_outbound_policy(
+    flow: &BcsMessageFlow,
+    group_id: &str,
+    sender_actor_id: &str,
+    message_text: &str,
+    targets: &[RoutingTarget],
+) -> Option<String> {
+    let Some(receiver) = targets
+        .iter()
+        .find(|target| target.bot_uuid != sender_actor_id)
+    else {
+        return Some(message_text.to_string());
+    };
+    let candidate = GroupMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        timestamp: now_ms(),
+        sender: sender_actor_id.to_string(),
+        content: message_text.to_string(),
+        message_type: GroupMessageType::Bot,
+        bot_name: None,
+        role: MessageRole::User,
+        run_id: String::new(),
+        history_meta: None,
+        metadata: None,
+        attachments: None,
+    };
+    match apply_outbound_interceptors(flow, group_id, &candidate, receiver).await {
+        Ok(message) => Some(message.content),
+        Err(reason) => {
+            warn!(
+                group_id,
+                sender = %sender_actor_id,
+                interceptor = %reason.interceptor_id,
+                code = %reason.code,
+                "human mention notification suppressed by outbound policy"
+            );
+            None
+        }
+    }
+}
+
 /// Run the outbound interceptor chain for an A2A (1:1 bot-to-bot) chat.
 ///
 /// A2A chats have no group context — `context_tag` is purely a log/trace label
@@ -1602,6 +1728,12 @@ pub async fn handle_group_callback(
     } else {
         build_explicit_mention_decision(&group, &cmd.mentions, &routable_message, &overlay)
     };
+
+    // NOTE: group callbacks deliberately do NOT trigger human mention
+    // notifications. `POST /groups/{id}/callback` carries no caller identity,
+    // so request-controlled `mentions` would let anyone able to reach the
+    // route push external notifications (e.g. IM DMs) to arbitrary human
+    // participants. Re-enable only behind an authenticated callback caller.
 
     if cmd.store_message {
         let group_message = GroupMessage {

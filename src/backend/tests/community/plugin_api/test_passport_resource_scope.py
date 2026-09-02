@@ -10,7 +10,7 @@ every caller passes through, rather than each caller being trusted to remember.
 
 import pytest
 
-from agentclaw.community.plugin_api.passport import unpack_resource_scope
+from agentclaw.community.plugin_api.passport import extract_cli_items, unpack_resource_scope
 
 
 class TestNonResourceUpdates:
@@ -18,6 +18,10 @@ class TestNonResourceUpdates:
 
     def test_none_scope_is_a_non_resource_update(self):
         assert unpack_resource_scope(None) == (None, None)
+
+    def test_non_mapping_scope_fails_closed(self):
+        with pytest.raises(ValueError, match="mapping"):
+            unpack_resource_scope([])  # type: ignore[arg-type]
 
 
 class TestIdentityBearingScope:
@@ -29,10 +33,18 @@ class TestIdentityBearingScope:
             {"mcp_code": "b", "identity_mode": "owner"},
         ]
         mcp, cli = unpack_resource_scope(
-            {"mcp_items": items, "cli_items": [{"cli_code": "c"}]}
+            {
+                "mcp_items": items,
+                "cli_items": [{"cli_code": "c", "identity_mode": "owner"}],
+            }
         )
         assert mcp == items
-        assert cli == [{"cli_code": "c"}]
+        assert cli == [{
+            "cli_code": "c",
+            "cli_name": None,
+            "cli_desc": None,
+            "identity_mode": "owner",
+        }]
 
     def test_items_win_over_codes(self):
         """``mcp_codes`` is ignored when items are present — one source only."""
@@ -66,10 +78,18 @@ class TestCodeOnlyScope:
         no items — otherwise a caller with nothing to grant would have to
         assemble an identity lookup purely to satisfy the guard."""
         mcp, cli = unpack_resource_scope(
-            {"mcp_codes": [], "cli_items": [{"cli_code": "c"}]}
+            {
+                "mcp_codes": [],
+                "cli_items": [{"cli_code": "c", "identity_mode": "owner"}],
+            }
         )
         assert mcp == []
-        assert cli == [{"cli_code": "c"}]
+        assert cli == [{
+            "cli_code": "c",
+            "cli_name": None,
+            "cli_desc": None,
+            "identity_mode": "owner",
+        }]
 
 
 class TestMalformedScope:
@@ -86,3 +106,53 @@ class TestMalformedScope:
     def test_missing_both_mcp_keys_is_rejected(self):
         with pytest.raises(ValueError):
             unpack_resource_scope({"cli_items": []})
+
+
+@pytest.mark.parametrize(
+    "cli_items",
+    [
+        [{"cli_code": "missing-mode"}],
+        [{"cli_code": "invalid-mode", "identity_mode": "delegate"}],
+        [{"cli_code": "duplicate", "identity_mode": "owner"}, {"cli_code": "duplicate", "identity_mode": "caller"}],
+        [{"identity_mode": "owner"}],
+        ["not-a-mapping"],
+    ],
+)
+def test_cli_writer_scope_rejects_invalid_or_ambiguous_items(cli_items):
+    """A resourceManifest writer must never silently default or dedupe CLI identity."""
+    with pytest.raises(ValueError, match="CLI"):
+        unpack_resource_scope({"mcp_items": [], "cli_items": cli_items})
+
+
+def test_legacy_query_without_identity_is_normalized_before_writer_boundary():
+    """The compatibility default belongs only to the AgentPass query extractor."""
+    legacy_items = extract_cli_items({"clis": [{"cli_code": "legacy-cli"}]})
+
+    assert legacy_items == [{
+        "cli_code": "legacy-cli",
+        "cli_name": None,
+        "cli_desc": None,
+        "identity_mode": "owner",
+    }]
+    assert unpack_resource_scope({"mcp_items": [], "cli_items": legacy_items}) == (
+        [], legacy_items,
+    )
+
+
+def test_legacy_query_with_null_cli_list_normalizes_to_empty_scope():
+    """A legacy AgentPass null list means no CLI grants, not an invalid item."""
+    assert extract_cli_items({"clis": None}) == []
+
+
+@pytest.mark.parametrize(
+    "passport",
+    [
+        {"clis": "not-a-list"},
+        {"clis": [{"cli_code": "cli", "cli_name": 1}]},
+        {"clis": [{"cli_code": "cli", "cli_desc": 1}]},
+    ],
+)
+def test_query_extractor_rejects_malformed_cli_metadata(passport):
+    """Query compatibility may default identity, but it never coerces metadata."""
+    with pytest.raises(ValueError, match="CLI"):
+        extract_cli_items(passport)

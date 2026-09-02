@@ -117,6 +117,26 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/bots/{bot_id}/config-manifest/capabilities",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # Apply's mode is not a free choice — it FOLLOWS from its Check(...) row.
+    # ``require_check``'s gate declares OwnerIdDep -> resolve_owner_id ->
+    # AddressedBotGrantDep, so any row carrying Check(...) pulls in
+    # require_granted_addressed_bot, and test_admission_inventory holds each
+    # route to the dependency its mode calls for. The surface has exactly two
+    # coherent pairings, and mixing one from each is what principal.py calls its
+    # oldest defect. Naming it because the pairing looks like two decisions and
+    # is one.
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/config-manifest/apply",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skill-sets",
@@ -195,6 +215,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "PATCH",
         "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PATCH",
+        "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
@@ -587,6 +611,20 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
     # Department directory search — a tenant-wide catalogue read, not a user's.
+    # ── Source credentials (W3, #1471) — OPEN, application-operated ─────────
+    # These are machine operations, and the *edge* is what makes them so:
+    # the gateway's route_security requires an app credential on every
+    # path of the group (`user: optional, app: required`, the same shape
+    # as /openapi/v1/bots/authorized), so the caller that arrives here is
+    # an application of the tenant — there is no user axis for this table
+    # to gate and no bot for a grant to address. The one identity that
+    # matters, the owning application (rotation and delete are the
+    # creating application's alone), is enforced in the service, against
+    # the row.
+    ("PUT", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/source-credentials"): AdmissionMode.OPEN,
+    ("DELETE", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
@@ -800,6 +838,33 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # No bot exists yet for a grant to cover, and creation spends the user's
     # quota. Auto-granting the new bot would invent consent nobody gave.
     ("POST", "/openapi/v1/bots"): AdmissionMode.REFUSED,
+    # Creating a bot with its manifest is the same creation, so it carries the
+    # same refusal — and the reason is sharper here than "no grant to check".
+    #
+    # These routes take their owner from ``UserIdDep``. For an app-only caller
+    # ``require_user_id`` returns the ``user_id`` **query parameter verbatim**,
+    # deferring the question of whether the app may act for that user to
+    # "whichever grant dependency the route declares". There is no grant
+    # dependency these routes *can* declare: a grant covers a bot, and at
+    # submission there is no bot. So admitting an app here would mean any
+    # application credential could create a bot as any user — spending that
+    # user's quota and running a caller-supplied startup script under their
+    # identity — with nothing anywhere proving the user ever authorized it.
+    #
+    # W13's reviewer asked for these to admit applications, and they should:
+    # this pair exists for unattended integration. But "admit" needs a check
+    # that can run *before* a bot exists, and the surface has none today. That
+    # is the user-level admission mode the review names as future work, not
+    # something ``OPEN`` provides — ``OPEN`` here would be no check at all.
+    #
+    # The poll carries the same refusal for the same mechanism: its ``user_id``
+    # is equally unchecked for an app-only caller, and what it returns includes
+    # the authorization handles.
+    ("POST", "/openapi/v1/bots/with-manifest"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/with-manifest/status",
+    ): AdmissionMode.REFUSED,
     # Delegation is a human act. An application must not be able to widen its
     # own access, withdraw a competitor's, or enumerate what else reaches a bot.
     ("POST", "/openapi/v1/bots/{bot_id}/authorized-apps"): AdmissionMode.REFUSED,

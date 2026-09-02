@@ -41,9 +41,7 @@ def _principal_fingerprint(headers: Mapping[str, str]) -> str | None:
     approval request credential with the BCN callback credential.
     """
     values = [
-        value
-        for key, value in headers.items()
-        if key.lower() == "x-avernet-principal"
+        value for key, value in headers.items() if key.lower() == "x-avernet-principal"
     ]
     if not values:
         return None
@@ -155,42 +153,28 @@ class FriendDecisionCallbackHandler:
             else {"reason": review_remark}
         )
         callback_headers = dict(credential.headers)
-        lowered_headers = {key.lower(): value for key, value in callback_headers.items()}
+        lowered_headers = {
+            key.lower(): value for key, value in callback_headers.items()
+        }
         has_principal = "x-avernet-principal" in lowered_headers
         has_authorization = "authorization" in lowered_headers
         principal_header_count = _principal_header_count(callback_headers)
         principal_fingerprint = _principal_fingerprint(callback_headers)
         principal_length = (
-            len(lowered_headers["x-avernet-principal"])
-            if has_principal
-            else None
+            len(lowered_headers["x-avernet-principal"]) if has_principal else None
         )
         logger.info(
-            "BCN callback auth headers: has_principal=%s "
-            "principal_header_count=%s principal_fingerprint=%s "
-            "principal_length=%s has_authorization=%s",
-            has_principal,
-            principal_header_count,
-            principal_fingerprint,
-            principal_length,
-            has_authorization,
+            "BCN callback auth headers",
+            extra={
+                "has_principal": has_principal,
+                "principal_header_count": principal_header_count,
+                "principal_fingerprint": principal_fingerprint,
+                "principal_length": principal_length,
+                "has_authorization": has_authorization,
+            },
         )
         logger.info(
-            "friend work-order BCN callback request: "
-            "work_order_id=%s callback_path=%s action=%s "
-            "has_principal=%s principal_header_count=%s "
-            "principal_fingerprint=%s principal_length=%s "
-            "has_authorization=%s x_request_id=%s x_trace_id=%s",
-            context.work_order.id,
-            path,
-            action,
-            has_principal,
-            principal_header_count,
-            principal_fingerprint,
-            principal_length,
-            has_authorization,
-            lowered_headers.get("x-request-id"),
-            lowered_headers.get("x-trace-id"),
+            "friend work-order BCN callback request",
             extra={
                 "work_order_id": context.work_order.id,
                 "event_type": context.source_event_type,
@@ -239,15 +223,7 @@ class FriendDecisionCallbackHandler:
                 response_payload.get("request_id") if response_payload else None
             )
             logger.info(
-                "friend work-order BCN callback response: "
-                "http_status=%s response_code=%s response_message=%s "
-                "response_request_id=%s response_body_raw=%s duration_ms=%.1f",
-                response.status_code,
-                response_code,
-                response_message,
-                response_request_id,
-                logged_response_body,
-                duration_ms,
+                "friend work-order BCN callback response",
                 extra={
                     "work_order_id": context.work_order.id,
                     "event_type": context.source_event_type,
@@ -267,9 +243,7 @@ class FriendDecisionCallbackHandler:
         except Exception as exc:
             failure_duration_ms = (time.perf_counter() - callback_started) * 1000
             http_status = response.status_code if response is not None else None
-            response_code = (
-                response_payload.get("code") if response_payload else None
-            )
+            response_code = response_payload.get("code") if response_payload else None
             response_message = (
                 response_payload.get("message") if response_payload else None
             )
@@ -282,25 +256,7 @@ class FriendDecisionCallbackHandler:
                 else response_body_raw
             )
             logger.warning(
-                "friend work-order decision callback failed: "
-                "work_order_id=%s callback_path=%s action=%s "
-                "http_status=%s response_code=%s response_message=%s "
-                "response_request_id=%s response_body_raw=%s duration_ms=%.1f "
-                "exception_type=%s principal_header_count=%s "
-                "principal_fingerprint=%s principal_length=%s",
-                context.work_order.id,
-                path,
-                action,
-                http_status,
-                response_code,
-                response_message,
-                response_request_id,
-                logged_failure_body,
-                failure_duration_ms,
-                type(exc).__name__,
-                principal_header_count,
-                principal_fingerprint,
-                principal_length,
+                "friend work-order decision callback failed",
                 extra={
                     "work_order_id": context.work_order.id,
                     "event_type": context.source_event_type,

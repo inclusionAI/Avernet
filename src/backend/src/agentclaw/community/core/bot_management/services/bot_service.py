@@ -3347,7 +3347,7 @@ class BotService(BotServiceProtocol):
             )
 
     # DRM 控制开关: claude_code 启动时是否往 BCN 注册 Provider bot.
-    # value 取 "true"/"on"/"1" 视为开启, 其它 (含空 / 异常 / 未配置) 视为关闭.
+    # value 取 "true"/"on"/"1" 视为开启; 空 / 异常 / 未配置默认开启.
     # 排查日志关键字: [DRM] ClaudeCodeBcnRegister
     _CLAUDE_CODE_BCN_REGISTER_DRM_ID = (
         "Alipay.agentclaw:name=com.alipay.agentclaw.service.drm."
@@ -3361,17 +3361,31 @@ class BotService(BotServiceProtocol):
     )
 
     def _is_claude_code_bcn_register_enabled(self) -> bool:
-        """读 DRM 判断 claude_code BCN 注册是否启用. 默认关 (失败也关).
+        """读 DRM 判断 claude_code BCN 注册是否启用. 默认开 (失败也开).
 
         Returns:
-            True: DRM 显式开启 (value in {"true", "on", "1"} 不区分大小写)
-            False: DRM 关闭 / 取不到 / 异常
+            True: DRM 显式开启，或 DRM 未配置 / 不可用
+            False: DRM 显式配置为关闭值
         """
-        raw_value = self._drm_reader.read(self._CLAUDE_CODE_BCN_REGISTER_DRM_ID)
-        value = str(raw_value).strip().lower() if raw_value else ""
+        try:
+            raw_value = self._drm_reader.read(self._CLAUDE_CODE_BCN_REGISTER_DRM_ID)
+        except Exception as error:
+            logger.warning(
+                "[DRM] ClaudeCodeBcnRegister unavailable; default enabled "
+                "error_type=%s",
+                type(error).__name__,
+            )
+            return True
+
+        value = str(raw_value).strip().lower() if raw_value is not None else ""
+        if not value:
+            logger.info("[DRM] ClaudeCodeBcnRegister unset; default enabled")
+            return True
+
         enabled = value in ("true", "on", "1")
         logger.info(
-            f"[DRM] ClaudeCodeBcnRegister value={raw_value!r} enabled={enabled}"
+            "[DRM] ClaudeCodeBcnRegister explicit_value_present=true enabled=%s",
+            enabled,
         )
         return enabled
 

@@ -53,13 +53,9 @@ def test_restart_on_a_bot_not_owned_by_caller_does_not_reach_the_device(client, 
 
 def test_restart_does_not_publish_a_made_up_legacy_address():
     """A new bot-first operation has no component-first contract to retire."""
-    from fastapi import FastAPI
+    from tests.community.adapters.http.openapi_v1.conftest import public_document
 
-    from agentclaw.community.adapters.http.openapi_v1 import build_public_router
-
-    app = FastAPI()
-    app.include_router(build_public_router())
-    paths = app.openapi()["paths"]
+    paths = public_document()["paths"]
 
     assert "/openapi/v1/bots/{bot_id}/engine/restart" in paths
     assert "/openapi/v1/bots/engine/{bot_id}/restart" not in paths

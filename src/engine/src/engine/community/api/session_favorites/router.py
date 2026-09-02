@@ -10,7 +10,7 @@ from engine.community.api.caps import check_capability
 from engine.community.api.response import ApiResponse
 from engine.community.api.session.router import _get_session_api, _session_to_dict
 from engine.community.core.engine.capability import Capability
-from engine.community.core.session.models import SessionListRequest
+from engine.community.core.session.models import Session, SessionListRequest
 from engine.community.core.session_favorite import get_session_favorite_repository
 from engine.community.shared.utils import decode_session_key
 
@@ -18,9 +18,8 @@ log = logging.getLogger("session-favorites")
 
 router = APIRouter(prefix="/api/session-favorites", tags=["session-favorites"])
 
-# Engine SessionService implementations paginate in memory. Fetching this bounded
-# set lets the adapter apply pagination after it filters by the SQLite metadata.
-_FAVORITE_SESSION_SCAN_LIMIT = 10_000
+# Bound exact lookups so a large favorite set cannot flood the engine gateway.
+_FAVORITE_SESSION_LOOKUP_CONCURRENCY = 8
 
 
 def _require_user_id(user_id: str | None) -> str:
@@ -49,23 +48,32 @@ async def list_session_favorites(
             return ApiResponse(success=True, data=[], warning=warning)
 
         api = _get_session_api(engine)
-        sessions = await api.list(
-            SessionListRequest(
-                user_id=resolved_user_id,
-                agent_id=agent_id,
-                limit=_FAVORITE_SESSION_SCAN_LIMIT,
-                offset=0,
+        semaphore = asyncio.Semaphore(_FAVORITE_SESSION_LOOKUP_CONCURRENCY)
+
+        async def resolve_favorite(session_id: str) -> Session | None:
+            async with semaphore:
+                sessions = await api.list(
+                    SessionListRequest(
+                        user_id=resolved_user_id,
+                        agent_id=agent_id,
+                        session_key=session_id,
+                        limit=1,
+                        offset=0,
+                    )
+                )
+            return next(
+                (session for session in sessions if session.id == session_id),
+                None,
             )
+
+        # gather preserves the repository's newest-favorite-first order. Resolve
+        # before slicing so stale favorite rows do not leave pages under-filled.
+        resolved_sessions = await asyncio.gather(
+            *(resolve_favorite(session_id) for session_id in favorite_session_ids)
         )
-        # Engines own their session ordering, so restore the SQLite favorite
-        # order before applying favorite-list pagination.
-        favorite_rank = {
-            session_id: index for index, session_id in enumerate(favorite_session_ids)
-        }
         favorite_sessions = [
-            session for session in sessions if session.id in favorite_rank
+            session for session in resolved_sessions if session is not None
         ]
-        favorite_sessions.sort(key=lambda session: favorite_rank[session.id])
         paged_sessions = favorite_sessions[offset:offset + limit]
         return ApiResponse(
             success=True,

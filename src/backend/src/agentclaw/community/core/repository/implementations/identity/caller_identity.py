@@ -6,11 +6,13 @@ from injector import inject
 
 from agentclaw.community.core.bot_collaborator.models import BotCollabLockModel
 from agentclaw.community.core.caller_identity.contracts import (
+    CliCallTypeMutationResult,
     CallerIdentityIrreversibleError,
     DraftCallTypeCompensationResult,
     DraftCallTypeMutationResult,
 )
 from agentclaw.community.core.caller_identity.models import (
+    BotCliCallConfigModel,
     BotMcpCallConfigModel,
     McpCallType,
 )
@@ -33,6 +35,44 @@ class CallerIdentityRepository(
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
+
+    @staticmethod
+    def _verify_lock(
+        session,
+        *,
+        lock_key: str,
+        lock_holder_user_id: str,
+        lock_epoch: int | None,
+        env: str,
+    ) -> None:
+        """Re-check the caller's collaboration lock inside the write transaction."""
+        if lock_epoch is not None:
+            # 以下为安全注释COSEC：在写事务内锁定并校验 lock，拒绝过期/被夺取的授权。
+            lock = (
+                session.query(BotCollabLockModel)
+                .filter(
+                    BotCollabLockModel.lock_key == lock_key,
+                    BotCollabLockModel.holder_user_id == lock_holder_user_id,
+                    BotCollabLockModel.id == lock_epoch,
+                    BotCollabLockModel.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if lock is None:
+                raise CallerIdentityLockMismatchError
+            return
+        lock = (
+            session.query(BotCollabLockModel)
+            .filter(
+                BotCollabLockModel.lock_key == lock_key,
+                BotCollabLockModel.env == env,
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if lock is not None:
+            raise CallerIdentityLockMismatchError
 
     def replace_draft_call_type(
         self,
@@ -158,6 +198,222 @@ class CallerIdentityRepository(
             bot_call_type=aggregate,
             revision=revision,
         )
+
+    def replace_draft_cli_call_type(
+        self,
+        *,
+        bot_pk: int,
+        engine_type: str,
+        cli_code: str,
+        call_type: McpCallType,
+        modifier_id: str,
+        lock_key: str,
+        lock_holder_user_id: str,
+        lock_epoch: int | None,
+        effective_server_codes: set[str] | None = None,
+        effective_cli_codes: set[str] | None = None,
+    ) -> CliCallTypeMutationResult:
+        """Save one CLI override and atomically refresh the Bot aggregate."""
+        normalized_call_type = McpCallType.parse(call_type)
+        env = get_current_env()
+        with self._db.transactional_orm_session() as session:
+            self._verify_lock(
+                session,
+                lock_key=lock_key,
+                lock_holder_user_id=lock_holder_user_id,
+                lock_epoch=lock_epoch,
+                env=env,
+            )
+            bot = (
+                session.query(BotModel)
+                .filter(BotModel.id == bot_pk, BotModel.env == env)
+                .with_for_update()
+                .one()
+            )
+            if bot.active_engine != engine_type:
+                raise CallerIdentityEngineChangedError
+            row = (
+                session.query(BotCliCallConfigModel)
+                .filter(
+                    BotCliCallConfigModel.bot_pk == bot_pk,
+                    BotCliCallConfigModel.cli_code == cli_code,
+                    BotCliCallConfigModel.engine_type == engine_type,
+                    BotCliCallConfigModel.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            previous = McpCallType.parse(row.call_type) if row is not None else None
+            if normalized_call_type is McpCallType.OWNER:
+                revision = int(row.revision) + 1 if row is not None else 0
+                if row is not None:
+                    session.delete(row)
+            elif row is None:
+                revision = 1
+                session.add(BotCliCallConfigModel(
+                    bot_pk=bot_pk,
+                    cli_code=cli_code,
+                    engine_type=engine_type,
+                    call_type=McpCallType.CALLER.value,
+                    modifier_id=modifier_id,
+                    revision=revision,
+                    env=env,
+                ))
+            else:
+                revision = int(row.revision) + 1
+                row.call_type = McpCallType.CALLER.value
+                row.modifier_id = modifier_id
+                row.revision = revision
+            session.flush()
+            aggregate = self._aggregate(
+                session,
+                bot_pk=bot_pk,
+                engine_type=engine_type,
+                effective_server_codes=effective_server_codes,
+                effective_cli_codes=effective_cli_codes,
+                env=env,
+            )
+            # COSEC: keep the established caller-to-owner guard while holding
+            # the Bot row lock; a CLI cannot bypass the Bot aggregate policy.
+            if bot.call_type == McpCallType.CALLER.value and aggregate is McpCallType.OWNER:
+                logger.warning(
+                    "caller_cli_call_type_update_rejected_irreversible "
+                    "bot_pk=%s cli_code=%s previous_bot_call_type=%s "
+                    "next_bot_call_type=%s",
+                    bot_pk,
+                    cli_code,
+                    McpCallType.CALLER.value,
+                    aggregate.value,
+                )
+                raise CallerIdentityIrreversibleError
+            caller_config_revision = int(bot.caller_config_revision or 0) + 1
+            bot.call_type = aggregate.value
+            bot.caller_config_revision = caller_config_revision
+            bot.modifier_id = modifier_id
+        logger.info(
+            "caller_cli_call_type_saved bot_pk=%s cli_code=%s call_type=%s "
+            "bot_call_type=%s revision=%s caller_config_revision=%s",
+            bot_pk,
+            cli_code,
+            normalized_call_type.value,
+            aggregate.value,
+            revision,
+            caller_config_revision,
+        )
+        return CliCallTypeMutationResult(
+            previous_explicit_call_type=previous,
+            revision=revision,
+            bot_call_type=aggregate,
+            caller_config_revision=caller_config_revision,
+        )
+
+    def compensate_draft_cli_call_type(
+        self,
+        *,
+        bot_pk: int,
+        engine_type: str,
+        cli_code: str,
+        previous_explicit_call_type: McpCallType | None,
+        modifier_id: str,
+        expected_revision: int,
+        expected_caller_config_revision: int,
+        lock_key: str,
+        lock_holder_user_id: str,
+        lock_epoch: int | None,
+        effective_server_codes: set[str] | None = None,
+        effective_cli_codes: set[str] | None = None,
+    ) -> bool:
+        env = get_current_env()
+        with self._db.transactional_orm_session() as session:
+            self._verify_lock(
+                session,
+                lock_key=lock_key,
+                lock_holder_user_id=lock_holder_user_id,
+                lock_epoch=lock_epoch,
+                env=env,
+            )
+            bot = (
+                session.query(BotModel)
+                .filter(BotModel.id == bot_pk, BotModel.env == env)
+                .with_for_update()
+                .one()
+            )
+            if bot.active_engine != engine_type:
+                raise CallerIdentityEngineChangedError
+            if int(bot.caller_config_revision or 0) != expected_caller_config_revision:
+                return False
+            row = (
+                session.query(BotCliCallConfigModel)
+                .filter(
+                    BotCliCallConfigModel.bot_pk == bot_pk,
+                    BotCliCallConfigModel.cli_code == cli_code,
+                    BotCliCallConfigModel.engine_type == engine_type,
+                    BotCliCallConfigModel.env == env,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if previous_explicit_call_type is None:
+                if row is None or int(row.revision) != expected_revision:
+                    return False
+                session.delete(row)
+            elif row is None:
+                session.add(BotCliCallConfigModel(
+                    bot_pk=bot_pk,
+                    cli_code=cli_code,
+                    engine_type=engine_type,
+                    call_type=previous_explicit_call_type.value,
+                    modifier_id=modifier_id,
+                    revision=expected_revision + 1,
+                    env=env,
+                ))
+            elif int(row.revision) == expected_revision:
+                row.call_type = previous_explicit_call_type.value
+                row.modifier_id = modifier_id
+                row.revision = expected_revision + 1
+            else:
+                return False
+            session.flush()
+            aggregate = self._aggregate(
+                session,
+                bot_pk=bot_pk,
+                engine_type=engine_type,
+                effective_server_codes=effective_server_codes,
+                effective_cli_codes=effective_cli_codes,
+                env=env,
+            )
+            caller_config_revision = expected_caller_config_revision + 1
+            bot.call_type = aggregate.value
+            bot.caller_config_revision = caller_config_revision
+            bot.modifier_id = modifier_id
+        logger.warning(
+            "caller_cli_call_type_compensated bot_pk=%s cli_code=%s "
+            "bot_call_type=%s caller_config_revision=%s",
+            bot_pk,
+            cli_code,
+            aggregate.value,
+            caller_config_revision,
+        )
+        return True
+
+    def list_draft_cli_call_types(
+        self,
+        bot_pk: int,
+        engine_type: str,
+    ) -> dict[str, McpCallType]:
+        env = get_current_env()
+        with self._db.orm_session() as session:
+            rows = (
+                session.query(BotCliCallConfigModel)
+                .filter(
+                    BotCliCallConfigModel.bot_pk == bot_pk,
+                    BotCliCallConfigModel.engine_type == engine_type,
+                    BotCliCallConfigModel.env == env,
+                )
+                .order_by(BotCliCallConfigModel.cli_code.asc())
+                .all()
+            )
+            return {row.cli_code: McpCallType.parse(row.call_type) for row in rows}
 
     def compensate_draft_call_type(
         self,
@@ -293,25 +549,43 @@ class CallerIdentityRepository(
         *,
         bot_pk: int,
         engine_type: str,
-        effective_server_codes: set[str],
+        effective_server_codes: set[str] | None,
+        effective_cli_codes: set[str] | None = None,
         env: str,
     ) -> McpCallType:
-        if not effective_server_codes:
-            return McpCallType.OWNER
-        rows = (
-            session.query(BotMcpCallConfigModel.call_type)
-            .filter(
-                BotMcpCallConfigModel.bot_pk == bot_pk,
-                BotMcpCallConfigModel.engine_type == engine_type,
-                BotMcpCallConfigModel.env == env,
-                BotMcpCallConfigModel.server_code.in_(effective_server_codes),
-            )
-            .all()
+        mcp_query = session.query(BotMcpCallConfigModel.call_type).filter(
+            BotMcpCallConfigModel.bot_pk == bot_pk,
+            BotMcpCallConfigModel.engine_type == engine_type,
+            BotMcpCallConfigModel.env == env,
         )
+        if effective_server_codes is not None:
+            if not effective_server_codes:
+                mcp_rows = []
+            else:
+                mcp_rows = mcp_query.filter(
+                    BotMcpCallConfigModel.server_code.in_(effective_server_codes)
+                ).all()
+        else:
+            mcp_rows = mcp_query.all()
+        cli_query = session.query(BotCliCallConfigModel.call_type).filter(
+            BotCliCallConfigModel.bot_pk == bot_pk,
+            BotCliCallConfigModel.engine_type == engine_type,
+            BotCliCallConfigModel.env == env,
+        )
+        if effective_cli_codes is not None:
+            if not effective_cli_codes:
+                cli_rows = []
+            else:
+                cli_rows = cli_query.filter(
+                    BotCliCallConfigModel.cli_code.in_(effective_cli_codes)
+                ).all()
+        else:
+            cli_rows = cli_query.all()
         return (
             McpCallType.CALLER
             if any(
-                McpCallType.parse(row.call_type) is McpCallType.CALLER for row in rows
+                McpCallType.parse(row.call_type) is McpCallType.CALLER
+                for row in [*mcp_rows, *cli_rows]
             )
             else McpCallType.OWNER
         )

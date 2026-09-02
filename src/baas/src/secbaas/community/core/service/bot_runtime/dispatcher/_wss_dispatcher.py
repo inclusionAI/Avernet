@@ -91,6 +91,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
             path=path,
             ws_conn_mode=ws_conn_mode,
         )
+        conn_info.device_id = paas_device_id
 
         logger.info(
             f"Dispatched WS connection: ws_url={conn_info.ws_url}, "
@@ -178,6 +179,7 @@ class DefaultBotWssDispatcher(BotBaseDispatcher, BotWssDispatcher):
             path=path,
             ws_conn_mode=ws_conn_mode,
         )
+        conn_info.device_id = paas_device_id
 
         logger.info(
             f"Dispatched WS connection for specific device: "

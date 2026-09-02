@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_router
 from agentclaw.community.adapters.http.openapi_v1.deprecated import (
     LEGACY_ROUTES,
     SELF_CHECKED_ROUTES,
@@ -69,7 +69,7 @@ def _effective_routes():
     the test would pass while the wiring was absent. Reading the effective
     contexts is what makes this check about the assembled surface.
     """
-    router = build_public_router()
+    router = public_router()
     found = []
     for route in getattr(router, "routes", []):
         if hasattr(route, "effective_route_contexts"):

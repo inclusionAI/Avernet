@@ -21,6 +21,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
+from secbaas.community.core.service.paas import (
+    DeviceFacadeException,
+    ErrorCode,
+    PaasError,
+)
 from secbaas.community.core.service.scheduler import (
     DeadlineRenewalScheduler,
     DeadlineRenewalSchedulerConfig,
@@ -177,6 +182,8 @@ class TestStep0GapDetection:
         # Mock hot counts: count_hot_arca_devices + count_hot_arca_bindings
         mock_repo.count_hot_arca_devices.return_value = 40000
         mock_repo.count_hot_arca_bindings.return_value = 10000
+        mock_repo.count_hot_covered.return_value = 50000  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
 
         scheduler._round_count = 0
@@ -194,6 +201,8 @@ class TestStep0GapDetection:
         mock_repo.count_active.return_value = 45000  # cold
         mock_repo.count_hot_arca_devices.return_value = 40000
         mock_repo.count_hot_arca_bindings.return_value = 10000  # hot total = 50000
+        mock_repo.count_hot_covered.return_value = 49000  # covered < hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         # find_unregistered returns empty to stop the loop after first call
         mock_repo.find_unregistered.return_value = []
@@ -212,6 +221,8 @@ class TestStep0GapDetection:
         mock_repo.count_active.return_value = 0  # cold = 0
         mock_repo.count_hot_arca_devices.return_value = 500
         mock_repo.count_hot_arca_bindings.return_value = 500  # hot = 1000
+        mock_repo.count_hot_covered.return_value = 0  # gap = hot - covered
+        mock_repo.count_suppressed_terminal.return_value = 0
 
         # Side effect: 1 batch for baas_device, then empty; empty for binding
         call_counts: dict[str, int] = {}
@@ -242,12 +253,105 @@ class TestStep0GapDetection:
         assert report.gap_records_registered >= 1
 
     @pytest.mark.asyncio
+    async def test_terminal_stopped_gap_never_reregisters(self, caplog):
+        """86-02 (R7 retarget): covered-math steady state — no gap, no revival.
+
+        Terminal rows stay terminal: a threshold-STOPPED row is excluded
+        from discovery (any-status anti-join), AND the covered counts keep
+        covering their hot rows — gap = hot - covered = 0 with every hot
+        row matched by a (possibly STOPPED) cold row. The steady state is
+        therefore gap_detected False, register_if_missing never fires
+        (dead-sandbox rows never resurrect), and the suppressed-but-hot-
+        ACTIVE population stays visible via suppressed_terminal_count on
+        the gauge line — the ongoing per-round signal.
+        """
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 45000  # cold
+        mock_repo.count_hot_arca_devices.return_value = 40000
+        mock_repo.count_hot_arca_bindings.return_value = 10000  # hot total = 50000
+        mock_repo.count_hot_covered.return_value = 50000  # every hot row covered
+        mock_repo.count_suppressed_terminal.return_value = 5000
+        mock_repo.list_due_for_renewal.return_value = []
+        # If the scan somehow ran, it comes back empty on both sides.
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.register_if_missing = MagicMock()
+
+        scheduler._round_count = 0
+        with caplog.at_level(logging.INFO, logger="core-scheduler"):
+            report = await scheduler._run_once()
+
+        # Covered math (any-status coverage): gap = hot - covered = 0, so
+        # the discovery scan never even runs.
+        assert mock_repo.find_unregistered.call_count == 0
+        assert report.gap_detected is False
+        assert report.gap_records_registered == 0
+        # The resurrect loop's write never fires.
+        assert mock_repo.register_if_missing.call_count == 0
+        # The suppressed-terminal population is still visible as its own
+        # alertable gauge dimension.
+        messages = [r.message for r in caplog.records]
+        assert any(
+            "[arca_ttl_metrics]" in m and "suppressed_terminal_count=5000" in m
+            for m in messages
+        )
+
+    @pytest.mark.asyncio
+    async def test_gap_uses_covered_math_triggers_scan(self):
+        """86-02 (R3): the gap trigger runs on covered math — an uncovered
+        remainder (hot 50000, covered 49000) still triggers the scan even
+        when the legacy hot-minus-cold formula would read zero (cold ==
+        hot), so the trigger is pinned to the new formula alone."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 50000  # cold == hot (legacy gap 0)
+        mock_repo.count_hot_arca_devices.return_value = 40000
+        mock_repo.count_hot_arca_bindings.return_value = 10000  # hot = 50000
+        mock_repo.count_hot_covered.return_value = 49000  # 1000 uncovered
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.list_due_for_renewal.return_value = []
+        mock_repo.find_unregistered.return_value = []
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        assert report.gap_detected is True
+        assert mock_repo.find_unregistered.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_covered_count_failure_degrades_to_legacy_gap(self, caplog):
+        """86-02 (R3): count_hot_covered raising degrades Step 0 to the
+        legacy hot-minus-cold formula with a warning; the round completes,
+        suppressed_terminal_count forced to 0."""
+        import logging
+
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 50000  # cold == hot
+        mock_repo.count_hot_arca_devices.return_value = 50000
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.side_effect = Exception("DB down")
+        mock_repo.list_due_for_renewal.return_value = []
+
+        scheduler._round_count = 0
+        with caplog.at_level(logging.WARNING, logger="core-scheduler"):
+            report = await scheduler._run_once()
+
+        # Legacy formula: hot(50000) - cold(50000) = 0 → no gap, no scan.
+        assert isinstance(report, RenewalRunReport)
+        assert report.gap_detected is False
+        assert mock_repo.find_unregistered.call_count == 0
+        # The suppressed signal is observably zero, never silently dropped.
+        assert report.suppressed_terminal_count == 0
+        messages = [r.message for r in caplog.records]
+        assert any("covered/gauge count query failed" in m for m in messages)
+
+    @pytest.mark.asyncio
     async def test_anti_join_periodic_verify_triggers_every_48_rounds(self):
         """Test 8: anti-join periodic verify fires on round 48 regardless of COUNT."""
         scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
         mock_repo.count_active.return_value = 50000
         mock_repo.count_hot_arca_devices.return_value = 50000
         mock_repo.count_hot_arca_bindings.return_value = 0  # cold == hot
+        mock_repo.count_hot_covered.return_value = 50000  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         mock_repo.find_unregistered.return_value = []
 
@@ -274,6 +378,8 @@ class TestStep0GapDetection:
         mock_repo.count_active.return_value = 50000
         mock_repo.count_hot_arca_devices.side_effect = Exception("DB connection error")
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 0
+        mock_repo.count_suppressed_terminal.return_value = 0
         # Mock Step 1 to return empty
         mock_repo.list_due_for_renewal.return_value = []
 
@@ -282,6 +388,57 @@ class TestStep0GapDetection:
 
         # Should not crash; report is returned
         assert isinstance(report, RenewalRunReport)
+
+    @pytest.mark.asyncio
+    async def test_hot_count_failure_degrades_gap_math_not_negative_gap(self, caplog):
+        """WR-02 (85-86 deep review): hot counts raise while the covered
+        count succeeds → the round does NOT compute a negative gap from the
+        residual zeros — gap_detected stays False, no discovery scan runs
+        off a fabricated gap, and the degradation is logged distinctly from
+        both the cold-failure path and a healthy zero-gap round."""
+        import logging
+
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 50000  # cold succeeds
+        mock_repo.count_hot_arca_devices.side_effect = Exception("hot table down")
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 50000  # covered succeeds
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.list_due_for_renewal.return_value = []
+        mock_repo.find_unregistered.return_value = []
+
+        scheduler._round_count = 0  # round 1: 1 % 48 != 0, no periodic verify
+        with caplog.at_level(logging.ERROR, logger="core-scheduler"):
+            report = await scheduler._run_once()
+
+        assert report.gap_detected is False
+        mock_repo.find_unregistered.assert_not_called()
+        messages = [r.message for r in caplog.records]
+        # The hot-degradation signal is present and distinguishable from
+        # the cold-count-failure message.
+        assert any("gap detection degraded" in m for m in messages)
+        assert not any("count_active failed" in m for m in messages)
+
+    @pytest.mark.asyncio
+    async def test_hot_count_failure_keeps_periodic_verify_alive(self):
+        """WR-02 (85-86 deep review): hot counts failing ON a periodic
+        verify round still run the gap-independent anti-join scan — hoisted
+        unregistered rows can never be hidden indefinitely by the degraded
+        gap math."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 50000  # cold succeeds
+        mock_repo.count_hot_arca_devices.side_effect = Exception("hot table down")
+        mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 50000  # covered succeeds
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.list_due_for_renewal.return_value = []
+        mock_repo.find_unregistered.return_value = []
+
+        scheduler._round_count = 47  # about to become 48 in _run_once()
+        report = await scheduler._run_once()
+
+        assert report.gap_detected is False
+        assert mock_repo.find_unregistered.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_cold_count_failure_skips_gap_detection_but_continues_round(
@@ -295,6 +452,8 @@ class TestStep0GapDetection:
         mock_repo.count_active.side_effect = Exception("cold table down")
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.list_due_for_renewal.side_effect = [
             [
@@ -354,6 +513,8 @@ class TestStep1ColdTableQuery:
         mock_repo.count_active.return_value = 200  # cold == hot, no gap
         mock_repo.count_hot_arca_devices.return_value = 100
         mock_repo.count_hot_arca_bindings.return_value = 100
+        mock_repo.count_hot_covered.return_value = 200  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
 
         mock_repo.list_due_for_renewal.side_effect = [
             [self._due_row("baas_device", 1, "sb-1", hot_id=1) for _ in range(100)],
@@ -377,6 +538,8 @@ class TestStep1ColdTableQuery:
         mock_repo.count_active.return_value = 200
         mock_repo.count_hot_arca_devices.return_value = 200
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 200  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         mock_repo.find_unregistered.return_value = []
 
@@ -389,12 +552,16 @@ class TestStep1ColdTableQuery:
 
     @pytest.mark.asyncio
     async def test_orphan_detection_marks_stopped_and_excludes(self):
-        """Test 12: hot_id=NULL → set_status(STOPPED), excluded from processing."""
+        """Test 12: hot_id=NULL + recheck absent → set_status(STOPPED,
+        stop_reason='orphan'), excluded from processing."""
         scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
         mock_repo.count_active.return_value = 2
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.return_value = False
         mock_repo.list_due_for_renewal.side_effect = [
             # baas_device: 1 valid + 1 orphan
             [
@@ -408,9 +575,9 @@ class TestStep1ColdTableQuery:
         scheduler._round_count = 0
         report = await scheduler._run_once()
 
-        # set_status called for orphan
+        # set_status called for orphan with the WR-02/R4 reason stamp
         mock_repo.set_status.assert_called_once_with(
-            "test", "baas_device", 2, "STOPPED"
+            "test", "baas_device", 2, "STOPPED", stop_reason="orphan"
         )
         # du_count = 2 rows total
         assert report.due_count == 2
@@ -422,7 +589,10 @@ class TestStep1ColdTableQuery:
         mock_repo.count_active.return_value = 2
         mock_repo.count_hot_arca_devices.return_value = 2
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.return_value = False
         mock_repo.set_status.side_effect = Exception("DB connection lost")
         mock_repo.list_due_for_renewal.side_effect = [
             [self._due_row("baas_device", 1, "sb-1", hot_id=None)],
@@ -441,6 +611,88 @@ class TestStep1ColdTableQuery:
         assert isinstance(report, RenewalRunReport)
 
     @pytest.mark.asyncio
+    async def test_orphan_reappeared_hot_row_postpones_not_stops(self):
+        """86-02 (R4): hot_id=None but the recheck finds the hot row alive
+        again → postpone; set_status never called, orphan_count stays 0."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 2
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.return_value = True  # hot row reappeared
+        mock_repo.list_due_for_renewal.side_effect = [
+            [self._due_row("baas_device", 2, "sb-2", hot_id=None)],
+            [],
+        ]
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        # Reappeared hot row → postponed, never stopped this round.
+        mock_repo.set_status.assert_not_called()
+        mock_repo.postpone_renewal.assert_called_once()
+        assert report.orphan_count == 0
+
+    @pytest.mark.asyncio
+    async def test_orphan_recheck_failure_postpones_not_stops(self):
+        """86-02 (R4): hot_row_exists raising → postpone (never STOP on
+        doubt); set_status never called."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 2
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.side_effect = Exception("DB down")
+        mock_repo.list_due_for_renewal.side_effect = [
+            [self._due_row("baas_device", 2, "sb-2", hot_id=None)],
+            [],
+        ]
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        mock_repo.set_status.assert_not_called()
+        mock_repo.postpone_renewal.assert_called_once()
+        assert report.orphan_count == 0
+
+    @pytest.mark.asyncio
+    async def test_orphan_postpone_write_failure_does_not_abort_round(self):
+        """86-REVIEW WR-01: a failing postpone write on one poison row must
+        not abort the remaining orphan checks or the round — the next
+        proven-absent orphan is still STOPPED this round."""
+        scheduler, mock_repo, _, _ = _make_scheduler(enabled=True)
+        mock_repo.count_active.return_value = 2
+        mock_repo.count_hot_arca_devices.return_value = 1
+        mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
+        mock_repo.find_unregistered.return_value = []
+        # Row 1: recheck alive → postpone raises; row 2: recheck absent.
+        mock_repo.hot_row_exists.side_effect = [True, False]
+        mock_repo.postpone_renewal.side_effect = Exception("DB down")
+        mock_repo.list_due_for_renewal.side_effect = [
+            [
+                self._due_row("baas_device", 2, "sb-2", hot_id=None),
+                self._due_row("baas_device", 3, "sb-3", hot_id=None),
+            ],
+            [],
+        ]
+
+        scheduler._round_count = 0
+        report = await scheduler._run_once()
+
+        # Round survives: the second orphan is still terminally STOPPED.
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 3, "STOPPED", stop_reason="orphan"
+        )
+        mock_repo.postpone_renewal.assert_called_once()
+        assert report.orphan_count == 1
+
+    @pytest.mark.asyncio
     async def test_one_side_query_failure_keeps_healthy_side_rows(self):
         """WR-05: when one due query raises, the healthy side's batch is
         still processed this round — only the failed side is emptied."""
@@ -448,6 +700,8 @@ class TestStep1ColdTableQuery:
         mock_repo.count_active.return_value = 200
         mock_repo.count_hot_arca_devices.return_value = 100
         mock_repo.count_hot_arca_bindings.return_value = 100
+        mock_repo.count_hot_covered.return_value = 200  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.list_due_for_renewal.side_effect = [
             Exception("device table down"),
@@ -493,6 +747,8 @@ class TestEarlyReturnMetrics:
         mock_repo.count_active.return_value = 200
         mock_repo.count_hot_arca_devices.return_value = 200
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 200  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         mock_repo.find_unregistered.return_value = []
 
@@ -518,7 +774,10 @@ class TestEarlyReturnMetrics:
         mock_repo.count_active.return_value = 2
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 1
+        mock_repo.count_hot_covered.return_value = 2  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
+        mock_repo.hot_row_exists.return_value = False
         mock_repo.list_due_for_renewal.side_effect = [
             [
                 self._due_row("baas_device", 1, "sb-1", hot_id=None),
@@ -564,6 +823,8 @@ class TestStep2ConcurrentRenewalScaffolding:
         mock_repo.count_active.return_value = 3
         mock_repo.count_hot_arca_devices.return_value = 3
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 3  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
 
         rows = [
@@ -588,6 +849,8 @@ class TestStep2ConcurrentRenewalScaffolding:
         mock_repo.count_active.return_value = 100
         mock_repo.count_hot_arca_devices.return_value = 100
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 100  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.list_due_for_renewal.side_effect = Exception("DB query error")
 
@@ -1052,6 +1315,8 @@ class TestTtlWindowDerivation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0  # gap=1 -> scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.list_due_for_renewal.return_value = []
         ttl_epoch_sec = 1760000000
 
@@ -1089,7 +1354,15 @@ class TestTtlWindowDerivation:
 
 
 class TestStep4FailureHandling:
-    """Tests for Step 4 — failure handling (retry + STOPPED threshold)."""
+    """Tests for Step 4 — liveness-gated failure handling.
+
+    Two-verdict model at the max_fail_count threshold: a platform-confirmed
+    verdict (dead-sandbox DEVICE_NOT_FOUND error class, or an expired TTL)
+    writes terminal STOPPED with the verdict as stop_reason; every
+    non-confirming failure (outage/unavailable class, empty TTL, generic
+    exception, rejected extension on a live container) holds the count at
+    max_fail_count - 1 (cap-and-hold) and keeps retrying.
+    """
 
     @pytest.mark.asyncio
     async def test_failure_retry_below_max_fail_count(self):
@@ -1115,9 +1388,191 @@ class TestStep4FailureHandling:
         mock_repo.set_status.assert_not_called()
         assert result == "failed"
 
+    @staticmethod
+    def _assert_cap_and_hold(mock_repo):
+        """Assert the cap-and-hold shape: count pinned at max_fail_count-1."""
+        call_args = mock_repo.update_after_failure.call_args
+        assert call_args is not None
+        assert call_args.kwargs.get("new_fail_count") == 9
+        return call_args.kwargs.get("next_renew_at")
+
+    @staticmethod
+    def _gone_exception(operation="get_device_info"):
+        """Dead-sandbox error class the platform emits for a recycled sandbox."""
+        return DeviceFacadeException(
+            operation,
+            "ARCA",
+            0,
+            None,
+            PaasError(ErrorCode.DEVICE_NOT_FOUND, "Device not found"),
+        )
+
     @pytest.mark.asyncio
-    async def test_failure_stopped_at_max_fail_count(self):
-        """Test 24: fail_count=10 → STOPPED, no retry."""
+    async def test_failure_threshold_confirmed_gone_stops_with_reason(self):
+        """fail_count=9 + DEVICE_NOT_FOUND → STOPPED with stop_reason=threshold_gone."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(side_effect=self._gone_exception())
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_gone"
+        )
+        mock_repo.update_after_failure.assert_not_called()
+        assert result == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_failure_threshold_expired_ttl_stops_with_reason(self):
+        """fail_count=9 + platform-reported expired TTL → STOPPED, threshold_expired."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1))
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_expired"
+        )
+        mock_repo.update_after_failure.assert_not_called()
+        assert result == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_expired_within_clock_tol_band_not_confirmed_holds_cap_and_retries(
+        self,
+    ):
+        """WR-02 (86-REVIEW, option 1): fail_count=9 + remaining=-1min with
+        tol=5 — the reading is inside the grace band, NOT confirming: no
+        STOPPED write, cap-and-hold at 9, retry next round."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"clock_tol_minutes": 5},
+        )
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1 / 60))
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        self._assert_cap_and_hold(mock_repo)
+
+    @pytest.mark.asyncio
+    async def test_expired_within_clock_tol_band_below_cap_increments_and_retries(
+        self,
+    ):
+        """WR-02 (86-REVIEW, option 1): below the cap, a within-band reading
+        routes through ordinary non-confirming failure accounting (count
+        increments, retry scheduled) — never a confirming verdict."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"clock_tol_minutes": 5},
+        )
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1 / 60))
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=3)
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        call_kwargs = mock_repo.update_after_failure.call_args.kwargs
+        assert call_kwargs.get("new_fail_count") == 4
+
+    @pytest.mark.asyncio
+    async def test_expired_beyond_clock_tol_confirms_threshold_expired(self):
+        """WR-02 (86-REVIEW, option 1): fail_count=9 + remaining=-10min with
+        tol=5 — beyond the grace band → confirmed STOPPED with
+        stop_reason=threshold_expired."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"clock_tol_minutes": 5},
+        )
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-10 / 60))
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_expired"
+        )
+        mock_repo.update_after_failure.assert_not_called()
+        assert result == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_failure_threshold_outage_error_class_holds_cap_and_retries(self):
+        """fail_count=9 + DEVICE_UNAVAILABLE (outage) → NO stop, cap-and-hold at 9."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(
+            side_effect=DeviceFacadeException(
+                "get_device_info",
+                "ARCA",
+                0,
+                None,
+                PaasError(ErrorCode.DEVICE_UNAVAILABLE, "platform down"),
+            )
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        next_retry = self._assert_cap_and_hold(mock_repo)
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+
+        now_cst = datetime.now(ZoneInfo("Asia/Shanghai")).replace(tzinfo=None)
+        expected_min = now_cst + timedelta(minutes=2) - timedelta(seconds=5)
+        expected_max = now_cst + timedelta(minutes=2) + timedelta(seconds=5)
+        assert expected_min <= next_retry <= expected_max
+
+    @pytest.mark.asyncio
+    async def test_failure_threshold_generic_exception_holds_cap_and_retries(self):
+        """fail_count=9 + plain Exception (fail-safe default) → cap-and-hold."""
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(side_effect=Exception("timeout"))
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        self._assert_cap_and_hold(mock_repo)
+
+    @pytest.mark.asyncio
+    async def test_failure_non_confirming_at_max_fail_count_holds_cap_and_retries(
+        self,
+    ):
+        """fail_count=10 + empty TTL (non-confirming) → cap-and-hold, never STOPPED."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
         mock_facade.get_device_info = AsyncMock(
@@ -1129,15 +1584,13 @@ class TestStep4FailureHandling:
         record = _renewal_record(renew_fail_count=10)
         result = await scheduler._renew_one(record)
 
-        mock_repo.set_status.assert_called_once_with(
-            "test", "baas_device", 1, "STOPPED"
-        )
-        mock_repo.update_after_failure.assert_not_called()
-        assert result == "stopped"
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        self._assert_cap_and_hold(mock_repo)
 
     @pytest.mark.asyncio
-    async def test_failure_threshold_exact_nine_to_ten_triggers_stopped(self):
-        """Test 25: fail_count=9 → incremented to 10 → STOPPED."""
+    async def test_failure_nine_to_ten_non_confirming_holds_cap_and_retries(self):
+        """fail_count=9 + empty TTL → count reaches 10 but holds at 9, retries."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
 
         mock_facade.get_device_info = AsyncMock(
@@ -1149,11 +1602,76 @@ class TestStep4FailureHandling:
         record = _renewal_record(renew_fail_count=9)
         result = await scheduler._renew_one(record)
 
+        assert result == "failed"
+        mock_repo.set_status.assert_not_called()
+        self._assert_cap_and_hold(mock_repo)
+
+    @pytest.mark.asyncio
+    async def test_extend_ttl_not_found_at_threshold_stops(self):
+        """fail_count=9 + extend_ttl raises DEVICE_NOT_FOUND → STOPPED, threshold_gone.
+
+        The sandbox was provably alive seconds earlier (TTL read succeeded),
+        but the extension reply reports the dead-sandbox error class — the
+        single confirming error shape must still terminate at the cap.
+        """
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(10))
+        )
+        mock_facade.extend_ttl = AsyncMock(
+            side_effect=self._gone_exception(operation="extend_ttl")
+        )
+        mock_repo.update_after_failure = MagicMock()
+        mock_repo.set_status = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        result = await scheduler._renew_one(record)
+
         mock_repo.set_status.assert_called_once_with(
-            "test", "baas_device", 1, "STOPPED"
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_gone"
         )
         mock_repo.update_after_failure.assert_not_called()
         assert result == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_threshold_set_status_failure_retains_stopped_verdict(self, caplog):
+        """WR-01 (85-86 deep review): a set_status raise at the cap must not
+        leak into _process_one's secondary routing — the confirming verdict
+        stays "stopped", the stopped_transition metric still fires, the
+        "marked STOPPED" warning is kept, and the write failure is logged
+        with its exception traceback (write re-attempted next round)."""
+        import logging
+
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
+        mock_facade.get_device_info = AsyncMock(
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1))
+        )
+        mock_repo.set_status = MagicMock(side_effect=Exception("Unknown column"))
+        mock_repo.update_after_failure = MagicMock()
+
+        record = _renewal_record(renew_fail_count=9)
+        with caplog.at_level(logging.INFO, logger="core-scheduler"):
+            result = await scheduler._renew_one(record)
+
+        # The platform-confirmed verdict is retained — no downgrade to a
+        # non-confirming cap-and-hold via _process_one's failure routing.
+        assert result == "stopped"
+        mock_repo.set_status.assert_called_once_with(
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_expired"
+        )
+        mock_repo.update_after_failure.assert_not_called()
+        messages = [r.message for r in caplog.records]
+        # The verdict signal and the durable alarm both fire as usual.
+        assert any("marked STOPPED" in m for m in messages)
+        assert any("stopped_transition=1" in m for m in messages)
+        # The write failure itself stays observable, with its traceback.
+        failed_lines = [
+            r for r in caplog.records if "terminal STOPPED write failed" in r.message
+        ]
+        assert len(failed_lines) == 1
+        assert failed_lines[0].levelno == logging.ERROR
+        assert failed_lines[0].exc_info is not None
 
 
 class TestStep5ReportAndMetrics:
@@ -1166,6 +1684,8 @@ class TestStep5ReportAndMetrics:
         mock_repo.count_active.return_value = 3
         mock_repo.count_hot_arca_devices.return_value = 3
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 3  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.set_status = MagicMock()
         mock_repo.update_after_success = MagicMock()
@@ -1211,6 +1731,22 @@ class TestStep5ReportAndMetrics:
         # The field is declared: constructing with it is also legal.
         assert RenewalRunReport(anti_join_triggered=True).anti_join_triggered is True
 
+    def test_report_declares_suppressed_terminal_count_field(self):
+        """86-02 (R3): suppressed_terminal_count is a declared dataclass
+        field on RenewalRunReport, so structured consumers (asdict /
+        serializers) preserve the alertable suppression signal instead of
+        silently dropping the dynamic attribute."""
+        from dataclasses import asdict
+
+        report = RenewalRunReport()
+        report.suppressed_terminal_count = 5000
+        assert asdict(report)["suppressed_terminal_count"] == 5000
+        # The field is declared: constructing with it is also legal.
+        assert (
+            RenewalRunReport(suppressed_terminal_count=5000).suppressed_terminal_count
+            == 5000
+        )
+
     @pytest.mark.asyncio
     async def test_metrics_logging_emits_structured_entries(self, caplog):
         """Test 27: after _run_once(), structured [arca_ttl_metrics] log emitted."""
@@ -1220,6 +1756,8 @@ class TestStep5ReportAndMetrics:
         mock_repo.count_active.return_value = 3
         mock_repo.count_hot_arca_devices.return_value = 3
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 3  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.set_status = MagicMock()
         mock_repo.update_after_success = MagicMock()
@@ -1245,6 +1783,7 @@ class TestStep5ReportAndMetrics:
         assert "last_run_timestamp" in msg
         assert "renew_failure_rate" in msg
         assert "due_count" in msg
+        assert "suppressed_terminal_count" in msg
 
     @pytest.mark.asyncio
     async def test_renewal_success_derives_next_renew_from_post_extend_ttl(self):
@@ -1711,6 +2250,8 @@ class TestDiscoveryScanIsolation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 10
         mock_repo.count_hot_arca_bindings.return_value = 0  # gap=10 → scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.side_effect = Exception("DB down")
         mock_repo.list_due_for_renewal.return_value = []
 
@@ -1732,6 +2273,8 @@ class TestDiscoveryScanIsolation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0  # gap=1 → scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         call_counts: dict[str, int] = {}
 
         def _find_unregistered(env, side, limit=500):
@@ -1771,6 +2314,8 @@ class TestDiscoveryScanIsolation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 1  # gap=2 → scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         call_counts: dict[str, int] = {}
 
         def _find_unregistered(env, side, limit=500):
@@ -1808,6 +2353,8 @@ class TestDiscoveryScanIsolation:
         mock_repo.count_active.return_value = 0
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0  # gap=1 → scan
+        mock_repo.count_hot_covered.return_value = 0  # nothing covered
+        mock_repo.count_suppressed_terminal.return_value = 0
         calls: dict[str, int] = {}
 
         def _find_unregistered(env, side, limit=500):
@@ -1892,6 +2439,8 @@ class TestProcessOneIsolation:
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.update_after_failure = MagicMock()
         mock_repo.update_after_success = MagicMock(side_effect=Exception("DB down"))
@@ -1920,6 +2469,8 @@ class TestProcessOneIsolation:
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.update_after_failure = MagicMock(side_effect=Exception("DB down"))
 
@@ -1939,29 +2490,47 @@ class TestProcessOneIsolation:
 
 
 class TestStoppedTransitionMetric:
-    """WR-GAP-03: threshold crossing emits a scrapeable metrics line — the
-    persisted STOPPED state alone is transient (revive oscillation)."""
+    """WR-GAP-03: a threshold-STOPPED write emits a scrapeable metrics line.
+    R7 retarget: under the liveness gate the line fires only when the STOPPED
+    write carries a platform-confirmed verdict — the line now also carries
+    the stop_reason dimension and is the durable alarm (the persistence side
+    is the any-status anti-join keeping confirmed STOPPED rows terminal)."""
 
     @pytest.mark.asyncio
     async def test_stopped_transition_emits_metrics_line(self, caplog):
-        """WR-GAP-03: fail_count crossing the threshold emits
-        [arca_ttl_metrics] stopped_transition=1 with fail_count."""
+        """WR-GAP-03: a platform-confirmed expired TTL crossing the threshold
+        emits [arca_ttl_metrics] stopped_transition=1 with fail_count, the
+        stop_reason=threshold_expired dimension, and (WR-02, option 3) the
+        raw remain_sec appended last — pinned under a controlled clock so
+        the full-line equality stays deterministic."""
         import logging
+        from unittest.mock import patch
+
+        from secbaas.community.core.service.scheduler._tasks import (
+            _deadline_renewal_task,
+        )
 
         scheduler, mock_repo, _, mock_facade = _make_scheduler(enabled=True)
-
-        mock_facade.get_device_info = AsyncMock(
-            return_value=MagicMock(ttl_timestamp=None)
-        )
         mock_repo.set_status = MagicMock()
         mock_repo.update_after_failure = MagicMock()
 
+        # Controlled clock: ttl seeded exactly 1h in the past, so the raw
+        # remaining (ttl_ms/1000.0 - time.time()) is exactly -3600.0.
+        fixed_now = 1_750_000_000.0
         record = _renewal_record(renew_fail_count=9)
         with caplog.at_level(logging.INFO, logger="core-scheduler"):
-            result = await scheduler._renew_one(record)
+            with patch.object(
+                _deadline_renewal_task.time, "time", return_value=fixed_now
+            ):
+                mock_facade.get_device_info = AsyncMock(
+                    return_value=MagicMock(
+                        ttl_timestamp=int((fixed_now - 3600.0) * 1000)
+                    )
+                )
+                result = await scheduler._renew_one(record)
 
         mock_repo.set_status.assert_called_once_with(
-            "test", "baas_device", 1, "STOPPED"
+            "test", "baas_device", 1, "STOPPED", stop_reason="threshold_expired"
         )
         mock_repo.update_after_failure.assert_not_called()
         assert result == "stopped"
@@ -1971,10 +2540,11 @@ class TestStoppedTransitionMetric:
         ]
         assert len(transition_lines) == 1
         msg = transition_lines[0]
-        assert "[arca_ttl_metrics]" in msg
-        assert "stopped_transition=1" in msg
-        assert "sandbox_id=sb-1" in msg
-        assert "fail_count=10" in msg
+        assert msg == (
+            "[arca_ttl_metrics] stopped_transition=1 sandbox_id=sb-1 "
+            "source_table=baas_device source_id=1 fail_count=10 "
+            "stop_reason=threshold_expired,remain_sec=-3600.0"
+        )
 
         transition_records = [
             r for r in caplog.records if "stopped_transition" in r.message
@@ -1985,6 +2555,58 @@ class TestStoppedTransitionMetric:
         stopped_lines = [r for r in caplog.records if "marked STOPPED" in r.message]
         assert len(stopped_lines) == 1
         assert stopped_lines[0].levelno == logging.WARNING
+        assert "threshold_expired" in stopped_lines[0].message
+
+    @pytest.mark.asyncio
+    async def test_stopped_transition_remain_sec_is_raw_unadjusted(self, caplog):
+        """WR-02 (86-REVIEW, option 3): remain_sec carries the RAW remaining
+        at verdict time — (ttl_ms/1000.0 - time.time()) with NO clock-
+        tolerance offset — verified against an injected ttl_ms under a
+        controlled clock; existing field order is preserved. (The platform
+        API offers no "platform current time" primitive, so this value is
+        the closest observable approximation of the host/platform clock
+        delta.)"""
+        import logging
+        from unittest.mock import patch
+
+        from secbaas.community.core.service.scheduler._tasks import (
+            _deadline_renewal_task,
+        )
+
+        scheduler, mock_repo, _, mock_facade = _make_scheduler(
+            enabled=True,
+            config_overrides={"clock_tol_minutes": 5},
+        )
+        mock_repo.set_status = MagicMock()
+        mock_repo.update_after_failure = MagicMock()
+
+        # Controlled clock: expiry 10 minutes in the past (beyond tol=5),
+        # so the raw remaining at verdict time is exactly -600.0s.
+        fixed_now = 1_750_000_000.0
+        expired_ms = int((fixed_now - 600.0) * 1000)
+        record = _renewal_record(renew_fail_count=9)
+        with caplog.at_level(logging.INFO, logger="core-scheduler"):
+            with patch.object(
+                _deadline_renewal_task.time, "time", return_value=fixed_now
+            ):
+                mock_facade.get_device_info = AsyncMock(
+                    return_value=MagicMock(ttl_timestamp=expired_ms)
+                )
+                result = await scheduler._renew_one(record)
+
+        assert result == "stopped"
+        stopped_lines = [
+            r.message for r in caplog.records if "stopped_transition=1" in r.message
+        ]
+        assert len(stopped_lines) == 1
+        # Field order preserved (fail_count before stop_reason) and the raw
+        # remainder appended last with no margin offset applied (the
+        # margin-adjusted verdict would read -10min past -5min tol, but the
+        # metric records the un-adjusted -600.0s).
+        assert (
+            "source_id=1 fail_count=10 stop_reason=threshold_expired,"
+            "remain_sec=-600.0" in stopped_lines[0]
+        )
 
 
 class TestRenewalDigestLogging:
@@ -2131,13 +2753,14 @@ class TestRenewalDigestLogging:
 
     @pytest.mark.asyncio
     async def test_stopped_outcome_maps_to_failure_digest_result(self, caplog):
-        """Threshold STOPPED maps the digest result to "failure" (not
-        "stopped") — monitor vocabulary stays two-valued success/failure."""
+        """Threshold STOPPED on a platform-confirmed expired verdict maps the
+        digest result to "failure" (not "stopped") — monitor vocabulary
+        stays two-valued success/failure."""
         scheduler, mock_repo, _, mock_facade = _make_scheduler(
             enabled=True, config_overrides={"max_fail_count": 1}
         )
         mock_facade.get_device_info = AsyncMock(
-            return_value=MagicMock(ttl_timestamp=None)
+            return_value=MagicMock(ttl_timestamp=_ttl_ms(-1))
         )
         mock_repo.set_status = MagicMock()
 
@@ -2214,6 +2837,8 @@ class TestRenewalDigestLogging:
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.update_after_failure = MagicMock()
         # update_after_success raises → _renew_one raises out of the h3 path
@@ -2250,6 +2875,8 @@ class TestRenewalDigestLogging:
         mock_repo.count_active.return_value = 1
         mock_repo.count_hot_arca_devices.return_value = 1
         mock_repo.count_hot_arca_bindings.return_value = 0
+        mock_repo.count_hot_covered.return_value = 1  # covered == hot
+        mock_repo.count_suppressed_terminal.return_value = 0
         mock_repo.find_unregistered.return_value = []
         mock_repo.update_after_failure = MagicMock(side_effect=Exception("DB down"))
 

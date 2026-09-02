@@ -88,3 +88,43 @@ class TestGetFilePathDeviceFs:
 
         result = await service.get_file_path("nope.txt")
         assert result is None
+
+
+class TestAdmissionRefusal:
+    """The one predicate both the write chain and the apply-time gate ask.
+
+    Lives beside the constants it reads so the two call surfaces
+    (``ResourceFileService.upload_file`` raises it; the manifest
+    materialiser's resolve gate returns it) cannot drift from each other —
+    each reading its own copy would be the drift, silently re-creating the
+    half-written-tree bug the gate exists to prevent.
+    """
+
+    def test_an_allowed_extension_passes(self):
+        from agentclaw.community.core.resources.services import file_service
+
+        assert file_service.admission_refusal("a.md", b"body") is None
+
+    def test_a_refused_extension_names_the_rule(self):
+        from agentclaw.community.core.resources.services import file_service
+
+        refusal = file_service.admission_refusal("run.sh", b"#!/bin/sh\n")
+        assert refusal is not None and refusal.startswith("File type not allowed.")
+        assert file_service.admission_refusal("LICENSE", b"MIT").startswith(
+            "File type not allowed."
+        )
+
+    def test_an_oversized_body_names_the_rule(self, monkeypatch):
+        from agentclaw.community.core.resources.services import file_service
+
+        monkeypatch.setattr(file_service, "MAX_FILE_SIZE", 16)
+        refusal = file_service.admission_refusal("a.md", b"x" * 17)
+        assert refusal is not None and refusal.startswith("File too large.")
+
+    def test_the_extension_is_judged_on_the_basename(self):
+        from agentclaw.community.core.resources.services import file_service
+
+        # A path-shaped name must not dodge the allow-list via its directory.
+        assert file_service.admission_refusal("run.sh", b"").startswith(
+            "File type not allowed."
+        )

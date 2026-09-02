@@ -28,6 +28,28 @@ ALLOWED_EXTENSIONS = {
 }
 
 
+def admission_refusal(basename: str, data: bytes) -> Optional[str]:
+    """The workspace file surface's admission rule — the one predicate.
+
+    Read by both enforcement sites: ``ResourceFileService.upload_file``
+    raises it as ``ValueError``; the manifest apply flow asks it in its
+    resolve stage (before the first destructive delete) and reports the
+    answer. One rule, both sides — the reason it lives here, beside the
+    constants it reads at call time.
+
+    ``basename`` is judged alone (the caller strips any directory part);
+    ``data`` is the exact bytes about to be written.
+    """
+    if Path(basename).suffix.lower() not in ALLOWED_EXTENSIONS:
+        return (
+            "File type not allowed. Allowed: "
+            f"{', '.join(sorted(ALLOWED_EXTENSIONS))}"
+        )
+    if len(data) > MAX_FILE_SIZE:
+        return f"File too large. Max size: {MAX_FILE_SIZE / 1024 / 1024}MB"
+    return None
+
+
 class FileNode:
     """Represents a file or directory node in the tree."""
     def __init__(self, name: str, path: str, is_dir: bool = False, size: int = 0,

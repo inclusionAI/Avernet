@@ -22,7 +22,7 @@ module_config:
 user_config:
   # 插件配置
   plugins:
-    auth: "oauth"
+    auth: "stub"
     secret: "env"
     cache: "redis"
     bot_service: "real"
@@ -60,8 +60,8 @@ user_config:
       env: "${ENV:-}"
 
   bot_service:
-    proxy_base_url: "${BOT_SERVICE_PROXY_BASE_URL:-https://backend.avernet-inc.com}"
-    proxy_ws_base_url: "${BOT_SERVICE_PROXY_WS_BASE_URL:-wss://backend.avernet-inc.com}"
+    proxy_base_url: "${BOT_SERVICE_PROXY_BASE_URL}"
+    proxy_ws_base_url: "${BOT_SERVICE_PROXY_WS_BASE_URL}"
     adapter_port: 20003
     ws_path: "/api/openclaw/ws"
     connect_timeout: 10

@@ -1,18 +1,33 @@
-# `agentclaw.community.core.bot_config_manifest`
-
 A **configuration manifest** that belongs to a bot: one document declaring what
 that bot should have — MCP servers, workspace resources, skills, engine config,
 identity files, command-line tools — plus the imperative `script` that #926
 already owned.
 
-Two waves of `docs/bot-config-manifest/work-items.zh-CN.md` live in this module
-now. W1 **stores, validates and describes** a manifest. W2 (the `fetch/`
+Six waves of `docs/bot-config-manifest/work-items.zh-CN.md` live in this
+module now. W1 **stores, validates and describes** a manifest. W2 (the `fetch/`
 package, #1470) is the guarded transport underneath the fetching wave: the
-fetcher and the unpack pipeline every remote-source byte rides through.
-Neither wave applies anything — a document accepted by W1 sits inert until the
-apply engine lands, and bytes fetched by W2 are write-or-hash material, never
-run. Neither holds a credential: W1 refuses them at the boundary, and W2
-declares (but does not bind) the injector protocol W3 will.
+fetcher and the unpack pipeline every remote-source byte rides through. W3 (the
+`credentials/` package, #1471) is where a secret may finally live: named
+tenant-level credentials, presented by the platform within stored prefixes. W4
+(the `apply/` package, #1472) **applies** a stored document to its bot. W11
+(the `content/` package, #1510) is the platform-side copy: the
+content-addressed blob store and the append-only provenance log that §2.8
+demands, so that everything after fetch reads *the platform's* bytes. Bytes
+fetched by W2 and kept by W11 are write-or-hash material, never run. W5
+registers the first two **fetch-consuming** materialisers: `skills` — packages
+that travel the manual-upload road (`SkillPackageValidator`, then
+`upload_local_skill`, then direct activation) — and `identity` — the file set
+minus the reserved names, written through the router's own
+`IdentityService` path. The one funnel they fetch through is
+`apply/entry_fetch.py`: substitute, consult the platform's copy, fetch under
+a named credential, file the receipt. W6 adds `resources` — files and
+archived directory trees, written through `ResourceFileService`'s one
+dispatcher chain, directory entries replacing their declared tree in full.
+
+A credential never enters a document (W1 refuses it at the boundary); W2
+declares the injector protocol, and W3 binds it. W11 records a credential
+*name* in provenance and nothing else. Apply holds none either: it calls the
+services that own each area and passes no secret of its own.
 
 ## The one rule everything here is shaped by
 
@@ -114,13 +129,134 @@ downloader (URL shape → global-only resolution → pinned connection with
 SNI, streaming double caps). Structure follows it; this is a backend-side
 re-implementation behind its own tests, not an import.
 
+## The credentials side (W3): presentation, named and scoped
+
+A manifest references a credential **by name**; the platform presents the
+secret while fetching within the stored `allowed_prefixes`. The name is the
+only spelling that ever appears in a document, a log, an error, or an apply
+report — the value is decryptable only in the fetch hop's memory.
+
+What `credentials/` owns:
+
+- **the write path's truth**: one body schema whose discriminating key is the
+  *mechanism* (`type`), v1 implementing `header` only, reserved mechanisms
+  (`oss_aksk`, `basic`) refused at write so the stored type is real from
+  day one;
+- **the boundary of presentation**: absolute `https` prefixes, matched on
+  path-segment boundaries (`…/team/content` never authorizes
+  `…/team/content-secret`), decode-then-normalize on both sides so a
+  doubly-encoded slash is an equivalent spelling, not an escape. A target
+  outside every prefix fails the hop; the platform never falls back to
+  fetching *without* the credential;
+- **fail-closed storage**: under the corp/community deployment columns a write
+  with no resolvable master key is refused before persistence (a loud 503) —
+  `TokenVault`'s empty-key plaintext passthrough is right for singlebox and
+  must never catch tenant tokens at rest;
+- **the rotation contract**: a rotation is a same-name re-PUT, no apply is
+  triggered, and the binding re-reads per hop — "the next fetch uses the new
+  value" needs no signal;
+- **the ownership boundary**: the surface is application-operated (the edge
+  requires an app credential on every route); a name belongs to the
+  application that created it, and rotation — a whole-row replace, of the
+  secret, the header, *and* the prefixes every manifest citation of the
+  name depends on — and delete are the owner's calls alone, refused with
+  403 before storage for any other application of the tenant. Reads stay
+  tenant-wide: the name is the shared reference namespace manifests cite.
+
+What it deliberately does not own:
+
+- **transport**: the binding duck-satisfies W2's injector/policy seams — W2
+  enforces the pinned connection and per-hop revalidation; the fetcher
+  *calls* `reauthorize` on every hop, which is what keeps a credential from
+  leaving its prefixes across a redirect;
+- **reference integrity**: deleting a still-referenced credential is allowed;
+  the referencing entries fail their next fetch *with the name*, recorded
+  where failures are recorded (apply, W4). Storage never guesses the
+  reference graph;
+- **the fetch-failure vocabulary**: "credential X was rejected" (401/403) is
+  the apply report's wording; the binding surfaces the name and the boundary,
+  not a classified outcome.
+
+## The content store (W11): the platform's own copy
+
+§2.8 is a hard requirement from audit and reconciliation: content fetched on a
+manifest's behalf is kept as **the platform's durable copy**, and every step
+after fetch reads that copy. The `content/` package is that mechanism — one
+store behind all three consumers of the requirement (audit, delivery,
+`keep_last`), not a copy per consumer:
+
+- **Bytes live in a content-addressed blob tree** —
+  `<root>/blobs/<hex[:2]>/<hex64>` under the `content_store_dir` from
+  `application.yaml`. The digest (`sha256:<hex>`, the fetcher's own
+  vocabulary) IS the address: identical bytes are written once, ever, and the
+  write is durable before it is visible — fsync on the temp file, then
+  `os.replace` (power loss must not leave an address holding half its
+  bytes: this layer never re-fetches, so an in-flight retry cannot heal a
+  torn write). They are not in the database — schema §5 lets one entry be
+  100–200 MiB, and a column holding that is a self-destructing design.
+- **Provenance lives in `ac_manifest_content`**, append-only, one row per
+  store event — and a row is a **fetch event, not a delivery**: under §3.2's
+  all-or-nothing overwrite, an entry can be fetched, verified and filed here
+  and never materialised because a sibling in its category failed (read
+  alone, this table over-reports; the apply linkage below joins the rest of
+  the answer). Each row carries: the bot axes `(avernet_tenant, env,
+  entity_id, bot_id)`, the digest, both URLs (entry source after
+  `${BOT_*}` substitution, and the final hop — differing values mean a
+  redirect happened), the credential **name** (W3's identifier; the value
+  never crosses into this layer), size, fetch time, who triggered it — and
+  the `apply_id` / `category` / `entry_identity` trio linking the row back
+  to the apply and the entry the fetch served (nullable; present whenever
+  the fetch pipeline knew them, and indexed for "what did apply X fetch").
+  No unique key: fetching the same digest twice is two audit events, not
+  one row to overwrite. Dedup lives in the blob layer by content address;
+  repetition in the log is the fact.
+- **`read(digest)` is the one read path**, shared by delivery and audit:
+  read in chunks with the hash computed on the same pass, returned whole
+  (peak ≈ 2× the blob at the §5 cap — a stated v1 trade; the consumer
+  materialises the full payload anyway), so the store returns
+  bytes it can prove or fails — a re-delivery that "mostly" matches its
+  address would defeat the receipt contract exactly where it matters. A
+  missing address is terminal; this layer **never re-fetches** (§2.8's
+  decoupling: a retried apply re-reads here, and a source-side fault cannot
+  pollute a delivery in progress).
+- **URLs in provenance carry path but neither userinfo nor query** — the
+  same posture as the fetcher's own log line (query strings are where
+  signed-source tokens live). The reconciliation anchor for audit is the
+  digest, never a one-time signed URL. IPv6 literals keep their brackets
+  (httpx hands the host back bare; a bracketless authority with a port is
+  unreadable, and this table is never corrected after write). The wire's
+  ``Content-Type`` is advisory — a header wider than its column stores NULL
+  plus a log line, because throwing away digest-verified bytes over
+  advisory metadata hands the source a provenance eraser. Source **URL
+  length** is refused upfront at `PUT` (2048, the provenance column width —
+  admission, not a post-fetch surprise); the store keeps the width check as
+  the last line of defence for what admission cannot see, a redirect
+  destination's length.
+- **Retention is stated, not defaulted**: v1 retains rows and blobs
+  unconditionally — no delete, no sweep, no TTL. Until an audit horizon is
+  named, any deletion is a manufactured audit gap. A retention window, when
+  audit names one, lands as a DDL-comment change plus a sweep mechanism in
+  that PR, not as a silent default. The one stated exception, so a future
+  sweeper's boundary is already drawn: `.tmp-*` staging files from crashed
+  writes are not audit facts, and a store into the shard collects the ones
+  old enough that no live writer owns them.
+
+The store is a declared machine part in the same shape as the fetcher: the
+service takes its repository and the blob root as constructor values, and the
+composition root that constructs it (reading
+`user_config.bot_config_manifest.content_store_dir` through
+`content.settings.content_store_root_from_config`) arrives with W5, the wave
+that fetches — W4's apply (#1472) landed fetch-free, so it wires no store and
+no caller exists yet. The per-entry digests that wave's apply records carry
+are how `keep_last` reuses this store without a second addressing.
+
 ## Tenancy is load-bearing here
 
 `ac_bots` is itself tenant-scoped, so a `bot_id` is unique only *within* a
 tenant — legacy `default` bots carry documented residual collision on that
 identifier. Without `avernet_tenant` in this table's key, two such bots share
 one manifest row, and either tenant could overwrite the other's manifest, which
-once apply lands decides what is installed in the other tenant's container. The
+decides what is installed in the other tenant's container. The
 column, the guard registration and the tenant's place in the uniqueness key are
 one mechanism; none of the three works alone.
 
@@ -133,22 +269,159 @@ utf8mb4 bytes and past the cap on its own, while at 256 the four columns come to
 column comment in `repository/models.py` for why 256 and not the 64 that would
 also fit.
 
+## Applying (W4, #1472; the fetching categories W5, #1473)
+
+`apply/` holds the engine: an orchestrator, an ordering table, a materialiser
+registry, and the four materialisers shipped so far — `mcp` and `script` with
+W4, `identity` and `skills` with W5.
+
+**The ordering table is complete; the registry is sparse.** `APPLY_ORDER` names
+every construct the vocabulary defines, including the ones nothing can act on
+yet; `build_materialisers()` maps only those that some shipped code writes. A
+declared construct with no materialiser is an **expected state**, not a gap —
+its entries fail with a readable reason, its category is aborted so nothing is
+destroyed, and later waves close the window by *registering* rather than by
+deleting a branch (W5 closed `skills` and `identity` this way; W6 holds
+`resources`).
+
+**The orchestrator must never grow category knowledge.** Every category-level
+rule lives there once — serialization, ordering, phase selection, the abort rule,
+the `skipped` cascade, the outcome tally — and a materialiser knows none of it.
+That is the whole of what W5, W6 and W13 get from this item: adding a category is
+writing a materialiser, not rebuilding the engine. `tests/community/core/bot_config_manifest/apply/test_orchestrator_stays_generic.py`
+asserts the module names no category, because the moment it does the registry
+stops meaning anything and every later work item adds "just one" special case.
+
+**Two phases, and the split is not organisational.** `script` needs no container
+and on the creation path must be written *before*
+`BaasService._build_create_bot_payload` composes the start command; everything
+else resolves a device and raises if unbound. On a running bot the two run back
+to back and the split is invisible; on the creation path they are separated by
+the whole of container provisioning, which is why W13 can call them one at a
+time. **This reverses design §3.4's order** — see work-items §2.12.
+
+**Apply is started, not awaited.** `POST …/apply` answers `202` with an
+`apply_id` and the work continues elsewhere. The lock is taken and the stored
+document re-validated *before* an id is minted, so a caller never holds a handle
+to an apply that did not start. A report stranded at `RUNNING` by a killed
+process reads as `FAILED` once its lock is stale — derived at read time, so there
+is no sweeper to keep alive.
+
+**"Elsewhere" is the task queue, not a thread (W13).** W4 ran the work on
+`threading.Thread(daemon=True)`; `core/task_queue`'s README names that pattern as
+the one it exists to replace, and W13 makes the loss load-bearing — creation
+depends on an apply completing, so a thread that dies with its pod does not lose
+a report, it boots a bot without its script. All three paths now run through one
+handler (`apply/apply_task.py`): the pre-container phase, the post-container
+phase, and an explicit apply on a running bot. The lock is acquired by whoever
+enqueues and released by whoever runs, so it spans the handoff; a task that never
+runs leaves a lock the TTL reaps, exactly as a dead thread did.
+
+**Re-running an apply is safe because apply converges — not because retry is
+off.** The queue is at-least-once *structurally*: a crashed worker's task is
+re-claimed once its lease expires, whether or not a handler ever returns `Retry`.
+Anyone adding a materialiser that is not convergent breaks this, and no queue
+configuration would save it.
+
+**Apply records delivery, not execution** (§2.7). The `script` materialiser
+writes one `ac_bot_startup_script` row and does nothing else: no restart, no
+republish, no payload rebuild. The row executes at the bot's next **device
+provisioning** — create, restart or republish — because
+`_build_create_bot_payload` re-reads it on every payload it composes; it is never
+re-run inside a container already up. Adding a restart here so a script "takes
+effect now" is the tempting bug, and the one this boundary exists to prevent.
+
+**Fetch lives in `resolve`, and only there** (W5). The registry's contract puts
+everything that can fail before touching the bot into `resolve`, and a fetch is
+exactly that kind of failure: one failed fetch aborts its whole category with
+zero writes, by construction rather than by discipline. The pipeline every
+fetching category runs is `apply/entry_fetch.py` — substitute ``${BOT_*}``
+*before* prefix authorization, consult W11's newest receipt for the source
+(pinned entries are served from the store: content addressing makes those bytes
+*the* declared bytes, and unpinned entries re-fetch so an apply converges to the
+source), fetch under W3's binding, file the receipt. `keep_last` reads that
+receipt only when it may — a receipt disagreeing with a declared digest is
+stale, not last. A `dry_run` may therefore fetch (it still writes nothing to the
+bot); the receipt it files is the platform's record of what the bot was served,
+true whether the apply proceeds.
+
+**The two fetching categories and their areas** (§3.2). `identity` overwrites
+the file set minus the reserved names — `MEMORY.md` and `IDENTITY.md` are
+refused in `resolve` and subtracted from the removals, both halves, so the
+guarantee holds for documents that never met the validator — writing through
+`IdentityService` with the router's own coordinates
+(`identity_coords_from_record`, resolved in core for exactly this consumer);
+"removal" is an empty write because the domain's own contract is that absent
+and empty are one state. `skills` overwrites the **active skill set**, narrowed
+by the Set-governed members (`BotCapabilityStateReader.member_skill_ids` — the
+write refuses them, so the plan refuses to plan them; the same narrowing `mcp`
+applies to platform defaults): a skill one of the bot's Sets supplies is
+neither declarable nor removable, a first apply uploads (the fetched zip
+validated by the upload path's own `SkillPackageValidator`, tar.gz/subpath
+unpacked by the guarded unpacker and re-packed canonically) and activates
+through `DirectActivationService`, and convergence is observed through W11
+receipts — an active name plus a store-served pin writes nothing.
+
+## Creating a bot from a manifest (W13, #1696)
+
+`creation.py` is the seam bot creation calls — preflight, persist, the
+pre-container phase, discard, and the two operations that start and read the
+creation job. `create_job.py` is the job itself. Both live here rather than in
+`core/bot_management` because they are manifest concerns; creation decides *when*
+to call them.
+
+**The dependency runs one way.** `create_job` imports `creation` for the phase
+triggers, so the seam is handed its job operations at construction (the DI module
+wires them) rather than importing them back. `create_flow` must not import this
+package at all — that closes a cycle through the creation graph — which is why
+the seam's `persist` resolves the storage key itself and returns it.
+
+**Preflight is stricter than `PUT`, deliberately.** `PUT` may accept a construct
+no materialiser can act on: the document sits inert and nothing has been created.
+Here the same acceptance costs a Passport application, a user's authorization
+click and a live bot before the failure appears, so such a construct is refused
+at submission. The extra teclaw refusal is structural rather than a missing
+materialiser — teclaw composes a config artifact at provision time, a different
+mechanism from this pre/post-container delivery — and W8 (#1476) owns that arm,
+including lifting the refusal.
+
+### Operational precondition
+
+**Applying — and therefore creating a bot with a manifest — only progresses
+where `task_queue_worker.enabled=true` and `ac_task_queue` is provisioned.**
+Before W13 that flag gated an optimisation. It now gates the feature, and the
+failure mode is not slowness: with the worker off, `POST …/apply` still answers
+`202` and its report stays `RUNNING` until the apply lock's TTL expires, and a
+create-with-manifest still answers `202` and its poll sits at
+`AWAITING_AUTHORIZATION` until the creation deadline retires it as
+`AUTHORIZATION_EXPIRED`. Neither ever completes. It is the first thing to check
+when a creation or an apply appears stuck.
+
 ## Where the HTTP seam is
 
 Nothing here reads a framework, a request, or an HTTP status. The public surface
 is `adapters/http/openapi_v1/bots/config_manifest.py` (`GET` / `PUT` / `DELETE`
 on `/openapi/v1/bots/{bot_id}/config-manifest`, and `GET
-…/config-manifest/capabilities`), and the Service API contract the adapter
-depends on is `api/bot_config_manifest_service.py`. The fetch side has no HTTP
+…/config-manifest/capabilities`), plus
+`adapters/http/openapi_v1/bots/create_with_manifest.py` for the W13 pair
+(`POST /openapi/v1/bots/with-manifest` and its status poll). The Service API
+contract the adapter depends on is `api/bot_config_manifest_service.py`. The fetch side has no HTTP
 surface of its own — it is a core transport the apply orchestration (W4) calls.
 
 **There is no feature switch over the group.** An earlier revision hid it until
 apply landed; the surface ships enabled instead, and what keeps it honest is the
 capability resolver above — which had to keep working after any switch was
-removed anyway. Until apply lands, an accepted manifest is stored and read back
-and does nothing else, which is what `GET …/capabilities` and this README say.
+removed anyway. What an accepted manifest actually changes is decided by
+`GET …/capabilities` and by which materialisers are registered — see *Applying*
+below.
 
 ## Known gaps, recorded rather than discovered
+
+- **The apply-scope fetch budget is defined, not enforced** —
+  `APPLY_FETCH_TOTAL_LIMIT` / `APPLY_BUDGET_S` have no mechanism behind
+  them. Per-entry caps, per-hop timeouts and the apply-lock TTL bound one
+  apply today; the ledger lands with the wave that owns more fetch
+  consumers (W6/W7), threaded once through the entry fetcher.
 
 - **Deleting a bot does not delete its manifest.** Bot deletion is a soft update
   and no cascade reaches this table. The row cannot be inherited (the key names
@@ -156,6 +429,27 @@ and does nothing else, which is what `GET …/capabilities` and this README say.
   configuration outlives the bot they deleted. The purge belongs with this
   feature's other per-bot state — the apply record, W4 — rather than as a lone
   seam wired into the deletion path ahead of it.
+- **The community column refuses every credential write until a master key
+  is configured.** The DI provider binds `fail_closed=True` for corp and
+  community alike; community deploys Resolve `TokenVault` from env vars, so
+  until `AGENTCLAW_SECRET_*` carries a master key every PUT answers the loud
+  503 rather than storing plaintext. That is the guard working, not a defect
+  — the alternative is tenant tokens in the clear.
+- **`mcp[].config` was removed from schema v1, and the gap it exposed is
+  recorded rather than quietly patched.** `manifest-schema` §3.1 defined it as
+  per-bot configuration *"the same shape as the existing MCP config API"* —
+  which cannot be true of both halves. That API writes `ac_user_mcp_config`,
+  keyed `(user_id, server_code)`, and its write calls
+  `sync_mcp_detail_to_all_bots`: applying **one** bot's manifest would have
+  changed MCP configuration for **every** bot its owner has, a blast radius no
+  other category has and one §3.2's per-category area rule never sanctioned. Its
+  payload is `api_key` and `custom_headers`, which design §4.5 keeps out of a
+  manifest regardless. What *is* per-bot — `ac_bot_mcp_installation`, the
+  enabled-server set — is exactly what §3.2 names as the category's area and
+  exactly what apply converges. The follow-up, additive and non-breaking, is
+  `ac_bot_mcp_call_config`'s `call_type`: genuinely per-bot, but outside §3.2's
+  area and carrying draft/lock-epoch/irreversibility semantics an idempotent
+  re-apply has to answer for first.
 - **Fetch-time limits are absent from the write surface on purpose.** Schema
   §5's download sizes, unpacked sizes, archive file counts and timeouts cannot
   be enforced by a surface that never fetches; they are **the fetcher's
@@ -172,8 +466,44 @@ and does nothing else, which is what `GET …/capabilities` and this README say.
 ## Context Boundary
 
 ```yaml
-purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, and which constructs a bot can be told to have at all; plus (W2) the guarded fetch + unpack transport that fetches a manifest's remote sources on the platform's behalf.
+purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, and which constructs a bot can be told to have at all; plus (W2) the guarded fetch + unpack transport that fetches a manifest's remote sources on the platform's behalf, and (W11) the platform's own durable copy of what was fetched, with its provenance log.
 provides:
+  - BotConfigManifestApplyService
+  - BotConfigManifestApplyServiceProtocol
+  - BotConfigManifestApplyRecord
+  - BotConfigManifestApplyLockRecord
+  - ApplyOrchestrator
+  - ApplyReport
+  - ApplyStatus
+  - ApplyPhase
+  - ApplyContext
+  - ApplyTaskHandler
+  - ApplyTaskLifecycle
+  - APPLY_TASK_TYPE
+  - build_apply_task_payload
+  - BotCreationManifestSeam
+  - CREATE_PRE_CONTAINER_TRIGGER
+  - CREATE_ON_CONTAINER_TRIGGER
+  - preflight_creation_manifest
+  - resolve_manifest_entity_id
+  - BotCreateWithManifestHandler
+  - CreateJobLifecycle
+  - CREATE_JOB_TASK_TYPE
+  - enqueue_create_job
+  - find_create_job
+  - EntryOutcome
+  - EntryResult
+  - CategoryResult
+  - Materialiser
+  - APPLY_ORDER
+  - build_materialisers
+  - EntryFetcher
+  - FetchedEntry
+  - EntryFetchError
+  - scope_of
+  - ManifestIdentityPort
+  - IdentityMaterialiser
+  - SkillsMaterialiser
   - BotConfigManifestService
   - BotConfigManifestServiceProtocol
   - BotConfigManifestRecord
@@ -211,33 +541,87 @@ provides:
   - unpack_archive
   - UnpackedTree
   - UnpackError
+  - SourceCredentialService
+  - SourceCredentialServiceProtocol
+  - SourceCredentialRecord
+  - SourceCredentialRow
+  - SourceCredentialModel
+  - SourceCredentialBinding
+  - SourceCredentialRepositoryProtocol
+  - CredentialError
+  - CredentialNotFoundError
+  - MasterKeyUnavailableError
+  - PrefixAuthorizationPolicy
+  - PrefixAuthorizationError
+  - CanonicalPrefix
+  - validate_prefixes
+  - ManifestContentService
+  - ManifestContentServiceProtocol
+  - ManifestContentRepositoryProtocol
+  - ManifestContentModel
+  - StoredContentRecord
+  - ContentScope
+  - ContentStoreError
+  - ContentMissingError
+  - ContentIntegrityError
+  - content_store_root_from_config
+  - DEFAULT_CONTENT_STORE_DIR
 consumes:
   - "BotConfigManifestRepositoryProtocol (core.repository) — persistence for the one table"
+  - "BotConfigManifestApplyRepositoryProtocol / BotConfigManifestApplyLockRepositoryProtocol (core.repository) — the apply record and its serialization lock"
+  - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the `script` materialiser's only write"
+  - "DirectActivationServiceProtocol (core.skill_center) — the `mcp` materialiser's per-bot activation writes"
+  - "LocalSkillUploadServiceProtocol (core.skill_center) — the upload road the `skills` materialiser installs packages through: the same entry point the raw-zip router path takes (W5)"
+  - "BotCapabilityStateReaderProtocol (core.skill_center.capability_state_contract) — the flush-then-read active-set the `skills` materialiser enumerates its area from and narrows removals by (W5; the core contract module — not the api/ façade that re-exports it, which core deliberately does not depend on)"
+  - "SkillPackageValidator (core.skill_center.skill_package) — the manual-upload package gate the `skills` materialiser validates fetched bytes with, so an installed skill is an uploaded one (W5)"
+  - "ManifestContentServiceProtocol.latest_receipt — the per-source receipt lookup the entry fetch pipeline asks (W5)"
+  - "MCPAuthServiceProtocol (api) — the same permission check DirectActivationService consults, asked up front so a category is all-or-nothing"
+  - "ManifestContentRepositoryProtocol (core.repository) — persistence for the append-only provenance log"
   - "TeclawEngineTestProtocol (core.bot_startup_script, bound to core.bot_management TeclawProvisionService) — the single definition of 'runs in a teclaw container'"
   - "VALID_IDENTITY_FILES / CLAUDE_CODE_IDENTITY_FILES (core.services.identity) — the identity vocabulary, imported lazily because that module pulls in the device dispatcher"
   - "MAX_SCRIPT_BYTES (core.bot_startup_script) — script.body IS the #926 startup script, so it takes that cap rather than a second one"
+  - "TokenVault (core.bot_management) — enc:v1: AES-GCM reversible encryption for the credential secret; the master key comes from the SecretResolver, and the fail-closed profiles refuse writes without one"
+  - "SourceCredentialRepositoryProtocol (core.repository) — persistence for the credential table"
+  - "ALLOWED_EXTENSIONS / MAX_FILE_SIZE (core.resources.services.file_service) — the workspace file surface's admission rule, re-asked in the `resources` materialiser's resolve by delegating to the one `admission_refusal` predicate so an undeliverable entry fails with the tree still standing (W6)"
+  - "resolve_bot_engine (core.bot_management.engines.registry) — the pure runtime-engine routing policy (claude_code + a non-normalCC template ⇒ aicoding) the `resources` materialiser applies when addressing a bot's workspace, the same rule the resources router resolves through before it composes {bot_dir}/{engine}/workspace (W6)"
+  - "TaskQueueService (core.task_queue) — every apply runs as a task, and a creation is a task of its own; reached through a lazy provider because that module imports the DI container at module scope"
+  - "BotRepository (core.repository) — the apply task rebuilds its context by re-reading the bot rather than carrying it in a payload"
 consumed_by:
-  - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface"
-  - "the apply orchestration (W4, future) — constructor-injected transport_allowlist and FetchBudget"
+  - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface, and the create-with-manifest pair (W13), which reaches the seam and never the task queue"
+  - "core.bot_management create_flow — submission calls the creation seam (preflight, persist, start the job); the dependency runs one way, so the seam is handed its job operations at construction rather than importing them"
+  - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py constructor-injects the transport_allowlist and the content store root (read via the W2/W11 pure parsers over config_module's seam) and holds the one EntryFetcher over the fetcher, the store, and W3's credentials"
+  - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_startup_script
+  - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)
+  - agentclaw.community.core.bot_management.token_vault
+  - agentclaw.community.core.bot_management.utils  # resolve_agent_code — the creation job asks whether completion's *second* write (the owner relationship) actually landed, since the bot record alone cannot tell it
+  - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults
   - agentclaw.community.core.repository
+  - agentclaw.community.core.resources.services.file_service  # the workspace file surface's admission constants, re-asked at resolve (W6)
   - agentclaw.community.core.services.identity
+  - agentclaw.community.core.skill_center.capability_state_contract  # the flush-then-read active-set the `skills` materialiser enumerates (W5)
+  - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the `mcp` materialiser's per-bot activation writes
+  - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # the upload road a manifest skill travels (W5)
+  - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)
+  - agentclaw.community.core.task_queue  # applying runs as a queue task, not a daemon thread (W13) — the queue module imports the DI container at module scope, so TaskQueueService is a TYPE_CHECKING-only annotation behind a lazy provider
   - agentclaw.community.core.workspace.constants
+  - agentclaw.community.kernel.lifecycle  # the apply handler registers itself at boot
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database
+  - agentclaw.community.plugin_api.passport  # the creation job reads its own authorization status; the Plugin API type, not the service graph behind it
+  - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils
 ```
 
 ### Change impact
 
-Once apply lands, a change here changes **what is installed into a customer's
-container**. Today it changes what a caller is allowed to declare — which is the
-same authority one wave earlier — and, on the W2 side, which bytes the platform
-is willing to fetch at all.
-
+A change here changes **what is installed into a customer's container**, and
+since W4 that is immediate rather than prospective. It also changes what a
+caller is allowed to declare, and — on the W2/W3 side — which bytes the platform
+is willing to fetch and under whose credential.
 Two things are close to authorization boundaries already:
 
 - **No secret may enter a document.** A source URL carrying userinfo

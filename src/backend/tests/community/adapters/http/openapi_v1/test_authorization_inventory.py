@@ -497,11 +497,16 @@ def test_caller_identity_keeps_legacy_read_and_write_permission_levels():
     write = AUTHORIZATION[
         ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type")
     ]
+    cli_write = AUTHORIZATION[
+        ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type")
+    ]
 
     assert read.level is PermissionLevel.MEMBER
     assert read.edit_lock is None
     assert write.level is PermissionLevel.OWNER
     assert write.edit_lock is EDIT_LOCK
+    assert cli_write.level is PermissionLevel.OWNER
+    assert cli_write.edit_lock is EDIT_LOCK
 
 
 def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
@@ -510,6 +515,7 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"),
+        ("POST", "/openapi/v1/bots/{bot_id}/config-manifest/apply"),
         ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
@@ -521,6 +527,7 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}"),
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/activate"),

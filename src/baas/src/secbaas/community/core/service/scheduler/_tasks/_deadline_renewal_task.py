@@ -1,9 +1,13 @@
 """DeadlineRenewalScheduler — implementing ScheduledTask Protocol.
 
-Implements the full deadline-driven ARCA container TTL renewal scheduler:
+Implements the full five-step deadline-driven ARCA container TTL renewal
+engine:
   - run(): lock acquisition + dispatch to _run_once()
-  - _run_once(): Steps 0-2 (gap detection, cold-table query, concurrent renewal)
-  - Steps 3-5 (single renewal decision, failure handling, report) deferred to Plan 05-04.
+  - _run_once(): Steps 0-2 (gap detection + discovery scan, cold-table
+    due query, concurrent renewal)
+  - per record: Step 3 single renewal decision (_renew_one), Step 4
+    liveness-gated failure handling (_handle_failure), Step 5 metrics
+    logging (_log_metrics) + structured run report (RenewalRunReport).
 """
 
 from __future__ import annotations
@@ -13,9 +17,14 @@ import time
 from datetime import timedelta
 from uuid import uuid4
 
+from secbaas.community.api.device_manage import DeviceFacadeException
 from secbaas.community.core.repository.arca_ttl import TtlRenewalScheduleRepository
 from secbaas.community.core.service.distributed_lock import DistributedLockService
-from secbaas.community.core.service.paas import PaasServiceFacade
+from secbaas.community.core.service.paas import (
+    ErrorCode,
+    PaasError,
+    PaasServiceFacade,
+)
 from secbaas.community.core.utils import log_renew_digest
 from secbaas.community.core.utils.time_utils import (
     format_ttl_expiration_time,
@@ -74,6 +83,24 @@ def _requested_ttl_minutes(
         1,
         int((default_ttl_minutes * 60 - remaining_hours * 3600) / 60)
         - ttl_safety_margin_minutes,
+    )
+
+
+def _is_confirmed_gone(exc: BaseException) -> bool:
+    """Confirm only the platform's dead-sandbox error class.
+
+    True only when the exception is a DeviceFacadeException whose
+    original_error is a PaasError with code DEVICE_NOT_FOUND — the error
+    shape the platform emits for a genuinely recycled sandbox. Every other
+    shape (DEVICE_UNAVAILABLE, COMMAND_TIMEOUT, raw network exceptions,
+    anything that is not a DeviceFacadeException) returns False, so an
+    unknown failure can never silently kill a live container.
+    """
+    if not isinstance(exc, DeviceFacadeException):
+        return False
+    original = exc.original_error
+    return (
+        isinstance(original, PaasError) and original.code == ErrorCode.DEVICE_NOT_FOUND
     )
 
 
@@ -160,7 +187,10 @@ class DeadlineRenewalScheduler:
                 self._running = False
 
     # ------------------------------------------------------------------
-    # _run_once — main loop (Steps 0-2). Steps 3-5 deferred to Plan 05-04.
+    # _run_once — main loop: Step 0 gap detection + discovery scan, Step 1
+    # cold-table due query (+ orphan recheck), Step 2 concurrent renewal;
+    # Steps 3-5 (single renewal decision, liveness-gated failure handling,
+    # metrics) run per record via _renew_one/_handle_failure/_log_metrics.
     # ------------------------------------------------------------------
 
     async def _run_once(
@@ -199,6 +229,7 @@ class DeadlineRenewalScheduler:
 
         hot_count_device = 0
         hot_count_binding = 0
+        hot_counts_degraded = False
         try:
             hot_count_device = self._schedule_repo.count_hot_arca_devices(
                 self._config.env
@@ -207,31 +238,86 @@ class DeadlineRenewalScheduler:
                 self._config.env
             )
         except Exception:
+            # WR-02 (85-86 deep review): a partial hot-count failure must be
+            # distinguishable from a genuine zero gap — the residual
+            # hot_count=0 would fabricate a negative covered gap and read
+            # as "no gap, no discovery". Degrade the gap math this round
+            # instead; the periodic anti-join verify remains the discovery
+            # channel so hoisted unregistered rows are never hidden.
+            hot_counts_degraded = True
             log.exception(
-                "[DeadlineRenewalScheduler] Hot count query failed — discovery scan skipped"
+                "[DeadlineRenewalScheduler] Hot count query failed — gap "
+                "detection degraded this round (discovery limited to the "
+                "periodic anti-join verify)"
             )
 
         hot_count = hot_count_device + hot_count_binding
 
+        # R3 covered math: covered = hot rows matched by ANY cold row
+        # (ACTIVE or STOPPED); suppressed = the STOPPED-covered subset.
+        # A raised count degrades to the legacy formula with a warning —
+        # never a crash (the warning keeps the degradation observable).
+        covered_hot: int | None = None
+        suppressed_terminal = 0
+        try:
+            covered_hot = self._schedule_repo.count_hot_covered(self._config.env)
+            suppressed_terminal = self._schedule_repo.count_suppressed_terminal(
+                self._config.env
+            )
+        except Exception:
+            log.warning(
+                "[DeadlineRenewalScheduler] covered/gauge count query failed — "
+                "the failed part degraded: gap keeps covered math when the "
+                "covered count succeeded, otherwise falls back to "
+                "hot-minus-cold (suppressed_terminal_count kept at 0)"
+            )
+        report.suppressed_terminal_count = suppressed_terminal
+
+        # WR-02 (85-86 deep review): the periodic anti-join verify is the
+        # gap-independent discovery channel — it must stay reachable even
+        # when the gap math itself is skipped (hot-count degradation), so
+        # hoisted unregistered rows can never be hidden by a counting
+        # failure. Cold-count failure (below) still suppresses it, matching
+        # the WR-01 pinned contract.
         should_scan = False
         gap_result = None
+        periodic_verify = (
+            self._round_count % self._config.anti_join_verify_interval_cycles == 0
+        )
         if cold_count is None:
             # Cold-count failure: the gap ground truth is unknown, so gap
             # detection AND the cold-table-dependent discovery scan are
             # skipped this round (see exception log above). Steps 1-2
             # (due query + renewal) run unaffected.
             report.gap_detected = False
+        elif hot_counts_degraded:
+            # WR-02 (85-86 deep review): hot counts failed while the cold
+            # count succeeded — the residual hot_count=0 can only fabricate
+            # a negative covered gap (0 - covered < 0), which silently reads
+            # as "no gap", indistinguishable from a healthy zero-gap round.
+            # Skip the gap math this round (no negative gap is ever
+            # computed) and keep only the gap-independent periodic
+            # anti-join verify alive (see the hot-count exception log
+            # above for the distinguishing signal).
+            report.gap_detected = False
+            should_scan = periodic_verify
+            if should_scan:
+                # The gap is unknowable — hand the scan a bare result holder
+                # (hot/gap keep their 0 defaults and carry no gap semantics)
+                # so the verify still registers hoisted rows.
+                gap_result = GapDetectionResult(cold_count=cold_count)
         else:
-            gap = hot_count - cold_count
+            if covered_hot is not None:
+                gap = hot_count - covered_hot
+            else:
+                gap = hot_count - cold_count
             gap_result = GapDetectionResult(
                 cold_count=cold_count,
                 hot_count=hot_count,
                 gap=gap,
             )
             report.gap_detected = gap > 0
-            should_scan = (gap > 0) or (
-                self._round_count % self._config.anti_join_verify_interval_cycles == 0
-            )
+            should_scan = (gap > 0) or periodic_verify
 
         if should_scan and gap_result is not None:
             gap_result = await self._run_discovery_scan(gap_result)
@@ -296,25 +382,80 @@ class DeadlineRenewalScheduler:
             return report
 
         # ---- Orphan Detection within Step 1 ----
+        # R4 (WR-02) hot-row recheck: hot_id IS NULL can also mean the hot
+        # row simply reappeared since the due JOIN ran. Before writing the
+        # terminal STOPPED, re-check hot-row existence with the same JOIN
+        # conditions: reappeared (or recheck-failed — never STOP on doubt)
+        # rows postpone; genuinely absent rows write STOPPED stamped
+        # stop_reason='orphan'.
 
         processing_list: list[dict] = []
         for row in all_rows:
             if row.get("hot_id") is None:
+                # Alive on recheck / failed recheck → postpone (never STOP
+                # a possibly-live row); False → terminal STOPPED.
+                alive: bool | None = None
                 try:
-                    self._schedule_repo.set_status(
+                    alive = self._schedule_repo.hot_row_exists(
                         self._config.env,
                         row["source_table"],
                         row["source_id"],
-                        "STOPPED",
                     )
-                    report.orphan_count += 1
                 except Exception:
-                    log.exception(
-                        "[DeadlineRenewalScheduler] Failed to mark orphan "
-                        "source=%s:%s as STOPPED",
+                    log.warning(
+                        "[DeadlineRenewalScheduler] hot_row_exists recheck "
+                        "failed source=%s:%s — postponing instead of STOPPED "
+                        "(never STOP on doubt)",
                         row["source_table"],
                         row["source_id"],
                     )
+
+                if alive is False:
+                    try:
+                        self._schedule_repo.set_status(
+                            self._config.env,
+                            row["source_table"],
+                            row["source_id"],
+                            "STOPPED",
+                            stop_reason="orphan",
+                        )
+                        report.orphan_count += 1
+                    except Exception:
+                        log.exception(
+                            "[DeadlineRenewalScheduler] Failed to mark orphan "
+                            "source=%s:%s as STOPPED",
+                            row["source_table"],
+                            row["source_id"],
+                        )
+                else:
+                    next_renew = naive_cst_now() + timedelta(
+                        minutes=self._config.retry_delay_minutes
+                    )
+                    # WR-01 (86-REVIEW): the postpone write is a per-row
+                    # low-risk op — a single poison-row failure must not
+                    # abort the remaining orphan checks and this round's
+                    # metrics (CR-GAP-01 discipline).
+                    try:
+                        self._schedule_repo.postpone_renewal(
+                            self._config.env,
+                            row["source_table"],
+                            row["source_id"],
+                            next_renew,
+                        )
+                    except Exception:
+                        log.exception(
+                            "[DeadlineRenewalScheduler] Failed to postpone "
+                            "orphan source=%s:%s after recheck",
+                            row["source_table"],
+                            row["source_id"],
+                        )
+                    if alive is True:
+                        log.info(
+                            "[DeadlineRenewalScheduler] orphan source=%s:%s "
+                            "hot row reappeared — postponed instead of STOPPED",
+                            row["source_table"],
+                            row["source_id"],
+                        )
             else:
                 processing_list.append(row)
 
@@ -438,11 +579,12 @@ class DeadlineRenewalScheduler:
                                     "[DeadlineRenewalScheduler] discovery scan: "
                                     "unparseable ttl=%s for sandbox_id=%s "
                                     "source_table=%s source_id=%s — "
-                                    "falling back to now+12h",
+                                    "falling back to now+%.0fh",
                                     ttl_ms_str,
                                     row["sandbox_id"],
                                     row["source_table"],
                                     row["id"],
+                                    self._renewal_window.total_seconds() / 3600,
                                 )
                                 next_renew_at = naive_cst_now() + self._renewal_window
                         else:
@@ -450,10 +592,11 @@ class DeadlineRenewalScheduler:
                                 "[DeadlineRenewalScheduler] discovery scan: "
                                 "missing ttl for sandbox_id=%s "
                                 "source_table=%s source_id=%s — "
-                                "falling back to now+12h",
+                                "falling back to now+%.0fh",
                                 row["sandbox_id"],
                                 row["source_table"],
                                 row["id"],
+                                self._renewal_window.total_seconds() / 3600,
                             )
                             next_renew_at = naive_cst_now() + self._renewal_window
 
@@ -553,13 +696,20 @@ class DeadlineRenewalScheduler:
           (a) Get authoritative TTL from Arca via facade.get_device_info()
           (b) Extract ttl_timestamp — None/0 → failed
           (c-d) Compute remaining_hours from current time
-          (e) remaining < 0 (expired) → failed
+          (e) remaining below -(clock_tol_minutes/60) h — expired beyond
+              the host-clock grace margin → confirming failure
+              (threshold_expired); a negative reading within the margin
+              is non-confirming (WR-02, option 1)
           (f) remaining > 24h (cannot renew) → skipped (postpone)
           (g) 12h < remaining <= 24h (not yet due) → skipped (postpone)
           (h) 0 <= remaining <= 12h (renewal window) → extend_ttl(); on
               success next_renew_at is derived from the post-extend TTL
               re-read (WR-03: Arca clamps extensions at its 24h remaining
               cap, so assuming now + window can overshoot the real expiry)
+
+        Failure branches route through _handle_failure with a liveness
+        verdict — only platform-confirmed gone (DEVICE_NOT_FOUND) or
+        expired-beyond-the-grace-margin verdicts can terminate at the cap.
         """
         sandbox_id = record.get("sandbox_id", "")
 
@@ -578,7 +728,10 @@ class DeadlineRenewalScheduler:
                 e,
                 exc_info=True,
             )
-            outcome = await self._handle_failure(record)
+            outcome = await self._handle_failure(
+                record,
+                stop_reason=("threshold_gone" if _is_confirmed_gone(e) else None),
+            )
             self._emit_renew_digest(record, outcome, run_uuid=run_uuid)
             return outcome
 
@@ -623,12 +776,63 @@ class DeadlineRenewalScheduler:
             self._min_remaining = min(self._min_remaining, remaining_hours)
 
         # ---- Step 3(e): Expired (remaining < 0) ----
-        if remaining_hours < 0:
+        # WR-02 (86-REVIEW, option 1): this is the only confirming verdict
+        # derived from host-clock arithmetic — (platform ttl_ms) minus
+        # (scheduler host time.time()). A host clock skewed ahead by a few
+        # minutes fabricates a persistent false-expired reading for
+        # containers whose real remaining life is small, and one cap
+        # crossing with that reading used to write terminal STOPPED.
+        # Genuinely expired TTLs are already minutes-to-hours past expiry
+        # by the time the cap crossing happens (retry_delay x
+        # max_fail_count rounds of readings), so requiring the remaining
+        # to fall below -(clock_tol_minutes/60) hours filters clock skew
+        # without delaying real terminations — the margin only screens
+        # skew-fabricated false positives. (The D1 watermark in the
+        # success path compares platform-vs-platform epochs and stays
+        # clock-offset free — this knob does not affect it.)
+        clock_tol_minutes = self._config.clock_tol_minutes
+        if remaining_hours < -(clock_tol_minutes / 60.0):
+            # Confirmed expiry: the overshoot is beyond plausible host
+            # clock drift — the sandbox's real TTL is gone.
+            # WR-02 (86-REVIEW, option 3): record the RAW remaining in
+            # seconds at verdict time — (ttl_ms/1000.0 - time.time()),
+            # NO clock-tolerance offset — as the closest observable
+            # approximation of the host/platform clock delta for
+            # post-hoc diagnosis of a skew-driven termination.
+            remain_sec = ttl_ms / 1000.0 - time.time()
             log.warning(
                 "[DeadlineRenewalScheduler] sandbox_id=%s TTL expired "
                 "(remaining=%.1fh)",
                 sandbox_id,
                 remaining_hours,
+            )
+            outcome = await self._handle_failure(
+                record,
+                stop_reason="threshold_expired",
+                remain_sec=remain_sec,
+            )
+            self._emit_renew_digest(
+                record, outcome, ttl_before_ms=ttl_ms, run_uuid=run_uuid
+            )
+            return outcome
+
+        if remaining_hours < 0:
+            # Within the ±clock_tol_minutes band: the platform still
+            # served get_device_info for this sandbox (this path is
+            # unreachable otherwise), so the small negative reading is
+            # indistinguishable from host clock skew — NOT confirming.
+            # Route through non-confirming failure handling: below the cap
+            # the count increments and retries; at the cap it holds
+            # (cap-and-hold) and keeps retrying. A genuinely dead sandbox
+            # confirms in a later round via threshold_gone (dead-sandbox
+            # error class) or a deeper expiry crossing the margin.
+            log.warning(
+                "[DeadlineRenewalScheduler] sandbox_id=%s TTL within clock "
+                "tolerance band (remaining=%.1fh, tol=%dmin) — non-confirming "
+                "failure",
+                sandbox_id,
+                remaining_hours,
+                clock_tol_minutes,
             )
             outcome = await self._handle_failure(record)
             self._emit_renew_digest(
@@ -715,7 +919,10 @@ class DeadlineRenewalScheduler:
                 e,
                 exc_info=True,
             )
-            outcome = await self._handle_failure(record)
+            outcome = await self._handle_failure(
+                record,
+                stop_reason=("threshold_gone" if _is_confirmed_gone(e) else None),
+            )
             self._emit_renew_digest(
                 record, outcome, ttl_before_ms=ttl_ms, run_uuid=run_uuid
             )
@@ -862,11 +1069,35 @@ class DeadlineRenewalScheduler:
     # Step 4: Failure handling
     # ------------------------------------------------------------------
 
-    async def _handle_failure(self, record: dict) -> str:
-        """Handle renewal failure with retry and STOPPED threshold.
+    async def _handle_failure(
+        self,
+        record: dict,
+        *,
+        stop_reason: str | None = None,
+        remain_sec: float | None = None,
+    ) -> str:
+        """Handle renewal failure with a liveness-gated STOPPED threshold.
+
+        Two-verdict model: at the cap, a threaded stop_reason
+        (platform-confirmed gone/expired) writes terminal STOPPED with the
+        reason; with NO reason nothing terminal is written — the count is
+        capped at max_fail_count - 1 (cap-and-hold) and the row retries
+        after retry_delay_minutes.
 
         Args:
             record: The schedule record (dict from list_due_for_renewal).
+            stop_reason: Keyword-only verdict threaded from the failure site
+                ("threshold_gone" | "threshold_expired"); None means the
+                failure was non-confirming.
+            remain_sec: Keyword-only raw remaining seconds at verdict time —
+                (ttl_ms/1000.0 - time.time()) with NO clock-tolerance
+                offset — threaded from the threshold_expired call site
+                (WR-02, option 3) and appended to the stopped_transition
+                metric line as the host/platform clock-delta diagnostic
+                approximation (the platform API exposes no "platform
+                current time" primitive, so a true delta cannot be read
+                directly). None when the verdict has no TTL reading
+                (threshold_gone) — the suffix is then omitted.
 
         Returns:
             "failed" or "stopped".
@@ -874,31 +1105,104 @@ class DeadlineRenewalScheduler:
         new_fail_count = record.get("renew_fail_count", 0) + 1
 
         if new_fail_count >= self._config.max_fail_count:
-            self._schedule_repo.set_status(
-                self._config.env, record["source_table"], record["source_id"], "STOPPED"
+            if stop_reason is not None:
+                try:
+                    self._schedule_repo.set_status(
+                        self._config.env,
+                        record["source_table"],
+                        record["source_id"],
+                        "STOPPED",
+                        stop_reason=stop_reason,
+                    )
+                except Exception:
+                    # WR-01 (85-86 deep review): a failed terminal write must
+                    # not leak into _process_one's secondary routing, which
+                    # would downgrade this platform-confirmed verdict to a
+                    # non-confirming cap-and-hold and drop the
+                    # stopped_transition signal. The verdict and its metrics
+                    # are retained this round; the row stays ACTIVE with the
+                    # 9+-signature and the write is re-attempted next round.
+                    log.exception(
+                        "[DeadlineRenewalScheduler] terminal STOPPED write "
+                        "failed source=%s:%s stop_reason=%s — verdict "
+                        "retained, write re-attempted next round",
+                        record["source_table"],
+                        record["source_id"],
+                        stop_reason,
+                    )
+                log.warning(
+                    "[DeadlineRenewalScheduler] sandbox_id=%s "
+                    "source=%s:%s reached max_fail_count=%d, marked STOPPED "
+                    "(stop_reason=%s)",
+                    record.get("sandbox_id"),
+                    record["source_table"],
+                    record["source_id"],
+                    self._config.max_fail_count,
+                    stop_reason,
+                )
+                # The persisted STOPPED state is now only written on a
+                # platform-confirmed verdict (gone error class or expired
+                # TTL). After the phase 85 anti-join fix the discovery scan
+                # excludes any cold-table row matching (env, source, sandbox),
+                # so confirmed-STOPPED rows cannot be revived on the same
+                # sandbox. Revival channels stay the device-side lifecycle
+                # register() upsert (restart / destroy+create, baas_device
+                # rows only) and the stale-old-sandbox discovery safety net.
+                # The binding side (ac_entity_device_binding) has NO
+                # lifecycle register() writer — its renewal normally
+                # continues via the baas_device row for the same container,
+                # and a binding row whose device row also went terminal
+                # recovers via a new binding record id (re-bind) or a
+                # device-side restart. The durable alarm signal remains this
+                # metrics line, not the row status.
+                # WR-02 (86-REVIEW, option 3): remain_sec is appended AFTER
+                # the existing fields (their order is unchanged) as the RAW
+                # remaining at verdict time — (ttl_ms/1000.0 - time.time()),
+                # NO clock-tolerance offset — the closest observable
+                # approximation of the host/platform clock delta. A
+                # skew-driven termination is diagnosable post-hoc: a
+                # threshold_expired line whose remain_sec sits inside the
+                # tolerance band marks a clock anomaly rather than a real
+                # expiry.
+                remain_tail = (
+                    f",remain_sec={remain_sec:.1f}" if remain_sec is not None else ""
+                )
+                log.info(
+                    "[arca_ttl_metrics] stopped_transition=1 sandbox_id=%s "
+                    "source_table=%s source_id=%s fail_count=%d "
+                    "stop_reason=%s%s",
+                    record.get("sandbox_id"),
+                    record["source_table"],
+                    record["source_id"],
+                    new_fail_count,
+                    stop_reason,
+                    remain_tail,
+                )
+                return "stopped"
+
+            # Cap-and-hold: at/over the cap with a NON-confirming verdict
+            # the count is held at max_fail_count - 1 (the DB keeps the
+            # 9+-signature clue) and the row retries after
+            # retry_delay_minutes.
+            next_retry = naive_cst_now() + timedelta(
+                minutes=self._config.retry_delay_minutes
+            )
+            self._schedule_repo.update_after_failure(
+                self._config.env,
+                record["source_table"],
+                record["source_id"],
+                next_renew_at=next_retry,
+                new_fail_count=self._config.max_fail_count - 1,
             )
             log.warning(
-                "[DeadlineRenewalScheduler] sandbox_id=%s "
-                "source=%s:%s reached max_fail_count=%d, marked STOPPED",
+                "[DeadlineRenewalScheduler] sandbox_id=%s fail_count held at "
+                "%d/%d (non-confirming failure at cap) — retry at %s",
                 record.get("sandbox_id"),
-                record["source_table"],
-                record["source_id"],
+                self._config.max_fail_count - 1,
                 self._config.max_fail_count,
+                next_retry.isoformat(),
             )
-            # The persisted STOPPED state is transient: the next round's
-            # discovery scan can revive threshold-STOPPED rows (the
-            # anti-join matches only ACTIVE cold rows and
-            # register_if_missing upserts back to ACTIVE), so the durable
-            # alarm signal is this metrics line, not the row status.
-            log.info(
-                "[arca_ttl_metrics] stopped_transition=1 sandbox_id=%s "
-                "source_table=%s source_id=%s fail_count=%d",
-                record.get("sandbox_id"),
-                record["source_table"],
-                record["source_id"],
-                new_fail_count,
-            )
-            return "stopped"
+            return "failed"
 
         # Retry: schedule next attempt after retry_delay_minutes
         next_retry = naive_cst_now() + timedelta(
@@ -942,10 +1246,12 @@ class DeadlineRenewalScheduler:
 
         log.info(
             "[arca_ttl_metrics] last_run_timestamp=%d remaining_hours_min=%.1f "
-            "renew_failure_rate=%.3f due_count=%d gap_detected=%d",
+            "renew_failure_rate=%.3f due_count=%d gap_detected=%d "
+            "suppressed_terminal_count=%d",
             int(time.time()),
             remaining_val,
             failure_rate,
             report.due_count,
             1 if report.gap_detected else 0,
+            report.suppressed_terminal_count,
         )

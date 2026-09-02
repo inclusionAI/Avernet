@@ -14,7 +14,7 @@ from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.access.models import AccessControlPolicyRecord, ConfigItemRecord, UserInfoRecord
-    from agentclaw.community.core.caller_identity.contracts import DraftCallTypeCompensationResult, DraftCallTypeMutationResult
+    from agentclaw.community.core.caller_identity.contracts import CliCallTypeMutationResult, DraftCallTypeCompensationResult, DraftCallTypeMutationResult
     from agentclaw.community.core.caller_identity.models import McpCallType
 
 
@@ -56,6 +56,47 @@ class PolicyRepository(Protocol):
 
 @runtime_checkable
 class CallerIdentityRepositoryProtocol(Protocol):
+    @abstractmethod
+    def replace_draft_cli_call_type(
+        self,
+        *,
+        bot_pk: int,
+        engine_type: str,
+        cli_code: str,
+        call_type: McpCallType,
+        modifier_id: str,
+        lock_key: str,
+        lock_holder_user_id: str,
+        lock_epoch: int | None,
+        effective_server_codes: set[str] | None = None,
+        effective_cli_codes: set[str] | None = None,
+    ) -> CliCallTypeMutationResult: ...
+
+    @abstractmethod
+    def compensate_draft_cli_call_type(
+        self,
+        *,
+        bot_pk: int,
+        engine_type: str,
+        cli_code: str,
+        previous_explicit_call_type: McpCallType | None,
+        modifier_id: str,
+        expected_revision: int,
+        expected_caller_config_revision: int,
+        lock_key: str,
+        lock_holder_user_id: str,
+        lock_epoch: int | None,
+        effective_server_codes: set[str] | None = None,
+        effective_cli_codes: set[str] | None = None,
+    ) -> bool: ...
+
+    @abstractmethod
+    def list_draft_cli_call_types(
+        self,
+        bot_pk: int,
+        engine_type: str,
+    ) -> Mapping[str, McpCallType]: ...
+
     @abstractmethod
     def replace_draft_call_type(
         self,

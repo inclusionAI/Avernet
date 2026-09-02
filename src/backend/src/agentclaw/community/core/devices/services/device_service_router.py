@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.devices.services.cli_bootstrap import CliScopeReconcilerProtocol, reconcile_cli_bootstrap_scope
 from agentclaw.community.core.devices.errors import (
     DeviceNotFoundError,
     DeviceServiceError,
@@ -48,7 +49,6 @@ from agentclaw.community.log import get_logger
 
 
 logger = get_logger()
-
 # Provider 类型别名
 DeviceProvider = DeviceService
 
@@ -126,6 +126,7 @@ class DeviceServiceRouter(DeviceService):
         sandbox_client: "SandboxRuntimeClient | None" = None,
         publish_repo: BotPublishRepositoryProtocol | None = None,
         bot_repo: BotRepository | None = None,
+        cli_scope_reconciler: CliScopeReconcilerProtocol | None = None,
     ) -> None:
         """初始化设备服务路由器.
 
@@ -168,6 +169,7 @@ class DeviceServiceRouter(DeviceService):
         # binding → active_engine（bot_repo）。均可选，缺省时相关入口降级。
         self._publish_repo = publish_repo
         self._bot_repo = bot_repo
+        self._cli_scope_reconciler = cli_scope_reconciler
         # 惰性构造的多实例读取服务（§1）。
         self._instance_svc: DeviceInstanceService | None = None
 
@@ -711,7 +713,7 @@ class DeviceServiceRouter(DeviceService):
         if provider in self._providers:
             logger.info(
                 f"[update_device_headers] Routing: device_id={device_id}, "
-                f"provider={provider}, agent_code={agent_code or '(empty)'}, "
+                f"provider={provider}, has_agent_code={'yes' if agent_code else 'no'}, "
                 f"has_token={'yes' if agent_pass_token else 'no'}, "
                 f"active_only={active_only}"
             )
@@ -781,14 +783,19 @@ class DeviceServiceRouter(DeviceService):
             )
             raise DeviceNotFoundError(f"device {device_id} not found")
 
-        # ========== 步骤 2: 取 agent_code ==========
+        # ========== 步骤 2: 收敛 Passport CLI scope ==========
+        cli_bootstrap = reconcile_cli_bootstrap_scope(
+            self._cli_scope_reconciler, bot=bot, device_id=device_id, bot_id=bot_id, logger=logger
+        )
+
+        # ========== 步骤 3: 取 agent_code ==========
         from agentclaw.community.core.bot_management.utils import resolve_agent_code
 
         agent_code = resolve_agent_code(bot=bot, passport_plugin=self._passport_plugin)
         if agent_code:
             logger.info(
-                f"[bootstrap_device_auth] Agent code resolved: device_id={device_id}, "
-                f"bot_id={bot_id}, owner_id={owner_id}, agent_code={agent_code}"
+                "bootstrap_device_auth_agent_code_resolved device_id=%s bot_id=%s owner_id=%s",
+                device_id, bot_id, owner_id,
             )
         else:
             logger.error(
@@ -797,7 +804,7 @@ class DeviceServiceRouter(DeviceService):
             )
             raise DeviceServiceError(f"Agent code not found for bot_id={bot_id}, owner={owner_id}")
 
-        # ========== 步骤 3: 查 passport token ==========
+        # ========== 步骤 4: 查 passport token ==========
         agent_pass_token = ""
         try:
             if self._passport_plugin is None:
@@ -811,10 +818,10 @@ class DeviceServiceRouter(DeviceService):
             )
         except Exception as e:
             logger.error(
-                f"[bootstrap_device_auth] Token query failed: device_id={device_id}, "
-                f"bot_id={bot_id}, owner_id={owner_id}, error={e}"
+                "bootstrap_device_auth_token_query_failed device_id=%s bot_id=%s owner_id=%s error_type=%s",
+                device_id, bot_id, owner_id, type(e).__name__,
             )
-            raise DeviceServiceError(f"Passport token query failed: {e}") from e
+            raise DeviceServiceError("Passport token query failed") from e
 
         if not agent_pass_token:
             logger.error(
@@ -823,7 +830,7 @@ class DeviceServiceRouter(DeviceService):
             )
             raise DeviceServiceError("Passport token is empty")
 
-        # ========== 步骤 4: 热更新 headers ==========
+        # ========== 步骤 5: 热更新 headers ==========
         if is_baas_device:
             allocated_device = AllocatedDevice(
                 device_id=device_id,
@@ -858,14 +865,13 @@ class DeviceServiceRouter(DeviceService):
         )
 
         logger.info(
-            f"[bootstrap_device_auth] Done: device_id={device_id}, "
-            f"bot_id={bot_id}, owner_id={owner_id}, "
-            f"agent_code={agent_code or '(empty)'}, "
-            f"has_token={'yes' if agent_pass_token else 'no'}, "
-            f"update_ok={update_ok}"
+            "bootstrap_device_auth_succeeded device_id=%s bot_id=%s owner_id=%s "
+            "has_token=%s update_ok=%s cli_code_count=%s",
+            device_id, bot_id, owner_id, bool(agent_pass_token), update_ok,
+            len(cli_bootstrap.get("cli_codes", [])),
         )
 
-        return {"agent_code": agent_code}
+        return {"agent_code": agent_code, **cli_bootstrap}
 
     # ============== 多实例：实例列表（委托 DeviceInstanceService，§1）==============
 

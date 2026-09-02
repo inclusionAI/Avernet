@@ -114,16 +114,17 @@ class StubDispatcher:
 class StubRunner:
     def __init__(self):
         self.run_calls: list[list[TaskNode]] = []
-        self.bbs_calls: list = []   # engine 升 BBS 可恢复态时 run_bbs 调用的 task_id
+        self.bbs_calls: list = []   # engine 升 BBS 可恢复态时经 start_run 派发的 task_id
         self._groups = []
 
     async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
         self.run_calls.append(list(toDoTaskList))
+        self.bbs_calls.extend(
+            node.task_id
+            for node in toDoTaskList
+            if node.run_info.run_mode == "bbs"
+        )
         return [True] * len(toDoTaskList)
-
-    async def run_bbs(self, execution_graph) -> None:
-        """记录 BBS 升级调度(根 HUNG 升 BBS 可恢复态时 fire-and-forget 调用;对齐真实 TaskExecutor.run_bbs)。"""
-        self.bbs_calls.append(getattr(execution_graph, "task_id", None))
 
     async def form_coop_group(self, gf):
         self._groups.append(gf)
@@ -609,7 +610,7 @@ class TestOnHarness:
         assert len(runner.run_calls) == 1
 
     def test_root_hung_schedules_bbs(self, svc):
-        """调度优化:任一根 HUNG(此处 exec_stuck 冒泡到根)即调度 run_bbs(MAX_LOOP 未达即升 BBS)。"""
+        """调度优化:任一根 HUNG(此处 exec_stuck 冒泡到根)即经 start_run 调度 BBS。"""
         g = svc.initialize_graph(_task_info("t_bbs", max_depth=1))
         g.extend_props["execution_config"]["MAX_LOOP"] = 10  # 确保不撞反失控兜底
         svc.add_task_nodes([_child("c1", "t_bbs")], parent_node_id="t_bbs")
@@ -629,7 +630,7 @@ class TestOnHarness:
         assert len(runner.bbs_calls) == 1  # 新行为:根 HUNG 即调度 bbs(恰好一次)
 
     def test_loop_exhausted_does_not_schedule_bbs(self, svc):
-        """反失控兜底:loop_round 达 MAX_LOOP→图 HUNG(loop_exhausted),不再调度 run_bbs。"""
+        """反失控兜底:loop_round 达 MAX_LOOP→图 HUNG(loop_exhausted),不再调度 BBS。"""
         g = svc.initialize_graph(_task_info("t_loop", max_depth=1))
         g.extend_props["execution_config"]["MAX_LOOP"] = 1
         g.loop_round = 1  # 先判后+1:预设 loop 已达 MAX_LOOP,首次 _bump_loop_round 先判即撞图 HUNG
@@ -722,7 +723,7 @@ class TestMaxPlanRound:
         def _pass(node):
             async def _go():
                 await eng.on_report(_patch("t1", node, acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE)))
-                if eng._bg_tasks:  # 排空 fire-and-forget run_bbs,使 bbs_calls 落定
+                if eng._bg_tasks:  # 排空 fire-and-forget start_run,使 bbs_calls 落定
                     await _wait_bg_tasks(eng)
             _run(_go())
 
@@ -783,7 +784,7 @@ class TestMaxPlanRound:
         _pass("c7")
         assert graph.status == Status.HUNG
         assert graph.extend_props.get("hung_reason") == "loop_exhausted"
-        assert len(runner.bbs_calls) == 3  # loop 收尾硬停,不再调度 run_bbs
+        assert len(runner.bbs_calls) == 3  # loop 收尾硬停,不再调度 BBS
 
 # ===== 零 case 知识 =====
 class TestZeroCaseKnowledge:

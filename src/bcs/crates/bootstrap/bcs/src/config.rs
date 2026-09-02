@@ -18,9 +18,9 @@ pub use bcs_config_api::{
 pub use bcs_config_api::{
     AuthChainConfig, AuthSdkConfig,
     ChannelConfigSection, DingTalkAccountConfig, EventingConfig, FusionProviderConfig,
-    LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
-    LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig, StructuredOutputMode,
-    UserDirectoryConfig, UserDirectoryProviderConfig,
+    HumanNotifyConfig, LeaderElectionConfig, LlmConfig, LlmProviderType, LogOutputConfig,
+    LogOutputFormat, LoggingConfig, ManifestConfig, SecretConfig, SecurityConfig,
+    StructuredOutputMode, UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
 #[allow(unused_imports)]
@@ -427,8 +427,11 @@ fn default_collaboration_templates_default_language() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GatewayPrincipalConfig {
-    #[serde(default = "default_gateway_principal_issuer")]
-    pub issuer: String,
+    /// Accepted JWT issuers. A token whose `iss` claim matches any entry is
+    /// accepted. Defaults to both `gateway` and `backend` so tokens minted by
+    /// either issuer are trusted out of the box.
+    #[serde(default = "default_gateway_principal_issuers")]
+    pub issuers: Vec<String>,
 
     #[serde(default = "default_gateway_principal_audience")]
     pub audience: String,
@@ -446,7 +449,7 @@ pub struct GatewayPrincipalConfig {
 impl Default for GatewayPrincipalConfig {
     fn default() -> Self {
         Self {
-            issuer: default_gateway_principal_issuer(),
+            issuers: default_gateway_principal_issuers(),
             audience: default_gateway_principal_audience(),
             key_id: default_gateway_principal_key_id(),
             signing_key_env: default_gateway_principal_signing_key_env(),
@@ -457,8 +460,20 @@ impl Default for GatewayPrincipalConfig {
 
 impl GatewayPrincipalConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if self.issuers.is_empty() {
+            return Err("gateway_principal.issuers must not be empty".to_string());
+        }
+        let mut seen: Vec<&str> = Vec::with_capacity(self.issuers.len());
+        for issuer in &self.issuers {
+            if issuer.trim().is_empty() {
+                return Err("gateway_principal.issuers must not contain blank entries".to_string());
+            }
+            if seen.iter().any(|prior| *prior == issuer) {
+                return Err("gateway_principal.issuers must not contain duplicates".to_string());
+            }
+            seen.push(issuer);
+        }
         for (field, value) in [
-            ("issuer", &self.issuer),
             ("audience", &self.audience),
             ("key_id", &self.key_id),
             ("signing_key_env", &self.signing_key_env),
@@ -478,8 +493,8 @@ impl GatewayPrincipalConfig {
     }
 }
 
-fn default_gateway_principal_issuer() -> String {
-    "gateway".to_string()
+fn default_gateway_principal_issuers() -> Vec<String> {
+    vec!["gateway".to_string(), "backend".to_string()]
 }
 
 fn default_gateway_principal_audience() -> String {
@@ -605,6 +620,10 @@ pub struct BcsConfig {
     /// Channel(IM bridge) configuration.
     #[serde(default)]
     pub channels: ChannelConfigSection,
+
+    /// Human mention notification configuration.
+    #[serde(default)]
+    pub human_notify: HumanNotifyConfig,
 
     /// HTTP provider webhook adapter configuration.
     #[serde(default)]
@@ -1100,6 +1119,7 @@ impl Default for BcsConfig {
             database: DatabaseConfig::default(),
             secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
+            human_notify: HumanNotifyConfig::default(),
             provider_http: ProviderHttpConfig::default(),
             collaboration: CollaborationConfig::default(),
             openapi_v1: OpenApiV1Config::default(),
@@ -3089,5 +3109,59 @@ base_url = "https://directory.example.com"
 
         assert!(config.eventing.enabled);
         assert!(config.eventing.dispatcher_enabled);
+    }
+
+    /// Regression guard for the `issuer` → `issuers` field rename: the
+    /// checked-in configs must parse under `deny_unknown_fields`, and the old
+    /// scalar `issuer` key must not reappear. See PR #1799 follow-up.
+    #[test]
+    fn checked_in_configs_parse_with_array_issuers_and_reject_legacy_scalar() {
+        let targets: &[(&str, &str)] = &[
+            ("example", concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../configs/bcs-config-example.toml"
+            )),
+            ("local", concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../configs/bcs-config-local.toml"
+            )),
+            ("prod", concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../configs/bcs-config-prod.toml"
+            )),
+        ];
+        for (label, path) in targets {
+            let source = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("read {label} config {path}: {e}"));
+            let config: BcsConfig = toml::from_str(&source)
+                .unwrap_or_else(|e| panic!("parse {label} config {path}: {e}"));
+            assert_eq!(
+                config.gateway_principal.issuers,
+                vec!["gateway".to_string(), "backend".to_string()],
+                "{label} config gateway_principal.issuers must accept both issuers"
+            );
+            assert!(
+                !source.contains("issuer = "),
+                "{label} config {path} still carries the legacy scalar `issuer` key",
+            );
+        }
+    }
+
+    #[test]
+    fn human_notify_section_parses() {
+        let config: BcsConfig = toml::from_str(
+            r#"
+bots_base_dir = "/tmp/bots"
+
+[human_notify]
+provider = "dummy"
+
+[human_notify.providers.dummy]
+enabled = true
+"#,
+        )
+        .expect("config parses");
+        assert_eq!(config.human_notify.provider.as_deref(), Some("dummy"));
+        assert!(config.human_notify.enabled_provider("dummy"));
     }
 }

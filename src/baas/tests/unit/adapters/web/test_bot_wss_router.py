@@ -131,6 +131,7 @@ async def test_get_ws_info_response_fields_complete(mock_dispatcher):
         token="tok",
         target="X:1",
         expires_at=now,
+        device_id="ARCA_device-xyz",
     )
 
     transport = ASGITransport(app=app)
@@ -141,11 +142,13 @@ async def test_get_ws_info_response_fields_complete(mock_dispatcher):
 
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert set(data.keys()) == {"ws_url", "token", "target", "expires_at"}
+    assert set(data.keys()) == {"ws_url", "token", "target", "expires_at", "device_id"}
     assert isinstance(data["ws_url"], str)
     assert isinstance(data["token"], str)
     assert isinstance(data["target"], str)
     assert isinstance(data["expires_at"], str)
+    assert isinstance(data["device_id"], str)
+    assert data["device_id"] == "ARCA_device-xyz"
 
 
 @pytest.mark.asyncio

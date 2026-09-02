@@ -34,6 +34,7 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.core.repository.implementations.identity.caller_identity import CallerIdentityRepository
 from agentclaw.community.plugin_api.auth import AuthPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin
 
 
 class CallerIdentityModule(Module):
@@ -62,6 +63,7 @@ class CallerIdentityModule(Module):
         mcp_provider: BotMCPProvider,
         repository: CallerIdentityRepositoryProtocol,
         mcp_sync_service: MCPSyncServiceProtocol,
+        passport_plugin: PassportPlugin,
     ) -> CallerIdentityService:
         """Construct the draft configuration and Agent Principal sync service."""
         return CallerIdentityService(
@@ -71,6 +73,7 @@ class CallerIdentityModule(Module):
             mcp_provider=mcp_provider,
             repository=repository,
             mcp_sync_service=mcp_sync_service,
+            passport_plugin=passport_plugin,
         )
 
     @singleton

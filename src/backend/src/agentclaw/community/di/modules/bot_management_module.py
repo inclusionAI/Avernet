@@ -58,6 +58,8 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
     BotRestartLockRepositoryProtocol,
     BotStartupScriptRepositoryProtocol,
+    ManifestContentRepositoryProtocol,
+    SourceCredentialRepositoryProtocol,
 )
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
@@ -75,17 +77,66 @@ from agentclaw.community.api.bot_config_manifest_service import (
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
 )
+from agentclaw.community.api.bot_config_manifest_apply_service import (
+    BotConfigManifestApplyServiceProtocol,
+)
+from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
+from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
+    DirectActivationServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+    ApplyTaskLifecycle,
+)
+from agentclaw.community.core.bot_management.create_flow import (
+    complete_manifest_creation,
+)
+from agentclaw.community.core.bot_config_manifest.create_job import (
+    BotCreateWithManifestHandler,
+    CreateJobLifecycle,
+    enqueue_create_job,
+    find_create_job,
+)
+from agentclaw.community.core.bot_config_manifest.creation import (
+    BotCreationManifestSeam,
+)
+from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
+    BotConfigManifestApplyService,
+)
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    EntryFetcher,
+)
+from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
+    ManifestIdentityPort,
+)
+from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
+    ManifestResourcePort,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
+    GitSourceClient,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageValidator,
+)
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import (
+    BotConfigManifestApplyLockRepositoryProtocol,
+    BotConfigManifestApplyRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.repository.protocols.identity import (
     CallerIdentityRepositoryProtocol,
 )
-from agentclaw.community.core.devices.protocols import McpSyncProtocol
 from agentclaw.community.core.bot_management.services.bot_space_service import (
     BotSpaceService,
 )
@@ -158,6 +209,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.modules.config_module import read_user_config
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -177,6 +229,24 @@ from agentclaw.community.core.repository.implementations.bot.startup_script impo
 )
 from agentclaw.community.core.repository.implementations.bot.config_manifest import (
     BotConfigManifestRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.manifest_content import (
+    ManifestContentRepository,
+)
+from agentclaw.community.core.repository.implementations.bot.source_credential import (
+    SourceCredentialRepository,
+)
+from agentclaw.community.api.source_credential_service import (
+    SourceCredentialServiceProtocol,
+)
+from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.bot_config_manifest.credentials.service import (
+    SourceCredentialService,
+)
+
+from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
+    BotConfigManifestApplyLockRepository,
+    BotConfigManifestApplyRepository,
 )
 from agentclaw.community.core.repository.implementations.bot.render_screen import (
     RenderScreenRepository as UnifiedRenderScreenRepository,
@@ -254,6 +324,11 @@ class BotManagementModule(Module):
             to=BotStartupScriptRepository,
             scope=singleton,
         )
+        binder.bind(
+            SourceCredentialRepositoryProtocol,
+            to=SourceCredentialRepository,
+            scope=singleton,
+        )
         # The Service API Protocol resolves to the same singleton as the concrete
         # class, so routers can Inject the Protocol per the http-adapter rule.
         binder.bind(
@@ -280,6 +355,16 @@ class BotManagementModule(Module):
             to=BotConfigManifestRepository,
             scope=singleton,
         )
+        # ManifestContentRepository: the append-only provenance log behind
+        # W11's content store. Only the repository binds now — the store
+        # service itself is constructed by W4's apply wiring, which owns the
+        # content_store_dir config read (same "declared machine part" shape
+        # as W2's fetcher before an orchestrator consumed it).
+        binder.bind(
+            ManifestContentRepositoryProtocol,
+            to=ManifestContentRepository,
+            scope=singleton,
+        )
         # Bound here rather than in a module of its own: the manifest service
         # shares this module's ``teclaw_engine_test_factory``, which is the one
         # definition of "runs in a teclaw container" and the only reason either
@@ -292,6 +377,28 @@ class BotManagementModule(Module):
             to=BotConfigManifestService,
             scope=singleton,
         )
+        # The apply engine's two tables, and the service over them. Bound here
+        # rather than in a module of their own for the reason the manifest
+        # service above is: they are the same feature's storage, and the apply
+        # service depends on the document service directly.
+        binder.bind(
+            BotConfigManifestApplyRepositoryProtocol,
+            to=BotConfigManifestApplyRepository,
+            scope=singleton,
+        )
+        binder.bind(
+            BotConfigManifestApplyLockRepositoryProtocol,
+            to=BotConfigManifestApplyLockRepository,
+            scope=singleton,
+        )
+        # ``BotConfigManifestApplyService`` is built by the provider below rather
+        # than auto-constructed: its task-queue dependency is a lazy callable, and
+        # the queue module imports the DI container at module scope, so the
+        # annotation the injector would have to resolve cannot be imported here.
+        # The Protocol is bound through a provider too: ``bind(Protocol,
+        # to=ConcreteClass)`` builds a ClassProvider that instantiates the class
+        # *directly*, bypassing the provider below and failing on the same
+        # annotation.
         # TemplateService: constructed with injected TemplateRepository.
         binder.bind(TemplateService, to=TemplateService, scope=singleton)
         # CronAutoSetupService: constructed with injected dependencies.
@@ -576,6 +683,236 @@ class BotManagementModule(Module):
     @singleton
     @provider
     @inject
+    def manifest_script_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], BotStartupScriptServiceProtocol]:
+        """The startup-script service the ``script`` materialiser writes through.
+
+        Lazy, and the three factories below share one reason: the apply service
+        is constructed inside this module's graph, while the services its
+        materialisers write through reach back through the bot-configuration
+        graph. Resolving them at call time keeps that from closing a cycle at
+        construction — the same shape ``teclaw_engine_test_factory`` above uses.
+        """
+        return lambda: injector.get(BotStartupScriptServiceProtocol)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_task_queue_factory(
+        self, injector: Injector
+    ) -> Callable[[], TaskQueueService]:
+        """The queue every apply now runs on.
+
+        Lazy for a hard reason rather than symmetry with its neighbours:
+        ``task_queue_service`` imports ``community.di`` at module scope, so an
+        eager import from the apply service closes a cycle through the whole
+        container graph.
+        """
+        return lambda: injector.get(TaskQueueService)
+
+    @singleton
+    @provider
+    @inject
+    def bot_config_manifest_apply_service(
+        self,
+        manifest_service: BotConfigManifestServiceProtocol,
+        apply_repository: BotConfigManifestApplyRepositoryProtocol,
+        lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
+        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
+        activation_service_provider: Callable[[], DirectActivationServiceProtocol],
+        mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
+        # What W5's two fetch-consuming materialisers need, all supplied by
+        # manifest_fetch_module as lazy factories for the same cycle reason the
+        # three above are.
+        identity_service_provider: Callable[[], ManifestIdentityPort],
+        upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
+        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
+        package_validator_provider: Callable[[], SkillPackageValidator],
+        entry_fetcher_provider: Callable[[], EntryFetcher],
+        # W6's resources materialiser and W7's git transport, from the same
+        # module and lazy for the same reason.
+        resource_service_provider: Callable[[], ManifestResourcePort],
+        git_client_provider: Callable[[], GitSourceClient],
+        task_queue_provider: Callable[[], TaskQueueService],
+        bot_repository: BotRepository,
+    ) -> BotConfigManifestApplyService:
+        return BotConfigManifestApplyService(
+            manifest_service,
+            apply_repository,
+            lock_repository,
+            script_service_provider,
+            activation_service_provider,
+            mcp_auth_service_provider,
+            identity_service_provider,
+            upload_service_provider,
+            capability_reader_provider,
+            package_validator_provider,
+            entry_fetcher_provider,
+            resource_service_provider,
+            git_client_provider,
+            task_queue_provider,
+            bot_repository,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bot_config_manifest_apply_service_protocol(
+        self, service: BotConfigManifestApplyService
+    ) -> BotConfigManifestApplyServiceProtocol:
+        """The Protocol every adapter injects, delegated to the one instance."""
+        return service
+
+    @singleton
+    @provider
+    def bot_create_with_manifest_config(self) -> cfg.BotCreateWithManifestConfig:
+        """W13's creation policy, read through ``config_module``'s public seam.
+
+        Parsed here rather than in ``config_module`` for the reason
+        ``manifest_fetch_module`` does the same: the read goes through the one
+        seam, and the parsing lives with the graph that consumes it.
+        """
+        return cfg.BotCreateWithManifestConfig.from_block(
+            read_user_config().get("bot_create_with_manifest") or {}
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bot_creation_manifest_seam(
+        self,
+        manifest_service: BotConfigManifestServiceProtocol,
+        apply_service: BotConfigManifestApplyService,
+        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
+        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
+        task_queue_provider: Callable[[], TaskQueueService],
+        create_with_manifest_config: cfg.BotCreateWithManifestConfig,
+    ) -> BotCreationManifestSeam:
+        """The operations bot creation asks of the manifest layer.
+
+        ``is_teclaw`` comes from the same factory the capability resolver takes,
+        so "runs in a teclaw container" has one definition rather than a
+        hand-rolled comparison here.
+
+        The job's two operations are bound here rather than imported by the
+        seam: ``create_job`` imports ``creation`` for the phase triggers, so the
+        dependency has to run one way. The queue itself stays behind the same
+        lazy provider the apply service uses.
+        """
+        return BotCreationManifestSeam(
+            manifest_service=manifest_service,
+            apply_service=apply_service,
+            script_service_provider=script_service_provider,
+            is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
+            start_job=lambda **fields: enqueue_create_job(
+                task_queue_provider(), **fields
+            ),
+            find_job=lambda **fields: find_create_job(
+                task_queue_provider(), **fields
+            ),
+            authorization_window_seconds=(
+                create_with_manifest_config.authorization_window_seconds
+            ),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bot_create_with_manifest_handler(
+        self,
+        injector: Injector,
+        passport_plugin: PassportPlugin,
+        auth_rel_plugin: AuthRelationshipPlugin,
+        bot_repository: BotRepository,
+    ) -> BotCreateWithManifestHandler:
+        """The creation job's step machine.
+
+        Its collaborators are resolved lazily: the handler is built while the
+        injector is still walking bindings to discover lifecycles, and the
+        creation graph it reaches into is large.
+        """
+
+        def _complete(job_payload: dict) -> None:
+            complete_manifest_creation(
+                job_payload,
+                bot_service=injector.get(BotService),
+                passport_plugin=passport_plugin,
+                auth_rel_plugin=auth_rel_plugin,
+            )
+
+        return BotCreateWithManifestHandler(
+            manifest_seam_provider=lambda: injector.get(BotCreationManifestSeam),
+            apply_service_provider=lambda: injector.get(
+                BotConfigManifestApplyService
+            ),
+            bot_repository_provider=lambda: bot_repository,
+            complete_authorization=_complete,
+            passport_plugin_provider=lambda: passport_plugin,
+            bot_service_provider=lambda: injector.get(BotService),
+            # Read-only here: the job asks whether the owner relationship
+            # actually landed, because completion writes it *after* the bot
+            # record and a failure there would otherwise never be retried.
+            auth_relationship_provider=lambda: auth_rel_plugin,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def manifest_create_job_lifecycle(
+        self, registry: HandlerRegistry, injector: Injector
+    ) -> CreateJobLifecycle:
+        return CreateJobLifecycle(
+            registry=registry,
+            handler_provider=lambda: injector.get(BotCreateWithManifestHandler),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def manifest_apply_task_lifecycle(
+        self,
+        registry: HandlerRegistry,
+        injector: Injector,
+    ) -> ApplyTaskLifecycle:
+        """Registers the apply handler at boot.
+
+        The service is resolved lazily for the same cycle reason as its own queue
+        dependency, and because the lifecycle is discovered by walking the
+        injector's bindings — building the apply graph while that walk is in
+        progress is exactly the ordering this avoids.
+        """
+        return ApplyTaskLifecycle(
+            registry=registry,
+            apply_service_provider=lambda: injector.get(BotConfigManifestApplyService),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def manifest_activation_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], DirectActivationServiceProtocol]:
+        """The per-bot activation service the ``mcp`` materialiser converges through."""
+        return lambda: injector.get(DirectActivationServiceProtocol)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_mcp_auth_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], MCPAuthServiceProtocol]:
+        """The permission service the ``mcp`` materialiser asks before writing.
+
+        The *same* service ``DirectActivationService`` consults, so apply's
+        up-front check cannot give a different answer from the one the write
+        would get.
+        """
+        return lambda: injector.get(MCPAuthServiceProtocol)
+
+    @singleton
+    @provider
+    @inject
     def teclaw_provision_service_factory(
         self, injector: Injector
     ) -> Callable[[], TeclawProvisionService]:
@@ -630,3 +967,27 @@ class BotManagementModule(Module):
         self, svc: DataInitService
     ) -> DataInitServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def _source_credential_service_protocol(
+        self,
+        repository: SourceCredentialRepositoryProtocol,
+        vault: TokenVault,
+    ) -> SourceCredentialServiceProtocol:
+        """W3 (#1471): the profile decides the fail-closed posture.
+
+        Production columns (corp, community) refuse credential writes when
+        the vault has no master key — TokenVault's plaintext passthrough
+        is right for local, catastrophic for tenant tokens at rest. The
+        local/test columns keep the permissive default; corp_test runs the
+        Mist-backed vault anyway and benefits from the same guard.
+        """
+        from agentclaw.community.di.profile import DeployProfile
+
+        fail_closed = DeployProfile.detect() in (
+            DeployProfile.CORP,
+            DeployProfile.COMMUNITY,
+        )
+        return SourceCredentialService(repository, vault, fail_closed=fail_closed)

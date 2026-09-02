@@ -2,6 +2,7 @@
 Tests for TomlUtils class.
 """
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -9,15 +10,19 @@ import pytest
 from agentclaw.community.utils.toml_utils import TomlUtils
 
 
+# UUID-based values keep the fixture free of real-looking credentials.
+TEST_CLIENT_ID = str(uuid.uuid4())
+TEST_CLIENT_SECRET = str(uuid.uuid4())
+
 # Sample TOML content with nested tables like [channels.dingtalk.semanticflowali]
-SAMPLE_TOML = """
+SAMPLE_TOML = f"""
 [channels.dingtalk.semanticflowali]
-client_id = "dingl6x1pu7l5y9itkut"
-client_secret = "cXi3cLfK17vT4i4z-j08qdEy_Pb8Gj-9ZJwl61jpsJHl7oVNLb9MAv4wiMPgoHYF"
+client_id = "{TEST_CLIENT_ID}"
+client_secret = "{TEST_CLIENT_SECRET}"
 dm_policy = "open"
 allowlist = ["*"]
 reply_to_message = true
-robot_code = "dingl6x1pu7l5y9itkut"
+robot_code = "{TEST_CLIENT_ID}"
 card_template_id = "4d98ff02-25be-437b-933d-9884bac9acca.schema"
 card_template_key = "content"
 enable_streaming_cards = true
@@ -66,13 +71,13 @@ class TestTomlUtilsLoad:
         assert "channels" in data
         assert "dingtalk" in data["channels"]
         assert "semanticflowali" in data["channels"]["dingtalk"]
-        assert data["channels"]["dingtalk"]["semanticflowali"]["client_id"] == "dingl6x1pu7l5y9itkut"
+        assert data["channels"]["dingtalk"]["semanticflowali"]["client_id"] == TEST_CLIENT_ID
 
     def test_load_as_raw(self, temp_toml_file):
         """Test loading TOML as raw TOMLDocument."""
         doc = TomlUtils.load(temp_toml_file, raw=True)
 
-        assert doc["channels"]["dingtalk"]["semanticflowali"]["client_id"] == "dingl6x1pu7l5y9itkut"
+        assert doc["channels"]["dingtalk"]["semanticflowali"]["client_id"] == TEST_CLIENT_ID
 
     def test_loads(self):
         """Test loading from string."""
@@ -90,7 +95,7 @@ class TestTomlUtilsGet:
         value = TomlUtils.get(
             temp_toml_file, "channels.dingtalk.semanticflowali.client_id"
         )
-        assert value == "dingl6x1pu7l5y9itkut"
+        assert value == TEST_CLIENT_ID
 
     def test_get_array(self, temp_toml_file):
         """Test getting array value."""
@@ -117,7 +122,7 @@ class TestTomlUtilsGet:
         """Test getting entire nested table."""
         value = TomlUtils.get(temp_toml_file, "channels.dingtalk.semanticflowali")
         assert isinstance(value, dict)
-        assert value["client_id"] == "dingl6x1pu7l5y9itkut"
+        assert value["client_id"] == TEST_CLIENT_ID
 
 
 class TestTomlUtilsSet:
@@ -265,7 +270,7 @@ class TestNestedKeyOperations:
         channel = TomlUtils.get(temp_toml_file, "channels.dingtalk.semanticflowali")
 
         assert channel is not None
-        assert channel["client_id"] == "dingl6x1pu7l5y9itkut"
+        assert channel["client_id"] == TEST_CLIENT_ID
         assert channel["dm_policy"] == "open"
 
     def test_get_nonexistent_nested_table(self, temp_toml_file):
@@ -310,7 +315,7 @@ class TestNestedKeyOperations:
         assert channel["client_id"] == "updated_id"
         assert channel["dm_policy"] == "disabled"
         # Other fields should remain
-        assert channel["client_secret"] == "cXi3cLfK17vT4i4z-j08qdEy_Pb8Gj-9ZJwl61jpsJHl7oVNLb9MAv4wiMPgoHYF"
+        assert channel["client_secret"] == TEST_CLIENT_SECRET
 
     def test_exists_nested_table(self, temp_toml_file):
         """Test checking if nested table exists."""

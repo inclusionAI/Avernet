@@ -29,8 +29,8 @@ from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1 import (
     PUBLIC_API_PREFIX,
-    build_public_router,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ERROR_RESPONSES,
     USER_SCOPED_ERROR_RESPONSES,
@@ -270,6 +270,14 @@ def _without_request_id(response) -> dict:
 _NO_USER_DIMENSION = {
     # Name uniqueness is checked across the tenant, not within one user's bots.
     ("get", f"{PUBLIC_API_PREFIX}/bots/check-name"),
+    # Source credentials (W3, #1471): tenant-level named objects on an
+    # application-operated surface — no user axis at all. The caller is
+    # the tenant's application (the edge requires an app credential);
+    # a riding user is audit attribution in ``modifier``, never a scope.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/source-credentials"),
+    ("get", f"{PUBLIC_API_PREFIX}/bots/source-credentials/{{name}}"),
+    ("put", f"{PUBLIC_API_PREFIX}/bots/source-credentials/{{name}}"),
+    ("delete", f"{PUBLIC_API_PREFIX}/bots/source-credentials/{{name}}"),
     # The marketplace catalogue is identical for every caller in the tenant.
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
@@ -419,15 +427,33 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``GET …/config-manifest/capabilities``). Each addresses one bot and
 #: resolves it as the named user's, so all four are bot-path-addressed like
 #: the rest of the surface. ``none`` is 97 because task template execution
-#: is internal to ``execute`` and has no separate route. Directory download
-#: then adds one more path-addressed operation: 150 → 151.
-_BOT_ID_PLACEMENT = {"path": 151, "query": 1, "none": 97}
+#: is internal to ``execute`` and has no separate route; it then moved
+#: 97 → 101 with the four source-credentials operations (W3, #1471) —
+#: tenant-level rows, no bot dimension at all. The W3 rework moved the
+#: group under ``/bots/source-credentials`` and made all four operations
+#: user-parameter-free (application-operated), which changes no count here.
+#:
+#: ``path`` then moved 150 → 153 with the three apply operations (W4, #1472:
+#: ``POST …/config-manifest/apply``, ``GET …/config-manifest/last-apply``,
+#: ``GET …/config-manifest/applies/{apply_id}``). The ``apply_id`` is a handle
+#: for polling, never what authorizes the read — the bot is still addressed in
+#: the path and still resolved as the named user's, which is what makes an id
+#: from another bot resolve to nothing.
+#:
+#: CLI caller configuration then took ``path`` 153 → 154 — one more
+#: owner-addressed operation.
+#:
+#: W13 (#1696) adds the create-with-manifest pair, one to each column.
+#: ``GET …/bots/{bot_id}/with-manifest/status`` is bot-path-addressed like the
+#: rest (154 → 155); ``POST …/bots/with-manifest`` names no bot because it is
+#: the request that allocates one, so it joins ``none`` (101 → 102) beside
+#: ``POST /openapi/v1/bots`` itself.
+#: Directory download adds one more bot-path-addressed resource operation.
+_BOT_ID_PLACEMENT = {"path": 156, "query": 1, "none": 102}
 
 
 def _schema() -> dict:
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _current_operations(schema: dict):
@@ -512,8 +538,8 @@ def test_the_pinned_number_of_operations_take_it():
     version reads/actions and edit-lock operations all act for an explicit user.
     The five bot-first Editors operations bring the total to 119, and the four
     render-screen operations bring the total to 123, and the read-only Node
-    inventory brings the current total to 124. Caller identity context and MCP
-    call-type configuration add two more Bot-addressed, user-scoped operations.
+    inventory brings the current total to 124. Caller identity context plus MCP
+    and CLI call-type configuration add three Bot-addressed, user-scoped operations.
     """
     taking = [
         1
@@ -543,7 +569,7 @@ def test_the_pinned_number_of_operations_take_it():
     # moved to _USER_ID_FILTER_ONLY (asserted by its own test) and left this
     # count: 182 → 181. execute/dashboard take no user_id at all — see
     # _NO_USER_DIMENSION.
-    # Caller identity context and call-type update add two operations.
+    # Caller identity context plus MCP/CLI call-type updates add three operations.
     # Space Skill Grant management adds four Space-addressed operations,
     # editor-request command adds one, and permanent Draft Edit Lease adds four.
     # The owner-level routines aggregate (GET /bots/routines/all) adds one
@@ -557,10 +583,20 @@ def test_the_pinned_number_of_operations_take_it():
     # bringing the combined surface to 218. The public task execute operation is the single task submission surface;
     # static-template execution is selected inside execute rather than exposed as a route. The config
     # manifest adds four Bot-addressed operations — read, replace, clear, and
-    # the capability read — all user-scoped, bringing it to 222 after removing
-    # the obsolete run-template route. Directory download adds one more
-    # user-scoped resource operation, bringing the current surface to 223.
-    assert len(taking) == 223
+    # the capability read — all user-scoped, 223 after the obsolete
+    # run-template route was removed. W3 (#1471) added a user-taking
+    # PUT /source-credentials/{name} (223), and its rework took it back off
+    # the user parameter — the surface is application-operated, the audit
+    # actor composes off the principal alone — landing on 222 again.
+    # Applying the manifest (W4, #1472) adds three more — apply, the
+    # last-apply read, and the poll by ``apply_id``: 222 → 225. CLI caller
+    # configuration adds an owner-addressed user-scoped operation: 225 → 226.
+    # Creating a bot with its manifest (W13, #1696) adds two — the submission
+    # and its status poll: 226 → 228. Both name the end user for the same
+    # reason the ordinary create does: they spend that user's quota and read
+    # that user's rows, and neither is admissible to an application caller.
+    # Directory download adds one more user-scoped resource operation.
+    assert len(taking) == 229
 
 
 def test_the_exempt_operations_take_none():

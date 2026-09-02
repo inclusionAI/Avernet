@@ -29,6 +29,7 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
 from agentclaw.community.core.devices.protocols import (
@@ -59,6 +60,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
+from agentclaw.community.core.mcp.services.cli_passport_scope import CliPassportScopeReconciler
 from agentclaw.corp.plugins.prod.arca_factory import ArcaSandboxFactory
 
 
@@ -135,6 +137,7 @@ class TestingDevicesModule(Module):
         token_vault: TokenVault,
         passport_plugin: PassportPlugin,
         sandbox_client: SandboxRuntimeClient,
+        caller_identity_repository: CallerIdentityRepositoryProtocol,
     ) -> DeviceService:
         """Local-only ``DeviceServiceRouter`` build (singlebox via BaaS)."""
         from agentclaw.community.core.devices.services.local_device_service import (
@@ -177,6 +180,10 @@ class TestingDevicesModule(Module):
             arca_baas_rollout_policy=arca_baas_rollout_policy,
             passport_plugin=passport_plugin,
             sandbox_client=sandbox_client,
+            cli_scope_reconciler=CliPassportScopeReconciler(
+                passport_plugin=passport_plugin,
+                identity_repository=caller_identity_repository,
+            ),
         )
 
     @singleton

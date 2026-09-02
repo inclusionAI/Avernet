@@ -58,9 +58,8 @@ from agentclaw.community.core.resources.service import (
     ResourceNotFoundError,
 )
 from agentclaw.community.core.resources.services.file_service import (
-    ALLOWED_EXTENSIONS,
-    MAX_FILE_SIZE,
     FileNode,
+    admission_refusal,
 )
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
@@ -717,12 +716,13 @@ class ResourceFileService:
             raise ValueError("Filename is required")
 
         basename = filename.rsplit("/", 1)[-1]
-        if Path(basename).suffix.lower() not in ALLOWED_EXTENSIONS:
-            raise ValueError(
-                f"File type not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
-            )
-        if len(data) > MAX_FILE_SIZE:
-            raise ValueError(f"File too large. Max size: {MAX_FILE_SIZE / 1024 / 1024}MB")
+        # The admission rule is the one predicate beside the constants
+        # (``core/resources/services/file_service.admission_refusal``) — the
+        # same question the manifest apply flow asks in its resolve stage,
+        # so the two surfaces cannot drift from each other.
+        refusal = admission_refusal(basename, data)
+        if refusal is not None:
+            raise ValueError(refusal)
 
         if preserve_structure and "/" in filename:
             safe = "/".join(

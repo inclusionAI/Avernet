@@ -16,6 +16,9 @@ from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.service_bot.services.baas_service import BotWsConnectionInfoResponse
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.sandbox_runtime import (
+    SandboxRuntimeUnavailableError,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
@@ -158,18 +161,20 @@ def build_baas_conn_info_for_http(
     # 跟进：docs/superpowers/baas-refactor-dirty-work.md §1
     target = ws_info.target or ""
     if target.startswith("ARCA_"):
-        # The sandbox-runtime client owns the proxy base URL (prod=arca proxy).
-        # An ``ARCA_`` target is only ever produced by a prod/corp deployment, so
-        # ``sandbox_client`` is always wired for the callers that can reach this
-        # branch (baas builder/plugin). The community client never yields an
-        # ``ARCA_`` target, so its ``proxy_base_url()`` (which raises) is never hit.
-        if sandbox_client is None:
-            raise RuntimeError(
-                "build_baas_conn_info_for_http: ARCA target requires a "
-                f"sandbox_client to resolve the proxy base URL (target={target!r})"
-            )
-        proxy_base = sandbox_client.proxy_base_url()
-        info["url"] = f"{proxy_base}/proxypass/{target}"
+        # A BaaS binding may itself be backed by ARCA. Corp keeps its historical
+        # direct-proxy base; community has no ARCA client and trusts the proxypass
+        # URL BaaS returned (already normalised by build_baas_conn_info above).
+        if sandbox_client is not None:
+            try:
+                proxy_base = sandbox_client.proxy_base_url()
+            except SandboxRuntimeUnavailableError:
+                logger.info(
+                    "BaaS returned an ARCA-backed target without a local ARCA "
+                    "runtime; using the BaaS-issued proxy URL (target=%s)",
+                    target,
+                )
+            else:
+                info["url"] = f"{proxy_base}/proxypass/{target}"
         info["sandbox_id"] = target
     else:
         # 真 BaaS 后端（desktop bot / 未来 personal+baas）走 invoke-http 网关。

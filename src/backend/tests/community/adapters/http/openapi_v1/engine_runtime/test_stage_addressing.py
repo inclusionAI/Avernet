@@ -19,7 +19,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
@@ -89,6 +89,7 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
     ("patch", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
+    ("patch", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
     ("get", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("post", "/openapi/v1/bots/{bot_id}/authorized-apps"),
     ("delete", "/openapi/v1/bots/{bot_id}/authorized-apps/{app_id}"),
@@ -118,6 +119,12 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("put", "/openapi/v1/bots/{bot_id}/config-manifest"),
     ("delete", "/openapi/v1/bots/{bot_id}/config-manifest"),
     ("get", "/openapi/v1/bots/{bot_id}/config-manifest/capabilities"),
+    # Apply and its two reads address the same (owner, bot_id) pair as the
+    # document they act on, and take no ``stage`` for the same reason: an
+    # apply targets the bot, not one of its runtimes.
+    ("post", "/openapi/v1/bots/{bot_id}/config-manifest/apply"),
+    ("get", "/openapi/v1/bots/{bot_id}/config-manifest/last-apply"),
+    ("get", "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}"),
     # The product chat reads address a bot that may be shared with the acting
     # user, so they take the owner half of ``(owner, bot_id)`` for the same
     # reason and with the same default — the caller's own bot.
@@ -337,9 +344,7 @@ def test_a_dead_stage_is_the_fixed_409(client, relay):
 def _schema() -> dict:
     # Cached: four document tests read the same generated description, and
     # assembling the whole public surface per test quadruples the cost.
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _operations(schema: dict):

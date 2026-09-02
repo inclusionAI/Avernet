@@ -167,6 +167,16 @@ class CoreTaskContainer(containers.DeclarativeContainer):
             lambda v: int(v) if v is not None else 5,
             config.renewal_scheduler.post_extend_consistency_tol_minutes,
         ),
+        # WR-02 (86-REVIEW, option 1 — grace-margin knob): unlike the D-01
+        # tol above, this key IS declared on the renewal_scheduler schema
+        # (default 5, ge=0), so an absent YAML key derives 5 through the
+        # schema-seeded container defaults; the Callable + int() coerce
+        # mirrors the D-01 pattern so a quoted YAML number ("5") still
+        # reaches the verdict comparison.
+        clock_tol_minutes=providers.Callable(
+            lambda v: int(v) if v is not None else 5,
+            config.renewal_scheduler.clock_tol_minutes,
+        ),
         retry_delay_minutes=config.renewal_scheduler.retry_delay_minutes,
         max_fail_count=config.renewal_scheduler.max_fail_count,
         ttl_safety_margin_minutes=config.renewal_scheduler.ttl_safety_margin_minutes,

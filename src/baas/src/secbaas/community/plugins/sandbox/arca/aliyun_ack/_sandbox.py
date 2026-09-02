@@ -181,7 +181,7 @@ class AliyunAckSandbox(ArcaSandbox):
     def destroy(self) -> bool:
         """Delete the backing Deployment and associated resources. Idempotent on 404.
 
-        Removes the Deployment, ConfigMap, and NetworkPolicy created from
+        Removes the Deployment and ConfigMap created from
         the template. The PVC is NOT deleted — it is an independent resource
         so data survives Deployment deletion.
         """
@@ -208,16 +208,6 @@ class AliyunAckSandbox(ArcaSandbox):
                     cm_name,
                     lambda: core_api.delete_namespaced_config_map(
                         name=cm_name, namespace=self._namespace
-                    ),
-                )
-            )
-        np_name = self._resource_names.get("NetworkPolicy")
-        if np_name:
-            delete_ops.append(
-                (
-                    np_name,
-                    lambda: core_api.delete_namespaced_network_policy(
-                        name=np_name, namespace=self._namespace
                     ),
                 )
             )

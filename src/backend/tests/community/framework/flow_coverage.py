@@ -177,7 +177,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "bot_app_grant": _BOT_APP_GRANT_EXEMPT_REASON,
     "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
-    "bot_dormant": _EXEMPT_REASON,
+"bot_dormant": _EXEMPT_REASON,
     "bot_inventory": (
         "New public inventory/local Bot aggregation module. Covered by HTTP endpoint, "
         "service conformance, and architecture tests in this change; drain when "
@@ -188,23 +188,32 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "bot_public": _EXEMPT_REASON,
     "bot_config_manifest": (
         "Blocked on the same missing minter as _GATEWAY_PRINCIPAL_EXEMPT_REASON "
-        "above, and on a second thing of its own. All four routes are "
-        "/openapi/v1 and need a gateway-signed principal, which singlebox has "
-        "no way to produce. Even with one, a manifest applies "
-        "nothing in this wave — the observable effect an end-to-end flow would "
-        "look for does not exist yet. The W2 fetcher + unpack wave (#1470) adds "
-        "only transport behavior, observable against a real network — covered "
-        "by the security matrix in "
-        "tests/community/core/bot_config_manifest/fetch/ — and by W1's own "
-        "cover meanwhile: "
+        "above — every route in the group is /openapi/v1 and needs a "
+        "gateway-signed principal, which singlebox has no way to produce, the "
+        "manifest routes and the apply routes (W4, #1472) alike. The "
+        "machine-part waves — W2 fetch + unpack (#1470), the W11 content "
+        "store (#1510), and W5's skills/identity materialisers (#1473) — add "
+        "only transport/storage/materialisation behavior with no "
+        "singlebox-visible flow of their "
+        "own, covered by the security matrix in "
+        "tests/community/core/bot_config_manifest/fetch/ and the store "
+        "contract tests in "
+        "tests/community/core/bot_config_manifest/content/ (plus its "
+        "repository over a real database in "
+        "tests/community/repository/bot/test_manifest_content_repository.py), "
+        "by the materialiser suites in "
+        "tests/community/core/bot_config_manifest/apply/ (the two fetching "
+        "categories over fakes that count every write, and the entry-fetch "
+        "pipeline's pinned/unpinned/keep_last policy), "
+        "and by W1's own cover meanwhile: "
         "tests/community/repository/bot/test_bot_config_manifest_repository.py "
         "(repository over a real database), "
         "tests/community/core/bot_config_manifest/ (the schema rules, the "
         "capability resolver, and the absent-is-empty contract), and "
         "tests/community/endpoints/test_openapi_config_manifest.py (the four "
-        "routes through the assembled app). Drain this when singlebox fronts "
-        "the backend with a gateway and an apply-side wave lands a "
-        "singlebox-observable flow."
+        "manifest routes through the assembled app) plus the apply routes in "
+        "tests/community/endpoints/test_openapi_config_manifest_apply.py. "
+        "Drain this when singlebox fronts the backend with a gateway."
     ),
     "bot_startup_script": (
         "The script's effect is only observable inside a provisioned container: "

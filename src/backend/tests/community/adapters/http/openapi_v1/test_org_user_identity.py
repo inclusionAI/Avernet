@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
@@ -106,7 +106,7 @@ def client():
 
     app = FastAPI()
     app.add_middleware(AvernetTenantMiddleware)
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     app.add_exception_handler(Exception, _unhandled_exception_handler)
     return TestClient(app, raise_server_exceptions=False)
 

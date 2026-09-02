@@ -119,6 +119,7 @@ async def test_get_http_info_response_fields_complete(mock_dispatcher):
         http_url="http://gw/proxypass/X:1/p",
         token="tok",
         target="TECLAW_b_abc@4:1",
+        device_id="TECLAW_device-abc",
     )
 
     transport = ASGITransport(app=app)
@@ -129,10 +130,12 @@ async def test_get_http_info_response_fields_complete(mock_dispatcher):
 
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert set(data.keys()) == {"http_url", "token", "target"}
+    assert set(data.keys()) == {"http_url", "token", "target", "device_id"}
     assert isinstance(data["http_url"], str)
     assert isinstance(data["token"], str)
+    assert isinstance(data["device_id"], str)
     assert data["target"] == "TECLAW_b_abc@4:1"
+    assert data["device_id"] == "TECLAW_device-abc"
 
 
 @pytest.mark.asyncio

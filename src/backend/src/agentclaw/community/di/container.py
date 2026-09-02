@@ -30,6 +30,7 @@ from agentclaw.community.di.modules.bot_collaborator_module import BotCollaborat
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
+from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.caller_identity_module import CallerIdentityModule
@@ -116,6 +117,7 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        ManifestFetchModule(),
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),
