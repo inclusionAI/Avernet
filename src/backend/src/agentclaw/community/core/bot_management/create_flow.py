@@ -802,14 +802,14 @@ def _apply_and_hand_off(
         ),
         # **No first-bot skip on this surface.** ``create_bot_with_authorization``
         # asks Passport to skip approval for a user's very first bot; this
-        # endpoint deliberately does not. An OpenAPI client routes its users
-        # through consent every time, the first included, so what a client
-        # integrates against is one flow rather than two.
+        # endpoint deliberately does not, so an OpenAPI client integrates
+        # against one flow rather than two.
         #
-        # This governs the default tenant, which is where the approval flow
-        # lives. A non-default tenant still takes ``applyFirst`` unconditionally
-        # — #556's rule that approval does not apply to external tenants — and
-        # that is a separate decision, not this one.
+        # It governs every tenant, which it did not always: while
+        # ``_apply_passport`` consulted the tenant, this ``False`` was honoured
+        # on the default one and ignored elsewhere, so a non-default tenant got
+        # ``applyFirst`` — a bare token, no URL, and a ``202`` the caller could
+        # not act on. That branch is gone; see ``_apply_passport``.
         use_first_passport=False,
     )
 
