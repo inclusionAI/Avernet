@@ -76,6 +76,7 @@ describe('collaboration group controller', () => {
       name: 'n',
       collaboration: { strategy: 'chat', delivery_policy: { bot_final_delivery: 'send_to_driver' } },
       driver_bot_uuid: 'bot-1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'bot-1', role: 'driver' }],
     });
     const [, opts] = backendRequest.mock.calls[0];
@@ -182,17 +183,17 @@ describe('collaboration session controller', () => {
     });
   });
 
-  it('listSessionMessages takes before/limit', async () => {
+  it('listSessionMessages forwards pending-history opt-in', async () => {
     backendRequest.mockResolvedValue({
       code: 20000,
       message: '',
       data: { messages: [], next_cursor: null, has_more: false },
       request_id: 'r',
     });
-    await sessionController.listSessionMessages('s1', { before: 'abc', limit: 50 });
+    await sessionController.listSessionMessages('s1', { before: 'abc', limit: 50, include_pending: true });
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/messages', {
       method: 'GET',
-      params: { before: 'abc', limit: 50 },
+      params: { before: 'abc', limit: 50, include_pending: true },
       injectUserId: false,
     });
   });

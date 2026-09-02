@@ -1,5 +1,10 @@
 export const routes = [
-  { path: '/', redirect: '/workspace' },
+  // Open 形态默认入口 = 对外欢迎页(src/pages/Welcome)。internal overlay 声明 '/welcome' 覆盖项
+  // (config/routes.internal.ts),内部形态经「/ → /welcome → /workspace」重定向链保持原默认入口,
+  // 欢迎页组件不可达;本仓库本地 dev 恒为 internal 形态,页面不可见;Open 形态经 OSS 导出构建验收。
+  // ⚠️ 本条 ext 不可被 internal 覆盖项取代:AppLayout 父节点同为 path='/',internal 若声明 '/'
+  // 会被 filterConflicts 连布局带子路由整棵剥离(见 routes.internal.ts 注释)。
+  { path: '/', redirect: '/welcome' },
   { path: '/work', redirect: '/workspace' },
   { path: '/manage', redirect: '/bot-workshop' },
   { path: '/collaboration-permissions', redirect: '/collaboration-privacy' },
@@ -17,6 +22,7 @@ export const routes = [
       { path: '/collaboration-square', redirect: '/collaboration-square/bots' },
       { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
       { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },
+      { path: '/collaboration-square/tasks', component: '@/pages/CollaborationSquare/Tasks' },
       { path: '/collaboration-privacy', component: '@/pages/CollaborationPrivacy' },
       { path: '/bot-workshop', component: '@/pages/BotWorkshop' },
       { path: '/bot-workshop/logs', component: '@/pages/BotWorkshop/Logs' },
@@ -39,4 +45,7 @@ export const routes = [
     path: '/design-system',
     component: './Demo/DesignSystem',
   },
+  // Open 形态对外欢迎页:顶层独立路由(同 /design-system 范式,AppLayout 外,不进工作台 Shell/侧栏)。
+  // internal overlay 声明 '/welcome' 覆盖项物理取消本条 + stale 深链兜底(见 routes.internal.ts)。
+  { path: '/welcome', component: '@/pages/Welcome' },
 ];

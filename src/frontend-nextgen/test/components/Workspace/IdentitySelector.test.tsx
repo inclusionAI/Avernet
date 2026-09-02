@@ -38,20 +38,59 @@ const identities: Identity[] = [
 ];
 
 describe('WorkspaceIdentitySelector', () => {
-  it('展示当前身份入口，并按 Bot 业务信息展示头像、名称、Bot 类型、引擎和可群聊状态', async () => {
+  it('展示当前身份入口，并按 Bot 业务信息展示头像、名称、Bot 类型、引擎、运行状态', async () => {
     render(<WorkspaceIdentitySelector identities={identities} activeId="bot-online" onChange={() => {}} />);
 
     expect(screen.getByRole('button', { name: '当前协作身份：协作 Bot' })).toHaveClass('min-h-10');
     expect(screen.getByText('协作 Bot')).toBeInTheDocument();
     expect(screen.getByText('个人 Bot')).toBeInTheDocument();
+    expect(screen.getByText('个人 Bot')).toHaveClass('rounded-sm', 'px-1', 'py-0', 'text-[10px]');
     expect(screen.getByText('OpenClaw')).toBeInTheDocument();
-    expect(screen.getByText('可群聊')).toBeInTheDocument();
+    expect(screen.getByText('运行状态：在线')).toBeInTheDocument();
     expect(screen.queryByText('Bot ID：')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '当前协作身份：协作 Bot' }));
+    expect(
+      screen.queryByText('当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+    ).not.toBeInTheDocument();
     expect(await screen.findByText('隐藏 Bot')).toBeInTheDocument();
     expect(screen.getByText('ClaudeCode')).toBeInTheDocument();
-    expect(screen.getByText('不可群聊')).toBeInTheDocument();
+    expect(screen.getByText('运行状态：不在线')).toBeInTheDocument();
+  });
+
+  it('将 bots 接口的引擎枚举统一为可读标签', () => {
+    render(
+      <WorkspaceIdentitySelector
+        identities={[
+          { id: 'openclaw', name: 'Openclaw Bot', kind: 'bot', avatar: 'O', engine: 'openclaw' },
+          { id: 'claude-code', name: 'Claude Bot', kind: 'bot', avatar: 'C', engine: 'claude_code' },
+          { id: 'hermes', name: 'Hermes Bot', kind: 'bot', avatar: 'H', engine: 'hermes' },
+          { id: 'teclaw', name: 'TEClaw Bot', kind: 'bot', avatar: 'T', engine: 'teclaw' },
+        ]}
+        activeId="openclaw"
+        onChange={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：Openclaw Bot' }));
+
+    expect(screen.getAllByText('OpenClaw')).toHaveLength(2);
+    expect(screen.getByText('ClaudeCode')).toBeInTheDocument();
+    expect(screen.getByText('Hermes')).toBeInTheDocument();
+    expect(screen.getByText('TEClaw')).toBeInTheDocument();
+  });
+
+  it('不把 TeamClaw 网关等 provider 名称当作引擎标签展示', () => {
+    render(
+      <WorkspaceIdentitySelector
+        identities={[{ id: 'provider-bot', name: 'Provider Bot', kind: 'bot', avatar: 'P', engine: 'TeamClaw网关' }]}
+        activeId="provider-bot"
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByText('引擎类型暂无')).toBeInTheDocument();
+    expect(screen.queryByText('TeamClaw网关')).not.toBeInTheDocument();
   });
 
   it('用户身份使用顶栏头像，并不展示引擎和 Bot 状态，保留用户标签', () => {
@@ -68,10 +107,10 @@ describe('WorkspaceIdentitySelector', () => {
     expect(screen.getByText('用户')).toBeInTheDocument();
     expect(screen.getByText('工号：447147')).toBeInTheDocument();
     expect(screen.queryByText('OpenClaw')).not.toBeInTheDocument();
-    expect(screen.queryByText('可群聊')).not.toBeInTheDocument();
+    expect(screen.queryByText('可参与群聊：')).not.toBeInTheDocument();
   });
 
-  it('在当前协作身份旁提供简短说明提示', async () => {
+  it('通过信息图标提供客观的数据范围说明，不使用观察者主体文案', async () => {
     render(<WorkspaceIdentitySelector identities={identities} activeId="human_447147" onChange={() => {}} />);
 
     const infoTrigger = screen.getByLabelText('协作身份说明');
@@ -81,9 +120,37 @@ describe('WorkspaceIdentitySelector', () => {
     expect(
       await screen.findByText('当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/我参与的会话|当前身份可见/)).not.toBeInTheDocument();
   });
 
-  it('沿用既有状态语义：群聊文案由 chatStatus 决定，不因可达性变化而改写', () => {
+  it('侧栏身份区不常显身份标签，说明收纳在下拉菜单的信息图标中', async () => {
+    render(
+      <WorkspaceIdentitySelector
+        identities={identities}
+        activeId="human_447147"
+        onChange={() => {}}
+        layout="sidebar"
+      />,
+    );
+
+    expect(screen.queryByText('协作身份')).not.toBeInTheDocument();
+    expect(screen.queryByText('可切换身份')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：风太' }));
+    const infoTrigger = await screen.findByLabelText('协作身份说明');
+    fireEvent.pointerMove(infoTrigger);
+    expect(
+      await screen.findByText('当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+    ).toBeInTheDocument();
+  });
+
+  it('只有一个协作身份时不显示切换提示', () => {
+    render(<WorkspaceIdentitySelector identities={[identities[0]]} activeId="human_447147" onChange={() => {}} />);
+
+    expect(screen.queryByText('可切换身份')).not.toBeInTheDocument();
+  });
+
+  it('不可达 Bot 仍仅展示运行状态，不展示群聊参与状态', () => {
     render(
       <WorkspaceIdentitySelector
         identities={[
@@ -103,9 +170,33 @@ describe('WorkspaceIdentitySelector', () => {
       />,
     );
 
-    expect(screen.getByText('可群聊')).toBeInTheDocument();
+    expect(screen.getByText('运行状态：在线')).toBeInTheDocument();
+    expect(screen.queryByText(/可参与群聊/)).not.toBeInTheDocument();
     expect(screen.getByText('桌面 Bot')).toBeInTheDocument();
-    expect(screen.queryByText('不可群聊')).not.toBeInTheDocument();
+  });
+
+  it('Bot 不在线时显示状态检查提示', async () => {
+    render(
+      <WorkspaceIdentitySelector
+        identities={[
+          {
+            id: 'bot-offline',
+            name: '离线 Bot',
+            kind: 'bot',
+            avatar: 'B',
+            chatStatus: 'hidden',
+            reachability: 'reachable',
+          },
+        ]}
+        activeId="bot-offline"
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByText('运行状态：不在线')).toBeInTheDocument();
+    expect(screen.queryByText(/可参与群聊/)).not.toBeInTheDocument();
+    fireEvent.pointerMove(screen.getByLabelText('Bot 运行状态：不在线'));
+    expect(await screen.findByText('请检查 Bot 实例状态')).toBeInTheDocument();
   });
 
   it('将低频协作权限入口放在身份下拉菜单标题行右侧并触发页面导航回调', async () => {

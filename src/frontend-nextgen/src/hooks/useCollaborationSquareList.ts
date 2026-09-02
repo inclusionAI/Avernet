@@ -116,7 +116,7 @@ export function useCollaborationSquareList({
             setBots(page.items);
             setHasMore(!isSmartSearch && COLLABORATION_SQUARE_PAGE_SIZE < page.total);
           }
-        } else {
+        } else if (resource === 'group') {
           const search = query.trim();
           const page = await collaborationSquareGroupService.listGroupPage(
             { ...(search ? { search } : {}), offset: 0, limit: COLLABORATION_SQUARE_PAGE_SIZE },
@@ -184,7 +184,7 @@ export function useCollaborationSquareList({
         appendBots(result.items);
         currentBotPage.current = page;
         setHasMore(page * COLLABORATION_SQUARE_PAGE_SIZE < result.total);
-      } else {
+      } else if (resource === 'group') {
         const search = groupQuery.trim();
         const offset = currentGroupOffset.current;
         const result = await collaborationSquareGroupService.listGroupPage(
@@ -210,6 +210,8 @@ export function useCollaborationSquareList({
   }, [appendBots, appendGroups, botQuery, botSearchMode, groupQuery, hasMore, humanBotContext, resource, viewerFields]);
 
   useEffect(() => {
+    // 任务广场由 useCollaborationSquareTask 独立加载，本 hook 仅服务 bot/group。
+    if (resource === 'task') return;
     const controller = new AbortController();
     const requestId = ++latestListRequest.current;
     const delay = activeLoadQuery.trim() ? COLLABORATION_SQUARE_SEARCH_DEBOUNCE_MS : 0;

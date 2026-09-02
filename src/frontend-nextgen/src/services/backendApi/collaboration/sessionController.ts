@@ -115,7 +115,7 @@ export async function uncollectSession(session_id: string, params: { participant
 // view_bot_id：当前身份对应的 bot/human 的 bot_id。
 export async function listSessionMessages(
   session_id: string,
-  params: { before?: string; limit?: number; view_bot_id?: string },
+  params: { before?: string; limit?: number; view_bot_id?: string; include_pending?: boolean },
 ) {
   return backendRequest<BackendApiEnvelope<SessionMessageData[]>>(
     `/openapi/v1/collaboration/sessions/${session_id}/messages`,

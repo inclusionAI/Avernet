@@ -8,9 +8,19 @@
  */
 import { normalizeTaskStatus } from '@/shared/taskStatus';
 import type { TaskDashboardResponse, TaskNodeDto, TaskStatusCode, TaskType } from './contract';
+import { OKR_OUTPUT_DIMENSIONS } from './okrOutput';
 import { renderableSource, unwrapHttpEnvelope } from './outputEnvelope';
 import { ARTIFACT_TYPE_LABELS, SOURCE_LABELS, TASK_STATUS_TONES, TASK_TYPE_LABELS } from './tokens';
-import type { DagEdgeView, DagNodeView, NodeStatus, StepTraceView, TaskNodeView, TaskStatus, TaskView } from './types';
+import type {
+  DagEdgeView,
+  DagNodeView,
+  NodeStatus,
+  StepTraceView,
+  TaskNodeView,
+  TaskOutputDimension,
+  TaskStatus,
+  TaskView,
+} from './types';
 
 /** 执行模态 → 头像底色 */
 function executorColor(runMode?: string | null): string | null {
@@ -74,6 +84,38 @@ function resolveOutputRender(output: unknown, outputSummary: string | null | und
   return renderableSource(output);
 }
 
+/** 将实施节点 output 的顶层对象拆成多个产出维度，优先读取每个维度下的 summary。 */
+function resolveOutputDimensions(output: unknown): TaskOutputDimension[] {
+  let payload: unknown = output;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return [];
+    }
+  }
+  payload = unwrapHttpEnvelope(payload);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
+
+  return Object.entries(payload as Record<string, unknown>)
+    .map(([key, value]) => {
+      const summary =
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? (value as Record<string, unknown>).summary
+          : undefined;
+      const content = typeof summary === 'string' && summary.trim() ? summary : renderableSource(value);
+      return content?.trim() ? { key, content } : null;
+    })
+    .filter((item): item is TaskOutputDimension => item !== null);
+}
+
+function isOkrTask(taskId: string, spec: TaskDashboardResponse['task_spec'], nodes: TaskNodeDto[]): boolean {
+  const taskText = [taskId, JSON.stringify(spec), ...nodes.map((node) => JSON.stringify(node.task_spec ?? {}))].join(
+    ' ',
+  );
+  return /(?:\bokr\b|目标与关键结果)/i.test(taskText);
+}
+
 function getExtendString(extendProps: Record<string, unknown> | undefined, ...keys: string[]): string | null {
   for (const key of keys) {
     const value = extendProps?.[key];
@@ -82,13 +124,41 @@ function getExtendString(extendProps: Record<string, unknown> | undefined, ...ke
   return null;
 }
 
+function mapSourceTypeToRunMode(sourceType: unknown): 'single_bot' | 'coop_group' | null {
+  switch (sourceType) {
+    case 'coop_group':
+      return 'coop_group';
+    case 'bot':
+    case 'api':
+      return 'single_bot';
+    default:
+      return null;
+  }
+}
+
+function hasNonEmptyValue(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (value && typeof value === 'object') return Object.keys(value).length > 0;
+  return value !== null && value !== undefined;
+}
+
+const BOT_NAME_OVERRIDES: Record<string, string> = {
+  自动研发bot: '安全架构师',
+};
+
+function resolveBotDisplayName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const normalizedName = name.trim();
+  return BOT_NAME_OVERRIDES[normalizedName.toLocaleLowerCase()] ?? normalizedName;
+}
+
 function resolveNodeExecutor(runInfo: TaskNodeDto['run_info']): string | null {
   if (!runInfo) return null;
   const extendProps = runInfo.extend_props;
   const assigneeName = runInfo.assignee_name ?? getExtendString(extendProps, 'assignee_name');
 
   // 单 Bot 节点的 assignee 可能只是 Bot ID，优先使用 extend_props.assignee_name 展示可读名称。
-  if (runInfo.run_mode === 'single_bot' && assigneeName) return assigneeName;
+  if (runInfo.run_mode === 'single_bot' && assigneeName) return resolveBotDisplayName(assigneeName);
 
   const namedExecutor =
     assigneeName ??
@@ -100,7 +170,7 @@ function resolveNodeExecutor(runInfo: TaskNodeDto['run_info']): string | null {
       'initiator_bot_name',
       'bot_name',
     );
-  if (runInfo.run_mode === 'coop_group') return namedExecutor;
+  if (runInfo.run_mode === 'coop_group') return resolveBotDisplayName(namedExecutor);
 
   const assigneeBotId = getExtendString(extendProps, 'assignee_bot_id');
   const binding =
@@ -108,7 +178,19 @@ function resolveNodeExecutor(runInfo: TaskNodeDto['run_info']): string | null {
       ? (runInfo.assignee as { binding?: string }).binding ?? null
       : null;
   const assigneeStr = typeof runInfo.assignee === 'string' ? runInfo.assignee : null;
-  return namedExecutor ?? assigneeBotId ?? binding ?? assigneeStr ?? getExtendString(extendProps, 'bot_id');
+  return resolveBotDisplayName(
+    namedExecutor ?? assigneeBotId ?? binding ?? assigneeStr ?? getExtendString(extendProps, 'bot_id'),
+  );
+}
+
+const NODE_TITLE_OVERRIDES: Record<string, string> = {
+  无人任务研发承接: '舆情监控方案分析',
+  营销策略进一步讨论: '圈人和选品策略讨论',
+  风险评审: '业务/技术风险评审',
+};
+
+function resolveNodeTitle(title: string | undefined, fallback: string): string {
+  return (title && NODE_TITLE_OVERRIDES[title]) ?? title ?? fallback;
 }
 
 function mapNodeTaskSpec(spec: TaskNodeDto['task_spec']): TaskNodeView['taskSpec'] {
@@ -129,6 +211,7 @@ function mapNodeTaskSpec(spec: TaskNodeDto['task_spec']): TaskNodeView['taskSpec
 function mapNodeStatus(s: TaskStatusCode | 'SKIPPED'): NodeStatus {
   switch (s) {
     case 'DONE':
+    case 'SUCCESS':
       return 'done';
     case 'RUNNING':
     case 'PLANNING':
@@ -309,10 +392,20 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
   // task_spec/owner/progress 等需从根节点（tasks[0]）与 extend_props 推导。
   const taskList = d.tasks ?? [];
   const rootNode = taskList[0];
-  // task_spec 直接从根节点（tasks[0]）取：后端 top-level 不返回 task_spec。
-  const spec = (rootNode?.task_spec ?? {}) as TaskDashboardResponse['task_spec'];
+  // 优先使用根节点 task_spec；根节点字段不完整时，使用 dashboard 顶层 task_spec 补齐。
+  // 部分 OKR 任务只在顶层下发背景/目标，不能因为根节点存在就丢失这些字段。
+  const rootSpec = rootNode?.task_spec;
+  const topLevelSpec = d.task_spec;
+  const spec = {
+    metadata: rootSpec?.metadata ?? topLevelSpec?.metadata,
+    context: rootSpec?.context ?? topLevelSpec?.context,
+    goal: rootSpec?.goal ?? topLevelSpec?.goal,
+  } as TaskDashboardResponse['task_spec'];
   const meta = spec.metadata ?? { title: d.task_id ?? rootNode?.node_id ?? '', instruction: '' };
   const goal = spec.goal ?? { objective: '', acceptances: [] };
+  const acceptances = (goal.acceptances ?? [])
+    .map((a) => (typeof a === 'string' ? a : a.acceptance ?? a.description ?? ''))
+    .filter(Boolean);
   const ctx = spec.context ?? {};
   const tcCtx = ctx?.extend_props?.teamclaw_context as
     | { main_session_name?: string; parent_task_id?: string }
@@ -335,19 +428,33 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
   const hasExecGraph = !!executionGraph && Array.isArray(executionGraph.tasks) && executionGraph.tasks.length > 0;
   const useExecGraph = (taskType === 'yaml' || taskType === 'workflow') && hasExecGraph;
   const graphSource = useExecGraph ? executionGraph! : d;
+  const graphExtProps = {
+    ...((graphSource?.extend_props ?? {}) as Record<string, unknown>),
+    ...(extProps ?? {}),
+  };
   const graphTasks = graphSource.tasks ?? [];
   const graphRelations = graphSource.relations ?? [];
+  const okrTask = isOkrTask(d.task_id ?? '', spec, graphTasks);
+  // workflow/yaml 的 execution_graph 可能只返回内部节点，未复用顶层 tasks[0] 的 node_id。
+  // 此时将 execution_graph 的 task_id 节点（缺失时首节点）视为展示根节点，确保 graph 级兜底生效。
+  const graphRootNode = useExecGraph
+    ? graphTasks.find((node) => node.node_id === d.task_id) ?? graphTasks[0]
+    : rootNode;
 
   // 自定义 yaml/workflow:execution_graph 节点不含会话信息,协群会话在顶层根节点 data.tasks[0].run_info。
   // 把根节点 group_id/session_id/group_name 回填到 execution_graph 节点,使其可下钻同一协群会话;
   // 动态/单 bot 节点自带 session,优先取自身(回填仅作兜底,不影响)。
   const rootRunInfo = rootNode?.run_info;
   const rootExt = rootRunInfo?.extend_props;
-  const rootGroupId = getExtendString(rootExt, 'group_id', 'coop_group_id', 'source_group_id');
-  const rootSessionId = getExtendString(rootExt, 'session_id', 'group_session_id', 'main_session_id');
+  const rootGroupId =
+    getExtendString(rootExt, 'group_id', 'coop_group_id', 'source_group_id') ??
+    getExtendString(graphExtProps, 'group_id', 'coop_group_id', 'source_group_id');
+  const rootSessionId =
+    getExtendString(rootExt, 'session_id', 'group_session_id', 'main_session_id') ??
+    getExtendString(graphExtProps, 'session_id', 'group_session_id', 'main_session_id');
   const rootGroupName = getExtendString(rootExt, 'group_name');
-  // 产物 Tab 直接展示根节点(d.tasks[0].run_info)的 output：与节点详情「输出摘要」同套渲染逻辑。
-  const rootOutputRender = isEmptyOutput(rootRunInfo?.output, rootRunInfo?.output_summary)
+  // 默认产物 Tab 展示根节点(d.tasks[0].run_info)的 output：与节点详情「输出摘要」同套渲染逻辑。
+  const defaultRootOutputRender = isEmptyOutput(rootRunInfo?.output, rootRunInfo?.output_summary)
     ? null
     : resolveOutputRender(rootRunInfo?.output, rootRunInfo?.output_summary);
 
@@ -356,34 +463,54 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
     .map((n) => {
       const ri = n.run_info ?? {};
-      const title = n.task_spec?.metadata?.title ?? n.node_id;
+      const title = resolveNodeTitle(n.task_spec?.metadata?.title, n.node_id);
+      const isRootNode = n.node_id === graphRootNode?.node_id || n.node_id === d.task_id;
+      // 根节点的运行信息可能没有完整落在 run_info 中：用 graph 级 extend_props 做只读兜底，
+      // 不覆盖节点自身已有值。子节点仍保持原有节点级字段解析逻辑。
+      const effectiveExtendProps = isRootNode ? { ...graphExtProps, ...(ri.extend_props ?? {}) } : ri.extend_props;
+      const effectiveRunMode =
+        (hasNonEmptyValue(ri.run_mode) ? ri.run_mode : null) ??
+        (isRootNode ? mapSourceTypeToRunMode(getExtendString(graphExtProps, 'source_type') ?? d.source_type) : null);
+      const effectiveAssignee =
+        (hasNonEmptyValue(ri.assignee) ? ri.assignee : null) ??
+        (isRootNode ? getExtendString(graphExtProps, 'owner_bot_id') ?? d.owner_bot_id ?? null : null);
+      const effectiveRunInfo = {
+        ...ri,
+        run_mode: effectiveRunMode,
+        assignee: effectiveAssignee,
+        extend_props: effectiveExtendProps,
+      };
       // execution_graph(状态机)节点 assignee 是 bot_binding 对象{type,binding},规范化为字符串:
       // 优先 assignee_bot_id(实际 bot)→ binding(逻辑角色);单/动态节点 assignee 本就是字符串。
-      const assigneeRaw = ri.assignee;
-      const assigneeBotId = getExtendString(ri.extend_props, 'assignee_bot_id');
+      const assigneeRaw = effectiveRunInfo.assignee;
+      const assigneeBotId = getExtendString(effectiveRunInfo.extend_props, 'assignee_bot_id');
       const assigneeBinding =
         assigneeRaw && typeof assigneeRaw === 'object' ? (assigneeRaw as { binding?: string }).binding ?? null : null;
       const assigneeNorm = typeof assigneeRaw === 'string' ? assigneeRaw : assigneeBotId ?? assigneeBinding ?? null;
       const rawGroupId =
-        getExtendString(ri.extend_props, 'group_id', 'coop_group_id', 'source_group_id') ?? rootGroupId;
+        getExtendString(effectiveRunInfo.extend_props, 'group_id', 'coop_group_id', 'source_group_id') ?? rootGroupId;
       const nodeSessionId =
-        getExtendString(ri.extend_props, 'session_id', 'group_session_id', 'main_session_id') ?? rootSessionId;
+        getExtendString(effectiveRunInfo.extend_props, 'session_id', 'group_session_id', 'main_session_id') ??
+        rootSessionId;
       // 单/群判别:协作群 session_id 形如 bcs_grp_xxx:round,单聊形如 agent:main:session:...:user:xxx。
       // 不能再用 group_id 是否存在判断——单 bot 执行也会在 extend_props 带 group_id(群上下文泄漏),
       // 会导致会话消息查询误走协作群端点。统一以 run_mode=coop_group 或 session_id 以 bcs_grp_ 开头为准。
-      const isGroupNode = ri.run_mode === 'coop_group' || nodeSessionId?.startsWith('bcs_grp_') === true;
+      const isGroupNode = effectiveRunMode === 'coop_group' || nodeSessionId?.startsWith('bcs_grp_') === true;
       const groupId = isGroupNode ? rawGroupId : null;
       const groupName = isGroupNode
-        ? getExtendString(ri.extend_props, 'group_name') ?? rootGroupName ?? 'BCS协作群'
+        ? getExtendString(effectiveRunInfo.extend_props, 'group_name') ?? rootGroupName ?? 'BCS协作群'
         : null;
+      // OKR 任务为演示流程提供前端状态兜底：根节点出现后续节点后，视为根节点已完成。
+      const hasSubsequentNode = graphTasks.some((candidate) => (candidate.sequence ?? 0) > (n.sequence ?? 0));
+      const nodeStatus = isRootNode && okrTask && hasSubsequentNode ? 'done' : mapNodeStatus(n.status);
       return {
         id: n.node_id,
         name: title,
         sequence: n.sequence ?? 0,
-        status: mapNodeStatus(n.status),
-        executor: resolveNodeExecutor(ri),
-        executorColor: executorColor(ri.run_mode),
-        runMode: ri.run_mode ?? null,
+        status: nodeStatus,
+        executor: resolveNodeExecutor(effectiveRunInfo),
+        executorColor: executorColor(effectiveRunMode),
+        runMode: effectiveRunMode ?? null,
         // 下钻触发条件 = session_id 存在(与单/群判别无关):
         // - 协作群(isGroupNode) → 按 group_id 查群成员 + 协作群消息端点
         // - 单 bot → 按 assignee 内部 id(去 :user_id 后缀)走 bots sessions 消息端点
@@ -391,14 +518,14 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
         groupName,
         sessionId: nodeSessionId,
         assignee: assigneeNorm,
-        startedAt: msToDisplay(ri.start_time),
-        endAt: msToDisplay(ri.end_time),
-        timeConsuming: durationDisplay(ri.start_time, ri.end_time),
-        output: ri.output ? JSON.stringify(ri.output) : null,
-        outputSummary: resolveOutputSummary(ri.output, ri.output_summary),
-        outputRender: resolveOutputRender(ri.output, ri.output_summary),
+        startedAt: msToDisplay(effectiveRunInfo.start_time),
+        endAt: msToDisplay(effectiveRunInfo.end_time),
+        timeConsuming: durationDisplay(effectiveRunInfo.start_time, effectiveRunInfo.end_time),
+        output: effectiveRunInfo.output ? JSON.stringify(effectiveRunInfo.output) : null,
+        outputSummary: resolveOutputSummary(effectiveRunInfo.output, effectiveRunInfo.output_summary),
+        outputRender: resolveOutputRender(effectiveRunInfo.output, effectiveRunInfo.output_summary),
         taskSpec: mapNodeTaskSpec(n.task_spec),
-        artifacts: (ri.artifacts ?? []).map((a) => ({
+        artifacts: (effectiveRunInfo.artifacts ?? []).map((a) => ({
           id: a.artifact_id,
           name: a.name,
           type: a.type,
@@ -406,20 +533,45 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
           summary: a.summary ?? null,
           updatedAt: a.created_at,
         })),
-        hasSubTask: !!ri.child_task_id,
-        subTaskId: ri.child_task_id ?? null,
-        stepTraces: mapActionLog(ri.action_log),
-        acceptanceResult: ri.acceptance_result
+        hasSubTask: !!effectiveRunInfo.child_task_id,
+        subTaskId: effectiveRunInfo.child_task_id ?? null,
+        stepTraces: mapActionLog(effectiveRunInfo.action_log),
+        acceptanceResult: effectiveRunInfo.acceptance_result
           ? {
-              verdict: ri.acceptance_result.verdict,
-              acceptancesMetric: ri.acceptance_result.acceptances_metric ?? [],
-              gaps: ri.acceptance_result.gaps ?? [],
+              verdict: effectiveRunInfo.acceptance_result.verdict,
+              acceptancesMetric: effectiveRunInfo.acceptance_result.acceptances_metric ?? [],
+              gaps: effectiveRunInfo.acceptance_result.gaps ?? [],
             }
           : null,
       };
     });
 
   const { dagNodes, dagEdges } = layoutDag(nodes, graphRelations);
+  const implementationNode = nodes.find((node) => node.name.includes('投放实施') || node.name.includes('实施投放'));
+  // 只要节点视图存在已完成的投放实施节点，产物 Tab 就展示该节点的 output；否则保持普通任务的根节点输出逻辑。
+  const selectedOutputNode = implementationNode?.status === 'done' ? implementationNode : undefined;
+  const rootOutputRender = selectedOutputNode?.outputRender ?? defaultRootOutputRender;
+  const rootOutputDimensions = selectedOutputNode
+    ? okrTask
+      ? OKR_OUTPUT_DIMENSIONS
+      : resolveOutputDimensions(selectedOutputNode.output)
+    : undefined;
+
+  const graphOwnerBotId = getExtendString(graphExtProps, 'owner_bot_id') ?? d.owner_bot_id ?? '';
+  const graphSourceType =
+    (getExtendString(graphExtProps, 'source_type') as TaskDashboardResponse['source_type'] | null) ?? d.source_type;
+  const graphOwnerBotName =
+    resolveBotDisplayName(
+      getExtendString(graphExtProps, 'owner_bot_name', 'bot_name') ?? d.owner_bot?.name ?? graphOwnerBotId,
+    ) ?? graphOwnerBotId;
+  const graphCreateTime =
+    d.create_time ??
+    getExtendString(graphExtProps, 'create_time', 'gmt_create') ??
+    (rootRunInfo?.start_time ? new Date(rootRunInfo.start_time).toISOString() : '');
+  const graphFinishTime =
+    d.finish_time ??
+    getExtendString(graphExtProps, 'finish_time', 'gmt_modified') ??
+    (rootRunInfo?.end_time ? new Date(rootRunInfo.end_time).toISOString() : null);
 
   const productStatus = mapTaskStatus(d.status);
   // 以下 void 引用避免未使用告警（色表/label 由 UI 层消费）
@@ -432,17 +584,15 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     description: ctx.background ?? '',
     goal: goal.objective ?? '',
     objective: goal.objective ?? '',
-    acceptances: (goal.acceptances ?? [])
-      .map((a) => (typeof a === 'string' ? a : a.acceptance ?? a.description ?? ''))
-      .filter(Boolean),
+    acceptances,
     status: productStatus,
     taskType: taskType,
     taskTypeLabel: TASK_TYPE_LABELS[taskType] ?? taskType,
-    sourceLabel: SOURCE_LABELS[d.source_type ?? 'bot'] ?? d.source_type ?? '',
-    ownerBotName: d.owner_bot?.name ?? d.owner_bot_id ?? '',
-    ownerBotId: d.owner_bot_id ?? '',
-    createdAt: d.create_time,
-    finishedAt: d.finish_time,
+    sourceLabel: SOURCE_LABELS[graphSourceType ?? 'bot'] ?? graphSourceType ?? '',
+    ownerBotName: graphOwnerBotName,
+    ownerBotId: graphOwnerBotId,
+    createdAt: graphCreateTime,
+    finishedAt: graphFinishTime,
     loopRound: d.loop_round ?? 0,
     needsAttention: !!d.needs_attention,
     statusReason: d.status_reason ?? null,
@@ -451,6 +601,7 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     mainSessionName: d.main_session?.name ?? (execCfg.main_session_name as string) ?? tcCtx?.main_session_name ?? null,
     progress: computeProgress(d, nodes),
     rootOutputRender,
+    rootOutputDimensions,
     artifacts: mapArtifacts(d.artifacts),
     nodes,
     dagNodes,

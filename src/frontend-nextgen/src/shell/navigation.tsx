@@ -41,7 +41,7 @@ export const navigationItems: NavigationItem[] = [
     path: '/collaboration-square',
     icon: Compass,
     area: 'work',
-    description: '发现公开 Bot 与协作群',
+    description: '发现公开 Bot、协作群与任务',
   },
   {
     id: 'collaboration-privacy',

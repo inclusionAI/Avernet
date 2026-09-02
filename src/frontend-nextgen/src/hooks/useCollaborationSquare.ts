@@ -1,5 +1,4 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
-import { parseSquareDeepLink } from '@/domain/collaborationSquare/mapper';
 import {
   canStartPublicBotConversation,
   getPublicBotTargetId,
@@ -9,7 +8,9 @@ import {
   type SquareResource,
 } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquareList } from '@/hooks/useCollaborationSquareList';
+import { useCollaborationSquareTask } from '@/hooks/useCollaborationSquareTask';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import { useSquareDeepLink } from '@/hooks/useSquareDeepLink';
 import {
   CollaborationSquareError,
   collaborationSquareBotService,
@@ -24,7 +25,7 @@ import {
   getCollaborationSquareErrorMessage,
 } from '@/utils/collaborationSquare';
 import { history } from '@umijs/max';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useCreateGroupSessionFlow } from './useCreateGroupSessionFlow';
 
 export function useCollaborationSquare(resource: SquareResource) {
@@ -41,7 +42,7 @@ export function useCollaborationSquare(resource: SquareResource) {
     () => (humanBotContext ? { viewerActorType: 'human' as const, viewerActorId: humanBotContext.userId } : null),
     [humanBotContext],
   );
-  const { load, loadMore, hasMore, loadingMore, loadMoreError } = useCollaborationSquareList({
+  const botGroupList = useCollaborationSquareList({
     resource,
     humanBotContext,
     humanIdentityStatus,
@@ -57,6 +58,8 @@ export function useCollaborationSquare(resource: SquareResource) {
     setLoading: store.setLoading,
     setError: store.setError,
   });
+  const taskView = useCollaborationSquareTask(resource);
+  const { load, loadMore, hasMore, loadingMore, loadMoreError } = resource === 'task' ? taskView.list : botGroupList;
 
   const closeBotProfile = useCallback(() => {
     store.setSelectedBotId(null);
@@ -117,20 +120,7 @@ export function useCollaborationSquare(resource: SquareResource) {
     [handleTargetInvalid, store.setDetailLoading, store.setGroupMembers, store.setSelectedGroupId],
   );
 
-  useEffect(() => {
-    if (store.loading || typeof window === 'undefined') return;
-    const deepLink = parseSquareDeepLink(window.location.search, resource);
-    if (!deepLink) return;
-    if (resource === 'bot') {
-      const bot = store.bots.find((item) => item.id === deepLink.id);
-      if (bot) void openBotProfile(bot);
-      else handleTargetInvalid('bot', deepLink.id);
-    } else {
-      const group = store.groups.find((item) => item.id === deepLink.id);
-      if (group) void openGroupMembers(group);
-      else handleTargetInvalid('group', deepLink.id);
-    }
-  }, [handleTargetInvalid, openBotProfile, openGroupMembers, resource, store.bots, store.groups, store.loading]);
+  useSquareDeepLink({ resource, openBotProfile, openGroupMembers, handleTargetInvalid });
 
   const runBusy = useCallback(
     async (key: string, task: () => Promise<void>, invalidTargetId?: string) => {
@@ -220,6 +210,7 @@ export function useCollaborationSquare(resource: SquareResource) {
     visibleGroups,
     selectedGroup,
     load,
+    reload: load,
     loadMore,
     hasMore,
     loadingMore,
@@ -230,6 +221,8 @@ export function useCollaborationSquare(resource: SquareResource) {
     closeGroupMembers,
     primaryBotAction,
     createGroupSession,
+    openTaskDetail: taskView.openTaskDetail,
+    closeTaskDetail: taskView.closeTaskDetail,
     createSessionTarget: createSessionFlow.target,
     isCreatingSession: createSessionFlow.isCreating,
     closeCreateSessionModal: createSessionFlow.close,

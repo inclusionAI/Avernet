@@ -4,6 +4,7 @@ import { Empty } from '@/components/ui/Empty';
 import type { TaskListItem } from '@/domain/tasks/models';
 import type { ScheduledRoutineRecord, ScheduledRoutineRunRecord } from '@/services/scheduledTasks';
 import { TASK_API_BASE } from '@/services/tasks/taskConfig';
+import { getBotDisplayName, getUserTaskSourceLabel, getUserTaskTypeLabel } from '../userTaskUtils';
 import { MyTaskRoutineDrawer } from './MyTaskRoutineDrawer';
 import { MyTaskRoutineHistoryDrawer } from './MyTaskRoutineHistoryDrawer';
 
@@ -30,6 +31,7 @@ export interface MyTaskDrawersProps {
 export function MyTaskDrawers({
   selectedTaskId,
   onCloseTask,
+  taskRecords,
   ownerUserId,
   selectedRoutine,
   selectedRoutineKey,
@@ -45,6 +47,33 @@ export function MyTaskDrawers({
   onOpenRoutineFromHistory,
   botNameMap,
 }: MyTaskDrawersProps) {
+  const selectedTask = selectedTaskId ? taskRecords.find((record) => record.task_id === selectedTaskId) : null;
+  const taskInfoFallback = selectedTask
+    ? (() => {
+        const record = selectedTask as TaskListItem & {
+          task_info?: {
+            execution_config?: { task_type?: string };
+            create_time?: string;
+            finish_time?: string | null;
+            source_type?: string | null;
+            owner_bot_id?: string | null;
+          };
+          create_time?: string;
+          finish_time?: string | null;
+        };
+        const taskInfo = record.task_info;
+        return {
+          taskTypeLabel: getUserTaskTypeLabel(
+            record.execution_config?.task_type ?? taskInfo?.execution_config?.task_type,
+          ),
+          sourceLabel: getUserTaskSourceLabel(record.source_type ?? taskInfo?.source_type),
+          ownerBotName: getBotDisplayName(botNameMap, record.owner_bot_id ?? taskInfo?.owner_bot_id),
+          createdAt: record.gmt_create ?? taskInfo?.create_time ?? record.create_time ?? '',
+          finishedAt: record.gmt_modified ?? taskInfo?.finish_time ?? record.finish_time ?? null,
+        };
+      })()
+    : undefined;
+
   return (
     <>
       <Drawer open={Boolean(selectedTaskId)} onOpenChange={(open) => !open && onCloseTask()}>
@@ -56,6 +85,7 @@ export function MyTaskDrawers({
                 bcsBaseUrl=""
                 userId={ownerUserId}
                 taskId={selectedTaskId}
+                taskInfoFallback={taskInfoFallback}
                 style={{ height: '100%', minHeight: 0 }}
               />
             ) : (

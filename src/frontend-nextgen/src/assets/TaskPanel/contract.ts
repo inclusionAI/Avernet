@@ -4,7 +4,7 @@
  * 仅用于副屏内部 fetch 反序列化，真实字段差异由 taskPanelMapper 收口。
  */
 
-export type EngineStatus = 'PENDING' | 'PLANNING' | 'RUNNING' | 'DONE' | 'FAILED' | 'HUNG';
+export type EngineStatus = 'PENDING' | 'PLANNING' | 'RUNNING' | 'DONE' | 'SUCCESS' | 'FAILED' | 'HUNG';
 export type ProductTaskStatus = 'DRAFTING' | 'DEFINED' | 'EXECUTING' | 'REVIEWING' | 'DONE' | 'FAILED' | 'CANCELLED';
 export type TaskStatusCode = EngineStatus | ProductTaskStatus;
 

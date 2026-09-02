@@ -7,8 +7,11 @@ const transform = {
 };
 
 const moduleNameMapper = {
-  '^@/(.*)$': '<rootDir>/src/$1',
+  // 位图资源（品牌 logo 等）jest 桩：必须放在 `^@/` 之前，让 .png import 在路径改写前先行命中，
+  // 否则先经 `@/` 解析到真实 png 文件后不会再二次映射，导致 PNG 被当 JS 解析。src/typings.d.ts 只管类型。
+  '\\.(png|jpe?g|gif|webp|avif)$': '<rootDir>/test/mocks/fileMock.js',
   '\\.(css|less|scss|sass)$': '<rootDir>/test/mocks/styleMock.js',
+  '^@/(.*)$': '<rootDir>/src/$1',
   '^@alipay/tc-chat-extensions': '<rootDir>/test/mocks/tc-chat-extensions.js',
   // @tc-chat/ui 的 es/ 是未转译 ESM，直接 import 会 SyntaxError。该包同时发了 CJS 的 lib/
   // （package.json main），故测试环境重定向到 lib/ 用真实实现：既省掉全量转译整个 UI 库的开销，

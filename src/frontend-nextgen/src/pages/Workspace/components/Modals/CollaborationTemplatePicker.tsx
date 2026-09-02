@@ -2,7 +2,7 @@ import { Button, Popover, PopoverContent, PopoverTrigger, Segmented } from '@/co
 import type { CollaborationTemplate } from '@/services/workspace/collaborationTemplateService';
 import { cn } from '@/utils/cn';
 import { Check, ChevronDown, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { TemplateMode } from '../../hooks/useCollaborationTemplates';
 
 export interface CollaborationTemplatePickerProps {
@@ -15,6 +15,7 @@ export interface CollaborationTemplatePickerProps {
   tagLabel: (tag: string) => string;
   onModeChange: (mode: TemplateMode) => void;
   onSelect: (template: CollaborationTemplate) => void;
+  action?: ReactNode;
 }
 
 const MODE_OPTIONS: Array<{ value: TemplateMode; label: string }> = [
@@ -34,6 +35,7 @@ export function CollaborationTemplatePicker(props: CollaborationTemplatePickerPr
     tagLabel,
     onModeChange,
     onSelect,
+    action,
   } = props;
   const [open, setOpen] = useState(false);
   const isTemplate = mode === 'template';
@@ -138,6 +140,7 @@ export function CollaborationTemplatePicker(props: CollaborationTemplatePickerPr
           加载内容...
         </span>
       )}
+      {action && <div className="ml-auto shrink-0">{action}</div>}
     </div>
   );
 }

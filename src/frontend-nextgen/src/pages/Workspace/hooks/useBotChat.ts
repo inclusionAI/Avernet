@@ -1,4 +1,5 @@
 import { clearBotCdnConfig, queryAndRegisterBotLibraryCdn } from '@/services/bcs/libraryCdnInjector';
+import { listTaskPreflightMessages, mergeTaskPreflightMessages } from '@/services/tasks/taskPreflightMessageStore';
 import { createBotChatProvider, type BotChatState } from '@/services/workspace/botChatProvider';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -112,7 +113,9 @@ export function useBotChat(
     provider
       .loadHistory()
       .then((history: ChatMessage[]) => {
-        if (!cancelled) chat.setMessages(history);
+        if (!cancelled) {
+          chat.setMessages(mergeTaskPreflightMessages(history, listTaskPreflightMessages(sessionId)));
+        }
       })
       .catch((error: unknown) => {
         if (!cancelled) toast.error(error instanceof Error ? error.message : '加载历史消息失败');

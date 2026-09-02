@@ -78,8 +78,8 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
+      <div className="grid min-w-0 grid-cols-2 gap-4">
+        <div className="min-w-0">
           <label className="mb-2 block text-xs font-semibold text-muted-foreground" htmlFor="create-group-name">
             协作群名称
           </label>
@@ -91,7 +91,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             className="h-9 rounded-md"
           />
         </div>
-        <div>
+        <div className="min-w-0">
           <label className="mb-2 block text-xs font-semibold text-muted-foreground" htmlFor="create-group-context">
             协作目标
           </label>
@@ -109,7 +109,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
         <span className="mb-2 block text-xs font-semibold text-muted-foreground" id="strategy-group-label">
           协作群类型
         </span>
-        <div role="radiogroup" aria-labelledby="strategy-group-label" className="grid grid-cols-3 gap-3">
+        <div role="radiogroup" aria-labelledby="strategy-group-label" className="grid min-w-0 grid-cols-3 gap-3">
           {STRATEGY_OPTIONS.map((option) =>
             (() => {
               const disabled = option.value === 'task_dag' && !supportsStateMachine;
@@ -124,7 +124,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
                   disabled={disabled}
                   onClick={() => onKindChange(option.value)}
                   className={cn(
-                    'h-auto flex-col items-start gap-1 rounded-lg border px-3 py-2.5 text-left',
+                    'h-auto min-w-0 flex-col items-start gap-1 rounded-lg border px-3 py-2.5 text-left',
                     disabled
                       ? 'cursor-not-allowed border-border bg-muted opacity-60'
                       : kind === option.value
@@ -179,16 +179,18 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
       )}
 
       {kind === 'free_chat' && (
-        <div className="grid grid-cols-2 gap-4">
-          <GroupLeaderSelect
-            id="create-group-driver"
-            label="群主 Bot"
-            value={driverBotId}
-            options={leaderOptions}
-            placeholder="选择群主 Bot"
-            onChange={onDriverChange}
-          />
-          <div>
+        <div className="grid min-w-0 grid-cols-2 gap-4">
+          <div className="min-w-0">
+            <GroupLeaderSelect
+              id="create-group-driver"
+              label="群主 Bot"
+              value={driverBotId}
+              options={leaderOptions}
+              placeholder="选择群主 Bot"
+              onChange={onDriverChange}
+            />
+          </div>
+          <div className="min-w-0">
             <span className="mb-2 block text-xs font-semibold text-muted-foreground">自动回复</span>
             <Segmented<DeliveryPolicy> value={deliveryPolicy} onChange={onDeliveryChange} options={DELIVERY_OPTIONS} />
             <p className="mt-2 text-[11px] leading-4 text-muted-foreground">

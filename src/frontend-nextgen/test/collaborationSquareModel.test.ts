@@ -9,6 +9,12 @@ import {
   parseSquareDeepLink,
   resolveFriendRequestBotId,
 } from '../src/domain/collaborationSquare/mapper';
+import {
+  TASK_STATUS_CONFIG,
+  getPublicTaskStatusPresentation,
+  type PlazaTaskStatus,
+  type SquareResource,
+} from '../src/domain/collaborationSquare/types';
 
 const bots = [
   {
@@ -215,5 +221,33 @@ describe('collaboration square model', () => {
     expect(parseSquareDeepLink('?resource=bot&id=b1', 'bot')).toEqual({ resource: 'bot', id: 'b1' });
     expect(parseSquareDeepLink('?resource=group&id=g1', 'bot')).toBeNull();
     expect(parseSquareDeepLink('?resource=bot&id=', 'bot')).toBeNull();
+  });
+});
+
+describe('collaboration square task plaza model', () => {
+  test('SquareResource 覆盖 bot/group/task 三态', () => {
+    // 编译期断言：联合类型必须接受 'task'，否则 tsc 报错。
+    const resources: SquareResource[] = ['bot', 'group', 'task'];
+    expect(resources).toContain('task');
+  });
+
+  test('PlazaTaskStatus 为四种广场只读状态', () => {
+    // 编译期断言：PlazaTaskStatus 必须恰好是这四个值。
+    const statuses: PlazaTaskStatus[] = ['pending_claim', 'claimed', 'reviewing', 'completed'];
+    expect(Object.keys(TASK_STATUS_CONFIG).sort()).toEqual([...statuses].sort());
+  });
+
+  test('TASK_STATUS_CONFIG 四态文案与 tone 固定映射', () => {
+    expect(TASK_STATUS_CONFIG.pending_claim).toEqual({ label: '待认领', tone: 'warning' });
+    expect(TASK_STATUS_CONFIG.claimed).toEqual({ label: '已认领', tone: 'brand' });
+    expect(TASK_STATUS_CONFIG.reviewing).toEqual({ label: '待验收', tone: 'info' });
+    expect(TASK_STATUS_CONFIG.completed).toEqual({ label: '已完成', tone: 'success' });
+  });
+
+  test('getPublicTaskStatusPresentation 返回与 TASK_STATUS_CONFIG 一致的 label/tone', () => {
+    const statuses: PlazaTaskStatus[] = ['pending_claim', 'claimed', 'reviewing', 'completed'];
+    for (const status of statuses) {
+      expect(getPublicTaskStatusPresentation(status)).toEqual(TASK_STATUS_CONFIG[status]);
+    }
   });
 });

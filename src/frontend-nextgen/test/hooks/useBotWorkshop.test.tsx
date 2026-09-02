@@ -5,9 +5,9 @@ import { useSpaceContext } from '@/hooks/useSpaceContext';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService } from '@/services/botWorkshop';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
-import { history } from '@umijs/max';
-import { act, renderHook, waitFor } from '@testing-library/react';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { history } from '@umijs/max';
 
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 jest.mock('@/hooks/useBotWorkshopEditorIdentity', () => ({

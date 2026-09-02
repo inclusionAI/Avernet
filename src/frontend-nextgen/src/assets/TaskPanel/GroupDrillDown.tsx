@@ -240,6 +240,20 @@ export function filterGroupMessages(messages: GroupMessage[]): GroupMessage[] {
   return messages.filter((message) => !isNonMessageGroupContent(message));
 }
 
+/** 会话接口返回顺序不稳定，尤其协作群接口常按最新消息在前返回；展示统一按时间递增。 */
+export function sortMessagesByTimestamp(messages: GroupMessage[]): GroupMessage[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((a, b) => {
+      const aTime = new Date(a.message.timestamp).getTime();
+      const bTime = new Date(b.message.timestamp).getTime();
+      const aSortable = Number.isNaN(aTime) ? Number.MAX_SAFE_INTEGER : aTime;
+      const bSortable = Number.isNaN(bTime) ? Number.MAX_SAFE_INTEGER : bTime;
+      return aSortable - bSortable || a.index - b.index;
+    })
+    .map(({ message }) => message);
+}
+
 function senderColor(sender: string): string {
   const palette = [C.primary, '#6366F1', '#0EA5E9', C.success, C.warning];
   const score = Array.from(sender).reduce((sum, char) => sum + char.charCodeAt(0), 0);
@@ -441,6 +455,8 @@ export const GroupSessionView: React.FC<{
 }> = ({ node, bcsBaseUrl, apiBaseUrl, userId, onBack }) => {
   const groupId = node.groupId;
   const sessionId = node.sessionId;
+  // 根节点可能只有 run_mode=coop_group + sessionId，没有回填 groupId；仍按协作群会话读取消息。
+  const isGroup = node.runMode === 'coop_group' || Boolean(groupId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [group, setGroup] = useState<GroupData | null>(null);
@@ -464,7 +480,7 @@ export const GroupSessionView: React.FC<{
     const memberPromise = groupId
       ? fetchGroupDetail(groupId, bcsBaseUrl)
       : Promise.resolve(
-          assignee
+          isGroup && assignee
             ? {
                 group_id: '',
                 name: node.executor ?? assignee,
@@ -488,19 +504,20 @@ export const GroupSessionView: React.FC<{
       try {
         const g = await memberPromise;
         if (cancelled) return;
-        const ownedViewBot = groupId ? resolveOwnedViewBot(g?.participants ?? [], userId) : null;
-        const viewBotId = groupId ? ownedViewBot?.actor_id ?? '' : '';
+        const ownedViewBot = isGroup ? resolveOwnedViewBot(g?.participants ?? [], userId) : null;
+        // 根节点没有 group detail 时，graph owner assignee 可作为协作群消息视角 bot。
+        const viewBotId = isGroup ? ownedViewBot?.actor_id ?? assignee ?? '' : '';
         // 单聊会话归属人(session_id 里的 :user:xxx,即 bot owner);与当前登录人不符 → 跨用户,无权查看。
-        const singleSessionUser = !groupId ? sessionId.match(/:user:([^:]+)$/)?.[1] ?? '' : '';
-        const crossUserSingle = !groupId && singleSessionUser !== '' && Boolean(userId) && singleSessionUser !== userId;
-        const canViewMessages = groupId ? Boolean(ownedViewBot) : !crossUserSingle;
+        const singleSessionUser = !isGroup ? sessionId.match(/:user:([^:]+)$/)?.[1] ?? '' : '';
+        const crossUserSingle = !isGroup && singleSessionUser !== '' && Boolean(userId) && singleSessionUser !== userId;
+        const canViewMessages = isGroup ? Boolean(viewBotId) : !crossUserSingle;
         const msgs = canViewMessages
-          ? await fetchSessionMessages(sessionId, Boolean(groupId), assignee, userId, viewBotId || undefined)
+          ? await fetchSessionMessages(sessionId, isGroup, assignee, userId, viewBotId || undefined)
           : [];
         if (cancelled) return;
         setGroup(g);
         setNoMessagePermission(!canViewMessages);
-        setMessages(filterGroupMessages(msgs as GroupMessage[]));
+        setMessages(sortMessagesByTimestamp(filterGroupMessages(msgs as GroupMessage[])));
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : '加载执行会话信息失败');
@@ -513,7 +530,6 @@ export const GroupSessionView: React.FC<{
     };
   }, [groupId, sessionId, bcsBaseUrl, apiBaseUrl, assignee, userId]);
 
-  const isGroup = Boolean(groupId);
   const memberCount = group?.participants.length ?? 0;
   const msgCount = messages.length;
   const groupName = node.name || group?.name || (isGroup ? '协作群执行详情' : '执行会话详情');

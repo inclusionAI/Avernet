@@ -47,6 +47,13 @@ export interface BotChatSessionView {
   favorite?: boolean;
 }
 
+export interface BotSessionPageView {
+  items: BotChatSessionView[];
+  total: number;
+}
+
+export const BOT_SESSION_PAGE_SIZE = 10;
+
 export interface BotModelView {
   modelId: string;
   name: string;
@@ -103,6 +110,7 @@ function toSessionView(
     model?: string;
   },
   botId: string,
+  favorite = false,
 ): BotChatSessionView {
   // 后端返回的 title 有时拼接了 `_${session_id}` 后缀（更新标题后尤其明显），
   // 这里剥离掉该后缀，仅展示用户可见的标题；为空时回退为「新会话」（与 open-claw 一致）。
@@ -120,6 +128,7 @@ function toSessionView(
     gmtModified: s.gmt_modified,
     gmtCreate: s.gmt_create,
     model: s.model,
+    ...(favorite ? { favorite: true } : {}),
   };
 }
 
@@ -149,6 +158,21 @@ export const botSessionService = {
       const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100 });
       const items = (resp.data?.items ?? []).map(toOwnedBotView);
       return { ok: true, data: items };
+    } catch (e) {
+      return { ok: false, error: toDomainError(e) };
+    }
+  },
+  async listSessionsPage(
+    bot: ChatBotView,
+    userId: string,
+    page = 1,
+    pageSize = BOT_SESSION_PAGE_SIZE,
+  ): Promise<DomainResult<BotSessionPageView>> {
+    try {
+      const params = { user_id: resolveUserId(userId), owner_id: bot.ownerId, page, page_size: pageSize };
+      const resp = await listBotSessions(bot.realBotId, params);
+      const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId));
+      return { ok: true, data: { items, total: resp.data?.total ?? items.length } };
     } catch (e) {
       return { ok: false, error: toDomainError(e) };
     }
@@ -236,24 +260,24 @@ export const botSessionService = {
       return { ok: false, error: toDomainError(e) };
     }
   },
-  async listFavoriteSessions(bot: ChatBotView, userId: string): Promise<DomainResult<BotChatSessionView[]>> {
+  async listFavoriteSessionsPage(
+    bot: ChatBotView,
+    userId: string,
+    page = 1,
+    pageSize = BOT_SESSION_PAGE_SIZE,
+  ): Promise<DomainResult<BotSessionPageView>> {
     try {
-      const params = { user_id: resolveUserId(userId), owner_id: bot.ownerId, page: 1, page_size: 50 };
+      const params = { user_id: resolveUserId(userId), owner_id: bot.ownerId, page, page_size: pageSize };
       const resp = await listFavoriteSessions(bot.realBotId, params);
-      const items = (resp.data?.items ?? []).map((s) => ({
-        sessionId: s.session_id,
-        botId: bot.botId,
-        title: s.title || '新会话',
-        messageCount: s.message_count,
-        gmtModified: s.gmt_modified,
-        gmtCreate: s.gmt_create,
-        model: s.model,
-        favorite: true,
-      }));
-      return { ok: true, data: items };
+      const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId, true));
+      return { ok: true, data: { items, total: resp.data?.total ?? items.length } };
     } catch (e) {
       return { ok: false, error: toDomainError(e) };
     }
+  },
+  async listFavoriteSessions(bot: ChatBotView, userId: string): Promise<DomainResult<BotChatSessionView[]>> {
+    const result = await this.listFavoriteSessionsPage(bot, userId, 1, 50);
+    return result.ok ? { ok: true, data: result.data.items } : result;
   },
   async listMessages(bot: ChatBotView, userId: string, sessionId: string): Promise<ChatMessage[]> {
     const resp = await listBotSessionMessages(bot.realBotId, sessionId, {

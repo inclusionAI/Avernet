@@ -17,6 +17,16 @@ const NODE_STATUS_LABELS: Record<NodeStatus, string> = {
   cancelled: '已取消',
 };
 
+const RUN_MODE_LABELS: Record<string, string> = {
+  single_bot: '单Bot',
+  coop_group: '协作群',
+  bbs: 'BBS接力',
+};
+
+function getRunModeLabel(runMode?: string | null): string {
+  return runMode ? RUN_MODE_LABELS[runMode] ?? runMode : '未标记执行模态';
+}
+
 const StepItem: React.FC<{ step: TaskNodeView['stepTraces'][number]; index: number; isLast: boolean }> = ({
   step,
   index,
@@ -272,7 +282,7 @@ export const NodeDetailDrawer: React.FC<{
             <NodeStatusIcon status={node.status} size={11} />
             {statusLabel}
           </span>
-          <span style={{ color: C.textSecondary, fontSize: 11 }}>{node.runMode ?? '未标记执行模态'}</span>
+          <span style={{ color: C.textSecondary, fontSize: 11 }}>{getRunModeLabel(node.runMode)}</span>
         </div>
       </header>
 
@@ -280,7 +290,7 @@ export const NodeDetailDrawer: React.FC<{
         <SectionCard title="基本信息">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
             <DetailField label="执行器" value={node.executor} />
-            <DetailField label="执行模态" value={node.runMode} />
+            <DetailField label="执行模态" value={getRunModeLabel(node.runMode)} />
             <DetailField label="开始时间" value={node.startedAt} />
             <DetailField label="结束时间" value={node.endAt} />
             <DetailField label="耗时" value={node.timeConsuming} />
@@ -299,7 +309,6 @@ export const NodeDetailDrawer: React.FC<{
         <SectionCard title="任务信息" marginTop={12}>
           <div style={{ display: 'grid', gap: 8 }}>
             <DetailField label="标题" value={<TruncatedText value={taskSpec.title ?? node.name} maxLength={20} />} />
-            <DetailField label="执行指令" value={taskSpec.instruction} wide />
             <DetailField label="目标" value={taskSpec.target} wide />
             <DetailField label="验收标准" value={acceptanceValue} wide />
           </div>

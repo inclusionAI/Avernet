@@ -18,6 +18,8 @@ export interface BackendRequestOptions {
   /** 操作语义标签(如 create-skill),参与 toastKey 去重键组成,保证同接口跨操作的独立失败不被误合并。 */
   operation?: string;
   signal?: AbortSignal;
+  /** 旧版 AgentCoding /api/** 接口的特殊后端；新版 /api/** 不设置此项。 */
+  target?: 'default' | 'legacy-agentclaw';
 }
 
 export class BackendRequestError extends Error {
@@ -89,12 +91,26 @@ export function triggerLoginPrompt(): void {
  * 这些请求被动带上了未预期的 user_id query；且 user_id 进入 URL，若后端以 query 而非会话
  * 鉴别身份则存在冒充风险。需按域收窄注入范围，或由 controller 显式传入身份。
  */
+/**
+ * legacy-agentclaw 只是告诉 dev server / Tern proxy 走旧 AgentClaw 路由。
+ * 请求本身必须保持同源相对路径，不能在浏览器里直连 agentclaw-pre：
+ * - 本地开发仍显示/发送同源的 /api/... 路径；
+ * - 由 config.local.ts / internal runtime 的代理转发到真实后端。
+ */
+function resolveBackendUrl(url: string): string {
+  return url;
+}
+
+function isApiRequestUrl(url: string): boolean {
+  return url.startsWith('/openapi') || url.startsWith('/api/');
+}
+
 function injectUserId(
   url: string,
   params: Record<string, unknown> | undefined,
   data: unknown,
 ): Record<string, unknown> | undefined {
-  if (!url.startsWith('/openapi') && !url.startsWith('/api/')) return params;
+  if (!isApiRequestUrl(url)) return params;
   if (params?.user_id) return params;
   if (data && typeof data === 'object' && 'user_id' in data) return params;
   const userId = useIdentityStore.getState().currentIdentityId;
@@ -124,8 +140,10 @@ async function readResponseData(
 }
 
 async function executeBackendRequest<T>(url: string, options: BackendRequestOptions): Promise<T> {
-  const finalParams = options.injectUserId === false ? options.params : injectUserId(url, options.params, options.data);
-  const requestUrl = withQuery(url, finalParams);
+  const resolvedUrl = resolveBackendUrl(url);
+  const finalParams =
+    options.injectUserId === false ? options.params : injectUserId(resolvedUrl, options.params, options.data);
+  const requestUrl = withQuery(resolvedUrl, finalParams);
   const response = await fetch(requestUrl, {
     method: options.method ?? 'GET',
     headers: {

@@ -76,6 +76,8 @@ const WorkspacePage: React.FC = () => {
     panelRef: workspace.panelRef,
     context: taskComposerContext,
     submitPanelMessage: workspace.submitPanelMessage,
+    appendAssistantMessage: workspace.appendAssistantMessage,
+    streamAssistantMessage: workspace.streamAssistantMessage,
   });
   const taskComposerDisabledReason = !taskComposerContext && !workspace.isTestUser ? '请先选择一个 Bot 会话' : null;
   const handleSend = useComposerSend(taskExecution, {
@@ -179,6 +181,7 @@ const WorkspacePage: React.FC = () => {
           onOpenAddFriend={() => setAddFriendOpen(true)}
           onOpenPermissions={openCollaborationPermissions}
           userAvatarUrl={workspace.currentUserAvatarUrl}
+          onManageBot={(bot) => navigate(`/bot-workshop/detail?type=view&id=${encodeURIComponent(bot.realBotId)}`)}
         />
         <ChatPanel
           target={workspace.botChatTarget}
@@ -253,10 +256,23 @@ const WorkspacePage: React.FC = () => {
         open={createGroupOpen}
         activeIdentity={activeIdentity}
         onClose={() => setCreateGroupOpen(false)}
-        onCreated={(groupId) => {
+        onCreated={(group) => {
           setCreateGroupOpen(false);
           setView('group');
-          useWorkspaceStore.getState().selectGroup(groupId);
+          if (group.initialSessionId && group.initialRun?.state === 'running') {
+            useWorkspaceStore.getState().setPendingGroupBootstrap({
+              groupId: group.groupId,
+              sessionId: group.initialSessionId,
+              run: group.initialRun,
+            });
+          }
+          useWorkspaceStore.getState().selectGroup(group.groupId);
+          if (group.initialSessionId) {
+            const store = useWorkspaceStore.getState();
+            if (!store.expandedGroupIds[group.groupId]) store.toggleGroupExpanded(group.groupId);
+            useWorkspaceStore.getState().selectSession(group.initialSessionId);
+            useWorkspaceStore.getState().bumpHistoryRefresh();
+          }
         }}
       />
       <AddFriendModal open={addFriendOpen} activeIdentity={activeIdentity} onClose={() => setAddFriendOpen(false)} />

@@ -158,6 +158,40 @@ describe('botChatService', () => {
     );
   });
 
+  it('session 关联详情保留已加载的关联列表', async () => {
+    getBotChat.mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: { id: 'other-trace', timestamp: '2026-08-19T00:00:00Z', session_id: 'session-1' },
+    });
+    const context = { botId: 'viewer-bot', botName: 'Viewer', userId: 'u1' };
+    useBotChatStore.getState().openFor(context);
+    const related = {
+      items: [
+        {
+          id: 'other-trace',
+          timestamp: '2026-08-19T00:00:00Z',
+          name: 'Other Trace',
+          sessionId: 'session-1',
+          status: 'SUCCESS',
+          latencyMs: 0,
+          totalTokens: 0,
+          totalCost: 0,
+        },
+      ],
+      total: 2,
+      page: 1,
+      limit: 100,
+      hasMore: false,
+    };
+    useBotChatStore.getState().setRelatedState({ relationScope: 'session', related });
+
+    await botChatService.detail(context, 'other-trace', undefined, 'viewer-bot', undefined, true);
+
+    expect(useBotChatStore.getState().related).toBe(related);
+    expect(useBotChatStore.getState().relationScope).toBe('session');
+  });
+
   it('群关联详情使用来源 Bot 的 Gateway 路由且保留关联列表', async () => {
     getBotChat.mockResolvedValue({
       success: true,

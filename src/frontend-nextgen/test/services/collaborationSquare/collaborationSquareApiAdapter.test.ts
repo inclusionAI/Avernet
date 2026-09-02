@@ -1,4 +1,5 @@
 import * as botSessionController from '@/services/backendApi/bots/privateBotSessionController';
+import * as bbsTaskController from '@/services/backendApi/collaboration/bbsTaskController';
 import * as collaborationBotController from '@/services/backendApi/collaboration/collaborationBotController';
 import * as friendConnectionController from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import * as groupController from '@/services/backendApi/collaboration/collaborationGroupController';
@@ -18,6 +19,7 @@ const mockedListFriendConnectionRequests = jest.spyOn(friendConnectionController
 const mockedCreateFriendConnectionRequest = jest.spyOn(friendConnectionController, 'createFriendConnectionRequest');
 const mockedCreateBotSession = jest.spyOn(botSessionController, 'createBotSession');
 const mockedCreateGroupSession = jest.spyOn(sessionController, 'createSession');
+const mockedListBbsTasks = jest.spyOn(bbsTaskController, 'listBbsTasks');
 const humanContext = { actorId: 'human_327325', userId: '327325' };
 
 beforeEach(() => {
@@ -30,6 +32,7 @@ beforeEach(() => {
   mockedCreateFriendConnectionRequest.mockReset();
   mockedCreateBotSession.mockReset();
   mockedCreateGroupSession.mockReset();
+  mockedListBbsTasks.mockReset();
 });
 
 describe('CollaborationSquareApiAdapter', () => {
@@ -867,5 +870,266 @@ describe('CollaborationSquareApiAdapter', () => {
       { id: 'human_1', displayName: '章梧', type: 'human', role: 'consultant' },
     ]);
     mockedGetGroup.mockRestore();
+  });
+
+  describe('listPublicTasks (BBS list 端点)', () => {
+    const bbsItem = (
+      overrides: Partial<{
+        task_id: string;
+        title: string;
+        goal: string;
+        status: string;
+        publisher: string | null;
+        assignee_id: string;
+        assignee_name: string;
+        relay_create_time: string;
+        relay_begin_time: string;
+        relay_end_time: string;
+      }> = {},
+    ) => ({
+      task_id: 'bbs-1',
+      title: '梳理需求',
+      goal: '输出路线图',
+      acceptances: [{ id: 'a1', description: '覆盖方向' }],
+      status: 'PENDING',
+      publisher: 'bot-pub-1',
+      relay_create_time: '2026-09-01T09:00:00Z',
+      ...overrides,
+    });
+
+    it('映射 BBS envelope（code 200000）到 PublicTask 列表，publisher 经 bots/query 反查', async () => {
+      mockedListBbsTasks.mockResolvedValue({
+        code: 200000,
+        message: 'OK',
+        data: {
+          total: 2,
+          items: [
+            bbsItem({ status: 'RUNNING', assignee_id: 'bot-asg', assignee_name: '运维助手', relay_begin_time: 't1' }),
+            bbsItem({ task_id: 'bbs-2', status: 'DONE', assignee_id: 'bot-asg', relay_end_time: 't2' }),
+          ],
+        },
+        request_id: 'r',
+      });
+      // publisher 反查（与群主 driver_bot_uuid 反查同法）。
+      mockedQueryCollaborationBots.mockResolvedValue({
+        code: 20000,
+        data: { items: [{ bot_id: 'bot-pub-1', kind: 'bot', name: '产品协作助手' }] },
+      });
+
+      const result = await new CollaborationSquareApiAdapter().listPublicTasks({}, undefined);
+
+      // 空 query 不下发分页/过滤参数（交服务端默认 page=1, page_size=20）。
+      expect(mockedListBbsTasks).toHaveBeenCalledWith({}, undefined);
+      expect(mockedQueryCollaborationBots).toHaveBeenCalledWith({ bot_ids: ['bot-pub-1'] });
+      expect(result).toEqual({
+        items: [
+          {
+            id: 'bbs-1',
+            name: '梳理需求',
+            goal: '输出路线图',
+            acceptanceCriteria: ['覆盖方向'],
+            status: 'claimed',
+            publisherBotName: '产品协作助手',
+            publishedAt: '2026-09-01T09:00:00Z',
+            claimedBotName: '运维助手',
+            claimedAt: 't1',
+          },
+          {
+            id: 'bbs-2',
+            name: '梳理需求',
+            goal: '输出路线图',
+            acceptanceCriteria: ['覆盖方向'],
+            status: 'completed',
+            publisherBotName: '产品协作助手',
+            publishedAt: '2026-09-01T09:00:00Z',
+            claimedBotName: 'bot-asg',
+            claimedAt: undefined,
+            completedAt: 't2',
+          },
+        ],
+        total: 2,
+      });
+    });
+
+    it('publisher 为复合 bot_id:owner 时拆 realBotId 反查，结果按复合 id 命中（不透传 :owner）', async () => {
+      mockedListBbsTasks.mockResolvedValue({
+        code: 200000,
+        data: { total: 1, items: [bbsItem({ task_id: 't-comp', publisher: 'bot-pub-1:431368' })] },
+      });
+      // bots/query 注册表按裸 bot_id 建索引，返回的 bot_id 不带 :owner。
+      mockedQueryCollaborationBots.mockResolvedValue({
+        code: 20000,
+        data: { items: [{ bot_id: 'bot-pub-1', kind: 'bot', name: '产品协作助手' }] },
+      });
+
+      const result = await new CollaborationSquareApiAdapter().listPublicTasks({}, undefined);
+
+      // 下发裸 realBotId，不把 :owner 透传进 bots/query。
+      expect(mockedQueryCollaborationBots).toHaveBeenCalledWith({ bot_ids: ['bot-pub-1'] });
+      expect(result.items[0]?.publisherBotName).toBe('产品协作助手');
+    });
+
+    it('publisher nameMap 未命中兜底用 ID，publisher 为 null 时 publisherBotName 为 undefined', async () => {
+      mockedListBbsTasks.mockResolvedValue({
+        code: 200000,
+        data: {
+          total: 2,
+          items: [
+            bbsItem({ task_id: 't-miss', publisher: 'bot-missing' }),
+            bbsItem({ task_id: 't-null', publisher: null }),
+          ],
+        },
+      });
+      mockedQueryCollaborationBots.mockResolvedValue({ code: 20000, data: { items: [] } });
+
+      const result = await new CollaborationSquareApiAdapter().listPublicTasks({}, undefined);
+
+      const byId = Object.fromEntries(result.items.map((t) => [t.id, t]));
+      expect(byId['t-miss']?.publisherBotName).toBe('bot-missing');
+      expect(byId['t-null']?.publisherBotName).toBeUndefined();
+    });
+
+    it('无 publisher 时不下发 bots/query 反查', async () => {
+      mockedListBbsTasks.mockResolvedValue({
+        code: 200000,
+        data: { total: 1, items: [bbsItem({ task_id: 't-null', publisher: null })] },
+      });
+      await new CollaborationSquareApiAdapter().listPublicTasks({}, undefined);
+      expect(mockedQueryCollaborationBots).not.toHaveBeenCalled();
+    });
+
+    it('assignee_name 缺失时按 assignee_id 拆 realBotId 反查回填 claimedBotName', async () => {
+      mockedListBbsTasks.mockResolvedValue({
+        code: 200000,
+        data: {
+          total: 1,
+          items: [
+            bbsItem({
+              task_id: 't-asg',
+              status: 'RUNNING',
+              publisher: null,
+              assignee_id: 'bot-asg:2088',
+              relay_begin_time: 't1',
+            }),
+          ],
+        },
+      });
+      mockedQueryCollaborationBots.mockResolvedValue({
+        code: 20000,
+        data: { items: [{ bot_id: 'bot-asg', kind: 'bot', name: '运维助手' }] },
+      });
+
+      const result = await new CollaborationSquareApiAdapter().listPublicTasks({}, undefined);
+
+      // publisher 为 null 不参与反查；仅 assignee 拆 realBotId 下发。
+      expect(mockedQueryCollaborationBots).toHaveBeenCalledWith({ bot_ids: ['bot-asg'] });
+      expect(result.items[0]?.claimedBotName).toBe('运维助手');
+    });
+
+    it('空 data 数组返回空列表且不下发 bots/query', async () => {
+      mockedListBbsTasks.mockResolvedValue({ code: 200000, data: { total: 0, items: [] } });
+      const result = await new CollaborationSquareApiAdapter().listPublicTasks({}, undefined);
+      expect(result).toEqual({ items: [], total: 0 });
+      expect(mockedQueryCollaborationBots).not.toHaveBeenCalled();
+    });
+
+    it('未知 status 的 item 被 mapper 丢弃（不入列），total 仍为服务端值', async () => {
+      mockedListBbsTasks.mockResolvedValue({
+        code: 200000,
+        data: {
+          total: 3,
+          items: [
+            bbsItem({ task_id: 'valid', status: 'PENDING' }),
+            bbsItem({ task_id: 'drop-cancelled', status: 'CANCELLED' }),
+            bbsItem({ task_id: 'drop-failed', status: 'FAILED' }),
+          ],
+        },
+      });
+      mockedQueryCollaborationBots.mockResolvedValue({ code: 20000, data: { items: [] } });
+      const result = await new CollaborationSquareApiAdapter().listPublicTasks({}, undefined);
+      expect(result.items.map((t) => t.id)).toEqual(['valid']);
+      // total 取自服务端（3），不随 mapper 丢弃未知态而变。
+      expect(result.total).toBe(3);
+    });
+
+    it('offset/limit 换算为 1-based page/page_size 下发', async () => {
+      mockedListBbsTasks.mockResolvedValue({ code: 200000, data: { total: 0, items: [] } });
+      await new CollaborationSquareApiAdapter().listPublicTasks({ offset: 24, limit: 24 }, undefined);
+      expect(mockedListBbsTasks).toHaveBeenCalledWith({ page: 2, page_size: 24 }, undefined);
+    });
+
+    it('search 换算为 search_word 下发；空/空白不下发', async () => {
+      mockedListBbsTasks.mockResolvedValue({ code: 200000, data: { total: 0, items: [] } });
+      await new CollaborationSquareApiAdapter().listPublicTasks({ search: '需求', offset: 0, limit: 24 }, undefined);
+      expect(mockedListBbsTasks).toHaveBeenCalledWith({ page: 1, page_size: 24, search_word: '需求' }, undefined);
+      // 空白 search 不下发 search_word。
+      await new CollaborationSquareApiAdapter().listPublicTasks({ search: '   ', offset: 0, limit: 24 }, undefined);
+      expect(mockedListBbsTasks).toHaveBeenLastCalledWith({ page: 1, page_size: 24 }, undefined);
+    });
+
+    it('广场态 status 映射为 BBS 原始态下发；all 不下发 status', async () => {
+      mockedListBbsTasks.mockResolvedValue({ code: 200000, data: { total: 0, items: [] } });
+      const adapter = new CollaborationSquareApiAdapter();
+      await adapter.listPublicTasks({ status: 'claimed', offset: 0, limit: 24 }, undefined);
+      expect(mockedListBbsTasks).toHaveBeenLastCalledWith({ page: 1, page_size: 24, status: 'RUNNING' }, undefined);
+      await adapter.listPublicTasks({ status: 'completed', offset: 0, limit: 24 }, undefined);
+      expect(mockedListBbsTasks).toHaveBeenLastCalledWith({ page: 1, page_size: 24, status: 'DONE' }, undefined);
+      await adapter.listPublicTasks({ status: 'pending_claim', offset: 0, limit: 24 }, undefined);
+      expect(mockedListBbsTasks).toHaveBeenLastCalledWith({ page: 1, page_size: 24, status: 'PENDING' }, undefined);
+      // all 不下发 status。
+      await adapter.listPublicTasks({ status: 'all', offset: 0, limit: 24 }, undefined);
+      expect(mockedListBbsTasks).toHaveBeenLastCalledWith({ page: 1, page_size: 24 }, undefined);
+    });
+
+    it('total 为服务端过滤后行数，不等于本页 mapped 条数（驱动 hasMore）', async () => {
+      mockedListBbsTasks.mockResolvedValue({
+        code: 200000,
+        data: { total: 100, items: [bbsItem({ task_id: 'a' }), bbsItem({ task_id: 'b' })] },
+      });
+      mockedQueryCollaborationBots.mockResolvedValue({ code: 20000, data: { items: [] } });
+      const result = await new CollaborationSquareApiAdapter().listPublicTasks({ offset: 0, limit: 24 }, undefined);
+      expect(result.items.map((t) => t.id)).toEqual(['a', 'b']);
+      expect(result.total).toBe(100);
+    });
+
+    it('code != 200000 抛 protocol_error', async () => {
+      mockedListBbsTasks.mockResolvedValue({ code: 20000, data: { total: 0, items: [] } } as never);
+      await expect(new CollaborationSquareApiAdapter().listPublicTasks({}, undefined)).rejects.toMatchObject({
+        code: 'protocol_error',
+      });
+    });
+
+    it('ACE 登录失效映射为 unauthenticated', async () => {
+      mockedListBbsTasks.mockResolvedValue({
+        actionType: 'LOGIN',
+        buserviceErrorCode: 'USER_NOT_LOGIN',
+        decisionBy: 'ACE',
+        buserviceErrorMsg: 'http://login',
+      } as never);
+      await expect(new CollaborationSquareApiAdapter().listPublicTasks({}, undefined)).rejects.toMatchObject({
+        code: 'unauthenticated',
+      });
+    });
+
+    it('AbortError 原样透传，不吞成 network', async () => {
+      const abortError = new DOMException('aborted', 'AbortError');
+      mockedListBbsTasks.mockRejectedValue(abortError);
+      await expect(new CollaborationSquareApiAdapter().listPublicTasks({}, undefined)).rejects.toBe(abortError);
+    });
+
+    it('BackendRequestError 401 映射为 unauthenticated', async () => {
+      mockedListBbsTasks.mockRejectedValue(
+        new BackendRequestError('unauthorized', { status: 401, apiPath: '/api/v1/collaboration/tasks/bbs/list' }),
+      );
+      await expect(new CollaborationSquareApiAdapter().listPublicTasks({}, undefined)).rejects.toMatchObject({
+        code: 'unauthenticated',
+      });
+    });
+
+    it('getPublicTask 仍为 unsupported（详情改用列表项，不发请求）', async () => {
+      await expect(new CollaborationSquareApiAdapter().getPublicTask('bbs-1')).rejects.toMatchObject({
+        code: 'unsupported',
+      });
+    });
   });
 });

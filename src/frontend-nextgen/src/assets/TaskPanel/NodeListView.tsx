@@ -22,8 +22,18 @@ const groupBadgeStyle: React.CSSProperties = {
 const RUN_MODE_LABELS: Record<string, string> = {
   single_bot: '单Bot',
   coop_group: '协作群',
-  bbs: 'bbs认领',
+  bbs: 'BBS接力',
 };
+
+const BOT_DISPLAY_NAME_OVERRIDES: Record<string, string> = {
+  自动研发bot: '安全架构师',
+};
+
+function resolveBotDisplayName(name?: string | null): string | null {
+  if (!name) return null;
+  const normalizedName = name.trim();
+  return BOT_DISPLAY_NAME_OVERRIDES[normalizedName.toLocaleLowerCase()] ?? normalizedName;
+}
 const subTaskBadgeStyle: React.CSSProperties = {
   padding: '2px 5px',
   borderRadius: 4,
@@ -65,6 +75,9 @@ export const NodeListView: React.FC<{
     return <Empty description="暂无执行节点" />;
   }
 
+  // dashboard 通常已排序；视图层再次按 sequence 排序，确保所有入口都按执行顺序展示。
+  const orderedNodes = nodes.slice().sort((left, right) => left.sequence - right.sequence);
+
   const getConversationBotId = (node: TaskNodeView): string | null => {
     const botId = node.assignee?.trim() || ownerBotId?.trim();
     if (!botId) return null;
@@ -73,13 +86,20 @@ export const NodeListView: React.FC<{
 
   return (
     <div style={{ padding: '14px 12px 24px' }}>
-      {nodes.map((node, idx) => {
-        const isLast = idx === nodes.length - 1;
+      {orderedNodes.map((node, idx) => {
+        const isLast = idx === orderedNodes.length - 1;
         const canOpenSub = Boolean(node.hasSubTask && node.subTaskId && onOpenSubTask);
         const canDrillSession = Boolean(node.sessionId) && Boolean(onOpenGroupSession);
         const runModeLabel = RUN_MODE_LABELS[node.runMode ?? ''];
-        const executorLabel =
-          node.runMode === 'coop_group' || node.groupId ? node.groupName ?? 'BCS协作群' : node.executor;
+        // 根节点的执行者可能只由 graph 级 owner_bot_id 兜底到 assignee，名称字段仍为空；
+        // 即使没有 executor/groupName，只要存在 sessionId 也要渲染可点击的下钻入口。
+        // 只有明确的 coop_group 才按群名称展示，避免 BBS 节点携带 groupId 时误走群展示分支。
+        const isGroupNode = node.runMode === 'coop_group' || (!node.runMode && Boolean(node.groupId));
+        const executorLabel = resolveBotDisplayName(
+          isGroupNode
+            ? node.groupName ?? node.executor ?? node.assignee ?? ownerBotId ?? 'BCS协作群'
+            : node.executor ?? node.assignee ?? ownerBotId,
+        );
         const actionLabel = canOpenSub ? `打开子任务 ${node.name}` : `查看节点详情 ${node.name}`;
         const openNode = () => {
           if (canOpenSub && node.subTaskId) {

@@ -4,6 +4,7 @@ import type {
   PublicBotDiscoveryQuery,
   PublicBotSearchQuery,
   PublicGroupSearchQuery,
+  PublicTaskSearchQuery,
 } from '@/domain/collaborationSquare/types';
 import { listGroups as listBackendGroups, queryCollaborationBots } from '@/services/backendApi';
 import { CollaborationSquareApiAdapter } from './collaborationSquareApiAdapter';
@@ -52,6 +53,12 @@ export class CollaborationSquareService {
   listGroupMembers(groupId: string, signal?: AbortSignal) {
     return this.gateway.listGroupMembers(groupId, signal);
   }
+  listPublicTasks(query?: PublicTaskSearchQuery, signal?: AbortSignal) {
+    return this.gateway.listPublicTasks(query, signal);
+  }
+  getPublicTask(taskId: string, signal?: AbortSignal) {
+    return this.gateway.getPublicTask(taskId, signal);
+  }
 
   private async runTargetAction<T>(key: string, task: () => Promise<T>) {
     if (this.inFlight.has(key)) throw new CollaborationSquareError('duplicate_action', '该操作正在提交，请勿重复操作');
@@ -87,3 +94,6 @@ export class CollaborationSquareService {
 export const collaborationSquareService = new CollaborationSquareService(new MockCollaborationSquareAdapter());
 export const collaborationSquareBotService = new CollaborationSquareService(new CollaborationSquareApiAdapter());
 export const collaborationSquareGroupService = new CollaborationSquareService(new CollaborationSquareApiAdapter());
+// 任务广场：接入真实 BBS 任务列表端点 GET /api/v1/collaboration/tasks/bbs/list，与 bot/group 一致走 ApiAdapter。
+// Mock 的 task 方法/fixture 保留（不再被 wired service 使用，留作 dev/测试兜底，不删）。
+export const collaborationSquareTaskService = new CollaborationSquareService(new CollaborationSquareApiAdapter());

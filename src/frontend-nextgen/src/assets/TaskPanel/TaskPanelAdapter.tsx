@@ -9,7 +9,7 @@
  */
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent';
 import type { CSSProperties } from 'react';
-import { TaskPanel } from './TaskPanel';
+import { TaskPanel, type TaskPanelProps } from './TaskPanel';
 
 type TaskPanelParams = {
   apiBaseUrl?: string;
@@ -18,6 +18,7 @@ type TaskPanelParams = {
   taskId?: string;
   initialTab?: 'info' | 'artifacts' | 'progress';
   onTogglePanelName?: string;
+  taskInfoFallback?: TaskPanelProps['taskInfoFallback'];
 };
 
 /**
@@ -59,6 +60,7 @@ export function TaskPanelAdapter({
       bcsBaseUrl={bcsBaseUrl}
       userId={p.userId}
       taskId={p.taskId}
+      taskInfoFallback={p.taskInfoFallback}
       initialTab={p.initialTab}
       onOpenSubTask={(subTaskId) => {
         onInteraction({

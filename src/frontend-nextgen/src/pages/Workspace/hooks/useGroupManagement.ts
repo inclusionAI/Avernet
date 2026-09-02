@@ -17,7 +17,7 @@ export interface UseGroupManagementResult {
   addMember: (actorId: string) => Promise<boolean>;
   removeMember: (actorId: string) => Promise<boolean>;
   leaveGroup: (actorId: string) => Promise<boolean>;
-  createShare: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  createShare: (targetGroupId?: string) => Promise<DomainResult<{ invitationUrl: string }>>;
   /** 当前群的钉钉绑定状态：null 未绑定 / view 已绑定 / 'conflict' 多绑定冲突。 */
   dingTalkBinding: DingTalkBindingState;
   dingTalkLoading: boolean;
@@ -120,17 +120,21 @@ export function useGroupManagement(
     [groupId],
   );
 
-  const createShare = useCallback(async () => {
-    if (!groupId) {
-      return {
-        ok: false as const,
-        error: { code: 'GROUP_MISSING', friendlyMessage: '未选择协作群', canRetry: false },
-      };
-    }
-    const res = await invitationService.createGroupShare(groupId);
-    if (!res.ok) notifyError(res);
-    return res;
-  }, [groupId]);
+  const createShare = useCallback(
+    async (targetGroupId?: string) => {
+      const shareGroupId = targetGroupId ?? groupId;
+      if (!shareGroupId) {
+        return {
+          ok: false as const,
+          error: { code: 'GROUP_MISSING', friendlyMessage: '未选择协作群', canRetry: false },
+        };
+      }
+      const res = await invitationService.createGroupShare(shareGroupId);
+      if (!res.ok) notifyError(res);
+      return res;
+    },
+    [groupId],
+  );
 
   const saveDingTalk = useCallback(
     async (config: GroupDingTalkConfig) => {

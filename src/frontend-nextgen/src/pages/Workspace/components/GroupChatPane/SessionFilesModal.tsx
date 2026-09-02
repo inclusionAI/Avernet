@@ -240,6 +240,11 @@ export function SessionFilesModal({ sessionId, sessionName, onClose }: SessionFi
           submitStaged={async () => {
             await upload.submitStaged();
           }}
+          onAddToSession={() => {
+            upload.clearCompleted();
+            setUploadOpen(false);
+            toast.success('文件已添加至会话');
+          }}
           cancelTask={upload.cancelTask}
           retryTask={upload.retryTask}
           discardAll={upload.discardAll}

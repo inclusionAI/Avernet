@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import type { PublicBot, PublicBotSearchQuery, PublicGroup } from '@/domain/collaborationSquare/types';
+import type { PublicBot, PublicBotSearchQuery, PublicGroup, PublicTask } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import {
@@ -7,6 +7,7 @@ import {
   collaborationSquareBotService,
   collaborationSquareGroupService,
   collaborationSquareService,
+  collaborationSquareTaskService,
 } from '@/services/collaborationSquare';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -51,6 +52,16 @@ const resultGroup = (id: string): PublicGroup => ({
 });
 
 const groupPage = (items: PublicGroup[], total = items.length) => ({ items, total });
+
+const resultTask = (id: string): PublicTask => ({
+  id,
+  name: id,
+  goal: `目标 ${id}`,
+  acceptanceCriteria: ['验收标准'],
+  status: 'pending_claim',
+  publisherBotName: '协作助手',
+  publishedAt: '2026-08-19T09:00:00Z',
+});
 
 describe('useCollaborationSquare Bot Search', () => {
   beforeEach(() => {
@@ -545,6 +556,180 @@ describe('useCollaborationSquare Bot Search', () => {
     });
 
     expect(useCollaborationSquareStore.getState().bots).toEqual([]);
+
+    unmount();
+  });
+});
+
+describe('useCollaborationSquare Task Plaza', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    (history.push as jest.Mock).mockClear();
+    useCollaborationSquareStore.getState().reset();
+    useWorkspaceStore.getState().reset();
+    useWorkspaceStore
+      .getState()
+      .setIdentities([{ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }], 'human_327325');
+    mockedUseHumanIdentity.mockReturnValue({
+      identity: { userId: '327325', displayName: '当前用户', online: true },
+      status: 'ready',
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  test('resource=task 首屏调用 listPublicTasks 并回填 store.tasks', async () => {
+    const listTasks = jest
+      .spyOn(collaborationSquareTaskService, 'listPublicTasks')
+      .mockResolvedValue({ items: [resultTask('task-1'), resultTask('task-2')], total: 2 });
+    const { result, unmount } = renderHook(() => useCollaborationSquare('task'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    expect(listTasks).toHaveBeenLastCalledWith({ offset: 0, limit: 24 }, expect.any(AbortSignal));
+    expect(result.current.tasks.map((task) => task.id)).toEqual(['task-1', 'task-2']);
+    expect(result.current.hasMore).toBe(false);
+    expect(result.current.loading).toBe(false);
+
+    unmount();
+  });
+
+  test('setTaskStatusFilter 透传 status，空关键词时立即重载', async () => {
+    const listTasks = jest
+      .spyOn(collaborationSquareTaskService, 'listPublicTasks')
+      .mockResolvedValue({ items: [resultTask('task-2')], total: 1 });
+    const { result, unmount } = renderHook(() => useCollaborationSquare('task'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    expect(listTasks).toHaveBeenLastCalledWith({ offset: 0, limit: 24 }, expect.any(AbortSignal));
+
+    act(() => {
+      result.current.setTaskStatusFilter('claimed');
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    expect(listTasks).toHaveBeenLastCalledWith({ status: 'claimed', offset: 0, limit: 24 }, expect.any(AbortSignal));
+
+    unmount();
+  });
+
+  test('setTaskQuery 按 1 秒防抖透传 search（命中 name/goal 由 adapter 完成）', async () => {
+    const listTasks = jest
+      .spyOn(collaborationSquareTaskService, 'listPublicTasks')
+      .mockResolvedValue({ items: [resultTask('task-1')], total: 1 });
+    const { result, unmount } = renderHook(() => useCollaborationSquare('task'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    expect(listTasks).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      result.current.setTaskQuery(' 路 线图 ');
+    });
+    await act(async () => {
+      jest.advanceTimersByTime(999);
+    });
+    expect(listTasks).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      jest.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+    expect(listTasks).toHaveBeenLastCalledWith({ search: '路 线图', offset: 0, limit: 24 }, expect.any(AbortSignal));
+
+    unmount();
+  });
+
+  test('openTaskDetail 直接用列表项填充 taskDetail，不触发 getPublicTask', async () => {
+    const task = resultTask('task-1');
+    jest.spyOn(collaborationSquareTaskService, 'listPublicTasks').mockResolvedValue({ items: [task], total: 1 });
+    // 详情改用已加载列表项（内存），不再发 getPublicTask 请求。
+    const getTask = jest.spyOn(collaborationSquareTaskService, 'getPublicTask');
+    const { result, unmount } = renderHook(() => useCollaborationSquare('task'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    act(() => {
+      result.current.openTaskDetail(task);
+    });
+    expect(getTask).not.toHaveBeenCalled();
+    expect(result.current.selectedTaskId).toBe('task-1');
+    expect(result.current.taskDetail?.id).toBe('task-1');
+    // 详情来自内存，无异步加载态。
+    expect(result.current.detailLoading).toBe(false);
+    // 任务列表不受详情打开影响。
+    expect(result.current.tasks.map((item) => item.id)).toEqual(['task-1']);
+
+    unmount();
+  });
+
+  test('closeTaskDetail 清理 selectedTaskId 与 taskDetail', async () => {
+    const task = resultTask('task-1');
+    jest.spyOn(collaborationSquareTaskService, 'listPublicTasks').mockResolvedValue({ items: [task], total: 1 });
+    const { result, unmount } = renderHook(() => useCollaborationSquare('task'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    act(() => {
+      result.current.openTaskDetail(task);
+    });
+    expect(result.current.selectedTaskId).toBe('task-1');
+    act(() => {
+      result.current.closeTaskDetail();
+    });
+    expect(result.current.selectedTaskId).toBeNull();
+    expect(result.current.taskDetail).toBeNull();
+
+    unmount();
+  });
+
+  test('listPublicTasks 失败时 surfaced 为 error 字符串，不因 target_invalid 特判删除任务', async () => {
+    jest
+      .spyOn(collaborationSquareTaskService, 'listPublicTasks')
+      .mockRejectedValue(new CollaborationSquareError('target_invalid', '整页失效'));
+    const { result, unmount } = renderHook(() => useCollaborationSquare('task'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    expect(result.current.error).toBe('整页失效');
+    expect(result.current.loading).toBe(false);
+    expect(result.current.tasks).toEqual([]);
+
+    unmount();
+  });
+
+  test('reload 触发重新加载首屏列表', async () => {
+    const listTasks = jest
+      .spyOn(collaborationSquareTaskService, 'listPublicTasks')
+      .mockResolvedValue({ items: [resultTask('task-1')], total: 1 });
+    const { result, unmount } = renderHook(() => useCollaborationSquare('task'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    expect(listTasks).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await result.current.reload();
+    });
+    expect(listTasks).toHaveBeenCalledTimes(2);
 
     unmount();
   });

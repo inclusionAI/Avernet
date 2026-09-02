@@ -6,7 +6,7 @@ import type { BackendApiPage } from '@/services/backendApi/types';
 // @/services/backendApi/types，由 service 层转出，保持全库判定逻辑单一收口(见 types.ts isEnvelopeFailure)。
 export { isEnvelopeFailure } from '@/services/backendApi/types';
 
-/** 我的任务列表查询参数（对齐 GET /openapi/v1/collaboration/tasks/list）。 */
+/** 我的任务列表查询参数（对齐 GET /api/v1/collaboration/tasks/list）。 */
 export interface ListMyTaskParams {
   user_id: string;
   status?: string;
@@ -20,7 +20,7 @@ export type ListMyTaskData = TaskListItem[] | BackendApiPage<TaskListItem>;
 
 /**
  * 我的任务列表「状态 Tab」是产品态(DRAFTING/DEFINED/EXECUTING/REVIEWING/DONE/FAILED/CANCELLED);
- * 后端 GET /openapi/v1/collaboration/tasks/list 的 status 入参是运行时态枚举
+ * 后端 GET /api/v1/collaboration/tasks/list 的 status 入参是运行时态枚举
  * (PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG/CANCELLED),支持逗号分隔多值做 IN 过滤。
  * 这里把前端 Tab 的产品态反查为运行时态集合(对齐后端 runtime_status_to_product_status 逆映射;
  * DRAFTING 为作者态,运行时不产生 → 空集合,由上层短路返回空)。

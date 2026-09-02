@@ -36,4 +36,10 @@ export class UnsupportedCollaborationSquareAdapter implements CollaborationSquar
   async createGroupSession() {
     return unsupported();
   }
+  async listPublicTasks() {
+    return unsupported();
+  }
+  async getPublicTask() {
+    return unsupported();
+  }
 }

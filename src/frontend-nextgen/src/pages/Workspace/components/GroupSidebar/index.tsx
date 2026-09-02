@@ -1,10 +1,12 @@
-import { Button, Empty, Input, Segmented, Skeleton } from '@/components/ui';
+import { Button, Empty, Input, Skeleton } from '@/components/ui';
 import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelector';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { GroupView, SessionView } from '@/domain/collaboration/types';
+import type { DomainResult } from '@/services/workspace/identityService';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { Search } from 'lucide-react';
 import { WorkspaceActionButton } from '../WorkspaceActionButton';
+import { WorkspacePrimaryTabs } from '../WorkspacePrimaryTabs';
 import { GroupItem } from './GroupItem';
 import { GroupSidebarFilters, type KindFilter, type Membership } from './GroupSidebarFilters';
 
@@ -44,6 +46,7 @@ export interface GroupSidebarProps {
   favoriteSessionIds: string[];
   sessionSearchText: string;
   onSessionSearchTextChange: (v: string) => void;
+  selectedGroupId: string | null;
   selectedSessionId: string | null;
   onSelectSession: (groupId: string, sessionId: string) => void;
   onCreateSession: (groupId: string) => void;
@@ -56,7 +59,7 @@ export interface GroupSidebarProps {
   /** 会话管理：打开管理面板。 */
   onManageSession: (groupId: string, sessionId: string) => void;
   /** 分享群。 */
-  onShareGroup: (groupId: string) => void;
+  onShareGroup: (groupId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
   /** 解散群（已在组件内二次确认，此处直接执行）。 */
   onDissolveGroup: (groupId: string) => void;
 }
@@ -93,6 +96,7 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     favoriteSessionIds,
     sessionSearchText,
     onSessionSearchTextChange,
+    selectedGroupId,
     selectedSessionId,
     onSelectSession,
     onCreateSession,
@@ -102,31 +106,26 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     onAddFriend,
     onManageGroup,
     onManageSession,
+    onShareGroup,
+    onDissolveGroup,
   } = props;
   const availableViews = availableViewsProp ?? ['chat', 'group'];
-  const tabOptions = availableViews.map((v) => ({ value: v, label: v === 'chat' ? '对话' : '协作群' }));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 pb-2">
+      <div className="shrink-0 px-[18px] pb-3 pt-4">
         <WorkspaceIdentitySelector
           identities={identities}
           activeId={activeIdentityId}
           onChange={onChangeIdentity}
           onOpenPermissions={onOpenPermissions}
           userAvatarUrl={userAvatarUrl}
+          layout="sidebar"
         />
       </div>
-      <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
-        <div className="mb-2 flex items-center gap-2">
-          <Segmented<'chat' | 'group'>
-            className="h-9 min-w-0 flex-1 border border-border/70 bg-muted/70"
-            activeOptionClassName="bg-primary/10 font-medium text-primary shadow-none hover:bg-primary/15 hover:text-primary"
-            inactiveOptionClassName="bg-background/60 text-foreground/80 hover:bg-background hover:text-foreground"
-            value={view}
-            options={tabOptions}
-            onChange={onViewChange}
-          />
+      <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted">
+        <div className="sticky top-0 z-20 mb-2 flex items-center gap-2 bg-muted px-[18px]">
+          <WorkspacePrimaryTabs value={view} options={availableViews} onChange={onViewChange} />
           <WorkspaceActionButton onAddFriend={onAddFriend} onCreateGroup={onCreateGroup} />
         </div>
         <GroupSidebarFilters
@@ -160,7 +159,7 @@ export function GroupSidebarList(props: GroupSidebarProps) {
 
         {/* 列表区 */}
         {isLoading ? (
-          <div className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="overflow-hidden border-y border-border bg-background">
             {[1, 2, 3].map((i) => (
               <Skeleton.Block key={i} className="h-14 w-full rounded-none border-b border-border last:border-b-0" />
             ))}
@@ -184,34 +183,43 @@ export function GroupSidebarList(props: GroupSidebarProps) {
             />
           )
         ) : (
-          <div className="space-y-2">
-            {groups.map((group) => {
-              const sessions = sessionsByGroupId[group.groupId];
-              return (
-                <GroupItem
-                  key={group.groupId}
-                  group={group}
-                  expanded={!!expandedGroupIds[group.groupId]}
-                  sessions={sessions}
-                  sessionTab={sessionTabsByGroup[group.groupId] ?? 'all'}
-                  onSessionTabChange={(t) => onSessionTabForGroup(group.groupId, t)}
-                  favoriteSessionIds={favoriteSessionIds}
-                  selectedSessionId={selectedSessionId}
-                  onSelectGroup={onSelectGroup}
-                  onToggleGroupExpanded={onToggleGroupExpanded}
-                  onSelectSession={onSelectSession}
-                  onToggleFavorite={onToggleFavorite}
-                  onCreateSession={onCreateSession}
-                  onManageGroup={onManageGroup}
-                  onManageSession={onManageSession}
-                  totalSessionCount={totalSessionsByGroupId[group.groupId]}
-                  hasMoreSessions={hasMoreSessionsByGroupId[group.groupId] ?? false}
-                  isLoadingMoreSessions={isLoadingMoreSessionsByGroupId[group.groupId] ?? false}
-                  onLoadMoreSessions={() => onLoadMoreSessions(group.groupId)}
-                />
-              );
-            })}
-          </div>
+          <>
+            <div className="flex items-center justify-between border-b border-border px-[18px] py-2 text-xs">
+              <span className="font-medium text-foreground">协作群</span>
+              <span className="text-muted-foreground">{groups.length} 个群</span>
+            </div>
+            <div className="divide-y divide-border/70 overflow-hidden border-b border-border bg-muted/10">
+              {groups.map((group) => {
+                const sessions = sessionsByGroupId[group.groupId];
+                return (
+                  <GroupItem
+                    key={group.groupId}
+                    group={group}
+                    expanded={!!expandedGroupIds[group.groupId]}
+                    sessions={sessions}
+                    sessionTab={sessionTabsByGroup[group.groupId] ?? 'all'}
+                    onSessionTabChange={(t) => onSessionTabForGroup(group.groupId, t)}
+                    favoriteSessionIds={favoriteSessionIds}
+                    selectedGroupId={selectedGroupId}
+                    selectedSessionId={selectedSessionId}
+                    onSelectGroup={onSelectGroup}
+                    onToggleGroupExpanded={onToggleGroupExpanded}
+                    onSelectSession={onSelectSession}
+                    onToggleFavorite={onToggleFavorite}
+                    onCreateSession={onCreateSession}
+                    onManageGroup={onManageGroup}
+                    onManageSession={onManageSession}
+                    onShareGroup={onShareGroup}
+                    onDissolveGroup={onDissolveGroup}
+                    totalSessionCount={totalSessionsByGroupId[group.groupId]}
+                    hasMoreSessions={hasMoreSessionsByGroupId[group.groupId] ?? false}
+                    isLoadingMoreSessions={isLoadingMoreSessionsByGroupId[group.groupId] ?? false}
+                    onLoadMoreSessions={() => onLoadMoreSessions(group.groupId)}
+                  />
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -221,7 +229,7 @@ export function GroupSidebarList(props: GroupSidebarProps) {
 /** 内流协作群列表外壳。≥lg 在流内；<lg hidden，由 Workspace 抽屉呈现同一 GroupSidebarList。 */
 export function GroupSidebar(props: GroupSidebarProps) {
   return (
-    <aside className="hidden w-[340px] shrink-0 flex-col overflow-hidden border-r border-border bg-muted/30 p-2 lg:flex">
+    <aside className="hidden w-[360px] shrink-0 flex-col overflow-hidden border-r border-border bg-muted/20 lg:flex">
       <GroupSidebarList {...props} />
     </aside>
   );

@@ -6,6 +6,7 @@ import {
   BotSessionSidebar,
   type BotSessionSidebarProps,
 } from '@/pages/Workspace/components/BotSessionSidebar';
+import type { ChatBotView } from '@/services/workspace/botSessionService';
 
 interface ChatSessionSidebarSlotProps {
   /** Reactive workspace model（chatBots / friendBots / botSessions 等会话侧栏所需数据）。 */
@@ -20,6 +21,7 @@ interface ChatSessionSidebarSlotProps {
   onOpenAddFriend: () => void;
   onOpenPermissions: () => void;
   userAvatarUrl?: string;
+  onManageBot?: (bot: ChatBotView) => void;
 }
 
 /**
@@ -37,6 +39,7 @@ export function ChatSessionSidebarSlot({
   onOpenAddFriend,
   onOpenPermissions,
   userAvatarUrl,
+  onManageBot,
 }: ChatSessionSidebarSlotProps) {
   const botSessions = workspace.botSessions;
   const botSidebarProps: BotSessionSidebarProps = {
@@ -55,6 +58,9 @@ export function ChatSessionSidebarSlot({
     expandedBotIds: workspace.expandedBotIds,
     expandedBotSectionKey: workspace.expandedBotSectionKey,
     sessionsByBotId: botSessions.sessionsByBotId,
+    favoriteSessionsByBotId: botSessions.favoriteSessionsByBotId,
+    sessionPageMetaByBotId: botSessions.sessionPageMetaByBotId,
+    favoriteSessionPageMetaByBotId: botSessions.favoriteSessionPageMetaByBotId,
     isSessionsLoading: botSessions.isSessionsLoading,
     selectedBotSessionId: botSessions.selectedBotSessionId,
     onToggleBotExpanded: workspace.toggleBotExpanded,
@@ -80,6 +86,8 @@ export function ChatSessionSidebarSlot({
     },
     onToggleFavorite: (botId, sessionId) => botSessions.toggleFavorite(botId, sessionId),
     onLoadFavorites: (botId) => botSessions.loadFavoriteSessions(botId),
+    onLoadMoreSessions: botSessions.loadMoreSessions,
+    onManageBot,
     onCreateGroup: onOpenCreateGroup,
     onAddFriend: onOpenAddFriend,
   };

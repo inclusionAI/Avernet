@@ -67,10 +67,11 @@ export const botChatService = {
     groupId?: string,
     addressedBotId?: string,
     sessionId?: string,
+    preserveRelated = false,
   ) {
     const sequence = ++detailSequence;
     useBotChatStore.getState().setDetailState({ detailLoading: true, error: undefined });
-    if (!groupId) {
+    if (!groupId && !preserveRelated) {
       useBotChatStore.getState().setRelatedState({ related: undefined, relatedLoading: false, error: undefined });
     }
     try {

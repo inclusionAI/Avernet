@@ -20,6 +20,13 @@ describe('Open Core default capabilities', () => {
     expect(r.value).toEqual({ url: null });
   });
 
+  test('getAgentCodingInternalResources 默认全部为 null（Open Core 不泄漏内部资源地址）', () => {
+    const r = defaultCapabilities.getAgentCodingInternalResources();
+    expect(r.status).toBe('available');
+    expect(Object.values(r.value)).toEqual(expect.arrayContaining([null]));
+    expect(Object.values(r.value).every((value) => value === null)).toBe(true);
+  });
+
   test('getMemberAvatarUrl 默认 null（Open Core 无内网 antwork 照片服务，成员行回退首字母占位）', () => {
     const r = defaultCapabilities.getMemberAvatarUrl('208800');
     expect(r.status).toBe('available');
@@ -49,6 +56,22 @@ describe('Open Core default capabilities', () => {
     const r = defaultCapabilities.getInternalRouteMetas();
     expect(r.status).toBe('available');
     expect(r.value).toEqual([]);
+  });
+
+  test('getBotEngineOptions 默认仅 OpenClaw（不暴露 Claude Code 原生创建入口）', () => {
+    const r = defaultCapabilities.getBotEngineOptions();
+    expect(r.status).toBe('available');
+    expect(r.value.map((o) => o.value)).toEqual(['openclaw']);
+    // label 与 internal overlay 全量清单逐项一致（见 test/internal/brandAndEngineCapabilities.test.ts）
+    expect(r.value.map((o) => o.label)).toEqual(['OpenClaw']);
+  });
+
+  test('getProductBrand 默认 Avernet（横版 wordmark + 方版 mark 视觉组件）', () => {
+    const r = defaultCapabilities.getProductBrand();
+    expect(r.status).toBe('available');
+    expect(r.value.name).toBe('Avernet');
+    expect(typeof r.value.Logo).toBe('function');
+    expect(typeof r.value.loginWordmark).toBe('function');
   });
 
   test('getHumanIdentity：externalAuthStore.user 已登录 → 返回 oauth 外部身份（oauth-provider 策略）', () => {

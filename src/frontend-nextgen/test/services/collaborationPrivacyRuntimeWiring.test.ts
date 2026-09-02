@@ -198,6 +198,43 @@ describe('collaboration privacy runtime wiring', () => {
     expect(getWorkerConfig).toHaveBeenCalledWith('bot-real-1', signal);
   });
 
+  it('pads a lost numeric prefix before user lookup and keeps the canonical employee number downstream', async () => {
+    const context = createDependencies();
+    const { dependencies, getOrgUser, listManagedBots } = context;
+    getOrgUser.mockImplementationOnce(async (userId: string, _signal?: AbortSignal) => {
+      void _signal;
+      return { code: 200000, data: { ...createUserDto(), user_id: userId } };
+    });
+    const adapter = createCollaborationPrivacyRuntimeAdapter({
+      ...dependencies,
+      getOrgUser,
+      apiAdapter: {
+        ...dependencies.apiAdapter,
+        listManagedBots,
+      },
+    });
+
+    await expect(adapter.loadOverview('12345')).resolves.toMatchObject({
+      currentUser: { employeeNumber: '012345' },
+    });
+
+    expect(getOrgUser).toHaveBeenCalledWith('012345', undefined);
+    expect(listManagedBots).toHaveBeenCalledWith({ kind: 'bot', user_id: '012345' }, undefined);
+  });
+
+  it('normalizes a short numeric user_id returned by the user API before page echo', async () => {
+    const { dependencies, getOrgUser } = createDependencies();
+    getOrgUser.mockImplementationOnce(async (_userId: string, _signal?: AbortSignal) => {
+      void _userId;
+      void _signal;
+      return { code: 200000, data: { ...createUserDto(), user_id: '1234' } };
+    });
+    const adapter = createCollaborationPrivacyRuntimeAdapter({ ...dependencies, getOrgUser });
+
+    await expect(adapter.syncDepartment('1234')).resolves.toMatchObject({ employeeNumber: '001234' });
+    expect(getOrgUser).toHaveBeenCalledWith('001234', undefined);
+  });
+
   it('treats a missing BCSFuse config as an unavailable profile capability without blocking the overview', async () => {
     const { dependencies, getWorkerConfig } = createDependencies();
     getWorkerConfig.mockRejectedValueOnce(

@@ -1,8 +1,9 @@
-import { IconButton } from '@/components/ui';
+import { Button, IconButton } from '@/components/ui';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { SessionView } from '@/domain/collaboration/types';
 import { cn } from '@/utils/cn';
-import { MoreHorizontal, Star } from 'lucide-react';
-import React from 'react';
+import { MoreHorizontal, Settings2, Star } from 'lucide-react';
+import React, { useState } from 'react';
 import { formatMonthDayTime, SessionCard } from '../SessionCard';
 
 interface SessionItemProps {
@@ -15,8 +16,7 @@ interface SessionItemProps {
 }
 
 /**
- * 协作群会话条目:卡片式(角标 + 标题 + 副行 + 日期 + 收藏),选中态蓝色高亮。
- * 收藏星:已收藏常显,未收藏悬浮显现;点击不冒泡,避免误收起所属群卡片。
+ * 协作群会话条目：标题 + 副行 + 日期，收藏与会话管理统一收进右侧更多操作菜单。
  */
 export const SessionItem = React.memo(function SessionItem({
   session,
@@ -26,43 +26,58 @@ export const SessionItem = React.memo(function SessionItem({
   onToggleFavorite,
   onManageSession,
 }: SessionItemProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   const handleFavorite = (e: React.MouseEvent) => {
     e.stopPropagation();
+    setMenuOpen(false);
     onToggleFavorite(session.sessionId);
   };
-  const memberCount = session.participantCount ?? session.participants.length;
   const createdTime = formatMonthDayTime(session.lastMessageAt ?? session.createdAt);
-  const subtitle = memberCount > 0 ? `${memberCount} 个成员` : undefined;
 
   return (
     <SessionCard
       title={session.title}
-      subtitle={subtitle}
+      subtitle=""
+      compact
       dateText={createdTime}
       selected={selected}
       onSelect={() => onSelectSession(session.sessionId)}
       trailing={
-        <div className="flex items-center gap-0.5 self-start" onClick={(e) => e.stopPropagation()}>
-          <IconButton
-            label={favorite ? '取消收藏' : '收藏会话'}
-            size="sm"
-            icon={
-              <Star className={cn('h-3.5 w-3.5', favorite ? 'fill-warning text-warning' : 'text-muted-foreground')} />
-            }
-            onClick={handleFavorite}
-            className={cn(!favorite && 'opacity-0 transition-opacity group-hover:opacity-100')}
-          />
-          {onManageSession && (
-            <IconButton
-              label="管理会话"
-              size="sm"
-              icon={<MoreHorizontal className="h-4 w-4" />}
-              onClick={(e) => {
-                e.stopPropagation();
-                onManageSession(session.sessionId);
-              }}
-            />
-          )}
+        <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+          <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+            <PopoverTrigger asChild>
+              <IconButton
+                label="会话更多操作"
+                size="sm"
+                icon={<MoreHorizontal className="h-4 w-4" />}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-44 p-1">
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+                onClick={handleFavorite}
+              >
+                <Star className={cn('h-3.5 w-3.5', favorite ? 'fill-warning text-warning' : 'text-muted-foreground')} />
+                {favorite ? '取消收藏' : '收藏会话'}
+              </Button>
+              {onManageSession && (
+                <Button
+                  variant="ghost"
+                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onManageSession(session.sessionId);
+                  }}
+                >
+                  <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  管理会话
+                </Button>
+              )}
+            </PopoverContent>
+          </Popover>
         </div>
       }
     />

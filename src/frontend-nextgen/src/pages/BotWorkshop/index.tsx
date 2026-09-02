@@ -114,6 +114,10 @@ const BotWorkshopPage: React.FC = () => {
           authorization={workshop.createAuthorization}
           onClose={workshop.closeCreate}
           onSubmit={workshop.submitCreate}
+          agentCodingTemplates={workshop.agentCodingTemplates}
+          agentCodingTemplatesLoading={workshop.agentCodingTemplatesLoading}
+          agentCodingTemplatesError={workshop.agentCodingTemplatesError}
+          onRetryAgentCodingTemplates={workshop.retryAgentCodingTemplates}
         />
         <BotAccessModal
           mode={workshop.access.mode}

@@ -34,4 +34,21 @@ describe('/openapi/v1/org/user controller', () => {
       signal,
     });
   });
+
+  it.each([
+    ['123456', '123456'],
+    ['012345', '012345'],
+    ['12345', '012345'],
+    ['1234', '001234'],
+    ['WB123456', 'WB123456'],
+  ])('normalizes employee number %s to %s before sending user_id', async (input, expected) => {
+    await getOrgUser(input);
+
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/org/user', {
+      method: 'GET',
+      params: { user_id: expected },
+      injectUserId: false,
+      signal: undefined,
+    });
+  });
 });

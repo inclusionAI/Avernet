@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
-import type { IdentityView } from '@/domain/collaboration';
+import type { GroupView, IdentityView } from '@/domain/collaboration';
 import { GROUP_CREATE_VIA_EXECUTE } from '@/services/workspace/groupCreateConfig';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAllAvailableBots } from '../../hooks/useAllAvailableBots';
@@ -8,35 +8,23 @@ import { useCollaborationTemplates } from '../../hooks/useCollaborationTemplates
 import { useCreateGroup } from '../../hooks/useCreateGroup';
 import { useGroupCollaborationPicker } from '../../hooks/useGroupCollaborationPicker';
 import { useParticipantBinding } from '../../hooks/useParticipantBinding';
-import { BindingSlot } from './BindingSlot';
+import { BindingSlot, YamlValidateButton } from './BindingSlot';
+import { CollaborationFlowAside } from './CollaborationFlowAside';
 import { CollaborationTemplatePicker } from './CollaborationTemplatePicker';
 import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
 import type { GroupLeaderOption } from './GroupLeaderSelect';
 import { GroupParticipantPicker } from './GroupParticipantPicker';
-
-export type StrategyForm =
-  | { kind: 'free_chat'; name: string; botUuids: string[]; deliveryPolicy: 'send_to_driver' | 'inject_observers' }
-  | { kind: 'task_master_slave'; name: string; botUuids: string[] }
-  | { kind: 'task_dag'; name: string; botUuids: string[]; definitionYaml: string };
+import { summarizeYaml } from './groupYamlUtils';
 
 export interface CreateGroupModalProps {
   open: boolean;
   /** 当前对话协作身份；决定好友列表与可协作 Bot 列表的查询视角。 */
   activeIdentity?: IdentityView | null;
   onClose: () => void;
-  /** 创建成功后回传协作群 ID。 */
-  onCreated: (groupId: string) => void;
+  /** 创建成功后回传群详情及初始 Manager run。 */
+  onCreated: (group: GroupView) => void;
 }
 
-/** 从 YAML 顶层 key 中正则提取 participants/roles 等条目做结构摘要预览。 */
-function summarizeYaml(yaml: string): string[] {
-  const keys: string[] = [];
-  for (const line of yaml.split('\n')) {
-    const m = /^([A-Za-z_][\w-]*):\s*$/.exec(line.trim());
-    if (m && !keys.includes(m[1])) keys.push(m[1]);
-  }
-  return keys;
-}
 export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: CreateGroupModalProps) {
   const { run, friendlyError, creating, clearError } = useCreateGroup();
   const picker = useGroupCollaborationPicker(activeIdentity?.id, open, activeIdentity?.kind === 'user');
@@ -82,14 +70,10 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
   }, [activeIdentity, selectedBots]);
 
   const allAvailableBots = useAllAvailableBots(activeIdentity, picker);
-  const boundBotIds = useMemo(
-    () => Array.from(new Set(Object.values(binding.participantBindings).filter(Boolean))),
-    [binding.participantBindings],
-  );
-  const boundBotObjects = useMemo(
-    () => boundBotIds.map((id) => ({ id, name: allAvailableBots.find((b) => b.id === id)?.name ?? id })),
-    [boundBotIds, allAvailableBots],
-  );
+  const allBotName = (botId: string) => allAvailableBots.find((b) => b.id === botId)?.name ?? botId;
+  const boundBotIds = Array.from(new Set(Object.values(binding.participantBindings).filter(Boolean)));
+  const activeRoleBotId = binding.participantBindings[binding.activeParticipantKey] ?? '';
+  const activeRoleBotOption = activeRoleBotId ? [{ id: activeRoleBotId, name: allBotName(activeRoleBotId) }] : [];
 
   useEffect(() => {
     const opening = open && !wasOpenRef.current;
@@ -114,7 +98,11 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
     if (kind === 'task_dag') {
       const activeKey = binding.activeParticipantKey;
       if (!activeKey) return;
-      binding.handleBind(activeKey, id);
+      if (binding.participantBindings[activeKey] === id) {
+        binding.handleUnbind(activeKey);
+      } else {
+        binding.handleBind(activeKey, id);
+      }
       return;
     }
     if (activeIdentity?.kind === 'bot' && id === activeIdentity.id) return;
@@ -145,13 +133,9 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
   const canSubmit = hasParticipants && hasLeader && binding.canSubmitTaskDag;
 
   const bindingSlot: ReactNode = (
-    <BindingSlot
-      visible={kind === 'task_dag' && supportsStateMachine}
-      yaml={definitionYaml}
-      leaderOptions={allAvailableBots}
-      binding={binding}
-    />
+    <BindingSlot visible={kind === 'task_dag' && supportsStateMachine} binding={binding} botNameResolver={allBotName} />
   );
+  const showFlowAside = kind === 'task_dag' && binding.yamlValidation.isValidated;
 
   const templateSlot: ReactNode =
     kind === 'task_dag' && supportsStateMachine ? (
@@ -165,6 +149,7 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
         tagLabel={templates.tagLabel}
         onModeChange={templates.setMode}
         onSelect={templates.selectTemplate}
+        action={<YamlValidateButton yaml={definitionYaml} binding={binding} />}
       />
     ) : null;
 
@@ -192,18 +177,23 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
         deliveryPolicy,
         definitionYaml,
         driverBotUuid: effectiveLeader,
+        originator: activeIdentity?.id ?? '',
         participants,
         context: context.trim() || undefined,
         participantBindings: kind === 'task_dag' ? participantBindingsArr : undefined,
       },
       { viaExecute: enableTaskExecute },
     );
-    if (res.ok) onCreated(res.data.groupId);
+    if (res.ok) onCreated(res.data);
   };
 
   return (
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
-      <ModalContent size="lg" closeLabel="关闭发起协作弹窗" className="gap-0 overflow-hidden p-0">
+      <ModalContent
+        size={showFlowAside ? 'xl' : 'lg'}
+        closeLabel="关闭发起协作弹窗"
+        className="min-w-0 gap-0 overflow-hidden p-0"
+      >
         <ModalHeader className="border-b border-border px-6 pb-4 pt-5">
           <div className="flex min-w-0 items-center gap-2">
             <ModalTitle className="m-0 shrink-0 text-base font-semibold text-foreground">发起协作</ModalTitle>
@@ -221,64 +211,70 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
           </div>
         </ModalHeader>
 
-        <div className="app-scrollbar max-h-[560px] space-y-5 overflow-y-auto px-6 py-6">
-          <GroupConfigFields
-            kind={kind}
-            name={name}
-            context={context}
-            driverBotId={driverBotId}
-            managerBotId={managerBotId}
-            deliveryPolicy={deliveryPolicy}
-            definitionYaml={definitionYaml}
-            yamlSummary={yamlSummary}
-            yamlValidated={kind === 'task_dag' && binding.yamlValidation.isValidated}
-            leaderOptions={leaderOptions}
-            supportsStateMachine={supportsStateMachine}
-            viaExecute={enableTaskExecute}
-            onViaExecuteChange={(value) => {
-              clearError();
-              setEnableTaskExecute(value);
-            }}
-            templateSlot={templateSlot}
-            bindingSlot={bindingSlot}
-            onKindChange={switchKind}
-            onNameChange={setField(setName)}
-            onContextChange={setField(setContext)}
-            onDriverChange={(value) => {
-              clearError();
-              setDriverBotId(value);
-            }}
-            onManagerChange={(value) => {
-              clearError();
-              setManagerBotId(value);
-            }}
-            onDeliveryChange={setDeliveryPolicy}
-            onYamlChange={(value) => {
-              clearError();
-              setDefinitionYaml(value);
-              binding.yamlValidation.invalidate();
-            }}
-          />
-
-          {(kind !== 'task_dag' || binding.yamlValidation.isValidated) && (
-            <GroupParticipantPicker
-              picker={picker}
-              selectedIds={kind === 'task_dag' ? boundBotIds : botUuids}
-              selectedOptions={kind === 'task_dag' ? boundBotObjects : selectedBots}
-              showMineTab={activeIdentity?.kind === 'user'}
-              onToggle={toggleBot}
-              excludeId={kind === 'task_dag' ? null : activeIdentity?.id}
-              prependBot={
-                kind === 'task_dag' && activeIdentity?.kind === 'bot'
-                  ? { id: activeIdentity.id, name: activeIdentity.displayName }
-                  : null
-              }
+        <div className="flex min-h-0 min-w-0 max-w-full overflow-x-hidden">
+          <div
+            data-testid="create-group-modal-body"
+            className="app-scrollbar max-h-[560px] min-w-0 max-w-full flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-6 py-6"
+          >
+            <GroupConfigFields
+              kind={kind}
+              name={name}
+              context={context}
+              driverBotId={driverBotId}
+              managerBotId={managerBotId}
+              deliveryPolicy={deliveryPolicy}
+              definitionYaml={definitionYaml}
+              yamlSummary={yamlSummary}
+              yamlValidated={kind === 'task_dag' && binding.yamlValidation.isValidated}
+              leaderOptions={leaderOptions}
+              supportsStateMachine={supportsStateMachine}
+              viaExecute={enableTaskExecute}
+              onViaExecuteChange={(value) => {
+                clearError();
+                setEnableTaskExecute(value);
+              }}
+              templateSlot={templateSlot}
+              bindingSlot={bindingSlot}
+              onKindChange={switchKind}
+              onNameChange={setField(setName)}
+              onContextChange={setField(setContext)}
+              onDriverChange={(value) => {
+                clearError();
+                setDriverBotId(value);
+              }}
+              onManagerChange={(value) => {
+                clearError();
+                setManagerBotId(value);
+              }}
+              onDeliveryChange={setDeliveryPolicy}
+              onYamlChange={(value) => {
+                clearError();
+                setDefinitionYaml(value);
+                binding.yamlValidation.invalidate();
+              }}
             />
-          )}
 
-          {friendlyError && (
-            <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{friendlyError}</p>
-          )}
+            {(kind !== 'task_dag' || binding.yamlValidation.isValidated) && (
+              <GroupParticipantPicker
+                picker={picker}
+                selectedIds={kind === 'task_dag' ? (activeRoleBotId ? [activeRoleBotId] : []) : botUuids}
+                selectedOptions={kind === 'task_dag' ? activeRoleBotOption : selectedBots}
+                showMineTab={activeIdentity?.kind === 'user'}
+                onToggle={toggleBot}
+                excludeId={kind === 'task_dag' ? null : activeIdentity?.id}
+                prependBot={
+                  kind === 'task_dag' && activeIdentity?.kind === 'bot'
+                    ? { id: activeIdentity.id, name: activeIdentity.displayName }
+                    : null
+                }
+              />
+            )}
+
+            {friendlyError && (
+              <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{friendlyError}</p>
+            )}
+          </div>
+          {showFlowAside && <CollaborationFlowAside leaderOptions={allAvailableBots} binding={binding} />}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-border px-6 py-4">

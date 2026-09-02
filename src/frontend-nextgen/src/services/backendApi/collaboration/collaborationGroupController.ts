@@ -58,6 +58,16 @@ export interface GroupDetailData {
   // list 场景只暴露的字段
   membership?: 'direct' | 'session_only';
   participant_count?: number;
+  /** 创建群时后端同步生成的初始会话 ID；详情接口可能不返回。 */
+  initial_session_id?: string;
+  /** 创建群时同步启动的 Driver/Manager run；详情接口可能不返回。 */
+  initial_run?: {
+    run_id: string;
+    bot_uuid: string;
+    activity_kind: 'group_bootstrap';
+    state: 'running' | 'failed';
+    started_at: string;
+  };
 }
 export interface GroupCreateChatBody {
   group_kind: 'normal';
@@ -65,6 +75,7 @@ export interface GroupCreateChatBody {
   context?: string;
   participants: GroupParticipantInput[];
   driver_bot_uuid: string;
+  originator: string;
   collaboration: GroupCollaborationChat;
 }
 export interface GroupCreateManagerWorkerBody {
@@ -73,6 +84,7 @@ export interface GroupCreateManagerWorkerBody {
   context?: string;
   participants: GroupParticipantInput[];
   driver_bot_uuid: string;
+  originator: string;
   collaboration: GroupCollaborationManagerWorker;
 }
 export interface GroupCreateStateMachineBody {
@@ -81,6 +93,7 @@ export interface GroupCreateStateMachineBody {
   context?: string;
   participants: GroupParticipantInput[];
   driver_bot_uuid: string;
+  originator: string;
   collaboration: GroupCollaborationStateMachine;
 }
 export type CreateGroupBody = GroupCreateChatBody | GroupCreateManagerWorkerBody | GroupCreateStateMachineBody;

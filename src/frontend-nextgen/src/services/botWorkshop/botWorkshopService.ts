@@ -14,6 +14,8 @@ import {
 } from '@/services/backendApi/bots/botController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
+import { runAfterCreateActions } from './agentCodingAfterCreateService';
+import { agentCodingTemplateService, type AgentCodingTemplate } from './agentCodingTemplateService';
 import { mapBotDto, mapBotList } from './botMapper';
 import type {
   AvernetBotCreateRequest,
@@ -58,17 +60,40 @@ function validateCreate(input: BotCreateInput) {
     throw new Error(`${engineName} 暂不支持服务化`);
   }
   if (input.scenario === 'cloud' && !input.spaceId.trim()) throw new Error('请选择有效的归属空间');
+  if (input.engine === 'aicoding') {
+    const template = input.agentCoding?.template;
+    if (!template) throw new Error('请选择 AgentCoding 模板');
+    const templateError = agentCodingTemplateService.validate(template as never, input.agentCoding?.values ?? {});
+    if (templateError) throw new Error(templateError);
+  }
+  if (
+    input.scenario === 'cloud' &&
+    input.ownership === 'personal' &&
+    input.engine === 'claude_code' &&
+    !input.agentCoding?.template
+  )
+    throw new Error('普通 Claude Code 请通过 AgentCoding 模板创建');
+  if (input.agentCoding?.template && ['normal', 'normalCC'].includes(input.agentCoding.template.templateType))
+    throw new Error('普通 Claude Code 模板不能走 AgentCoding 创建');
 }
 
 function toCreateRequest(input: BotCreateInput): AvernetBotCreateRequest {
   validateCreate(input);
+  const engine = input.agentCoding?.template?.engine || input.engine;
   return {
     bot_name: input.name.trim(),
     bot_desc: input.description.trim(),
-    engine: input.engine,
-    cluster_name: input.engine === 'teclaw' ? 'ANDC' : 'ACRA',
+    engine,
+    cluster_name: engine === 'teclaw' ? 'ANDC' : 'ACRA',
     bot_type: input.serviceMode === 'service' ? 'service' : 'personal',
     space_id: input.spaceId || undefined,
+    ...(input.agentCoding?.template
+      ? agentCodingTemplateService.toCreateFields(
+          input.agentCoding.template as never,
+          input.agentCoding.values,
+          input.name,
+        )
+      : {}),
   };
 }
 
@@ -125,6 +150,9 @@ export const botWorkshopService = {
   },
   validateCreate,
   toCreateRequest,
+  async listAgentCodingTemplates() {
+    return agentCodingTemplateService.list();
+  },
   async create(input: BotCreateInput): Promise<BotCreateResult> {
     validateCreate(input);
     const normalized: BotCreateInput =
@@ -142,13 +170,41 @@ export const botWorkshopService = {
       const iframeUrl = typeof dto.iframe_url === 'string' ? dto.iframe_url : '';
       const redirectUrl = typeof dto.redirect_url === 'string' ? dto.redirect_url : '';
       if (!botId || (!iframeUrl && !redirectUrl)) throw new Error('授权信息不完整，请稍后重试创建');
-      return { type: 'authorization_required', botId, iframeUrl, redirectUrl, request: request! };
+      return {
+        type: 'authorization_required',
+        botId,
+        iframeUrl,
+        redirectUrl,
+        request: request!,
+        agentCoding: normalized.agentCoding,
+      };
     }
-    return { type: 'created', bot: mapBotDto(dto).item };
+    const bot = mapBotDto(dto).item;
+    if (normalized.agentCoding?.template) {
+      const failures = await runAfterCreateActions({
+        botId: bot.id,
+        ownerId: bot.ownerId,
+        template: normalized.agentCoding.template as AgentCodingTemplate,
+        values: normalized.agentCoding.values,
+      });
+      if (failures.length > 0) {
+        return {
+          type: 'created_with_pending_after_create',
+          bot,
+          afterCreateFailures: failures.map((failure) => ({
+            key: failure.action.key,
+            retryable: failure.action.retryable,
+            message: failure.error.message,
+          })),
+        };
+      }
+    }
+    return { type: 'created', bot };
   },
   async pollCreateAuthorization(
     botId: string,
     request: AvernetBotCreateRequest,
+    agentCoding?: BotCreateInput['agentCoding'],
   ): Promise<BotCreateAuthorizationPollResult> {
     let response;
     try {
@@ -167,11 +223,26 @@ export const botWorkshopService = {
     }
     const dto = response.data;
     if (!dto?.status) throw new Error('授权状态接口未返回有效状态');
-    return {
-      status: dto.status,
-      message: dto.message,
-      bot: dto.bot ? mapBotDto(dto.bot, botId).item : undefined,
-    };
+    const bot = dto.bot ? mapBotDto(dto.bot, botId).item : undefined;
+    if (dto.status === 'ISSUED' && bot && agentCoding?.template) {
+      const failures = await runAfterCreateActions({
+        botId: bot.id,
+        ownerId: bot.ownerId,
+        template: agentCoding.template as AgentCodingTemplate,
+        values: agentCoding.values,
+      });
+      return {
+        status: dto.status,
+        message: dto.message,
+        bot,
+        afterCreateFailures: failures.map((failure) => ({
+          key: failure.action.key,
+          retryable: failure.action.retryable,
+          message: failure.error.message,
+        })),
+      };
+    }
+    return { status: dto.status, message: dto.message, bot };
   },
   async update(id: string, values: { name?: string; description?: string }) {
     const response = await updateBot(id, { bot_name: values.name, bot_desc: values.description });

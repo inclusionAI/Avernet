@@ -1,6 +1,7 @@
 import type { BotHealthCapability } from '@/domain/botHealthCheck';
 import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
+import type { ComponentType } from 'react';
 
 export type CapabilityStatus = 'available' | 'unsupported';
 
@@ -119,6 +120,42 @@ export interface MetricsDashboardSpec {
  */
 export type LoginStrategy = 'ace-gateway' | 'oauth-provider';
 
+/**
+ * Bot 工坊引擎「可选清单」单项（筛选下拉、创建弹窗共用）。value 与后端 engine 字段
+ * 字符串契约一致（openclaw/aicoding/hermes/teclaw），label 为两处消费方
+ * 共用的展示文案。选项见 `getBotEngineOptions` capability。
+ */
+export interface BotEngineOption {
+  value: string;
+  label: string;
+}
+
+/** 仅 Internal Overlay 提供的 Agent Coding 外部资源；Open Core 全部为 null。 */
+export interface AgentCodingInternalResources {
+  templateFactoryUrl: string | null;
+  imageManualUrl: string | null;
+  imageBuildUrl: string | null;
+  workflowRepositoryBaseUrl: string | null;
+  codefuseTokenUrl: string | null;
+  antCodeProjectsApiUrl: string | null;
+  antCodeProjectBaseUrl: string | null;
+}
+
+/**
+ * 产品品牌语义（名称/页头 Logo/登录视觉）。Open Core 业务代码 不得硬编码产品名或
+ * logo 实现，统一经 `getProductBrand` 解析；internal overlay 注入 TeamClaw 现状视觉。
+ * Logo 用组件承载：字符串 URL 表达不了内部「色块 + 图标」组合样式，且把形态差异
+ * 完全封进 overlay 文件，将来新增形态零消费方改动。
+ */
+export interface ProductBrand {
+  /** 产品名；运行时品牌文案（弹窗标题/欢迎语/toast）以插值消费。 */
+  name: string;
+  /** 页头品牌视觉组件（接收 className 控制尺寸）。 */
+  Logo: ComponentType<{ className?: string }>;
+  /** 登录态/空态视觉组件（可选，如方版 mark）；缺省时 UI 回退 Logo。 */
+  loginWordmark?: ComponentType<{ className?: string }>;
+}
+
 export interface AppCapabilities {
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
@@ -156,6 +193,11 @@ export interface AppCapabilities {
    * 同步签名：capability 不发请求，直接返回当前形态的大盘 URL（或 null 回退）。
    */
   getMetricsDashboard: () => CapabilityResult<MetricsDashboardSpec>;
+  /** 应用 Coding 的语雀 Token 获取指引视频；Open Core 默认不提供，internal overlay 注入。 */
+  getAppCodingYuqueTokenGuideVideoUrl: () => CapabilityResult<string | null>;
+  /** CodeFuse 模型目录接口地址；Open Core 无内部目录时返回 null。 */
+  getCodefuseModelsUrl: () => CapabilityResult<string | null>;
+  getAgentCodingInternalResources: () => CapabilityResult<AgentCodingInternalResources>;
   /**
    * 登录策略（见 `LoginStrategy`）：Open Core 默认 `oauth-provider`；internal overlay `ace-gateway`。
    * `status==='unsupported'` 时调用方按 `ace-gateway` 兜底。同步签名，不发请求。
@@ -178,4 +220,18 @@ export interface AppCapabilities {
    * `getRouteMeta` 消费本能力与基线 `routeMetaList` 合并后的链表做高亮/分组解析。
    */
   getInternalRouteMetas: () => CapabilityResult<RouteMeta[]>;
+  /**
+   * Bot 工坊引擎可选清单（筛选下拉、创建弹窗的唯一事实源，组件不得自行硬编码）。
+   * Open Core 默认仅 `openclaw`（不暴露 Claude Code 原生创建入口）；
+   * internal overlay 覆盖为全量 4 项（字面量随 overlay 物理剥离）。
+   * 注意：引擎领域映射规则（服务化矩阵、cluster_name、AgentCoding 家族、WS 路径等）
+   * 是后端契约事实，MUST 保留全量，不随本清单收窄。
+   */
+  getBotEngineOptions: () => CapabilityResult<BotEngineOption[]>;
+  /**
+   * 产品品牌语义（名称/页头 Logo/登录视觉，见 `ProductBrand`）。
+   * Open Core 默认 `Avernet` + 横版 wordmark；internal overlay 覆盖为 `TeamClaw` +
+   * 现状蓝底 AppWindow 视觉（样式块随 overlay 剥离，Open Core 产物不背内部样式）。
+   */
+  getProductBrand: () => CapabilityResult<ProductBrand>;
 }

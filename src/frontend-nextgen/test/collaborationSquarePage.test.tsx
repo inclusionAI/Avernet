@@ -178,8 +178,11 @@ describe('collaboration square accessible UI', () => {
     const files = [
       'src/pages/CollaborationSquare/Bots/index.tsx',
       'src/pages/CollaborationSquare/Groups/index.tsx',
+      'src/pages/CollaborationSquare/Tasks/index.tsx',
+      'config/routes.ts',
       'src/components/CollaborationSquare/SquarePageShell/index.tsx',
       'src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx',
+      'src/components/CollaborationSquare/PublicGroupSquareSection/index.tsx',
       'src/hooks/useCollaborationSquare.ts',
       'src/hooks/useCollaborationSquareList.ts',
       'src/hooks/useCreateGroupSessionFlow.ts',
@@ -201,5 +204,8 @@ describe('collaboration square accessible UI', () => {
     expect(source).toContain('onScroll={handleScroll}');
     expect(source).toContain('rootMargin: `0px 0px ${LOAD_MORE_PRELOAD_DISTANCE}px 0px`');
     expect(source).toContain('发现协作群，支持基于公开协作群快速创建新会话。');
+    expect(source).toContain('发现公开 BBS 求助任务');
+    expect(source).toContain('resource="task"');
+    expect(source).toContain('/collaboration-square/tasks');
   });
 });

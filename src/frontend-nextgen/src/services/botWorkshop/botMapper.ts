@@ -84,7 +84,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
   // 页面地址中的 canonical Bot ID，避免编辑页后续请求串到 /bots/default/**。
   const id = asString(addressedBotId) ?? asString(dto.bot_id) ?? '';
   const space = dto.space && typeof dto.space === 'object' ? (dto.space as BackendUnknownRecord) : undefined;
-  const ownerId = asString(dto.owner_entity_id);
+  const ownerId = asString(dto.owner_entity_id) ?? asString(dto.owner_id);
   const spaceId = asString(dto.space_id) ?? asString(space?.space_id) ?? asString(dto.owner_entity_id);
   const entityId = asString(dto.entity_id) ?? asString(dto.owner_entity_id) ?? spaceId;
   const botType = asString(dto.bot_type) ?? 'personal';

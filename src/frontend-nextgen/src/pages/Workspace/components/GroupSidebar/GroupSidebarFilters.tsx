@@ -1,7 +1,7 @@
 import { Button, Input } from '@/components/ui';
 import type { GroupKind } from '@/domain/collaboration/types';
 import { cn } from '@/utils/cn';
-import { Filter, Search } from 'lucide-react';
+import { Check, Filter, Search } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 
 export type KindFilter = 'all' | GroupKind;
@@ -18,10 +18,10 @@ const KIND_OPTIONS: KindFilter[] = ['all', 'free_chat', 'task_master_slave', 'ta
 
 const kindChipClass = (active: boolean) =>
   cn(
-    'h-8 flex-none whitespace-nowrap rounded-md border-0 px-2 text-xs',
+    'h-7 flex-none whitespace-nowrap rounded-none border-0 px-0 text-xs',
     active
-      ? 'bg-primary/10 font-medium text-primary hover:bg-primary/15 hover:text-primary'
-      : 'bg-transparent font-normal text-muted-foreground hover:bg-accent hover:text-foreground',
+      ? 'bg-transparent font-medium text-primary hover:bg-transparent hover:text-primary'
+      : 'bg-transparent font-normal text-muted-foreground hover:bg-transparent hover:text-foreground',
   );
 
 interface GroupSidebarFiltersProps {
@@ -73,7 +73,7 @@ export function GroupSidebarFilters({
 
   return (
     <div ref={filterRegionRef} className="my-2">
-      <div className="flex items-center gap-2 px-1">
+      <div className="flex items-center gap-2 px-[18px]">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -93,10 +93,11 @@ export function GroupSidebarFilters({
           aria-label="筛选"
           onClick={() => setFiltersOpen((open) => !open)}
           className={cn(
-            'h-9 shrink-0 gap-1 rounded-md border border-transparent px-2 text-xs hover:border-border',
-            filtersOpen && 'border-border bg-accent text-foreground',
+            'h-9 shrink-0 gap-1 rounded-md border border-input bg-background px-2 text-xs text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground',
+            filtersOpen &&
+              'border-primary/30 bg-primary/5 text-primary hover:border-primary/40 hover:bg-primary/10 hover:text-primary',
             hasActiveFilters &&
-              'border-primary/30 bg-primary/10 text-primary hover:border-primary/40 hover:bg-primary/15 hover:text-primary',
+              'border-primary/30 bg-primary/5 text-primary hover:border-primary/40 hover:bg-primary/10 hover:text-primary',
           )}
         >
           <Filter className="h-3.5 w-3.5" aria-hidden />
@@ -106,13 +107,14 @@ export function GroupSidebarFilters({
       </div>
 
       {filtersOpen && (
-        <div
-          id={filterPanelId}
-          className="mt-2 space-y-2 rounded-lg border border-border bg-muted-foreground/10 p-2 shadow-sm"
-        >
-          <div role="radiogroup" aria-label="协作群类型">
-            <p className="mb-1 text-[11px] font-medium text-foreground">群类型</p>
-            <div className="flex flex-wrap gap-1">
+        <div id={filterPanelId} className="mt-2 space-y-2 border-y border-border/80 bg-muted px-[18px] py-3">
+          <div
+            className="grid min-h-7 min-w-0 grid-cols-[4rem_minmax(0,1fr)] items-center gap-1"
+            role="radiogroup"
+            aria-label="协作群类型"
+          >
+            <p className="whitespace-nowrap text-[11px] font-medium text-muted-foreground">协作群类型</p>
+            <div className="flex min-w-0 flex-nowrap gap-x-2 overflow-x-auto scrollbar-hide">
               {KIND_OPTIONS.map((kind) => (
                 <Button
                   key={kind}
@@ -123,17 +125,22 @@ export function GroupSidebarFilters({
                   onClick={() => handleKindFilterChange(kind)}
                   className={kindChipClass(kindFilter === kind)}
                 >
+                  {kindFilter === kind && <Check className="h-3 w-3" aria-hidden />}
                   {KIND_LABELS[kind]}
                 </Button>
               ))}
             </div>
           </div>
-          <div role="radiogroup" aria-label="协作群参与方式">
-            <p className="mb-1 text-[11px] font-medium text-foreground">参与方式</p>
-            <div className="flex flex-wrap gap-1">
+          <div
+            className="grid min-h-7 min-w-0 grid-cols-[4rem_minmax(0,1fr)] items-center gap-1"
+            role="radiogroup"
+            aria-label="协作群参与方式"
+          >
+            <p className="whitespace-nowrap text-[11px] font-medium text-muted-foreground">参与方式</p>
+            <div className="flex min-w-0 flex-nowrap gap-x-2 overflow-x-auto scrollbar-hide">
               {(
                 [
-                  ['direct', '固定协作群成员'],
+                  ['direct', '固定群成员'],
                   ['session_only', '仅参与临时会话'],
                 ] as const
               ).map(([value, label]) => (
@@ -146,6 +153,7 @@ export function GroupSidebarFilters({
                   onClick={() => handleMembershipChange(value)}
                   className={kindChipClass(membership === value)}
                 >
+                  {membership === value && <Check className="h-3 w-3" aria-hidden />}
                   {label}
                 </Button>
               ))}

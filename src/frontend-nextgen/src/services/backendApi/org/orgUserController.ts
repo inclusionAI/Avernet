@@ -1,3 +1,4 @@
+import { normalizeEmployeeNumber } from '@/utils/employeeNumber';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
@@ -26,7 +27,7 @@ export interface OrgUserDto {
 export function getOrgUser(userId: string, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<OrgUserDto>>(ORG_USER_ENDPOINTS.user, {
     method: 'GET',
-    params: { user_id: userId },
+    params: { user_id: normalizeEmployeeNumber(userId) },
     // user_id 是该接口的显式必填参数，不依赖全局身份注入。
     injectUserId: false,
     signal,

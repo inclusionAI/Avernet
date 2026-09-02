@@ -31,7 +31,7 @@ export function splitBotId(botId: string): { realBotId: string; ownerId?: string
   return { realBotId: botId.slice(0, separator), ownerId: botId.slice(separator + 1) || undefined };
 }
 
-export function mapListError(error: unknown, resource: 'Bot' | '协作群'): never {
+export function mapListError(error: unknown, resource: 'Bot' | '协作群' | '任务广场'): never {
   if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError') throw error;
   if (error instanceof CollaborationSquareError) throw error;
   if (isAceLoginRedirectError(error)) {
@@ -107,18 +107,36 @@ export function mapSessionRole(role?: string): string | undefined {
 }
 
 /**
- * 经 POST /openapi/v1/collaboration/bots/query 批量解析 bot/human 展示名，返回 {bot_id: name} 映射。
- * 后端返回的 bot 列表与请求 id 列表非一一对应（部分 id 查不到，如已删除），按 bot_id 匹配；
+ * 经 POST /openapi/v1/collaboration/bots/query 批量解析 bot/human 展示名，返回 {原始 id: name} 映射。
+ *
+ * 输入 id 可能是复合 `bot_id:owner_id`（BBS 任务 publisher/assignee 即此形态），而 bots/query 注册表
+ * 按裸 `bot_id` 建索引、返回的 `bot_id` 不带 `:owner`。故先经 {@link splitBotId} 拆出 `realBotId` 下发，
+ * 再把命中的名按**原始输入 id** 回填——调用方用复合 id 查找也能命中。`splitBotId` 对无 `:` 的裸 id /
+ * uuid 原样返回，群主 `driver_bot_uuid` 等不受影响。
+ *
+ * 后端返回的 bot 列表与请求 id 列表非一一对应（部分 id 查不到，如已删除），未命中的不进映射；
  * 失败返回空映射，调用方回退兜底文案。
  */
 export async function resolveBotNames(botIds: string[]): Promise<Record<string, string>> {
   if (botIds.length === 0) return {};
+  const realByOriginal = new Map<string, string>();
+  const realSet = new Set<string>();
+  for (const id of botIds) {
+    const realBotId = splitBotId(id).realBotId;
+    realByOriginal.set(id, realBotId);
+    realSet.add(realBotId);
+  }
   try {
-    const resp = await queryCollaborationBots({ bot_ids: botIds });
+    const resp = await queryCollaborationBots({ bot_ids: [...realSet] });
     const items = resp.data?.items ?? [];
-    const map: Record<string, string> = {};
+    const bareNameMap: Record<string, string> = {};
     for (const item of items) {
-      if (item.bot_id && item.name) map[item.bot_id] = item.name;
+      if (item.bot_id && item.name) bareNameMap[item.bot_id] = item.name;
+    }
+    const map: Record<string, string> = {};
+    for (const [originalId, realBotId] of realByOriginal) {
+      const name = bareNameMap[realBotId];
+      if (name) map[originalId] = name;
     }
     return map;
   } catch {

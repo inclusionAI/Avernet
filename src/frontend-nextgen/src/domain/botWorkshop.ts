@@ -75,6 +75,24 @@ export interface BotListResult {
 
 export type BotCreateScenario = 'local' | 'cloud';
 
+export interface AgentCodingTemplateDraft {
+  key: string;
+  versionId: string;
+  name: string;
+  description?: string;
+  engine: string;
+  templateType: string;
+  source: 'official' | 'market';
+  fields: Array<Record<string, unknown>>;
+  config: Record<string, unknown>;
+}
+
+export interface AgentCodingDraft {
+  kind: 'applicationCoding' | 'template';
+  template?: AgentCodingTemplateDraft;
+  values: Record<string, unknown>;
+}
+
 export interface BotCreateInput {
   scenario: BotCreateScenario;
   name: string;
@@ -84,6 +102,7 @@ export interface BotCreateInput {
   ownership: BotOwnership;
   serviceMode: BotServiceMode;
   initialize: boolean;
+  agentCoding?: AgentCodingDraft;
 }
 
 export interface BotCreateSpace {
@@ -100,6 +119,15 @@ export interface AvernetBotCreateRequest {
   cluster_name: 'ACRA' | 'ANDC';
   bot_type: 'personal' | 'service';
   space_id?: string;
+  engine_properties?: {
+    template_type?: string;
+    template_config?: {
+      template_key?: string;
+      template_version_id?: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
 }
 
 export interface BotCreateAuthorization {
@@ -108,14 +136,23 @@ export interface BotCreateAuthorization {
   iframeUrl: string;
   redirectUrl: string;
   request: AvernetBotCreateRequest;
+  agentCoding?: AgentCodingDraft;
 }
 
-export type BotCreateResult = { type: 'created'; bot: BotDomain } | BotCreateAuthorization;
+export type BotCreateResult =
+  | { type: 'created'; bot: BotDomain }
+  | {
+      type: 'created_with_pending_after_create';
+      bot: BotDomain;
+      afterCreateFailures: Array<{ key: string; retryable: boolean; message: string }>;
+    }
+  | BotCreateAuthorization;
 
 export interface BotCreateAuthorizationPollResult {
   status: string;
   message?: string;
   bot?: BotDomain;
+  afterCreateFailures?: Array<{ key: string; retryable: boolean; message: string }>;
 }
 
 export type BotAction =

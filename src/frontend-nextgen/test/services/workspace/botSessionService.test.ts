@@ -233,3 +233,52 @@ describe('botSessionService', () => {
     expect(res.ok && res.data.model).toBe('openai/gpt-5.3');
   });
 });
+
+it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参数', async () => {
+  const bot = {
+    botId: '20260402_ab:2088',
+    realBotId: '20260402_ab',
+    ownerId: '2088',
+    displayName: 'B',
+    online: true,
+    chatable: true,
+  };
+  mocked.listBotSessions.mockResolvedValue({
+    code: 200000,
+    data: {
+      items: [
+        {
+          session_id: 'sid-1',
+          title: '标题_sid-1',
+          agent_id: '',
+          model: '',
+          message_count: 1,
+          gmt_create: '',
+          gmt_modified: '',
+        },
+      ],
+      total: 12,
+    },
+  });
+  const all = await botSessionService.listSessionsPage(bot, 'human_327325', 2, 10);
+  expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
+    user_id: '327325',
+    owner_id: '2088',
+    page: 2,
+    page_size: 10,
+  });
+  expect(all).toMatchObject({ ok: true, data: { total: 12, items: [{ title: '标题' }] } });
+
+  mocked.listFavoriteSessions.mockResolvedValue({
+    code: 200000,
+    data: {
+      items: [{ session_id: 'sid-f', title: '收藏标题_sid-f', message_count: 2, gmt_create: '', gmt_modified: '' }],
+      total: 1,
+    },
+  });
+  const favorites = await botSessionService.listFavoriteSessionsPage(bot, 'human_327325', 1, 10);
+  expect(favorites).toMatchObject({
+    ok: true,
+    data: { total: 1, items: [{ sessionId: 'sid-f', title: '收藏标题', favorite: true }] },
+  });
+});

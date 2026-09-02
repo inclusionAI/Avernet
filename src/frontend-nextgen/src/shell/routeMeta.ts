@@ -51,6 +51,13 @@ export const routeMetaList: RouteMeta[] = [
     openCore: true,
   },
   {
+    path: '/collaboration-square/tasks',
+    title: '协作广场任务',
+    section: 'work',
+    navKey: 'collaboration-square',
+    openCore: true,
+  },
+  {
     path: '/collaboration-privacy',
     title: '协作权限',
     section: 'work',

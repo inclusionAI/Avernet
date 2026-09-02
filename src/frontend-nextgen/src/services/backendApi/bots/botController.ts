@@ -202,3 +202,16 @@ export function restartLocalBot(bot_id: string) {
     params: userScopedParams(),
   });
 }
+
+/** AgentCoding 创建后的架构 Bot 扩展写入。动作 key 由 Service 白名单映射后才能调用。 */
+export function updateBotExt(bot_id: string, body: BackendUnknownRecord) {
+  return backendRequest<BackendApiEnvelope<BackendUnknownRecord>>(
+    `/api/public/bots/${encodeURIComponent(bot_id)}/ext`,
+    {
+      method: 'PATCH',
+      data: body,
+      operation: 'agent-coding-after-create',
+      target: 'legacy-agentclaw',
+    },
+  );
+}

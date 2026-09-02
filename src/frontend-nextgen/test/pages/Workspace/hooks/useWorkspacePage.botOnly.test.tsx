@@ -2,8 +2,8 @@
 import { useWorkspacePage } from '@/pages/Workspace/hooks/useWorkspacePage';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useSearchParams } from '@umijs/max';
 import { act, renderHook } from '@testing-library/react';
+import { useSearchParams } from '@umijs/max';
 
 jest.mock('@umijs/max', () => ({
   history: { replace: jest.fn() },

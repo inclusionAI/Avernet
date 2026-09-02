@@ -12,6 +12,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { useAgentCodingTemplates } from './useAgentCodingTemplates';
 import { useBotCreateAuthorization } from './useBotCreateAuthorization';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
 
@@ -28,6 +29,7 @@ export function useBotWorkshop() {
   const loadSequence = useRef(0);
   const [creating, setCreating] = useState(false);
   const { keyword, engine, deployment, serviceMode, page, pageSize } = state;
+  const agentCodingTemplates = useAgentCodingTemplates(state.createScenario === 'cloud');
   const currentUser = getCapabilities().getCurrentOpenApiUserId({ activeIdentityId });
   const currentOpenApiUserId = currentUser.status === 'available' ? currentUser.value?.trim() || undefined : undefined;
   const load = useCallback(async () => {
@@ -96,6 +98,10 @@ export function useBotWorkshop() {
         if (result.type === 'authorization_required') {
           createAuthorization.beginAuthorization(result);
           return;
+        }
+        if (result.type === 'created_with_pending_after_create') {
+          const actions = result.afterCreateFailures.map((failure) => failure.key).join('、');
+          toast.warning(`Bot 已创建，但后续配置未全部完成${actions ? `：${actions}` : ''}`);
         }
         await handleCreated(result.bot);
       } catch (error) {
@@ -172,8 +178,7 @@ export function useBotWorkshop() {
       toast.error('用户身份未加载完成，请稍后重试');
       return;
     }
-    const botId =
-      bot.id.includes(':') || !bot.ownerId ? bot.id : `${bot.id}:${bot.ownerId}`;
+    const botId = bot.id.includes(':') || !bot.ownerId ? bot.id : `${bot.id}:${bot.ownerId}`;
     workspaceService.persistIdentity(user.id);
     current.setActiveIdentityId(user.id);
     const workspace = useWorkspaceStore.getState();
@@ -203,6 +208,10 @@ export function useBotWorkshop() {
     },
     creating,
     createAuthorization: createAuthorization.authorization,
+    agentCodingTemplates: agentCodingTemplates.templates,
+    agentCodingTemplatesLoading: agentCodingTemplates.loading,
+    agentCodingTemplatesError: agentCodingTemplates.error,
+    retryAgentCodingTemplates: agentCodingTemplates.retry,
     createSpaces: state.createScenario
       ? botWorkshopService.getCreateSpaces(
           state.createScenario,

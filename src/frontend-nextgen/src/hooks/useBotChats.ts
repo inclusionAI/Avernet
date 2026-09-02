@@ -105,10 +105,15 @@ export function useBotChats() {
     // The related list already came from the session query. Clicking a related
     // trace should only load that trace's detail, not query the same session again.
     const sessionId = selectedSessionId;
+    const preserveRelated = !isListSelection && !groupId;
     const detailRequest = sessionId
-      ? botChatService.detail(context, traceId, groupId, sourceBotId, sessionId)
+      ? botChatService.detail(context, traceId, groupId, sourceBotId, sessionId, preserveRelated)
       : sourceBotId
-      ? botChatService.detail(context, traceId, groupId, sourceBotId)
+      ? preserveRelated
+        ? botChatService.detail(context, traceId, groupId, sourceBotId, undefined, true)
+        : botChatService.detail(context, traceId, groupId, sourceBotId)
+      : preserveRelated
+      ? botChatService.detail(context, traceId, groupId, undefined, undefined, true)
       : botChatService.detail(context, traceId, groupId);
     const detail = await detailRequest.catch(() => undefined);
     if (detail) {

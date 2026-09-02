@@ -178,6 +178,8 @@ it('从 session 关联列表打开 Trace 时直接请求详情，不重复查询
     'related-trace',
     undefined,
     'viewer-bot',
+    undefined,
+    true,
   );
   expect(mockedRelated).not.toHaveBeenCalled();
 });

@@ -60,6 +60,21 @@ export function useBotSessionFilesFeature(
     [insertChips],
   );
 
+  const addReadyUploadsToSession = useCallback(() => {
+    const readyTasks = upload.tasks.filter((task) => task.phase === 'ready' && task.resourceId);
+    if (readyTasks.length === 0) {
+      toast.warning('暂无已完成上传的文件可添加');
+      return;
+    }
+    senderRef.current?.insertFileChips?.(
+      readyTasks.map((task) => ({ resource_id: task.resourceId as string, display_name: task.name })),
+    );
+    senderRef.current?.focus?.();
+    readyTasks.forEach((task) => upload.removeTask(task.localId));
+    setUploadOpen(false);
+    toast.success(`已添加 ${readyTasks.length} 个文件至会话`);
+  }, [upload.removeTask, upload.tasks]);
+
   const handleSelectSkill = useCallback((skillName: string) => {
     senderRef.current?.insert(`/${skillName} `, 'end');
     senderRef.current?.focus?.();
@@ -192,6 +207,7 @@ export function useBotSessionFilesFeature(
         submit={async () => {
           await upload.submit();
         }}
+        onAddToSession={addReadyUploadsToSession}
         removeTask={upload.removeTask}
       />
       <BotSessionFilesModal

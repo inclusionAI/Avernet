@@ -6,6 +6,7 @@ import {
   isNonMessageGroupContent,
   resolveMasterBot,
   shouldCollapseMessage,
+  sortMessagesByTimestamp,
   type GroupMessage,
 } from '@/assets/TaskPanel/GroupDrillDown';
 import { describe, expect, it, jest } from '@jest/globals';
@@ -49,6 +50,20 @@ describe('GroupDrillDown message filtering', () => {
     expect(isNonMessageGroupContent(normalMessage)).toBe(false);
     expect(filterGroupMessages([systemMessage, systemBotMessage, contextMessage, normalMessage])).toEqual([
       normalMessage,
+    ]);
+  });
+});
+
+describe('GroupDrillDown message ordering', () => {
+  it('按消息时间递增展示群消息，接口倒序返回时也能纠正', () => {
+    const newest = makeMessage({ id: 'newest', content: '较晚消息', timestamp: '2026-08-22T10:03:00+08:00' });
+    const oldest = makeMessage({ id: 'oldest', content: '较早消息', timestamp: '2026-08-22T10:01:00+08:00' });
+    const middle = makeMessage({ id: 'middle', content: '中间消息', timestamp: '2026-08-22T10:02:00+08:00' });
+
+    expect(sortMessagesByTimestamp([newest, middle, oldest]).map((message) => message.id)).toEqual([
+      'oldest',
+      'middle',
+      'newest',
     ]);
   });
 });
@@ -196,6 +211,64 @@ describe('GroupDrillDown message typography', () => {
       expect(screen.getByText('一'.repeat(201))).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '收起消息' }));
       expect(screen.getByRole('button', { name: '展开消息' })).toBeInTheDocument();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+});
+
+describe('GroupSessionView root session fallback', () => {
+  it('run_mode=coop_group 但缺少 groupId 时仍按 sessionId 请求群消息', async () => {
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn<(...args: Parameters<typeof fetch>) => Promise<Response>>();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          items: [
+            {
+              id: 'message-root',
+              sender: 'root-bot',
+              message_type: 'bot',
+              content: '根节点协作群消息',
+              timestamp: 1,
+            },
+          ],
+        },
+      }),
+    } as Response);
+    global.fetch = fetchMock;
+
+    try {
+      render(
+        <GroupSessionView
+          node={{
+            id: 'root-node',
+            name: '根节点',
+            sequence: 1,
+            status: 'running',
+            executor: 'root-bot',
+            assignee: 'root-bot',
+            runMode: 'coop_group',
+            sessionId: 'bcs_grp_root:round-1',
+            hasSubTask: false,
+            subTaskId: null,
+            stepTraces: [],
+            acceptanceResult: null,
+            artifacts: [],
+          }}
+          bcsBaseUrl=""
+          apiBaseUrl=""
+          userId="user-1"
+          onBack={jest.fn()}
+        />,
+      );
+
+      expect(await screen.findByText('根节点协作群消息')).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/openapi/v1/collaboration/sessions/bcs_grp_root%3Around-1/messages'),
+        expect.objectContaining({ credentials: 'include' }),
+      );
     } finally {
       global.fetch = originalFetch;
     }

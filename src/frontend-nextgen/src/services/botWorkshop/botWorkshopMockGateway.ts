@@ -15,7 +15,8 @@ const seedBots: BackendUnknownRecord[] = [
     bot_id: 'mock-bot-002',
     bot_name: '服务巡检助手',
     bot_desc: '定时检查服务状态并整理异常信息。',
-    engine: 'teclaw',
+    // 云端服务化样例：仅用当前形态可选引擎（Open Core 见 getBotEngineOptions），不用 teclaw 等内部引擎。
+    engine: 'openclaw',
     bot_type: 'service',
     status: 'ACTIVE',
     publish_status: 'success',
@@ -38,7 +39,7 @@ const seedBots: BackendUnknownRecord[] = [
     bot_id: 'mock-bot-004',
     bot_name: '研究提纲助手',
     bot_desc: '将研究目标拆解为可执行的调研提纲。',
-    engine: 'hermes',
+    engine: 'claude_code',
     bot_type: 'personal',
     status: 'ACTIVE',
     owner_entity_id: 'personal-space',
@@ -58,7 +59,8 @@ const seedBots: BackendUnknownRecord[] = [
     bot_id: 'mock-bot-006',
     bot_name: '数据核对助手',
     bot_desc: '核对结构化数据中的缺失项与异常项。',
-    engine: 'teclaw',
+    // 个人非服务化样例（claude_code 原生个人引擎）。
+    engine: 'claude_code',
     bot_type: 'personal',
     status: 'PENDING',
     owner_entity_id: 'personal-space',

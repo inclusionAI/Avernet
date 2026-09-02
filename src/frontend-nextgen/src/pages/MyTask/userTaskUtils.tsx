@@ -124,8 +124,18 @@ export function taskTypeBadge(type: string) {
   return <Badge tone="primary">{taskTypeLabelMap[type] ?? type}</Badge>;
 }
 
+export function getUserTaskTypeLabel(taskType?: string | null): string {
+  if (!taskType) return '—';
+  return taskTypeLabelMap[taskType] ?? taskType;
+}
+
+export function getUserTaskSourceLabel(sourceType?: string | null): string {
+  if (!sourceType) return '—';
+  return sourceTypeLabelMap[sourceType] ?? sourceType;
+}
+
 export function sourceTypeBadge(sourceType: string) {
-  return <Badge tone="neutral">{sourceTypeLabelMap[sourceType] ?? sourceType}</Badge>;
+  return <Badge tone="neutral">{getUserTaskSourceLabel(sourceType)}</Badge>;
 }
 
 export function getUserTaskTitle(record: any): string {

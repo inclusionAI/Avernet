@@ -1,6 +1,57 @@
 export type BotRelationshipStatus = 'none' | 'applying' | 'friend';
-export type SquareResource = 'bot' | 'group';
+export type SquareResource = 'bot' | 'group' | 'task';
 export type BotSearchMode = 'name' | 'smart';
+
+/**
+ * 任务广场（只读浏览）四种公开状态。来源语义为 BBS 接力（求助）发布到广场的公开任务，
+ * 本档只消费广场只读四态，不建模任务生命周期。
+ */
+export type PlazaTaskStatus = 'pending_claim' | 'claimed' | 'reviewing' | 'completed';
+/** 状态筛选：`'all'` 表示不限。 */
+export type TaskStatusFilter = 'all' | PlazaTaskStatus;
+/** 状态徽标语义 tone，配合文案双通道呈现，避免仅依赖颜色。 */
+export type TaskStatusTone = 'warning' | 'brand' | 'info' | 'success';
+
+export interface PublicTask {
+  id: string;
+  name: string;
+  goal: string;
+  acceptanceCriteria: string[];
+  status: PlazaTaskStatus;
+  /** 发布者展示名。BBS 端点 publisher 为 null（系统任务等）时为 undefined。 */
+  publisherBotName?: string;
+  publishedAt: string;
+  claimedBotName?: string;
+  claimedAt?: string;
+  completedAt?: string;
+}
+
+export interface PublicTaskSearchQuery {
+  /** 命中任务名称或任务目标，大小写不敏感。 */
+  search?: string;
+  /** 状态筛选，`'all'` 表示不限。 */
+  status?: TaskStatusFilter;
+  offset?: number;
+  limit?: number;
+}
+
+export interface PublicTaskPage {
+  items: PublicTask[];
+  total: number;
+}
+
+/** 任务广场状态文案与语义 tone 的固定映射（文字 + 语义徽标双通道）。 */
+export const TASK_STATUS_CONFIG: Record<PlazaTaskStatus, { label: string; tone: TaskStatusTone }> = {
+  pending_claim: { label: '待认领', tone: 'warning' },
+  claimed: { label: '已认领', tone: 'brand' },
+  reviewing: { label: '待验收', tone: 'info' },
+  completed: { label: '已完成', tone: 'success' },
+};
+
+/** 返回广场任务状态的展示信息（label + tone），对齐既有 {@link getPublicBotTargetId} 纯函数范式。 */
+export function getPublicTaskStatusPresentation(status: PlazaTaskStatus): { label: string; tone: TaskStatusTone } {
+  return TASK_STATUS_CONFIG[status];
+}
 
 /**
  * Catalog 检索时的当前身份（read-time viewer）。跟随当前角色 tab：

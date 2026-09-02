@@ -331,14 +331,18 @@ describe('createGroup', () => {
     },
   };
 
-  it('chat strategy maps to GroupCreateChatBody with delivery_policy', async () => {
-    gc.createGroup.mockResolvedValue(baseDetail);
+  it('chat strategy maps originator and preserves initial_session_id', async () => {
+    gc.createGroup.mockResolvedValue({
+      ...baseDetail,
+      data: { ...baseDetail.data, initial_session_id: 'initial-session' },
+    });
     gc.getGroup.mockResolvedValue(baseDetail);
     sc.listGroupSessions.mockResolvedValue({ code: 20000, data: { items: [], total: 0, offset: 0, limit: 50 } });
     const res = await groupService.createGroup({
       name: '我的群',
       strategy: 'chat',
       deliveryPolicy: 'send_to_driver',
+      originator: 'actor-bot',
       driverBotUuid: 'b1',
       participants: [{ actor_id: 'b1' }],
     });
@@ -346,12 +350,14 @@ describe('createGroup', () => {
       expect.objectContaining({
         group_kind: 'normal',
         name: '我的群',
+        originator: 'actor-bot',
         driver_bot_uuid: 'b1',
         participants: [{ actor_id: 'b1', role: 'driver' }],
         collaboration: { strategy: 'chat', delivery_policy: { bot_final_delivery: 'send_to_driver' } },
       }),
     );
     expect(res.ok).toBe(true);
+    expect(res.ok && res.data.initialSessionId).toBe('initial-session');
   });
 
   it('state_machine strategy assembles definition.content_yaml + participant_bindings', async () => {
@@ -377,6 +383,7 @@ describe('createGroup', () => {
       strategy: 'state_machine',
       definitionYaml: yaml,
       driverBotUuid: 'b1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'b1' }],
     });
     expect(gc.createGroup).toHaveBeenCalledWith(
@@ -399,6 +406,7 @@ describe('createGroup', () => {
       name: '任务群',
       strategy: 'manager_worker',
       driverBotUuid: 'b1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'b1' }, { actor_id: 'b2' }],
     });
 
@@ -412,6 +420,46 @@ describe('createGroup', () => {
     );
   });
 
+  it.each([
+    ['chat', 'run-driver'],
+    ['manager_worker', 'run-manager'],
+  ] as const)('preserves the %s initial responder run fields from the create response', async (strategy, runId) => {
+    gc.createGroup.mockResolvedValue({
+      ...baseDetail,
+      data: {
+        ...baseDetail.data,
+        initial_session_id: 'session-initial',
+        initial_run: {
+          run_id: runId,
+          bot_uuid: 'b1',
+          activity_kind: 'group_bootstrap',
+          state: 'running',
+          started_at: '2026-08-31T00:00:00Z',
+        },
+      },
+    });
+    gc.getGroup.mockResolvedValue(baseDetail);
+    sc.listGroupSessions.mockResolvedValue({ code: 20000, data: { items: [], total: 0, offset: 0, limit: 50 } });
+
+    const res = await groupService.createGroup({
+      name: '协作群',
+      strategy,
+      driverBotUuid: 'b1',
+      originator: 'actor-1',
+      participants: [{ actor_id: 'b1' }],
+    });
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          initialSessionId: 'session-initial',
+          initialRun: expect.objectContaining({ runId, botUuid: 'b1', state: 'running' }),
+        }),
+      }),
+    );
+  });
+
   it('400 maps to friendlyMessage inline', async () => {
     gc.createGroup.mockRejectedValue({ status: 400, message: 'YAML 校验不通过: invalid role' });
     const res = await groupService.createGroup({
@@ -419,6 +467,7 @@ describe('createGroup', () => {
       strategy: 'state_machine',
       definitionYaml: 'a:\n  b',
       driverBotUuid: 'b1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'b1' }],
     });
     expect(res.ok).toBe(false);
@@ -431,6 +480,7 @@ describe('createGroup', () => {
       name: '我的群',
       strategy: 'chat',
       driverBotUuid: 'b1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'b1' }],
     });
     expect(res.ok).toBe(false);

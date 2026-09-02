@@ -1,6 +1,7 @@
 import * as sessionController from '@/services/backendApi/collaboration/sessionController';
 import { buildGroupWsUrl, createGroupChatProvider } from '@/services/workspace/groupChatProvider';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import type { ChatMessage } from '@tc-chat/core';
 
 jest.mock('@/services/backendApi/collaboration/sessionController');
 
@@ -11,26 +12,31 @@ jest.mock('@tc-chat/adapters', () => ({
 }));
 const sc = sessionController as unknown as Record<string, jest.Mock<any>>;
 
-// patch 会替换 transport.send，这里用模块级变量保留原始 send 引用，供帧注入断言转发结果。
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let lastOriginalSend: jest.Mock<any>;
 
 const fakeSdkProvider = jest.fn<any>().mockImplementation((cfg: any) => {
   const send = jest.fn<any>().mockResolvedValue(undefined);
   lastOriginalSend = send;
-  return {
+  const inner: any = {
     config: cfg,
     transport: { send },
     request: jest.fn<any>().mockResolvedValue(undefined),
     abort: jest.fn<any>(),
-    connect: jest.fn<any>().mockResolvedValue(undefined),
+    connect: jest.fn<any>(),
     disconnect: jest.fn<any>(),
     onMessage: undefined,
     onComplete: undefined,
     onError: undefined,
     isConnected: false,
+    hydrateRun: jest.fn<any>((message: ChatMessage) => message),
+    beginHistoryHydration: jest.fn<any>(),
+    enterLiveMode: jest.fn<any>(),
     subscribeToConnectionStatus: jest.fn<any>(() => jest.fn<any>()),
   };
+  inner.connect.mockImplementation(async () => {
+    inner.isConnected = true;
+  });
+  return inner;
 });
 
 beforeEach(() => {
@@ -39,19 +45,26 @@ beforeEach(() => {
   fakeSdkProvider.mockImplementation((cfg: any) => {
     const send = jest.fn<any>().mockResolvedValue(undefined);
     lastOriginalSend = send;
-    return {
+    const inner: any = {
       config: cfg,
       transport: { send },
       request: jest.fn<any>().mockResolvedValue(undefined),
       abort: jest.fn<any>(),
-      connect: jest.fn<any>().mockResolvedValue(undefined),
+      connect: jest.fn<any>(),
       disconnect: jest.fn<any>(),
       onMessage: undefined,
       onComplete: undefined,
       onError: undefined,
       isConnected: false,
+      hydrateRun: jest.fn<any>((message: ChatMessage) => message),
+      beginHistoryHydration: jest.fn<any>(),
+      enterLiveMode: jest.fn<any>(),
       subscribeToConnectionStatus: jest.fn<any>(() => jest.fn<any>()),
     };
+    inner.connect.mockImplementation(async () => {
+      inner.isConnected = true;
+    });
+    return inner;
   });
 });
 
@@ -92,6 +105,34 @@ describe('groupChatProvider', () => {
     expect(provider.supportState.error).toBe('401');
   });
 
+  it('SDK connect Promise 成功但底层未连接时，不误报为已连接', async () => {
+    sc.createSessionToken.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { token: 'tk', expires_at: 999 },
+    });
+    const disconnectedSdk = jest.fn<any>().mockImplementation((cfg: any) => ({
+      config: cfg,
+      connect: jest.fn<any>().mockResolvedValue(undefined),
+      disconnect: jest.fn<any>(),
+      request: jest.fn<any>(),
+      abort: jest.fn<any>(),
+      isConnected: false,
+      subscribeToConnectionStatus: jest.fn<any>(() => jest.fn<any>()),
+    }));
+    const provider = createGroupChatProvider({
+      sessionId: 's-disconnected',
+      groupId: 'g1',
+      identityId: 'me',
+      createSdkProvider: disconnectedSdk,
+      wsOrigin: 'wss://x.test',
+    });
+
+    await expect(provider.connect()).rejects.toThrow('协作会话 WebSocket 未建立');
+    expect(provider.supportState).toEqual({ phase: 'error', error: '协作会话 WebSocket 未建立。' });
+  });
+
   // 集成层（通过 fakeSdkProvider 注入）：attach 只取一次 token，再 connect
   it('creates SDK provider once with token-loaded URL, then forwards request/stop', async () => {
     sc.createSessionToken.mockResolvedValue({
@@ -117,19 +158,26 @@ describe('groupChatProvider', () => {
     });
     await provider.connect();
     expect(fakeSdkProvider).toHaveBeenCalledTimes(1);
-    const cfg = fakeSdkProvider.mock.calls[0][0] as { url: string; currentUserId: string; groupId: string };
+    const cfg = fakeSdkProvider.mock.calls[0][0] as {
+      url: string;
+      currentUserId: string;
+      groupId: string;
+      sessionId: string;
+    };
     expect(cfg.url).toBe('wss://x.test/openapi/v1/collaboration/messages/ws?token=tk');
     expect(cfg.currentUserId).toBe('me');
     expect(cfg.groupId).toBe('g1');
+    expect(cfg.sessionId).toBe('s1');
 
     // BCS 协议：connect 携带 groupId（SDK connect 帧 = { group_id }）
     const inner = provider as unknown as { inner: { connect: jest.Mock; request: jest.Mock; abort: jest.Mock } };
-    expect(inner.inner.connect).toHaveBeenCalledWith({ groupId: 'g1' });
+    expect(inner.inner.connect).toHaveBeenCalledWith({ groupId: 'g1', sessionId: 's1' });
 
     await provider.request({ content: 'hi', sessionId: 's1' });
     expect(inner.inner.request).toHaveBeenCalledWith({
       query: 'hi',
       groupId: 'g1',
+      sessionId: 's1',
       senderId: 'me',
       botUuid: 'human_me',
     });
@@ -164,6 +212,7 @@ describe('groupChatProvider', () => {
     expect(inner.inner.request).toHaveBeenCalledWith({
       query: '@波士顿龙虾 你在干嘛',
       groupId: 'g1',
+      sessionId: 's1',
       senderId: '327325',
       botUuid: 'human_327325',
       mentions: ['20260528_udt1y38n:327325'],
@@ -205,16 +254,14 @@ describe('groupChatProvider', () => {
     expect(inner.inner.request).toHaveBeenCalledWith({
       query: '看图',
       groupId: 'g1',
+      sessionId: 's1',
       senderId: '327325',
       botUuid: 'human_327325',
       attachments,
     });
   });
 
-  // 会话级 WS 帧注入：对齐旧「我的协作」页面——SDK 的 connect/chat.send 帧未带 session_id 时，
-  // 消息会落到 'main' 会话；wrapper 必须拦截 transport.send 注入 session_id，
-  // 并把 chat.send 的 sessionKey 从硬编码 'main' 替换为 sessionId。
-  it('patches transport.send to inject session_id into connect and chat.send frames', async () => {
+  it('通过兼容适配器为 SDK connect/chat.send 帧注入当前 session', async () => {
     sc.createSessionToken.mockResolvedValue({
       code: 20000,
       message: '',
@@ -232,20 +279,27 @@ describe('groupChatProvider', () => {
     });
     await provider.connect();
     const inner = provider as unknown as {
-      inner: { transport: { send: jest.Mock } };
+      inner: { connect: jest.Mock; beginHistoryHydration: jest.Mock; transport: { send: jest.Mock } };
     };
-    const transportSend = inner.inner.transport.send;
+    expect(inner.inner.connect).toHaveBeenCalledWith({ groupId: 'g1', sessionId: 's1' });
+    expect(inner.inner.beginHistoryHydration).toHaveBeenCalled();
 
-    // connect 帧：注入 session_id（group_id 由 SDK 自带）
-    await transportSend({ type: 'req', id: 'f1', method: 'connect', params: { group_id: 'g1' } });
+    await inner.inner.transport.send({
+      type: 'req',
+      id: 'connect-1',
+      method: 'connect',
+      params: { group_id: 'g1' },
+    });
     expect(lastOriginalSend).toHaveBeenCalledWith(
-      expect.objectContaining({ method: 'connect', params: { group_id: 'g1', session_id: 's1' } }),
+      expect.objectContaining({
+        method: 'connect',
+        params: { group_id: 'g1', session_id: 's1' },
+      }),
     );
 
-    // chat.send 帧：注入 session_id，并把 sessionKey 从 'main' 替换为 sessionId
-    await transportSend({
+    await inner.inner.transport.send({
       type: 'req',
-      id: 'f2',
+      id: 'send-1',
       method: 'chat.send',
       params: { group_id: 'g1', sessionKey: 'main', message: 'hi' },
     });
@@ -255,6 +309,131 @@ describe('groupChatProvider', () => {
         params: { group_id: 'g1', sessionKey: 's1', session_id: 's1', message: 'hi' },
       }),
     );
+  });
+
+  it('断开后重连会重新获取 token、创建新的 SDK provider 并断开旧 provider', async () => {
+    sc.createSessionToken
+      .mockResolvedValueOnce({
+        code: 20000,
+        message: '',
+        request_id: 'r1',
+        data: { token: 'tk-1', expires_at: 999 },
+      })
+      .mockResolvedValueOnce({
+        code: 20000,
+        message: '',
+        request_id: 'r2',
+        data: { token: 'tk-2', expires_at: 1000 },
+      });
+    const provider = createGroupChatProvider({
+      sessionId: 's-reconnect',
+      groupId: 'g1',
+      identityId: 'me',
+      createSdkProvider: fakeSdkProvider as unknown as Parameters<
+        typeof createGroupChatProvider
+      >[0]['createSdkProvider'],
+      wsOrigin: 'wss://x.test',
+    });
+
+    await provider.connect();
+    const firstInner = (provider as unknown as { inner: { disconnect: jest.Mock } }).inner;
+    await provider.reconnect();
+    const secondInner = (provider as unknown as { inner: { disconnect: jest.Mock } }).inner;
+
+    expect(sc.createSessionToken).toHaveBeenCalledTimes(2);
+    expect(fakeSdkProvider).toHaveBeenCalledTimes(2);
+    expect(firstInner.disconnect).toHaveBeenCalledTimes(1);
+    expect(fakeSdkProvider.mock.calls[1][0].url).toBe('wss://x.test/openapi/v1/collaboration/messages/ws?token=tk-2');
+    expect(secondInner).not.toBe(firstInner);
+  });
+
+  it('兼容不提供 hydration 扩展能力的 SDK 版本', async () => {
+    sc.createSessionToken.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { token: 'tk', expires_at: 999 },
+    });
+    sc.listSessionMessages.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: [
+        {
+          id: 'm1',
+          timestamp: 1_700_000_000_100,
+          sender: 'user-1',
+          content: '历史消息',
+          message_type: 'human',
+          role: 'user',
+        },
+      ],
+    });
+    const sdkWithoutHydration = jest.fn<any>().mockImplementation((cfg: any) => {
+      const inner: any = {
+        config: cfg,
+        request: jest.fn<any>().mockResolvedValue(undefined),
+        abort: jest.fn<any>(),
+        connect: jest.fn<any>(),
+        disconnect: jest.fn<any>(),
+        onMessage: undefined,
+        onComplete: undefined,
+        onError: undefined,
+        isConnected: false,
+        subscribeToConnectionStatus: jest.fn<any>(() => jest.fn<any>()),
+      };
+      inner.connect.mockImplementation(async () => {
+        inner.isConnected = true;
+      });
+      return inner;
+    });
+    const provider = createGroupChatProvider({
+      sessionId: 's-legacy-sdk',
+      groupId: 'g1',
+      identityId: 'me',
+      createSdkProvider: sdkWithoutHydration,
+      wsOrigin: 'wss://x.test',
+    });
+
+    await expect(provider.connect()).resolves.toBeUndefined();
+    await expect(provider.loadHistory()).resolves.toHaveLength(1);
+    expect(sdkWithoutHydration).toHaveBeenCalledTimes(1);
+
+    // wrapper 自己的 hydration 状态仍可安全切换；底层缺少扩展方法不应抛错。
+    expect(() => provider.beginHistoryHydration()).not.toThrow();
+    expect(() => provider.enterLiveMode()).not.toThrow();
+  });
+
+  it('buffers SDK output until history hydration enters live mode', async () => {
+    sc.createSessionToken.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { token: 'tk', expires_at: 999 },
+    });
+    const provider = createGroupChatProvider({
+      sessionId: 's1',
+      groupId: 'g1',
+      identityId: 'me',
+      createSdkProvider: fakeSdkProvider as unknown as Parameters<
+        typeof createGroupChatProvider
+      >[0]['createSdkProvider'],
+      wsOrigin: 'wss://x.test',
+    });
+    const onMessage = jest.fn();
+    provider.onMessage = onMessage;
+    await provider.connect();
+    const inner = provider as unknown as {
+      inner: { onMessage?: (message: ChatMessage) => void; enterLiveMode: jest.Mock };
+    };
+    const liveMessage = { id: 'm1', role: 'assistant', content: 'live', status: 'streaming' } as ChatMessage;
+
+    inner.inner.onMessage?.(liveMessage);
+    expect(onMessage).not.toHaveBeenCalled();
+
+    provider.enterLiveMode();
+    expect(inner.inner.enterLiveMode).toHaveBeenCalled();
+    expect(onMessage).toHaveBeenCalledWith(liveMessage);
   });
 
   it('concurrent connect shares initializePromise — token fetched once', async () => {
@@ -356,6 +535,7 @@ describe('groupChatProvider', () => {
     expect(sc.listSessionMessages).toHaveBeenCalledWith('s-hist', {
       limit: 50,
       view_bot_id: 'me',
+      include_pending: true,
     });
     // (a) 升序 createdAt：旧→新
     expect(history.map((m) => m.createdAt)).toEqual([1700000000100, 1700000000101, 1700000000200, 1700000000201]);
@@ -399,13 +579,18 @@ describe('groupChatProvider', () => {
       sessionId: 's-page',
       groupId: 'g1',
       identityId: 'me',
+      createSdkProvider: fakeSdkProvider,
       wsOrigin: 'wss://x.test',
     });
     const history = await provider.loadHistory();
     expect(history).toHaveLength(50);
     // 满页 → 还有更早消息可加载；首屏不带 before 游标。
     expect(provider.hasMoreHistory).toBe(true);
-    expect(sc.listSessionMessages).toHaveBeenLastCalledWith('s-page', { limit: 50, view_bot_id: 'me' });
+    expect(sc.listSessionMessages).toHaveBeenLastCalledWith('s-page', {
+      limit: 50,
+      view_bot_id: 'me',
+      include_pending: true,
+    });
 
     // 不足一页场景：另起一个 provider，首屏只回 3 条 → hasMore=false。
     sc.listSessionMessages.mockResolvedValueOnce({
@@ -418,6 +603,7 @@ describe('groupChatProvider', () => {
       sessionId: 's-short',
       groupId: 'g1',
       identityId: 'me',
+      createSdkProvider: fakeSdkProvider,
       wsOrigin: 'wss://x.test',
     });
     await providerShort.loadHistory();
@@ -443,6 +629,7 @@ describe('groupChatProvider', () => {
       sessionId: 's-more',
       groupId: 'g1',
       identityId: 'me',
+      createSdkProvider: fakeSdkProvider,
       wsOrigin: 'wss://x.test',
     });
     await provider.loadHistory();
@@ -465,6 +652,7 @@ describe('groupChatProvider', () => {
       limit: 50,
       before: '1700000000100',
       view_bot_id: 'me',
+      include_pending: true,
     });
     // 翻转为升序旧→新：old1(T0-99) → old3(T0-97)。
     expect(older.map((m) => m.createdAt)).toEqual([T0 - 99, T0 - 98, T0 - 97]);
@@ -490,6 +678,7 @@ describe('groupChatProvider', () => {
       sessionId: 's-empty',
       groupId: 'g1',
       identityId: 'me',
+      createSdkProvider: fakeSdkProvider,
       wsOrigin: 'wss://x.test',
     });
     await provider.loadHistory();

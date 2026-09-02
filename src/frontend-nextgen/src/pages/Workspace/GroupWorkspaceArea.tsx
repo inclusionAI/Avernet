@@ -136,7 +136,10 @@ export function GroupWorkspaceArea({
     });
     setActivePanel('sessionManage');
   };
-  const handleShareGroupFromSidebar = () => toast.info('协作群邀请链接即将生成，请稍候。');
+  const handleShareGroupFromSidebar = (groupId: string) => {
+    ws.onSelectGroup(groupId);
+    return groupManage.createShare(groupId);
+  };
   const handleDissolveGroupFromSidebar = (groupId: string) => void ws.dissolveGroup(groupId);
   // 内流侧栏（≥lg）与 <lg 抽屉共用同一份 props，避免两处分叉。抽屉内选中会话后追加收起。
   const groupSidebarProps: GroupSidebarProps = {
@@ -171,6 +174,7 @@ export function GroupWorkspaceArea({
     favoriteSessionIds: sessions.favoriteSessionIds,
     sessionSearchText: sessions.sessionSearchText,
     onSessionSearchTextChange: sessions.setSessionSearchText,
+    selectedGroupId: ws.selectedGroupId,
     selectedSessionId: sessions.selectedSessionId,
     onSelectSession: (gid, id) => sessions.openSession(gid, id),
     onCreateSession: handleCreateSession,
@@ -214,8 +218,11 @@ export function GroupWorkspaceArea({
         chat={chat.chat}
         supportState={chat.supportState}
         connectionStatus={chat.connectionStatus}
+        groupBootstrapProcessing={chat.groupBootstrapProcessing}
         send={chat.send}
         submitPanelMessage={chat.submitPanelMessage}
+        appendAssistantMessage={chat.appendAssistantMessage}
+        streamAssistantMessage={chat.streamAssistantMessage}
         stop={chat.stop}
         reconnect={chat.reconnect}
         reloadHistory={chat.reloadHistory}

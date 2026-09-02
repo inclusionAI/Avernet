@@ -8,6 +8,7 @@ import type {
   PublicConfig,
 } from '@/domain/collaborationPrivacy/types';
 import type { CollaborationBotDto, OrgDeptDto, OrgUserDto } from '@/services/backendApi';
+import { normalizeEmployeeNumber } from '@/utils/employeeNumber';
 import { mapFriendApprovalAttributesToDomain, mapPublicationApprovalsFromFriendExt } from './friendApprovalAttributes';
 
 export interface DepartmentScopeReference {
@@ -61,7 +62,7 @@ export function readDepartmentScopeReferences(friendExt: unknown, key: string): 
 export function mapOrgUserToIdentity(dto: OrgUserDto): CurrentUserIdentity {
   return {
     displayName: dto.display_name,
-    employeeNumber: dto.user_id,
+    employeeNumber: normalizeEmployeeNumber(dto.user_id),
     departmentPath: dto.dept_name ? [dto.dept_name] : [],
     lastSyncedAt: new Date().toISOString(),
   };

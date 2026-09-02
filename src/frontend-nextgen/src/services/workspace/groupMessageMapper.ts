@@ -1,8 +1,6 @@
-import type {
-  SessionMessageAttachment,
-  SessionMessageData,
-} from '@/services/backendApi/collaboration/sessionController';
-import type { Block, ChatMessage, ImageBlock, TextBlock, ToolExecutionBlock, ToolStep } from '@tc-chat/core';
+import type { SessionMessageData } from '@/services/backendApi/collaboration/sessionController';
+import type { Block, ChatMessage, TextBlock, ToolExecutionBlock, ToolStep } from '@tc-chat/core';
+import { imageAttachmentsToBlocks } from './messageBlockBuilder';
 import { extractMessageContent, isToolError, normalizeTimestamp, type ToolResultMeta } from './messageMapperHelpers';
 import { sessionFileService } from './sessionFileService';
 
@@ -27,6 +25,9 @@ interface MessageMetadata {
   status?: unknown;
   error?: unknown;
   is_error?: unknown;
+  tool_args?: unknown;
+  bcs_pending?: unknown;
+  pending_kind?: unknown;
 }
 
 export type GroupHistoryDto = SessionMessageData & { metadata?: MessageMetadata & ToolResultMeta };
@@ -52,8 +53,16 @@ export function toolResultToToolStep(dto: GroupHistoryDto): ToolStep | null {
     id,
     tool,
     title: tool,
-    status: isToolError(meta) ? 'error' : 'success',
-    input: meta.arguments === undefined ? undefined : JSON.stringify(meta.arguments),
+    status:
+      (dto.metadata as MessageMetadata | undefined)?.bcs_pending === true
+        ? 'running'
+        : isToolError(meta)
+        ? 'error'
+        : 'success',
+    input:
+      meta.arguments === undefined && (dto.metadata as MessageMetadata | undefined)?.tool_args === undefined
+        ? undefined
+        : JSON.stringify(meta.arguments ?? (dto.metadata as MessageMetadata | undefined)?.tool_args),
     output: extractMessageContent(meta.result ?? dto.content) || undefined,
   };
 }
@@ -64,29 +73,48 @@ function isToolResult(item: GroupHistoryDto): boolean {
   return Boolean(meta?.tool_call_id || meta?.tool_name || meta?.is_error);
 }
 
-/** 图片失效/已删（无 url）时展示的占位图（SVG data URL）。 */
-const IMAGE_UNAVAILABLE_PLACEHOLDER =
-  'data:image/svg+xml;charset=utf8,' +
-  encodeURIComponent(
-    `<svg xmlns='http://www.w3.org/2000/svg' width='240' height='160'><rect width='240' height='160' fill='#f1f5f9'/><g fill='none' stroke='#cbd5e1' stroke-width='2'><rect x='90' y='45' width='60' height='50' rx='4'/><circle cx='106' cy='62' r='6' fill='#cbd5e1'/><path d='M90 95 L112 73 L132 90 L150 65 L150 95Z' fill='#cbd5e1'/></g><text x='120' y='125' text-anchor='middle' font-family='sans-serif' font-size='14' fill='#94a3b8'>图片不可用</text></svg>`,
-  );
+function isTerminalToolStatus(status: ToolStep['status']): boolean {
+  return status === 'success' || status === 'error';
+}
 
-/**
- * 把 BCS 图片附件转换为 SDK ImageBlock[]（对齐 open-claw「我的协作」展示方式）。
- * 有 url 直接以 share_url 作 <img src>；无 url（图片已删/失效）展示占位图。
- */
-function attachmentsToBlocks(attachments?: SessionMessageAttachment[], sessionId?: string): ImageBlock[] {
-  if (!attachments || attachments.length === 0) return [];
-  return attachments
-    .filter((att) => att.type === 'image')
-    .map((att) => ({
-      type: 'image' as const,
-      data:
-        (sessionId && att.attachment_id ? sessionFileService.buildContentUrl(sessionId, att.attachment_id) : att.url) ||
-        IMAGE_UNAVAILABLE_PLACEHOLDER,
-      name: att.file_name ?? 'image',
-      mimeType: att.mime_type ?? 'image/png',
-    }));
+/** 按 tool_call_id 更新已有步骤；新步骤只并入尾部连续的 tool block。 */
+function upsertToolStep(blocks: Block[], incoming: ToolStep): Block[] {
+  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+    const block = blocks[blockIndex];
+    if (block.type !== 'tool_execution') continue;
+    const toolBlock = block as ToolExecutionBlock;
+    const stepIndex = toolBlock.steps.findIndex((step) => step.id === incoming.id);
+    if (stepIndex < 0) continue;
+
+    const existing = toolBlock.steps[stepIndex];
+    const preserveTerminal = isTerminalToolStatus(existing.status) && !isTerminalToolStatus(incoming.status);
+    const merged: ToolStep = preserveTerminal
+      ? {
+          ...existing,
+          tool: incoming.tool || existing.tool,
+          title: incoming.title || existing.title,
+          input: incoming.input ?? existing.input,
+        }
+      : {
+          ...existing,
+          ...incoming,
+          input: incoming.input ?? existing.input,
+          output: incoming.output ?? existing.output,
+        };
+    const steps = toolBlock.steps.map((step, index) => (index === stepIndex ? merged : step));
+    return blocks.map((item, index) => (index === blockIndex ? { ...toolBlock, steps } : item));
+  }
+
+  const lastIndex = blocks.length - 1;
+  const lastBlock = blocks[lastIndex];
+  if (lastBlock?.type === 'tool_execution') {
+    return blocks.map((item, index) =>
+      index === lastIndex
+        ? { ...(item as ToolExecutionBlock), steps: [...(item as ToolExecutionBlock).steps, incoming] }
+        : item,
+    );
+  }
+  return [...blocks, { type: 'tool_execution', steps: [incoming] } as ToolExecutionBlock];
 }
 
 /** 优先用 role 字段（与 SDK 对齐），缺失时按 message_type 兜底映射。 */
@@ -106,6 +134,7 @@ function resolveRole(dto: GroupHistoryDto): ChatMessage['role'] | null {
  */
 export function mapGroupHistoryMessages(dtos: GroupHistoryDto[], sessionId?: string): ChatMessage[] {
   const result: ChatMessage[] = [];
+  const assistantByRun = new Map<string, ChatMessage>();
   for (const raw of dtos) {
     const dto = raw as GroupHistoryDto;
     const role = resolveRole(dto);
@@ -113,32 +142,38 @@ export function mapGroupHistoryMessages(dtos: GroupHistoryDto[], sessionId?: str
 
     const id = String(dto.id);
     const content = extractMessageContent(dto.content);
-    const status: ChatMessage['status'] = 'history';
+    const isPending = dto.metadata?.bcs_pending === true;
+    const status: ChatMessage['status'] = isPending ? 'streaming' : 'history';
     const createdAt = normalizeTimestamp(dto.timestamp) ?? 0;
     const roundId = getRoundId(dto);
-    const prev = result[result.length - 1];
+    const runKey = role === 'assistant' && roundId ? `${roundId}\u0000${String(dto.sender ?? '')}` : null;
+    const prev = runKey ? assistantByRun.get(runKey) : undefined;
 
-    // 聚合：相邻 assistant + 同 run_id 的消息合并
-    if (prev && prev.role === 'assistant' && role === 'assistant' && roundId && getRoundId(prev) === roundId) {
+    // 聚合：同一 bot 的同 run_id 消息合并；允许不同 run 的帧交错
+    if (prev) {
       const newStep = isToolResult(dto) ? toolResultToToolStep(dto) : null;
-      const blocks: Block[] = [...(prev.blocks ?? [])];
+      let blocks: Block[] = [...(prev.blocks ?? [])];
+      blocks.push(
+        ...imageAttachmentsToBlocks(dto.attachments, {
+          resolveAttachmentUrl: (attachment) => {
+            const attachmentId = attachment.attachment_id ?? attachment.attachmentId;
+            return sessionId && typeof attachmentId === 'string' && attachmentId
+              ? sessionFileService.buildContentUrl(sessionId, attachmentId)
+              : undefined;
+          },
+        }),
+      );
       if (newStep) {
-        const exists = blocks.some(
-          (b) => b.type === 'tool_execution' && (b as ToolExecutionBlock).steps.some((s) => s.id === newStep.id),
-        );
-        if (!exists) {
-          const existingToolBlock = blocks.find((b) => b.type === 'tool_execution') as ToolExecutionBlock | undefined;
-          if (existingToolBlock) {
-            existingToolBlock.steps = [...existingToolBlock.steps, newStep];
-          } else {
-            blocks.push({ type: 'tool_execution', steps: [newStep] } as ToolExecutionBlock);
-          }
-        }
+        blocks = upsertToolStep(blocks, newStep);
       } else if (content) {
         blocks.push({ type: 'text', content } as TextBlock);
       }
       prev.blocks = blocks;
       prev.content = [...(prev.content ? [prev.content] : []), content].filter(Boolean).join('\n');
+      if (isPending) {
+        prev.status = 'streaming';
+        prev.extra = { ...prev.extra, bcsPending: true, metadata: dto.metadata };
+      }
       continue;
     }
 
@@ -146,7 +181,14 @@ export function mapGroupHistoryMessages(dtos: GroupHistoryDto[], sessionId?: str
     const step = isTool ? toolResultToToolStep(dto) : null;
     const blocks: Block[] = [];
     // 图片附件置顶（图片在上、文本在下），与 open-claw「我的协作」回显一致
-    const imageBlocks = attachmentsToBlocks(dto.attachments, sessionId);
+    const imageBlocks = imageAttachmentsToBlocks(dto.attachments, {
+      resolveAttachmentUrl: (attachment) => {
+        const attachmentId = attachment.attachment_id ?? attachment.attachmentId;
+        return sessionId && typeof attachmentId === 'string' && attachmentId
+          ? sessionFileService.buildContentUrl(sessionId, attachmentId)
+          : undefined;
+      },
+    });
     blocks.push(...imageBlocks);
     if (content && !isTool) {
       blocks.push({ type: 'text', content } as TextBlock);
@@ -159,6 +201,12 @@ export function mapGroupHistoryMessages(dtos: GroupHistoryDto[], sessionId?: str
     if (dto.sender !== undefined) extra.senderId = dto.sender;
     if (typeof dto.bot_name === 'string' && dto.bot_name) extra.botName = dto.bot_name;
     if (roundId) extra.conversationRoundId = roundId;
+    if (roundId) extra.runId = roundId;
+    if (role === 'assistant' && dto.sender !== undefined) extra.botUuid = dto.sender;
+    if (isPending) {
+      extra.bcsPending = true;
+      extra.metadata = dto.metadata;
+    }
 
     const message: ChatMessage = {
       id,
@@ -171,6 +219,7 @@ export function mapGroupHistoryMessages(dtos: GroupHistoryDto[], sessionId?: str
     } as ChatMessage;
 
     result.push(message);
+    if (runKey) assistantByRun.set(runKey, message);
   }
   return result;
 }

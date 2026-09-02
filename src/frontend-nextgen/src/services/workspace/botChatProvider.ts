@@ -2,6 +2,7 @@ import { getBotConnection } from '@/services/backendApi/bots/privateBotSessionCo
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';
 import { OpenClawProvider, type ConnectionStatusEvent, type OpenClawProviderConfig } from '@tc-chat/adapters';
 import type { ChatMessage, ChatProvider, PromptFileRef, ResourceReference } from '@tc-chat/core';
+import { installCompleteFallback } from './botChatCompleteFallback';
 import { botSessionService, resolveUserId, type ChatBotView } from './botSessionService';
 
 export interface BotChatRequest {
@@ -60,6 +61,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private stateListeners = new Set<(state: BotChatState) => void>();
   private unsubscribeInnerConnection?: () => void;
   private state: BotChatState = { phase: 'idle', error: null };
+  private teardownFallback?: () => void;
 
   constructor(options: BotChatProviderOptions) {
     this.options = options;
@@ -148,6 +150,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     inner.onMessage = (message) => this.onMessage?.(message);
     inner.onComplete = (messages) => this.onComplete?.(messages);
     inner.onError = (error) => this.onError?.(error);
+    this.teardownFallback = installCompleteFallback(inner, (msgs) => this.onComplete?.(msgs));
     this.unsubscribeInnerConnection?.();
     this.unsubscribeInnerConnection = inner.subscribeToConnectionStatus((event) => {
       if (event.status === 'connected') this.setState({ phase: 'ready', error: null });
@@ -173,6 +176,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
 
   disconnect(): void {
     if (!this.inner) return;
+    this.teardownFallback?.();
     this.inner.disconnect();
     this.emitConnection({ status: 'disconnected', retryCount: 0 });
   }
@@ -232,6 +236,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     this.inner?.disconnect();
     this.inner = null;
     this.initializePromise = null;
+    this.teardownFallback?.();
     await this.connect();
   }
 

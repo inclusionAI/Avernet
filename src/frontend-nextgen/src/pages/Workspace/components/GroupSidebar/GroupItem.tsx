@@ -1,37 +1,46 @@
-import { Button, Card, IconButton, Skeleton } from '@/components/ui';
+import { Button, IconButton, Skeleton } from '@/components/ui';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/AlertDialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { GroupView, SessionView } from '@/domain/collaboration/types';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
+import type { DomainResult } from '@/services/workspace/identityService';
 import { cn } from '@/utils/cn';
-import { LoaderCircle, MoreHorizontal, Plus, Users } from 'lucide-react';
-import React from 'react';
+import { MoreHorizontal, Plus, Settings2, Share2, Trash2, Users } from 'lucide-react';
+import React, { useState } from 'react';
 import { AvatarTile } from '../AvatarTile';
-import { formatMonthDayTime } from '../SessionCard';
-import { SessionTabs, type SessionTabValue } from '../SessionTabs';
+import { ShareDialog } from '../ManagePanel/ShareDialog';
+import { SessionToolbar } from '../SessionToolbar';
 import { SessionItem } from './SessionItem';
 
-export type SessionTab = SessionTabValue;
+export type SessionTab = 'all' | 'favorite';
 
 interface GroupItemProps {
   group: GroupView;
-  /** 是否展开会话列表（群默认收起，展开后才按需加载会话）。 */
   expanded: boolean;
-  /** 会话列表；undefined 表示首次拉取尚未完成（展示骨架屏）。 */
   sessions: SessionView[] | undefined;
   sessionTab: SessionTab;
   onSessionTabChange: (t: SessionTab) => void;
   favoriteSessionIds: string[];
+  selectedGroupId: string | null;
   selectedSessionId: string | null;
   onSelectGroup: (groupId: string) => void;
   onToggleGroupExpanded: (groupId: string) => void;
-  /** 选中会话——需要带 groupId：跨群点选时上层要同步切换选中群。 */
   onSelectSession: (groupId: string, sessionId: string) => void;
   onToggleFavorite: (sessionId: string) => void;
   onCreateSession: (groupId: string) => void;
   onManageGroup: (groupId: string) => void;
-  /** 会话管理：打开对应会话的管理面板。 */
   onManageSession: (groupId: string, sessionId: string) => void;
-  /** 后端分页返回的总会话数；未提供时回退到已加载数量。 */
+  onShareGroup: (groupId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
+  onDissolveGroup: (groupId: string) => void;
   totalSessionCount?: number;
   hasMoreSessions: boolean;
   isLoadingMoreSessions: boolean;
@@ -44,6 +53,11 @@ const KIND_LABEL: Record<GroupView['kind'], string> = {
   task_dag: '自定义协同',
 };
 
+const MEMBERSHIP_LABEL: Record<NonNullable<GroupView['membership']>, string> = {
+  direct: '固定群成员',
+  session_only: '仅参与临时会话',
+};
+
 export const GroupItem = React.memo(function GroupItem({
   group,
   expanded,
@@ -51,6 +65,7 @@ export const GroupItem = React.memo(function GroupItem({
   sessionTab,
   onSessionTabChange,
   favoriteSessionIds,
+  selectedGroupId,
   selectedSessionId,
   onSelectGroup,
   onToggleGroupExpanded,
@@ -59,155 +74,222 @@ export const GroupItem = React.memo(function GroupItem({
   onCreateSession,
   onManageGroup,
   onManageSession,
+  onShareGroup,
+  onDissolveGroup,
   totalSessionCount,
   hasMoreSessions,
   isLoadingMoreSessions,
   onLoadMoreSessions,
 }: GroupItemProps) {
-  // 点击群卡片：选中该群并切换会话列表的展开/收起，使整个卡片可折叠。
-  const handleCardClick = () => {
-    // 已选中该群时仅切换折叠态，避免 selectGroup 重置 selectedSessionId 导致闪烁。
-    const isSelected = useWorkspaceStore.getState().selectedGroupId === group.groupId;
-    if (!isSelected) onSelectGroup(group.groupId);
-    onToggleGroupExpanded(group.groupId);
-  };
-  const handleCreateSession = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onCreateSession(group.groupId);
-  };
-  // 会话列表加载中时，列表与收藏计数为空占位。
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [dissolveOpen, setDissolveOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
   const loaded = sessions !== undefined;
   const safeSessions = sessions ?? [];
-  // 每群独立的 全部会话/收藏 过滤：仅过滤本群会话列表。
   const visibleSessions =
     sessionTab === 'favorite' ? safeSessions.filter((s) => favoriteSessionIds.includes(s.sessionId)) : safeSessions;
-  // 群创建时间(MM/dd HH:mm),参照会话卡片 dateText 的展示格式;无法解析时为空串 → 不渲染。
-  const createdTime = formatMonthDayTime(group.createdAt);
+  // 群接口只返回当前页会话的收藏状态；仍有下一页时，收藏总数尚不能确定。
+  const favoriteCount = hasMoreSessions
+    ? undefined
+    : safeSessions.filter((s) => favoriteSessionIds.includes(s.sessionId)).length;
+  const membershipLabel = MEMBERSHIP_LABEL[group.membership ?? 'direct'];
+  const selected = selectedGroupId === group.groupId;
+
+  const handleCardClick = () => {
+    if (selectedGroupId !== group.groupId) onSelectGroup(group.groupId);
+    onToggleGroupExpanded(group.groupId);
+  };
+  const handleShare = async () => {
+    setActionsOpen(false);
+    setShareOpen(true);
+    setShareUrl(null);
+    setSharing(true);
+    const result = await onShareGroup(group.groupId);
+    setSharing(false);
+    if (result.ok) setShareUrl(result.data.invitationUrl);
+  };
+  const openDissolveConfirm = () => {
+    setActionsOpen(false);
+    setDissolveOpen(true);
+  };
 
   return (
-    <>
-      <div className="space-y-2">
-        <Card
-          className={cn(
-            'flex items-center gap-1 rounded-lg p-1 transition-colors',
-            expanded && 'border-primary bg-primary/5',
-          )}
+    <div>
+      <div
+        className={cn(
+          'group relative flex min-h-[72px] items-center gap-3 border-b border-transparent px-[18px] py-3 transition-colors',
+          selected ? 'bg-primary/5' : 'bg-transparent hover:bg-accent/50',
+        )}
+      >
+        {selected && (
+          <span aria-hidden="true" className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-sm bg-primary" />
+        )}
+        <Button
+          variant="ghost"
+          aria-label={group.name}
+          aria-expanded={expanded}
+          onClick={handleCardClick}
+          className="flex h-auto min-w-0 flex-1 items-center justify-start gap-2.5 rounded-none px-0 py-1 text-left hover:bg-transparent"
         >
-          <Button
-            variant="ghost"
-            aria-expanded={expanded}
-            onClick={handleCardClick}
-            className="flex h-auto min-w-0 flex-1 items-center justify-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-transparent"
-          >
-            <AvatarTile label={group.name} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1">
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{group.name}</span>
-                    </TooltipTrigger>
-                    <TooltipContent>{group.name}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-                <span className="shrink-0">{KIND_LABEL[group.kind]}</span>
-                <span aria-hidden="true" className="text-muted-foreground/50">
-                  ·
-                </span>
-                {group.membership === 'session_only' && <span className="shrink-0 text-primary">临时会话成员</span>}
-                {group.membership === 'session_only' && (
+          <AvatarTile label={group.name} fallbackContent={<Users className="h-4 w-4" aria-hidden="true" />} />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{group.name}</span>
+                  </TooltipTrigger>
+                  <TooltipContent>{group.name}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs leading-4 text-muted-foreground">
+              {group.isPublic && (
+                <>
+                  <span className="shrink-0 text-primary">公开</span>
                   <span aria-hidden="true" className="text-muted-foreground/50">
                     ·
                   </span>
-                )}
-                <span className="shrink-0">{group.isPublic ? '公开' : '私有'}</span>
-                <span aria-hidden="true" className="text-muted-foreground/50">
-                  ·
-                </span>
-                <span className="inline-flex min-w-0 items-center gap-0.5 truncate">
-                  <Users className="h-3 w-3 shrink-0" />
-                  {group.participantCount} 个成员
-                </span>
-                {createdTime ? (
-                  <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{createdTime}</span>
-                ) : null}
-              </div>
+                </>
+              )}
+              <span className="shrink-0">{KIND_LABEL[group.kind]}</span>
+              <span aria-hidden="true" className="text-muted-foreground/50">
+                ·
+              </span>
+              <span className="shrink-0">{membershipLabel}</span>
             </div>
-          </Button>
-          <div className="flex shrink-0 items-center gap-0.5">
-            <IconButton label="新建会话" size="sm" icon={<Plus className="h-4 w-4" />} onClick={handleCreateSession} />
+          </div>
+        </Button>
+        <IconButton
+          label="新建会话"
+          size="sm"
+          icon={<Plus className="h-4 w-4" />}
+          className="rounded-md"
+          onClick={(event) => {
+            event.stopPropagation();
+            onCreateSession(group.groupId);
+          }}
+        />
+        <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
+          <PopoverTrigger asChild>
             <IconButton
-              label="管理协作群"
+              label="协作群操作"
               size="sm"
               icon={<MoreHorizontal className="h-4 w-4" />}
-              onClick={() => onManageGroup(group.groupId)}
+              className="rounded-md"
+              onClick={(event) => event.stopPropagation()}
             />
-          </div>
-        </Card>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-44 p-1">
+            <Button
+              variant="ghost"
+              className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+              onClick={() => {
+                setActionsOpen(false);
+                onManageGroup(group.groupId);
+              }}
+            >
+              <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+              管理协作群
+            </Button>
+            <Button
+              variant="ghost"
+              className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+              onClick={() => void handleShare()}
+            >
+              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+              分享协作群
+            </Button>
+            <Button
+              variant="ghost"
+              className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs text-destructive"
+              onClick={openDissolveConfirm}
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              解散协作群
+            </Button>
+          </PopoverContent>
+        </Popover>
+      </div>
 
-        {expanded && (
-          <div className="pl-3">
-            <SessionTabs
-              className="w-full border-b border-border/70 pb-1"
-              value={sessionTab}
-              showCount
-              countFormat="suffix"
-              allCount={totalSessionCount ?? safeSessions.length}
-              favoriteCount={safeSessions.filter((s) => favoriteSessionIds.includes(s.sessionId)).length}
-              onChange={onSessionTabChange}
-            />
-            <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
-              {!loaded ? (
-                <div>
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton.Block
-                      key={i}
-                      className="h-14 w-full rounded-none border-b border-border last:border-b-0"
-                    />
-                  ))}
-                </div>
-              ) : visibleSessions.length === 0 ? (
-                <div className="px-3 py-4">
-                  <span className="text-xs text-muted-foreground">
-                    {sessionTab === 'favorite' ? '暂无已收藏会话' : '暂无协作群会话'}
-                  </span>
-                </div>
-              ) : (
-                visibleSessions.map((session) => (
-                  <SessionItem
-                    key={session.sessionId}
-                    session={session}
-                    favorite={favoriteSessionIds.includes(session.sessionId)}
-                    selected={selectedSessionId === session.sessionId}
-                    onSelectSession={(sessionId) => onSelectSession(group.groupId, sessionId)}
-                    onToggleFavorite={onToggleFavorite}
-                    onManageSession={(sessionId) => onManageSession(group.groupId, sessionId)}
-                  />
-                ))
-              )}
-            </div>
-            {hasMoreSessions && (
-              <div className="mt-2 flex justify-center">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={isLoadingMoreSessions}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void onLoadMoreSessions();
-                  }}
-                  className="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
-                  {isLoadingMoreSessions && <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-                  {isLoadingMoreSessions ? '正在加载…' : '加载更多'}
-                </Button>
+      {expanded && (
+        <div aria-label={`协作群会话列表：${group.name}`} className="border-b border-border/60 bg-background">
+          <SessionToolbar
+            value={sessionTab}
+            onChange={onSessionTabChange}
+            allCount={totalSessionCount}
+            favoriteCount={favoriteCount}
+          />
+          <div className="overflow-hidden border-b border-border/60 bg-background">
+            {!loaded ? (
+              <div>
+                {[1, 2, 3].map((i) => (
+                  <Skeleton.Block key={i} className="h-16 w-full rounded-none border-b border-border last:border-b-0" />
+                ))}
               </div>
+            ) : visibleSessions.length === 0 ? (
+              <div className="px-3 py-5">
+                <span className="text-xs text-muted-foreground">
+                  {sessionTab === 'favorite' ? '暂无已收藏会话' : '暂无协作群临时会话'}
+                </span>
+              </div>
+            ) : (
+              visibleSessions.map((session) => (
+                <SessionItem
+                  key={session.sessionId}
+                  session={session}
+                  favorite={favoriteSessionIds.includes(session.sessionId)}
+                  selected={selectedSessionId === session.sessionId}
+                  onSelectSession={(sessionId) => onSelectSession(group.groupId, sessionId)}
+                  onToggleFavorite={onToggleFavorite}
+                  onManageSession={(sessionId) => onManageSession(group.groupId, sessionId)}
+                />
+              ))
             )}
           </div>
-        )}
-      </div>
-    </>
+          {hasMoreSessions && (
+            <div className="flex justify-center border-b border-border/60 px-[18px] pb-1 pt-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={isLoadingMoreSessions}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void onLoadMoreSessions();
+                }}
+                className="h-8 rounded-none px-3 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              >
+                {isLoadingMoreSessions ? '正在加载…' : '加载更多'}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <ShareDialog
+        open={shareOpen}
+        title="协作群"
+        inviting={sharing}
+        invitationUrl={shareUrl}
+        onClose={() => setShareOpen(false)}
+      />
+
+      <AlertDialog open={dissolveOpen} onOpenChange={setDissolveOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>解散协作群</AlertDialogTitle>
+            <AlertDialogDescription>解散后将无法恢复“{group.name}”及其会话，确定继续吗？</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => onDissolveGroup(group.groupId)}>
+              确认解散
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 });

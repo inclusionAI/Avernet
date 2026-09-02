@@ -40,6 +40,21 @@ export interface GroupChatState {
   error: string | null;
 }
 
+type HydrationCapableGroupChatProvider = SdkGroupChatProvider & {
+  beginHistoryHydration?: () => void;
+  enterLiveMode?: () => void;
+  hydrateRun?: (message: ChatMessage) => ChatMessage;
+};
+
+type SessionFrame = {
+  method?: string;
+  params?: Record<string, unknown>;
+};
+
+type SessionFrameTransport = {
+  send: (frame: unknown) => Promise<unknown>;
+};
+
 interface GroupChatProviderOptions {
   sessionId: string;
   /** 群 ID——BCS connect 帧的 group_id（旧「我的协作」协议）。 */
@@ -55,7 +70,7 @@ interface GroupChatProviderOptions {
  * 协作群对话 Provider——封装 SDK GroupChatProvider（BCS 协议）生命周期：
  *  - 一次性拉取 session token（共享 initializePromise，并发 connect 不重发）
  *  - 依据 token 构造同源 ws URL，注入 SDK Provider
- *  - connect 帧携带 group_id；transport.send 拦截注入 session_id（对齐旧「我的协作」页面）
+ *  - connect/chat.send 帧通过兼容适配器补齐 session_id（当前 SDK 未原生支持 sessionId）
  *  - 转发连接状态、loadHistory 委托 GroupChatHistoryPaginator 走 collaboration sessionController
  *
  * 不含 IAM 轮询——新网关 token 已携带调用者身份。
@@ -75,6 +90,11 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   private stateListeners = new Set<(state: GroupChatState) => void>();
   private unsubscribeInnerConnection?: () => void;
   private state: GroupChatState = { phase: 'idle', error: null };
+  private bufferLiveEvents = true;
+  private historyHydrationActive = true;
+  private bufferedEvents: Array<
+    { kind: 'message'; message: ChatMessage } | { kind: 'complete'; messages: ChatMessage[] }
+  > = [];
 
   /** 协作群历史消息向上翻页分页器（游标 / hasMore / 加载态由其内部管理）。 */
   private readonly historyPaginator: GroupChatHistoryPaginator;
@@ -152,6 +172,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       url,
       currentUserId: this.options.identityId,
       groupId: this.options.groupId,
+      sessionId: this.options.sessionId,
       reconnectAttempts: 3,
       heartbeatInterval: 30_000,
       heartbeatTimeout: 5 * 60_000,
@@ -160,10 +181,16 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       fallbackMessage: '请求失败，请稍后重试',
     });
 
+    // 当前已安装 SDK 的 GroupChatProvider 类型和运行时只处理 group_id，
+    // 传入的 sessionId 会被忽略；在包装层保留会话级帧适配，避免重连后落到默认 main 会话。
     this.patchSessionFrames(inner);
 
-    inner.onMessage = (message) => this.onMessage?.(message);
-    inner.onComplete = (messages) => this.onComplete?.(messages);
+    if (this.historyHydrationActive) {
+      (inner as HydrationCapableGroupChatProvider).beginHistoryHydration?.();
+    }
+
+    inner.onMessage = (message) => this.dispatchOrBuffer({ kind: 'message', message });
+    inner.onComplete = (messages) => this.dispatchOrBuffer({ kind: 'complete', messages });
     inner.onError = (error) => this.onError?.(error);
 
     this.unsubscribeInnerConnection?.();
@@ -180,28 +207,26 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   }
 
   /**
-   * 会话级 WS 帧注入——对齐旧「我的协作」页面（legacy open-claw `useGroupChatProviders`）：
-   * SDK GroupChatProvider 的 connect 帧只带 group_id，会话级连接还需 session_id；
-   * chat.send 帧同样补 session_id，并把 sessionKey 从硬编码 'main' 替换为 sessionId，
-   * 否则消息会落到 'main' 会话。
+   * 为旧版 SDK 的 BCS 帧补齐会话标识。
+   *
+   * 该适配只作用于当前 Provider 的出站帧，不改 API 合同、领域模型或 SDK 包；
+   * 新版 SDK 若自行生成 session 字段，也统一覆盖为当前会话，避免重连沿用 main。
    */
   private patchSessionFrames(inner: SdkGroupChatProvider): void {
-    const transport = (inner as unknown as { transport?: { send: (frame: unknown) => Promise<unknown> } }).transport;
+    const transport = (inner as unknown as { transport?: SessionFrameTransport }).transport;
     if (!transport || typeof transport.send !== 'function') return;
+
     const originalSend = transport.send.bind(transport);
     const { sessionId } = this.options;
     transport.send = (frame: unknown) => {
-      const target = frame as { method?: string; params?: Record<string, unknown> } | null;
-      if (target?.params) {
-        if (target.method === 'connect') {
-          target.params.session_id = sessionId;
-        }
-        if (target.method === 'chat.send') {
-          target.params.session_id = sessionId;
-          target.params.sessionKey = sessionId;
-        }
-      }
-      return originalSend(frame);
+      if (!frame || typeof frame !== 'object') return originalSend(frame);
+      const target = frame as SessionFrame;
+      if (!target.params || typeof target.params !== 'object') return originalSend(frame);
+      if (target.method !== 'connect' && target.method !== 'chat.send') return originalSend(frame);
+
+      const params: Record<string, unknown> = { ...target.params, session_id: sessionId };
+      if (target.method === 'chat.send') params.sessionKey = sessionId;
+      return originalSend({ ...target, params });
     };
   }
 
@@ -209,7 +234,8 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.emitConnection({ status: 'connecting', retryCount: 0 });
     try {
       const inner = await this.ensureInitialized();
-      await inner.connect({ groupId: this.options.groupId });
+      await inner.connect({ groupId: this.options.groupId, sessionId: this.options.sessionId });
+      this.assertConnected(inner);
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       this.setState({ phase: 'error', error: normalized.message });
@@ -223,9 +249,16 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.emitConnection({ status: 'disconnected', retryCount: 0 });
   }
 
+  private assertConnected(inner: SdkGroupChatProvider): void {
+    if (!inner.isConnected) throw new Error('协作会话 WebSocket 未建立。');
+  }
+
   async request(params: GroupChatRequest, messageId?: string): Promise<void> {
     const inner = await this.ensureInitialized();
-    if (!inner.isConnected) await inner.connect({ groupId: this.options.groupId });
+    if (!inner.isConnected) {
+      await inner.connect({ groupId: this.options.groupId, sessionId: this.options.sessionId });
+      this.assertConnected(inner);
+    }
     // payload 字段保真装配抽至 buildGroupChatPayload（groupChatProviderHelpers,根因 C);messageId 缺省时不透传第二参。
     const payload = buildGroupChatPayload(params, this.options.groupId, this.options.identityId);
     if (messageId !== undefined) {
@@ -247,9 +280,10 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   async loadHistory(): Promise<ChatMessage[]> {
     this.setState({ phase: 'loading-history', error: null });
     try {
+      const inner = await this.ensureInitialized();
       const messages = await this.historyPaginator.loadLatest();
       this.setState({ phase: this.isConnected ? 'ready' : 'idle', error: null });
-      return messages;
+      return messages.map((message) => this.hydrateMessage(inner, message));
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       this.setState({ phase: 'error', error: normalized.message });
@@ -264,11 +298,18 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
    */
   async loadMoreHistory(): Promise<ChatMessage[]> {
     try {
-      return await this.historyPaginator.loadOlder();
+      const inner = await this.ensureInitialized();
+      const messages = await this.historyPaginator.loadOlder();
+      return messages.map((message) => this.hydrateMessage(inner, message));
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       throw normalized;
     }
+  }
+
+  private hydrateMessage(inner: SdkGroupChatProvider, message: ChatMessage): ChatMessage {
+    const hydrateRun = (inner as HydrationCapableGroupChatProvider).hydrateRun;
+    return typeof hydrateRun === 'function' ? hydrateRun.call(inner, message) : message;
   }
 
   /** 重置初始化状态并重新连接——供业务层在断线恢复时主动调用。 */
@@ -279,6 +320,38 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.inner = null;
     this.initializePromise = null;
     await this.connect();
+  }
+
+  /** Start a refresh-safe history hydration window and buffer subsequent WS updates. */
+  beginHistoryHydration(): void {
+    this.historyHydrationActive = true;
+    this.bufferLiveEvents = true;
+    this.bufferedEvents = [];
+    (this.inner as HydrationCapableGroupChatProvider | null)?.beginHistoryHydration?.();
+  }
+
+  /** Deliver WS updates that arrived after connect and after history has been installed. */
+  enterLiveMode(): void {
+    this.historyHydrationActive = false;
+    this.bufferLiveEvents = false;
+    (this.inner as HydrationCapableGroupChatProvider | null)?.enterLiveMode?.();
+    const events = this.bufferedEvents;
+    this.bufferedEvents = [];
+    for (const event of events) {
+      if (event.kind === 'message') this.onMessage?.(event.message);
+      else this.onComplete?.(event.messages);
+    }
+  }
+
+  private dispatchOrBuffer(
+    event: { kind: 'message'; message: ChatMessage } | { kind: 'complete'; messages: ChatMessage[] },
+  ): void {
+    if (this.bufferLiveEvents) {
+      this.bufferedEvents.push(event);
+      return;
+    }
+    if (event.kind === 'message') this.onMessage?.(event.message);
+    else this.onComplete?.(event.messages);
   }
 
   private setState(patch: Partial<GroupChatState>): void {

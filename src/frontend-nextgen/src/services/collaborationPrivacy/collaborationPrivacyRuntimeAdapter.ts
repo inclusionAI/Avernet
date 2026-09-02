@@ -21,6 +21,7 @@ import {
   type OrgUserDto,
 } from '@/services/backendApi';
 import { isEnvelopeFailure, type BackendApiEnvelope } from '@/services/backendApi/types';
+import { normalizeEmployeeNumber } from '@/utils/employeeNumber';
 import { collaborationPrivacyApiAdapter, type CollaborationPrivacyApiAdapter } from './collaborationPrivacyApiAdapter';
 import {
   type CollaborationPrivacyGateway,
@@ -62,6 +63,13 @@ function assertOrgUserResponse(response: BackendApiEnvelope<OrgUserDto>): OrgUse
     throw new Error(response.message || '当前用户组织信息接口返回异常');
   }
   return response.data;
+}
+
+function normalizeOrgUser(dto: OrgUserDto): OrgUserDto {
+  return {
+    ...dto,
+    user_id: normalizeEmployeeNumber(dto.user_id),
+  };
 }
 
 function assertDepartmentResponse(response: BackendApiEnvelope<OrgDeptDto[]>): OrgDeptDto[] {
@@ -324,8 +332,8 @@ export function createCollaborationPrivacyRuntimeAdapter(
 
   return {
     async loadOverview(userId, signal) {
-      const userResponse = await dependencies.getOrgUser(userId, signal);
-      const currentUser = assertOrgUserResponse(userResponse);
+      const userResponse = await dependencies.getOrgUser(normalizeEmployeeNumber(userId), signal);
+      const currentUser = normalizeOrgUser(assertOrgUserResponse(userResponse));
       const managedBots = await dependencies.apiAdapter.listManagedBots(
         { kind: 'bot', user_id: currentUser.user_id },
         signal,
@@ -373,7 +381,8 @@ export function createCollaborationPrivacyRuntimeAdapter(
     },
 
     async syncDepartment(userId, signal) {
-      return mapOrgUserToIdentity(assertOrgUserResponse(await dependencies.getOrgUser(userId, signal)));
+      const userResponse = await dependencies.getOrgUser(normalizeEmployeeNumber(userId), signal);
+      return mapOrgUserToIdentity(normalizeOrgUser(assertOrgUserResponse(userResponse)));
     },
 
     async searchDepartments(keyword, signal) {

@@ -4,6 +4,8 @@ import type {
   PublicBotProfile,
   PublicGroup,
   PublicGroupMember,
+  PublicTask,
+  TaskStatusFilter,
 } from '@/domain/collaborationSquare/types';
 import { getPublicBotTargetId } from '@/domain/collaborationSquare/types';
 import { create } from 'zustand';
@@ -22,6 +24,11 @@ export interface CollaborationSquareState {
   selectedBotId: string | null;
   selectedGroupId: string | null;
   busyKeys: string[];
+  tasks: PublicTask[];
+  taskQuery: string;
+  taskStatusFilter: TaskStatusFilter;
+  selectedTaskId: string | null;
+  taskDetail: PublicTask | null;
   setBots: (bots: PublicBot[]) => void;
   appendBots: (bots: PublicBot[]) => void;
   setGroups: (groups: PublicGroup[]) => void;
@@ -39,6 +46,14 @@ export interface CollaborationSquareState {
   updateBotRelationship: (targetId: string, status: PublicBot['relationshipStatus']) => void;
   removeBot: (id: string) => void;
   removeGroup: (id: string) => void;
+  setTasks: (tasks: PublicTask[]) => void;
+  appendTasks: (tasks: PublicTask[]) => void;
+  setTaskQuery: (query: string) => void;
+  setTaskStatusFilter: (filter: TaskStatusFilter) => void;
+  setSelectedTaskId: (id: string | null) => void;
+  setTaskDetail: (task: PublicTask | null) => void;
+  removeTask: (id: string) => void;
+  resetTaskFilters: () => void;
   reset: () => void;
 }
 
@@ -56,6 +71,11 @@ const initialState = {
   selectedBotId: null,
   selectedGroupId: null,
   busyKeys: [],
+  tasks: [],
+  taskQuery: '',
+  taskStatusFilter: 'all' as TaskStatusFilter,
+  selectedTaskId: null,
+  taskDetail: null,
 };
 
 export const useCollaborationSquareStore = create<CollaborationSquareState>((set) => ({
@@ -101,5 +121,22 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
       selectedGroupId: state.selectedGroupId === id ? null : state.selectedGroupId,
       groupMembers: state.selectedGroupId === id ? [] : state.groupMembers,
     })),
+  setTasks: (tasks) => set({ tasks }),
+  appendTasks: (tasks) =>
+    set((state) => {
+      const existingIds = new Set(state.tasks.map((task) => task.id));
+      return { tasks: [...state.tasks, ...tasks.filter((task) => !existingIds.has(task.id))] };
+    }),
+  setTaskQuery: (taskQuery) => set({ taskQuery }),
+  setTaskStatusFilter: (taskStatusFilter) => set({ taskStatusFilter }),
+  setSelectedTaskId: (selectedTaskId) => set({ selectedTaskId, taskDetail: null }),
+  setTaskDetail: (taskDetail) => set({ taskDetail }),
+  removeTask: (id) =>
+    set((state) => ({
+      tasks: state.tasks.filter((task) => task.id !== id),
+      selectedTaskId: state.selectedTaskId === id ? null : state.selectedTaskId,
+      taskDetail: state.taskDetail?.id === id ? null : state.taskDetail,
+    })),
+  resetTaskFilters: () => set({ taskQuery: '', taskStatusFilter: 'all' }),
   reset: () => set(initialState),
 }));

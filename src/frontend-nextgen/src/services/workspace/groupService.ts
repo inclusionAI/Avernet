@@ -155,6 +155,7 @@ export const groupService = {
         createdAt: d.created_at,
         participantCount: d.participants.length,
         ownerUserId: d.originator_actor_id,
+        ...(d.initial_session_id ? { initialSessionId: d.initial_session_id } : {}),
         ...(d.membership ? { membership: d.membership } : {}),
         isPublic: d.visibility === 'public',
         deliveryPolicy,
@@ -236,14 +237,34 @@ export const groupService = {
     const body = buildCreateGroupBody(input);
     try {
       const resp = await createGroupApi(body);
-      const groupId = resp.data?.group_id;
-      if (!groupId) {
+      const created = resp.data;
+      const groupId = created?.group_id;
+      if (!created || !groupId) {
         return {
           ok: false,
           error: toDomainError('GROUP_CREATE_FAILED', '创建协作群失败，请稍后重试。'),
         };
       }
-      return this.loadGroupDetail(groupId);
+      const loaded = await this.loadGroupDetail(groupId);
+      if (!loaded.ok) return loaded;
+      return {
+        ok: true,
+        data: {
+          ...loaded.data,
+          ...(created.initial_session_id ? { initialSessionId: created.initial_session_id } : {}),
+          ...(created.initial_run
+            ? {
+                initialRun: {
+                  runId: created.initial_run.run_id,
+                  botUuid: created.initial_run.bot_uuid,
+                  activityKind: created.initial_run.activity_kind,
+                  state: created.initial_run.state,
+                  startedAt: created.initial_run.started_at,
+                },
+              }
+            : {}),
+        },
+      };
     } catch (err) {
       const e = err as { status?: number; message?: string };
       const status = e?.status;

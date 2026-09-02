@@ -12,6 +12,9 @@ import type {
   PublicGroup,
   PublicGroupMember,
   PublicGroupSearchQuery,
+  PublicTask,
+  PublicTaskPage,
+  PublicTaskSearchQuery,
 } from '@/domain/collaborationSquare/types';
 
 export interface CollaborationSquareGateway {
@@ -42,4 +45,8 @@ export interface CollaborationSquareGateway {
     context?: HumanBotActionContext,
     options?: { title?: string; query?: string },
   ): Promise<CreateSessionResult>;
+  /** 浏览/搜索公开任务广场（跨用户公开，本期仅 Mock/Unsupported，真实端点待后端建设）。 */
+  listPublicTasks(query?: PublicTaskSearchQuery, signal?: AbortSignal): Promise<PublicTaskPage>;
+  /** 任务只读详情；目标不存在或状态未知时抛 `target_invalid`。 */
+  getPublicTask(taskId: string, signal?: AbortSignal): Promise<PublicTask>;
 }

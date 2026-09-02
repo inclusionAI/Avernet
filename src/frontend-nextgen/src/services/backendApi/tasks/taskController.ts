@@ -1,7 +1,7 @@
 /**
  * 任务执行 Loop Controller —— 单一边界，统一 Envelope{code,message,data,request_id}。
  * - execute/dashboard：内部面 /api/v1/collaboration/tasks/*
- * - list：openapi 面 /openapi/v1/collaboration/tasks/list
+ * - list：内部面 /api/v1/collaboration/tasks/list
  *
  * 默认走相对路径（dev proxy / prod 网关转发）。
  * 测试场景可通过 baseUrl 直连本地 singlebox（localhost:8888），绕过 proxy。
@@ -37,7 +37,7 @@ export async function dashboardTask(
 }
 
 /**
- * GET /openapi/v1/collaboration/tasks/list 查询参数。
+ * GET /api/v1/collaboration/tasks/list 查询参数。
  * - user_id：必填，按用户过滤；
  * - status：可选，精确匹配（后端 Status 枚举值，运行时态）；
  * - page / page_size：可选，服务端分页（1-based，page_size ≤ 100）。
@@ -56,7 +56,7 @@ export async function listTasks(
   params: ListTasksParams,
   baseUrl: string = DEFAULT_BASE,
 ): Promise<Envelope<BackendApiPage<TaskListItem> | TaskListItem[]>> {
-  const path = '/openapi/v1/collaboration/tasks/list';
+  const path = '/api/v1/collaboration/tasks/list';
   const url = baseUrl ? `${baseUrl.replace(/\/+$/, '')}${path}` : path;
   return backendRequest<Envelope<BackendApiPage<TaskListItem> | TaskListItem[]>>(url, {
     method: 'GET',

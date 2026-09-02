@@ -12,8 +12,12 @@ export interface ServerConfig {
   TEAMCLAW_ADMIN: string;
   /** PrivateChat 管理 API，承载 /api/v1/expert-chats/**。 */
   PRIVATE_CHAT_MANAGEMENT: string;
+  /** 旧版 AgentCoding /api/**，本地开发通过同源代理转发到旧 AgentClaw。 */
+  LEGACY_AGENTCLAW?: string;
   /** PrivateChat 会话代理，承载 /proxypass/** 与 WebSocket。 */
   PRIVATE_CHAT_SESSION: string;
+  /** AIX Harness / 模板工厂，承载 /template-factory/**（可选，缺失时回退 localhost:8888）。 */
+  AIXHARNESS?: string;
   /** ASF aixcore API，承载 /aixcore/** 系统接口（可选，缺失时回退 localhost:8888）。 */
   AIXCORE?: string;
   /** Clawweb 后端，承载 workflow 列表/详情 GET /api/workflows(/{id})。
@@ -31,6 +35,7 @@ const PLACEHOLDER: ServerConfig = {
   TEAMCLAW_GW: 'http://127.0.0.1:8888',
   TEAMCLAW_ADMIN: 'http://127.0.0.1:8888',
   PRIVATE_CHAT_MANAGEMENT: 'http://127.0.0.1:8888',
+  LEGACY_AGENTCLAW: 'http://127.0.0.1:8888',
   PRIVATE_CHAT_SESSION: 'http://127.0.0.1:8889',
   AIXCORE: 'http://127.0.0.1:8888',
   CLAWWEB: 'http://127.0.0.1:8888',

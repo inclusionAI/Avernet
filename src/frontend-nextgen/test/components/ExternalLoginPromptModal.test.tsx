@@ -30,13 +30,13 @@ describe('ExternalLoginPromptModal', () => {
   it('prompt 信号 → 弹窗显示标题与「立即登录」', () => {
     useLoginRedirectStore.getState().requestPrompt();
     render(<ExternalLoginPromptModal />);
-    expect(screen.getByRole('heading', { name: '登录后继续使用 TeamClaw' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '登录后继续使用 Avernet' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '立即登录' })).toBeTruthy();
   });
 
   it('无 prompt 信号 → 不弹', () => {
     render(<ExternalLoginPromptModal />);
-    expect(screen.queryByRole('heading', { name: '登录后继续使用 TeamClaw' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: '登录后继续使用 Avernet' })).toBeNull();
   });
 
   it('点击「立即登录」→ login() 拉 /auth/url 并 navigateToUrl(providerUrl)', async () => {
@@ -56,6 +56,6 @@ describe('ExternalLoginPromptModal', () => {
     useLoginRedirectStore.getState().requestPrompt();
     render(<ExternalLoginPromptModal />);
     fireEvent.click(screen.getByRole('button', { name: '稍后再说' }));
-    expect(screen.queryByRole('heading', { name: '登录后继续使用 TeamClaw' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: '登录后继续使用 Avernet' })).toBeNull();
   });
 });

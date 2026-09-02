@@ -12,6 +12,7 @@ export interface CreateGroupInput {
   deliveryPolicy?: 'send_to_driver' | 'inject_observers';
   definitionYaml?: string;
   driverBotUuid: string;
+  originator: string;
   participants: Array<{ actor_id: string }>;
   context?: string;
   participantBindings?: Array<{ binding: string; actor_ids: string[] }>;

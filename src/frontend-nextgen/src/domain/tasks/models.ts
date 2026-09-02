@@ -63,7 +63,7 @@ export interface TaskRecord {
   finish_time: string | null;
 }
 
-/** list 接口返回的任务行项（顶层字段 + task_spec，后端 /openapi/v1/collaboration/tasks/list）。 */
+/** list 接口返回的任务行项（顶层字段 + task_spec，后端 /api/v1/collaboration/tasks/list）。 */
 export interface TaskListItem {
   id: number;
   task_id: string;

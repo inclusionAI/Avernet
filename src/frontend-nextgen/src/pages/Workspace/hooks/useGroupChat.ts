@@ -1,4 +1,5 @@
 import type { SessionView } from '@/domain/collaboration';
+import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import { createGroupChatProvider, type GroupChatState } from '@/services/workspace/groupChatProvider';
@@ -14,6 +15,7 @@ import {
   buildGroupChatBridgeRequest,
   buildGroupUserMessageExtra,
 } from './groupChatRequestBuilder';
+import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
 import { useManifestHistoryLoader } from './useManifestHistoryLoader';
 
 /**
@@ -25,12 +27,8 @@ import { useManifestHistoryLoader } from './useManifestHistoryLoader';
  * - 暴露 `send/stop/reconnect` 命令，仅在 Hook 内做最小裁剪（trim、isRequesting 短路）
  * - 不拼装会话显示字段（业务字段层由调用方 / 组件负责）
  *
- * 消息加载：每次切换会话（sessionId 变化）时显式调用 provider.loadHistory()
- * （即 GET /openapi/v1/collaboration/sessions/{sid}/messages），将完整 ChatMessage
- * 直接灌入 SDK chat.messages，绕过 SDK defaultMessages 的字段裁剪（保留 createdAt 等）。
- *
- * Provider 生命周期：mount 或 sessionId 变更 → connect；unmount 或 sessionId 变更 → disconnect。
- * 入参为 SessionView（而非裸 sessionId）：BCS connect 帧需要 group_id，与 sessionId 一并注入 Provider。
+ * Provider 连接、history hydration 与 WS 暂存由 useManifestHistoryLoader 统一协调；
+ * SessionView 同时提供 BCS 所需的 group_id 和 session_id。
  */
 export function useGroupChat(session: SessionView | null) {
   const identityId = useWorkspaceStore((s) => s.activeIdentityId);
@@ -41,7 +39,6 @@ export function useGroupChat(session: SessionView | null) {
   const sessionId = session?.sessionId ?? null;
   const groupId = session?.groupId ?? null;
 
-  // 副屏命令式 handle（命令式 openTab/closePanelForce；对齐单聊 useWorkspace 的 panelRef）。
   const panelRef = useRef<PanelHandle>(null);
   // 主屏输入框 ref（SenderRef）：经 useChatBridge.setInputRef 注册到全局桥,卡片填输入框时
   // bridge.getInputRef().insert(text) 生效。SenderRef ⊇ BridgeInputRef,见下方 useChatBridge 调用 as 转换。
@@ -57,7 +54,6 @@ export function useGroupChat(session: SessionView | null) {
   const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
 
   // Provider 依赖 sessionId + groupId + identityId；任一缺失则不创建（Hook 进入空闲态）。
-  // wsOrigin 部署态直连网关（绕过 tern cors proxy 的 WS 盲区）；dev 返回 undefined 走同源 dev proxy。
   const provider = useMemo(() => {
     if (!sessionId || !groupId || !identityId) return null;
     return createGroupChatProvider({ sessionId, groupId, identityId, wsOrigin: resolveGroupWsOrigin() });
@@ -72,6 +68,12 @@ export function useGroupChat(session: SessionView | null) {
     // 改由下方 effect 显式 loadHistory + setMessages，保留完整 ChatMessage 语义。
     placeholderMessage: '',
     panelRef,
+  });
+  const groupBootstrapProcessing = useGroupBootstrapProcessing({
+    groupId,
+    sessionId,
+    messages: chat.messages,
+    supportPhase: supportState.phase,
   });
 
   // 集中注册 submit/abort/getMessages 到全局单例桥，使 aixcore 卡片沙箱的 bridge.sendMessage 经
@@ -92,23 +94,6 @@ export function useGroupChat(session: SessionView | null) {
       }),
   });
 
-  // Provider 生命周期：仅在 sessionId 真正变化时 connect，stop 旧会话 disconnect。
-  const prevSessionIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!provider || !sessionId) return;
-    if (prevSessionIdRef.current === sessionId) return;
-    prevSessionIdRef.current = sessionId;
-    // 切换会话：清空副屏 tab，避免旧会话副屏残留。
-    panelRef.current?.closePanelForce();
-    provider.connect().catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : '协作连接失败');
-    });
-    return () => {
-      prevSessionIdRef.current = null;
-      void provider.disconnect();
-    };
-  }, [provider, sessionId]);
-
   // 订阅 Provider 阶段状态 + WebSocket 连接状态。
   useEffect(() => {
     if (!provider) return;
@@ -122,6 +107,13 @@ export function useGroupChat(session: SessionView | null) {
     };
   }, [provider]);
 
+  // 切换会话时清理旧会话副屏；连接、history hydration 与 WS 暂存由
+  // useManifestHistoryLoader 作为同一个可取消初始化流程统一管理。
+  useEffect(() => {
+    if (!provider || !sessionId) return;
+    panelRef.current?.closePanelForce();
+  }, [provider, sessionId]);
+
   useManifestHistoryLoader({
     provider,
     sessionId,
@@ -129,6 +121,13 @@ export function useGroupChat(session: SessionView | null) {
     setHasMoreHistory,
     setIsLoadingMoreHistory,
     setMessages: chat.setMessages,
+  });
+
+  // 重新进入会话时合并本地持久化的前置 assistant 消息（已抽入 useTaskPreflightAssistant）。
+  const { appendAssistantMessage, streamAssistantMessage } = useTaskPreflightAssistant({
+    chat,
+    sessionKey: sessionId ?? undefined,
+    mergePersistedHistory: true,
   });
 
   const send = (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => {
@@ -169,16 +168,18 @@ export function useGroupChat(session: SessionView | null) {
     }
   };
 
-  // 重新加载会话历史：直连 provider.loadHistory() 并把结果灌进 SDK chat.messages。
-  // 组件不直接调 Provider；error 状态下 GroupChatPane 的「重新加载历史」走此出口。
   const reloadHistory = async () => {
     if (!provider || !sessionId) return;
+    provider.beginHistoryHydration();
     try {
+      if (!provider.isConnected) await provider.connect();
       const history: ChatMessage[] = await provider.loadHistory();
       chat.setMessages(history);
       setHasMoreHistory(provider.hasMoreHistory);
       setIsLoadingMoreHistory(false);
+      provider.enterLiveMode();
     } catch (error: unknown) {
+      provider.enterLiveMode();
       toast.error(error instanceof Error ? error.message : '加载历史消息失败');
     }
   };
@@ -207,7 +208,6 @@ export function useGroupChat(session: SessionView | null) {
       setIsLoadingMoreHistory(false);
     }
   };
-  // 副屏 <AixUI> 直发 chat.onRequest 绕开全局桥 last-wins（修复群 execute 串到单聊 bot），等价桥路径 + isInject 静默。
   const submitPanelMessage = useCallback(
     (content: string) => {
       if (sessionId)
@@ -237,10 +237,13 @@ export function useGroupChat(session: SessionView | null) {
     send,
     stop,
     submitPanelMessage,
+    appendAssistantMessage,
+    streamAssistantMessage,
     reconnect,
     reloadHistory,
     hasMoreHistory,
     isLoadingMoreHistory,
     loadMoreHistory,
+    groupBootstrapProcessing,
   };
 }

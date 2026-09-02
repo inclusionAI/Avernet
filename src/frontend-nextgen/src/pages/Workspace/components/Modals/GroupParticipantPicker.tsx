@@ -63,7 +63,7 @@ export function GroupParticipantPicker({
   const selectedBots = selectedOptions.filter((bot) => selectedIds.includes(bot.id));
 
   return (
-    <div className="min-w-0">
+    <div data-testid="group-participant-picker" className="w-full min-w-0 max-w-full">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-semibold text-foreground">
           成员 Bot <span className="text-destructive">*</span>
@@ -74,7 +74,7 @@ export function GroupParticipantPicker({
       </div>
 
       {selectedBots.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div className="mb-3 flex min-w-0 max-w-full flex-wrap gap-2">
           {selectedBots.map((bot) => (
             <span
               key={bot.id}
@@ -107,7 +107,7 @@ export function GroupParticipantPicker({
             { value: 'friends', label: '好友 Bot' },
             { value: 'candidates', label: '可协作 Bot' },
           ]}
-          className="rounded-lg"
+          className="w-full min-w-0 rounded-lg"
         />
       </div>
 
@@ -154,7 +154,7 @@ export function GroupParticipantPicker({
       ) : (
         <div
           className={cn(
-            'min-w-0 w-full overflow-hidden rounded-lg border border-border bg-card',
+            'min-w-0 w-full max-w-full overflow-hidden rounded-lg border border-border bg-card',
             cardMode && 'border-0 bg-transparent',
           )}
         >
@@ -181,7 +181,7 @@ export function GroupParticipantPicker({
                   disabled={unavailable}
                   aria-pressed={selected}
                   className={cn(
-                    'h-auto min-w-0 w-full justify-start gap-2 rounded-none border-0 px-3 py-2 text-left',
+                    'h-auto min-w-0 w-full max-w-full justify-start gap-2 rounded-none border-0 px-3 py-2 text-left',
                     cardMode
                       ? selected
                         ? 'rounded-lg border border-primary bg-primary/10 hover:bg-primary/10'

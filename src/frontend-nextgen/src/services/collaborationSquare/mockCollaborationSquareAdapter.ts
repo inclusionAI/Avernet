@@ -10,6 +10,11 @@ import {
   type PublicGroupMemberTransport,
   type PublicGroupTransport,
 } from '@/domain/collaborationSquare/mapper';
+import {
+  mapPublicTaskDto,
+  sortPublicTasksByPublishedDesc,
+  type PublicTaskTransport,
+} from '@/domain/collaborationSquare/taskMapper';
 import type {
   BotRelationshipStatus,
   CreateSessionResult,
@@ -19,6 +24,9 @@ import type {
   PublicBotSearchQuery,
   PublicGroup,
   PublicGroupSearchQuery,
+  PublicTask,
+  PublicTaskPage,
+  PublicTaskSearchQuery,
 } from '@/domain/collaborationSquare/types';
 import { CollaborationSquareError } from './collaborationSquareError';
 import type { CollaborationSquareGateway } from './collaborationSquareGateway';
@@ -117,5 +125,38 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
     return {
       sessionId: `square-${groupId}-${Date.now()}`,
     };
+  }
+
+  // 任务广场：本期仅 Mock（后端公开跨用户 BBS 任务广场端点 Out of Scope 未建设），跨用户公开，不做 owner 过滤。
+  async listPublicTasks(query: PublicTaskSearchQuery = {}, signal?: AbortSignal): Promise<PublicTaskPage> {
+    // 可控失败触发（仅浏览器，对齐既有 mock 的 simulate 范式）；node 测试无 window 不触发。
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('simulate') === 'task-fail') {
+      throw new CollaborationSquareError('network', '任务广场数据加载失败');
+    }
+    const dtos = await readJson<PublicTaskTransport[]>('/api/mock/collaboration-square/tasks', signal);
+    const all = dtos.map(mapPublicTaskDto).filter((task): task is PublicTask => task !== null);
+    const keyword = (query.search ?? '').trim().toLocaleLowerCase();
+    const matched = keyword
+      ? all.filter(
+          (task) => task.name.toLocaleLowerCase().includes(keyword) || task.goal.toLocaleLowerCase().includes(keyword),
+        )
+      : all;
+    const filtered =
+      query.status && query.status !== 'all' ? matched.filter((task) => task.status === query.status) : matched;
+    // 与真实 adapter 一致：客户端过滤后按 publishedAt 倒序（最新发布在前），再分页。
+    const sorted = sortPublicTasksByPublishedDesc(filtered);
+    const offset = Math.max(0, query.offset ?? 0);
+    const limit = query.limit ?? sorted.length;
+    return { items: structuredClone(sorted.slice(offset, offset + limit)), total: sorted.length };
+  }
+
+  async getPublicTask(taskId: string, signal?: AbortSignal): Promise<PublicTask> {
+    const dto = await readJson<PublicTaskTransport>(
+      `/api/mock/collaboration-square/tasks/${encodeURIComponent(taskId)}`,
+      signal,
+    );
+    const task = mapPublicTaskDto(dto);
+    if (!task) throw new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问');
+    return task;
   }
 }

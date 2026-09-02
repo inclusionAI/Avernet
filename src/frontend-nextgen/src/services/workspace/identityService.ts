@@ -90,8 +90,7 @@ function readBotEngine(value: unknown): string | undefined {
       .map(readEngineString)
       .find(isNonEmptyString) ??
     readNestedString(record, ['engine_info'], readEngineString) ??
-    readNestedString(record, ['runtime', 'engine'], readEngineString) ??
-    readNestedString(record, ['provider', 'name'])
+    readNestedString(record, ['runtime', 'engine'], readEngineString)
   );
 }
 
@@ -137,10 +136,8 @@ async function enrichBotMetadata<T extends { id: string; kind: string; engine?: 
   items: T[],
   userId?: string,
 ): Promise<T[]> {
-  const missingMetadata = items.some(
-    (item) => item.kind === 'bot' && (!isNonEmptyString(item.engine) || !isNonEmptyString(item.botType)),
-  );
-  if (!missingMetadata) return items;
+  const hasBots = items.some((item) => item.kind === 'bot');
+  if (!hasBots) return items;
 
   try {
     const response = await listBots({
@@ -159,14 +156,15 @@ async function enrichBotMetadata<T extends { id: string; kind: string; engine?: 
     });
 
     return items.map((item) => {
-      if (item.kind !== 'bot' || (isNonEmptyString(item.engine) && isNonEmptyString(item.botType))) {
+      if (item.kind !== 'bot') {
         return item;
       }
       const metadata = metadataByBotId.get(item.id) ?? metadataByBotId.get(normalizeBotId(item.id));
       if (!metadata) return item;
       return {
         ...item,
-        engine: isNonEmptyString(item.engine) ? item.engine : metadata.engine,
+        // 只从 /openapi/v1/bots 的补充结果读取引擎；不要回退到 mine/provider 的展示名称。
+        engine: metadata.engine,
         botType: isNonEmptyString(item.botType) ? item.botType : metadata.botType,
       };
     });

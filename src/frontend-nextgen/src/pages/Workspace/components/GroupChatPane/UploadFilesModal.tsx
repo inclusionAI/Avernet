@@ -22,6 +22,7 @@ export interface UploadFilesModalProps {
   discardAll: () => Promise<void>;
   clearCompleted: () => void;
   hasPending: () => boolean;
+  onAddToSession: () => void;
 }
 
 export function UploadFilesModal(props: UploadFilesModalProps) {
@@ -37,6 +38,7 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
     discardAll,
     clearCompleted,
     hasPending,
+    onAddToSession,
   } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -45,10 +47,13 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
     (files: FileList | File[] | null) => {
       if (!files) return;
       const arr = Array.from(files);
-      if (arr.length) stageFiles(arr);
+      if (arr.length) {
+        stageFiles(arr);
+        void submitStaged();
+      }
       if (inputRef.current) inputRef.current.value = '';
     },
-    [stageFiles],
+    [stageFiles, submitStaged],
   );
 
   const handleClose = useCallback(async () => {
@@ -59,8 +64,6 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
     }
     onClose();
   }, [discardAll, clearCompleted, hasPending, onClose]);
-
-  const stagedCount = queue.filter((t) => t.phase === 'staged').length;
 
   return (
     <Modal open={open} onOpenChange={(o) => !o && void handleClose()}>
@@ -87,8 +90,8 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
           )}
         >
           <FileText className="mb-2 h-8 w-8 text-primary" />
-          <p className="text-sm font-medium text-foreground">点击或拖拽上传文件</p>
-          <p className="mt-1 text-xs text-muted-foreground">支持表格、文档、压缩包、HTML 与图片类文件</p>
+          <p className="text-sm font-medium text-foreground">点击或拖拽选择文件</p>
+          <p className="mt-1 text-xs text-muted-foreground">选中文件后将自动上传，完成后可添加至会话</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">单次最多上传 {SESSION_FILE_MAX_BATCH} 个</p>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => pickFiles(e.target.files)} />
         </div>
@@ -184,8 +187,11 @@ export function UploadFilesModal(props: UploadFilesModalProps) {
           <Button variant="secondary" onClick={() => void handleClose()}>
             关闭
           </Button>
-          <Button disabled={stagedCount === 0 || isUploading} onClick={() => void submitStaged()}>
-            {isUploading ? '上传中…' : '上传'}
+          <Button
+            disabled={queue.every((task) => task.phase !== 'ready' || !task.fileId) || isUploading}
+            onClick={onAddToSession}
+          >
+            {isUploading ? '上传中…' : '添加至会话'}
           </Button>
         </ModalFooter>
       </ModalContent>
