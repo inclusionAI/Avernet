@@ -28,6 +28,7 @@ logger = logging.getLogger("task.dispatcher")
 # Keep this block self-contained so the pre-release test behavior can be removed
 # without touching the generic dispatch strategy below.
 _SINGLE_CANDIDATE_MISS_PROBABILITY = 0.4
+_RULE_TEST_MAX_GROUP_MEMBERS = 3
 
 # Temporary pre-authorized Bot pool for validating the multi-Bot dispatch path.
 # The rule mode intentionally samples from this fixed pool instead of using the
@@ -568,7 +569,10 @@ def _rule_based_search_result(candidates: list[dict]) -> SearchResult:
         )
 
     dispatch_count = 1 if candidate_count <= 2 else candidate_count
-    dispatch_count = min(dispatch_count, len(_RULE_TEST_BOT_POOL))
+    # PRE 定制：固定候选池建协作群最多保留 3 个成员，避免搜推结果直接拉超大群。
+    dispatch_count = min(
+        dispatch_count, _RULE_TEST_MAX_GROUP_MEMBERS, len(_RULE_TEST_BOT_POOL)
+    )
     selected = random.sample(_RULE_TEST_BOT_POOL, dispatch_count)
     if dispatch_count == 1:
         bot_id = selected[0]
@@ -640,7 +644,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
         "返回 JSON 字符串,``outcome`` 标 4 态之一,其余字段随态而定: \n"
         '- **HIT_SINGLE**(单 bot 足够): ``{"outcome":"HIT_SINGLE","bot_id":"<bot_id>","bot_name":"<bot_name>","owner_id":"<owner_id>","owner_name":"<owner_name>"}``\n'
         '- **HIT_GROUP**(已有协作群可复用): ``{"outcome":"HIT_GROUP","group_id":"<group_id>"}``\n'
-        "- **HIT_MULTI_BOTS**(多 bot 协同,需动态拉协作群):\n"
+        "- **HIT_MULTI_BOTS**(多 bot 协同,需动态拉协作群；协作群成员最多 3 个，超过 3 个只保留最匹配的 3 个，manager 放在首位):\n"
         '  ``{"outcome":"HIT_MULTI_BOTS","bot_ids":["b1","b2"],"collab_mode":"chat|manager_worker|state_machine",\n'
         '   "group_name":"<协作群名>","members_info":[{"bot_id":"b1","role":"<角色>","responsibility":"<职责>"}],\n'
         '   "manager_bot_id":"<manager_bot_id>(collab_mode=manager_worker 时必填)",\n'
@@ -663,7 +667,7 @@ def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
         "```"
     )
     return (
-        f"[task-search] 请基于以下子任务需求与候选 bot 集决出执行者(who)与协作方式(how)。\n"
+        f"[task-search] 请基于以下子任务需求与候选 bot 集决出执行者(who)与协作方式(how)。协作群最多 3 个成员，禁止返回超过 3 个 bot_ids 或 members_info。\n"
         f"子任务需求+候选集\n{_json.dumps({'demand': demand, 'catalog': catalog}, ensure_ascii=False)}\n\n{return_fmt}\n\n{NO_WEB_SEARCH_CONSTRAINT}"
     )
 

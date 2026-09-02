@@ -224,6 +224,32 @@ def test_rule_dispatch_single_candidate_random_miss_allows_bbs_escalation(monkey
     assert result.miss_reason == "rule_single_candidate_random_miss"
 
 
+def test_rule_dispatch_multi_candidate_caps_fixed_pool_group_at_three(monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.99,
+    )
+    observed = {}
+
+    def sample(values, count):
+        observed["count"] = count
+        return list(values)[:count]
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
+        sample,
+    )
+
+    result = _rule_based_search_result(
+        [{"bot_id": f"candidate-{index}"} for index in range(8)]
+    )
+
+    assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+    assert observed["count"] == 3
+    assert len(result.group_formation.bot_ids) == 3
+    assert len(result.group_formation.members_info) == 3
+
+
 def test_rule_dispatch_single_candidate_keeps_hit_after_40_percent_threshold(monkeypatch):
     monkeypatch.setattr(
         "agentclaw.community.core.task.task_dispatch.strategies.random.random",
