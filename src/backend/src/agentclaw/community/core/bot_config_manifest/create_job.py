@@ -469,7 +469,15 @@ class BotCreateWithManifestHandler:
                     "[manifest_create] bot_id=%s could not be provisioned", bot_id
                 )
                 if not self._discard(payload):
-                    return self._cleanup_did_not_land(bot_id)
+                    # Terminal regardless. A reschedule here would find the
+                    # soft-deleted record absent, read the authorization as
+                    # ISSUED and create the bot again under the same id; the
+                    # rows fall to the sweeper instead.
+                    logger.error(
+                        "[manifest_create] bot_id=%s: provisioning failed and the "
+                        "discard did not land; leaving the rows to the sweeper",
+                        bot_id,
+                    )
                 return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {could_not_provision}")
             return Reschedule(POLL_DELAY_SECONDS)
 

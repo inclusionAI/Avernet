@@ -638,9 +638,9 @@ class _RecordingSeam(_Seam):
         return super().discard(**kwargs)
 
 
-def _record_first(*, passport_status="ISSUED", applies=None, bots=None, refuse=False):
+def _record_first(*, passport_status="ISSUED", applies=None, bots=None, refuse=False, discard_succeeds=True):
     applies = applies or _Applies()
-    seam = _RecordingSeam(applies)
+    seam = _RecordingSeam(applies, discard_succeeds=discard_succeeds)
     bots = bots or _Bots()
     created: list[tuple[dict, dict]] = []
 
@@ -759,3 +759,14 @@ def test_pre_create_on_is_untouched_by_the_sequence_wiring():
     handler.handle(p)
     assert created and created[0][1] == {}, "the default call shape, provisioning inline"
     assert service.calls == []
+
+
+def test_record_first_a_provisioning_failure_is_terminal_even_when_the_discard_does_not_land():
+    """A reschedule here would re-create the soft-deleted bot under the same id."""
+    handler, applies, seam, _bots, _created, _service = _record_first(refuse=True, discard_succeeds=False)
+    p = dict(_TECLAW_PAYLOAD)
+    handler.handle(p)
+    applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    outcome = handler.handle(p)
+    assert isinstance(outcome, Fail) and outcome.error.startswith(BOT_COULD_NOT_BE_PROVISIONED)
+    assert seam.discards == 1
