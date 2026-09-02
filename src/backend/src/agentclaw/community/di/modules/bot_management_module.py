@@ -108,6 +108,12 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
 from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
     ManifestIdentityPort,
 )
+from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
+    ManifestResourcePort,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
+    GitSourceClient,
+)
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
@@ -724,6 +730,10 @@ class BotManagementModule(Module):
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], EntryFetcher],
+        # W6's resources materialiser and W7's git transport, from the same
+        # module and lazy for the same reason.
+        resource_service_provider: Callable[[], ManifestResourcePort],
+        git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], TaskQueueService],
         bot_repository: BotRepository,
     ) -> BotConfigManifestApplyService:
@@ -739,6 +749,8 @@ class BotManagementModule(Module):
             capability_reader_provider,
             package_validator_provider,
             entry_fetcher_provider,
+            resource_service_provider,
+            git_client_provider,
             task_queue_provider,
             bot_repository,
         )

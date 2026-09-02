@@ -80,6 +80,11 @@ from agentclaw.community.core.bot_config_manifest.apply.source_session import (
 from agentclaw.community.core.bot_config_manifest.services.apply_report_codec import (
     report_from_payload,
 )
+from agentclaw.community.core.bot_config_manifest.services.apply_lock_reaper import (
+    APPLY_LOCK_TTL_SECONDS,
+    is_abandoned,
+    reap_stale_lock,
+)
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ApplyAccepted,
     BotConfigManifestApplyServiceProtocol,
@@ -125,17 +130,6 @@ if TYPE_CHECKING:  # pragma: no cover - import-time cycle, see below
 
 logger = get_logger()
 
-#: How long a lock may be held before another apply may take it.
-#:
-#: Also what bounds a report stranded at ``RUNNING``: a process killed mid-apply
-#: never runs its ``finally``, so the row would poll forever. Past this age the
-#: read derives ``FAILED`` instead. Derived at read time rather than swept, so
-#: there is no second mechanism to keep alive.
-#:
-#: Generous, because it is a safety net rather than a timeout: an apply that
-#: legitimately takes minutes (W5 fetching several sources) must not have its
-#: lock stolen mid-write.
-APPLY_LOCK_TTL_SECONDS = 30 * 60
 
 
 class ManifestApplyBotMissingError(RuntimeError):
@@ -298,7 +292,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id
         )
         if lock is None:
-            if not self._reap_stale_lock(env=env, entity_id=entity_id, bot_id=bot_id):
+            if not reap_stale_lock(
+                self._locks, env=env, entity_id=entity_id, bot_id=bot_id
+            ):
                 raise ManifestApplyInProgressError(bot_id)
             lock = self._locks.acquire(
                 env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id
@@ -970,54 +966,11 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             return None
         payload = json.loads(record.report) if record.report else {}
         status = ApplyStatus(record.status)
-        if status is ApplyStatus.RUNNING and self._is_abandoned(
-            entity_id=entity_id, bot_id=bot_id
+        if status is ApplyStatus.RUNNING and is_abandoned(
+            self._locks, env=get_current_env(), entity_id=entity_id, bot_id=bot_id
         ):
             status = ApplyStatus.FAILED
         return report_from_payload(payload, record=record, status=status)
-
-    def _is_abandoned(self, *, entity_id: str, bot_id: str) -> bool:
-        """True when no live lock backs a ``RUNNING`` report.
-
-        Either the lock is gone (released without the terminal write landing) or
-        it is older than the TTL, so no apply can still be working under it.
-        """
-        env = get_current_env()
-        held = self._locks.get(env=env, entity_id=entity_id, bot_id=bot_id)
-        if held is None:
-            return True
-        return (
-            self._locks.get_if_stale(
-                env=env,
-                entity_id=entity_id,
-                bot_id=bot_id,
-                ttl_seconds=APPLY_LOCK_TTL_SECONDS,
-            )
-            is not None
-        )
-
-    def _reap_stale_lock(self, *, env: str, entity_id: str, bot_id: str) -> bool:
-        """Drop a lock whose holder is long gone. Returns whether one was freed."""
-        stale = self._locks.get_if_stale(
-            env=env,
-            entity_id=entity_id,
-            bot_id=bot_id,
-            ttl_seconds=APPLY_LOCK_TTL_SECONDS,
-        )
-        if stale is None:
-            return False
-        logger.warning(
-            "[manifest_apply] reaping stale lock, env=%s, entity_id=%s, bot_id=%s",
-            env,
-            entity_id,
-            bot_id,
-        )
-        return self._locks.release(
-            env=env,
-            entity_id=entity_id,
-            bot_id=bot_id,
-            lock_token=stale.lock_token,
-        )
 
 
 __all__ = ["APPLY_LOCK_TTL_SECONDS", "BotConfigManifestApplyService"]

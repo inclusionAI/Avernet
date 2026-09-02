@@ -27,9 +27,11 @@ from agentclaw.community.core.bot_config_manifest.schema.validator import (
     validate_document,
 )
 
-# What the registry actually holds today: W4's two plus W5's two. Written out
-# rather than read from the service so this suite tests the gate, not the wiring
-# — the derivation itself is pinned in the apply service's own tests.
+# A registry standing one materialiser short of today's. Written out rather than
+# read from the service so this suite tests the gate, not the wiring — the
+# derivation itself is pinned in the apply service's own tests, and a set read
+# from the service would leave these cases with nothing to refuse the moment the
+# last materialiser landed.
 _LANDED = frozenset(
     {
         ManifestSection.SCRIPT,
@@ -39,9 +41,15 @@ _LANDED = frozenset(
     }
 )
 
-#: A category the schema accepts and nothing can yet materialise — `resources`
-#: arrives with W6. It is the example throughout this suite because it is the
-#: real one; using a landed category would test the fixture, not the gate.
+#: The category held out of ``_LANDED`` above, and the example throughout this
+#: suite. It was the real gap until W6 landed the resources materialiser; it is
+#: a stand-in now, because every category the *capability* layer admits is
+#: materialised today and the two that are not (``engine_config``,
+#: ``cli_tools``) are refused a layer earlier, as ``unsupported_category``.
+#: That makes this gate unreachable from the wire — which is why it is tested
+#: here against a constructed registry rather than through the endpoint, and
+#: why it stays: the vocabulary is expected to keep outrunning the code, and
+#: the next category to do so meets this gate on the way in.
 _UNMATERIALISED = (
     'schema_version: 1\nmanifest:\n  resources:\n'
     '    - path: "docs/a.md"\n      source: "https://example.com/a.md"\n'
@@ -99,7 +107,11 @@ def test_a_declared_empty_category_still_needs_a_materialiser():
 
 
 def test_registering_the_materialiser_makes_the_same_document_acceptable():
-    """The gate is derived, so W6 widens it by landing — as W5 already did."""
+    """The gate is derived, so landing a materialiser widens it and nothing else.
+
+    W6 did exactly this for ``resources`` in the real registry; here it is done
+    to the fixture, which is the same edit the service's own derivation makes.
+    """
     with pytest.raises(ManifestValidationError):
         _preflight(_UNMATERIALISED)
     parsed = _preflight(

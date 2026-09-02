@@ -25,7 +25,6 @@ from agentclaw.community.core.bot_config_manifest.apply.source_session import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ManifestApplyInProgressError,
 )
@@ -857,11 +856,13 @@ def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(worl
 
 
 def test_materialised_constructs_reports_what_is_registered_today(world):
-    """W4 registered two; W5 brought the count to four.
+    """W4 registered two; W5 brought the count to four, W6 to five.
 
     Pinned as an equality rather than a subset so a materialiser that lands
     without its documentation, its ordering entry or its capability gate is
     caught here — the set is a published contract, not an accident of imports.
+    Widening it is the whole edit a new materialiser needs, which is the
+    property the next test pins.
     """
     service, *_ = world
     assert {c.value for c in service.materialised_constructs()} == {
@@ -869,6 +870,7 @@ def test_materialised_constructs_reports_what_is_registered_today(world):
         "mcp",
         "identity",
         "skills",
+        "resources",
     }
 
 

@@ -67,10 +67,12 @@ from ._fakes import (
     FakeActivationService,
     FakeCapabilityReader,
     FakeCredentials,
+    FakeGitClient,
     FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
+    FakeResourceFileService,
     FakeSkillUploadService,
     FakeStartupScriptService,
     real_validator,
@@ -179,6 +181,11 @@ def _service(db, *, scripts, manifests=None, queue=None):
         entry_fetcher_provider=lambda: EntryFetcher(
             FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
         ),
+        # W6's resources materialiser and W7's git transport: unreached by
+        # this suite's script-only document, but the registry registers them
+        # and the session is built per apply regardless.
+        resource_service_provider=lambda: FakeResourceFileService(),
+        git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
     )
