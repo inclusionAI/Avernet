@@ -205,7 +205,7 @@ class TaskExecutor:
             _flag = self._singlebot_2_group_enabled(node.task_id)
             _bypass = _flag and _owner_present and _bcs_wired and self._graph is not None
             logger.info(
-                "[task][task-executor] single_bot 派发 task=%s node=%s assignee=%s owner_present=%s bcs_wired=%s graph=%s flag=%s → bypass=%s",
+                "[task][task-executor] single_bot_dispatch task=%s node=%s assignee=%s owner_present=%s bcs_wired=%s graph=%s flag=%s → bypass=%s",
                 node.task_id, node.node_id, assignee, _owner_present, _bcs_wired,
                 self._graph is not None, _flag, _bypass,
             )

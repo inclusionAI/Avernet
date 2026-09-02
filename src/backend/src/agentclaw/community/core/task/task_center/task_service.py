@@ -36,6 +36,9 @@ from agentclaw.community.core.task.domain.models import (
     TaskOpResult,
     TaskSpec,
     TaskType,
+    Metadata,
+    Context,
+    Goal,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -367,46 +370,56 @@ class TaskService:
         wf_id = ec.get("workflow_id")
         args = ec.get("args", [])
         message = f"/{wf_id} " + " ".join(args) if wf_id else " ".join(args)
+
+        logger.error("[task][task_service] run_workflow, message=%s", message)
         try:
-            bot_result = await self._engine.trigger_single_bot_workflow(
-                task_id=task_id,
-                bot_id=compose_bot_identity(request.owner_bot_id, request.owner_user_id),
-                message=message,
+            self._graph.update_task_node_info(
+                TaskNodePatch(
+                    task_id=task_id,
+                    node_id=task_id,
+                    status=Status.RUNNING,
+                    run_mode="single_bot",
+                    assignee=request.owner_bot_id,
+                    extend_props_patch={},
+                )
             )
+
+            task_node = TaskNode(
+                node_id=task_id,
+                task_id=task_id,
+                status=Status.RUNNING,
+                task_spec=TaskSpec(
+                    metadata=Metadata(
+                        task_id=task_id,
+                        title=message,
+                        instruction=""
+                    ),
+                    context=Context(
+                        background="",
+                        extend_props={}
+                    ),
+                    goal=Goal(
+                        objective=message,
+                        acceptances=list()
+                    )
+                ),
+                run_info=None,
+                node_run_graph=None
+            )
+
+            logger.error("[task][task_service] run_workflow_begin, task_id=%s", task_id)
+            await self._engine._runner.start_run([task_node])
+            logger.error("[task][task_service] run_workflow_end, task_id=%s", task_id)
+
+            return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
         except Exception as exc:
+            logger.error("[task][task_service] run_workflow_meet_exception, %s", exc)
             return TaskOpResult(
                 task_id=task_id,
                 success=False,
                 error=f"workflow trigger failed: {exc}",
                 run_id=run_id,
             )
-        session_id = bot_result.session_id if bot_result is not None else None
-        # Keep the graph identity semantically split.  ``assignee`` remains the
-        # product bot id, while the owner is persisted alongside it so dashboard
-        # reads never resolve a duplicate bot name under another user.
-        run_extend = {
-            "session_id": session_id,
-            "assignee_owner_id": request.owner_user_id,
-        }
-        self._graph.update_task_node_info(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=task_id,
-                status=Status.RUNNING,
-                run_mode="single_bot",
-                assignee=request.owner_bot_id,
-                extend_props_patch=run_extend,
-            )
-        )
-        self._persist_node_run(
-            task_id,
-            task_info,
-            run_mode="single_bot",
-            assignee=request.owner_bot_id,
-            session_id=session_id,
-            extend_props=run_extend,
-        )
-        return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
 
     async def _run_yaml(self, task_id, request, task_info, run_id):
         from agentclaw.community.core.task.task_dispatch.strategies import (
