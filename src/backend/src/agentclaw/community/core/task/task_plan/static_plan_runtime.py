@@ -132,7 +132,13 @@ class StaticPlanRuntime:
         values = list(resolved.values())
         if len(values) == 1:
             v = values[0]
-            return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
+            if isinstance(v, str):
+                return v
+            # bot 上报 $.result 多为 {"summary": "...", "random": "..."};透传 summary 纯文本,
+            # 不把 JSON 包裹塞给下游(下游看到的是自然语言产出正文,不是 {"summary":...} JSON)。
+            if isinstance(v, dict) and "summary" in v:
+                return str(v["summary"])
+            return json.dumps(v, ensure_ascii=False, default=str)
         if not values:
             return "(无)"
         return json.dumps(resolved, ensure_ascii=False, default=str)
