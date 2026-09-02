@@ -118,6 +118,8 @@ class BbsTaskOverviewRecord:
     relay_end_time: Optional[datetime]  # task_node_run_info.gmt_modified
     task_spec: dict[str, Any]
     publisher: Optional[str]  # task_info.owner_bot_id(缺失 → None)
+    owner_user_id: Optional[str] = None  # task_info.owner_user_id;供 service 批量查 name(不进 DTO)
+    publisher_name: Optional[str] = None  # 发布方 bot 名称(service enrich;缺失/降级 → None)
 
 
 @dataclass

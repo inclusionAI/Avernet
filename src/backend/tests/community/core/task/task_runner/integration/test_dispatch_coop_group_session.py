@@ -108,6 +108,7 @@ def test_form_coop_group_appends_human_observer_when_owner_present():
     req = bcs.created[0]
     assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
     assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
+    assert req.originator == "human_35983"
 
 
 def test_form_coop_group_no_human_observer_when_owner_absent():
@@ -119,4 +120,43 @@ def test_form_coop_group_no_human_observer_when_owner_absent():
     req = bcs.created[0]
     assert all(not str(p.get("bot_uuid", "")).startswith("human_") for p in req.participants)
     assert req.routing_policy is None
+
+
+class _OwnerDash:
+    def __init__(self, owner_user_id):
+        self.extend_props = {"owner_user_id": owner_user_id}
+
+
+class _OwnerGraph:
+    """form_coop_group 反查 owner_user_id 用:query_task_dashboard 返带 owner 的快照。"""
+
+    def __init__(self, owner_user_id):
+        self._owner = owner_user_id
+        self.patches = []
+
+    def update_task_node_info(self, patch):
+        self.patches.append(patch)
+
+    def query_task_dashboard(self, task_id, node_id=None):
+        return _OwnerDash(self._owner)
+
+
+def test_form_coop_group_recovers_owner_via_task_id_for_run_yaml_path():
+    """P1:_run_yaml/start_coop_group 路径的 GF 只带 task_id(无 owner_user_id/loop_task_id),
+    经 graph.query_task_dashboard(task_id).extend_props[owner_user_id] 回补 → 仍追加人类观察者 +
+    routing_policy + originator=human_<owner>(对齐拉人接口示例)。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(
+        bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+        poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+        graph=_OwnerGraph("35983"),
+    )
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["drv", "w1"], collab_mode="chat",
+        extend_props={"task_id": "t1"},
+    )))
+    req = bcs.created[0]
+    assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
+    assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
+    assert req.originator == "human_35983"
 

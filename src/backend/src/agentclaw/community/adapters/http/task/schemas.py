@@ -328,6 +328,9 @@ class BbsTaskItemDTO(BaseModel):
     acceptances: list[Any] | None = Field(None, description="解析自 task_spec.goal.acceptances")
     assignee_name: str | None = Field(None, description="解析自 extend_props.assignee_name")
     publisher: str | None = Field(None, description="发布方 botId(task_info.owner_bot_id)")
+    publisher_name: str | None = Field(
+        None, description="发布方 bot 名称(由 publisher bot_id 批量查 BotService;缺失/降级 → None)"
+    )
 
 
 class TaskRelationDTO(BaseModel):
@@ -714,6 +717,7 @@ def bbs_task_overview_to_dto(record) -> BbsTaskItemDTO:
         acceptances=goal.get("acceptances"),
         assignee_name=extend_props.get("assignee_name"),
         publisher=record.publisher,
+        publisher_name=record.publisher_name,
     )
 
 

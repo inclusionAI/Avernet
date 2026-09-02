@@ -621,16 +621,22 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             if not joined:
                 return [], total
 
-            # publisher:按 distinct task_id 一次 in_() 批查 task_info.owner_bot_id,避免 N+1。
+            # publisher:按 distinct task_id 一次 in_() 批查 task_info.owner_bot_id + owner_user_id,避免 N+1。
             task_ids = {run.task_id for run, _ in joined}
             publishers: dict[str, str] = {}
+            owner_users: dict[str, str] = {}
             if task_ids:
                 publisher_rows = (
-                    db.query(TaskInfoModel.task_id, TaskInfoModel.owner_bot_id)
+                    db.query(
+                        TaskInfoModel.task_id,
+                        TaskInfoModel.owner_bot_id,
+                        TaskInfoModel.owner_user_id,
+                    )
                     .filter(TaskInfoModel.task_id.in_(task_ids))
                     .all()
                 )
-                publishers = {tid: oid for tid, oid in publisher_rows if oid}
+                publishers = {tid: oid for tid, oid, _ in publisher_rows if oid}
+                owner_users = {tid: uid for tid, _, uid in publisher_rows if uid}
 
             records: list[BbsTaskOverviewRecord] = []
             for run, node in joined:
@@ -651,6 +657,8 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                         relay_end_time=run_rec.gmt_modified,
                         task_spec=node_rec.task_spec or {},
                         publisher=publishers.get(run_rec.task_id),
+                        owner_user_id=owner_users.get(run_rec.task_id),
+                        # publisher_name 由 TaskService._enrich_bbs_publisher_names 批量补(repo 不查 BotService)
                     )
                 )
             return records, total

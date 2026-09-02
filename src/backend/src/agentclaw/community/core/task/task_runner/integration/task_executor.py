@@ -440,14 +440,16 @@ class TaskExecutor:
 
     def _resolve_owner_user_id(self, gf: GroupFormation) -> str | None:
         """解析任务 owner_user_id:优先 ``gf.extend_props["owner_user_id"]``(P2 直接注入);
-        否则按 ``loop_task_id`` 反查 ``graph.extend_props["owner_user_id"]``(覆盖 engine._drain 协作派发路径,
-        不改 dispatch/planning)。无则 None → 不拉人类观察者。"""
+        否则按 ``loop_task_id``/``task_id`` 反查 ``graph.extend_props["owner_user_id"]``(覆盖 engine._drain
+        协作派发路径[GF 带 loop_task_id] 与 _run_yaml/start_coop_group 路径[GF 带 task_id],不改 dispatch/planning)。
+        无则 None → 不拉人类观察者。"""
         explicit = gf.extend_props.get("owner_user_id")
         if explicit:
             logger.info("[task][task_executor] resolve_owner_user_id 命中 gf.extend_props[owner_user_id] owner=%s", explicit)
             return str(explicit)
         loop_task_id = gf.extend_props.get("loop_task_id") or ""
-        task_id = loop_task_id.split("::", 1)[0] if loop_task_id else ""
+        # _drain 协作派发路径 GF 带 loop_task_id(task::node);_run_yaml/start_coop_group 路径 GF 带 task_id(无 loop_task_id)。
+        task_id = (loop_task_id.split("::", 1)[0] if loop_task_id else "") or (gf.extend_props.get("task_id") or "")
         if task_id and self._graph is not None:
             try:
                 snapshot = self._graph.query_task_dashboard(task_id)
@@ -458,8 +460,8 @@ class TaskExecutor:
             logger.info("[task][task_executor] resolve_owner_user_id 反查 graph task=%s owner=%s", task_id, owner)
             return str(owner) if owner else None
         logger.info(
-            "[task][task_executor] resolve_owner_user_id 无来源(loop_task_id=%s graph=%s)→ 不拉人类观察者",
-            loop_task_id, self._graph is not None,
+            "[task][task_executor] resolve_owner_user_id 无来源(owner_user_id/loop_task_id/task_id 均无, graph=%s)→ 不拉人类观察者",
+            self._graph is not None,
         )
         return None
 
@@ -624,6 +626,7 @@ class TaskExecutor:
                     },
                 }
         _raw_originator = gf.extend_props.get("originator")
+        logger.info("[task][task_executor] raw_originator = %s", _raw_originator)
         if _raw_originator:
             req_kwargs["originator"] = str(_raw_originator)
         elif originator_bot_id:
@@ -795,9 +798,11 @@ class TaskExecutor:
                 ]
                 req_kwargs["routing_policy"] = dict(_HUMAN_OBSERVER_ROUTING_POLICY)
                 req_kwargs.setdefault("label", gf.group_name or "")
+                # 拉人接口示例:originator=human_<owner>(setdefault——已有显式 bot originator 时不覆盖)。
+                req_kwargs.setdefault("originator", f"human_{_owner_user_id}")
                 logger.info(
-                    "[task][task_executor] form_coop_group 追加人类观察者(不发言) mode=%s owner=%s → routing_policy=inject_observers",
-                    mode, _owner_user_id,
+                    "[task][task_executor] form_coop_group 追加人类观察者(不发言) mode=%s owner=%s → routing_policy=inject_observers originator=human_%s",
+                    mode, _owner_user_id, _owner_user_id,
                 )
             else:
                 logger.info("[task][task_executor] form_coop_group 无 owner_user_id → 不拉人类观察者 mode=%s", mode)

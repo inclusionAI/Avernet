@@ -395,6 +395,7 @@ def _seed_bbs_list_service(world) -> None:
                 relay_end_time=None,
                 task_spec=_TASK_SPEC,
                 publisher="pub-1",
+                publisher_name="EndpointPublisherBot",
             )
         ], 1
 
@@ -426,6 +427,7 @@ def _seed_bbs_list_error(world) -> None:
                         "goal": "exercise the route",
                         "assignee_name": "Alice",
                         "publisher": "pub-1",
+                        "publisher_name": "EndpointPublisherBot",
                     }
                 ],
             },

@@ -39,6 +39,7 @@ def _record(
     status: Status = Status.RUNNING,
     extend_props: dict | None = None,
     task_spec: dict | None = None,
+    publisher_name: str | None = None,
 ) -> BbsTaskOverviewRecord:
     spec = task_spec if task_spec is not None else {
         "metadata": {"task_id": task_id, "title": title, "instruction": "执行"},
@@ -62,6 +63,7 @@ def _record(
         relay_end_time=datetime(2026, 9, 1, 10, 5, 0),
         task_spec=spec,
         publisher="pub-1",
+        publisher_name=publisher_name,
     )
 
 
@@ -352,3 +354,24 @@ def test_bbs_list_route_combines_status_and_search_word():
     page = r.json()["data"]
     assert page["total"] == 1
     assert page["items"][0]["task_id"] == "bbs-1"
+
+
+# ── publisher_name 展示字段(stub 已模拟 service enrich)──
+
+
+def test_bbs_list_route_returns_publisher_name_when_present():
+    """record 带 publisher_name 时透出到 DTO(stub 模拟 service 已 enrich)。"""
+    c = _client([_record("bbs-1", publisher_name="张三客服Bot")])
+    r = c.get("/api/v1/collaboration/tasks/bbs/list")
+    assert r.status_code == 200, r.text
+    it = r.json()["data"]["items"][0]
+    assert it["publisher"] == "pub-1"
+    assert it["publisher_name"] == "张三客服Bot"
+
+
+def test_bbs_list_route_publisher_name_none_when_absent():
+    """record 无 publisher_name(降级)→ DTO.publisher_name=None。"""
+    c = _client([_record("bbs-1")])  # publisher_name 默认 None
+    r = c.get("/api/v1/collaboration/tasks/bbs/list")
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["items"][0]["publisher_name"] is None

@@ -281,7 +281,11 @@ class TaskService:
 
     @staticmethod
     def _normalize_owner_bot_id(request: TaskInfoRequest) -> TaskInfoRequest:
-        """Keep new task_info rows semantically split while accepting legacy composite input."""
+        """Keep new task_info rows semantically split while accepting legacy composite input.
+
+        归属解耦(A):当 owner_bot_id 内嵌归属与 owner_user_id(执行用户/人类观察者)不一致时,**保留**
+        owner_bot_id 复合(真实归属不被覆盖),owner_user_id 仍为执行用户 —— owner bot 寻址用真实归属,
+        执行用户仅作人类观察者(P1)。归属一致或缺执行用户时维持原行为(拆为 bare bot_id + owner_user_id)。"""
         bot_id, separator, embedded_owner_id = str(
             request.owner_bot_id or ""
         ).partition(":")
@@ -295,10 +299,12 @@ class TaskService:
         ):
             logger.warning(
                 "[task][execute] owner identity mismatch: owner_bot_id=%s owner_user_id=%s; "
-                "keep explicit owner_user_id",
+                "keep owner_bot's real owner (embedded), owner_user_id is the executing observer",
                 request.owner_bot_id,
                 request.owner_user_id,
             )
+            # 保留 owner_bot_id 复合(真实归属),不拆为 bare —— 供 _run_yaml 直接用作 owner bot 寻址。
+            return replace(request, owner_bot_id=request.owner_bot_id, owner_user_id=owner_user_id)
         return replace(request, owner_bot_id=bot_id, owner_user_id=owner_user_id)
 
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
@@ -415,9 +421,14 @@ class TaskService:
         _task_context = (
             (_ts.goal.objective or _ts.metadata.instruction or _ts.metadata.title) or ""
         ).strip()
+        # owner bot 寻址:_normalize 已在"归属≠执行用户"时保留 owner_bot_id 复合(真实归属),
+        # 此处直接用 composite;bare(无内嵌归属)时才 compose 执行用户作归属。
+        _owner_bot = request.owner_bot_id or ""
+        if ":" not in _owner_bot:
+            _owner_bot = compose_bot_identity(_owner_bot, request.owner_user_id)
         gf = GroupFormation(
             bot_ids=[
-                compose_bot_identity(request.owner_bot_id, request.owner_user_id),
+                _owner_bot,
                 *ec.get("participant_bot_ids", []),
             ],
             collab_mode=resolve_coop_collab_mode(has_yaml, ec.get("group_kind")),
@@ -956,10 +967,55 @@ class TaskService:
         可选过滤(为空不过滤,退化为纯分页)。返回 ``(records, total)``——``records`` 为
         ``BbsTaskOverviewRecord``(含 task_spec/extend_props 原始 dict);title/goal/acceptances/
         assignee_name 由 adapter translator 二次解析;``total`` 为**过滤后**行数。
+        查得后交 ``_enrich_bbs_publisher_names`` 把 publisher bot_id 批量解析为 name(降级 None)。
         """
-        return self._graph.list_bbs_tasks_overview(
+        records, total = self._graph.list_bbs_tasks_overview(
             page, page_size, search_word=search_word, status=status
         )
+        return self._enrich_bbs_publisher_names(records), total
+
+    def _enrich_bbs_publisher_names(
+        self, records: list[BbsTaskOverviewRecord]
+    ) -> list[BbsTaskOverviewRecord]:
+        """批量解析 publisher bot_id → name(BotService.list_bots_by_owner_bot_pairs)。
+
+        展示字段增量:``bot_service`` 缺失 / pair 缺 bot_id 或 owner_id / 查询抛错 / 未命中 →
+        ``publisher_name=None``,绝不阻断列表(复用 ``_enrich_task_owner_display`` 的批量+降级模式)。
+        repo 只补 ``(publisher, owner_user_id)``;name 在此用一次批量下游查询,无 N+1。
+        """
+        if not records or self._bot_service is None:
+            return records
+        pairs = list(
+            dict.fromkeys(
+                (r.publisher, r.owner_user_id)
+                for r in records
+                if r.publisher and r.owner_user_id
+            )
+        )
+        names: dict[tuple[str, str], str | None] = {}
+        if pairs:
+            try:
+                result = (
+                    self._bot_service.list_bots_by_owner_bot_pairs(
+                        pairs=pairs, page=1, page_size=len(pairs)
+                    )
+                    or {}
+                )
+                for item in result.get("items") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    key = (
+                        str(item.get("bot_id") or ""),
+                        str(item.get("owner_id") or ""),
+                    )
+                    if key[0] and key[1]:
+                        names[key] = item.get("bot_name")
+            except Exception as exc:  # noqa: BLE001 display enrichment only
+                logger.warning("[task][bbs] publisher bot name lookup failed: %s", exc)
+        return [
+            replace(r, publisher_name=names.get((r.publisher, r.owner_user_id)))
+            for r in records
+        ]
 
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(委托 TaskGraphService.claim_bbs_owner)。

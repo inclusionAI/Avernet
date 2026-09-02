@@ -159,7 +159,7 @@ def test_list_bbs_tasks_overview_empty_when_no_bbs(db):
 
 
 def test_list_bbs_tasks_overview_publisher_none_when_task_info_missing(db):
-    # run_info(bbs) + node 存在,但无 task_info 行 → publisher=None(不报错)。
+    # run_info(bbs) + node 存在,但无 task_info 行 → publisher=None(不报错);owner_user_id / publisher_name 也 None。
     _seed_task(db, task_id="orphan-1", node_id="n1", run_mode="bbs", with_task_info=False)
 
     rows, total = TaskGraphRepository(db).list_bbs_tasks_overview()
@@ -168,6 +168,8 @@ def test_list_bbs_tasks_overview_publisher_none_when_task_info_missing(db):
     assert len(rows) == 1
     assert rows[0].task_id == "orphan-1"
     assert rows[0].publisher is None
+    assert rows[0].owner_user_id is None
+    assert rows[0].publisher_name is None
 
 
 def test_list_bbs_tasks_overview_paginates_and_reports_total(db):
@@ -370,3 +372,66 @@ def test_graph_service_list_bbs_tasks_overview_forwards_filters(db):
     rows, total = svc.list_bbs_tasks_overview(status="RUNNING", search_word="alpha")
     assert total == 1
     assert rows[0].task_id == "run-1"
+
+
+# ── owner_user_id 中间量 + publisher_name enrich(repo 不查 BotService)──
+
+
+def test_list_bbs_tasks_overview_fills_owner_user_id(db):
+    """repo 顺带取 owner_user_id 填进 record(供 service 批量查 name);publisher_name 恒 None。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs", publisher="pub-1")
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview()
+    assert total == 1
+    r = rows[0]
+    assert r.publisher == "pub-1"
+    assert r.owner_user_id == "u1"  # _seed_task owner_user_id="u1"
+    assert r.publisher_name is None  # repo 不查 BotService
+
+
+class _StubBotService:
+    """最小 stub:实现 list_bots_by_owner_bot_pairs,记录调用以验证批量一次。"""
+
+    def __init__(self, mapping: dict | None = None, *, raise_on_call: bool = False) -> None:
+        self._mapping = mapping or {}
+        self._raise = raise_on_call
+        self.calls = 0
+
+    def list_bots_by_owner_bot_pairs(self, *, pairs, page, page_size):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        if self._raise:
+            raise RuntimeError("bot service down")
+        return {"items": list(self._mapping.values())}
+
+
+def test_task_service_enriches_publisher_name_via_bot_service(db):
+    """TaskService 用 list_bots_by_owner_bot_pairs 批量查,填 publisher_name;一次批量调用。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs", publisher="bot-A")
+    bot = _StubBotService(
+        {("bot-A", "u1"): {"bot_id": "bot-A", "owner_id": "u1", "bot_name": "客服Bot-A"}}
+    )
+
+    service = TaskService(TaskGraphService(graph_repo=TaskGraphRepository(db)), bot_service=bot)
+    rows, total = service.list_bbs_tasks()
+    assert total == 1
+    assert rows[0].publisher == "bot-A"
+    assert rows[0].publisher_name == "客服Bot-A"
+    assert bot.calls == 1
+
+
+def test_task_service_publisher_name_none_when_bot_service_missing(db):
+    """无 bot_service → publisher_name 降级 None,不阻断。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs", publisher="bot-A")
+    service = TaskService(TaskGraphService(graph_repo=TaskGraphRepository(db)))
+    rows, _ = service.list_bbs_tasks()
+    assert rows[0].publisher == "bot-A"
+    assert rows[0].publisher_name is None
+
+
+def test_task_service_publisher_name_none_when_bot_service_raises(db):
+    """bot_service 查询抛错 → 降级 None,不阻断列表。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs", publisher="bot-A")
+    bot = _StubBotService(raise_on_call=True)
+    service = TaskService(TaskGraphService(graph_repo=TaskGraphRepository(db)), bot_service=bot)
+    rows, _ = service.list_bbs_tasks()
+    assert rows[0].publisher == "bot-A"
+    assert rows[0].publisher_name is None

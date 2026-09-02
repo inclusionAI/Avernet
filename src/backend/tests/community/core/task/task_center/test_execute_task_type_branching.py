@@ -170,6 +170,54 @@ def test_execute_yaml_composes_owner_identity_before_forming_group():
     assert captured["bot_ids"] == ["default:146836", "default:153364"]
 
 
+def test_normalize_owner_bot_id_preserves_real_owner_on_mismatch():
+    """(A) 归属解耦:owner_bot_id 内嵌归属(146836)与 owner_user_id(35983,执行用户/观察者)不一致时,
+    保留 owner_bot_id 复合(真实归属不被覆盖);owner_user_id 仍为执行用户。"""
+    req = _request(
+        TaskType.YAML,
+        owner_bot_id="default:146836",
+        owner_user_id="35983",
+        yaml="kind: collab",
+    )
+    norm = TaskService._normalize_owner_bot_id(req)
+    assert norm.owner_bot_id == "default:146836"  # 真实归属保留(不被 35983 覆盖)
+    assert norm.owner_user_id == "35983"  # 执行用户(人类观察者)
+
+
+def test_execute_yaml_owner_bot_keeps_real_owner_when_user_is_observer():
+    """(A):owner_bot 归属(146836)与执行用户(35983)不一致时,_run_yaml 建 owner bot 用真实归属
+    (default:146836),不被 owner_user_id(35983)覆盖;35983 仅作人类观察者(由 P1 保证,不在此断言)。"""
+    eng = _FakeEngine(graph=None)
+    captured = {}
+
+    async def start(gf):
+        captured["bot_ids"] = gf.bot_ids
+        return eng.group_start
+
+    eng.start_coop_group = start
+    svc, _, _ = _service(eng)
+
+    result = asyncio.new_event_loop().run_until_complete(
+        svc.execute(
+            _request(
+                TaskType.YAML,
+                owner_bot_id="default:146836",
+                owner_user_id="35983",  # mismatch:执行用户 35983 != bot 归属 146836
+                yaml="kind: collab",
+                participant_bot_ids=["default:153364"],
+                participant_bindings={
+                    "editor": ["default:146836"],
+                    "writer": ["default:153364"],
+                },
+            )
+        )
+    )
+
+    assert result.success is True
+    assert captured["bot_ids"][0] == "default:146836"  # 真实归属保留,不被 35983 覆盖
+    assert "default:35983" not in captured["bot_ids"]  # 执行用户不混入 bot 归属
+
+
 def test_execute_yaml_persists_session_id_with_state_machine():
     eng = _FakeEngine(graph=None)
     async def start(gf):
