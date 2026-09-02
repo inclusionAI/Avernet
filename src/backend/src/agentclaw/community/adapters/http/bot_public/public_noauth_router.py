@@ -1,16 +1,25 @@
 """Bot Public Router.
 
 提供 Bot 相关接口：
-- GET /api/public/bots/{bot_id}/appcoding-bots - 获取架构师 bot 关联的 coding bots
-- PATCH /api/public/bots/{bot_id}/ext - 更新 bot ext 字段（限制字段）
+- GET /api/public/bots/{bot_id}/appcoding-bots - 获取架构师 bot 关联的 coding bots（免登录只读，已脱敏）
+- PATCH /api/public/bots/{bot_id}/ext - 更新 bot ext 字段（限制字段，仅超管）
+
+注意：本文件历史上是一个完全免登录的 router。写接口 ``PATCH /ext`` 会跨 owner
+修改任意 Bot 的 ext，免登录暴露等价于任意人可篡改任意 Bot 的架构域分类字段，
+因此该写接口现在要求登录并落在 ``super_admin`` 名单内（与
+``POST /api/bots/update-bot-ext-for-others`` 同一权限域：跨 owner 的 Bot 管理操作）。
+读接口保持免登录：它只返回已 ``_scrub_sensitive`` 脱敏的公开数据。
 """
 import json
 from typing import Any, Optional
 
-from fastapi import APIRouter, Path, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel
 
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.access.admin_scopes import super_admin
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
 )
@@ -145,12 +154,17 @@ async def list_coding_bots_by_architect_public(
 async def update_bot_ext_public(
     bot_id: str = Path(..., description="Bot ID"),
     request: Request = None,
+    user: AuthenticatedUser = Depends(get_current_user),
     bot_repo: BotRepository = Injected(BotRepository),
 ) -> ApiResponse:
-    """局部更新 bot ext 字段（限制白名单）。
+    """局部更新 bot ext 字段（限制白名单，仅超管）。
 
     PATCH /api/public/bots/{bot_id}/ext
     Body: { "key1": "value1", ... }  # 只允许白名单字段
+
+    该接口按 bot_id 定位 Bot 并以其自身 owner_id 落库，调用方无需是 owner，
+    因此必须限制为管理员：未登录返回 401，登录但不在 ``super_admin`` 名单内
+    返回 403 信封。
 
     只允许更新白名单字段，非白名单字段会被自动过滤；
     敏感字段（如 iam_token 等）会被过滤去除。
@@ -161,10 +175,23 @@ async def update_bot_ext_public(
     Args:
         bot_id: Bot ID
         request: FastAPI request object containing JSON body with fields to update
+        user: 已登录用户（由 ``get_current_user`` 解析，未登录直接 401）
 
     Returns:
         更新结果
     """
+    if user.staffId not in super_admin():
+        logger.warning(
+            f"[public_noauth.update_bot_ext] Permission denied for "
+            f"user={user.staffId} bot_id={bot_id}"
+        )
+        return ApiResponse(
+            success=False,
+            message="权限不足：此接口仅允许管理员调用",
+            error_code=403,
+            data=None,
+        )
+
     try:
         ext_update = await request.json()
         if not isinstance(ext_update, dict):
@@ -229,8 +256,8 @@ async def update_bot_ext_public(
         bot_repo.update_by_owner(bot_id, owner_id, {"ext": ext})
 
         logger.info(
-            f"[public_noauth.update_bot_ext] Updated bot_id={bot_id} "
-            f"fields={list(filtered_update.keys())}"
+            f"[public_noauth.update_bot_ext] operator={user.staffId} "
+            f"Updated bot_id={bot_id} fields={list(filtered_update.keys())}"
         )
 
         return ApiResponse(
