@@ -310,11 +310,26 @@ class PersonalSpaceInitialized(SpaceCreated):
     )
 
 
+class InitializePersonalSpaceRequest(BaseModel):
+    """Optional controls for initializing the current user's personal Space."""
+
+    skip_sc: bool = Field(
+        default=False,
+        alias="skipSC",
+        description="Whether to skip creating or binding the corresponding Skill Center Team.",
+    )
+
+
 class CreateSpaceRequest(BaseModel):
     """Request for creating a shared team Space."""
 
     space_name: str = Field(
         min_length=1, max_length=128, description="Display name for the new Space."
+    )
+    skip_sc: bool = Field(
+        default=False,
+        alias="skipSC",
+        description="Whether to skip creating the corresponding Skill Center Team.",
     )
 
 
