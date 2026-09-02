@@ -126,6 +126,13 @@ logger = get_logger()
 # and is reaped on the next restart attempt so a bot is never permanently
 # blocked from restarting.
 RESTART_LOCK_TTL_SECONDS = 120
+#: How long an unbound ``PROVISIONING`` record may sit before a later
+#: ``provision_bot`` call treats the claim as abandoned and takes it over (W8).
+#: Longer than step 2 normally takes — a device allocation is seconds to a
+#: minute — so a live, slow holder that lost its task lease is not raced; the
+#: creation job only reaches this on a re-invocation, and the queue's own
+#: deadline bounds the whole creation anyway.
+PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
 
 # Passport refresh is callback-driven and retryable. Keep caller-instance
 # fan-out bounded while still attempting every instance before reporting an
@@ -1543,7 +1550,10 @@ class BotService(BotServiceProtocol):
         (``claim_provisioning``). A second call that finds the claim taken —
         an at-least-once re-invocation of the creation job while the first is
         still allocating — returns the record untouched rather than allocating
-        a second device. Everything after the record — BCN registration, the
+        a second device. A claim left behind by a holder that died (still
+        unbound after ``PROVISIONING_CLAIM_STALE_SECONDS`` on the database
+        clock) is taken over instead, so the record does not stay stranded at
+        ``PROVISIONING``. Everything after the record — BCN registration, the
         device or teclaw container, the publish record, the draft artifact,
         memory initialisation — runs exactly as ``create_bot`` runs it, from
         the same code, so ``create_bot()`` and ``create_bot(provision=False)``
@@ -1563,7 +1573,9 @@ class BotService(BotServiceProtocol):
             )
             return record
 
-        if not self._repository.claim_provisioning(bot_id, user_id):
+        if not self._repository.claim_provisioning(
+            bot_id, user_id, reclaim_after_seconds=PROVISIONING_CLAIM_STALE_SECONDS
+        ):
             logger.info(
                 f"[bot_service.provision_bot] Bot {bot_id} is being provisioned by "
                 f"another call (status={record.get('status')}); returning the record"

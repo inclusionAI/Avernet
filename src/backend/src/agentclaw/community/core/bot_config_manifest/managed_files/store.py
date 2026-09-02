@@ -199,19 +199,32 @@ class ManagedFilesStore:
         records = self._repo.list_all(
             env=scope.env, entity_id=scope.entity_id, bot_id=scope.bot_id
         )
-        failed = [r.store_key for r in records if not self._oss.delete_object(r.store_key)]
+        failed: list[str] = []
+        removed = 0
+        for record in records:
+            if not self._oss.delete_object(record.store_key):
+                # The row stays with its object, so the next purge reaches
+                # it; the creation job retries a discard that did not land.
+                failed.append(record.store_key)
+                continue
+            # Each row goes as soon as its object is confirmed gone, so a
+            # later failure cannot leave the index remembering bytes that
+            # are no longer there.
+            self._repo.delete(
+                env=scope.env,
+                entity_id=scope.entity_id,
+                bot_id=scope.bot_id,
+                category=record.category,
+                rel_path=record.rel_path,
+            )
+            removed += 1
         if failed:
-            # The rows for the objects still standing stay too, so the next
-            # purge reaches them; the creation job retries a discard that
-            # did not land.
             for key in failed:
                 logger.warning("[managed_files] object delete failed during purge: %s", key)
             raise ManagedFilesStoreError(
                 f"object store delete failed for {len(failed)} object(s) during purge"
             )
-        return self._repo.purge_bot(
-            env=scope.env, entity_id=scope.entity_id, bot_id=scope.bot_id
-        )
+        return removed
 
     # ── reads ────────────────────────────────────────────────────────────
 

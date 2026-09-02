@@ -40,10 +40,11 @@ prod consumers only read the projected subset) plus a nested
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from injector import inject
-from sqlalchemy import and_, func, or_
+from sqlalchemy import DateTime, and_, func, or_, select, type_coerce
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.repository.implementations.bot.device_provider import (
@@ -83,6 +84,11 @@ _UPDATE_ALLOWED_FIELDS = (
 # Only allowlisted JSON columns are reachable; engine_types is NOT
 # in _UPDATE_ALLOWED_FIELDS (prod parity — it is silently dropped).
 _JSON_FIELDS = ("share_policy", "ext")
+
+
+def _as_naive(dt: datetime) -> datetime:
+    """Drop tzinfo so the DB's "now" and a stored ``gmt_modified`` compare."""
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
 
 
 class BotRepository(
@@ -503,7 +509,13 @@ class BotRepository(
 
     # ── updates (single conditional statements) ─────────────────
 
-    def claim_provisioning(self, bot_id: str, owner_id: str) -> bool:
+    def claim_provisioning(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        reclaim_after_seconds: Optional[int] = None,
+    ) -> bool:
         with self._db.orm_session() as db:
             rowcount = (
                 db.query(self.Model)
@@ -520,6 +532,38 @@ class BotRepository(
                     synchronize_session=False,
                 )
             )
+            if rowcount == 1 or reclaim_after_seconds is None:
+                return rowcount == 1
+            # A claim whose holder died leaves the row at PROVISIONING and
+            # unbound with nothing left to release it. Judged on the database
+            # clock alone (both "now" and ``gmt_modified`` are the DB's, the
+            # way the apply lock judges staleness), and taken by one
+            # conditional update: refreshing ``gmt_modified`` is what moves
+            # the row past the cutoff, so of two reclaimers only one wins.
+            db_now = db.execute(select(type_coerce(func.now(), DateTime))).scalar()
+            if db_now is None:
+                return False
+            cutoff = _as_naive(db_now) - timedelta(seconds=reclaim_after_seconds)
+            rowcount = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.owner_id == owner_id,
+                    self.Model.is_delete == 0,
+                    self.Model.status == "PROVISIONING",
+                    self.Model.binding_id.is_(None),
+                    self.Model.gmt_modified <= cutoff,
+                    self._env(),
+                )
+                .update({self.Model.gmt_modified: func.now()}, synchronize_session=False)
+            )
+            if rowcount == 1:
+                logger.warning(
+                    "[bot_repository.claim_provisioning] reclaimed a stale provisioning "
+                    "claim: bot_id=%s, older than %ss",
+                    bot_id,
+                    reclaim_after_seconds,
+                )
         return rowcount == 1
 
     def update_by_owner(

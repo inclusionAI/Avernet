@@ -27,6 +27,7 @@ class _Repo:
     def __init__(self, log: list) -> None:
         self.rows: dict[str, dict[str, Any]] = {}
         self._log = log
+        self.stale_claims: set[str] = set()
 
     def count_by_owner(self, *a, **k):
         return 0
@@ -51,15 +52,24 @@ class _Repo:
         self._log.append(("soft_delete", bot_id))
         self.rows[bot_id]["is_delete"] = 1
 
-    def claim_provisioning(self, bot_id, user_id):
+    def claim_provisioning(self, bot_id, user_id, *, reclaim_after_seconds=None):
         row = self.rows.get(bot_id)
         if not row or row.get("owner_id") != user_id or row.get("is_delete"):
             return False
-        if row.get("status") != "PENDING" or row.get("binding_id"):
+        if row.get("binding_id"):
             return False
-        row["status"] = "PROVISIONING"
-        self._log.append(("claim", bot_id))
-        return True
+        if row.get("status") == "PENDING":
+            row["status"] = "PROVISIONING"
+            self._log.append(("claim", bot_id))
+            return True
+        # The real repository judges staleness on the DB clock; the fake is
+        # told which claims are abandoned.
+        if row.get("status") == "PROVISIONING" and reclaim_after_seconds is not None:
+            if bot_id in self.stale_claims:
+                self.stale_claims.discard(bot_id)
+                self._log.append(("reclaim", bot_id))
+                return True
+        return False
 
 
 def _device_result() -> DeviceBindingRecord:
@@ -204,6 +214,22 @@ def test_a_second_call_while_the_claim_is_held_does_not_provision_again() -> Non
         record = svc.provision_bot("g-1", "u1", "nick")
     assert len(log) == writes_before, "the second call allocated"
     assert record["binding_id"] is None and record["status"] == "PROVISIONING"
+
+
+@pytest.mark.unit
+def test_an_abandoned_claim_is_taken_over_rather_than_stranding_the_record() -> None:
+    """A holder that died mid-provisioning leaves PROVISIONING and unbound
+    with nothing to release it; a later call takes the claim over."""
+    log: list = []
+    svc = _service(log)
+    with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=False):
+        svc.create_bot(**_ARGS, engine_type="openclaw", bot_type="service", provision=False)
+    assert svc._repository.claim_provisioning("g-1", "u1") is True
+    svc._repository.stale_claims.add("g-1")
+    with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=False):
+        record = svc.provision_bot("g-1", "u1", "nick")
+    assert ("reclaim", "g-1") in log
+    assert record["binding_id"] is not None
 
 
 @pytest.mark.unit

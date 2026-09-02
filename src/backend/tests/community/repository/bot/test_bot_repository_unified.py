@@ -409,6 +409,27 @@ def test_exists_by_owner_and_bot_type_only_matches_live_requested_type(repo):
 # ── update_by_owner allowlist (adopt prod) ──────────────────────────
 
 
+def test_claim_provisioning_is_one_conditional_update(repo):
+    repo.insert(_data(bot_id="b1", status="PENDING", binding_id=None))
+    assert repo.claim_provisioning("b1", "emp1") is True
+    assert repo.get_by_id_and_owner("b1", "emp1")["status"] == "PROVISIONING"
+    assert repo.claim_provisioning("b1", "emp1") is False, "already claimed"
+    assert repo.claim_provisioning("b1", "other") is False, "not the owner"
+    repo.update_by_owner("b1", "emp1", {"binding_id": 9})
+    assert repo.claim_provisioning("b1", "emp1", reclaim_after_seconds=0) is False, "bound"
+
+
+def test_claim_provisioning_reclaims_only_a_stale_unbound_claim(repo):
+    """Judged on the database clock: a claim younger than the cutoff is
+    refused, one past it is taken over by refreshing ``gmt_modified``."""
+    repo.insert(_data(bot_id="b1", status="PENDING", binding_id=None))
+    assert repo.claim_provisioning("b1", "emp1") is True
+    assert repo.claim_provisioning("b1", "emp1", reclaim_after_seconds=3600) is False
+    assert repo.claim_provisioning("b1", "emp1", reclaim_after_seconds=0) is True
+    assert repo.get_by_id_and_owner("b1", "emp1")["status"] == "PROVISIONING"
+    assert repo.claim_provisioning("b1", "emp1", reclaim_after_seconds=3600) is False
+
+
 def test_update_by_owner_allowlist_drops_non_allowlisted(repo):
     repo.insert(_data(bot_id="b1", status="PENDING"))
     out = repo.update_by_owner(

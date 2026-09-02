@@ -66,6 +66,28 @@ def test_a_failed_object_delete_keeps_the_row_so_the_bytes_stay_reachable() -> N
     assert key not in oss.objects and store.list(_SCOPE, category=CATEGORY_IDENTITY) == []
 
 
+def test_a_purge_that_could_not_delete_every_object_keeps_only_those_rows() -> None:
+    """A row goes as soon as its object is confirmed gone: a later failure in
+    the same purge must not leave the index remembering bytes that are not
+    there any more."""
+    from agentclaw.community.core.bot_config_manifest.managed_files import ManagedFilesStoreError
+
+    store, oss = _store()
+    store.put(_SCOPE, category=CATEGORY_IDENTITY, name="a", rel_path="identity/a", content=b"1", apply_id=None)
+    store.put(_SCOPE, category=CATEGORY_RESOURCES, name="b", rel_path="workspace/b", content=b"2", apply_id=None)
+    stuck = store.list(_SCOPE, category=CATEGORY_RESOURCES)[0].store_key
+    real_delete = oss.delete_object
+    oss.delete_object = lambda k: False if k == stuck else real_delete(k)  # type: ignore[method-assign]
+    with pytest.raises(ManagedFilesStoreError):
+        store.purge(_SCOPE)
+    assert store.list(_SCOPE, category=CATEGORY_IDENTITY) == [], "its object is gone; so is the row"
+    assert [r.store_key for r in store.list(_SCOPE, category=CATEGORY_RESOURCES)] == [stuck]
+    assert stuck in oss.objects
+    oss.delete_object = real_delete  # type: ignore[method-assign]
+    assert store.purge(_SCOPE) == 1
+    assert oss.objects == {}
+
+
 def test_delete_removes_object_then_row_and_purge_removes_everything() -> None:
     store, oss = _store()
     store.put(_SCOPE, category=CATEGORY_IDENTITY, name="a", rel_path="identity/a", content=b"1", apply_id=None)
