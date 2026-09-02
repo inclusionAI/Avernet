@@ -34,10 +34,20 @@ from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyConstruct,
 )
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
+    BotConfigManifestApplyServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
+    BotConfigManifestServiceProtocol,
+)
+from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.core.bot_config_manifest.schema import (
     ManifestValidationError,
     Violation,
 )
+from agentclaw.community.core.task_queue.types import TaskRecord
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -206,12 +216,12 @@ class BotCreationManifestSeam:
     def __init__(
         self,
         *,
-        manifest_service: Any,
-        apply_service: Any,
-        script_service_provider: Callable[[], Any],
+        manifest_service: BotConfigManifestServiceProtocol,
+        apply_service: BotConfigManifestApplyServiceProtocol,
+        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         is_teclaw: Callable[[Optional[str]], bool],
         start_job: Callable[..., None],
-        find_job: Callable[..., Any],
+        find_job: Callable[..., Optional[TaskRecord]],
         authorization_window_seconds: int,
     ) -> None:
         self._manifests = manifest_service
@@ -361,7 +371,7 @@ class BotCreationManifestSeam:
             window_seconds=self._authorization_window_seconds,
         )
 
-    def find_job(self, *, entity_id: str, bot_id: str) -> Optional[Any]:
+    def find_job(self, *, entity_id: str, bot_id: str) -> Optional[TaskRecord]:
         """This creation's task row, or ``None`` if no creation was submitted.
 
         The tenant is resolved here, from the request, rather than taken as an

@@ -610,6 +610,7 @@ internal_dependencies:
   - agentclaw.community.kernel.lifecycle  # the apply handler registers itself at boot
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database
+  - agentclaw.community.plugin_api.passport  # the creation job reads its own authorization status; the Plugin API type, not the service graph behind it
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils

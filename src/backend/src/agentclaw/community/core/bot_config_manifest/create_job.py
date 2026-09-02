@@ -33,10 +33,16 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplySta
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ManifestApplyInProgressError,
 )
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
+    BotConfigManifestApplyServiceProtocol,
+)
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
+    BotCreationManifestSeam,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import (
     Complete,
@@ -269,11 +275,20 @@ class BotCreateWithManifestHandler:
     def __init__(
         self,
         *,
-        manifest_seam_provider: Callable[[], Any],
-        apply_service_provider: Callable[[], Any],
-        bot_repository_provider: Callable[[], Any],
+        manifest_seam_provider: Callable[[], BotCreationManifestSeam],
+        apply_service_provider: Callable[[], BotConfigManifestApplyServiceProtocol],
+        bot_repository_provider: Callable[[], BotRepository],
+        passport_plugin_provider: Callable[[], PassportPlugin],
+        # The three below stay ``Any``, and each for the same structural
+        # reason rather than for want of a name: every one of them lives in
+        # ``core/bot_management`` or the graph it pulls in, and this package is
+        # what that graph reaches into. Naming their types here would close the
+        # cycle at import time, which is why they arrive as callables the DI
+        # module resolves. ``complete_authorization`` is
+        # ``create_flow.complete_bot_authorization``, ``bot_service_provider``
+        # yields ``BotService``, and ``auth_relationship_provider`` yields the
+        # relationship writer the owner-repair step consults.
         complete_authorization: Callable[..., Any],
-        passport_plugin_provider: Callable[[], Any],
         bot_service_provider: Callable[[], Any],
         auth_relationship_provider: Callable[[], Any],
     ) -> None:
