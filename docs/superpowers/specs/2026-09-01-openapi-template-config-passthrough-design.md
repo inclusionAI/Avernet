@@ -80,7 +80,7 @@ Front-end 映射:`engine ← item.engine_type`,`bot_type ← item.bot_type`,`eng
 | 1 | `engine_properties` 出现 `template_type/template_config` 以外的键 | 422 `unsupported engine_properties fields: [...]`(沿用既有文案,键名集合更新) |
 | 2 | 工厂形态:`template_type` 缺失或空串 | 422 `engine_properties.template_type is required for template-config creates` |
 | 3 | 任何形态:`template_config` 缺失或空 | 422(沿用现有 `applicationCoding template_config must not be empty` 文案,新增错误才用新文案,减少测试 churn) |
-| 4 | 完整工厂快照(双键)与手填专用键(`devflow_workflow/code_repos/yuque_kb_repos` 等外层契约键)混传 | 422 工厂路径不解读手填键,明确拒绝;不完整快照(缺 `template_uid`)混有手填键则走手填路径,工厂键按未知键存活(现状) |
+| 4 | 【已删除(2026-09-02 实测修正)】真实 tc-list 快照把 custom_field 表单值展开在顶层,`yuque_kb_repos`/`devflow_workflow` 与手填键天然同名——混传拒绝会误伤所有带表单值的真实快照(pre 实测 architect 模板 422 复现)。形态歧义由工厂双键判定已足够,规则删除;不完整快照(缺 `template_uid`)仍走手填路径,工厂键按未知键存活 |
 | 5 | 任何形态的 `template_config` 顶层出现拒收 server-managed 字段:`bot_id/workspace_id/workspace_status/workspace_state/start_status/engine_form` | 422 `template_config contains server-managed fields: [...]`(实现事实修正:`TEMPLATE_SERVER_RESERVED_FIELDS` 本含 `template_uid`,工厂分支在 strategy 层对四个工厂身份键做豁免后复用同一拒绝逻辑,手填路径拒绝集合不变) |
 | 6 | 手填路径 `template_type` 传了且 ≠ `applicationCoding` | 422(防形态冒充;工厂值必须走工厂标记) |
 | 7 | 组合 gates 违反(cloud-only、engine 非 claude_code、bot_type 非 personal、非个人空间) | 409(沿用 `BotCombinationUnsupportedError` 既有文案与顺序) |
