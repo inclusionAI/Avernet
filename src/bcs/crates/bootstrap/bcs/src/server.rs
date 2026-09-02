@@ -34,9 +34,9 @@ use crate::lifecycle::LifecycleOrchestrator;
 use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
 use crate::plugins::{
     CachePluginKind, DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
-    build_registered_channel_provider, build_registered_leader_election,
-    build_registered_llm_provider, build_registered_security_gateway,
-    build_registered_user_directory,
+    build_human_mention_notify_port, build_registered_channel_provider,
+    build_registered_leader_election, build_registered_llm_provider,
+    build_registered_security_gateway, build_registered_user_directory,
 };
 use bcs_api_http::v1::gateway_principal::{GatewayPrincipalTokenVerifier, GatewayPrincipalTrust};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
@@ -1991,6 +1991,7 @@ impl Default for BcsServerState {
             config.provider_chat_run_timeout_ms,
             config.eventing.enabled.then(|| group_event_factory.clone()),
             crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
+            Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort),
         );
         let pending_messages = message_flow_builder
             .pending_message_port()
@@ -2818,6 +2819,7 @@ fn create_message_flow_builder(
     provider_chat_run_timeout_ms: u64,
     event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
     event_recorder: Arc<dyn EventRecorderPort>,
+    human_mention_notify: Arc<dyn bcs_service_api::port::HumanMentionNotifyPort>,
 ) -> BcsMessageFlow {
     let mut message_flow = BcsMessageFlow::new(
         group,
@@ -2833,7 +2835,8 @@ fn create_message_flow_builder(
     .with_provider_chat_run_timeout_ms(provider_chat_run_timeout_ms)
     .with_provider_stream_gray_list(provider_stream_gray_list)
     .with_bot_terminal_observer(bot_terminal_observer)
-    .with_event_recorder(event_recorder);
+    .with_event_recorder(event_recorder)
+    .with_human_mention_notify(human_mention_notify);
     if let Some(factory) = event_record_factory {
         message_flow = message_flow.with_event_record_factory(factory);
     }
@@ -3520,6 +3523,15 @@ impl BcsServer {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        if config.human_notify.provider.is_some() {
+            // This synchronous construction path cannot await the notifier
+            // factory build; keep the configured backend from being silently
+            // ignored.
+            tracing::warn!(
+                "human_notify.provider is configured but ignored in this construction path; \
+                 use BcsServer::new_with_storage to enable human mention notifications"
+            );
+        }
         let message_flow_builder = create_message_flow_builder(
             bot_registry.clone(),
             sessions.clone(),
@@ -3536,6 +3548,7 @@ impl BcsServer {
             config.provider_chat_run_timeout_ms,
             config.eventing.enabled.then(|| group_event_factory.clone()),
             crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
+            Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort),
         );
         let pending_messages = message_flow_builder
             .pending_message_port()
@@ -4356,6 +4369,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                 .enabled
                 .then(|| crate::eventing_wiring::event_record_factory(&config, event_repo.clone())),
             crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
+            build_human_mention_notify_port(&config).await?,
         );
         let pending_messages = message_flow_builder
             .pending_message_port()

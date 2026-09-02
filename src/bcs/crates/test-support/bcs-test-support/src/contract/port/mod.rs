@@ -1,6 +1,7 @@
 //! Port contract harnesses.
 
 pub mod bot_terminal_observer;
+pub mod human_notify;
 pub mod metrics;
 
 use bcs_domain::HumanInputNotificationMode;
@@ -17,6 +18,7 @@ use bcs_service_api::{
 };
 
 pub use bot_terminal_observer::bot_terminal_observer_port_contract_tests;
+pub use human_notify::{human_mention_notifier_contract_tests, HumanNotifyContractHarness};
 pub use metrics::{
     bot_metrics_snapshot_port_contract_tests,
     delivery_policy_block_instrumentation_hook_contract_tests,

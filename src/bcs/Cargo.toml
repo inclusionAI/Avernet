@@ -68,6 +68,7 @@ members = [
     "crates/plugin-api/bcs-cache-api",
     "crates/plugin-api/bcs-channel-api",
     "crates/plugin-api/bcs-db-api",
+    "crates/plugin-api/bcs-human-notify-api",
     "crates/plugin-api/bcs-llm-api",
     "crates/plugin-api/bcs-security-gateway-api",
     "crates/plugin-api/bcs-secret-api",
@@ -80,6 +81,7 @@ members = [
     "crates/plugins/bcs-storage-local",
     "crates/plugins/bcs-db-local",
     "crates/plugins/bcs-db-mysql",
+    "crates/plugins/bcs-human-notify-dummy",
     "crates/plugins/bcs-llm-anthropic",
     "crates/plugins/bcs-llm-openai-compatible",
     "crates/plugins/bcs-secret-local",
@@ -304,6 +306,7 @@ bcs-system-message         = { path = "crates/services/bcs-system-message" }
 bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }
 bcs-channel-api            = { path = "crates/plugin-api/bcs-channel-api" }
 bcs-db-api                 = { path = "crates/plugin-api/bcs-db-api" }
+bcs-human-notify-api       = { path = "crates/plugin-api/bcs-human-notify-api" }
 bcs-llm-api                = { path = "crates/plugin-api/bcs-llm-api" }
 bcs-storage-api            = { path = "crates/plugin-api/bcs-storage-api" }
 bcs-storage-local          = { path = "crates/plugins/bcs-storage-local" }
@@ -314,6 +317,7 @@ bcs-cache-local            = { path = "crates/plugins/bcs-cache-local" }
 bcs-cache-redis            = { path = "crates/plugins/bcs-cache-redis" }
 bcs-db-local               = { path = "crates/plugins/bcs-db-local" }
 bcs-db-mysql               = { path = "crates/plugins/bcs-db-mysql" }
+bcs-human-notify-dummy     = { path = "crates/plugins/bcs-human-notify-dummy" }
 bcs-llm-anthropic          = { path = "crates/plugins/bcs-llm-anthropic" }
 bcs-llm-openai-compatible = { path = "crates/plugins/bcs-llm-openai-compatible" }
 bcs-secret-local           = { path = "crates/plugins/bcs-secret-local" }

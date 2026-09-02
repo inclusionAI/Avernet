@@ -238,6 +238,20 @@ tower_http = "warn"
 # [user_directory.providers.<provider>].
 enabled = false
 
+# Human mention notification: notify human participants when a message
+# @-mentions them. Select a linked backend; omit `provider` to disable.
+[human_notify]
+provider = "dummy"
+
+[human_notify.providers.dummy]
+enabled = true
+# DingTalk backend options (internal builds), for illustration:
+# [human_notify.providers.dingtalk]
+# enabled = true
+# robot_code = "ding..."
+# client_id = "ding..."
+# client_secret = "${DINGTALK_NOTIFY_CLIENT_SECRET}"
+
 [auth]
 chain = ["oauth_session"]
 require_authentication = true
