@@ -2155,6 +2155,11 @@ git commit -m "feat(w7): thread the source session through apply, with strict ba
 
 ### Task 9: 收尾——全套回归、架构守卫、coverage gate、文档
 
+> **CLAIMED BY A(续任会话)@2026-09-02 18:48** — 前任 A 会话已交付 Tasks 1/2/3/5/8
+> (`2e1267dfc` 止);Task 7 由 B 落地(`28f7f921e`),B 的跨轨修复 `3664a729c`
+> 已在执行日志留痕、按日志为准。本会话只动 Task 9 与其产出文件(work-items 两份
+> 文档),不触碰 materialisers/entry_fetch 等已交付面。
+
 **Files:**
 - Test: 全套；`src/backend/docs/bot-config-manifest/work-items.zh-CN.md` 与 `work-items.md` 的 W7 节加完成标记
 
@@ -2235,4 +2240,6 @@ git commit -m "docs(backend): mark W7 delivered in the work items"
 - 18:1x B 交付 Task 6 identity git 路(`3a48f605e`,B 轨 4 用例绿)。
 - 18:18 A 落盘 Task 8(`2e1267dfc`)。
 - 18:4x **B 的跨轨前置修复** `3664a729c`:`fetch_declared` 的 no-session 门槛原先进门就抛,把纯内联 URL 路(W5 老,不经 W7)也拦了,导致 identity 套件 9 个存量用例与 engine 的 SKIPPED 邻居用例在 Task 6 重路由后转红。门槛改为只守真正读 session 的路(`from` 查找与 git 路)。entry_fetch.py 属 A 轨文件,B 仅在 A idle(Task 8 已提交、Task 9 未派发)时做了这个前置修复,在此留痕;Task 9 如有冲突以本日志为准。
+- 18:45 B 落盘 Task 7 skills git 路(`28f7f921e`)。A 续任会话独立复核中发现的同一批转红与 B 的修复相互印证(门槛下移方向一致),无需返工。
+- 18:48 **A 续任会话 claim Task 9**(收尾:全套回归、架构守卫、coverage gate、work-items 标记、PR)。开工前 `git log` 核对:Task 1–8 全部已有提交,工作区干净。
 
