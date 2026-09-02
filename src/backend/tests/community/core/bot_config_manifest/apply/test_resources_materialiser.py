@@ -1202,3 +1202,49 @@ def test_refusals_quote_the_write_chains_own_words():
     resolved = _run(m.resolve(ctx, [{"path": "data/run.sh", "content": "#"}]))
     assert not resolved.ok
     assert resolved.failures[0].reason.startswith("File type not allowed")
+
+
+# --- the port the wiring keys on (F7) ---
+
+
+def test_the_port_mirrors_the_apply_side_call_surface():
+    """The port is apply's call surface, exactly — and a keyword subset of
+    the real service.
+
+    A ``@runtime_checkable`` isinstance checks method *presence* only, so
+    nothing else notices a signature drift; pinned here by reflection:
+    every parameter the port declares must exist on the real
+    ``ResourceFileService`` method with the same declared default (the
+    fake mirrors the port in turn). The port is deliberately *narrower*
+    than the real service — ``preserve_structure`` and ``publish_id`` /
+    ``device_uuid`` are the router's vocabulary, not apply's.
+    """
+    import inspect
+
+    from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
+        ManifestResourcePort,
+    )
+    from agentclaw.community.core.services.resource_file_service import (
+        ResourceFileService,
+    )
+
+    def _kwparams(func) -> dict[str, Any]:
+        return {
+            name: param.default
+            for name, param in inspect.signature(func).parameters.items()
+            if param.kind == inspect.Parameter.KEYWORD_ONLY
+        }
+
+    for method in ("upload_file", "delete", "exists"):
+        port_params = _kwparams(getattr(ManifestResourcePort, method))
+        real_params = _kwparams(getattr(ResourceFileService, method))
+        # Every port parameter exists on the real service...
+        assert set(port_params) <= set(real_params), (method, port_params)
+        # ...with the same declared default where the port declares one.
+        for name, default in port_params.items():
+            assert real_params[name] == default, (method, name)
+        # ...and every parameter the port declares is one apply passes.
+        assert "preserve_structure" not in port_params, method
+        # The one divergence the apply side must not reintroduce: ``exists``
+        # is addressed like ``delete`` and ``upload_file``, entity and all.
+        assert "entity_type" in _kwparams(ManifestResourcePort.exists)

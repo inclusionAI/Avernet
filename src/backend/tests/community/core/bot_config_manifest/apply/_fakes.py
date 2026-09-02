@@ -677,8 +677,10 @@ class FakeResourceFileService:
     (its dispatcher covers the arca / baas / teclaw transports uniformly), so
     the fake needs only the three entry points the materialiser calls:
     ``upload_file``, ``delete`` — plus ``exists`` for the plan stage's
-    classification. Signatures mirror the real service's, so a drift shows up
-    as a TypeError in these tests before it shows up mid-apply in production.
+    classification. Signatures mirror the port's apply-side surface (every
+    parameter the materialiser passes; the router-only extras such as
+    ``preserve_structure`` are deliberately absent), so a drift shows up as a
+    TypeError in these tests before it shows up mid-apply in production.
 
     ``delete`` removes from the presence set as well — the real service's
     contract — because the plan stage classifies by ``exists`` and would
@@ -718,7 +720,6 @@ class FakeResourceFileService:
         target_dir: str,
         filename: str,
         data: bytes,
-        preserve_structure: bool = False,
     ) -> dict[str, Any]:
         self.upload_calls.append(
             {
