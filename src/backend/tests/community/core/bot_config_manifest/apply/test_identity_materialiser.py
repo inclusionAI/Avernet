@@ -390,3 +390,21 @@ def test_the_receipts_link_the_apply_and_the_entry():
     _run(_apply(materialiser, _ctx(), [DECLARED]))
     assert all(call["apply_id"] is not None for call in content.store_calls[:1])
     assert content.store_calls[-1]["apply_id"] is None
+
+
+def test_the_real_identity_service_satisfies_the_port():
+    """The port's three names exist on the real service class, with the
+    arity the port declares — the fake cannot be the only thing holding the
+    contract (the audit asked for a drift guard before the fake and the
+    real service can disagree)."""
+    import inspect
+
+    from agentclaw.community.core.services.identity import IdentityService
+
+    for name in ("list_bot_files", "read_identity_file", "update_bot_file"):
+        method = getattr(IdentityService, name, None)
+        assert method is not None, name
+        # The port's positional contract: entity pair first, then the
+        # operation's own arguments, owner/operator last — itself a subset
+        # of the router's own calls.
+        assert len(inspect.signature(method).parameters) >= 5, name

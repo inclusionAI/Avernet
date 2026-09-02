@@ -5,8 +5,9 @@ behalf is kept as **the platform's own durable copy**, and every step after
 fetch reads that copy. This service is the one mechanism behind all three
 consumers of the requirement — audit (what did this bot receive, from
 where, when), delivery (a retried apply re-reads here, never re-fetches),
-and ``keep_last`` (W4's per-entry fallback is a digest the orchestrator
-remembers plus a read from here; one store, one addressing, no second copy).
+and ``keep_last`` (W5's entry-fetch pipeline reads this store's newest
+receipt for the entry's source and stands in with those bytes when the
+source is down; one store, one addressing, no second copy).
 
 Two halves:
 
@@ -45,6 +46,9 @@ from agentclaw.community.core.bot_config_manifest.content.errors import (
     ContentIntegrityError,
     ContentMissingError,
     ContentStoreError,
+)
+from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
+    ManifestContentServiceProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.content.models import (
     ContentScope,
@@ -182,7 +186,7 @@ def _advisory_content_type(value: Optional[str]) -> Optional[str]:
     return None
 
 
-class ManifestContentService:
+class ManifestContentService(ManifestContentServiceProtocol):
     """Store fetched bytes once, address them by digest, read them back provably."""
 
     def __init__(

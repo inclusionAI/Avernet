@@ -260,7 +260,13 @@ class SkillsMaterialiser(Materialiser):
                 continue
 
             try:
-                package = self._build_package(
+                # The same blocking-IO ruling as the fetch itself: a
+                # 100-MiB archive walked and re-packed is seconds of CPU and
+                # a dry run runs this on the request event loop — the fetch
+                # got to_thread for exactly that reason (and the module's
+                # own comment says it).
+                package = await asyncio.to_thread(
+                    self._build_package,
                     entry=entry,
                     fetched=fetched,
                     source_url=source_url,

@@ -149,9 +149,24 @@ class ManifestFetchModule(Module):
         reaches the device dispatcher graph at import time, and this
         module's import must not trigger that chain.
         """
+        from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
+            ManifestIdentityPort,
+        )
         from agentclaw.community.core.services.identity import IdentityService
 
-        return lambda: injector.get(IdentityService)
+        def _identity() -> ManifestIdentityPort:
+            service = injector.get(IdentityService)
+            if not isinstance(service, ManifestIdentityPort):
+                # Structural check at wiring time: the port has no
+                # implementation relationship to the service, so nothing
+                # else would notice a renamed method until mid-apply. The
+                # drift guard belongs where the two first meet.
+                raise TypeError(
+                    "IdentityService no longer satisfies ManifestIdentityPort"
+                )
+            return service
+
+        return _identity
 
     @singleton
     @provider

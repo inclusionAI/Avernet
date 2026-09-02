@@ -20,6 +20,7 @@ tests, which drive fakes built on the same shapes the router calls.
 """
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
 #: The router's fixed entity pair for the personal-bot surface — the pair
@@ -38,6 +39,7 @@ class ManifestIdentityPort(Protocol):
     ``TypeError`` in the materialiser's tests before it surfaces mid-apply.
     """
 
+    @abstractmethod
     async def list_bot_files(
         self,
         entity_type: str,
@@ -49,6 +51,7 @@ class ManifestIdentityPort(Protocol):
         stage: str = "draft",
     ) -> list[tuple[str, bool]]: ...
 
+    @abstractmethod
     async def read_identity_file(
         self,
         entity_type: str,
@@ -61,6 +64,7 @@ class ManifestIdentityPort(Protocol):
         stage: str = "draft",
     ) -> str: ...
 
+    @abstractmethod
     async def update_bot_file(
         self,
         entity_type: str,

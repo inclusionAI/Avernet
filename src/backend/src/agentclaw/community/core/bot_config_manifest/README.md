@@ -504,7 +504,7 @@ consumes:
   - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the `script` materialiser's only write"
   - "DirectActivationServiceProtocol (core.skill_center) — the `mcp` materialiser's per-bot activation writes"
   - "LocalSkillUploadServiceProtocol (core.skill_center) — the upload road the `skills` materialiser installs packages through: the same entry point the raw-zip router path takes (W5)"
-  - "BotCapabilityStateReaderProtocol (core.skill_center.bot_capability_state_reader_protocol) — the flush-then-read active-set the `skills` materialiser enumerates its area from and narrows removals by (W5)"
+  - "BotCapabilityStateReaderProtocol (core.skill_center.capability_state_contract) — the flush-then-read active-set the `skills` materialiser enumerates its area from and narrows removals by (W5; the core contract module — not the api/ façade that re-exports it, which core deliberately does not depend on)"
   - "SkillPackageValidator (core.skill_center.skill_package) — the manual-upload package gate the `skills` materialiser validates fetched bytes with, so an installed skill is an uploaded one (W5)"
   - "ManifestContentServiceProtocol.latest_receipt — the per-source receipt lookup the entry fetch pipeline asks (W5)"
   - "MCPAuthServiceProtocol (api) — the same permission check DirectActivationService consults, asked up front so a category is all-or-nothing"
