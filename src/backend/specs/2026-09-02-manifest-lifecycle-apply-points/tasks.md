@@ -125,16 +125,16 @@ Conventions every task assumes:
 
 ## Group C — teclaw platform-managed delivery
 
-## [ ] Task 7: The managed-files index
+## [x] Task 7: The managed-files index
 - **Files:** `core/bot_config_manifest/repository/managed_files_models.py` (new),
   `core/repository/protocols/bot/managed_files.py` (new),
   `core/repository/implementations/bot/managed_files.py` (new),
   `core/bot_config_manifest/sql/2026_09_02_bot_config_managed_files.sql` (new),
   tenant-guard registration, `tests/community/repository/bot/test_managed_files_repository.py` (new)
 - **Done when:**
-  - [ ] Table per plan K-2; protocol as an abstract base; implementation with
+  - [x] Table per plan K-2; protocol as an abstract base; implementation with
         `upsert`, `delete`, `list_by_category`, `purge_bot`.
-  - [ ] Repository tests on SQLite; the tenant column is in the unique key.
+  - [x] Repository tests on SQLite; the tenant column is in the unique key.
 - **Depends on:** —
 
 ## [ ] Task 8: `ManagedFilesStore` and the reader
