@@ -8,18 +8,18 @@ Plan: `plan.md` in this directory.
 A bot that carries a configuration manifest configures itself. Today the only
 thing that applies a stored manifest is an explicit `POST …/config-manifest/apply`,
 or the creation job W13 runs for bots born through `POST /openapi/v1/bots/with-manifest`.
-Everything else the design promised — a `PUT` that takes effect, a republish that
-re-converges, a restart that re-resolves a moving ref, a teclaw bot created with
-its manifest — still needs a human to remember to call apply afterwards.
+A `PUT` that takes effect and a teclaw bot created with its manifest still need
+a human to remember to call apply afterwards, and the legacy startup-script
+endpoint can silently diverge from the manifest it now shadows.
 
-This item wires the apply engine into the four remaining lifecycle points:
+This item wires the apply engine into the two lifecycle points that still
+need it in this iteration, and records why the other two are deferred:
 
 | Point | What happens |
 | --- | --- |
 | `PUT …/config-manifest` on an existing bot | The document is stored and an apply is **started**, in the same request. The response carries the apply's id. |
-| A bot's container comes up (first boot, in-place restart, rebuild restart) | An apply is **started** against the freshly active container, so a manifest stored while the bot was `PENDING` lands, and a moving ref is re-resolved under D2's rules. |
-| Publish / republish (first release included) | An apply runs against the draft stage and **finishes before the build snapshot is taken**, so the artifact carries the converged state. |
 | Creation on **teclaw** through W13's endpoint | Accepted. The same job runs the same two phases; the refusal W13 shipped is lifted. |
+| Restart (in-place or rebuild) and publish / republish | **Not apply points in this iteration** (owner decision, 2026-09-02). Nothing applied earlier is lost on either path — see *What the code allows* — and what a re-apply there would add is only the re-resolution of a moving git ref and correction of manual drift. Both converge at `PUT` and at explicit apply. |
 
 It also makes the legacy `/startup-script` endpoints an alias view of the
 manifest's `script` field on bots that have a manifest, so an edit through the
@@ -45,9 +45,9 @@ re-derived:
   untouched: a republish still builds, a restart still restarts, a creation
   still creates. The report is what says what did not land.
 - **§3.2 (D2) — a moving ref is re-resolved at every apply point**, in `strict`
-  or `non_strict` mode per source. Lifecycle points are exactly the restarts
-  "nobody associated with a configuration change"; making them applies is what
-  gives the mode something to enforce.
+  or `non_strict` mode per source. In this iteration the apply points are
+  `PUT`, explicit apply and creation; restart and republish are deferred
+  (D-1), so a ref never moves on them.
 
 ## What the code allows, checked before writing this
 
@@ -67,32 +67,27 @@ than assumed:
    consequence on teclaw exactly as on ARCA: the first container comes up and is
    then configured.
 
-2. **The platform already has one signal for "this bot's container just came
-   up".** `DeviceService.report_device_alive` publishes `DeviceActivatedEvent`
-   on every binding transition `PENDING → ACTIVE`, and two listeners
-   (`SkillSymlinkListener`, `CronAutoSetupListener`) already subscribe to it to
-   reconcile a freshly active container. It fires for an ordinary create's
-   first boot, for the BaaS in-place restart (the binding is flipped back to
-   `PENDING` and re-reported), and for the ARCA rebuild restart (a new binding).
-   It does **not** fire for publish-stage containers as far as the bot is
-   concerned — `BotRepository.get_by_binding_id` resolves only the bot's own
-   draft binding — and scale-out replicas have no binding row of their own.
-   teclaw's activation is the one gap: its durable publish poll flips the
-   binding terminal directly and publishes nothing.
+2. **Nothing applied earlier is lost on a restart or a republish.** The script
+   row is re-read by `_build_create_bot_payload` on every payload it composes
+   (`upgrade_bot` for the in-place restart, the device service for the rebuild
+   restart, `create_bot` for a first release). The workspace is on NAS. Skills
+   and MCP are DB state, and the existing skill listener re-syncs symlinks on
+   every activation. An ARCA build snapshots the draft workspace plus DB state;
+   a teclaw build gathers the running draft container's files — where the
+   manifest's per-file writes landed — and takes MCP and skills from DB. A
+   re-apply at those points would therefore change nothing a previous apply
+   delivered; it would only re-resolve a moving `ref` and correct manual drift.
+   Those two are the whole payload of "apply at restart / republish", and the
+   owner has deferred them.
 
 ## User Stories
 
 - As a bot owner, I `PUT` a manifest and the running bot reflects it, without a
   restart and without a second call; the response tells me an apply started and
   where to read its result.
-- As a bot owner, I `PUT` a manifest onto a bot that is still `PENDING`; when
-  its container comes up it configures itself.
-- As a bot owner, I republish a service bot and the new version's snapshot
-  contains what the manifest declares, including a moved branch ref resolved
-  under the source's mode.
-- As a bot owner, I restart a bot and the manifest is re-converged against the
-  new container; a `strict` source that moved is refused and the bot keeps
-  running what it had, and the report says so.
+- As a bot owner, I `PUT` a manifest onto a bot that is still `PENDING`; the
+  response tells me which part could not land yet and what to do once the bot
+  is `ACTIVE`, and the apply report records the same per entry.
 - As a bot owner on teclaw, I create a bot with its manifest through the same
   endpoint ARCA owners use, and it comes up configured.
 - As an operator who still uses `PUT …/startup-script`, my edit on a bot that
@@ -123,67 +118,17 @@ than assumed:
       the script is delivered now and executes at the bot's next device
       provisioning. The apply report's `script` entry carries the same note it
       does today.
+- [ ] When the bot is **not `ACTIVE`** at `PUT` time, `warnings` also says that
+      the categories needing a live container (`identity`, `resources`,
+      `skills`, `mcp`) will be recorded as failed in this apply and that the
+      caller should `POST …/config-manifest/apply` once the bot is `ACTIVE`.
+      Apply itself does **not** branch on the bot's status (§2.7): both phases
+      are started, and the report says per entry what did not land.
 - [ ] No restart is issued on either family. `BotService.restart_bot` is not
       reachable from anything this item adds; a test on the manifest layer pins
       that it names no restart, republish or payload-rebuild call.
 - [ ] `DELETE …/config-manifest` is unchanged: it clears the declaration and
       applies nothing.
-
-### The container comes up
-
-- [ ] When a bot's own binding transitions to `ACTIVE` and the bot has a stored
-      manifest, an apply of both phases is started with trigger `start`. This
-      covers an ordinary create's first boot, the BaaS in-place restart and the
-      ARCA rebuild restart with one mechanism.
-- [ ] On teclaw, the same happens when the durable publish poll persists the
-      binding `ACTIVE` — the one activation path that publishes no
-      `DeviceActivatedEvent` today.
-- [ ] A bot without a manifest is untouched: no apply, no record, no lock.
-- [ ] **Scale-out does not re-apply.** A scale-out adds BaaS devices under the
-      bot's existing container identity and raises no activation for the bot's
-      binding; instances stay identical because they share one platform state
-      (#926's actual requirement). A test pins that an activation the bot
-      repository cannot resolve to a bot starts nothing.
-- [ ] **Publish-stage containers do not re-apply.** A verify or online container
-      redeploys a frozen artifact; the manifest addresses the draft stage, which
-      is what the republish point below converges before that artifact is
-      frozen. Their activations resolve to no bot and start nothing.
-- [ ] **A bot whose W13 creation job is still live is left to the job.** The job
-      owns creation-time apply and recognises its own phases by trigger on the
-      newest record; a `start` apply landing between "container up" and "phase B
-      started" would make it start phase B twice and blur the poll. The listener
-      checks for a live creation job and yields. Once the job is terminal — a
-      later restart of a W13-created bot — the listener applies like for any
-      other bot.
-- [ ] A stale activation (the bot's current binding is no longer the one that
-      fired) starts nothing, per the precedent the skill listener sets.
-- [ ] The listener writes nothing to the bot record and never raises into the
-      device-alive path; a failure to start an apply is logged and the container
-      is unaffected.
-
-### Publish / republish
-
-- [ ] When a publish enters its build phase and the bot has a stored manifest,
-      an apply of both phases is started against the draft stage with trigger
-      `republish`, and **the build waits for it to reach a terminal status**
-      before producing the artifact. The verify-flow task reschedules itself
-      while the apply is `RUNNING`, exactly as W13's creation job waits for its
-      pre-container phase.
-- [ ] The wait is durable and re-entrant: the apply's id is recorded on the
-      publish record's `ext`, so a re-claimed task resumes waiting on the same
-      apply rather than starting another. An apply that cannot be started
-      because the lock is held is retried on the next tick; any other failure to
-      start is recorded on the publish record and the build proceeds.
-- [ ] A `PARTIAL` or `FAILED` republish apply **does not fail the publish**. The
-      build proceeds with whatever converged; the apply report says what did
-      not (§2.7).
-- [ ] A bot without a manifest builds exactly as today, with no apply, no
-      record and no extra tick.
-- [ ] The first release of a service bot is a publish and gets the same
-      treatment.
-- [ ] On teclaw the promotion gather runs after the apply, so the per-file
-      writes the `identity` and `resources` materialisers made into the running
-      draft container are what the artifact carries.
 
 ### Creation on teclaw (lifting W13's refusal)
 
@@ -246,49 +191,52 @@ than assumed:
 
 ### Records, D2, and what apply never does
 
-- [ ] Every lifecycle apply is started through `start_apply`, so it takes the
-      lock, re-validates, writes a `RUNNING` record, and — because the source
-      session is built from the newest recorded resolutions — enforces the
-      source's `mode` on a moved ref: `strict` refuses the entry and the
-      category aborts, `non_strict` delivers and notes the move. No second
-      enforcement path exists.
-- [ ] The trigger vocabulary is `explicit`, `put`, `start`, `republish`,
-      `create:pre_container`, `create:on_container`. `last-apply` and
+- [ ] The `PUT` apply is started through `start_apply`, so it takes the lock,
+      re-validates, writes a `RUNNING` record, and — because the source session
+      is built from the newest recorded resolutions — enforces the source's
+      `mode` on a moved ref: `strict` refuses the entry and the category
+      aborts, `non_strict` delivers and notes the move. No second enforcement
+      path exists. In this iteration a moving ref is re-resolved **only** at
+      `PUT` and at explicit apply.
+- [ ] The trigger vocabulary is `explicit`, `put`, `create:pre_container`,
+      `create:on_container`. `last-apply` and
       `GET …/applies/{id}` return the same per-entry detail for every trigger.
 - [ ] Apply writes nothing to the bot record and does not branch on first boot,
       on either family (§2.7). The orchestrator-stays-generic test still holds;
       nothing added here reads or writes `ac_bots.status`.
-- [ ] `last-apply` is the reachable signal for "did my manifest land" on the
-      paths that have no poll loop (republish, restart). The user manual §7 says
-      so and no longer implies a real-time state on those paths.
+- [ ] The user manual §7 states that restart and republish do not re-apply in
+      this iteration, that nothing previously applied is lost on them, and that
+      a moved ref or manual drift converges at the next `PUT` or explicit
+      apply.
 
 ### Nothing else moves
 
 - [ ] `POST …/config-manifest/apply`, its `202` and its `409`, are unchanged.
 - [ ] W13's endpoint, poll and job behave exactly as they do today on ARCA;
       their tests pass with assertions untouched.
-- [ ] The skill symlink and cron listeners are not modified.
-- [ ] The publish flow's phase sequence, statuses and existing tasks are
-      unchanged for bots without a manifest.
+- [ ] No restart, publish, device-activation or provisioning path is modified.
+      `BotService.restart_bot`, `PublishFlowService`, `DeviceService`,
+      `TeclawProvisionService` and the teclaw publish poll are untouched.
 
 ## Decisions
 
-**D-1 — One mechanism for "the container came up": the device-activated
-event.** The alternatives were to hook each caller — `restart_bot`'s two legs,
-`_allocate_device_async`, the BaaS publish poller, the restart poll task — or to
-apply *before* the payload is rebuilt. Hooking callers is four seams for one
-fact and misses the next one added; applying before the rebuild runs against a
-container that is about to be destroyed (the ARCA leg releases the device), so
-its device writes fail per entry and the report is noise. The event is the
-platform's own definition of the moment, it already has two listeners, and it
-naturally excludes publish-stage containers and scale-out.
+**D-1 — Restart and republish are not apply points in this iteration.** Owner
+decision (2026-09-02), on the finding that nothing previously applied is lost on
+either path and that a re-apply there would only re-resolve a moving `ref` and
+correct manual drift. The work item's restart and republish criteria are
+recorded as deferred, not met. The mechanisms designed for them — a
+`DeviceActivatedEvent` listener for "the container came up", and a durable
+wait before the publish build — are kept in this spec's revision history for
+when they are wanted, and none of their code lands.
 
-**D-2 — Republish applies *before* the build, and waits.** The published stages
-are frozen snapshots of the draft; an apply after the new container comes up
-would target the draft and never reach the snapshot. So the republish point is
-the build phase, and the build waits, the way W13's job waits for phase A. The
-wait is bounded by the apply lock's TTL and the task's own deadline, and a
-non-succeeding apply lets the build proceed (§2.7).
+**D-2 — A `PUT` on a non-ACTIVE bot warns rather than defers.** With no
+activation hook, a manifest stored while the bot is `PENDING` has nothing to
+re-apply it when the container comes up. Rather than applying phase A only and
+inventing a "deferred" state, `PUT` starts both phases exactly as on an ACTIVE
+bot — §2.7 forbids apply from branching on bot state — and the response warns
+that container-bound categories will be recorded as failed and names the call
+to make once the bot is `ACTIVE`. The report carries the same information per
+entry.
 
 **D-3 — teclaw creation is the same job, not a different step order.** The
 refusal W13 shipped protected against a mechanism that would "change under" a
@@ -297,34 +245,19 @@ available in iteration 1: nothing can be delivered before the container exists
 on either family. The honest outcome is to lift the refusal and state that the
 first-artifact guarantee is #1508's on both families.
 
-**D-4 — The activation apply yields to a live W13 creation job.** The job
-recognises its phases by trigger on the newest record and the poll derives its
-state the same way; a foreign trigger landing mid-creation would make the job
-start phase B twice and hide the creation's report from the poll. Checking for a
-live job is a cheap indexed read; once the job is terminal the bot is an
-ordinary bot.
-
-**D-5 — teclaw's activation gets a direct hook, not a new event emission.**
-Publishing `DeviceActivatedEvent` from the teclaw poll would also wake the skill
-symlink listener (a whole-artifact redeliver on every teclaw boot) and the cron
-listener — a behaviour change to two other features. The teclaw poll handler
-gets an optional activation callback, wired by DI to the same listener logic.
-Emitting the event is recorded as the cleaner long-term fix and left to its own
-change.
-
-**D-6 — `PUT` starts an apply; it does not run one.** Apply is a durable task
+**D-4 — `PUT` starts an apply; it does not run one.** Apply is a durable task
 (W13); the request returns the id. A `PUT` that could not start an apply still
 stores: the alternative, a `409`, would refuse a valid document because of
 apply's own serialisation, which §2.6 forbids.
 
-**D-7 — The legacy endpoint writes the row itself on the manifest arm, rather
+**D-5 — The legacy endpoint writes the row itself on the manifest arm, rather
 than starting an apply.** Its contract is synchronous — the row exists when
 `200` returns — and its tests read the repository straight after. Starting an
 apply would make the row eventually consistent and would `409` under a running
 apply. Writing the row with the substituted body is exactly what the
 materialiser writes, so the next apply plans `unchanged`.
 
-**D-8 — The document rewrite is a textual splice, not a re-serialisation.** W1
+**D-6 — The document rewrite is a textual splice, not a re-serialisation.** W1
 stores the document verbatim because `script.body` is a shell body whose bytes
 are its meaning. Re-dumping the YAML would reformat every other section. The
 splice replaces the top-level `script` section only and proves itself by
@@ -332,9 +265,8 @@ parsing the result back.
 
 ## In Scope
 
-- `PUT …/config-manifest` starting an apply and reporting it.
-- The device-activated listener, its DI wiring, and the teclaw activation hook.
-- The publish build-phase wait and its `ext` marker.
+- `PUT …/config-manifest` starting an apply and reporting it, with the
+  non-ACTIVE warning.
 - Lifting W13's teclaw refusal.
 - The `/startup-script` write-through, both arms, with the splice helper.
 - The §2.12 ordering test and its documentation.
@@ -350,10 +282,11 @@ parsing the result back.
   bot list and detail payloads are UI contracts; adding a manifest summary to
   them is a product decision and its own change. `last-apply` remains the
   authority.
-- **Emitting `DeviceActivatedEvent` from the teclaw poll** (D-5).
-- **Applying at scale-out** — explicitly not wanted.
-- **A restart of the publish record's stage containers** — they redeploy a
-  frozen artifact and are not an apply point.
+- **Applying at restart (in-place or rebuild) and at publish / republish**
+  (D-1). Deferred with the mechanisms recorded below.
+- **Applying when a container comes up** for a manifest stored while the bot
+  was `PENDING` (D-2). Deferred with D-1; it shares the same hook.
+- **Applying at scale-out** — explicitly not wanted, and moot under D-1.
 - **Deleting a manifest when its bot is deleted** — a standing gap, unchanged.
 - **Cleaning stale `ac_bot_startup_script` rows** — unchanged.
 
@@ -363,14 +296,18 @@ parsing the result back.
    owner wants a minimal signal in this item, the cheapest is a
    `config_manifest: {last_apply_status, last_applied_at}` block on the bot
    detail payload of `GET /openapi/v1/bots/{bot_id}`.
-2. **teclaw activation** — D-5 chose the callback. If emitting the event is
-   preferred despite waking the other listeners, it is a two-line change in the
-   teclaw poll handler and the callback goes away.
 
 ## Follow-ups
 
 - #1508 — deliver every category before start; removes the `script` rule and
   the `APPLYING` window, and makes the first artifact carry the manifest.
-- Emit `DeviceActivatedEvent` from the teclaw publish poll once the skill and
-  cron listeners are confirmed safe on teclaw.
+- Restart / republish as apply points, when moving-ref re-resolution at those
+  points is wanted. The designed shape, so it is not re-derived: a
+  `LifecycleBase` listener on `DeviceActivatedEvent` (plus a callback from the
+  teclaw publish poll, which emits no event) starting a `start`-triggered apply
+  for bots with a manifest, skipping stale bindings and live W13 creation
+  jobs; and a `manifest_apply_before_build` step in `PublishVerifyFlowHandler`
+  that starts a `republish`-triggered apply against the draft stage and
+  reschedules until it is terminal, with the apply id kept in the publish
+  record's `ext`.
 - A manifest summary on the bot detail surface (open question 1).
