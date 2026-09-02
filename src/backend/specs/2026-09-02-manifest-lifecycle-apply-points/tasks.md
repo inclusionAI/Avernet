@@ -52,19 +52,19 @@ Conventions every task assumes:
         selection.
 - **Depends on:** —
 
-## [~] Task 3: The apply service runs through the strategy
+## [x] Task 3: The apply service runs through the strategy
 - **Files:** `services/config_manifest_apply_service.py`,
   `apply/orchestrator.py` (only if it calls `steps_for` directly),
   `di/modules/bot_management_module.py`,
   `tests/community/core/bot_config_manifest/apply/test_apply_service_lifecycle.py`
 - **Done when:**
-  - [ ] `_rebuild` / `run_apply_task` select the strategy for the bot, build
+  - [x] `_rebuild` / `run_apply_task` select the strategy for the bot, build
         materialisers from `strategy.ports()`, walk `strategy.steps_for(phases)`,
         and call `strategy.finish(ctx, report)` after the terminal record is
         written (a `finish` failure is a report note, never a raise).
-  - [ ] ARCA's ports are the providers the service takes today, so its
+  - [x] ARCA's ports are the providers the service takes today, so its
         behaviour is unchanged and every existing apply test passes unedited.
-  - [ ] A new test pins that no module under `apply/materialisers/` names an
+  - [x] A new test pins that no module under `apply/materialisers/` names an
         engine string.
 - **Depends on:** Task 2
 

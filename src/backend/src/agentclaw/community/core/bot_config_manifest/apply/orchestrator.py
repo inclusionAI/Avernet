@@ -14,11 +14,12 @@ adds "just one" special case.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     ApplyPhase,
+    ApplyStep,
     steps_for,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
@@ -90,8 +91,18 @@ class ApplyOrchestrator:
     provisioning — and get one report from each.
     """
 
-    def __init__(self, materialisers: Mapping[ApplyConstruct, Materialiser]) -> None:
+    def __init__(
+        self,
+        materialisers: Mapping[ApplyConstruct, Materialiser],
+        *,
+        steps: Callable[[frozenset[ApplyPhase] | None], tuple[ApplyStep, ...]] | None = None,
+    ) -> None:
         self._materialisers = dict(materialisers)
+        # Which construct belongs to which phase is the engine family's to say
+        # (``apply/delivery.py``, W8): the strategy hands its ``steps_for`` in.
+        # The default is the order table's own reading — ARCA's — so a caller
+        # that predates the seam is unchanged.
+        self._steps = steps or steps_for
 
     async def apply(
         self,
@@ -117,7 +128,7 @@ class ApplyOrchestrator:
         or removal happens — the write paths are simply never entered.
         """
         results: list[CategoryResult] = []
-        for step in steps_for(phases):
+        for step in self._steps(phases):
             entries = declared_entries(parsed, step.construct)
             if entries is None:
                 # Not declared: no opinion, no touch, nothing reported.

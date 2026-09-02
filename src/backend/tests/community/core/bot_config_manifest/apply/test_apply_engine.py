@@ -557,6 +557,7 @@ def test_the_report_payload_names_every_field_it_emits():
         "started_at",
         "finished_at",
         "sources",
+        "notes",
         "categories",
         "entries",
     }

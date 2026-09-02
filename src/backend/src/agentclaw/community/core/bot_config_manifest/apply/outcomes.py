@@ -208,6 +208,10 @@ class ApplyReport:
     categories: tuple[CategoryResult, ...] = ()
     #: Resolved named sources. Empty in v1's URL wave; W7 fills it.
     sources: tuple[SourceResolution, ...] = field(default=())
+    #: Apply-level notes that belong to no category — today only the delivery
+    #: strategy's closing step (W8): a teclaw redeliver that failed after every
+    #: category was written is recorded here rather than raised (§2.7).
+    notes: tuple[str, ...] = field(default=())
 
     @property
     def entries(self) -> tuple[EntryResult, ...]:
@@ -236,6 +240,7 @@ class ApplyReport:
             "sources": [source.as_dict() for source in self.sources],
             "categories": [category.as_dict() for category in self.categories],
             "entries": [entry.as_dict() for entry in self.entries],
+            "notes": list(self.notes),
         }
 
 

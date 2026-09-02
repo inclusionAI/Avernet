@@ -736,6 +736,8 @@ class BotManagementModule(Module):
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], TaskQueueService],
         bot_repository: BotRepository,
+        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
+        manifest_config: cfg.BotConfigManifestConfig,
     ) -> BotConfigManifestApplyService:
         return BotConfigManifestApplyService(
             manifest_service,
@@ -753,6 +755,11 @@ class BotManagementModule(Module):
             git_client_provider,
             task_queue_provider,
             bot_repository,
+            # W8: the delivery seam. The engine authority is the same factory
+            # the capability resolver and the creation seam take; the switch is
+            # the config cluster's, read once here.
+            is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
+            teclaw_platform_managed=manifest_config.teclaw_platform_managed,
         )
 
     @singleton
