@@ -118,6 +118,9 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     msg = _task_msg(skill_name, execution_graph, backend_url, winner_bot_id,
                     title=winner.get("title", ""), goal=winner.get("goal", ""))
 
+    _group_enabled = _singlebot_2_group_switch(graph, task_id)
+    actual_run_mode = "coop_group" if (_group_enabled and group_executor is not None) else "bbs"
+
     # 先增加一个bbs节点,RUNNING
     bbs_task_node = TaskNode(
         node_id=f"bbs-{uuid.uuid4().hex[:8]}",
@@ -129,8 +132,9 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             goal=Goal(objective=winner.get("goal", msg), acceptances=[]),
         ),
         run_info=RuntimeInfo(
-            run_mode="bbs",
-            assignee=winner_bot_id
+            run_mode=actual_run_mode,
+            assignee=winner_bot_id,
+            extend_props={"actual_run_mode": "bbs"}
         ),
         node_run_graph=None
     )
@@ -146,7 +150,6 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     # 执行bbs，执行完后再更新
     try:
         logger.info("[task][bbs_mode] begin_rely_task, task_id=%s", task_id)
-        _group_enabled = _singlebot_2_group_switch(graph, task_id)
         if _group_enabled and group_executor is not None:
             _owner_user_id = _resolve_owner_user_id_from_graph(graph, task_id)
             logger.info(
