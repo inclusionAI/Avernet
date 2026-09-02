@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
+    BOT_COULD_NOT_BE_PROVISIONED,
     _CONTAINER_FAILED_STATUSES,
     _CONTAINER_READY_STATUSES,
 )
@@ -524,3 +525,25 @@ def test_pre_create_on_still_ignores_the_pre_container_record():
         job=_Job(TaskStatus.PENDING),
     )
     assert state is CreationState.CREATING
+
+
+def test_record_first_a_retired_job_with_the_container_never_up_is_create_failed():
+    """The phase finished, the bot never reached ACTIVE, the queue retired the
+    job: not CREATING forever — the job's row says it is over."""
+    for status in (TaskStatus.TIMED_OUT, TaskStatus.FAILED):
+        state, _ = _record_first_state(
+            bot={"status": "PENDING"},
+            report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED),
+            job=_Job(status, "the bot could not be provisioned: PENDING"),
+        )
+        assert state is CreationState.CREATE_FAILED, status
+
+
+def test_a_provisioning_failure_that_soft_deleted_the_record_is_create_failed():
+    """W8: under RECORD_PRE_PROVISION the service soft-deletes the record on an
+    allocation failure, so the poll sees no bot beside a terminal job — the
+    shape of a decline, which it is not."""
+    (state, _), _ = _state(job=_Job(TaskStatus.FAILED, f"{BOT_COULD_NOT_BE_PROVISIONED}: no capacity"))
+    assert state is CreationState.CREATE_FAILED
+    (state, _), _ = _state(job=_Job(TaskStatus.FAILED, "authorization did not complete: REJECTED"))
+    assert state is CreationState.AUTHORIZATION_REJECTED

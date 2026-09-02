@@ -61,6 +61,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
+    BOT_COULD_NOT_BE_PROVISIONED,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
@@ -374,23 +375,17 @@ def _creation_state(
     if report is not None and report.trigger == _terminal_trigger(sequence):
         if report.status is ApplyStatus.RUNNING:
             return (CreationState.APPLYING, None)
-        if sequence is CreationSequence.RECORD_PRE_PROVISION and not _bot_is_running(bot):
-            # The phase finished but the container is still being provisioned
-            # from what it wrote — or never came up, which the job's own row
-            # says below.
-            if str(bot.get("status") or "") not in _PROVISIONING_FAILED:
-                return (CreationState.CREATING, None)
-        elif report.status is ApplyStatus.SUCCEEDED:
-            return (CreationState.READY, None)
-        else:
-            # PARTIAL and FAILED alike: the bot is up, part of the manifest is not.
+        if sequence is CreationSequence.PRE_CREATE_ON or _bot_is_running(bot):
+            # Under ``PRE_CREATE_ON`` this record exists only once the bot is
+            # up; under ``RECORD_PRE_PROVISION`` it is the outcome once the
+            # bot is up. PARTIAL and FAILED alike: part of the manifest is not.
+            if report.status is ApplyStatus.SUCCEEDED:
+                return (CreationState.READY, None)
             return (CreationState.APPLY_FAILED, None)
-        if _bot_is_running(bot):
-            return (
-                (CreationState.READY, None)
-                if report.status is ApplyStatus.SUCCEEDED
-                else (CreationState.APPLY_FAILED, None)
-            )
+        # ``RECORD_PRE_PROVISION``, the phase finished, the container not up:
+        # still being provisioned from what the phase wrote, or never coming.
+        # The job's row below tells the two apart, exactly as it does for a
+        # bot with no record of its own.
 
     # The second textual ``job()``, never a second call: the ``bot is None``
     # branch above returns on every path, so exactly one of the two runs.
@@ -449,8 +444,15 @@ def _bot_less_terminal(record) -> CreationState:
     """
     if record.status is TaskStatus.TIMED_OUT:
         return CreationState.AUTHORIZATION_EXPIRED
-    if (record.last_error or "") == AUTHORIZATION_WINDOW_ELAPSED:
+    last_error = record.last_error or ""
+    if last_error == AUTHORIZATION_WINDOW_ELAPSED:
         return CreationState.AUTHORIZATION_EXPIRED
+    if last_error.startswith(BOT_COULD_NOT_BE_PROVISIONED):
+        # W8: under ``RECORD_PRE_PROVISION`` a provisioning failure soft-deletes
+        # the record the job had written, so the poll sees no bot beside a
+        # terminal job — the shape of a decline, which it is not: the user
+        # authorized, and the platform could not provision.
+        return CreationState.CREATE_FAILED
     return CreationState.AUTHORIZATION_REJECTED
 
 

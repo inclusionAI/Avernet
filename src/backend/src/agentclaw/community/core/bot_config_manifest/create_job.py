@@ -103,6 +103,12 @@ CREATE_QUEUE_DEADLINE_MARGIN_SECONDS = 5 * 60
 #: first when the second happened would attribute to a user a decision they never
 #: made. The queue's own ``TIMED_OUT`` is the other half of the same answer.
 AUTHORIZATION_WINDOW_ELAPSED = "the authorization window elapsed"
+#: The ``Fail`` reason's prefix when the bot could not be provisioned. Shared
+#: with the poll for the same reason as the one above: under W8's
+#: ``RECORD_PRE_PROVISION`` sequence the service soft-deletes the record on an
+#: allocation failure, so the poll sees no bot beside a terminal job — a
+#: decline's shape — and only this prefix tells it the user did authorize.
+BOT_COULD_NOT_BE_PROVISIONED = "the bot could not be provisioned"
 
 
 def create_job_idempotency_key(
@@ -353,9 +359,7 @@ class BotCreateWithManifestHandler:
                 "window; discarding what submission wrote",
                 bot_id,
             )
-            if not self._seam_provider().discard(
-                entity_id=entity_id, bot_id=bot_id, owner_id=user_id
-            ):
+            if not self._discard(payload):
                 return self._cleanup_did_not_land(bot_id)
             return Fail(AUTHORIZATION_WINDOW_ELAPSED)
 
@@ -375,9 +379,7 @@ class BotCreateWithManifestHandler:
                 status,
                 bot_id,
             )
-            if not self._seam_provider().discard(
-                entity_id=entity_id, bot_id=bot_id, owner_id=user_id
-            ):
+            if not self._discard(payload):
                 return self._cleanup_did_not_land(bot_id)
             return Fail(f"authorization did not complete: {status}")
 
@@ -460,11 +462,15 @@ class BotCreateWithManifestHandler:
                 )
             except Exception as could_not_provision:  # noqa: BLE001 — terminal
                 # The service soft-deletes the record on an allocation failure,
-                # so a retry would create a second bot under the same id.
+                # so a retry would create a second bot under the same id. The
+                # rows submission and the phase wrote are orphans now — no
+                # record for ordinary deletion to reach — so they go here.
                 logger.exception(
                     "[manifest_create] bot_id=%s could not be provisioned", bot_id
                 )
-                return Fail(f"the bot could not be provisioned: {could_not_provision}")
+                if not self._discard(payload):
+                    return self._cleanup_did_not_land(bot_id)
+                return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {could_not_provision}")
             return Reschedule(POLL_DELAY_SECONDS)
 
         status = str(bot.get("status") or "")
@@ -474,11 +480,25 @@ class BotCreateWithManifestHandler:
                 bot_id,
                 status,
             )
-            return Fail(f"the bot could not be provisioned: {status}")
+            return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {status}")
         if status not in _CONTAINER_READY_STATUSES:
             return Reschedule(POLL_DELAY_SECONDS)
         self._repair_owner_relationship_if_missing(payload, bot)
         return Complete()
+
+    def _discard(self, payload: dict) -> bool:
+        """Remove what submission and the phase wrote; ``False`` if it did not land.
+
+        The managed-files purge (``owner_id``) is asked for only under
+        ``RECORD_PRE_PROVISION``: the store is that sequence's, and a
+        ``PRE_CREATE_ON`` creation must not depend on a table it never wrote.
+        """
+        record_first = self._sequence(payload) is CreationSequence.RECORD_PRE_PROVISION
+        return self._seam_provider().discard(
+            entity_id=str(payload["entity_id"]),
+            bot_id=str(payload["bot_id"]),
+            owner_id=str(payload["user_id"]) if record_first else None,
+        )
 
     # ── after there is a bot ────────────────────────────────────────────────
 

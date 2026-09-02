@@ -13,6 +13,7 @@ from typing import Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
+    BOT_COULD_NOT_BE_PROVISIONED,
     CREATE_JOB_TASK_TYPE,
     CREATE_QUEUE_DEADLINE_MARGIN_SECONDS,
     DEFAULT_CREATE_DEADLINE_SECONDS,
@@ -723,13 +724,23 @@ def test_record_first_a_failed_phase_still_provisions():
     assert len(service.calls) == 1
 
 
-def test_record_first_provisioning_failure_is_terminal():
-    handler, applies, _seam, _bots, _created, service = _record_first(refuse=True)
+def test_record_first_provisioning_failure_is_terminal_and_discards():
+    handler, applies, seam, _bots, _created, service = _record_first(refuse=True)
     p = dict(_TECLAW_PAYLOAD)
     handler.handle(p)
     applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
     outcome = handler.handle(p)
-    assert isinstance(outcome, Fail) and "provisioned" in outcome.error
+    assert isinstance(outcome, Fail) and outcome.error.startswith(BOT_COULD_NOT_BE_PROVISIONED)
+    # The record is soft-deleted by the service: the rows the phase wrote are
+    # orphans, and the job is the only thing that can reach them.
+    assert seam.discard_kwargs == [{"entity_id": "u_owner", "bot_id": "b_1", "owner_id": "u_owner"}]
+
+
+def test_pre_create_on_discards_without_touching_the_store():
+    handler, _applies, seam, _bots, created, _service = _record_first(passport_status="REJECTED")
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Fail)  # claude_code → PRE_CREATE_ON
+    assert seam.discard_kwargs == [{"entity_id": "u_owner", "bot_id": "b_1", "owner_id": None}]
+    assert not created
 
 
 def test_record_first_a_declined_creation_purges_the_store_too():
