@@ -24,6 +24,11 @@ from agentclaw.community.core.task.domain.prompt_constants import (
 
 logger = logging.getLogger("task.dispatcher")
 
+# ===== PRE rule-mode test customization =====
+# Keep this block self-contained so the pre-release test behavior can be removed
+# without touching the generic dispatch strategy below.
+_SINGLE_CANDIDATE_MISS_PROBABILITY = 0.4
+
 # Temporary pre-authorized Bot pool for validating the multi-Bot dispatch path.
 # The rule mode intentionally samples from this fixed pool instead of using the
 # discovered candidates as assignees, because discovered Bots may not have the
@@ -548,6 +553,20 @@ def _rule_based_search_result(candidates: list[dict]) -> SearchResult:
     if candidate_count == 0:
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
 
+    if (
+        candidate_count == 1
+        and random.random() < _SINGLE_CANDIDATE_MISS_PROBABILITY
+    ):
+        logger.info(
+            "[task][search] rule mode single candidate randomly missed "
+            "to allow BBS escalation probability=%s",
+            _SINGLE_CANDIDATE_MISS_PROBABILITY,
+        )
+        return SearchResult(
+            outcome=SearchOutcome.MISS,
+            miss_reason="rule_single_candidate_random_miss",
+        )
+
     dispatch_count = 1 if candidate_count <= 2 else candidate_count
     dispatch_count = min(dispatch_count, len(_RULE_TEST_BOT_POOL))
     selected = random.sample(_RULE_TEST_BOT_POOL, dispatch_count)
@@ -582,6 +601,8 @@ def _rule_based_search_result(candidates: list[dict]) -> SearchResult:
         ),
     )
 
+
+# ===== END PRE rule-mode test customization =====
 
 def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
     """组 search prompt:{子任务需求, 候选集} + 约定返回格式(4 态)+ 示例。零 case 知识。
