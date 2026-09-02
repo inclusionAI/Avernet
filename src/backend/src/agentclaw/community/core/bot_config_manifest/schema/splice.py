@@ -37,7 +37,10 @@ from agentclaw.community.core.bot_config_manifest.schema.violations import (
     Violation,
 )
 
-_HEADER_RE = re.compile(r"^script\s*:")
+#: The section header, in the spellings a hand-written document uses: a bare,
+#: single- or double-quoted key at column 0, with a leading BOM tolerated on
+#: the first line (the parser skips it; the splice must too).
+_HEADER_RE = re.compile(r"^\ufeff?(?:script|\"script\"|'script')\s*:")
 #: The document's own key for the section, and the key under it.
 SECTION = "script"
 
@@ -50,9 +53,23 @@ def splice_script_section(document: str, body: Optional[str]) -> str:
     the document does not parse or the rendered section does not read back as
     the body given.
     """
-    _require_parseable(document)
+    parsed = _require_parseable(document)
     lines = document.split("\n")
     span = _section_span(lines)
+    if SECTION in parsed and span is None:
+        # The parser sees a ``script`` key the splice cannot locate (an
+        # explicit-key form, say). Appending would leave two declarations
+        # and let the old body win a later removal — refuse instead.
+        raise ManifestValidationError(
+            [
+                Violation(
+                    location=SECTION,
+                    code="invalid_script",
+                    message="the document's script section could not be located "
+                    "for rewriting; edit the manifest document directly",
+                )
+            ]
+        )
 
     if body is None:
         if span is None:
@@ -65,7 +82,26 @@ def splice_script_section(document: str, body: Optional[str]) -> str:
         # newline; it is the newline, not a blank line, and stays.)
         while end < len(lines) - 1 and lines[end].strip() == "":
             end += 1
-        return "\n".join(lines[:start] + lines[end:])
+        removed = "\n".join(lines[:start] + lines[end:])
+        # The removal proves itself the way the replacement does: what is
+        # left must parse and declare no script — a second declaration the
+        # span did not cover (a duplicate key) would otherwise survive.
+        try:
+            left = yaml.safe_load(removed) if removed.strip() else {}
+        except yaml.YAMLError:
+            left = None
+        if not isinstance(left, dict) or left.get(SECTION) is not None:
+            raise ManifestValidationError(
+                [
+                    Violation(
+                        location=SECTION,
+                        code="invalid_script",
+                        message="removing the script section did not leave a "
+                        "document without one; edit the manifest document directly",
+                    )
+                ]
+            )
+        return removed
 
     for rendering in (_literal_block(body), _quoted_scalar(body)):
         candidate = _with_section(document, lines, span, rendering)
@@ -83,14 +119,16 @@ def splice_script_section(document: str, body: Optional[str]) -> str:
     )
 
 
-def _require_parseable(document: str) -> None:
+def _require_parseable(document: str) -> dict[str, Any]:
     try:
         parsed = yaml.safe_load(document) if document.strip() else {}
     except yaml.YAMLError as exc:
         raise ManifestValidationError(
             [Violation(location="document", code="invalid_yaml", message=str(exc))]
         ) from None
-    if parsed is not None and not isinstance(parsed, dict):
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict):
         raise ManifestValidationError(
             [
                 Violation(
@@ -100,6 +138,7 @@ def _require_parseable(document: str) -> None:
                 )
             ]
         )
+    return parsed
 
 
 def _section_span(lines: list[str]) -> Optional[tuple[int, int]]:

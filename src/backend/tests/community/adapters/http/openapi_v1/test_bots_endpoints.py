@@ -2202,10 +2202,12 @@ def test_startup_script_get_answers_with_the_declared_body(
         script="echo row\n", size_bytes=9, modifier="u1", gmt_modified=None
     )
     manifest_service.script_body.return_value = "echo declared\n"
+    manifest_service.get.return_value = MagicMock(modifier="u2", gmt_modified=None)
     data = _ok(client.get("/openapi/v1/bots/b1/startup-script"))
     assert data["script"] == "echo declared\n"
     assert data["size_bytes"] == len("echo declared\n")
-    assert data["updated_by"] == "u1"
+    # The body is the manifest's, so the author is the manifest's too.
+    assert data["updated_by"] == "u2"
 
     manifest_service.script_body.return_value = None
     assert _ok(client.get("/openapi/v1/bots/b1/startup-script"))["script"] == "echo row\n"

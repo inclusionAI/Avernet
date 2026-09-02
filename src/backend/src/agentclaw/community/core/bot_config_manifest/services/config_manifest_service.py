@@ -35,7 +35,10 @@ from agentclaw.community.core.bot_config_manifest.repository.models import (
     BotConfigManifestRecord,
 )
 from agentclaw.community.core.bot_config_manifest.schema import (
+    MAX_SCRIPT_BYTES,
+    ManifestValidationError,
     ValidationResult,
+    Violation,
     placeholders,
     validate_document,
 )
@@ -222,6 +225,30 @@ class BotConfigManifestService(BotConfigManifestServiceProtocol):
         record = self.get(entity_id=entity_id, bot_id=bot_id)
         if record is None:
             return None
+        resolved: Optional[str] = None
+        if body is not None:
+            # What the row will carry. Checked against the row's own cap
+            # *before* the document is stored: a substituted value can be
+            # longer than its placeholder, and a row write refused after the
+            # document changed would leave the two disagreeing.
+            resolved = placeholders.resolve(
+                body,
+                engine_type=active_engine or "",
+                env=get_current_env(),
+                tenant=get_current_avernet_tenant(),
+            )
+            size = len(resolved.encode("utf-8"))
+            if size > MAX_SCRIPT_BYTES:
+                raise ManifestValidationError(
+                    [
+                        Violation(
+                            location="script.body",
+                            code="script_too_large",
+                            message=f"script body is {size} bytes after placeholder "
+                            f"substitution, over the {MAX_SCRIPT_BYTES}-byte limit",
+                        )
+                    ]
+                )
         document = splice_script_section(record.document, body)
         result = self.put(
             entity_id=entity_id,
@@ -232,19 +259,11 @@ class BotConfigManifestService(BotConfigManifestServiceProtocol):
             bot_type=bot_type,
         )
         scripts = self._scripts()
-        if body is None:
+        if resolved is None:
             scripts.delete(entity_id=entity_id, bot_id=bot_id)
         else:
             scripts.put(
-                entity_id=entity_id,
-                bot_id=bot_id,
-                script=placeholders.resolve(
-                    body,
-                    engine_type=active_engine or "",
-                    env=get_current_env(),
-                    tenant=get_current_avernet_tenant(),
-                ),
-                modifier=modifier,
+                entity_id=entity_id, bot_id=bot_id, script=resolved, modifier=modifier
             )
         return result
 

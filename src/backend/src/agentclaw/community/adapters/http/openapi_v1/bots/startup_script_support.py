@@ -97,20 +97,23 @@ def _startup_script_payload(
     state: str,
     reason: str,
     declared: Optional[str] = None,
+    declared_by: Any = None,
 ) -> StartupScript:
     """Shape a stored record — or its absence — as the response model.
 
     ``declared`` (W8, §2.2) is the manifest's own ``script.body`` when the bot
     carries a manifest that declares one: the alias view answers with it, and
-    the row supplies the audit fields it has.
+    ``declared_by`` — the manifest record — supplies the audit fields, so the
+    body is never stamped with the author of an older row.
     """
     script = declared if declared is not None else (record.script if record is not None else "")
+    audit = declared_by if declared is not None and declared_by is not None else record
     return StartupScript(
         bot_id=bot_id,
         script=script,
         size_bytes=len(script.encode("utf-8")),
-        updated_by=record.modifier if record is not None else "",
-        updated_at=record.gmt_modified if record is not None else None,
+        updated_by=audit.modifier if audit is not None else "",
+        updated_at=audit.gmt_modified if audit is not None else None,
         supported=state == SUPPORTED,
         unsupported_reason=reason,
     )

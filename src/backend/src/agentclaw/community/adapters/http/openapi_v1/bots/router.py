@@ -1365,8 +1365,15 @@ async def get_bot_startup_script(
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
     record = startup_script_service.get(entity_id=entity_id, bot_id=bot_id)
     declared = manifest_service.script_body(entity_id=entity_id, bot_id=bot_id)
+    declared_by = (
+        manifest_service.get(entity_id=entity_id, bot_id=bot_id)
+        if declared is not None
+        else None
+    )
     return envelope(
-        _startup_script_payload(bot_id, record, state, reason, declared=declared),
+        _startup_script_payload(
+            bot_id, record, state, reason, declared=declared, declared_by=declared_by
+        ),
         request,
     )
 

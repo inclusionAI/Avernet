@@ -116,3 +116,35 @@ def test_the_quoted_fallback_is_used_when_a_block_cannot_read_back() -> None:
     spliced = splice_script_section(_WITHOUT, "a\r\nb")
     assert 'body: "a\\r\\nb"' in spliced
     assert _body_of(spliced) == "a\r\nb"
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        'schema_version: 1\n"script":\n  body: old\n',
+        "schema_version: 1\n'script':\n  body: old\n",
+        "\ufeffscript:\n  body: old\nschema_version: 1\n",
+    ],
+    ids=["double-quoted", "single-quoted", "bom"],
+)
+def test_a_quoted_or_bom_prefixed_key_is_the_same_section(document: str) -> None:
+    replaced = splice_script_section(document, "new\n")
+    parsed = yaml.safe_load(replaced)
+    assert parsed["script"]["body"] == "new\n"
+    assert replaced.count("script") == 1, replaced
+    assert "script" not in yaml.safe_load(splice_script_section(document, None))
+
+
+def test_a_script_key_the_splice_cannot_locate_is_refused_not_duplicated() -> None:
+    explicit = "schema_version: 1\n? script\n:\n  body: old\n"
+    with pytest.raises(ManifestValidationError) as caught:
+        splice_script_section(explicit, "new\n")
+    assert caught.value.violations[0].code == "invalid_script"
+    with pytest.raises(ManifestValidationError):
+        splice_script_section(explicit, None)
+
+
+def test_removal_refuses_when_a_second_declaration_would_survive() -> None:
+    duplicate = "schema_version: 1\nscript:\n  body: a\nscript:\n  body: b\n"
+    with pytest.raises(ManifestValidationError):
+        splice_script_section(duplicate, None)

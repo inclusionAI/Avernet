@@ -137,3 +137,21 @@ def test_a_refusal_leaves_the_document_and_the_row_untouched() -> None:
         )
     assert repository.writes == [] and scripts.writes == 0
     assert service.get(entity_id=_ENTITY, bot_id=_BOT).document == _DOCUMENT
+
+
+def test_a_body_that_outgrows_the_row_after_substitution_is_refused_before_storing(monkeypatch) -> None:
+    from agentclaw.community.core.bot_config_manifest.schema import MAX_SCRIPT_BYTES
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_config_manifest.services.config_manifest_service.get_current_avernet_tenant",
+        lambda: "a-tenant-name-longer-than-its-placeholder",
+    )
+    service, repository, scripts = _service(_DOCUMENT)
+    # Under the cap as written, over it once every ${BOT_TENANT} is substituted.
+    body = "${BOT_TENANT}" * (MAX_SCRIPT_BYTES // len("${BOT_TENANT}"))
+    assert len(body.encode()) <= MAX_SCRIPT_BYTES
+    with pytest.raises(ManifestValidationError) as caught:
+        _write(service, body)
+    assert caught.value.violations[0].code == "script_too_large"
+    assert repository.writes == [] and scripts.writes == 0
+    assert service.get(entity_id=_ENTITY, bot_id=_BOT).document == _DOCUMENT
