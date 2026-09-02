@@ -358,10 +358,12 @@ Conventions every task assumes:
         pre-binding port).
 - **Depends on:** Tasks 3, 6, 12, 16, 17, 20
 
-## [ ] Task 22: Regression sweep
+## [x] Task 22: Regression sweep
 - **Files:** —
 - **Done when:**
-  - [ ] `uv run pytest tests/community/core/bot_config_manifest tests/community/core/config_compose tests/community/core/skill_center tests/community/core/bot_management tests/community/core/service_bot tests/community/kernel tests/community/repository tests/community/endpoints tests/community/adapters/http/openapi_v1 tests/community/architecture` passes.
-  - [ ] `test_no_script_is_byte_identical_to_the_bare_chain` unmodified.
-  - [ ] Lint (`ruff`) and the oversized-module gate pass.
+  - [x] `uv run pytest tests/community/core/bot_config_manifest tests/community/core/config_compose tests/community/core/skill_center tests/community/core/bot_management tests/community/core/service_bot tests/community/kernel tests/community/repository tests/community/endpoints tests/community/adapters/http/openapi_v1 tests/community/architecture` passes — 4883 + 3254 passed locally (the two
+        `rsync`-dependent build tests are deselected: the tool is absent in this
+        container); `tests/community/config` goldens regenerated for the new key.
+  - [x] `test_no_script_is_byte_identical_to_the_bare_chain` unmodified.
+  - [x] Lint (`ruff`) and the oversized-module gate pass.
 - **Depends on:** Task 21
