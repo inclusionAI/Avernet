@@ -1,4 +1,4 @@
-template_id: merchant-operations-goal-to-sop
+template_id: merchant-operations-goal-to-plan
 entry_bot_id: 20260901_kcvvkqqs
 entry_name: 店主Bot
 # execute 会根据 task_spec 的经营语义自动补入 static_plan_id；调用方无需传模板 id。

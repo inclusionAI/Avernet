@@ -27,7 +27,7 @@ templates:
     tags: [parallel]
     priority: 31
 
-  merchant-operations-goal-to-sop:
+  merchant-operations-goal-to-plan:
     tags: [serial, branching, risk-review]
     priority: 32
 

@@ -1,13 +1,13 @@
-# 商家经营目标到 SOP 协同模板。
+# 商家经营目标到经营方案 协同模板。
 # 只描述协同策略，不保存具体 bot id；运行时通过 participant_bindings 绑定实际 Bot。
 # execute 入口由 backend 的 STATIC_PLAN_TEMPLATES 注册表做内容路由；metadata.labels 和 Bot manifest 的 domains/skills 作为场景与能力说明。
 
-name: 商家经营目标到SOP
+name: 商家经营目标到经营方案
 
 metadata:
-  description: 将店主的一句经营目标，依次转化为营销打法、会员服务、客流产能、供应履约以及业务与舆情风险结论，最后汇总为带条件和待决事项的经营方案与SOP。
+  description: 将店主的一句经营目标，依次转化为营销打法、会员服务、客流产能、供应履约以及业务与舆情风险结论，最后汇总为带条件和待决事项的经营方案与执行计划。
   labels:
-    scenario: merchant_operations_goal_to_sop
+    scenario: merchant_operations_goal_to_plan
     entry_keywords: 门店,商家,店庆,周年庆,活动,促销,套餐,到店,预约,客流,营业额,GMV,转化,复购,拉新,护理,库存,产能,排班,履约,品质,投诉,差评,舆情
     routing_rule: 场景词至少命中1个且经营目标词至少命中1个时推荐；明确库存采购交期问题可从供应履约入口，明确投诉差评舆情问题可从舆情入口
     handoff_protocol: 接收方由当前问题决定专业拆解；上游只传背景、事实、已有判断、暴露问题和解决方向，不预写下游清单
@@ -101,7 +101,7 @@ runtime:
           - 只写我无法闭环的问题和问题方向，不预写下游清单
           ### 本跳产出正文(完整)
 
-          不要输出最终SOP；若某项无法确认，输出条件化方案或待确认项。
+          不要输出最终方案；若某项无法确认，输出条件化方案或待确认项。
         transitions:
           complete:
             targets:
@@ -210,7 +210,7 @@ runtime:
         transitions:
           complete:
             targets:
-              - synthesize_sop
+              - synthesize_plan
 
       review_public_risk:
         kind: bot_task
@@ -236,11 +236,11 @@ runtime:
         transitions:
           complete:
             targets:
-              - synthesize_sop
+              - synthesize_plan
 
-      synthesize_sop:
+      synthesize_plan:
         kind: bot_task
-        display_name: 汇总经营方案与SOP
+        display_name: 汇总经营方案
         node_timeout_ms: 300000
         max_attempts: 3
         assignee:
@@ -256,7 +256,7 @@ runtime:
           3. 投放、预约、产能、排班和履约节奏；
           4. 业务风险与舆情风险，以及对应的条件、监测点、失败动作和待决策事项；
           5. 哪些事项已确认、哪些是执行前置条件、哪些仍然阻断方案；
-          6. 一份按活动前、活动中、异常发生时组织的简洁SOP。
+          6. 一份按活动前、活动中、异常发生时组织的简洁执行计划。
 
           最终输出必须保留分歧和未决事项，不得声称没有工具回执时已经完成投放、采购、锁库、排班或持续监控。
           面向用户输出时不要暴露内部节点编号，但必须保留以下四段结构：

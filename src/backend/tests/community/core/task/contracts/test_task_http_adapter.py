@@ -357,7 +357,7 @@ class TestTaskExecute:
                 "task_spec": {
                     "metadata": {
                         "title": "门店经营目标",
-                        "instruction": "制定店庆经营方案和执行SOP",
+                        "instruction": "制定店庆经营方案和执行计划",
                     },
                     "context": {"background": "护理门店周年庆", "extend_props": {}},
                     "goal": {"objective": "提升到店复购", "acceptances": []},
@@ -372,7 +372,7 @@ class TestTaskExecute:
         task_id = r.json()["data"]["task_id"]
         record = inj.get(TaskInfoRepositoryProtocol).get(task_id)
         assert record is not None
-        assert record.execution_config["static_plan_id"] == "merchant-operations-goal-to-sop"
+        assert record.execution_config["static_plan_id"] == "merchant-operations-goal-to-plan"
         assert record.execution_config["static_plan_yaml"]
         assert record.execution_config["template_input"]["okr"] == "提升到店复购"
 
