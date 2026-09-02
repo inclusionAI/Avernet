@@ -147,6 +147,23 @@ async def test_optional_identity_present_is_included() -> None:
     assert isinstance(result[PrincipalType.APP], AppPrincipal)
 
 
+async def test_empty_requirement_returns_empty_without_touching_registry() -> None:
+    class _Exploding:
+        name = "explode"
+        principal_type = PrincipalType.USER
+
+        async def build(self, creds: CredentialBundle) -> Principal | None:
+            raise AssertionError("should not be called for an empty requirement")
+
+    reg: dict[PrincipalType, IdentityChain] = {
+        PrincipalType.USER: _chain(PrincipalType.USER, _Exploding())
+    }
+
+    result = await authenticate(_CREDS, {}, reg)
+
+    assert result == {}
+
+
 async def test_hard_failure_is_terminal() -> None:
     reg: dict[PrincipalType, IdentityChain] = {
         PrincipalType.USER: _chain(PrincipalType.USER, _Fixed("user", AuthError("bad")))
