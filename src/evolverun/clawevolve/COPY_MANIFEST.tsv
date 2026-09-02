@@ -1,14 +1,14 @@
 source_sha	source_path	source_blob	target_path	target_sha256	status
--	-	-	README.md	2e5c1942758deb1582a18447a20ac4b0a9f1b90e3409b7c5b6211540900d8599	module-scaffold
+-	-	-	README.md	555f6d3fdde88c4cba4e05ec0ad8474be273548757bd5338ef83d01924d731b8	module-scaffold
 -	-	-	package-lock.json	06699d74dce66ab910ed5dc574a4063b547b6237413527920890548507234234	module-scaffold
 -	-	-	package.json	30e606816a3236e59ea0c3adafe90514656023ea83f4dffa6588f6e04c8399f8	module-scaffold
 -	-	-	scripts/check-public-boundary.sh	5900e87838e0a4c0862dc4b3191436578b4139a35843b354564f8dc85467e1c6	module-scaffold
--	-	-	server/create-module.ts	1eb90221eea6380c5cc430a8eea11c7dc0402e92af2a9d509b5e2b873bd82367	module-scaffold
+-	-	-	server/create-module.ts	e91d00513b1ae1958534f65e46af1c5814f959b44601ae489f53db9ae8424d1a	boundary-adapter
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/db/dialect.ts	89a9bd8382720926f9fee9b417aabda9a8e27b4d	server/db/dialect.ts	125637c0764b0f45a405d058f2791e349512c45153053e8689633691101de5d5	copied
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/db.ts	6491fe460f1bdd8d5e7ede456a37ff7adf50b0d5	server/db.ts	ea13a45360c978b1cfd4029376ba5b048279430a6a89c19ecc2c3093b09eafd5	adapted
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/env.ts	6c41e63df5a882fd798ecfd4e7bc64c4f1db7ab6	server/env.ts	5e706956d4fbcd51d92ef6bdd6b5474180633f005db20ce7c2ce118210b6667a	adapted
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/fixtures/insight/v1/governance-rules.json	d702da4a7cf6a76c238aee0599781f077c1cee5c	server/fixtures/insight/v1/governance-rules.json	6f125e9e96b0c7452f22b000e1ddf58d2fdf384cd6f11f7aea994788b92b3d3a	copied
--	-	-	server/index.ts	5a68f2b3c43f1dd38b7f6eb45a03c6cad9418e5d145e27617fd49a1c11588529	module-scaffold
+-	-	-	server/index.ts	913da40ac112b5eeed3fffeb4da770cb1a9338fef5ce334172dd4e9ee938d542	boundary-adapter
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/lib/timeline-builder.ts	4f95c473be5f29c70c745c33359deb4722b79c49	server/lib/timeline-builder.ts	5ea3f43b51f20f909f51390d3372b9e68b25dc3a68416eca36541801fc8bbc64	copied
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/middleware/async-handler.ts	bf21bbd30456405f904fdfdf964aef169db55aec	server/middleware/async-handler.ts	342357c226dcf99dd55dc01af577b14dae54529e57bbf3fb97e6713410361ce9	copied
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/repositories/__tests__/evolve-pack-repository.test.ts	5e4cd94cdd794042cee36c635bd173058137ce03	server/repositories/__tests__/evolve-pack-repository.test.ts	8d17e279b9afd85823c0451d3c915b6f6050fb9bb4fb55988dce54602dd93b7d	adapted
@@ -125,3 +125,4 @@ source_sha	source_path	source_blob	target_path	target_sha256	status
 -	-	-	web/src/singlebox.css	6b219bdc66d96e4cf85c8b9cfb9e85be28c615f05aaec27b7302aa89a7e56125	module-scaffold
 -	-	-	web/src/singlebox.tsx	b7cfa6b436ca3e0fabdd2ccd502d028127a2f0cfb2f2a72377493f27671d883b	module-scaffold
 -	-	-	server/services/object-storage/filesystem-object-store.ts	0aa2a5d5a221b8dd503184343b450c75008ff65ed1e1d0704cefc3d1c7d31948	module-scaffold
+-	-	-	server/internal/module-api.ts	7042f99cf7f2886d2e94c139a0331673ef7c818c0347775a39eccf381f3f8f5a	boundary-adapter
