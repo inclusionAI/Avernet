@@ -115,7 +115,7 @@ def terminate_on_launch_failure(
 
     The mirrored ``finally`` of ``_run`` for the one path that cannot run
     it: a terminal ``FAILED`` record (the failure swims in the log, not
-    the stored report, same rule as ``_record_engine_failure``) written
+    the stored report, same rule as ``record_engine_failure``) written
     *before* the lock is released, so a poller never observes a
     lock-less RUNNING row and a re-apply never waits out the TTL for an
     apply that never started.

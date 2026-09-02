@@ -148,7 +148,7 @@ class StoreResourcePort(_StorePort):
     async def upload_file(
         self,
         *,
-        entity_type: str = "staff",
+        entity_type: str = OWNER_ENTITY_TYPE,
         entity_id: str,
         bot_id: str,
         engine_type: str,
@@ -172,7 +172,7 @@ class StoreResourcePort(_StorePort):
     async def delete(
         self,
         *,
-        entity_type: str = "staff",
+        entity_type: str = OWNER_ENTITY_TYPE,
         entity_id: str,
         bot_id: str,
         engine_type: str,
@@ -199,7 +199,7 @@ class StoreResourcePort(_StorePort):
     async def exists(
         self,
         *,
-        entity_type: str = "staff",
+        entity_type: str = OWNER_ENTITY_TYPE,
         entity_id: str,
         bot_id: str,
         engine_type: str,

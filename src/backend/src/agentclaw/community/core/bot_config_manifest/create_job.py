@@ -405,6 +405,15 @@ class BotCreateWithManifestHandler:
             # single pre-container phase writes platform state against it,
             # and provisioning composes the first artifact from that state
             # (W8, plan K-6). Nothing is applied before the record exists.
+            #
+            # Deliberately not wrapped the way ``provision_bot`` is below: a
+            # raising handler is the worker's implicit retry with backoff,
+            # and a retry here is safe — the completion is idempotent on the
+            # supplied ``bot_id``, so it cannot make a second bot, and the
+            # next attempt finds the record if the first one did write it.
+            # ``provision_bot`` is terminal only because the service
+            # soft-deletes the record on failure, which a retry would then
+            # re-create. Same shape as the ``PRE_CREATE_ON`` call below.
             self._create_the_bot(payload, provision=False)
             return Reschedule(POLL_DELAY_SECONDS)
 

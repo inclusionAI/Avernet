@@ -127,16 +127,48 @@ def not_active_note(bot_id: str, status: str) -> str:
 
 
 def put_warnings(
-    result: ManifestWriteResult, *, strategy: DeliveryStrategy, bot: dict[str, Any]
+    result: ManifestWriteResult,
+    *,
+    strategy: Optional[DeliveryStrategy],
+    bot: dict[str, Any],
 ) -> list[str]:
-    """The validator's notes, plus the two delivery notes this surface adds."""
+    """The validator's notes, plus the two delivery notes this surface adds.
+
+    ``strategy=None`` means the bot's delivery could not be resolved (see
+    ``delivery_or_none``): the container note needs the strategy to say
+    whether anything is container-bound, so it is left out rather than
+    guessed.
+    """
     warnings = list(result.warnings)
     if result.declares_script:
         warnings.append(SCRIPT_DELIVERY_NOTE)
     status = str(bot.get("status") or "")
-    if strategy.needs_container() and status != "ACTIVE":
+    if strategy is not None and strategy.needs_container() and status != "ACTIVE":
         warnings.append(not_active_note(str(bot.get("bot_id") or ""), status))
     return warnings
+
+
+def delivery_or_none(
+    apply_service: BotConfigManifestApplyServiceProtocol, bot: dict[str, Any]
+) -> Optional[DeliveryStrategy]:
+    """The bot's delivery strategy for the response's notes, or ``None``.
+
+    The same defensive shape as ``start_put_apply``: by the time the
+    response is being built the document is stored, and a ``200`` is owed.
+    Resolving the strategy can fail on a misconfigured deployment (the
+    platform-managed switch on with no platform ports bound) — the apply
+    itself already reported ``not_started`` for that, and the warnings must
+    not turn it into a ``500`` after the write.
+    """
+    try:
+        return apply_service.delivery_for_bot(bot)
+    except Exception:  # noqa: BLE001 — the write already happened; §2.7
+        logger.exception(
+            "[config_manifest] the bot's delivery strategy could not be resolved "
+            "for the PUT response: bot_id=%s",
+            bot.get("bot_id"),
+        )
+        return None
 
 
 def start_put_apply(

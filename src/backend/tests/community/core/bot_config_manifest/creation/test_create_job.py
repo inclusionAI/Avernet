@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+import pytest
+
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
     BOT_COULD_NOT_BE_PROVISIONED,
@@ -638,7 +640,10 @@ class _RecordingSeam(_Seam):
         return super().discard(**kwargs)
 
 
-def _record_first(*, passport_status="ISSUED", applies=None, bots=None, refuse=False, discard_succeeds=True):
+def _record_first(
+    *, passport_status="ISSUED", applies=None, bots=None, refuse=False, discard_succeeds=True,
+    complete_raises=False,
+):
     applies = applies or _Applies()
     seam = _RecordingSeam(applies, discard_succeeds=discard_succeeds)
     bots = bots or _Bots()
@@ -646,6 +651,8 @@ def _record_first(*, passport_status="ISSUED", applies=None, bots=None, refuse=F
 
     def complete(payload, **kw):
         created.append((payload, kw))
+        if complete_raises:
+            raise RuntimeError("the record could not be written")
         bots.record = {
             "bot_id": "b_1", "entity_id": "u_owner", "owner_id": "u_owner",
             "status": "PENDING", "binding_id": None, "active_engine": "teclaw",
@@ -759,6 +766,18 @@ def test_pre_create_on_is_untouched_by_the_sequence_wiring():
     handler.handle(p)
     assert created and created[0][1] == {}, "the default call shape, provisioning inline"
     assert service.calls == []
+
+
+def test_record_first_a_failed_record_write_is_retried_not_discarded():
+    """The record write is idempotent on ``bot_id``, so a raise here is the
+    worker's implicit retry with backoff — not the terminal discard that
+    ``provision_bot`` needs (the service soft-deletes the record there)."""
+    handler, _applies, seam, _bots, created, service = _record_first(complete_raises=True)
+    p = dict(_TECLAW_PAYLOAD)
+    with pytest.raises(RuntimeError, match="could not be written"):
+        handler.handle(p)
+    assert len(created) == 1 and created[0][1] == {"provision": False}
+    assert seam.discards == 0 and service.calls == []
 
 
 def test_record_first_a_provisioning_failure_is_terminal_even_when_the_discard_does_not_land():

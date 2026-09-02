@@ -49,6 +49,7 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.di import Injected
 
 from .config_manifest_support import (
+    delivery_or_none,
     put_warnings,
     start_put_apply,
     audit_actor,
@@ -169,7 +170,7 @@ async def update_bot_config_manifest(
         audit=audit,
     )
     warnings = put_warnings(
-        result, strategy=apply_service.delivery_for_bot(bot), bot=bot
+        result, strategy=delivery_or_none(apply_service, bot), bot=bot
     )
     return envelope(
         manifest_payload(bot_id, result.record, warnings=warnings, apply=started),

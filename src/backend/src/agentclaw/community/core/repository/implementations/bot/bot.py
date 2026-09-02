@@ -21,7 +21,8 @@ SQLite twin (flagged in the PR):
    prod does. The old SQLite twin ``setattr``'d any field.
 3. **``get_device_provider_*``** — implements prod's real
    ``ac_bots`` ⟕ ``ac_entity_device_binding`` join (the old SQLite
-   twin was a stub returning ``None``).
+   twin was a stub returning ``None``); lives in
+   :class:`BotDeviceProviderQueries` (``device_provider.py``).
 
 ``insert`` is a **plain INSERT** (``db.add`` + ``db.flush``) — the
 table has no unique key; never an upsert. ``update_by_owner`` /
@@ -45,6 +46,9 @@ from injector import inject
 from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.core.repository.implementations.bot.device_provider import (
+    BotDeviceProviderQueries,
+)
 from agentclaw.community.core.repository.implementations.bot.reachability import (
     BotReachabilityQueries,
 )
@@ -82,6 +86,7 @@ _JSON_FIELDS = ("share_policy", "ext")
 
 
 class BotRepository(
+    BotDeviceProviderQueries,
     BotReachabilityQueries,
     BotRepositoryProtocol,
 ):
@@ -711,88 +716,6 @@ class BotRepository(
                 .first()
             )
             return bot.to_dict() if bot else None
-
-    # ── device-provider join (adopt prod — drop the local stub) ─
-
-    def _device_provider_result(
-        self, device_provider, device_props_json, bot_type=None
-    ) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
-            "device_provider": device_provider,
-            "bot_type": bot_type or "",
-        }
-        if device_provider == "arca":
-            try:
-                props = (
-                    json.loads(device_props_json)
-                    if isinstance(device_props_json, str)
-                    else device_props_json
-                )
-                sandbox_id = (props or {}).get("sandbox_id")
-                if sandbox_id:
-                    result["sandbox_id"] = sandbox_id
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                pass
-        return result
-
-    def get_device_provider_by_bot_id_and_owner(
-        self, bot_id: str, owner_id: str
-    ) -> Optional[Dict[str, Any]]:
-        from agentclaw.community.core.devices.repository.models import (
-            EntityDeviceBinding,
-        )
-
-        with self._db.orm_session() as db:
-            row = (
-                db.query(
-                    EntityDeviceBinding.device_provider,
-                    EntityDeviceBinding.device_props,
-                    self.Model.bot_type,
-                )
-                .select_from(self.Model)
-                .outerjoin(
-                    EntityDeviceBinding,
-                    self.Model.device_id == EntityDeviceBinding.device_id,
-                )
-                .filter(
-                    self.Model.bot_id == bot_id,
-                    self.Model.owner_id == owner_id,
-                    self.Model.is_delete == 0,
-                    self._env(),
-                )
-                .first()
-            )
-            if row is None:
-                return None
-            return self._device_provider_result(row[0], row[1], row[2])
-
-    def get_device_provider_by_bot_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
-        from agentclaw.community.core.devices.repository.models import (
-            EntityDeviceBinding,
-        )
-
-        with self._db.orm_session() as db:
-            row = (
-                db.query(
-                    EntityDeviceBinding.device_provider,
-                    EntityDeviceBinding.device_props,
-                    self.Model.bot_type,
-                )
-                .select_from(self.Model)
-                .outerjoin(
-                    EntityDeviceBinding,
-                    self.Model.device_id == EntityDeviceBinding.device_id,
-                )
-                .filter(
-                    self.Model.bot_id == bot_id,
-                    self.Model.is_delete == 0,
-                    self._env(),
-                )
-                .first()
-            )
-            if row is None:
-                return None
-            return self._device_provider_result(row[0], row[1], row[2])
 
     # ── search / active (env-scoped JOIN to bot_publish) ────────
 
