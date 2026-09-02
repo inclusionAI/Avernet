@@ -148,8 +148,8 @@ def _seed_openapi_unlocked_mutable_caller_identity(world) -> None:
     _seed_unlocked_mutable_caller_identity(world)
 
 
-def _seed_openapi_unlocked_mutable_cli_caller_identity(world) -> None:
-    _seed_openapi_unlocked_mutable_caller_identity(world)
+def _seed_unlocked_mutable_cli_caller_identity(world) -> None:
+    _seed_unlocked_mutable_caller_identity(world)
     world.get(PassportPlugin).set_response("query_agent_passport", {
         "mcps": [],
         "clis": [{
@@ -159,6 +159,11 @@ def _seed_openapi_unlocked_mutable_cli_caller_identity(world) -> None:
             "identity_mode": "owner",
         }],
     })
+
+
+def _seed_openapi_unlocked_mutable_cli_caller_identity(world) -> None:
+    _enable_openapi_principal()
+    _seed_unlocked_mutable_cli_caller_identity(world)
 
 
 def _seed_openapi_owner(world) -> None:
@@ -389,6 +394,55 @@ def update_mcp_call_type_rejects_unknown_query_parameter():
 )
 def update_mcp_call_type_forbidden():
     """Only an owner of an existing service bot can change MCP call type."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/api/bots/{bot_id}/clis/{cli_code}/call-type",
+    scenario="happy",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "cli_code": _CLI_CODE},
+        query_params={
+            "ctoken": "opaque-gateway-compatibility-value",
+            "entity_id": _OWNER_ID,
+        },
+        headers={"x-user-id": _OWNER_ID},
+        json_body={"call_type": "caller"},
+    ),
+    seed=_seed_unlocked_mutable_cli_caller_identity,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "cli_code": _CLI_CODE,
+            "call_type": "caller",
+            "bot_call_type": "caller",
+        },
+    ),
+)
+def update_cli_call_type_happy():
+    """The legacy frontend updates an authorized CLI through its existing auth client."""
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/api/bots/{bot_id}/clis/{cli_code}/call-type",
+    scenario="error",
+    input=CaseInput(
+        path_params={
+            "bot_id": "missing_caller_identity_bot",
+            "cli_code": _CLI_CODE,
+        },
+        headers={"x-user-id": _OWNER_ID},
+        json_body={"call_type": "caller"},
+    ),
+    seed=_seed_owner,
+    expect=ExpectError(
+        status=404,
+        json_contains={"detail": "BOT_NOT_FOUND"},
+    ),
+)
+def update_cli_call_type_not_found():
+    """The legacy CLI mutation does not expose an absent or inaccessible Bot."""
 
 
 @endpoint_test(

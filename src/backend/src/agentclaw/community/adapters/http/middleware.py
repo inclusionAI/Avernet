@@ -43,6 +43,7 @@ logger = get_logger()
 _CTOKEN_COMPATIBILITY_PATHS = (
     re.compile(r"^/api/bots/[^/]+/caller-context$"),
     re.compile(r"^/api/bots/[^/]+/mcps/[^/]+/call-type$"),
+    re.compile(r"^/api/bots/[^/]+/clis/[^/]+/call-type$"),
     re.compile(r"^/api/v1/user-lists/(?:check|correct)$"),
 )
 

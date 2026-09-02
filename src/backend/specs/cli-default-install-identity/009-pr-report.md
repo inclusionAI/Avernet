@@ -56,3 +56,12 @@ Validation after the fix will rerun the 16 failing gates first, then the affecte
 
 - GitHub Backend unit tests then found two remaining integration gaps: the generic endpoint runner seeded the CLI happy path without a phase-one engine, and the shared HTTP status-map module exceeded the 1000-line cap after the new CLI mappings.
 - The endpoint seed now explicitly uses `openclaw`; duplicate callback map rows were removed while adding the CLI mappings, returning the module to the cap. The exact generic endpoint case and the oversized-module gate pass locally, along with Ruff and whitespace checks.
+
+## Follow-up: legacy frontend CLI call-type route
+
+- PR #1796 is merged and cannot receive the follow-up change.
+- Source repository: GitHub `inclusionAI/Avernet`; base: `dev`.
+- Scope: expose `PATCH /api/bots/{bot_id}/clis/{cli_code}/call-type` through the authenticated legacy frontend surface, add exact `ctoken` boundary sanitization, response schema, endpoint coverage, and frontend contract documentation.
+- Security boundary: the actor is derived only from the authenticated request context; Bot ownership, CLI authorization, collaboration-lock fencing, persistence, and AgentPass reconciliation remain in the existing Caller Identity service.
+- Local validation: the new route and compatibility middleware passed 9 tests; the related Caller Identity suite passed 64 tests; endpoint coverage gate, Ruff, bytecode compilation, and `git diff --check` passed.
+- Follow-up PR: not created yet. A new topic branch will replay only this follow-up commit onto the latest GitHub `dev` so the already-merged #1796 commits are not duplicated.
