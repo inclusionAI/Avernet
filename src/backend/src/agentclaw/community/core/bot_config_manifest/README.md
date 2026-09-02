@@ -20,7 +20,9 @@ that travel the manual-upload road (`SkillPackageValidator`, then
 minus the reserved names, written through the router's own
 `IdentityService` path. The one funnel they fetch through is
 `apply/entry_fetch.py`: substitute, consult the platform's copy, fetch under
-a named credential, file the receipt. `resources` remains for W6.
+a named credential, file the receipt. W6 adds `resources` — files and
+archived directory trees, written through `ResourceFileService`'s one
+dispatcher chain, directory entries replacing their declared tree in full.
 
 A credential never enters a document (W1 refuses it at the boundary); W2
 declares the injector protocol, and W3 binds it. W11 records a credential
