@@ -24,7 +24,8 @@ IdentityService exposes no delete, and inventing one in apply would give the
 identity area two removal semantics where every reader of the area sees one.
 A reserved name never receives even an empty write.
 
-Fetch (for ``source`` entries) happens in ``resolve`` through
+Fetch (for ``source`` entries — inline URL, or a ``from``/git source via W7's
+``fetch_declared``) happens in ``resolve`` through
 :class:`~agentclaw.community.core.bot_config_manifest.apply.entry_fetch.EntryFetcher`;
 a failure aborts the whole category before the first write — §3.2's
 all-or-nothing, by construction, never by discipline. The bytes are decoded
@@ -34,12 +35,13 @@ property only this category has an opinion about.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCategory
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     EntryFetcher,
+    GitEntrySource,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -67,6 +69,17 @@ if TYPE_CHECKING:
     )
 
 _FETCH_CATEGORY = FetchCategory.IDENTITY
+
+
+def _decode_utf8(body: bytes) -> Optional[str]:
+    """Both roads hand back bytes; only this category decides they must be
+    text (the module docstring's ruling). ``None`` means "not UTF-8" -- the
+    two call sites turn that into the same refusal, so the message is not
+    the thing that can drift between them."""
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 class IdentityMaterialiser(Materialiser):
@@ -142,12 +155,12 @@ class IdentityMaterialiser(Materialiser):
                 intents.append(Intent(file_type, inline, note=None))
                 continue
 
-            source_url = entry.get("source")
-            if not isinstance(source_url, str) or not source_url:
+            if "from" not in entry and "source" not in entry:
                 failures.append(
                     ResolveFailure(
                         file_type,
-                        "an identity entry must declare 'source' or 'content'",
+                        "an identity entry must declare 'source', 'from' "
+                        "or 'content'",
                     )
                 )
                 continue
@@ -158,22 +171,66 @@ class IdentityMaterialiser(Materialiser):
                 # call from a coroutine. It matters on the `dry_run` path,
                 # which the adapter awaits inline; a hung source must not
                 # park every concurrent request.
-                fetched = await asyncio.to_thread(
-                    self._fetcher.fetch,
+                decl = await asyncio.to_thread(
+                    self._fetcher.fetch_declared,
                     ctx,
-                    source_url=source_url,
-                    digest=entry.get("digest"),
-                    auth=entry.get("auth"),
+                    entry=entry,
                     category=_FETCH_CATEGORY,
-                    keep_last=entry.get("on_fetch_failure", "keep_last") == "keep_last",
                     entry_identity=file_type,
                 )
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(file_type, exc.reason))
                 continue
-            try:
-                body = fetched.content.decode("utf-8")
-            except UnicodeDecodeError:
+
+            if isinstance(decl, GitEntrySource):
+                if decl.subpath is None:
+                    # Category knowledge stays here: identity reads exactly
+                    # one file, and the source's subpath is where it is named.
+                    failures.append(
+                        ResolveFailure(
+                            file_type,
+                            "an identity entry from a git source must set "
+                            "the source's 'subpath' to a single file",
+                        )
+                    )
+                    continue
+
+                def _read_and_file() -> bytes:
+                    body = decl.read_file()
+                    # The one file's bytes go through the same store the URL
+                    # road files with: one log for audit and keep_last.
+                    self._fetcher.file_bytes(
+                        ctx,
+                        content=body,
+                        source_url=decl.receipt_url(),
+                        category=_FETCH_CATEGORY,
+                        entry_identity=file_type,
+                    )
+                    return body
+
+                try:
+                    body = await asyncio.to_thread(_read_and_file)
+                except EntryFetchError as exc:
+                    failures.append(ResolveFailure(file_type, exc.reason))
+                    continue
+                text = _decode_utf8(body)
+                if text is None:
+                    failures.append(
+                        ResolveFailure(
+                            file_type,
+                            "the fetched identity source is not UTF-8 text",
+                        )
+                    )
+                    continue
+                intents.append(
+                    Intent(file_type, text, note=decl.moved_note())
+                )
+                continue
+
+            # The URL road, exactly as before: decode what the wire brought.
+            fetched = decl
+            text = _decode_utf8(fetched.content)
+            if text is None:
                 failures.append(
                     ResolveFailure(
                         file_type, "the fetched identity source is not UTF-8 text"
@@ -181,7 +238,7 @@ class IdentityMaterialiser(Materialiser):
                 )
                 continue
             intents.append(
-                Intent(file_type, body, note=fetched.fallback_reason)
+                Intent(file_type, text, note=fetched.fallback_reason)
             )
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
