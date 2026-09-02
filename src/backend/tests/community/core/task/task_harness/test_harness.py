@@ -132,6 +132,39 @@ class TestBbsActualRunMode:
         assert rec.patches == []
 
 
+class TestCoopGroupTimeout:
+    def test_coop_group_default_timeout_is_twelve_minutes(self, svc, graph):
+        _dispatch_running(
+            svc, graph, "c1", run_mode="coop_group", assignee="group1"
+        )
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(
+            svc, rec, clock=clock, default_sla_timeout=1200.0, interval=0
+        )
+        h.register("t1")
+        h._poll_once()
+        clock.advance(719.0)
+        assert h._poll_once() == []
+        clock.advance(2.0)
+        resets = h._poll_once()
+        assert len(resets) == 1
+        assert resets[0].node_id == "c1"
+
+    def test_task_sla_override_still_wins_for_coop_group(self, svc, graph):
+        graph.extend_props["execution_config"]["SLA_TIMEOUT"] = 30.0
+        _dispatch_running(
+            svc, graph, "c1", run_mode="coop_group", assignee="group1"
+        )
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=1200.0)
+        h.register("t1")
+        h._poll_once()
+        clock.advance(31.0)
+        assert len(h._poll_once()) == 1
+
+
 class TestPollOnce:
     def test_first_sight_records_no_reset(self, svc, graph):
         clock = _Clock(0.0)

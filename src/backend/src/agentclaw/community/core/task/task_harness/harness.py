@@ -20,7 +20,8 @@ from agentclaw.community.core.task.domain.models import (
     effective_run_mode,
 )
 
-_DEFAULT_SLA_TIMEOUT = 1200.0  # RUNNING 卡死 backstop(>poller execute SLA 600s,poller 先判 FAIL 走正常重试;此仅兜底 poller 漏判)
+_DEFAULT_SLA_TIMEOUT = 1200.0  # single_bot/BBS RUNNING 卡死 backstop(>poller execute SLA 600s)
+_DEFAULT_COOP_GROUP_SLA_TIMEOUT = 720.0  # coop_group 超时 12 分钟,给群会话更长的收敛窗口
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
 _DEFAULT_INTERVAL = 120.0        # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已记录 DONE 不在此,external FAILED 由 on_harness 入口跳过)
 
@@ -41,6 +42,7 @@ class TaskHarness:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         default_sla_timeout: float = _DEFAULT_SLA_TIMEOUT,
+        default_coop_group_sla_timeout: float = _DEFAULT_COOP_GROUP_SLA_TIMEOUT,
         default_pending_timeout: float = _DEFAULT_PENDING_TIMEOUT,
         interval: float = _DEFAULT_INTERVAL,
     ) -> None:
@@ -51,6 +53,7 @@ class TaskHarness:
         self._clock = clock
         self._sleep = sleep
         self._default_sla = default_sla_timeout
+        self._default_coop_group_sla = default_coop_group_sla_timeout
         self._default_pending = default_pending_timeout
         self._interval = interval
         self._registered: set[str] = set()
@@ -67,14 +70,22 @@ class TaskHarness:
         """组合根(facade)在构造完编排核后回填复位重投入口(编排核 ``on_harness``)。"""
         self._on_harness_fn = fn
 
-    def _sla_timeout(self, task_id: str) -> float:
-        """读 SLA_TIMEOUT(RUNNING 卡死 backstop;优先 execution_config,缺省 default)。"""
+    def _sla_timeout(self, task_id: str, node=None) -> float:
+        """读节点 RUNNING SLA。
+
+        execution_config.SLA_TIMEOUT 仍可统一覆盖;未配置时,协作群默认 12 分钟,
+        single_bot/BBS 继续使用原默认值。
+        """
         try:
             cfg = self._graph._execution_config(task_id)
         except Exception:  # noqa: BLE001 - 图不存在/已删 → 退保守默认
-            return self._default_sla
+            cfg = {}
         t = cfg.get("SLA_TIMEOUT")
-        return float(t) if t is not None else self._default_sla
+        if t is not None:
+            return float(t)
+        if node is not None and effective_run_mode(node) == "coop_group":
+            return self._default_coop_group_sla
+        return self._default_sla
 
     def _pending_timeout(self, task_id: str) -> float:
         """读 PENDING_TIMEOUT(派发异常/未派发→重搜推;优先 execution_config,缺省 default)。"""
@@ -108,9 +119,9 @@ class TaskHarness:
             # 不执行 bot run,不纳入 SLA 超时巡检(避免误复位委托中的分解/聚合节点)。
             _EXEC_MODES = ("single_bot", "coop_group", "bbs")
             nodes = [n for n in nodes if effective_run_mode(n) in _EXEC_MODES]
-            sla = self._sla_timeout(task_id)
             now = self._clock()
             for n in nodes:
+                sla = self._sla_timeout(task_id, n)
                 key = (task_id, n.node_id)
                 seen.add(key)
                 t0 = self._dispatched_at.get(key)
