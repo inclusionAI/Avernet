@@ -182,6 +182,19 @@ class ArcaDelivery:
 Redeliver = Callable[[ApplyContext], Awaitable[Optional[str]]]
 
 
+@dataclass(frozen=True)
+class TeclawPlatformBindings:
+    """What the platform-managed teclaw path needs bound, as one DI value.
+
+    The store-backed ports and the closing redeliver are built in the
+    manifest-fetch graph (beside the store they write) and handed to the apply
+    service, whose own module is at its size cap, as a single parameter.
+    """
+
+    platform_ports: Callable[[], MaterialiserPorts]
+    redeliver: Redeliver
+
+
 class TeclawDelivery:
     """The artifact family.
 
@@ -345,5 +358,6 @@ __all__ = [
     "Redeliver",
     "TECLAW_PLATFORM_MANAGED_KEY",
     "TeclawDelivery",
+    "TeclawPlatformBindings",
     "teclaw_platform_managed_from_config",
 ]

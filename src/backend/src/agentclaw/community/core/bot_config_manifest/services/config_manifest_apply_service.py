@@ -38,7 +38,10 @@ from agentclaw.community.core.bot_config_manifest.apply.budget import (
 from agentclaw.community.core.bot_config_manifest.apply.carry_forward import (
     carry_forward,
 )
-from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.context import (
+    ApplyContext,
+    current_apply_id,
+)
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     DeliveryStrategy,
     DeliveryStrategyFactory,
@@ -837,23 +840,29 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         only for a real apply; its failure is a note on the report, never a
         raise (§2.7: a manifest problem does not fail what it rode on).
         """
-        report = await self._orchestrator(strategy).apply(
-            ctx,
-            parsed,
-            apply_id=apply_id,
-            trigger=trigger,
-            started_at=started_at,
-            phases=phases,
-        )
+        # The apply id for collaborators the strategy built without one — the
+        # store-backed ports stamp it into every index row.
+        token = current_apply_id.set(apply_id)
         try:
-            note = await strategy.finish(ctx, report)
-        except Exception as exc:  # noqa: BLE001 — recorded, never raised
-            logger.exception(
-                "[manifest_apply] closing step raised, apply_id=%s, bot_id=%s",
-                apply_id,
-                ctx.bot_id,
+            report = await self._orchestrator(strategy).apply(
+                ctx,
+                parsed,
+                apply_id=apply_id,
+                trigger=trigger,
+                started_at=started_at,
+                phases=phases,
             )
-            note = f"delivery could not be closed: {exc.__class__.__name__}"
+            try:
+                note = await strategy.finish(ctx, report)
+            except Exception as exc:  # noqa: BLE001 — recorded, never raised
+                logger.exception(
+                    "[manifest_apply] closing step raised, apply_id=%s, bot_id=%s",
+                    apply_id,
+                    ctx.bot_id,
+                )
+                note = f"delivery could not be closed: {exc.__class__.__name__}"
+        finally:
+            current_apply_id.reset(token)
         if note:
             report = dataclasses.replace(report, notes=report.notes + (note,))
         return report

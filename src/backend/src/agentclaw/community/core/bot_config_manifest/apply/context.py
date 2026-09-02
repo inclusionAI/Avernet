@@ -14,6 +14,7 @@ six core packages and one of them reaches the DI container at import time.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -25,6 +26,17 @@ from agentclaw.community.core.bot_config_manifest.apply.source_session import (
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
+)
+
+#: The apply currently writing, for collaborators that are built once and
+#: not handed the context — the store-backed ports stamp it into every index
+#: row (W8). Set by the apply service around the orchestrator's run and the
+#: closing step; ``None`` outside an apply and for a dry run, which writes
+#: nothing. A context variable rather than a field on the ports because the
+#: ports are built by the strategy before the apply id exists, and because a
+#: task-local value cannot leak between two applies sharing one process.
+current_apply_id: ContextVar[Optional[str]] = ContextVar(
+    "bot_config_manifest_current_apply_id", default=None
 )
 
 
@@ -87,4 +99,4 @@ class ApplyContext:
     source_session: Optional[SourceSession] = None
 
 
-__all__ = ["ApplyContext"]
+__all__ = ["ApplyContext", "current_apply_id"]

@@ -193,17 +193,21 @@ Conventions every task assumes:
         record-only activation converges a manifest skill with no device.
 - **Depends on:** Task 8, Task 10, Task 6
 
-## [ ] Task 12: `TeclawDelivery` ports and the closing redeliver
-- **Files:** `apply/delivery.py`, `di/modules/bot_management_module.py`,
+## [x] Task 12: `TeclawDelivery` ports and the closing redeliver
+- **Files:** `apply/delivery.py`, `apply/record_only_activation.py` (new),
+  `apply/redeliver.py` (new), `apply/context.py` (`current_apply_id`),
+  `di/modules/manifest_fetch_module.py` (`TeclawPlatformBindings` provider; the
+  creation-config provider moved here from `bot_management_module`, which is at
+  its size cap), `di/modules/bot_management_module.py`,
   `tests/community/core/bot_config_manifest/apply/test_teclaw_delivery.py` (new)
 - **Done when:**
-  - [ ] `TeclawDelivery(platform_managed=True).ports()` returns the store
+  - [x] `TeclawDelivery(platform_managed=True).ports()` returns the store
         ports and the record-only activation wrapper; `(False)` returns
         ARCA's ports.
-  - [ ] `finish` with the switch on: one `dispatch(ctx).sync_symlinks([])`
+  - [x] `finish` with the switch on: one `dispatch(ctx).sync_symlinks([])`
         when the bot has a live binding, nothing otherwise; a failure becomes a
         report note. With the switch off: no-op.
-  - [ ] Tests for all four combinations.
+  - [x] Tests for all four combinations.
 - **Depends on:** Task 9, Task 11
 
 ---
