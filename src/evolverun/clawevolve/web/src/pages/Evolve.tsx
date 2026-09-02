@@ -2598,6 +2598,15 @@ function PackDetail() {
 
 export default function Evolve() {
   const location = useLocation()
+  const { authState } = useClientUser()
+  // COSEC: The embedded package owns a separate auth cache from its ClawWeb host;
+  // do not issue identity-scoped API requests until this package resolves the user.
+  if (authState === 'loading') {
+    return <div className="mx-auto max-w-5xl px-4 py-20 text-center text-sm text-gray-500">正在识别当前用户…</div>
+  }
+  if (authState === 'login_required') {
+    return <div className="mx-auto max-w-5xl px-4 py-20 text-center text-sm text-red-600">登录状态无效，请刷新页面后重试。</div>
+  }
   let content: ReactNode
   if (location.pathname.startsWith('/evolve/packs/')) content = <PackDetail />
   else if (location.pathname === '/evolve/packs') content = <PackManagement />
