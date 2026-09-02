@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createClawevolveModule } from "./create-module.js";
 import { runMigrations, SqliteDatabase } from "./db.js";
+import { FilesystemObjectStore } from "./services/object-storage/filesystem-object-store.js";
 
 function positivePort(value: string | undefined): number {
   const port = Number(value ?? 3210);
@@ -26,13 +27,14 @@ function createLocalDatabase(dataDirectory: string): SqliteDatabase {
 
 async function main(): Promise<void> {
   const port = positivePort(process.env.CLAWEVOLVE_PORT ?? process.env.PORT);
-  const db = createLocalDatabase(
-    process.env.CLAWEVOLVE_DATA_DIR ?? join(homedir(), ".clawevolve"),
-  );
+  const dataDirectory = resolve(process.env.CLAWEVOLVE_DATA_DIR ?? join(homedir(), ".clawevolve"));
+  const db = createLocalDatabase(dataDirectory);
   await runMigrations(db, "sqlite");
+  const artifactStore = new FilesystemObjectStore(join(dataDirectory, "artifacts"));
 
   const module = createClawevolveModule({
     db,
+    artifactStore,
     // Singlebox intentionally has no enterprise transport. Creating and
     // inspecting tasks remains available while dispatch is reported locally.
     dispatch: async (input) => ({
@@ -47,6 +49,33 @@ async function main(): Promise<void> {
   await module.start();
 
   const app = express();
+  app.put(
+    "/api/singlebox/artifacts/:token",
+    express.raw({ type: "*/*", limit: "10mb" }),
+    async (request, response) => {
+      try {
+        const key = artifactStore.resolveSignedRequest(String(request.params.token), "PUT");
+        const result = await artifactStore.putObject(
+          key,
+          Buffer.isBuffer(request.body) ? request.body : Buffer.from(request.body ?? ""),
+          request.header("content-type") ?? "application/octet-stream",
+        );
+        response.set("ETag", result.etag).status(204).end();
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+      }
+    },
+  );
+  app.get("/api/singlebox/artifacts/:token", async (request, response) => {
+    try {
+      const key = artifactStore.resolveSignedRequest(String(request.params.token), "GET");
+      const object = await artifactStore.getObject(key);
+      if (object.etag) response.set("ETag", object.etag);
+      response.type(object.contentType ?? "application/octet-stream").send(object.content);
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
   app.use(express.json({ limit: "10mb" }));
   app.get("/health", (_request, response) => {
     response.json({ status: "ok", db: db.dbType, mode: "singlebox" });
