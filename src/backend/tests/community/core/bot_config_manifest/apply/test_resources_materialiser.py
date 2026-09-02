@@ -1115,3 +1115,73 @@ def test_an_engineless_bot_record_falls_back_to_the_context_engine():
         m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
     )
     assert svc.delete_calls[0]["engine_type"] == "openclaw"
+
+
+# --- the apply-time path belt re-asks the schema's own rule (F6) ---
+
+
+def test_a_tilde_path_is_refused_at_resolve():
+    """A document that predates the validator carries the PUT layer's
+    refusals into apply: "~" is an absolute-ish path in exactly the way
+    "/" is, and the old belt (only "/", ".." segments) let it through to
+    the write chain."""
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(m.resolve(ctx, [{"path": "~/x.md", "content": "x"}]))
+    assert not resolved.ok
+    assert resolved.failures[0].identity == "~/x.md"
+    assert "~" in resolved.failures[0].reason
+
+
+def test_a_windows_drive_path_is_refused_at_resolve():
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(m.resolve(ctx, [{"path": "C:evil.md", "content": "x"}]))
+    assert not resolved.ok
+    assert "workspace-relative" in resolved.failures[0].reason
+
+
+def test_duplicate_declared_paths_abort_the_category():
+    """The schema refuses a duplicate resource path at PUT; the belt must
+    re-ask it, or two entries at one path produce two intents with one
+    identity, two report rows, and a last-write-wins order no rule defines."""
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {"path": "data/a.md", "content": "first"},
+                {"path": "data/a.md", "source": "https://x/a"},
+            ],
+        )
+    )
+    assert not resolved.ok
+    # The mcp/siblings' "seen" refusal convention: the duplicate is blamed
+    # and the category aborts (§3.2) — the intents resolved before the
+    # refusal are never consumed, the orchestrator aborts on ``not ok``
+    # without looking at them. Nothing writable survives the apply.
+    assert any("more than once" in f.reason for f in resolved.failures)
+
+
+def test_an_unknown_unpack_kind_is_refused():
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.md": b"x"})))
+    ctx = make_context(engine_type="claude_code")
+    resolved = _run(
+        m.resolve(
+            ctx,
+            [
+                {
+                    "path": "wrap/",
+                    "unpack": "tgz",
+                    "source": "https://x/t.tgz",
+                }
+            ],
+        )
+    )
+    assert not resolved.ok
+    assert "zip|tar.gz" in resolved.failures[0].reason

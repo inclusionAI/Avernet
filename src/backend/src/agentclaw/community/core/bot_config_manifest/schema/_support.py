@@ -169,41 +169,54 @@ def check_digest(ctx: Context, location: str, value: Any) -> None:
         )
 
 
-def check_relative_path(
-    ctx: Context, location: str, value: Any, *, what: str
-) -> bool:
-    """Refuse an absolute path, a ``..`` segment, or exotic characters.
+def relative_path_refusal(
+    value: Any, *, what: str = "path"
+) -> tuple[str, str] | None:
+    """The workspace-relative path rule, pure (no ``Context``, no I/O).
 
-    Returns True when the value is usable by later rules (nesting, basenames).
+    Returns ``(code, message)`` for a value the workspace cannot accept, or
+    ``None`` when it is usable by later rules (nesting, basenames). Re-asked
+    from outside the PUT layer — the apply-time belt (a stored document can
+    predate the validator) — as *the* rule rather than a re-derivation, so
+    the two sides cannot drift.
 
     ``..`` is checked **per segment**, not as a substring: a directory named
     ``..config`` is legitimate and contains the two characters. A substring test
     would refuse it while still admitting nothing more.
     """
     if not isinstance(value, str) or not value:
-        ctx.add(location, "invalid_path", f"{what} must be a non-empty string")
-        return False
+        return "invalid_path", f"{what} must be a non-empty string"
     if value.startswith("/") or (len(value) > 1 and value[1] == ":"):
-        ctx.add(location, "absolute_path", f"{what} must be workspace-relative, not absolute")
-        return False
+        return (
+            "absolute_path",
+            f"{what} must be workspace-relative, not absolute",
+        )
     if value.startswith("~"):
-        ctx.add(location, "absolute_path", f"{what} must not start with '~'")
-        return False
+        return "absolute_path", f"{what} must not start with '~'"
     segments = value.split("/")
     if any(segment == ".." for segment in segments):
-        ctx.add(
-            location,
-            "path_traversal",
-            f"{what} must not contain a '..' segment",
-        )
-        return False
+        return "path_traversal", f"{what} must not contain a '..' segment"
     if not _PATH_CHARS_RE.match(value):
-        ctx.add(
-            location,
+        return (
             "invalid_path",
             f"{what} may only contain letters, digits, '.', '_', '-', '/' and "
             "${...} placeholders",
         )
+    return None
+
+
+def check_relative_path(
+    ctx: Context, location: str, value: Any, *, what: str
+) -> bool:
+    """Refuse an absolute path, a ``..`` segment, or exotic characters.
+
+    Returns True when the value is usable by later rules (nesting, basenames).
+    The rule itself lives in :func:`relative_path_refusal` — pure, shared —
+    so this wrapper only contributes the ``Context`` reporting.
+    """
+    refusal = relative_path_refusal(value, what=what)
+    if refusal is not None:
+        ctx.add(location, refusal[0], refusal[1])
         return False
     # Placeholders inside the value are *not* checked here. Every string this
     # function sees is also swept by the walker that scans a whole entry (or a
