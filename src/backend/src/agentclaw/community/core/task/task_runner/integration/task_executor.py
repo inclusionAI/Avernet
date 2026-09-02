@@ -26,7 +26,7 @@ from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter 
     OpenApiBadRequestError,
 )
 from agentclaw.community.core.task.task_runner.integration.prompt_formatter import (
-    _poller_content_instruction,
+    _no_callback_instruction,
 )
 from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
@@ -147,7 +147,7 @@ class TaskExecutor:
     def _skill_report_enabled(self) -> bool:
         """统一结果回收开关(默认 True=skill HTTP Push)。
 
-        开启(True)时所有任务模式走 skill HTTP 上报；关闭(False)时走 poller Pull。
+        开启(True)时所有任务模式允许 skill HTTP 上报；关闭(False)时禁止 Bot 主动 callback，由平台负责结果回收。
         两条链路互斥，未注入或读取失败时按默认值 True 处理。
         """
         ts = getattr(self, "_task_settings", None)
@@ -232,7 +232,7 @@ class TaskExecutor:
                     "node_id": node.node_id,
                     "execution_mode": "single_bot",
                     # 所有任务模式统一由 skill_report_enabled 决定回收链路:
-                    #   False → 终态消息由 poller Pull; True → Bot HTTP Push /callback/report。
+                    #   False → Bot 不主动 callback，由平台负责回收; True → Bot HTTP Push /callback/report。
                     "skill_report_enabled": skill_report,
                     "backend": self._api_base_url,
                 })
@@ -656,7 +656,7 @@ class TaskExecutor:
             req_kwargs["caller_bot_token"] = self._bot_token_provider.get_token(
                 req_kwargs.get("driver_bot") or ""
             )
-        # Push 模式下,manager_worker/state_machine 使用事件回调；Pull 模式下只由 poller 回收。
+        # 开关开启时,manager_worker/state_machine 使用事件回调；关闭时由平台负责回收。
         if mode == "manager_worker" and _sink_base and self._skill_report_enabled():
             _sink_base = str(_sink_base).rstrip("/")
             req_kwargs["event_subscriptions"] = [
@@ -701,7 +701,7 @@ class TaskExecutor:
         # 兜底注入 <GroupContext> 的 `目标` 行(session input 为空时,如建群 BotJoined)。
         _task_context = gf.extend_props.get("task_context")
         _skill_report = self._skill_report_enabled()
-        # 统一结果回收协议:协作群叶子派发期注入 loop_task_id,由下方开关选择 Push/Pull 提示。
+        # 统一结果回收开关:协作群叶子派发期注入 loop_task_id,由下方开关决定是否主动 callback。
         _loop_task_id = gf.extend_props.get("loop_task_id")
         if _loop_task_id and self._api_base_url:
             _task_context = (
@@ -770,7 +770,7 @@ class TaskExecutor:
                             + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE 并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
                         )
                     else:
-                        _rfooter.append(_poller_content_instruction())
+                        _rfooter.append(_no_callback_instruction())
                 req_kwargs["context"] = f"{_task_instruction.rstrip()}\n" + "\n".join(_rfooter)
             else:
                 # 非接力协作群:保留原 [task-execute] reporter/目标/指令/验收/任务上下文/回投体验收信封。
@@ -786,7 +786,7 @@ class TaskExecutor:
                         "生成 SUCCESS/DONE/FAILED，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
                         "验收步骤不可跳过：执行→逐条校验→生成结论→HTTP上报→确认HTTP 200。\n"
                         if _skill_report else
-                        "生成 success/data/gaps JSON；不得发起 HTTP 上报；其它 Bot 只提供产出。\n"
+                        "完成验收后由平台接口负责结果回收；不得发起 HTTP callback；其它 Bot 只提供产出。\n"
                     )
                     + "只有在上述完成条件满足后才触发 task-acceptance；建群初始上下文不触发验收。\n"
                     f"目标:{_task_objective}\n"
@@ -813,7 +813,7 @@ class TaskExecutor:
                             + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE，并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
                         )
                     else:
-                        req_kwargs["context"] += "\n" + _poller_content_instruction()
+                        req_kwargs["context"] += "\n" + _no_callback_instruction()
         # 人类观察者(P1):任务 owner 以 observer 角色被拉入协作群(chat/manager_worker),不发言。
         # routing_policy.inject_observers 默认生效,终产投递给观察者;state_machine 群 participants 不得带 role,故跳过。
         if mode in _HUMAN_OBSERVER_MODES:

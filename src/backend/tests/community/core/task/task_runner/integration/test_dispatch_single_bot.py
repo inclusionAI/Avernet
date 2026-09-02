@@ -208,10 +208,13 @@ def test_prompt_formatter_uses_context_and_node_spec():
     assert '"status": "SUCCESS"' in s
     assert '"task_id"' in s
     assert '"acceptance_result"' in s
+    assert '"verdict": "DONE"' in s
+    assert '"acceptances_metric"' in s
+    assert '"gaps": []' in s
 
 
-def test_prompt_formatter_pull_mode_uses_poller_protocol():
-    """skill_report_enabled=false 时使用 poller Pull 协议。"""
+def test_prompt_formatter_disabled_report_does_not_inject_platform_protocol():
+    """skill_report_enabled=false 时只禁止 Bot 主动 callback,不注入平台回收协议。"""
     fmt = PromptFormatterImpl()
     n = _node()
     s = fmt.format_execute({
@@ -220,8 +223,11 @@ def test_prompt_formatter_pull_mode_uses_poller_protocol():
         "execution_mode": "single_bot",
         "skill_report_enabled": False,
     }, n)
-    assert '"success": true' in s and '"data"' in s and '"gaps"' in s
-    assert "callback/report" not in s  # Pull 模式不引导 HTTP 上报
+    assert "本节点结果由平台接口负责回收" in s
+    assert "不要主动调用 /callback/report" in s
+    assert "callback/report" in s  # 仅作为禁止主动调用的边界说明
+    assert '"success": true' not in s
+    assert "poller" not in s
 
 
 def test_prompt_formatter_skill_report_on_uses_http_post():
@@ -236,7 +242,10 @@ def test_prompt_formatter_skill_report_on_uses_http_post():
     }, n)
     assert "callback/report" in s
     assert '"status": "SUCCESS"' in s
-    assert '"success": true' not in s  # 走 HTTP 上报,不产 poller JSON
+    assert '"success": true' not in s
+    assert '"verdict": "DONE"' in s
+    assert '"acceptances_metric"' in s
+
 
 
 def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():
