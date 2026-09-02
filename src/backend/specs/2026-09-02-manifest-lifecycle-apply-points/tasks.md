@@ -2,193 +2,343 @@
 
 Spec: `spec.md` · Plan: `plan.md` · Issue #1476.
 
-> **Revision 2.** Restart and republish deferred (spec D-1). Ten tasks in four
-> groups. A is vocabulary and the §2.12 pin; B is `PUT`; C is teclaw creation
-> and the alias view; D is docs and the sweep. Nothing adds a table or a column.
+> **Revision 3.** Seven groups, twenty-two tasks. A is the seam and the
+> vocabulary; B the artifact contract; C the teclaw store path; D creation;
+> E `PUT`; F the alias view; G docs and the sweep. A→C→D is the critical chain;
+> B is needed by C's composer task; E and F are independent of everything but A.
 
 Conventions every task assumes:
 
-- The `PUT` apply goes through `start_apply`; nothing here runs the
-  orchestrator, restarts a bot, republishes, or rebuilds a payload.
-- An apply that cannot start never fails the `PUT` it rode on (§2.6, §2.7).
-- `ManifestApplyInProgressError` means "not started", never "error".
-- No test that asserts today's behaviour on a bot **without** a manifest is
-  edited.
+- Every apply goes through `start_apply`; nothing here runs the orchestrator,
+  restarts a bot, republishes, or rebuilds a payload.
+- A lifecycle apply that cannot start, or that ends `PARTIAL` / `FAILED`, never
+  fails the lifecycle operation it rode on (§2.7).
+- The switch is read only by the strategy factory.
+- No test asserting today's behaviour on ARCA, or on teclaw with the switch
+  off, is edited.
 
 ---
 
-## Group A — Vocabulary and the ordering pin
+## Group A — The seam
 
-## [ ] Task 1: Trigger constants
-- **Files:** `core/bot_config_manifest/apply/triggers.py` (new),
-  `core/bot_config_manifest/apply/outcomes.py`, `core/bot_config_manifest/__init__.py`
+## [ ] Task 1: Trigger constants and the §2.12 pin
+- **Files:** `apply/triggers.py` (new), `apply/outcomes.py`,
+  `tests/community/core/bot_config_manifest/test_iteration1_ordering.py` (new)
 - **Done when:**
-  - [ ] `EXPLICIT = "explicit"` and `PUT = "put"` exist in one module; the
-        creation triggers stay in `creation.py` and are referenced, not
-        duplicated.
-  - [ ] `ApplyReport.trigger`'s docstring names the vocabulary and says restart
-        and republish are deferred.
-  - [ ] A test asserts every trigger fits `String(32)`.
+  - [ ] `EXPLICIT`, `PUT` constants; creation triggers referenced from
+        `creation.py`; `ApplyReport.trigger` docstring lists the vocabulary.
+  - [ ] The ordering test pins ARCA's `PRE_CONTAINER == (script,)` and names
+        #1508; a second case pins that `TeclawDelivery(switch on)` puts every
+        non-script construct in `PRE_CONTAINER`.
+- **Depends on:** Task 2 (for the teclaw case)
+
+## [ ] Task 2: `DeliveryStrategy`, both strategies, the factory, the switch
+- **Files:** `apply/delivery.py` (new), `apply/order.py`,
+  `core/bot_config_manifest/config.py` or wherever `BotConfigManifestConfig`
+  lives, `di/modules/manifest_fetch_module.py`,
+  `tests/community/core/bot_config_manifest/apply/test_delivery_strategy.py` (new)
+- **Done when:**
+  - [ ] Protocol per plan K-1; `ArcaDelivery` reproduces `APPLY_ORDER`'s phases
+        and `steps_for`; `TeclawDelivery(platform_managed=True)` maps every
+        non-script step to `PRE_CONTAINER`, `(False)` to `ON_CONTAINER`.
+  - [ ] `CreationSequence.PRE_CREATE_ON` for ARCA and teclaw-off,
+        `RECORD_PRE_PROVISION` for teclaw-on.
+  - [ ] `BotConfigManifestConfig.teclaw_platform_managed: bool = False` read
+        from `user_config.bot_config_manifest`; the factory takes it and
+        `is_teclaw`.
+  - [ ] `order.steps_for` delegates to `ArcaDelivery` so existing callers are
+        unchanged.
+  - [ ] Tests cover the three phase tables, the sequence, and the factory's
+        selection.
 - **Depends on:** —
 
-## [ ] Task 2: The §2.12 ordering pin
-- **Files:** `tests/community/core/bot_config_manifest/test_iteration1_ordering.py` (new)
-- **Done when:**
-  - [ ] Asserts `steps_for({PRE_CONTAINER})` is exactly `(script,)` and that no
-        `ON_CONTAINER` step is `script`.
-  - [ ] Its docstring states the rule ("a manifest's `script` must not depend on
-        anything the manifest declares"), why (first boot: script before
-        everything), and that #1508 deletes this test.
-- **Depends on:** —
-
----
-
-## Group B — `PUT` takes effect
-
-## [ ] Task 3: `declares_script` on the write result
-- **Files:** `core/bot_config_manifest/bot_config_manifest_service_protocol.py`,
-  `core/bot_config_manifest/services/config_manifest_service.py`
-- **Done when:**
-  - [ ] `ManifestWriteResult` carries `declares_script: bool`, computed from
-        the validated parse with `declared_entries(parsed, ManifestSection.SCRIPT) is not None`.
-  - [ ] Existing callers of `put` are unaffected (a defaulted field).
-- **Depends on:** —
-
-## [ ] Task 4: `PUT` starts the apply and says so
-- **Files:** `adapters/http/openapi_v1/bots/config_manifest.py`,
-  `adapters/http/openapi_v1/bots/config_manifest_support.py`,
-  `adapters/http/openapi_v1/bots/schemas.py`,
-  `tests/community/endpoints/test_openapi_config_manifest.py`
-- **Done when:**
-  - [ ] `ConfigManifest.apply: ConfigManifestApplyStarted | None` with
-        `{apply_id, result: RUNNING | NOT_STARTED, reason}`; `GET`/`DELETE` leave
-        it `None`.
-  - [ ] After `manifest_service.put`, the route calls `start_apply(trigger=PUT,
-        phases=ALL_PHASES, bot=bot, owner_id=…, actor_id=…, audit_actor=…)`
-        with the same principal/audit split the explicit apply route uses.
-  - [ ] `ManifestApplyInProgressError` → `NOT_STARTED` / `apply_in_progress`;
-        any other exception → logged, `NOT_STARTED` / `not_started`. The
-        response is `200` in all three cases and the document is stored.
-  - [ ] When `declares_script`, `warnings` gains the materialiser's
-        `DELIVERY_NOTE` (imported, not restated).
-  - [ ] When the bot's status is not `ACTIVE`, `warnings` gains the not-ACTIVE
-        note naming `POST …/config-manifest/apply` as the call to make once it
-        is. Apply itself is started for both phases regardless (§2.7).
-  - [ ] The docstring no longer says "Storing a manifest applies nothing yet";
-        it states §2.6, the `script` rule, and the not-ACTIVE behaviour.
-  - [ ] Endpoint tests: `apply.result == RUNNING` and the id is readable via
-        `GET …/applies/{id}`; lock held → `NOT_STARTED` with the document
-        stored; `script` declared → the delivery warning; `PENDING` bot → the
-        not-ACTIVE warning; `DELETE` unchanged.
-- **Depends on:** Task 1, Task 3
-
----
-
-## Group C — teclaw creation, and the alias view
-
-## [ ] Task 5: Lift W13's teclaw refusal
-- **Files:** `core/bot_config_manifest/creation.py`,
-  `adapters/http/openapi_v1/bots/create_with_manifest.py`,
+## [ ] Task 3: The apply service runs through the strategy
+- **Files:** `services/config_manifest_apply_service.py`,
+  `apply/orchestrator.py` (only if it calls `steps_for` directly),
   `di/modules/bot_management_module.py`,
-  `tests/community/core/bot_config_manifest/creation/test_creation_preflight.py`,
-  `tests/community/endpoints/test_openapi_create_with_manifest.py`,
-  other tests constructing the seam with `is_teclaw=`
+  `tests/community/core/bot_config_manifest/apply/test_apply_service_lifecycle.py`
 - **Done when:**
-  - [ ] `_TECLAW_REFUSAL`, the `engine` violation and the `is_teclaw` parameter
-        are gone from `preflight_creation_manifest`, the seam and its provider.
-  - [ ] The module and route docstrings state the first-boot semantics on both
-        families and that the first-artifact guarantee is #1508's.
-  - [ ] Tests: `mcp: []` on teclaw preflights clean; `script` on teclaw is
-        refused with `unsupported_script` by the validator; endpoint `202` on
-        teclaw; every job test passes unedited.
+  - [ ] `_rebuild` / `run_apply_task` select the strategy for the bot, build
+        materialisers from `strategy.ports()`, walk `strategy.steps_for(phases)`,
+        and call `strategy.finish(ctx, report)` after the terminal record is
+        written (a `finish` failure is a report note, never a raise).
+  - [ ] ARCA's ports are the providers the service takes today, so its
+        behaviour is unchanged and every existing apply test passes unedited.
+  - [ ] A new test pins that no module under `apply/materialisers/` names an
+        engine string.
+- **Depends on:** Task 2
+
+---
+
+## Group B — The artifact contract
+
+## [ ] Task 4: `ownership` on the artifact
+- **Files:** `kernel/bot_config/artifact.py`, `kernel/bot_config/artifact.schema.json`,
+  `tests/community/kernel/test_bot_config_artifact.py`
+- **Done when:**
+  - [ ] `ownership: dict[str, str] | None = None`; omitted by `to_dict` when
+        `None`; read by `from_dict`; values restricted to `platform` / `engine`
+        in the schema with the semantics in the description.
+  - [ ] Tests: unset leaves the key off the wire (byte-identical to before);
+        set round-trips; schema accepts both; `SCHEMA_VERSION` stays 4 and the
+        existing guard test is unedited.
 - **Depends on:** —
 
-## [ ] Task 6: The splice helper
-- **Files:** `core/bot_config_manifest/schema/splice.py` (new),
-  `tests/community/core/bot_config_manifest/test_script_splice.py` (new)
+## [ ] Task 5: The contract addendum
+- **Files:** `docs/bot-config-manifest/engine-convergence-contract.zh-CN.md`
 - **Done when:**
-  - [ ] `splice_script_section(document: str, body: str | None) -> str` per
-        plan K-3: replace / append / remove the top-level `script` section;
-        every other byte unchanged.
-  - [ ] Literal block rendering chooses `|` / `|-` / `|+` by trailing newlines
-        and adds an indentation indicator when needed; the result is parsed
-        back and compared to `body`; on mismatch a JSON-quoted scalar is used
-        and checked again; an unparseable document raises `ManifestValidationError`.
-  - [ ] Round-trip tests: quotes, `$(id)`, `{token}`, leading spaces, no trailing
-        newline, two trailing newlines, tabs, a CRLF body, an empty body; the
-        rest of a document with comments and a `sources:` block is
-        byte-identical after replace, append and remove.
+  - [ ] A new §9 "平台管理的类目：`ownership`" with: the map and its three
+        states; the per-category area it applies to (pointing at §5); file
+        refs in a redeliver to a running container; the store-backed local
+        `SkillRef` (files under the local-skills layout plus a `SkillRef`
+        naming the package prefix); one example artifact; an acceptance
+        checklist; and the statement that `schema_version` stays 4 under A5.
+  - [ ] §7's status table gains a row for the map, marked pending the teclaw
+        owner.
+- **Depends on:** Task 4
+
+## [ ] Task 6: The composer emits the map and reads the index for teclaw
+- **Files:** `core/config_compose/models.py`, `core/config_compose/protocols.py`,
+  `core/config_compose/services/config_composer.py`,
+  `core/config_compose/services/collector.py`,
+  `core/service_bot/services/deploy/external_compose_producer.py`,
+  `core/devices/services/teclaw_device_sync.py`,
+  `di/modules/service_bot_module.py`, `di/modules/devices_module.py`,
+  tests under `tests/community/core/config_compose/`
+- **Done when:**
+  - [ ] `ComposeRequest.platform_managed: frozenset[str] | None` (carry-along,
+        `compare=False`).
+  - [ ] `PlatformManagedCategoriesReader` and `ManagedFilesReader` protocols;
+        the producer and the device-sync service fill `platform_managed` from
+        the first; the collector's teclaw branches for identity, resources and
+        skills read the second when the category is `platform`.
+  - [ ] The composer sets `ownership` on teclaw requests: `mcp: platform`;
+        `identity_files` / `resources` / `skills`: `platform` when in
+        `platform_managed`, else `engine`. ARCA requests carry no map.
+  - [ ] Tests: ARCA compose unchanged; teclaw compose without a manifest emits
+        `engine` for the file categories and today's empty lists; teclaw
+        compose with declared identity emits `platform` and the index refs;
+        each ref resolves against the configured `bot-data` store.
+- **Depends on:** Task 4, Task 8 (reader implementation)
+
+---
+
+## Group C — teclaw platform-managed delivery
+
+## [ ] Task 7: The managed-files index
+- **Files:** `core/bot_config_manifest/repository/managed_files_models.py` (new),
+  `core/repository/protocols/bot/managed_files.py` (new),
+  `core/repository/implementations/bot/managed_files.py` (new),
+  `core/bot_config_manifest/sql/2026_09_02_bot_config_managed_files.sql` (new),
+  tenant-guard registration, `tests/community/repository/bot/test_managed_files_repository.py` (new)
+- **Done when:**
+  - [ ] Table per plan K-2; protocol as an abstract base; implementation with
+        `upsert`, `delete`, `list_by_category`, `purge_bot`.
+  - [ ] Repository tests on SQLite; the tenant column is in the unique key.
 - **Depends on:** —
 
-## [ ] Task 7: `write_through_script` and `script_body`
-- **Files:** `core/bot_config_manifest/services/config_manifest_service.py`,
-  `core/bot_config_manifest/bot_config_manifest_service_protocol.py`,
-  `di/modules/bot_management_module.py`,
-  `tests/community/core/bot_config_manifest/test_write_through_script.py` (new)
+## [ ] Task 8: `ManagedFilesStore` and the reader
+- **Files:** `core/bot_config_manifest/managed_files/{__init__,store,reader}.py` (new),
+  `core/bot_config_manifest/managed_files/README.md` (new),
+  `di/modules/manifest_fetch_module.py`,
+  `tests/community/core/bot_config_manifest/managed_files/test_store.py` (new)
 - **Done when:**
-  - [ ] The service takes a lazy `script_service_provider`.
-  - [ ] `write_through_script(...) -> ManifestWriteResult | None`: `None` when
-        no manifest; otherwise splice → `put` → row write with
-        `placeholders.resolve(body, engine_type, env, tenant)` (or `delete` for
-        `None`). A `put` refusal propagates and the row is untouched.
-  - [ ] `script_body(entity_id, bot_id) -> str | None`: the declared body, or
-        `None` when the manifest is absent or silent.
-  - [ ] The conformance `_PAIRS` entry still passes (protocol and concrete
-        signatures match).
-  - [ ] Tests: replace / append / remove; the row equals the substituted body;
-        the next apply plans `unchanged` (drive the script materialiser's
-        `plan` against the fake script service); refusal leaves both untouched.
-- **Depends on:** Task 6
-
-## [ ] Task 8: The three startup-script routes
-- **Files:** `adapters/http/openapi_v1/bots/router.py`,
-  `adapters/http/openapi_v1/bots/startup_script_support.py`,
-  `tests/community/endpoints/test_openapi_startup_script.py`,
-  `tests/community/adapters/http/openapi_v1/test_bots_endpoints.py`
-- **Done when:**
-  - [ ] `PUT`: after the support check, `manifest_service.write_through_script(...)`;
-        a result short-circuits the legacy write and the response is shaped
-        from the manifest's body; `None` → the legacy path, unchanged.
-  - [ ] `DELETE`: `write_through_script(body=None)`; `None` → legacy.
-  - [ ] `GET`: `script_body(...)` when not `None`, else the row.
-  - [ ] The withdraw-if-deleted guard runs on both arms of `PUT`.
-  - [ ] Docstrings state the alias rule.
-  - [ ] Endpoint tests: on a manifest bot, `PUT` updates `GET …/config-manifest`
-        and the row; `DELETE` removes the section and the row; `GET` returns the
-        declared body; on a bot without a manifest, the existing cases pass
-        **unedited**.
+  - [ ] `put` writes the object then the row and returns the ref; `delete`
+        removes both; `list`; `purge` removes every row and object for a bot.
+  - [ ] Keys follow the promotion layout with a `_manifest` segment.
+  - [ ] The reader implements `ManagedFilesReader` and
+        `PlatformManagedCategoriesReader` (declared categories when the switch
+        is on, else empty).
+  - [ ] Tests against a fake `ObjectStoragePlugin` and SQLite.
 - **Depends on:** Task 7
 
+## [ ] Task 9: Store-backed identity and resource ports
+- **Files:** `core/bot_config_manifest/managed_files/ports.py` (new),
+  `tests/community/core/bot_config_manifest/managed_files/test_store_ports.py` (new)
+- **Done when:**
+  - [ ] `StoreIdentityPort` and `StoreResourcePort` implement the existing port
+        protocols over the store.
+  - [ ] Driving the real `IdentityMaterialiser` and `ResourcesMaterialiser`
+        with these ports yields `created` / `updated` / `unchanged` and
+        removals purely from the index, with no device involved; a directory
+        entry replaces its tree in the index.
+- **Depends on:** Task 8
+
+## [ ] Task 10: Record-only activation
+- **Files:** `core/skill_center/services/direct_activation_service.py`,
+  the activation protocol under `api/`,
+  `tests/community/core/skill_center/test_direct_activation_service.py`
+- **Done when:**
+  - [ ] `project: bool = True` on the four activate/deactivate methods; `False`
+        passes `runtime_required=False`; audit still written.
+  - [ ] Tests: `project=False` never touches the projector and records the
+        mutation on a non-ACTIVE bot; `project=True` unchanged.
+- **Depends on:** —
+
+## [ ] Task 11: Store-backed skill package port
+- **Files:** `core/bot_config_manifest/managed_files/ports.py`,
+  `tests/community/core/bot_config_manifest/managed_files/test_skill_port.py` (new)
+- **Done when:**
+  - [ ] `upload_local_skill` validates through the same package validator,
+        unpacks into the store under `workspace/skills-local/<name>/…`, indexes
+        every file under category `skills` with the skill name, creates the
+        skill row with a `local://` locator, and returns the shape the
+        materialiser expects; `installed_package_digest` answers from the index.
+  - [ ] The collector's teclaw `skills` branch emits a `SkillRef` per indexed
+        skill (`scope="local"`, `store="bot-data"`, `path=<package prefix>`) in
+        addition to the files riding as resources refs.
+  - [ ] Driving the real `SkillsMaterialiser` with this port and the
+        record-only activation converges a manifest skill with no device.
+- **Depends on:** Task 8, Task 10, Task 6
+
+## [ ] Task 12: `TeclawDelivery` ports and the closing redeliver
+- **Files:** `apply/delivery.py`, `di/modules/bot_management_module.py`,
+  `tests/community/core/bot_config_manifest/apply/test_teclaw_delivery.py` (new)
+- **Done when:**
+  - [ ] `TeclawDelivery(platform_managed=True).ports()` returns the store
+        ports and the record-only activation wrapper; `(False)` returns
+        ARCA's ports.
+  - [ ] `finish` with the switch on: one `dispatch(ctx).sync_symlinks([])`
+        when the bot has a live binding, nothing otherwise; a failure becomes a
+        report note. With the switch off: no-op.
+  - [ ] Tests for all four combinations.
+- **Depends on:** Task 9, Task 11
+
 ---
 
-## Group D — Documentation and the sweep
+## Group D — Creation
 
-## [ ] Task 9: Docs
-- **Files:** `core/bot_config_manifest/README.md`,
-  `docs/bot-config-manifest/user-manual.zh-CN.md`,
-  `docs/bot-config-manifest/work-items.zh-CN.md`, `docs/bot-config-manifest/work-items.md`
+## [ ] Task 13: `create_bot(provision=False)` and `provision_bot`
+- **Files:** `core/bot_management/services/bot_service.py`,
+  `core/bot_management/create_flow.py`, `api/bot_service.py`,
+  `tests/community/core/bot_management/services/test_create_bot_deferred_provision.py` (new)
 - **Done when:**
-  - [ ] README: a "Lifecycle apply points (W8)" section naming `PUT` and
-        creation as the apply points, the alias view, the trigger vocabulary,
-        and the three deferrals with their reasons; Context Boundary rows for
-        the new provides (splice, write-through).
-  - [ ] User manual §4.6 (the `PUT` response's `apply` and the two warnings),
-        §5.5 (write-through semantics incl. substitution), §7 (per-point table:
-        restart / republish "no re-apply in this iteration; nothing previously
-        applied is lost; a moved ref or drift converges at the next `PUT` or
-        explicit apply").
-  - [ ] Work-items W8 (both languages): a progress block in W9's style — what
-        landed per criterion, the first-artifact deferral to #1508 with the
-        code reason, the restart/republish deferral with the owner's reasoning,
-        the health-surface deferral.
-- **Depends on:** Tasks 4, 5, 8
+  - [ ] `create_bot(..., provision: bool = True)`; `False` returns after
+        step 1 with status `PENDING`, no binding; `provision_bot(bot_id, user_id, nick_name)`
+        runs step 2 and the binding-dependent tail for such a record and is
+        idempotent on a record that already has a binding.
+  - [ ] `complete_bot_authorization` / `complete_manifest_creation` take
+        `provision` and pass it through.
+  - [ ] A golden test: `create_bot()` equals `create_bot(provision=False)` +
+        `provision_bot()` in the record written and the collaborator calls
+        made, in order; the whole existing creation suite passes unedited.
+- **Depends on:** —
 
-## [ ] Task 10: Regression sweep
+## [ ] Task 14: The job runs the strategy's sequence
+- **Files:** `core/bot_config_manifest/create_job.py`, `creation.py`,
+  `tests/community/core/bot_config_manifest/creation/test_create_job.py`,
+  `…/test_creation_ordering.py`
+- **Done when:**
+  - [ ] The handler asks the strategy for the sequence. Under
+        `RECORD_PRE_PROVISION`: authorized → `complete(provision=False)`;
+        record without binding and no terminal pre-container record → start
+        the phase; record terminal and no binding → `provision_bot`; binding
+        present → wait `ACTIVE` → `Complete`. Never starts phase B.
+  - [ ] Under `PRE_CREATE_ON` the handler is today's, and its tests are
+        unedited.
+  - [ ] Ordering tests: provision only after the phase is terminal; a second
+        invocation at every step is a no-op; a failed phase still provisions
+        (§2.7); a creation that ends without a bot purges the store as well as
+        the manifest and script row.
+- **Depends on:** Task 2, Task 12, Task 13
+
+## [ ] Task 15: The poll is sequence-aware, the refusal is lifted
+- **Files:** `adapters/http/openapi_v1/bots/create_with_manifest.py`,
+  `core/bot_config_manifest/creation.py`, `di/modules/bot_management_module.py`,
+  `tests/community/core/bot_config_manifest/creation/test_creation_preflight.py`,
+  `tests/community/endpoints/test_openapi_create_with_manifest.py`,
+  `tests/community/adapters/http/openapi_v1/test_create_with_manifest_routes.py`
+- **Done when:**
+  - [ ] `_TECLAW_REFUSAL`, the engine violation and `is_teclaw` are gone from
+        the preflight and the seam; `script` on teclaw is still
+        `unsupported_script`.
+  - [ ] `_creation_state` takes the sequence; under `RECORD_PRE_PROVISION` the
+        pre-container record is the terminal one (`READY` / `APPLY_FAILED` /
+        `APPLYING`), with `CREATING` between the phase and `ACTIVE`.
+  - [ ] Endpoint: `202` on teclaw; the poll walks
+        `AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY` with
+        the report from the single phase; ARCA scenarios unedited.
+- **Depends on:** Task 14
+
+## [ ] Task 16: The provisioner's first artifact carries the manifest
+- **Files:** `tests/community/core/bot_management/services/test_teclaw_provision_service.py`,
+  `tests/community/core/bot_config_manifest/creation/test_first_artifact.py` (new)
+- **Done when:**
+  - [ ] An end-to-end test: stored manifest declaring identity, a resource
+        and a skill; deferred create; the phase writes to the store; the
+        provisioner's composed artifact (real composer, fake collectors for
+        the DB categories, real reader over the index) carries the refs, the
+        `SkillRef`, and `ownership` with `platform` for the three; the
+        `create_teclaw_bot` call receives it.
+- **Depends on:** Task 15
+
+---
+
+## Group E — `PUT` takes effect
+
+## [ ] Task 17: `declares_script`, the `apply` field, the warnings
+- **Files:** `bot_config_manifest_service_protocol.py`, `services/config_manifest_service.py`,
+  `adapters/http/openapi_v1/bots/{config_manifest.py,config_manifest_support.py,schemas.py}`,
+  `tests/community/endpoints/test_openapi_config_manifest.py`
+- **Done when:**
+  - [ ] As revision 2's Tasks 3 and 4, with the not-ACTIVE warning emitted
+        only when the bot's strategy has `ON_CONTAINER` constructs.
+  - [ ] Endpoint tests: `RUNNING` with a readable id; lock held →
+        `NOT_STARTED` and stored; `script` → delivery note; `PENDING` ARCA →
+        not-ACTIVE note; `PENDING` teclaw with the switch on → no such note;
+        `DELETE` unchanged.
+- **Depends on:** Task 1, Task 2
+
+---
+
+## Group F — The alias view
+
+## [ ] Task 18: The splice helper
+- **Files:** `schema/splice.py` (new), `tests/community/core/bot_config_manifest/test_script_splice.py` (new)
+- **Done when:** as revision 2's Task 6.
+- **Depends on:** —
+
+## [ ] Task 19: `write_through_script` and `script_body`
+- **Files:** `services/config_manifest_service.py`, its protocol, `api/`,
+  `di/modules/bot_management_module.py`,
+  `tests/community/core/bot_config_manifest/test_write_through_script.py` (new)
+- **Done when:** as revision 2's Task 7.
+- **Depends on:** Task 18
+
+## [ ] Task 20: The three startup-script routes
+- **Files:** `adapters/http/openapi_v1/bots/{router.py,startup_script_support.py}`,
+  `tests/community/endpoints/test_openapi_startup_script.py`,
+  `tests/community/adapters/http/openapi_v1/test_bots_endpoints.py`
+- **Done when:** as revision 2's Task 8.
+- **Depends on:** Task 19
+
+---
+
+## Group G — Docs and the sweep
+
+## [ ] Task 21: Docs
+- **Files:** `core/bot_config_manifest/README.md`, `managed_files/README.md`,
+  `core/config_compose/README.md`, `core/skill_center/README.md` (boundary rows),
+  `docs/bot-config-manifest/user-manual.zh-CN.md`,
+  `docs/bot-config-manifest/{work-items,work-items.zh-CN}.md`,
+  the config reference for the switch
+- **Done when:**
+  - [ ] README: "Lifecycle apply points and the delivery seam (W8)" — the
+        strategy, the two families side by side, the switch and when to flip
+        it, the store and index, the closing redeliver, the alias view, the
+        trigger vocabulary, the deferrals.
+  - [ ] User manual §4.6, §5.5, §7, and a new teclaw subsection (first
+        artifact, whole-artifact convergence, the switch).
+  - [ ] Work-items W8 (both languages): a progress block — what landed per
+        criterion, the seam, the switch's default and its condition, the
+        deferrals (restart/republish, publish gather, health surface, ARCA
+        pre-binding port).
+- **Depends on:** Tasks 3, 6, 12, 16, 17, 20
+
+## [ ] Task 22: Regression sweep
 - **Files:** —
 - **Done when:**
-  - [ ] `uv run pytest tests/community/core/bot_config_manifest tests/community/endpoints/test_openapi_config_manifest*.py tests/community/endpoints/test_openapi_create_with_manifest.py tests/community/endpoints/test_openapi_startup_script.py tests/community/core/service_bot/services/test_baas_service_start_cmd.py tests/community/core/bot_management tests/community/adapters/http/openapi_v1 tests/community/architecture` passes.
-  - [ ] `test_no_script_is_byte_identical_to_the_bare_chain` is unmodified
-        (`git diff --stat` on its file is empty).
-  - [ ] Lint passes (`ruff`), and the oversized-module gate passes for
-        `router.py`.
-- **Depends on:** Task 9
+  - [ ] `uv run pytest tests/community/core/bot_config_manifest tests/community/core/config_compose tests/community/core/skill_center tests/community/core/bot_management tests/community/core/service_bot tests/community/kernel tests/community/repository tests/community/endpoints tests/community/adapters/http/openapi_v1 tests/community/architecture` passes.
+  - [ ] `test_no_script_is_byte_identical_to_the_bare_chain` unmodified.
+  - [ ] Lint (`ruff`) and the oversized-module gate pass.
+- **Depends on:** Task 21
