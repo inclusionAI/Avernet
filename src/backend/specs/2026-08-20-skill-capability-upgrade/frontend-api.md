@@ -126,7 +126,7 @@ permissions.publish_draft=true
 | 权限管理 | P2-GRT-001..005 |
 | 编辑锁 | P2-LSE-001..004 |
 | 发布影响、发布和轮询 | P2-PUB-001..005 |
-| 下线影响和下线 | P2-OFF-001..002 |
+| 下线影响、下线与 Version Copy | P2-OFF-001..003 |
 | 市场搜索 | P2-MKT-001..003 |
 | 引用 SC Public Skill | P2-REF-001..003 |
 
@@ -142,7 +142,7 @@ GET /openapi/v1/bots/spaces/{space_id}/skills?keyword=&page=1&page_size=20
 
 1. 首次进入请求第 1 页；搜索输入防抖后重新从第 1 页请求；
 2. Backend 对 name/description 做不区分大小写过滤后分页；
-3. Offline Skill 仍在工坊列表中，供 Owner/Manager 继续修改；
+3. Offline Skill 仍在工坊列表中，供 Owner/Manager 查看历史 Version 并复制为独立新 Skill；原 Skill 不可继续修改；
 4. 不在列表额外请求全部 Grants、Versions、文件树或影响面。
 
 卡片字段：
@@ -341,7 +341,7 @@ DELETE .../draft?expected_revision_id=rev-2&fencing_token=7
 - `deleted_scope=SKILL`：首次从未发布，且除终态 FAILED Attempt 外无外部事实，整个 Skill
   及其失败 Attempt 被删除。
 
-FROZEN 时不显示删除按钮。Offline Skill 不再允许升级；产品显示“复制”，以最后 Published Vn
+FROZEN 时不显示删除按钮。Offline Skill 不再允许升级；产品在历史 Version 行显示“复制”，以用户选择的精确 Published Vn
 创建独立新 Skill 的 V1 Draft。
 删除 Team Draft 会同时使当前 Lease/fencing token 失效，前端必须停止 Lease 轮询并退出编辑态。
 
@@ -446,7 +446,7 @@ Attempt。普通 FAILED 需要修改 Draft 后新建 Attempt。RESULT_UNKNOWN �
 - HTTP 202：恢复任务已重新入队，继续轮询同一 Attempt；
 - HTTP 200：Attempt 已经成功，无需创建任务，直接刷新 detail/list。
 
-## 10. 下线与重新发布
+## 10. 下线与 Version Copy
 
 先调用：
 
@@ -491,6 +491,18 @@ Artifact 无法读取，未发现明确引用，已继续下线”，但不得�
 普通错误 `data=null` 的 route-specific 例外。
 
 产品文案不能写成“Vn 变回草稿”；准确语义是“Skill Offline，保留历史 Vn；复制后产生独立新 Skill”。
+
+复制入口在历史 Version 行：
+
+```http
+POST /openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy?user_id={actor_id}
+Idempotency-Key: <uuid>
+```
+
+仅 `lifecycle_status=OFFLINE` 且 `actor.permissions.copy_offline_skill=true` 时展示。成功 HTTP 201 返回独立新
+Skill 的 Detail（新 `skill_id`、新 `skill_uuid`、`DRAFT_ONLY`、V1 `EDITING` Draft），跳转到该新 Skill 编辑页。
+在线源 Skill 调 Copy 返回 `409 code=409316`（`SKILL_NOT_OFFLINE`）；不要与原 Skill Offline 时其他写操作返回的
+`409312 SKILL_OFFLINE` 混淆。
 
 ## 11. 添加 Skill 弹窗的四个产品来源
 
@@ -729,7 +741,7 @@ Center Skill 的技术合同支持所有实际存在的 Bot Type × Engine 组�
 
 - 按 Operation ID 建 API client，不自行改路径。
 - 覆盖未知 additive 字段、200/201/202、403、404、409、422、423、503。
-- 模拟 Published V1 + Draft V2、Offline + Draft、RESULT_UNKNOWN、Reference 部分成功。
+- 模拟 Published V1 + Draft V2、Offline + `draft=null`、Offline Version Copy、RESULT_UNKNOWN、Reference 部分成功。
 - 不把候选 API 当成已发布 Gateway 路由。
 
 ### 16.2 Backend 路由落地后
@@ -740,11 +752,11 @@ Center Skill 的技术合同支持所有实际存在的 Bot Type × Engine 组�
 - Team 编辑覆盖 acquire、takeover、旧 token 保存失败。
 - 发布覆盖影响提示、轮询、恢复和页面刷新。
 - Reference 覆盖 20 项、部分成功、Set 删除和 inactive/active Set。
-- Offline 覆盖每类 blocker 与重新发布恢复。
+- Offline 覆盖每类 blocker、非阻断 `UNKNOWN_ARTIFACT` warning 与 Version Copy。
 
 ### 16.3 正式切流前
 
 - Swagger 中每个标记已实现的 Operation 都真实可调用，无 501/stub。
 - Phase 1 Local/Repo/SkillSet/MCP 回归通过。
 - 前端不依赖旧 `status/draft_status/can_edit/retire_skill`。
-- 产品文案使用“发布前影响”“Offline 后创建下一版 Draft”“新建 SkillSet 默认 active”。
+- 产品文案使用“发布前影响”“Offline 保留历史 Version、复制为新 Skill”“新建 SkillSet 默认 active”。

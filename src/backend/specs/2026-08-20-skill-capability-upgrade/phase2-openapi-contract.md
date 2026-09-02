@@ -211,6 +211,7 @@ Work Order 的列表、详情和审批复用既有 `/openapi/v1/bots/work-orders
       "delete_draft": true,
       "create_upgrade_draft": true,
       "offline_skill": true,
+      "copy_offline_skill": true,
       "manage_grants": true,
       "transfer_owner": true,
       "request_edit_access": false,
@@ -247,7 +248,7 @@ Detail 包含 `SpaceSkillSummary` 的全部字段，并展开：
 | `draft` | `DraftDetail|null` | 当前 Draft 的完整来源、Revision 与 metadata |
 | `latest_published_version` | `SkillVersionSummary|null` | 最新 Ready Version |
 | `active_publication` | `PublicationAttemptSummary|null` | 当前发布进度 |
-| `source` | `FOLDER|GIT` | Identity 首次创建来源 |
+| `source` | `FOLDER|GIT|COPY` | Identity 首次创建来源 |
 | `offline_at/offline_by` | `string|null` | TeamClaw 本地下线事实 |
 
 `DraftDetail`：
