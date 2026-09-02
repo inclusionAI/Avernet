@@ -43,7 +43,7 @@ test('declares an installable DSH bundle manifest and mount row', async () => {
   assert.deepEqual(manifest.dsh, { bundle: { patch: './cordis.patch.yml' } });
   assert.equal((manifest.dependencies as Record<string, string>).ws, '^8.18.3');
   assert.equal((manifest.dependencies as Record<string, string>)['js-yaml'], '^4.2.0');
-  assert.deepEqual(manifest.bin, { 'dsh-bcn-configure': './dist/configure.js' });
+  assert.deepEqual(manifest.bin, { 'dsh-bcn-configure': 'dist/configure.js' });
   assert.ok((manifest.files as string[]).includes('install-dsh.sh'));
   assert.equal(Object.keys(manifest.dependencies as Record<string, string>).some(key => key.startsWith('@deepseek-ai/')), false);
   const patch = await readFile(patchUrl, 'utf8');
