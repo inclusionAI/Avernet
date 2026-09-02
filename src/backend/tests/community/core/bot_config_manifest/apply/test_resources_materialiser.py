@@ -746,9 +746,11 @@ def test_write_carries_the_note_onto_the_report_row():
 def test_an_archive_member_the_chain_would_refuse_fails_at_resolve():
     """``upload_file`` refuses extensions outside its allow-list (no ``.sh``,
     no extensionless files). That refusal must land in ``resolve`` — before
-    the sentinel deletes the declared tree — or the category reaches write
-    with a member that deterministically fails *after* the destructive
-    delete, on every re-apply.
+    the tree marker promises the declared tree — or the category reaches
+    write with a member that deterministically fails *after* the
+    destructive delete, on every re-apply. The failure is keyed to the
+    *declared* entry's identity with the member named in the reason, so
+    the orchestrator's abort mapping can blame the declared row.
     """
     archive = _tgz({"a.md": b"ok", "run.sh": b"#!/bin/sh\n"})
     svc = FakeResourceFileService(exists_paths={"tools/old.md"})
@@ -763,7 +765,9 @@ def test_an_archive_member_the_chain_would_refuse_fails_at_resolve():
     # The whole category aborts (§3.2): one undeliverable member means the
     # tree is NOT deleted for a partial delivery.
     assert not resolved.ok
-    assert resolved.failures[0].identity == "tools/run.sh"
+    assert resolved.failures[0].identity == "tools/"
+    # The reason names the offending member inside the declared entry.
+    assert "tools/run.sh" in resolved.failures[0].reason
     assert "file type" in resolved.failures[0].reason.lower()
 
 
@@ -995,3 +999,52 @@ def test_an_empty_archive_still_audits_the_tree_removal():
     # The tree was deleted for real, and nothing was delivered.
     assert svc.deleted == ["gone"]
     assert svc.writes == {}
+
+
+def test_a_refused_member_blames_the_declared_entry_in_the_report():
+    """F3: the report must say which member was undeliverable and why.
+
+    The orchestrator's abort mapping keys failure reasons onto *declared*
+    entry identities — a member-keyed failure matches nothing and both
+    declared rows answer a generic "another entry could not be
+    materialized", leaving the author to guess which of the archive's
+    members violated the write chain's admission and in what way.
+    """
+    archive = _tgz({"a.md": b"ok", "run.sh": b"#!/bin/sh\n"})
+    svc = FakeResourceFileService(exists_paths={"tools/old.md"})
+    engine = _resources_engine(svc, _StubEntryFetcher(archive))
+    ctx = make_context(engine_type="claude_code")
+
+    report = _run(
+        engine.apply(
+            ctx,
+            {
+                "schema_version": 1,
+                "manifest": {
+                    "resources": [
+                        {
+                            "path": "tools/",
+                            "unpack": "tar.gz",
+                            "source": "https://x/t.tgz",
+                        },
+                        {"path": "notes/r.md", "content": "# rules"},
+                    ]
+                },
+            },
+            apply_id="a1", trigger="explicit",
+            started_at=datetime.now(), dry_run=False,
+        )
+    )
+
+    rows = {(e.identity, e.outcome.value): e for e in report.entries}
+    (identity, outcome), row = next(
+        item for item in rows.items() if item[0][0] == "tools/"
+    )
+    assert outcome == "failed"
+    assert "run.sh" in (row.reason or "")
+    assert "file type" in (row.reason or "").lower()
+    # The blameless neighbour keeps the generic skip wording.
+    assert rows[("notes/r.md", "skipped")].reason is not None
+    # Nothing was written and the tree still stands.
+    assert svc.writes == {}
+    assert svc.deleted == []

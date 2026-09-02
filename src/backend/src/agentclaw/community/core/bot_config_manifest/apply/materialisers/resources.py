@@ -198,7 +198,17 @@ class ResourcesMaterialiser(Materialiser):
                     None,
                 )
                 if bad is not None:
-                    failures.append(ResolveFailure(bad[0], bad[1]))
+                    # The failure keys to the *declared* entry's identity —
+                    # the orchestrator's abort mapping blames declared rows,
+                    # and a member-keyed failure would match nothing, sinking
+                    # the reason (which member, which admission rule) out of
+                    # the report. The member is named in the reason instead.
+                    failures.append(
+                        ResolveFailure(
+                            path,
+                            f"archive member {bad[0]!r}: {bad[1]}",
+                        )
+                    )
                     continue
                 intents.append(Intent(identity=path, value=_DECLARED_TREE))
                 for rel, data in members:
