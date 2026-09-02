@@ -30,6 +30,8 @@ from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     CATEGORY_IDENTITY,
     CATEGORY_RESOURCES,
     CATEGORY_SKILLS,
+    SKILLS_LOCAL_DIR,
+    WORKSPACE_NS,
     ManagedFile,
     ManagedFileScope,
     ManagedFilesStore,
@@ -113,10 +115,12 @@ class ManagedFilesComposeReader:
         """
         by_name: dict[str, str] = {}
         for f in self._files(req, CATEGORY_SKILLS):
-            # The package prefix: the ref path up to and including the skill's
-            # directory. Every file of one skill shares it.
-            prefix = f.ref_path.split(f"/{f.name}/", 1)[0] + f"/{f.name}"
-            by_name.setdefault(f.name, prefix)
+            # The package prefix: the scope's ref root plus the layout's own
+            # ``workspace/skills-local/<name>``. Built, never searched for —
+            # ``teclaw`` and ``workspace`` are legal skill names, and a search
+            # for ``/<name>/`` would match the layout's fixed segments first.
+            root = f.ref_path[: len(f.ref_path) - len(f.rel_path)]
+            by_name.setdefault(f.name, f"{root}{WORKSPACE_NS}/{SKILLS_LOCAL_DIR}/{f.name}")
         # ``scope="user"`` is the artifact's existing word for a per-bot,
         # user-supplied skill (``skillRef.scope`` admits ``shared`` | ``user``);
         # what is new is that the package now has a store address.

@@ -119,16 +119,6 @@ class ManagedFilesStore:
     def store_key(self, scope: ManagedFileScope, rel_path: str) -> str:
         return f"{self._store_base().rstrip('/')}/{self.ref_path(scope, rel_path)}"
 
-    def ref_path_of(self, record: ManagedFileRecord) -> str:
-        """The artifact ref path for an indexed row: its key minus the base."""
-        base = self._store_base().rstrip("/") + "/"
-        if record.store_key.startswith(base):
-            return record.store_key[len(base):]
-        # A row written under another base (the prefix moved) still resolves
-        # by recomputing from its scope-free rel_path — the composer's base is
-        # the current one, and that is what the engine will read against.
-        return record.store_key
-
     # ── writes ───────────────────────────────────────────────────────────
 
     def put(
@@ -157,7 +147,7 @@ class ManagedFilesStore:
             size_bytes=len(content),
             apply_id=apply_id,
         )
-        return self._to_file(record)
+        return self._to_file(scope, record)
 
     def delete(self, scope: ManagedFileScope, *, category: str, rel_path: str) -> bool:
         rel_path = rel_path.lstrip("/")
@@ -214,11 +204,11 @@ class ManagedFilesStore:
             category=category,
             rel_path=rel_path.lstrip("/"),
         )
-        return self._to_file(record) if record is not None else None
+        return self._to_file(scope, record) if record is not None else None
 
     def list(self, scope: ManagedFileScope, *, category: str) -> list[ManagedFile]:
         return [
-            self._to_file(record)
+            self._to_file(scope, record)
             for record in self._repo.list_by_category(
                 env=scope.env,
                 entity_id=scope.entity_id,
@@ -230,12 +220,17 @@ class ManagedFilesStore:
     def read(self, file: ManagedFile) -> Optional[bytes]:
         return self._oss.get_object(file.store_key)
 
-    def _to_file(self, record: ManagedFileRecord) -> ManagedFile:
+    def _to_file(self, scope: ManagedFileScope, record: ManagedFileRecord) -> ManagedFile:
+        # The ref path is recomputed from the scope and the row's rel_path,
+        # never sliced off the stored key: the composer's ``bot-data`` base is
+        # the *current* one, and a row written under an earlier base must
+        # still resolve against it (the object is re-put on the next apply;
+        # a stale key would otherwise double the prefix and 404 every file).
         return ManagedFile(
             category=record.category,
             name=record.name,
             rel_path=record.rel_path,
-            ref_path=self.ref_path_of(record),
+            ref_path=self.ref_path(scope, record.rel_path),
             store_key=record.store_key,
             digest=record.digest,
             size_bytes=record.size_bytes,

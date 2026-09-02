@@ -128,3 +128,32 @@ def test_the_reader_yields_collector_shaped_refs_from_the_index(monkeypatch) -> 
         "staff_u1/bot7_manifest/teclaw/workspace/skills-local/order-lookup/scripts/run.py",
     ]
     assert reader.skill_files(_REQ, []) == []
+
+
+def test_a_skill_named_like_a_layout_segment_keeps_its_own_prefix(monkeypatch) -> None:
+    """``teclaw`` and ``workspace`` are legal skill names; the package prefix
+    is built from the layout, not found by searching the ref path."""
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_config_manifest.managed_files.reader._scope",
+        lambda req: _SCOPE,
+    )
+    store, _ = _store()
+    for name in ("workspace", "teclaw"):
+        store.put(_SCOPE, category=CATEGORY_SKILLS, name=name, rel_path=f"workspace/skills-local/{name}/SKILL.md", content=b"s", apply_id=None)
+    skills = _reader(store, None).skills(_REQ)
+    assert [(s.name, s.path) for s in skills] == [
+        ("teclaw", "staff_u1/bot7_manifest/teclaw/workspace/skills-local/teclaw"),
+        ("workspace", "staff_u1/bot7_manifest/teclaw/workspace/skills-local/workspace"),
+    ]
+
+
+def test_a_row_written_under_an_earlier_base_resolves_against_the_current_one() -> None:
+    oss = FakeObjectStorage()
+    repo = sqlite_repository()
+    old = ManagedFilesStore(object_storage=oss, repository=repo, store_base=lambda: "teclaw/old/bolt_data")
+    old.put(_SCOPE, category=CATEGORY_IDENTITY, name="RULES.md", rel_path="identity/RULES.md", content=b"r", apply_id=None)
+    current = ManagedFilesStore(object_storage=oss, repository=repo, store_base=lambda: "teclaw/new/bolt_data")
+    (row,) = current.list(_SCOPE, category=CATEGORY_IDENTITY)
+    # The ref is store-relative under the current base, never the stale absolute key.
+    assert row.ref_path == "staff_u1/bot7_manifest/teclaw/identity/RULES.md"
+    assert row.store_key.startswith("teclaw/old/")
