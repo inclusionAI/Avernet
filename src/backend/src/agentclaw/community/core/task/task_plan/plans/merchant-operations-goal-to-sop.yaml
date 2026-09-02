@@ -93,3 +93,16 @@ nodes:
     task: |
       你是风险评审群(driver 业务风险Bot + 舆情Bot):基于上游带条件的经营承诺,做18周年店庆业务/合规/舆情风险评审,逐项给成因/等级/约束。
       处理不了的问题,按你的判断标明。
+
+  - id: synthesize_plan
+    name: 汇总经营方案
+    title: 汇总经营方案与执行计划
+    type: bot
+    bot_id: 20260901_kcvvkqqs
+    depends_on: [risk_review_group]
+    input:
+      handoff: $.risk_review_group.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接风险评审群的评审结论。作为店主侧最终汇总者,形成经营方案和执行计划。明确已确认事实、条件通过项、阻断项和待店主决策事项。
