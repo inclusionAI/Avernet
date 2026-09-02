@@ -106,7 +106,8 @@ def test_dispatch_single_bot_registers_handle():
     poller = _Poller()
     fmt = PromptFormatterImpl()
     exe = TaskExecutor(
-        bot=bot, bcs=None, formatter=fmt, context=_Ctx(), sink=None, poller=poller
+        bot=bot, bcs=None, formatter=fmt, context=_Ctx(), sink=None, poller=poller,
+        task_settings=_TaskSettingsOff()
     )
     ok = _run(exe.dispatch([_node()]))
     assert ok == [True]
@@ -126,6 +127,7 @@ def test_dispatch_single_bot_composes_owner_for_pure_assignee():
         context=_Ctx(),
         sink=None,
         poller=poller,
+        task_settings=_TaskSettingsOff(),
     )
 
     ok = _run(exe.dispatch([_node("default", {"assignee_owner_id": "146836"})]))
@@ -145,6 +147,7 @@ def test_dispatch_single_bot_rebuilds_composite_with_explicit_owner():
         context=_Ctx(),
         sink=None,
         poller=poller,
+        task_settings=_TaskSettingsOff(),
     )
 
     ok = _run(
@@ -166,6 +169,7 @@ def test_dispatch_single_bot_uses_explicit_owner_for_composite_assignee():
         context=_Ctx(),
         sink=None,
         poller=poller,
+        task_settings=_TaskSettingsOff(),
     )
 
     ok = _run(
@@ -187,6 +191,7 @@ def test_dispatch_single_bot_sends_assignee_verbatim():
         context=_Ctx(),
         sink=None,
         poller=poller,
+        task_settings=_TaskSettingsOff(),
     )
     ok = _run(exe.dispatch([_node()]))
     assert ok == [True]
@@ -199,38 +204,38 @@ def test_prompt_formatter_uses_context_and_node_spec():
     s = fmt.format_execute({"mode": "execute", "node_instruction": "分析行业"}, n)
     assert "分析行业" in s
     assert "验收标准" in s
-    # skill 上报协议 status 已对齐后端 Status 枚举 DONE/FAILED(不再用 SUCCESS/FAIL)。
-    assert '"status": "DONE"' in s
+    # 默认 skill_report_enabled=true,使用 HTTP Push 协议。
+    assert '"status": "SUCCESS"' in s
     assert '"task_id"' in s
     assert '"acceptance_result"' in s
 
 
-def test_prompt_formatter_single_bot_default_uses_poller_protocol():
-    """single_bot 默认走 poller 回收链路:产 {success,data,gaps} JSON,不下发 HTTP POST /callback/report。"""
+def test_prompt_formatter_pull_mode_uses_poller_protocol():
+    """skill_report_enabled=false 时使用 poller Pull 协议。"""
     fmt = PromptFormatterImpl()
     n = _node()
     s = fmt.format_execute({
         "mode": "execute",
         "node_instruction": "分析行业",
         "execution_mode": "single_bot",
-        "single_bot_skill_report": False,
+        "skill_report_enabled": False,
     }, n)
     assert '"success": true' in s and '"data"' in s and '"gaps"' in s
-    assert "callback/report" not in s  # 默认不引导 HTTP 上报(避免与 poller 并存)
+    assert "callback/report" not in s  # Pull 模式不引导 HTTP 上报
 
 
-def test_prompt_formatter_single_bot_skill_report_on_uses_http_post():
-    """single_bot 开启 skill 上报开关:下发 HTTP POST /callback/report,status=DONE/FAILED。"""
+def test_prompt_formatter_skill_report_on_uses_http_post():
+    """skill_report_enabled=true 时使用 HTTP Push 协议。"""
     fmt = PromptFormatterImpl()
     n = _node()
     s = fmt.format_execute({
         "mode": "execute",
         "node_instruction": "分析行业",
         "execution_mode": "single_bot",
-        "single_bot_skill_report": True,
+        "skill_report_enabled": True,
     }, n)
     assert "callback/report" in s
-    assert '"status": "DONE"' in s
+    assert '"status": "SUCCESS"' in s
     assert '"success": true' not in s  # 走 HTTP 上报,不产 poller JSON
 
 
@@ -260,20 +265,20 @@ def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():
 
 
 class _TaskSettingsOn:
-    """Fake task settings: single_bot_skill_report 开关返回 True(skill HTTP 上报链路)。"""
+    """Fake task settings: skill_report 开关返回 True(skill HTTP 上报链路)。"""
 
     def is_enabled(self, setting_type):
-        return setting_type == "single_bot_skill_report"
+        return setting_type == "skill_report_enabled"
 
     def get_enabled(self, *, setting_type, env):
-        return setting_type == "single_bot_skill_report"
+        return setting_type == "skill_report_enabled"
 
     def set_enabled(self, *, setting_type, enabled, env, operator=None):
-        return setting_type == "single_bot_skill_report" and enabled
+        return setting_type == "skill_report_enabled" and enabled
 
 
 class _TaskSettingsOff:
-    """Fake task settings: 全部开关 False(默认 poller 回收链路)。"""
+    """Fake task settings: skill_report_enabled=false，使用 poller Pull 回收。"""
 
     def is_enabled(self, setting_type):
         return False
@@ -285,7 +290,7 @@ class _TaskSettingsOff:
         return False
 
 
-def test_dispatch_single_bot_skill_report_on_skips_poller_registration():
+def test_dispatch_skill_report_on_skips_poller_registration():
     """开关开启时 single_bot 走 skill HTTP 上报链路,不注册 poller(与 poller 互斥,不并存)。"""
     bot = _Bot()
     poller = _Poller()
@@ -304,8 +309,8 @@ def test_dispatch_single_bot_skill_report_on_skips_poller_registration():
     assert poller.registered == []  # skill 上报模式下不注册 poller,避免双链路并存
 
 
-def test_dispatch_single_bot_skill_report_off_registers_poller():
-    """开关关闭(默认)时 single_bot 仍注册 poller 拉消息回收(现行默认行为保持)。"""
+def test_dispatch_skill_report_off_registers_poller():
+    """skill_report_enabled=false 时注册 poller Pull 回收。"""
     bot = _Bot()
     poller = _Poller()
     exe = TaskExecutor(
@@ -385,11 +390,8 @@ def test_dispatch_single_bot_2_group_bypass_creates_two_person_group():
     req = bcs.created[0]
     assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
     assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
-    assert req.originator == "human_35983"
-    h = poller.registered[0]
-    assert isinstance(h, BcsGroupHandle)
-    assert h.group_id == "g2g" and h.collab_mode == "chat" and h.session_id == "s2g"
-    assert h.loop_task_id == "t1::c1"
+    assert req.originator is None
+    assert poller.registered == []  # 默认 Push，不注册 Pull poller
     flip = [p for p in graph.patches if p.run_mode == "coop_group"]
     assert flip and flip[0].extend_props_patch.get("actual_run_mode") == "single_bot"
 
@@ -401,7 +403,7 @@ def test_dispatch_single_bot_2_group_disabled_falls_back_to_send():
     assert ok == [True]
     assert bot.sent and bot.sent[0][0] == "drv:35983"  # 老链路直发
     assert bcs.created == []
-    assert isinstance(poller.registered[0], SingleBotHandle)
+    assert poller.registered == []  # 默认 Push，不注册 poller
 
 
 def test_dispatch_single_bot_2_group_no_owner_falls_back_to_send():
@@ -411,4 +413,4 @@ def test_dispatch_single_bot_2_group_no_owner_falls_back_to_send():
     assert ok == [True]
     assert bot.sent  # 老链路
     assert bcs.created == []
-    assert isinstance(poller.registered[0], SingleBotHandle)
+    assert poller.registered == []  # 默认 Push，不注册 poller

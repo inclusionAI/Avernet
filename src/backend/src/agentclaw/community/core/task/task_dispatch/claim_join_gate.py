@@ -21,19 +21,19 @@ logger = get_logger()
 CATEGORY = "task"
 CLAIM_JOIN_FILTER = "claim_join_filter"
 SEARCH_SKILL = "search_skill"
-SINGLE_BOT_SKILL_REPORT = "single_bot_skill_report"
+SKILL_REPORT = "skill_report_enabled"
 CLAIM_JOIN_FILTER_KEY = "claim_join_filter_enabled"
 # Backward-compatible names used by existing tests and callers.
 KEY = CLAIM_JOIN_FILTER_KEY
 SEARCH_SKILL_KEY = "search_skill_enabled"
-SINGLE_BOT_SKILL_REPORT_KEY = "single_bot_skill_report_enabled"
+SKILL_REPORT_KEY = "skill_report_enabled"
 # TaskHarness 旁路巡检开关(默认关闭);through tasks/settings API (harness_poller).
 HARNESS_POLLER = "harness_poller"
 HARNESS_POLLER_KEY = "harness_poller_enabled"
 _SETTING_KEYS = {
     CLAIM_JOIN_FILTER: CLAIM_JOIN_FILTER_KEY,
     SEARCH_SKILL: SEARCH_SKILL_KEY,
-    SINGLE_BOT_SKILL_REPORT: SINGLE_BOT_SKILL_REPORT_KEY,
+    SKILL_REPORT: SKILL_REPORT_KEY,
     HARNESS_POLLER: HARNESS_POLLER_KEY,
 }
 _CACHE_TTL_S = 15.0
@@ -75,7 +75,7 @@ class TaskSettingsServiceProtocol(Protocol):
 
 
 class TaskSettingsService(TaskSettingsServiceProtocol):
-    """Runtime task switch service, defaulting to disabled and fail-open."""
+    """Runtime task switch service with explicit per-setting defaults."""
 
     @inject
     def __init__(
@@ -84,12 +84,12 @@ class TaskSettingsService(TaskSettingsServiceProtocol):
         defaults: dict[str, bool] | None = None,
     ) -> None:
         self._config = config
-        # single_bot_skill_report 默认 False(走 poller 回收链路);开启后 single_bot 改走
-        # skill HTTP 上报链路(predict：bot POST /callback/report),与 poller 互斥(不并存)。
+        # skill_report 默认 True(走 skill HTTP 上报链路);关闭后任务统一改走
+        # poller 拉取链路(predict：bot POST /callback/report),与 poller 互斥(不并存)。
         self._defaults = {
             CLAIM_JOIN_FILTER: False,
             SEARCH_SKILL: False,
-            SINGLE_BOT_SKILL_REPORT: False,
+            SKILL_REPORT: True,
             # TaskHarness 旁路巡检默认开启:常驻兜底(SLA 超时复位/FAILED 重派/PENDING 派发超时重搜推);
             # 事件驱动为主推进,此为旁路兜底。可经 tasks/settings harness_poller 跨副本热改关闭。
             HARNESS_POLLER: True,

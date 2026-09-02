@@ -25,6 +25,9 @@ from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter 
     OpenApiAuthError,
     OpenApiBadRequestError,
 )
+from agentclaw.community.core.task.task_runner.integration.prompt_formatter import (
+    _poller_content_instruction,
+)
 from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
     BcsGroupHandle,
@@ -80,8 +83,8 @@ class TaskExecutor:
         (dashboard 可见);None 时跳过(单测/无图路径)。R0 骨架允许 None。
         bbs_runner 通过注入的 BcnService.list_bots_by_task_modes(复用统一 provider 身份)查询任务模式候选。
         api_base_url: 任务后端 base url,传给 bbs_runner 拼发给胜出 bot 的任务消息。
-        task_settings: TaskSettingsServiceProtocol|None,读取 single_bot_skill_report 开关决定
-        single_bot 回收链路(默认 poller 拉消息;开启后走 skill HTTP 上报,与 poller 互斥不并存)。"""
+        task_settings: TaskSettingsServiceProtocol|None,读取 skill_report 开关决定
+        所有任务模式的结果回收链路(默认 skill HTTP 上报;关闭后走 poller 拉消息,两者互斥不并存)。"""
         self._bot = bot
         self._bcs = bcs
         self._bcn = bcn
@@ -141,24 +144,23 @@ class TaskExecutor:
 
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
 
-    def _single_bot_skill_report_enabled(self) -> bool:
-        """single_bot 回收链路开关(默认 False=poller 拉消息回收)。
+    def _skill_report_enabled(self) -> bool:
+        """统一结果回收开关(默认 True=skill HTTP Push)。
 
-        开启(True)时 single_bot 改走 skill HTTP 上报链路(predict：bot POST /callback/report),
-        与 poller 互斥:本方法返回 True 时 ``_dispatch_single_bot`` **不注册 poller**,避免双链路并存
-        导致双重收敛或 sla_timeout 噪声。开关未注入(non-prod/单测缺 task_settings)时回退 False(默认 poller)。
+        开启(True)时所有任务模式走 skill HTTP 上报；关闭(False)时走 poller Pull。
+        两条链路互斥，未注入或读取失败时按默认值 True 处理。
         """
-        ts = self._task_settings
+        ts = getattr(self, "_task_settings", None)
         if ts is None:
-            return False
+            return True
         try:
-            return ts.is_enabled("single_bot_skill_report")
-        except Exception as exc:  # noqa: BLE001 未知 setting_type / 读取失败 → fail-open 回退 poller
+            return ts.is_enabled("skill_report_enabled")
+        except Exception as exc:  # noqa: BLE001 未知 setting_type / 读取失败 → 使用默认 Push
             logger.warning(
-                "[task][task-executor] single_bot_skill_report 读取失败 → 回退 poller: %s",
+                "[task][task-executor] skill_report 读取失败 → 使用默认 Push: %s",
                 exc,
             )
-            return False
+            return True
 
     def _singlebot_2_group_enabled(self, task_id: str) -> bool:
         """singlebot_2_group 旁路开关(默认 True):single_bot 改建"二人 chat 群"(driver bot + 人类观察者,不发言)。
@@ -195,7 +197,7 @@ class TaskExecutor:
         assignee_owner_id = node.run_info.extend_props.get("assignee_owner_id")
         openapi_bot_id = compose_bot_identity(assignee, assignee_owner_id)
         loop_task_id = f"{node.task_id}::{node.node_id}"
-        skill_report = self._single_bot_skill_report_enabled()
+        skill_report = self._skill_report_enabled()
         session_id: str | None = None
         async with sem:
             # P2 旁路:singlebot_2_group(默认 true)且 owner 在场且 bcs/identity_resolver/graph 已接
@@ -229,10 +231,9 @@ class TaskExecutor:
                     "task_id": node.task_id,
                     "node_id": node.node_id,
                     "execution_mode": "single_bot",
-                    # single_bot 走哪条回收链路由开关决定(默认 poller):
-                    #   False → bot 在终态消息内产出 {success,data,gaps} JSON,poller 拉消息回收(formatter 不下发 HTTP POST);
-                    #   True  → bot 主动 HTTP POST /callback/report 上报,下不注册 poller(与上报互斥不并存)。
-                    "single_bot_skill_report": skill_report,
+                    # 所有任务模式统一由 skill_report_enabled 决定回收链路:
+                    #   False → 终态消息由 poller Pull; True → Bot HTTP Push /callback/report。
+                    "skill_report_enabled": skill_report,
                     "backend": self._api_base_url,
                 })
                 message = self._formatter.format_execute(ctx, node)
@@ -295,6 +296,7 @@ class TaskExecutor:
             "task_id": node.task_id,
             "node_id": node.node_id,
             "execution_mode": "single_bot",
+            "skill_report_enabled": self._skill_report_enabled(),
             "backend": self._api_base_url,
         })
         message = self._formatter.format_execute(ctx, node)
@@ -343,16 +345,17 @@ class TaskExecutor:
             "[task][task-executor] singlebot_2_group 取 session=%s task=%s node=%s group_id=%s",
             session_id, node.task_id, node.node_id, gid,
         )
-        self._poller.register(
-            BcsGroupHandle(
-                loop_task_id=loop_task_id,
-                group_id=gid,
-                collab_mode="manager_worker",
-                registered_at=time.monotonic(),
-                session_id=session_id,
-                run_id=None,
+        if not self._skill_report_enabled():
+            self._poller.register(
+                BcsGroupHandle(
+                    loop_task_id=loop_task_id,
+                    group_id=gid,
+                    collab_mode="manager_worker",
+                    registered_at=time.monotonic(),
+                    session_id=session_id,
+                    run_id=None,
+                )
             )
-        )
         node.run_info.assignee = gid
         node.run_info.run_mode = "coop_group"
         self._persist_dispatch_ids(node, group_id=gid, session_id=session_id, run_id=None)
@@ -363,7 +366,6 @@ class TaskExecutor:
         return True
 
     async def _dispatch_coop_group(
-
         self, node: TaskNode, sem: asyncio.Semaphore
     ) -> bool:
         group_id = node.run_info.assignee
@@ -378,23 +380,27 @@ class TaskExecutor:
             # chat / manager_worker:建群(create_group)已把任务指令作为 context 投入、且自带初始 session;
             # 复用该初始 session(get_group_session),不再 create_session 重复建群里的第二个 session。
             session_id = await self.get_group_session(group_id)
-            self._poller.register(
-                BcsGroupHandle(
-                    loop_task_id=loop_task_id,
-                    group_id=group_id,
-                    collab_mode=collab_mode,
-                    registered_at=time.monotonic(),
-                    session_id=session_id,
-                    run_id=None,
+            if not self._skill_report_enabled():
+                self._poller.register(
+                    BcsGroupHandle(
+                        loop_task_id=loop_task_id,
+                        group_id=group_id,
+                        collab_mode=collab_mode,
+                        registered_at=time.monotonic(),
+                        session_id=session_id,
+                        run_id=None,
+                    )
                 )
-            )
             self._persist_dispatch_ids(
                 node, group_id=group_id, session_id=session_id, run_id=None
             )
             return True
 
     async def _dispatch_state_machine(self, node, group_id, meta, loop_task_id) -> bool:
-        ctx = self._context.build(node.task_id, node.node_id)
+        ctx = dict(self._context.build(node.task_id, node.node_id) or {})
+        ctx["skill_report_enabled"] = self._skill_report_enabled()
+        ctx["task_id"] = node.task_id
+        ctx["node_id"] = node.node_id
         prompt = self._formatter.format_execute(ctx, node)
         definition_ref = (meta or {}).get("definition_ref")
         run_id = await self._bcs.start_state_machine_run(
@@ -404,16 +410,17 @@ class TaskExecutor:
             session_id=None,
             input={"query": prompt},
         )
-        self._poller.register(
-            BcsGroupHandle(
-                loop_task_id=loop_task_id,
-                group_id=group_id,
-                collab_mode="state_machine",
-                registered_at=time.monotonic(),
-                session_id=None,
-                run_id=run_id,
+        if not self._skill_report_enabled():
+            self._poller.register(
+                BcsGroupHandle(
+                    loop_task_id=loop_task_id,
+                    group_id=group_id,
+                    collab_mode="state_machine",
+                    registered_at=time.monotonic(),
+                    session_id=None,
+                    run_id=run_id,
+                )
             )
-        )
         self._persist_dispatch_ids(
             node, group_id=group_id, session_id=None, run_id=run_id
         )
@@ -649,9 +656,8 @@ class TaskExecutor:
             req_kwargs["caller_bot_token"] = self._bot_token_provider.get_token(
                 req_kwargs.get("driver_bot") or ""
             )
-        # BCN 事件回调订阅仅对 manager_worker 生效。state_machine/chat 使用 poller
-        # 兜底收敛，避免 BCS require_human 拒绝 Bot/HMAC-only 建群请求。
-        if mode == "manager_worker" and _sink_base:
+        # Push 模式下,manager_worker/state_machine 使用事件回调；Pull 模式下只由 poller 回收。
+        if mode == "manager_worker" and _sink_base and self._skill_report_enabled():
             _sink_base = str(_sink_base).rstrip("/")
             req_kwargs["event_subscriptions"] = [
                 {
@@ -671,7 +677,7 @@ class TaskExecutor:
                 }
             ]
 
-        if mode == "state_machine" and _sink_base:
+        if mode == "state_machine" and _sink_base and self._skill_report_enabled():
             _sink_base = str(_sink_base).rstrip("/")
             req_kwargs["event_subscriptions"] = [
                 {
@@ -694,9 +700,8 @@ class TaskExecutor:
         # 任务描述(目标)→ BCS 创建群的 context 字段。BCS ``resolve_session_topic`` 把 group.context
         # 兜底注入 <GroupContext> 的 `目标` 行(session input 为空时,如建群 BotJoined)。
         _task_context = gf.extend_props.get("task_context")
-        # 任务验收 push 链路:协作群叶子派发期注入 loop_task_id,此处写入群 context,
-        # 供 driver/owner bot 按 acceptance 段4 自验收后 push 回投 /callback/report
-        # (loop_task_id 定位执行节点;backend 取本 TaskExecutor 的 api_base_url,不写死)。
+        _skill_report = self._skill_report_enabled()
+        # 统一结果回收协议:协作群叶子派发期注入 loop_task_id,由下方开关选择 Push/Pull 提示。
         _loop_task_id = gf.extend_props.get("loop_task_id")
         if _loop_task_id and self._api_base_url:
             _task_context = (
@@ -751,18 +756,21 @@ class TaskExecutor:
                         _task_id, _node_id = _loop_task_id.split("::", 1)
                     except ValueError:
                         _task_id, _node_id = "<task_id>", "<node_id>"
-                    _rfooter.append(
-                        "回投请求体只能包含以下节点级字段;callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段:"
-                        + json.dumps({
-                            "task_id": _task_id,
-                            "node_id": _node_id,
-                            "status": "DONE",
-                            "output": "完整协作群执行输出",
-                            "acceptance_result": {},
-                            "extend_props": {},
-                        }, ensure_ascii=False)
-                        + "\n验收未通过时将 status 改为 DONE,并在 acceptance_result.gaps 填写具体差距;只有执行失败才使用 FAILED。"
-                    )
+                    if _skill_report:
+                        _rfooter.append(
+                            "回投请求体只能包含以下节点级字段;callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段:"
+                            + json.dumps({
+                                "task_id": _task_id,
+                                "node_id": _node_id,
+                                "status": "SUCCESS",
+                                "output": "完整协作群执行输出",
+                                "acceptance_result": {},
+                                "extend_props": {},
+                            }, ensure_ascii=False)
+                            + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE 并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
+                        )
+                    else:
+                        _rfooter.append(_poller_content_instruction())
                 req_kwargs["context"] = f"{_task_instruction.rstrip()}\n" + "\n".join(_rfooter)
             else:
                 # 非接力协作群:保留原 [task-execute] reporter/目标/指令/验收/任务上下文/回投体验收信封。
@@ -774,9 +782,13 @@ class TaskExecutor:
                     "只有 reporter_bot_id 对应的 Bot（本群唯一 master/driver）可以调用 "
                     "task-loop 的任务验收(acceptance)逻辑。所有 worker 完成或明确失败后，"
                     "reporter 必须立即逐条检查当前节点 goal.acceptances，汇总完整执行输出，"
-                    "生成 DONE/FAILED，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
-                    "验收步骤不可跳过：执行→逐条校验→生成结论→HTTP上报→确认HTTP 200。\n"
-                    "只有在上述完成条件满足后才触发 task-acceptance；建群初始上下文不触发验收。\n"
+                    + (
+                        "生成 SUCCESS/DONE/FAILED，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
+                        "验收步骤不可跳过：执行→逐条校验→生成结论→HTTP上报→确认HTTP 200。\n"
+                        if _skill_report else
+                        "生成 success/data/gaps JSON；不得发起 HTTP 上报；其它 Bot 只提供产出。\n"
+                    )
+                    + "只有在上述完成条件满足后才触发 task-acceptance；建群初始上下文不触发验收。\n"
                     f"目标:{_task_objective}\n"
                     f"指令:{_task_instruction}\n"
                     f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}\n"
@@ -787,18 +799,21 @@ class TaskExecutor:
                         _task_id, _node_id = _loop_task_id.split("::", 1)
                     except ValueError:
                         _task_id, _node_id = "<task_id>", "<node_id>"
-                    req_kwargs["context"] += (
-                        "\n回投请求体只能包含以下节点级字段；callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段："
-                        + json.dumps({
-                            "task_id": _task_id,
-                            "node_id": _node_id,
-                            "status": "DONE",
-                            "output": "完整协作群执行输出",
-                            "acceptance_result": {},
-                            "extend_props": {},
-                        }, ensure_ascii=False)
-                        + "\n验收未通过时将 status 改为 DONE，并在 acceptance_result.gaps 填写具体差距;只有执行失败才使用 FAILED。"
-                    )
+                    if _skill_report:
+                        req_kwargs["context"] += (
+                            "\n回投请求体只能包含以下节点级字段；callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段："
+                            + json.dumps({
+                                "task_id": _task_id,
+                                "node_id": _node_id,
+                                "status": "SUCCESS",
+                                "output": "完整协作群执行输出",
+                                "acceptance_result": {},
+                                "extend_props": {},
+                            }, ensure_ascii=False)
+                            + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE，并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
+                        )
+                    else:
+                        req_kwargs["context"] += "\n" + _poller_content_instruction()
         # 人类观察者(P1):任务 owner 以 observer 角色被拉入协作群(chat/manager_worker),不发言。
         # routing_policy.inject_observers 默认生效,终产投递给观察者;state_machine 群 participants 不得带 role,故跳过。
         if mode in _HUMAN_OBSERVER_MODES:

@@ -54,6 +54,12 @@ class _Ctx:
         return {"mode": "execute"}
 
 
+
+class _TaskSettingsOff:
+    def is_enabled(self, setting_type):
+        return False
+
+
 def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
@@ -88,7 +94,8 @@ def test_dispatch_coop_group_session_mode_registers_session_handle():
     bcs = _Bcs()
     poller = _Poller()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
-                       poller=poller, identity_resolver=_DoubleBcsBotIdentityResolver())
+                       poller=poller, identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       task_settings=_TaskSettingsOff())
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="chat")))
     ok = _run(exe.dispatch([_node(group_id="g1")]))
     assert ok == [True]

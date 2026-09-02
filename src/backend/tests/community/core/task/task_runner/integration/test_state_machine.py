@@ -27,6 +27,12 @@ def _adapter(handler):
                                                                 base_url="http://bcs"))
 
 
+
+class _TaskSettingsOff:
+    def is_enabled(self, setting_type):
+        return False
+
+
 def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
@@ -96,7 +102,8 @@ def test_dispatch_state_machine_registers_run_handle():
     bcs = _Bcs()
     poller = _Poller()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
-                       poller=poller, identity_resolver=_DoubleBcsBotIdentityResolver())
+                       poller=poller, identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       task_settings=_TaskSettingsOff())
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="state_machine",
                                             members_info=[{"bot_id": "drv", "role": "manager"}],
                                             extend_props={"collaboration_definition_yaml": "kind: collab"})))

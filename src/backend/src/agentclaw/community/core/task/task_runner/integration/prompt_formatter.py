@@ -18,7 +18,7 @@ from agentclaw.community.core.task.task_runner.integration.ports import (
 def _skill_report_instruction(context: dict[str, Any], *, task_id: str, node_id: str) -> str:
     """skill HTTP 上报协议块:bot 主动 POST /callback/report 回投(与 poller 互斥)。
 
-    用于 coop_group / state_machine / 开了开关的 single_bot。status=验收通过 SUCCESS / 不通过 DONE;
+    用于统一的 skill HTTP 上报模式。status=验收通过 SUCCESS / 不通过 DONE;
     verdict 同步 DONE/FAILED;产出放 output 字符串。
     """
     backend = str(context.get("backend") or "{backend}")
@@ -40,7 +40,7 @@ def _skill_report_instruction(context: dict[str, Any], *, task_id: str, node_id:
         json.dumps({
             "task_id": task_id,
             "node_id": node_id,
-            "status": "DONE",
+            "status": "SUCCESS",
             "output": "完整执行输出",
             "acceptance_result": {},
             "extend_props": {},
@@ -76,9 +76,18 @@ class PromptFormatterImpl(PromptFormatter):
         # (# 接自 / ## 群组成 / ## 上游产出正文 / ## 本角色任务)。此时直接下发交接正文即可——
         # bot 收到的是"从 X 接过来一个任务,情况是…",不再套派单/目标/验收/回收协议/字段要求/禁联网;
         # 回收(末尾 JSON / HTTP 上报)与验收、禁联网由各 bot 的 skill/rule 配置保回流,
-        # 框架兜底(single_bot poller / 80s auto-mock)承托,流程不卡。
+        # 框架兜底(poller / 80s auto-mock)承托,流程不卡。
         if str(instr).lstrip().startswith("# 接自"):
-            return str(instr)
+            protocol = (
+                _skill_report_instruction(
+                    context,
+                    task_id=str(context.get("task_id") or node.task_id),
+                    node_id=str(context.get("node_id") or node.node_id),
+                )
+                if context.get("skill_report_enabled", True)
+                else _poller_content_instruction()
+            )
+            return f"{instr.rstrip()}\n{protocol}"
         goal = node.task_spec.goal.objective
         siblings = context.get("sibling_outputs") or {}
         acceptances = [
@@ -92,26 +101,17 @@ class PromptFormatterImpl(PromptFormatter):
             f"指令:{instr}",
             f"验收标准:{json.dumps(acceptances, ensure_ascii=False)}",
         ]
-        mode = context.get("execution_mode")
-        if mode == "single_bot":
-            # single_bot 回收链路由开关决定(默认 poller 拉取;开启后走 skill HTTP 上报),两条链路互斥不并存。
-            if context.get("single_bot_skill_report"):
-                parts.append(_skill_report_instruction(
-                    context,
-                    task_id=str(context.get("task_id") or node.task_id),
-                    node_id=str(context.get("node_id") or node.node_id),
-                ))
-                parts.append("HTTP 上报完成后，回复中只需确认上报结果；不要用回复文本替代 HTTP POST。")
-            else:
-                parts.append(_poller_content_instruction())
-        else:
-            # coop_group / state_machine / 其它:统一 skill HTTP 上报协议(回调驱动)。
+        # 所有执行模式统一由 skill_report_enabled 决定回收方式。默认 Push，
+        # 关闭后统一使用 poller Pull，后续协作群 Pull 直接复用该协议。
+        if context.get("skill_report_enabled", True):
             parts.append(_skill_report_instruction(
                 context,
                 task_id=str(context.get("task_id") or node.task_id),
                 node_id=str(context.get("node_id") or node.node_id),
             ))
             parts.append("HTTP 上报完成后，回复中只需确认上报结果；不要用回复文本替代 HTTP POST。")
+        else:
+            parts.append(_poller_content_instruction())
         if siblings:
             parts.append(f"上游产出:{json.dumps(siblings, ensure_ascii=False, default=str)}")
         parts.append(NO_WEB_SEARCH_CONSTRAINT)

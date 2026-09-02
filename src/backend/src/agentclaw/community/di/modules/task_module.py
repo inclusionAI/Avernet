@@ -26,7 +26,7 @@ from agentclaw.community.api.system_config_service import SystemConfigServicePro
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     HARNESS_POLLER,
     SEARCH_SKILL,
-    SINGLE_BOT_SKILL_REPORT,
+    SKILL_REPORT,
     TaskClaimJoinGate,
     TaskClaimJoinGateProtocol,
     TaskSettingsService,
@@ -390,7 +390,7 @@ class TaskModule(Module):
             config=config,
             defaults={
                 SEARCH_SKILL: task_dispatch.task_search_skill_enabled,
-                SINGLE_BOT_SKILL_REPORT: task_dispatch.single_bot_skill_report_enabled,
+                SKILL_REPORT: task_dispatch.skill_report_enabled,
             },
         )
 
