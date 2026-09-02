@@ -13,22 +13,30 @@ class DirectActivationServiceProtocol(Protocol):
     Platform Default MCPs are controlled only by Default exclusion/un-exclusion.
     Same authorization, same UoW write, same compensation as the Set service:
     one pattern, two scopes.
+
+    ``project=False`` (W8) records the desired state and skips both the
+    readiness check and the runtime projection — for a delivery that projects
+    by itself, which is teclaw's artifact. The default is the pre-W8 contract.
     """
 
     async def activate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]: ...
 
     async def deactivate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]: ...
 
     async def activate_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]: ...
 
     async def deactivate_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]: ...
 
     def list_installed_mcps(

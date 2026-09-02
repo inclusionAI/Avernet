@@ -164,18 +164,18 @@ Conventions every task assumes:
         entry replaces its tree in the index.
 - **Depends on:** Task 8
 
-## [~] Task 10: Record-only activation
+## [x] Task 10: Record-only activation
 - **Files:** `core/skill_center/services/direct_activation_service.py`,
   the activation protocol under `api/`,
   `tests/community/core/skill_center/test_direct_activation_service.py`
 - **Done when:**
-  - [ ] `project: bool = True` on the four activate/deactivate methods; `False`
+  - [x] `project: bool = True` on the four activate/deactivate methods; `False`
         passes `runtime_required=False`; audit still written.
-  - [ ] Tests: `project=False` never touches the projector and records the
+  - [x] Tests: `project=False` never touches the projector and records the
         mutation on a non-ACTIVE bot; `project=True` unchanged.
 - **Depends on:** —
 
-## [ ] Task 11: Store-backed skill package port
+## [~] Task 11: Store-backed skill package port
 - **Files:** `core/bot_config_manifest/managed_files/ports.py`,
   `tests/community/core/bot_config_manifest/managed_files/test_skill_port.py` (new)
 - **Done when:**
