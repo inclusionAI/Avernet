@@ -34,6 +34,9 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from agentclaw.community.core.bot_config_manifest.apply.budget import (
     ApplyFetchBudget,
 )
+from agentclaw.community.core.bot_config_manifest.apply.carry_forward import (
+    carry_forward,
+)
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_DEADLINE_SECONDS,
@@ -67,7 +70,6 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyConstruct,
     ApplyReport,
     ApplyStatus,
-    derive_status,
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
     build_materialisers,
@@ -461,8 +463,12 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             )
             self._record_engine_failure(report, exc)
         else:
-            report = self._carry_forward(
-                report, ctx=ctx, carry_from_apply_id=carry_from_apply_id
+            report = carry_forward(
+                report,
+                ctx=ctx,
+                carry_from_apply_id=carry_from_apply_id,
+                applies=self._applies,
+                to_report=self._to_report,
             )
         finally:
             try:
@@ -555,72 +561,6 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 bot_id=bot_id,
                 lock_token=lock_token,
             )
-
-    def _carry_forward(
-        self,
-        report: ApplyReport,
-        *,
-        ctx: ApplyContext,
-        carry_from_apply_id: Optional[str],
-    ) -> ApplyReport:
-        """Fold an earlier apply's categories into this one's report.
-
-        One creation produces **two** applies — the pre-container phase writes
-        ``script``, the post-container phase writes everything else — separated by
-        the whole of container provisioning. Each mints its own ``apply_id`` and
-        its own record, so without this the report a caller reads at the end names
-        the post-container categories and silently omits ``script``: the manifest
-        would look as though part of it had vanished.
-
-        The carried categories go **first**, which is ``APPLY_ORDER``'s own order
-        (``script`` is position 0), and the summary is re-derived over the union —
-        so a failed pre-container phase plus a clean post-container one terminates
-        ``PARTIAL`` rather than ``SUCCEEDED``.
-
-        **A missing or foreign id is ignored, not fatal.** This is a reporting
-        nicety; losing it must never fail an apply that actually worked. The read
-        is scoped to the bot, so an id from another bot resolves to nothing here
-        exactly as it does on the poll route.
-        """
-        if not carry_from_apply_id:
-            return report
-        earlier = self._applies.get(
-            env=ctx.env,
-            entity_id=ctx.entity_id,
-            bot_id=ctx.bot_id,
-            apply_id=carry_from_apply_id,
-        )
-        if earlier is None:
-            logger.warning(
-                "[manifest_apply] carry_from_apply_id=%s not found for bot_id=%s; "
-                "reporting this phase alone",
-                carry_from_apply_id,
-                ctx.bot_id,
-            )
-            return report
-        try:
-            carried = self._to_report(
-                earlier, entity_id=ctx.entity_id, bot_id=ctx.bot_id
-            )
-        except Exception:  # noqa: BLE001 — a corrupt earlier row must not fail this apply
-            logger.exception(
-                "[manifest_apply] could not read carry_from_apply_id=%s",
-                carry_from_apply_id,
-            )
-            return report
-        if carried is None:
-            return report
-        categories = tuple(carried.categories) + tuple(report.categories)
-        return ApplyReport(
-            apply_id=report.apply_id,
-            bot_id=report.bot_id,
-            trigger=report.trigger,
-            status=derive_status(categories),
-            started_at=report.started_at,
-            finished_at=report.finished_at,
-            categories=categories,
-            sources=tuple(carried.sources) + tuple(report.sources),
-        )
 
     def run_apply_task(self, payload: dict) -> None:
         """Execute one apply from its task payload. Called only by the handler.
