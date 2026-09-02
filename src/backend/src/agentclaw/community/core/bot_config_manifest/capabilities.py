@@ -284,9 +284,9 @@ def resolve_capabilities(
 
     blocked: dict[Construct, str | None] = {
         ManifestCategory.MCP: None,
-        # Accepted with no materializer *yet* (W6). An accepted document sits
-        # inert until then, which is what `GET …/capabilities` and the module
-        # README say out loud rather than leaving a caller to discover.
+        # Materialised since W6, through the one write chain
+        # (`ResourceFileService`'s dispatcher) with tree-replacement
+        # semantics for directory entries — see the resources materialiser.
         ManifestCategory.RESOURCES: None,
         ManifestCategory.SKILLS: None,
         ManifestCategory.ENGINE_CONFIG: _REASON_ENGINE_CONFIG,

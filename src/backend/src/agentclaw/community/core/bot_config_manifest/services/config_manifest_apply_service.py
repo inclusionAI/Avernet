@@ -32,6 +32,9 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
 from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
     ManifestIdentityPort,
 )
+from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
+    ManifestResourcePort,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     APPLY_BUDGET_S,
     APPLY_FETCH_TOTAL_LIMIT,
@@ -127,6 +130,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], EntryFetcher],
+        resource_service_provider: Callable[[], ManifestResourcePort],
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_repository
@@ -150,6 +154,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         self._capability_reader_provider = capability_reader_provider
         self._package_validator_provider = package_validator_provider
         self._entry_fetcher_provider = entry_fetcher_provider
+        # The same laziness for W6's resources materialiser: the resource
+        # file service dispatches to devices, another arm of the same
+        # bot-configuration graph that made every provider above lazy.
+        self._resource_service_provider = resource_service_provider
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -520,6 +528,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 capability_reader=self._capability_reader_provider(),
                 package_validator=self._package_validator_provider(),
                 entry_fetcher=self._entry_fetcher_provider(),
+                resource_service=self._resource_service_provider(),
             )
         )
 

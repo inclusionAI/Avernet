@@ -11,6 +11,9 @@ in ``tests/community/core/bot_config_manifest/apply/``. What these cover is the
 
 from __future__ import annotations
 
+import io
+import json
+import tarfile
 import threading
 import time
 
@@ -31,6 +34,7 @@ from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_overrides,
     endpoint_test,
 )
 
@@ -438,3 +442,153 @@ def apply_while_locked_is_a_409():
     through the assembled app rather than at the service, because the defect was
     entirely in the mapping: the service raised the right exception all along.
     """
+
+
+# ── the resources category, through the assembled app (W6) ─────────────────
+
+
+def _tool_archive() -> bytes:
+    """A real tar.gz: the W6 unpack path must run against true bytes."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, data in {"top/a.py": b"x = 1\n", "top/sub/b.py": b"y = 2\n"}.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+_RESOURCE_DOCUMENT = (
+    "schema_version: 1\n"
+    "manifest:\n"
+    "  resources:\n"
+    "    - path: notes/r.md\n"
+    "      content: |\n"
+    "        # rules\n"
+    "    - path: tools/\n"
+    "      unpack: tar.gz\n"
+    "      strip_components: 1\n"
+    "      source: https://mirror.example.test/tools.tgz\n"
+    "      digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    "script:\n"
+    '  body: "echo hello"\n'
+)
+
+
+def _seed_bot_with_resource_manifest(world) -> None:
+    """A W6 document, applied against stubbed device I/O and fetch.
+
+    The write chain and the fetch funnel are bound over, the same seam
+    ``test_openapi_resources.py`` installs: through the assembled app is the
+    point, not through a real device or a real mirror.
+    """
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world)
+    world.get(BotConfigManifestRepositoryProtocol).upsert(
+        env=get_current_env(),
+        entity_id=_OWNER,
+        bot_id=_BOT_ID,
+        document=_RESOURCE_DOCUMENT,
+        size_bytes=len(_RESOURCE_DOCUMENT.encode("utf-8")),
+        schema_version=1,
+        modifier=_OWNER,
+    )
+
+    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+        EntryFetcher,
+        FetchedEntry,
+    )
+    from agentclaw.community.core.services.resource_file_service import (
+        ResourceFileService,
+    )
+
+    archive = _tool_archive()
+    uploads: list[dict] = []
+    deletes: list[str] = []
+
+    def fetch(_self, ctx, **kwargs):
+        return FetchedEntry(content=archive, digest="sha256:stub", from_store=False)
+
+    async def upload_file(_self, **kwargs):
+        uploads.append(
+            {
+                "target_dir": kwargs["target_dir"],
+                "filename": kwargs["filename"],
+                "data": kwargs["data"],
+            }
+        )
+        return {"path": f"{kwargs['target_dir']}/{kwargs['filename']}"}
+
+    async def delete(_self, **kwargs):
+        deletes.append(kwargs["path"])
+        return True
+
+    async def exists(_self, **_kwargs):
+        return False
+
+    bind_overrides(
+        world,
+        EntryFetcher,
+        {"fetch": fetch},
+    )
+    bind_overrides(
+        world,
+        ResourceFileService,
+        {"upload_file": upload_file, "delete": delete, "exists": exists},
+    )
+    # The stubs only record; the materialiser under test still decides what
+    # to call, so its decisions are visible on the recorders. Function
+    # attributes carry the recorders to the assertion — the framework builds
+    # a fresh injector per case, so there is no shared fixture to hang
+    # them on.
+    _seed_bot_with_resource_manifest.uploads = uploads
+    _seed_bot_with_resource_manifest.deletes = deletes
+
+
+def _resources_reached_the_write_chain(_response, world) -> None:
+    """The apply reported per-entry results, and the write chain saw them.
+
+    Joined-first via the same helper as the 202 case, so this asserts only
+    what the finished report says: the inline file and both archive members
+    created, and the declared tree replaced before its members uploaded.
+    """
+    record = world.get(BotConfigManifestApplyRepositoryProtocol).latest(
+        env=get_current_env(), entity_id=_OWNER, bot_id=_BOT_ID
+    )
+    assert record is not None and record.status == "SUCCEEDED", record
+    report = json.loads(record.report)
+    by_entry = {
+        (e["category"], e["name"]): e["action"] for e in report["entries"]
+    }
+    assert by_entry[("resources", "notes/r.md")] == "created"
+    assert by_entry[("resources", "tools/a.py")] == "created"
+    assert by_entry[("resources", "tools/sub/b.py")] == "created"
+
+    uploads = _seed_bot_with_resource_manifest.uploads
+    assert sorted(u["target_dir"] for u in uploads) == ["notes", "tools", "tools/sub"]
+    writes = {(u["target_dir"], u["filename"]): u["data"] for u in uploads}
+    assert writes == {
+        ("notes", "r.md"): b"# rules\n",
+        ("tools", "a.py"): b"x = 1\n",
+        ("tools/sub", "b.py"): b"y = 2\n",
+    }
+    # The declared directory tree is replaced in full, delete first — the
+    # ownership rule, including files the new archive no longer ships.
+    assert _seed_bot_with_resource_manifest.deletes == ["tools/"]
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/config-manifest/apply",
+    scenario="applies_the_resources_category",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS
+    ),
+    seed=_seed_bot_with_resource_manifest,
+    expect=ExpectSuccess(status=202, json_contains={"code": 200000}),
+    extra_assertions=(_await_the_background_apply, _resources_reached_the_write_chain),
+)
+def apply_materialises_resources():
+    """W6's category, end to end: an inline file entry and an archived
+    directory entry converge through the one write chain, each leaving its
+    per-entry row in the report."""

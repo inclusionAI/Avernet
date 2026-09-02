@@ -52,6 +52,7 @@ from ._fakes import (
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
+    FakeResourceFileService,
     FakeSkillUploadService,
     FakeStartupScriptService,
     real_validator,
@@ -152,6 +153,10 @@ def world():
         entry_fetcher_provider=lambda: EntryFetcher(
             FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
         ),
+        # W6's materialiser: this suite's document declares no resources,
+        # so the write chain is never reached — but it must exist for the
+        # registry to register.
+        resource_service_provider=lambda: FakeResourceFileService(),
     )
     return service, applies, locks, scripts, BotConfigManifestRepository(db)
 

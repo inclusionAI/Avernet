@@ -1520,6 +1520,8 @@ manifest 概念。
 
 #### W6 — `resources`：文件与目录 · #1474
 
+**已交付**（分支 `feat/bot-config-manifest-w6-arc`，PR 待提）。
+
 **Owner.** `lucas-xzp` · 0.75 天 · 第 4 天 · 实现（§7）
 
 

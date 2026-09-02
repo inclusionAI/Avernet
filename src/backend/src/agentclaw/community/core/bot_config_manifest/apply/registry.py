@@ -173,6 +173,7 @@ def build_materialisers(
     capability_reader: Any,
     package_validator: Any,
     entry_fetcher: Any,
+    resource_service: Any,
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services.
 
@@ -182,7 +183,7 @@ def build_materialisers(
     exists for that class of thing) and pull the bot-configuration graph into
     anything that merely wants the ordering table.
 
-    **W4 registered two; W5 registers four.** The map is keyed by each
+    **W4 registered two, W5 four, W6 five.** The map is keyed by each
     materialiser's own ``construct`` rather than by a name written here — so
     a materialiser cannot be registered under the wrong key. The fetch-side
     dependencies (``package_validator``, ``entry_fetcher``) exist because the
@@ -198,6 +199,9 @@ def build_materialisers(
     )
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.mcp import (
         McpMaterialiser,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (
+        ResourcesMaterialiser,
     )
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.script import (
         ScriptMaterialiser,
@@ -217,6 +221,7 @@ def build_materialisers(
             package_validator,
             entry_fetcher,
         ),
+        ResourcesMaterialiser(resource_service, entry_fetcher),
     )
     return {m.construct: m for m in materialisers}
 

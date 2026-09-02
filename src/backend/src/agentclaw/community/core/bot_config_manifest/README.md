@@ -20,7 +20,9 @@ that travel the manual-upload road (`SkillPackageValidator`, then
 minus the reserved names, written through the router's own
 `IdentityService` path. The one funnel they fetch through is
 `apply/entry_fetch.py`: substitute, consult the platform's copy, fetch under
-a named credential, file the receipt. `resources` remains for W6.
+a named credential, file the receipt. W6 adds `resources` — files and
+archived directory trees, written through `ResourceFileService`'s one
+dispatcher chain, directory entries replacing their declared tree in full.
 
 A credential never enters a document (W1 refuses it at the boundary); W2
 declares the injector protocol, and W3 binds it. W11 records a credential
@@ -514,6 +516,7 @@ consumes:
   - "MAX_SCRIPT_BYTES (core.bot_startup_script) — script.body IS the #926 startup script, so it takes that cap rather than a second one"
   - "TokenVault (core.bot_management) — enc:v1: AES-GCM reversible encryption for the credential secret; the master key comes from the SecretResolver, and the fail-closed profiles refuse writes without one"
   - "SourceCredentialRepositoryProtocol (core.repository) — persistence for the credential table"
+  - "ALLOWED_EXTENSIONS / MAX_FILE_SIZE (core.resources.services.file_service) — the workspace file surface's admission rules, re-asked in the `resources` materialiser's resolve so an undeliverable entry fails with the tree still standing (W6)"
 consumed_by:
   - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface"
   - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py constructor-injects the transport_allowlist and the content store root (read via the W2/W11 pure parsers over config_module's seam) and holds the one EntryFetcher over the fetcher, the store, and W3's credentials"
@@ -524,6 +527,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management.token_vault
   - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults
   - agentclaw.community.core.repository
+  - agentclaw.community.core.resources.services.file_service  # the workspace file surface's admission constants, re-asked at resolve (W6)
   - agentclaw.community.core.services.identity
   - agentclaw.community.core.skill_center.capability_state_contract  # the flush-then-read active-set the `skills` materialiser enumerates (W5)
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the `mcp` materialiser's per-bot activation writes
