@@ -1537,12 +1537,17 @@ class BotService(BotServiceProtocol):
     ) -> Dict[str, Any]:
         """Run step 2 and its tail for a bot created with ``provision=False``.
 
-        Idempotent: a record that already carries a binding is returned as it
-        is. Everything after the record — BCN registration, the device or
-        teclaw container, the publish record, the draft artifact, memory
-        initialisation — runs exactly as ``create_bot`` runs it, from the same
-        code, so ``create_bot()`` and ``create_bot(provision=False)`` followed
-        by this are the same writes in the same order (W8).
+        Idempotent, durably: a record that already carries a binding is
+        returned as it is, and before any of step 2's work begins the record is
+        moved from ``PENDING`` to ``PROVISIONING`` by one conditional update
+        (``claim_provisioning``). A second call that finds the claim taken —
+        an at-least-once re-invocation of the creation job while the first is
+        still allocating — returns the record untouched rather than allocating
+        a second device. Everything after the record — BCN registration, the
+        device or teclaw container, the publish record, the draft artifact,
+        memory initialisation — runs exactly as ``create_bot`` runs it, from
+        the same code, so ``create_bot()`` and ``create_bot(provision=False)``
+        followed by this are the same writes in the same order (W8).
 
         ``template_type`` / ``template_config`` / ``cookie`` are not on the
         record (the template row is, but the config the tail reads is the
@@ -1555,6 +1560,13 @@ class BotService(BotServiceProtocol):
             logger.info(
                 f"[bot_service.provision_bot] Bot {bot_id} already provisioned "
                 f"(binding_id={record.get('binding_id')})"
+            )
+            return record
+
+        if not self._repository.claim_provisioning(bot_id, user_id):
+            logger.info(
+                f"[bot_service.provision_bot] Bot {bot_id} is being provisioned by "
+                f"another call (status={record.get('status')}); returning the record"
             )
             return record
 
@@ -1583,10 +1595,23 @@ class BotService(BotServiceProtocol):
                 cookie=cookie,
             )
         except BotServiceError:
+            self._release_provisioning_claim(bot_id, user_id)
             raise
         except Exception as e:
             logger.error(f"[bot_service.provision_bot] Failed to provision bot {bot_id}: {e}")
+            self._release_provisioning_claim(bot_id, user_id)
             raise BotServiceError(f"Failed to provision bot: {e}")
+
+    def _release_provisioning_claim(self, bot_id: str, user_id: str) -> None:
+        """Best effort: a record the failed step 2 left behind goes back to
+        ``PENDING``. A soft-deleted record (the allocation failures delete it)
+        is not found and nothing is written."""
+        try:
+            current = self._repository.get_by_id_and_owner(bot_id, user_id)
+            if current and current.get("status") == "PROVISIONING" and not current.get("binding_id"):
+                self._repository.update_by_owner(bot_id, user_id, {"status": "PENDING"})
+        except Exception as e:  # noqa: BLE001 — the original error is the one to raise
+            logger.warning(f"[bot_service.provision_bot] could not release the claim for {bot_id}: {e}")
 
     def _provision_created_bot(
         self,

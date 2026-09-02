@@ -47,7 +47,26 @@ def test_a_failed_object_put_leaves_no_row() -> None:
     assert store.list(_SCOPE, category=CATEGORY_IDENTITY) == []
 
 
-def test_delete_removes_row_then_object_and_purge_removes_everything() -> None:
+def test_a_failed_object_delete_keeps_the_row_so_the_bytes_stay_reachable() -> None:
+    from agentclaw.community.core.bot_config_manifest.managed_files import ManagedFilesStoreError
+
+    store, oss = _store()
+    store.put(_SCOPE, category=CATEGORY_IDENTITY, name="a", rel_path="identity/a", content=b"1", apply_id=None)
+    key = store.list(_SCOPE, category=CATEGORY_IDENTITY)[0].store_key
+    oss.delete_object = lambda k: False  # type: ignore[method-assign]
+    with pytest.raises(ManagedFilesStoreError):
+        store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+    assert [r.store_key for r in store.list(_SCOPE, category=CATEGORY_IDENTITY)] == [key]
+    with pytest.raises(ManagedFilesStoreError):
+        store.purge(_SCOPE)
+    assert len(store.list(_SCOPE, category=CATEGORY_IDENTITY)) == 1
+    # Once the store answers again, the same row lets the delete land.
+    oss.delete_object = lambda k: oss.objects.pop(k, None) is not None  # type: ignore[method-assign]
+    assert store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+    assert key not in oss.objects and store.list(_SCOPE, category=CATEGORY_IDENTITY) == []
+
+
+def test_delete_removes_object_then_row_and_purge_removes_everything() -> None:
     store, oss = _store()
     store.put(_SCOPE, category=CATEGORY_IDENTITY, name="a", rel_path="identity/a", content=b"1", apply_id=None)
     store.put(_SCOPE, category=CATEGORY_RESOURCES, name="b", rel_path="workspace/b", content=b"2", apply_id=None)

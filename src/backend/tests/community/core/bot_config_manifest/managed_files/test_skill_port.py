@@ -23,6 +23,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
     ManagedFilesStore,
 )
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
+    ManagedSkillOwnerConflict,
     StoreSkillPackagePort,
 )
 
@@ -273,3 +274,22 @@ def test_installed_digest_answers_from_the_index() -> None:
     row = next(r for r in store.list(_SCOPE, category=CATEGORY_SKILLS) if r.rel_path.endswith("SKILL.md"))
     del oss.objects[row.store_key]
     assert digest() is None
+
+
+def test_a_same_name_row_owned_by_someone_else_is_never_replaced() -> None:
+    import pytest
+
+    _, store, oss, skills, _, _ = _rig({})
+    # A collaborator's row, and a legacy row with no owner at all.
+    skills.create({"name": "quality-check", "git_path": "local://skills-local/quality-check", "user_id": "u_other", "bolt_id": "b_1"})
+    port = StoreSkillPackagePort(
+        store, env=lambda: "dev", validator=real_validator(), skill_repository=skills
+    )
+    with pytest.raises(ManagedSkillOwnerConflict):
+        _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ))
+    assert skills.updates == [] and len(skills.creates) == 1
+    skills.rows.clear(); skills.creates.clear()
+    skills.create({"name": "quality-check", "git_path": "local://skills-local/quality-check", "user_id": None, "bolt_id": "b_1"})
+    with pytest.raises(ManagedSkillOwnerConflict):
+        _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ))
+    assert skills.updates == []

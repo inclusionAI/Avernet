@@ -423,8 +423,10 @@ file: bytes in the bot-data object store under the promotion key layout with a
 every category the platform asserts and writes the artifact's **`ownership`**
 map (`platform` / `engine` per category; `mcp` always `platform`; ARCA
 artifacts carry no map) — the engine contract's §9. A local skill the manifest
-installs rides as a `SkillRef` with a store address plus its files as resources
-refs; the collector emits it only while the bot has the skill active.
+installs rides as a `SkillRef` with a store address (R-O3) — plus its files
+as resources refs when `resources` is the platform's too, never in a list the
+map says the engine owns; the collector emits it only while the bot has the
+skill active.
 
 **The switch.** `user_config.bot_config_manifest.teclaw_platform_managed`
 (default `false`), read once at boot by `DeliveryStrategyFactory` and nowhere

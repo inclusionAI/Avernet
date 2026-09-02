@@ -874,10 +874,11 @@ skill 的包文件进平台自己的托管副本（bot-data 对象存储 + 一�
 - **运行中 `PUT`**：apply 写平台状态，最后把整包 artifact 重投一次给运行中的容器
   （不是逐文件写）；重投失败不会让 apply 失败，会记在报告的 `notes` 里，
   再 `POST …/apply` 一次即可。
-- **本地 skill**：清单装的 skill 以两种形态同时出现在 artifact 里——`skills` 里一条
-  `scope: "user"` 且带 `store`/`path` 的引用，指向包目录；以及包里的每个文件作为
-  `resources` 引用。被清单删掉的 skill 不再出现在 artifact 里（文件留在平台副本，
-  与 ARCA 上停用一个 skill 时文件留在主机一致）。
+- **本地 skill**：清单装的 skill 在 artifact 的 `skills` 里是一条 `scope: "user"` 且带
+  `store`/`path` 的引用，指向包目录，引擎按前缀拉整个包；当清单同时声明了
+  `resources`（于是 `resources` 也由平台断言）时，包里的每个文件还会作为 `resources`
+  引用出现。被清单删掉的 skill 不再出现在 artifact 里（文件留在平台副本，与 ARCA 上
+  停用一个 skill 时文件留在主机一致）。
 
 **这条路径由部署开关 `user_config.bot_config_manifest.teclaw_platform_managed`
 控制，默认关闭。**关闭时 teclaw 与 W8 之前一样：容器起来之后逐文件写，artifact 里

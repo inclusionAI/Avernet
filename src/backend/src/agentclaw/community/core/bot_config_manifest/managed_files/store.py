@@ -18,10 +18,14 @@ The artifact ref's ``path`` is everything after the base; the engine-relative
 ``rel_path`` the index keys on is ``{ns}/{rel}`` (``identity/RULES.md``,
 ``workspace/kb/faq.md``, ``workspace/skills-local/<name>/SKILL.md``).
 
-**Object before row.** ``put`` writes the object and only then the row, so a
-row without an object cannot exist; an object without a row is garbage a
-``purge`` collects. ``delete`` removes the row first and then the object, for
-the same reason read the other way.
+**Object before row, both ways.** ``put`` writes the object and only then the
+row, so a row without an object cannot exist. ``delete`` removes the object
+first and only then the row: an object delete that fails raises with the row
+still in place, so the index never forgets bytes it can no longer reach — a
+later delete or purge finds the row and tries again. The moment between the
+two, where a row names an object already gone, is the same moment ``put``
+has the other way round, and the composer reads through the index at the
+next compose, not during a write.
 """
 from __future__ import annotations
 
@@ -160,6 +164,13 @@ class ManagedFilesStore:
         )
         if record is None:
             return False
+        if not self._oss.delete_object(record.store_key):
+            # The row stays: a purge or the next apply can still find the
+            # object through it. Raised, so the category's write reports the
+            # failure rather than the index forgetting reachable bytes.
+            raise ManagedFilesStoreError(
+                f"object store delete failed for {record.store_key!r}"
+            )
         self._repo.delete(
             env=scope.env,
             entity_id=scope.entity_id,
@@ -167,13 +178,6 @@ class ManagedFilesStore:
             category=category,
             rel_path=rel_path,
         )
-        if not self._oss.delete_object(record.store_key):
-            # The row is gone, so the composer will not reference the object;
-            # the orphan is garbage a purge collects. Logged, not raised: the
-            # category's convergence is decided by the index.
-            logger.warning(
-                "[managed_files] object delete failed, orphan left: %s", record.store_key
-            )
         return True
 
     def purge_owner_bot(self, owner_id: str, bot_id: str) -> int:
@@ -195,16 +199,19 @@ class ManagedFilesStore:
         records = self._repo.list_all(
             env=scope.env, entity_id=scope.entity_id, bot_id=scope.bot_id
         )
-        removed = self._repo.purge_bot(
+        failed = [r.store_key for r in records if not self._oss.delete_object(r.store_key)]
+        if failed:
+            # The rows for the objects still standing stay too, so the next
+            # purge reaches them; the creation job retries a discard that
+            # did not land.
+            for key in failed:
+                logger.warning("[managed_files] object delete failed during purge: %s", key)
+            raise ManagedFilesStoreError(
+                f"object store delete failed for {len(failed)} object(s) during purge"
+            )
+        return self._repo.purge_bot(
             env=scope.env, entity_id=scope.entity_id, bot_id=scope.bot_id
         )
-        for record in records:
-            if not self._oss.delete_object(record.store_key):
-                logger.warning(
-                    "[managed_files] object delete failed during purge: %s",
-                    record.store_key,
-                )
-        return removed
 
     # ── reads ────────────────────────────────────────────────────────────
 

@@ -51,6 +51,16 @@ class _Repo:
         self._log.append(("soft_delete", bot_id))
         self.rows[bot_id]["is_delete"] = 1
 
+    def claim_provisioning(self, bot_id, user_id):
+        row = self.rows.get(bot_id)
+        if not row or row.get("owner_id") != user_id or row.get("is_delete"):
+            return False
+        if row.get("status") != "PENDING" or row.get("binding_id"):
+            return False
+        row["status"] = "PROVISIONING"
+        self._log.append(("claim", bot_id))
+        return True
+
 
 def _device_result() -> DeviceBindingRecord:
     return DeviceBindingRecord(
@@ -152,8 +162,11 @@ def test_deferred_provisioning_makes_the_same_writes_in_the_same_order(teclaw: b
 
     # The record-only step: PENDING, no binding.
     assert first["status"] == "PENDING" and first["binding_id"] is None
-    # The golden property.
-    assert deferred_log == inline_log
+    # The golden property, the deferred path's durable claim aside: it is the
+    # one write the inline path has no need for (nothing re-enters create_bot
+    # mid-provisioning — the record's existence short-circuits it).
+    assert [w for w in deferred_log if w[0] != "claim"] == inline_log
+    assert ("claim", "g-1") in deferred_log
     assert deferred_record == inline_record
     assert deferred_record["binding_id"] == (9 if teclaw else 7)
     assert deferred_record["status"] == "ACTIVE"
@@ -174,3 +187,35 @@ def test_provision_bot_refuses_an_unknown_bot() -> None:
     svc = _service([])
     with pytest.raises(BotServiceError):
         svc.provision_bot("nope", "u1", "nick")
+
+
+@pytest.mark.unit
+def test_a_second_call_while_the_claim_is_held_does_not_provision_again() -> None:
+    """The creation job's queue is at-least-once: a re-claimed task must not
+    allocate a second device while the first call is still mid-flight."""
+    log: list = []
+    svc = _service(log)
+    with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=False):
+        svc.create_bot(**_ARGS, engine_type="openclaw", bot_type="service", provision=False)
+    # Someone else holds the claim: the record reads PROVISIONING and unbound.
+    assert svc._repository.claim_provisioning("g-1", "u1") is True
+    writes_before = len(log)
+    with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=False):
+        record = svc.provision_bot("g-1", "u1", "nick")
+    assert len(log) == writes_before, "the second call allocated"
+    assert record["binding_id"] is None and record["status"] == "PROVISIONING"
+
+
+@pytest.mark.unit
+def test_a_failed_provisioning_releases_the_claim_when_the_record_survives() -> None:
+    log: list = []
+    svc = _service(log)
+    with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=False):
+        svc.create_bot(**_ARGS, engine_type="openclaw", bot_type="personal", provision=False)
+    svc._device_service_provider = lambda: (_ for _ in ()).throw(RuntimeError("no device service"))
+    with pytest.raises(BotServiceError):
+        with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=False):
+            svc.provision_bot("g-1", "u1", "nick")
+    # The unexpected error soft-deletes the record inside step 2, so nothing
+    # is left to release; a record that survived would read PENDING again.
+    assert svc._repository.rows["g-1"]["is_delete"] == 1

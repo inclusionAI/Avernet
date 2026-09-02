@@ -164,15 +164,31 @@ def test_platform_skills_emit_a_ref_and_the_files_for_active_packages_only() -> 
         ("weather", "shared", "skill-repo", "team/weather"),
         ("order-lookup", "user", "bot-data", f"{_BASE}/workspace/skills-local/order-lookup"),
     ]
-    # The package's files ride as resources refs; the stale package's do not.
-    assert collector.resources(req) == _LOOKUP_FILES
+    # Only ``skills`` is the platform's: the SkillRef alone carries the
+    # package (R-O3), and a resources list the map says the engine owns
+    # carries nothing the engine would then ignore.
+    assert collector.resources(req) == []
     # The active set was read once for the whole compose.
     assert collector._skill_set_service_factory.create.return_value.get_active_skills.call_count == 1
 
     artifact = _composer(collector).compose(req)
     assert artifact.ownership["skills"] == "platform"
+    assert artifact.ownership["resources"] == "engine" and artifact.resources == []
     assert [s.name for s in artifact.skills] == ["weather", "order-lookup"]
-    assert [r.path for r in artifact.resources] == [f.path for f in _LOOKUP_FILES]
+
+
+def test_with_resources_platform_managed_too_the_package_files_ride_as_resources() -> None:
+    managed = _FakeManagedFiles(
+        asserted={"skills", "resources"}, skills=[_LOOKUP, _STALE], resources=[_FAQ],
+        skill_files={"order-lookup": _LOOKUP_FILES, "stale": [CollectedFile("SKILL.md", store="bot-data", path="x")]},
+    )
+    rows = [{"git_path": "local://skills-local/order-lookup", "name": "order-lookup"}]
+    collector = _collector(skill_set_service=_skills_svc(rows), managed_files_reader=managed)
+    artifact = _composer(collector).compose(_req())
+    # The map and the list agree: resources is the platform's, and it carries
+    # the resource plus the active package's files — never the stale one's.
+    assert artifact.ownership["resources"] == "platform"
+    assert [r.path for r in artifact.resources] == [_FAQ.path] + [f.path for f in _LOOKUP_FILES]
 
 
 def test_a_platform_skill_the_bot_no_longer_has_active_is_not_delivered() -> None:

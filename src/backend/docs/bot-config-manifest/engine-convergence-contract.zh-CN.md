@@ -294,11 +294,13 @@ manifest 的 bot 拿到的 artifact 与今天逐字节相同，只多这一个�
   拉文件；W8 之后 `PUT manifest` 会向**运行中的** bot 重投带 `identity_files` /
   `resources` / `skills` 引用的 artifact，引擎必须按 §5 的区域把它们落地并收敛
   （多的删、少的拉），且仍满足 A3（重复投递无副作用）。
-- [ ] **R-O3 store 后端的本地 skill。**一个 manifest 安装的本地 skill 以两种形态同时
-  出现：其文件以 `resources` 引用出现在 `workspace/skills-local/<name>/…` 下，**并且**
-  `skills` 里有一条 `SkillRef{scope: "user", store: "bot-data", path: <包目录前缀>}`（`scope` 沿用 artifact 既有的 `shared | user` 词汇；新的是它有了 store 地址）。
-  引擎按 `path` 前缀从 store 拉整个包目录；`skills` 区域（active skill set）的
-  A1 替换同样适用于它。
+- [ ] **R-O3 store 后端的本地 skill。**一个 manifest 安装的本地 skill 在 `skills` 里
+  是一条 `SkillRef{scope: "user", store: "bot-data", path: <包目录前缀>}`（`scope`
+  沿用 artifact 既有的 `shared | user` 词汇；新的是它有了 store 地址）。引擎按
+  `path` 前缀从 store 拉整个包目录；`skills` 区域（active skill set）的 A1 替换同样
+  适用于它。**仅当 `resources` 也是 `platform` 时**，包内文件还会同时以 `resources`
+  引用出现在 `workspace/skills-local/<name>/…` 下（发布 gather 的形状）；`resources`
+  为 `engine` 时列表里不会有它们——一个引擎会忽略的列表不带任何平台断言的文件。
 
 ### 9.4 平台侧的开关
 

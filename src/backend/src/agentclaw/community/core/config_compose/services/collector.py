@@ -638,14 +638,20 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         ]
 
     def _teclaw_resources(self, req: ComposeRequest) -> list[CollectedFile]:
-        """teclaw: the platform's resources when it asserts the category, and
-        the files of every platform-held local skill the bot has active —
-        they ride as resources refs beside their ``SkillRef`` (W8). Nothing
-        when the platform asserts neither, as before W8."""
-        collected: list[CollectedFile] = []
+        """teclaw: the platform's resources when it asserts the category (W8).
+
+        When the platform asserts ``resources`` *and* ``skills``, the files of
+        every platform-held local skill the bot has active ride here too,
+        beside their ``SkillRef`` — the shape the publish gather produces. When
+        only ``skills`` is the platform's, the ``SkillRef`` alone carries the
+        package (engine contract R-O3): a resources list the map says the
+        engine owns must not carry files the engine would then ignore.
+        Nothing when the platform asserts neither, as before W8.
+        """
         managed = self._managed(req, "resources")
-        if managed is not None:
-            collected.extend(managed.resources(req))
+        if managed is None:
+            return []
+        collected: list[CollectedFile] = list(managed.resources(req))
         managed_skills = self._managed(req, "skills")
         if managed_skills is not None:
             active = req.memoized("active_skill_rows", lambda: self._active_skill_rows(req))

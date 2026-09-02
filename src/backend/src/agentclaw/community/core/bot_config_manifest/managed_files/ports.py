@@ -342,13 +342,32 @@ def _under(rel_path: str, prefix: str) -> bool:
     return rel_path.startswith(prefix + "/")
 
 
+class ManagedSkillOwnerConflict(RuntimeError):
+    """A same-name local skill row exists that the uploader does not own.
+
+    The real upload road never replaces a foreign-owned or legacy unowned row
+    (``LocalSkillUploadService._same_name_matches``); neither does this port.
+    Raised from the materialiser's write, so the entry reports ``failed``
+    rather than another collaborator's row being overwritten.
+    """
+
+
 def _own_row(rows: list[dict[str, Any]], owner_id: str) -> Optional[dict[str, Any]]:
-    """The bot's own same-name row: the owner's if there is one, else the
-    oldest — the real service's replacement target once it holds the lock."""
+    """The uploader's own same-name row, or ``None`` when there is none.
+
+    A row someone else owns — or a legacy row with no owner — is never a
+    replacement target: with such rows present and none of the uploader's,
+    the upload is refused.
+    """
     for row in rows:
         if str(row.get("user_id") or "") == owner_id:
             return row
-    return rows[0] if rows else None
+    if rows:
+        raise ManagedSkillOwnerConflict(
+            f"a local skill named {rows[0].get('name')!r} exists on this bot under "
+            "another owner; it cannot be replaced by this upload"
+        )
+    return None
 
 
 def _identity_path(file_type: str) -> str:
@@ -359,4 +378,9 @@ def _workspace_path(declared: str) -> str:
     return f"{WORKSPACE_NS}/{declared.lstrip('/')}"
 
 
-__all__ = ["StoreIdentityPort", "StoreResourcePort", "StoreSkillPackagePort"]
+__all__ = [
+    "ManagedSkillOwnerConflict",
+    "StoreIdentityPort",
+    "StoreResourcePort",
+    "StoreSkillPackagePort",
+]

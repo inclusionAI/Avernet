@@ -245,6 +245,17 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def claim_provisioning(self, bot_id: str, owner_id: str) -> bool:
+        """Atomically move a PENDING, unbound record to PROVISIONING (W8).
+
+        One conditional update: ``True`` for the caller that flipped it, ``False``
+        for every other — the record is bound, already claimed, or gone. The
+        durable claim ``provision_bot`` takes before step 2's work begins, so an
+        at-least-once re-invocation cannot provision the same bot twice.
+        """
+        ...
+
+    @abstractmethod
     def update_space_by_owner(
         self, *, bot_id: str, owner_id: str, space_id: int
     ) -> Optional[Dict[str, Any]]:

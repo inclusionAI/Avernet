@@ -498,6 +498,25 @@ class BotRepository(
 
     # ── updates (single conditional statements) ─────────────────
 
+    def claim_provisioning(self, bot_id: str, owner_id: str) -> bool:
+        with self._db.orm_session() as db:
+            rowcount = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.owner_id == owner_id,
+                    self.Model.is_delete == 0,
+                    self.Model.status == "PENDING",
+                    self.Model.binding_id.is_(None),
+                    self._env(),
+                )
+                .update(
+                    {self.Model.status: "PROVISIONING", self.Model.gmt_modified: func.now()},
+                    synchronize_session=False,
+                )
+            )
+        return rowcount == 1
+
     def update_by_owner(
         self, bot_id: str, owner_id: str, update_data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
